@@ -1,0 +1,70 @@
+[package]
+name = "voirs-dataset"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+description = "Dataset utilities for VoiRS (LJSpeech, JVS, etc.)"
+
+[lib]
+name = "voirs_dataset"
+crate-type = ["lib"]
+
+[dependencies]
+# HTTP and file handling
+reqwest.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+
+# Audio processing
+hound.workspace = true
+dasp.workspace = true
+claxon.workspace = true
+lewton.workspace = true
+minimp3.workspace = true
+mp3lame-encoder.workspace = true
+
+# Compression and archives
+flate2.workspace = true
+tar.workspace = true
+zip.workspace = true
+bzip2.workspace = true
+
+# Serialization and data formats
+serde.workspace = true
+serde_json.workspace = true
+csv.workspace = true
+toml.workspace = true
+
+# Async traits
+async-trait.workspace = true
+
+# Parallel processing
+rayon.workspace = true
+
+# Random number generation
+rand.workspace = true
+
+# Date and time handling
+chrono.workspace = true
+
+# File system and paths
+walkdir.workspace = true
+tempfile.workspace = true
+
+# Error handling
+anyhow.workspace = true
+thiserror.workspace = true
+
+# Logging
+tracing.workspace = true
+
+
+[features]
+default = []

@@ -1,0 +1,61 @@
+[package]
+name = "voirs-acoustic"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+description = "Acoustic model inference for VoiRS speech synthesis (VITS/FastSpeech2)"
+
+[lib]
+name = "voirs_acoustic"
+crate-type = ["lib"]
+
+[dependencies]
+# ML/Tensor libraries
+candle-core = { workspace = true, optional = true }
+candle-nn = { workspace = true, optional = true }
+candle-transformers = { workspace = true, optional = true }
+ort = { workspace = true, optional = true }
+safetensors.workspace = true
+hf-hub = { workspace = true, features = ["tokio"] }
+reqwest.workspace = true
+
+# Math and arrays
+ndarray.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+bincode.workspace = true
+
+# Error handling
+anyhow.workspace = true
+thiserror.workspace = true
+
+# Logging
+tracing.workspace = true
+
+# Async support
+async-trait.workspace = true
+tokio.workspace = true
+futures.workspace = true
+
+# Random number generation
+fastrand.workspace = true
+
+
+[dev-dependencies]
+voirs-g2p = { path = "../voirs-g2p" }
+voirs-vocoder = { path = "../voirs-vocoder" }
+
+[features]
+default = ["candle"]
+candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers"]
+onnx = ["dep:ort"]
+gpu = ["candle-core?/cuda", "ort?/cuda"]

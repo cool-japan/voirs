@@ -1,0 +1,90 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Audio files (except samples)
+*.wav
+*.mp3
+*.ogg
+*.flac
+!samples/**
+
+# Model files (large binaries)
+*.onnx
+*.safetensors
+*.bin
+*.pt
+*.pth
+models/**/*.onnx
+models/**/*.safetensors
+models/**/*.bin
+!models/README.md
+
+# Temporary files
+/tmp/
+*.tmp
+*.temp
+
+# Documentation build artifacts
+docs/guide/book/
+docs/api/
+
+# Benchmark results
+criterion/
+bench_results/
+
+# Coverage reports
+*.profraw
+lcov.info
+coverage/
+
+# Environment files
+.env
+.env.local
+
+# Cache directories
+.cargo/registry/
+.cargo/git/
+
+# PyO3 build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+build/
+dist/
+*.egg-info/
+
+# Node.js (for wasm bindings)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# FFI build artifacts
+*.so
+*.dylib
+*.dll
+*.a
+*.lib
+
+# Test outputs
+test_outputs/
+synthesis_results/
+*/target/

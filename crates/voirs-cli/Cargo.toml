@@ -1,0 +1,80 @@
+[package]
+name = "voirs-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+description = "Command-line interface for VoiRS speech synthesis"
+
+[[bin]]
+name = "voirs"
+path = "src/main.rs"
+
+[dependencies]
+# Core VoiRS crates
+voirs-sdk = { path = "../voirs-sdk" }
+voirs-g2p = { path = "../voirs-g2p" }
+voirs-acoustic = { path = "../voirs-acoustic" }
+voirs-vocoder = { path = "../voirs-vocoder" }
+# voirs-dataset = { path = "../voirs-dataset" }
+
+# CLI framework
+clap.workspace = true
+clap_complete.workspace = true
+
+# Audio I/O
+hound.workspace = true
+cpal.workspace = true
+
+# File handling and formats
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+
+# Progress and user interaction
+indicatif.workspace = true
+console.workspace = true
+dialoguer.workspace = true
+
+# Async runtime
+tokio.workspace = true
+
+# Error handling
+anyhow.workspace = true
+thiserror.workspace = true
+
+# Logging
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# Additional utilities
+chrono.workspace = true
+regex = "1.10"
+csv.workspace = true
+tempfile.workspace = true
+num_cpus.workspace = true
+
+# Serialization formats for config
+serde_yaml = "0.9"
+base64 = "0.22"
+
+# Model management
+hf-hub.workspace = true
+reqwest.workspace = true
+sha2.workspace = true
+
+# HTTP server
+axum.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+hyper.workspace = true
+
+[features]
+default = []
+gpu = ["voirs-acoustic/gpu", "voirs-vocoder/gpu"]

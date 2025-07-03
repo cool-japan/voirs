@@ -1,0 +1,70 @@
+[build]
+# Use multiple cores for compilation (0 = auto-detect, commented out to use default)
+
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-Wl,-ld_classic"]
+
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-Wl,-ld_classic"]
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+# WASM target configuration
+[target.wasm32-unknown-unknown]
+rustflags = [
+    "-C", "opt-level=s",
+    "-C", "lto=fat",
+    "-C", "codegen-units=1",
+]
+
+[target.wasm32-wasi]
+rustflags = [
+    "-C", "opt-level=s", 
+    "-C", "lto=fat",
+    "-C", "codegen-units=1",
+]
+
+# GPU targets
+[target.nvptx64-nvidia-cuda]
+rustflags = [
+    "-C", "opt-level=3",
+    "-C", "target-cpu=sm_50",
+]
+
+# Environment variables for GPU acceleration
+[env]
+# CUDA configuration
+CUDA_ROOT = { value = "/usr/local/cuda", relative = false }
+CUDNN_ROOT = { value = "/usr/local/cuda", relative = false }
+
+# ROCm configuration (AMD GPU)
+ROCM_ROOT = { value = "/opt/rocm", relative = false }
+
+# OpenCL configuration
+OPENCL_ROOT = { value = "/usr/local", relative = false }
+
+[alias]
+# Convenient build aliases
+build-cpu = "build --release --features=cpu"
+build-gpu = "build --release --features=gpu"
+build-wasm = "build --target=wasm32-unknown-unknown --release"
+build-all = "build --release --all-features"
+
+# Testing aliases
+test-cpu = "test --features=cpu"
+test-gpu = "test --features=gpu"
+test-all = "test --all-features"
+
+# Benchmarking
+bench = "bench --all-features"
+bench-cpu = "bench --features=cpu"
+bench-gpu = "bench --features=gpu"
+
+# Linting and formatting
+lint = "clippy --all-targets --all-features -- -D warnings"
+fmt-check = "fmt --all -- --check"

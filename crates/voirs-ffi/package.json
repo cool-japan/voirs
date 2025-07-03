@@ -1,0 +1,58 @@
+{
+  "name": "voirs-ffi",
+  "version": "0.1.0",
+  "description": "Node.js bindings for VoiRS speech synthesis",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "name": "voirs-ffi",
+    "triples": {
+      "defaults": true,
+      "additional": [
+        "x86_64-unknown-linux-musl",
+        "aarch64-unknown-linux-gnu",
+        "i686-pc-windows-msvc",
+        "armv7-unknown-linux-gnueabihf",
+        "aarch64-apple-darwin",
+        "aarch64-pc-windows-msvc",
+        "aarch64-unknown-linux-musl"
+      ]
+    }
+  },
+  "keywords": [
+    "speech",
+    "synthesis",
+    "tts",
+    "text-to-speech",
+    "audio",
+    "voice",
+    "rust",
+    "napi"
+  ],
+  "files": [
+    "index.js",
+    "index.d.ts"
+  ],
+  "engines": {
+    "node": ">= 10"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "scripts": {
+    "artifacts": "napi artifacts",
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "prepublishOnly": "napi prepublish -t npm",
+    "test": "node test.js",
+    "universal": "napi universal",
+    "version": "napi version"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.0.0"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/cool-japan/voirs",
+  "homepage": "https://github.com/cool-japan/voirs"
+}

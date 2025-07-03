@@ -1,0 +1,145 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/voirs-g2p",
+    "crates/voirs-acoustic", 
+    "crates/voirs-vocoder",
+    "crates/voirs-dataset",
+    "crates/voirs-cli",
+    "crates/voirs-ffi",
+    "crates/voirs-sdk",
+]
+
+[package]
+name = "voirs"
+version = "0.1.0"
+edition = "2021"
+authors = ["Tetsuya Kitahata <tetsuya@cool-japan.co.jp>"]
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+voirs-g2p = { path = "crates/voirs-g2p" }
+voirs-acoustic = { path = "crates/voirs-acoustic" }
+voirs-vocoder = { path = "crates/voirs-vocoder" }
+voirs-sdk = { path = "crates/voirs-sdk" }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[[test]]
+name = "end_to_end_pipeline_test"
+path = "tests/end_to_end_pipeline_test.rs"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Tetsuya Kitahata <tetsuya@cool-japan.co.jp>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/cool-japan/voirs"
+homepage = "https://github.com/cool-japan/voirs"
+documentation = "https://docs.rs/voirs"
+keywords = ["tts", "speech", "synthesis", "neural", "rust"]
+categories = ["multimedia::audio", "science"]
+rust-version = "1.70"
+
+[workspace.dependencies]
+# Core tensor/ML libraries
+candle-core = "0.9"
+candle-nn = "0.9"
+candle-transformers = "0.9"
+ort = "2.0.0-rc.10"
+safetensors = "0.4"
+hf-hub = "0.3"
+
+# Audio processing
+hound = "3.5"
+cpal = "0.15"
+dasp = "0.11"
+claxon = "0.4"  # FLAC decoding
+lewton = "0.10"  # OGG Vorbis decoding
+minimp3 = "0.5"  # MP3 decoding
+mp3lame-encoder = "0.1"  # MP3 encoding
+
+# DSP and math
+ndarray = "0.15"
+realfft = "3.3"
+rustfft = "6.2"
+
+# Text processing
+unicode-normalization = "0.1"
+unicode-segmentation = "1.10"
+
+# Async/concurrency
+tokio = { version = "1.35", features = ["full"] }
+tokio-stream = "0.1"
+async-stream = "0.3"
+rayon = "1.8"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"
+
+# CLI and utilities
+clap = { version = "4.4", features = ["derive"] }
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Add extra dependencies
+toml = "0.8"
+fastrand = "2.0"
+futures = "0.3"
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+rand = "0.8"
+
+# Additional CLI dependencies
+indicatif = "0.17"
+console = "0.15"
+dialoguer = "0.11"
+clap_complete = "4.4"
+reqwest = { version = "0.11", features = ["json", "stream"] }
+tokio-util = { version = "0.7", features = ["io"] }
+axum = { version = "0.7", features = ["json", "query"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+hyper = { version = "1.0", features = ["full"] }
+flate2 = "1.0"
+tar = "0.4"
+zip = "0.6"
+bzip2 = "0.4"
+csv = "1.3"
+walkdir = "2.4"
+tempfile = "3.8"
+libc = "0.2"
+once_cell = "1.19"
+num_cpus = "1.16"
+sha2 = "0.10"
+
+# FFI dependencies
+pyo3 = "0.21"
+numpy = "0.21"
+parking_lot = "0.12"
+
+
+[profile.dev]
+opt-level = 1
+debug = true
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+
+[profile.release-gpu]
+inherits = "release"
+opt-level = 3
+lto = "fat"
+
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1

@@ -1,0 +1,73 @@
+[package]
+name = "voirs-g2p"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+description = "Grapheme-to-Phoneme conversion for VoiRS speech synthesis"
+
+[lib]
+name = "voirs_g2p"
+crate-type = ["lib"]
+
+
+[dependencies]
+# Text processing
+unicode-normalization.workspace = true
+unicode-segmentation.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+regex = "1.10"
+
+# Error handling
+anyhow.workspace = true
+thiserror.workspace = true
+
+# Logging
+tracing.workspace = true
+
+# Async support
+async-trait.workspace = true
+tokio.workspace = true
+
+# FST support for Phonetisaurus
+fst = "0.4"
+memmap2 = "0.9"
+tempfile = "3.10"
+
+# HTTP client for model downloading
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Compression support
+flate2 = "1.0"
+tar = "0.4"
+
+# FFI for OpenJTalk
+libc = "0.2"
+
+# Neural network support
+candle-core = "0.8"
+candle-nn = "0.8"
+candle-transformers = "0.8"
+
+# CLI dependencies
+clap = { version = "4.5", features = ["derive"] }
+tracing-subscriber = "0.3"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
+tempfile = "3.10"
+
+[features]
+default = []
+
+[[bench]]
+name = "g2p_benchmarks"
+harness = false

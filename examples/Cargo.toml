@@ -1,0 +1,39 @@
+[package]
+name = "voirs-examples"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[example]]
+name = "simple_synthesis"
+path = "simple_synthesis.rs"
+
+[[example]]
+name = "batch_synthesis"  
+path = "batch_synthesis.rs"
+
+[[example]]
+name = "streaming_synthesis"
+path = "streaming_synthesis.rs"
+
+[[example]]
+name = "ssml_synthesis"
+path = "ssml_synthesis.rs"
+
+[[example]]
+name = "complete_pipeline"
+path = "complete_pipeline.rs"
+
+[dependencies]
+voirs = { path = ".." }
+voirs-g2p = { path = "../crates/voirs-g2p" }
+voirs-acoustic = { path = "../crates/voirs-acoustic" }
+voirs-vocoder = { path = "../crates/voirs-vocoder" }
+voirs-sdk = { path = "../crates/voirs-sdk" }
+tokio = { workspace = true }
+futures = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+candle-core = { workspace = true }
+candle-nn = { workspace = true }
