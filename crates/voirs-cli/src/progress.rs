@@ -1,6 +1,6 @@
 //! Progress indication utilities.
 
-use indicatif::{ProgressBar, ProgressStyle, ProgressState, ProgressFinish};
+use indicatif::{ProgressBar, ProgressFinish, ProgressState, ProgressStyle};
 use std::fmt::Write;
 use std::time::Duration;
 
@@ -15,31 +15,31 @@ impl SynthesisProgress {
         let bar = ProgressBar::new(total_items);
         bar.set_style(
             ProgressStyle::with_template(
-                "{spinner:.green} [{elapsed_precise}] [{bar:.cyan/blue}] {pos}/{len} {msg}"
+                "{spinner:.green} [{elapsed_precise}] [{bar:.cyan/blue}] {pos}/{len} {msg}",
             )
             .unwrap()
             .with_key("eta", |state: &ProgressState, w: &mut dyn Write| {
                 write!(w, "{:.1}s", state.eta().as_secs_f64()).unwrap()
             })
-            .progress_chars("#>-")
+            .progress_chars("#>-"),
         );
         bar.set_message("Synthesizing...");
-        
+
         Self { bar }
     }
-    
+
     /// Update progress with message
     pub fn update(&self, pos: u64, msg: &str) {
         self.bar.set_position(pos);
         self.bar.set_message(msg.to_string());
     }
-    
+
     /// Increment progress by 1
     pub fn inc(&self, msg: &str) {
         self.bar.inc(1);
         self.bar.set_message(msg.to_string());
     }
-    
+
     /// Finish progress bar
     pub fn finish(&self, msg: &str) {
         self.bar.finish_with_message(msg.to_string());
@@ -63,15 +63,15 @@ impl DownloadProgress {
             .progress_chars("#>-")
         );
         bar.set_message(format!("Downloading {}", filename));
-        
+
         Self { bar }
     }
-    
+
     /// Update download progress
     pub fn update(&self, downloaded_bytes: u64) {
         self.bar.set_position(downloaded_bytes);
     }
-    
+
     /// Finish download
     pub fn finish(&self, msg: &str) {
         self.bar.finish_with_message(msg.to_string());
@@ -96,31 +96,37 @@ impl BatchProgress {
             .progress_chars("#>-")
         );
         bar.set_message(format!("Processing {} items...", operation));
-        
-        Self { 
+
+        Self {
             bar,
             start_time: std::time::Instant::now(),
         }
     }
-    
+
     /// Update batch progress
     pub fn update(&self, pos: u64, current_item: &str) {
         self.bar.set_position(pos);
-        self.bar.set_message(format!("Processing: {}", current_item));
+        self.bar
+            .set_message(format!("Processing: {}", current_item));
     }
-    
+
     /// Increment batch progress
     pub fn inc(&self, current_item: &str) {
         self.bar.inc(1);
-        self.bar.set_message(format!("Processing: {}", current_item));
+        self.bar
+            .set_message(format!("Processing: {}", current_item));
     }
-    
+
     /// Finish batch processing
     pub fn finish(&self, msg: &str) {
         let elapsed = self.start_time.elapsed();
-        self.bar.finish_with_message(format!("{} (completed in {:.2}s)", msg, elapsed.as_secs_f64()));
+        self.bar.finish_with_message(format!(
+            "{} (completed in {:.2}s)",
+            msg,
+            elapsed.as_secs_f64()
+        ));
     }
-    
+
     /// Get elapsed time
     pub fn elapsed(&self) -> Duration {
         self.start_time.elapsed()
@@ -141,19 +147,19 @@ impl Spinner {
             ProgressStyle::with_template("{spinner:.blue} {msg}")
                 .unwrap()
                 .tick_strings(&[
-                    "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█", "▇", "▆", "▅", "▄", "▃", "▂", "▁"
-                ])
+                    "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█", "▇", "▆", "▅", "▄", "▃", "▂", "▁",
+                ]),
         );
         bar.set_message(msg.to_string());
-        
+
         Self { bar }
     }
-    
+
     /// Update spinner message
     pub fn update(&self, msg: &str) {
         self.bar.set_message(msg.to_string());
     }
-    
+
     /// Finish spinner
     pub fn finish(&self, msg: &str) {
         self.bar.finish_with_message(msg.to_string());
@@ -164,11 +170,12 @@ impl Spinner {
 pub fn create_file_progress(total_files: usize, operation: &str) -> ProgressBar {
     let bar = ProgressBar::new(total_files as u64);
     bar.set_style(
-        ProgressStyle::with_template(
-            &format!("{{spinner:.green}} {} [{{bar:.cyan/blue}}] {{pos}}/{{len}} {{msg}}", operation)
-        )
+        ProgressStyle::with_template(&format!(
+            "{{spinner:.green}} {} [{{bar:.cyan/blue}}] {{pos}}/{{len}} {{msg}}",
+            operation
+        ))
         .unwrap()
-        .progress_chars("#>-")
+        .progress_chars("#>-"),
     );
     bar
 }

@@ -5,31 +5,134 @@ edition = "2021"
 publish = false
 
 [[example]]
-name = "simple_synthesis"
+name = "examples_simple_synthesis"
 path = "simple_synthesis.rs"
 
 [[example]]
-name = "batch_synthesis"  
+name = "examples_batch_synthesis"  
 path = "batch_synthesis.rs"
 
 [[example]]
-name = "streaming_synthesis"
+name = "examples_streaming_synthesis"
 path = "streaming_synthesis.rs"
 
 [[example]]
-name = "ssml_synthesis"
+name = "examples_ssml_synthesis"
 path = "ssml_synthesis.rs"
 
 [[example]]
-name = "complete_pipeline"
+name = "examples_complete_pipeline"
 path = "complete_pipeline.rs"
 
+[[example]]
+name = "performance_benchmarking"
+path = "performance_benchmarking.rs"
+
+[[example]]
+name = "examples_ab_testing_quality_comparison"
+path = "ab_testing_quality_comparison.rs"
+
+[[example]]
+name = "examples_comprehensive_benchmark_suite"
+path = "comprehensive_benchmark_suite.rs"
+
+[[example]]
+name = "memory_profiling_analysis"
+path = "memory_profiling_analysis.rs"
+
+[[example]]
+name = "robust_error_handling_patterns"
+path = "robust_error_handling_patterns.rs"
+
+[[example]]
+name = "debug_troubleshooting_example"
+path = "debug_troubleshooting_example.rs"
+
+[[example]]
+name = "testing_framework_example"
+path = "testing_framework_example.rs"
+
+[[example]]
+name = "production_monitoring_example"
+path = "production_monitoring_example.rs"
+
+[[example]]
+name = "multimodal_integration_example"
+path = "multimodal_integration_example.rs"
+
+[[example]]
+name = "examples_ai_integration_example"
+path = "ai_integration_example.rs"
+
+[[example]]
+name = "educational_tools_example"
+path = "educational_tools_example.rs"
+
+[[example]]
+name = "mobile_integration_example"
+path = "mobile_integration_example.rs"
+
+[[example]]
+name = "creative_applications_example"
+path = "creative_applications_example.rs"
+
+[[example]]
+name = "profiling_optimization_example"
+path = "profiling_optimization_example.rs"
+
+[[example]]
+name = "documentation_testing_example"
+path = "documentation_testing_example.rs"
+
+[[example]]
+name = "community_contributions_gallery"
+path = "community_contributions_gallery.rs"
+
+[[example]]
+name = "use_case_gallery"
+path = "use_case_gallery.rs"
+
+[[example]]
+name = "best_practices_guide"
+path = "best_practices_guide.rs"
+
+[[example]]
+name = "faq_examples"
+path = "faq_examples.rs"
+
+[[example]]
+name = "wasm_integration_example"
+path = "wasm_integration_example.rs"
+crate-type = ["cdylib", "rlib"]
+
+[[example]]
+name = "streaming_synthesis_optimization"
+path = "streaming_synthesis_optimization.rs"
+
+[[example]]
+name = "performance_optimization_techniques"
+path = "performance_optimization_techniques.rs"
+
+[[example]]
+name = "low_latency_optimization"
+path = "low_latency_optimization.rs"
+
+[[example]]
+name = "audio_quality_assessment"
+path = "audio_quality_assessment.rs"
+
+[[example]]
+name = "emotion_control_example_fixed"
+path = "emotion_control_example_fixed.rs"
+
 [dependencies]
-voirs = { path = ".." }
-voirs-g2p = { path = "../crates/voirs-g2p" }
-voirs-acoustic = { path = "../crates/voirs-acoustic" }
-voirs-vocoder = { path = "../crates/voirs-vocoder" }
-voirs-sdk = { path = "../crates/voirs-sdk" }
+voirs = { version = "0.1.0-alpha.1", path = ".." }
+voirs-g2p = { version = "0.1.0-alpha.1", path = "../crates/voirs-g2p" }
+voirs-acoustic = { version = "0.1.0-alpha.1", path = "../crates/voirs-acoustic" }
+voirs-vocoder = { version = "0.1.0-alpha.1", path = "../crates/voirs-vocoder" }
+voirs-sdk = { version = "0.1.0-alpha.1", path = "../crates/voirs-sdk", features = ["emotion", "cloning", "conversion", "singing", "spatial"] }
+voirs-recognizer = { version = "0.1.0-alpha.1", path = "../crates/voirs-recognizer", features = ["whisper-pure"] }
+voirs-evaluation = { version = "0.1.0-alpha.1", path = "../crates/voirs-evaluation" }
 tokio = { workspace = true }
 futures = { workspace = true }
 anyhow = { workspace = true }
@@ -37,3 +140,29 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 candle-core = { workspace = true }
 candle-nn = { workspace = true }
+sysinfo = "0.30"
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+rand = { workspace = true }
+thiserror = "1.0"
+num_cpus = "1.16"
+md5 = "0.7"
+regex = "1.10"
+crossbeam = "0.8"
+
+# WebAssembly dependencies
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = [
+  "console",
+  "AudioContext",
+  "AudioBuffer",
+  "AudioBufferSourceNode",
+  "Window",
+  "Document"
+] }
+js-sys = "0.3"
+serde-wasm-bindgen = "0.4"
+console_error_panic_hook = "0.1"

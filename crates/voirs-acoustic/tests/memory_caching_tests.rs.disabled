@@ -1,0 +1,451 @@
+//! Comprehensive tests for memory management and caching features
+
+use voirs_acoustic::{
+    TensorMemoryPool, PoolStats, ResultCache, PerformanceMonitor, PerformanceMetrics,
+    AdvancedPerformanceProfiler, MemoryOptimizer, SystemInfo, SystemMemoryInfo,
+    Result,
+};
+use std::time::Duration;
+use std::thread;
+use std::sync::Arc;
+
+/// Test tensor memory pool basic functionality
+#[tokio::test]
+async fn test_tensor_memory_pool_basic() -> Result<()> {
+    let pool = TensorMemoryPool::new();
+    
+    // Test getting a buffer from the pool
+    let buffer = pool.get_buffer(1024);
+    assert_eq!(buffer.len(), 1024);
+    assert!(buffer.iter().all(|&x| x == 0.0)); // Buffer should be zeroed
+    
+    // Return buffer to pool
+    pool.return_buffer(buffer);
+    
+    // Get another buffer of the same size - should come from pool
+    let buffer2 = pool.get_buffer(1024);
+    assert_eq!(buffer2.len(), 1024);
+    
+    Ok(())
+}
+
+/// Test tensor memory pool statistics tracking
+#[tokio::test]
+async fn test_tensor_memory_pool_stats() -> Result<()> {
+    let pool = TensorMemoryPool::new();
+    
+    // Initial stats should be zero
+    let initial_stats = pool.get_stats();
+    assert_eq!(initial_stats.hits, 0);
+    assert_eq!(initial_stats.misses, 0);
+    assert_eq!(initial_stats.returns, 0);
+    assert_eq!(initial_stats.total_pooled, 0);
+    
+    // Get a buffer - should be a miss (new allocation)
+    let buffer = pool.get_buffer(512);
+    let stats_after_get = pool.get_stats();
+    assert_eq!(stats_after_get.misses, 1);
+    assert_eq!(stats_after_get.hits, 0);
+    
+    // Return the buffer
+    pool.return_buffer(buffer);
+    let stats_after_return = pool.get_stats();
+    assert_eq!(stats_after_return.returns, 1);
+    assert_eq!(stats_after_return.total_pooled, 1);
+    
+    // Get another buffer of same size - should be a hit
+    let _buffer2 = pool.get_buffer(512);
+    let stats_after_second_get = pool.get_stats();
+    assert_eq!(stats_after_second_get.hits, 1);
+    assert_eq!(stats_after_second_get.total_pooled, 0); // Buffer taken from pool
+    
+    Ok(())
+}
+
+/// Test tensor memory pool with custom limits
+#[tokio::test]
+async fn test_tensor_memory_pool_custom_limits() -> Result<()> {
+    let max_buffer_size = 1000;
+    let max_buffers_per_size = 3;
+    let pool = TensorMemoryPool::with_limits(max_buffer_size, max_buffers_per_size);
+    
+    // Test that buffers larger than max_buffer_size are not pooled
+    let large_buffer = pool.get_buffer(max_buffer_size + 1);
+    assert_eq!(large_buffer.len(), max_buffer_size + 1);
+    
+    pool.return_buffer(large_buffer);
+    let stats = pool.get_stats();
+    assert_eq!(stats.total_pooled, 0); // Large buffer should not be pooled
+    
+    // Test normal-sized buffers are pooled
+    for i in 0..max_buffers_per_size {
+        let buffer = pool.get_buffer(512);
+        pool.return_buffer(buffer);
+    }
+    
+    let stats_after_returns = pool.get_stats();
+    assert_eq!(stats_after_returns.total_pooled, max_buffers_per_size);
+    
+    Ok(())
+}
+
+/// Test result cache basic functionality
+#[tokio::test]
+async fn test_result_cache_basic() -> Result<()> {
+    let cache: ResultCache<String, i32> = ResultCache::new(10, Duration::from_secs(60));
+    
+    // Test cache miss
+    assert_eq!(cache.get(&"key1".to_string()), None);
+    
+    // Test cache put and hit
+    cache.put("key1".to_string(), 42);
+    assert_eq!(cache.get(&"key1".to_string()), Some(42));
+    
+    // Test cache size
+    assert_eq!(cache.size(), 1);
+    
+    Ok(())
+}
+
+/// Test result cache TTL (time-to-live) functionality
+#[tokio::test]
+async fn test_result_cache_ttl() -> Result<()> {
+    let cache: ResultCache<String, String> = ResultCache::new(10, Duration::from_millis(100));
+    
+    // Put a value in cache
+    cache.put("test_key".to_string(), "test_value".to_string());
+    assert_eq!(cache.get(&"test_key".to_string()), Some("test_value".to_string()));
+    
+    // Wait for TTL to expire
+    thread::sleep(Duration::from_millis(150));
+    
+    // Value should have expired
+    assert_eq!(cache.get(&"test_key".to_string()), None);
+    
+    Ok(())
+}
+
+/// Test result cache capacity management
+#[tokio::test]
+async fn test_result_cache_capacity() -> Result<()> {
+    let max_entries = 3;
+    let cache: ResultCache<i32, String> = ResultCache::new(max_entries, Duration::from_secs(60));
+    
+    // Fill cache to capacity
+    for i in 0..max_entries {
+        cache.put(i as i32, format!("value_{}", i));
+    }
+    assert_eq!(cache.size(), max_entries);
+    
+    // Add one more entry - should evict oldest
+    cache.put(max_entries as i32, format!("value_{}", max_entries));
+    assert_eq!(cache.size(), max_entries); // Size should remain the same
+    
+    // First entry might have been evicted (LRU behavior)
+    let new_value = cache.get(&(max_entries as i32));
+    assert_eq!(new_value, Some(format!("value_{}", max_entries)));
+    
+    Ok(())
+}
+
+/// Test result cache clear functionality
+#[tokio::test]
+async fn test_result_cache_clear() -> Result<()> {
+    let cache: ResultCache<String, i32> = ResultCache::new(10, Duration::from_secs(60));
+    
+    // Add some entries
+    cache.put("key1".to_string(), 1);
+    cache.put("key2".to_string(), 2);
+    cache.put("key3".to_string(), 3);
+    
+    assert_eq!(cache.size(), 3);
+    
+    // Clear cache
+    cache.clear();
+    assert_eq!(cache.size(), 0);
+    
+    // Verify entries are gone
+    assert_eq!(cache.get(&"key1".to_string()), None);
+    assert_eq!(cache.get(&"key2".to_string()), None);
+    assert_eq!(cache.get(&"key3".to_string()), None);
+    
+    Ok(())
+}
+
+/// Test performance monitor basic functionality
+#[tokio::test]
+async fn test_performance_monitor_basic() -> Result<()> {
+    let monitor = PerformanceMonitor::new();
+    
+    // Test timing measurement
+    let timer = monitor.start_timer("test_operation");
+    thread::sleep(Duration::from_millis(10));
+    monitor.record_timing("test_operation", timer.elapsed());
+    
+    // Test counter increment
+    monitor.increment_counter("test_counter");
+    monitor.increment_counter("test_counter");
+    
+    // Test memory usage recording
+    monitor.record_memory_usage("test_component", 1024);
+    
+    // Get metrics
+    let metrics = monitor.get_metrics();
+    
+    // Verify timing was recorded
+    let avg_timing = metrics.get_average_timing("test_operation");
+    assert!(avg_timing.is_some());
+    assert!(avg_timing.unwrap() >= Duration::from_millis(10));
+    
+    // Verify counter was incremented
+    let counter_value = metrics.get_counter("test_counter");
+    assert_eq!(counter_value, Some(2));
+    
+    // Verify memory usage was recorded
+    let memory_usage = metrics.get_memory_usage("test_component");
+    assert_eq!(memory_usage, Some(1024));
+    
+    Ok(())
+}
+
+/// Test performance metrics aggregation
+#[tokio::test]
+async fn test_performance_metrics_aggregation() -> Result<()> {
+    let monitor = PerformanceMonitor::new();
+    
+    // Record multiple timings for the same operation
+    for i in 0..5 {
+        let duration = Duration::from_millis(10 + i * 2);
+        monitor.record_timing("test_op", duration);
+    }
+    
+    let metrics = monitor.get_metrics();
+    
+    // Test average timing calculation
+    let avg_timing = metrics.get_average_timing("test_op").unwrap();
+    let expected_avg = Duration::from_millis((10 + 12 + 14 + 16 + 18) / 5);
+    
+    // Allow some tolerance for timing variations
+    let diff = if avg_timing > expected_avg {
+        avg_timing - expected_avg
+    } else {
+        expected_avg - avg_timing
+    };
+    assert!(diff < Duration::from_millis(5));
+    
+    // Test total timing
+    let total_timing = metrics.get_total_timing("test_op").unwrap();
+    let expected_total = Duration::from_millis(10 + 12 + 14 + 16 + 18);
+    assert_eq!(total_timing, expected_total);
+    
+    Ok(())
+}
+
+/// Test system info collection
+#[tokio::test]
+async fn test_system_info_collection() -> Result<()> {
+    let system_info = SystemInfo::collect();
+    
+    // Verify basic system information is collected
+    assert!(system_info.cpu_count > 0);
+    assert!(system_info.total_memory > 0);
+    assert!(!system_info.os_name.is_empty());
+    assert!(!system_info.architecture.is_empty());
+    
+    // Test memory info collection
+    let memory_info = SystemMemoryInfo::collect();
+    assert!(memory_info.total_memory > 0);
+    assert!(memory_info.available_memory <= memory_info.total_memory);
+    
+    Ok(())
+}
+
+/// Test memory optimizer functionality
+#[tokio::test]
+async fn test_memory_optimizer() -> Result<()> {
+    let optimizer = MemoryOptimizer::new();
+    
+    // Test optimization suggestions
+    let suggestions = optimizer.analyze_memory_usage();
+    assert!(!suggestions.is_empty()); // Should have some suggestions
+    
+    // Test memory pressure detection
+    let memory_info = SystemMemoryInfo::collect();
+    let pressure_level = optimizer.assess_memory_pressure(&memory_info);
+    
+    // Memory pressure should be a valid level
+    match pressure_level {
+        voirs_acoustic::memory::lazy::MemoryPressureLevel::Low |
+        voirs_acoustic::memory::lazy::MemoryPressureLevel::Medium |
+        voirs_acoustic::memory::lazy::MemoryPressureLevel::High |
+        voirs_acoustic::memory::lazy::MemoryPressureLevel::Critical => {
+            // Valid pressure level
+        }
+    }
+    
+    Ok(())
+}
+
+/// Test advanced performance profiler
+#[tokio::test]
+async fn test_advanced_performance_profiler() -> Result<()> {
+    let profiler = AdvancedPerformanceProfiler::new();
+    
+    // Start profiling session
+    let session_id = profiler.start_profiling_session("test_session");
+    
+    // Record some operations
+    for i in 0..3 {
+        let operation_id = profiler.start_operation(format!("operation_{}", i));
+        thread::sleep(Duration::from_millis(5));
+        profiler.end_operation(operation_id);
+    }
+    
+    // End profiling session
+    let report = profiler.end_profiling_session(session_id);
+    
+    // Verify report contains expected data
+    assert_eq!(report.session_name, "test_session");
+    assert!(report.total_duration > Duration::from_millis(10));
+    assert_eq!(report.operation_count, 3);
+    assert!(!report.operation_details.is_empty());
+    
+    Ok(())
+}
+
+/// Test concurrent access to memory pool
+#[tokio::test]
+async fn test_memory_pool_concurrent_access() -> Result<()> {
+    let pool = Arc::new(TensorMemoryPool::new());
+    let mut handles = Vec::new();
+    
+    // Spawn multiple threads accessing the pool concurrently
+    for thread_id in 0..4 {
+        let pool_clone = Arc::clone(&pool);
+        let handle = thread::spawn(move || {
+            for i in 0..10 {
+                let size = 512 + thread_id * 100 + i * 10;
+                let buffer = pool_clone.get_buffer(size);
+                assert_eq!(buffer.len(), size);
+                
+                // Simulate some work
+                thread::sleep(Duration::from_millis(1));
+                
+                pool_clone.return_buffer(buffer);
+            }
+        });
+        handles.push(handle);
+    }
+    
+    // Wait for all threads to complete
+    for handle in handles {
+        handle.join().unwrap();
+    }
+    
+    // Verify pool statistics
+    let stats = pool.get_stats();
+    assert!(stats.hits + stats.misses >= 40); // At least 40 operations total
+    
+    Ok(())
+}
+
+/// Test cache performance under load
+#[tokio::test]
+async fn test_cache_performance_under_load() -> Result<()> {
+    let cache: Arc<ResultCache<i32, String>> = Arc::new(
+        ResultCache::new(1000, Duration::from_secs(60))
+    );
+    let mut handles = Vec::new();
+    
+    // Spawn multiple threads accessing cache concurrently
+    for thread_id in 0..4 {
+        let cache_clone = Arc::clone(&cache);
+        let handle = thread::spawn(move || {
+            for i in 0..100 {
+                let key = thread_id * 100 + i;
+                let value = format!("thread_{}_value_{}", thread_id, i);
+                
+                // Put value
+                cache_clone.put(key, value.clone());
+                
+                // Get value back
+                let retrieved = cache_clone.get(&key);
+                assert_eq!(retrieved, Some(value));
+            }
+        });
+        handles.push(handle);
+    }
+    
+    // Wait for all threads to complete
+    for handle in handles {
+        handle.join().unwrap();
+    }
+    
+    // Verify cache has expected number of entries
+    assert!(cache.size() <= 1000); // Should not exceed capacity
+    assert!(cache.size() >= 300); // Should have many entries
+    
+    Ok(())
+}
+
+/// Test memory optimization recommendations
+#[tokio::test]
+async fn test_memory_optimization_recommendations() -> Result<()> {
+    let optimizer = MemoryOptimizer::new();
+    
+    // Get optimization recommendations
+    let recommendations = optimizer.get_optimization_recommendations();
+    
+    // Verify recommendations are provided
+    assert!(!recommendations.is_empty());
+    
+    // Verify recommendation structure
+    for recommendation in &recommendations {
+        assert!(!recommendation.category.is_empty());
+        assert!(!recommendation.description.is_empty());
+        assert!(recommendation.priority >= 0);
+        assert!(recommendation.estimated_savings >= 0);
+    }
+    
+    Ok(())
+}
+
+/// Test memory pool efficiency metrics
+#[tokio::test]
+async fn test_memory_pool_efficiency() -> Result<()> {
+    let pool = TensorMemoryPool::new();
+    
+    // Perform a series of allocations and returns
+    let buffer_sizes = vec![256, 512, 256, 1024, 512, 256];
+    let mut buffers = Vec::new();
+    
+    // Allocate all buffers
+    for &size in &buffer_sizes {
+        buffers.push(pool.get_buffer(size));
+    }
+    
+    // Return all buffers
+    for buffer in buffers {
+        pool.return_buffer(buffer);
+    }
+    
+    // Allocate same sizes again - should have high hit rate
+    for &size in &buffer_sizes {
+        let _buffer = pool.get_buffer(size);
+    }
+    
+    let stats = pool.get_stats();
+    
+    // Calculate hit rate
+    let total_operations = stats.hits + stats.misses;
+    let hit_rate = if total_operations > 0 {
+        stats.hits as f64 / total_operations as f64
+    } else {
+        0.0
+    };
+    
+    // With repeated allocations, we should have some hits
+    assert!(hit_rate > 0.0);
+    
+    Ok(())
+}

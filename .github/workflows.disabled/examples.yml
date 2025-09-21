@@ -1,0 +1,518 @@
+# VoiRS Examples CI/CD Pipeline
+# ===============================
+#
+# This GitHub Actions workflow provides comprehensive continuous integration
+# and deployment for VoiRS examples, including:
+# - Multi-platform builds (Linux, Windows, macOS)
+# - Comprehensive testing with timeout handling
+# - Performance regression detection
+# - Code quality checks (clippy, fmt, audit)
+# - Artifact generation and reporting
+# - Deployment to staging/production environments
+#
+# Workflow triggers:
+# - Push to main/develop branches
+# - Pull requests
+# - Scheduled nightly builds
+# - Manual workflow dispatch
+
+name: VoiRS Examples CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'examples/**'
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/**'
+  
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'examples/**'
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  
+  schedule:
+    # Run nightly at 2 AM UTC
+    - cron: '0 2 * * *'
+  
+  workflow_dispatch:
+    inputs:
+      test_category:
+        description: 'Test category to run'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - performance
+          - voice
+          - spatial
+          - production
+      build_profile:
+        description: 'Build profile'
+        required: false
+        default: 'ci'
+        type: choice
+        options:
+          - ci
+          - development
+          - production
+          - quick
+      run_benchmarks:
+        description: 'Run performance benchmarks'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Cache version - increment to invalidate caches
+  CACHE_VERSION: v1
+
+jobs:
+  # Job 1: Code Quality and Linting
+  quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+        
+    - name: Setup Rust cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        key: quality-${{ env.CACHE_VERSION }}
+        
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+      
+    - name: Run Clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
+      
+    - name: Security audit
+      uses: rustsec/audit-check@v1
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Job 2: Multi-platform Build Matrix
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    needs: quality
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: voirs-examples-linux
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: voirs-examples-windows
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: voirs-examples-macos
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        target: ${{ matrix.target }}
+        
+    - name: Setup Rust cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        key: build-${{ matrix.os }}-${{ env.CACHE_VERSION }}
+        
+    - name: Install system dependencies (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libasound2-dev pkg-config
+        
+    - name: Install system dependencies (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew install pkg-config
+        
+    - name: Build examples
+      run: |
+        cd examples
+        python3 ../../tools/enhanced_build_system.py --build-only --parallel 4
+      env:
+        CARGO_TARGET: ${{ matrix.target }}
+        
+    - name: Archive build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.artifact_name }}
+        path: |
+          examples/target/release/examples/
+          !examples/target/release/examples/*.d
+        retention-days: 7
+
+  # Job 3: Comprehensive Testing
+  test:
+    name: Test (${{ matrix.category }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs: build
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        category: [basic, performance, voice, spatial, production]
+        include:
+          - category: basic
+            timeout: 60
+            examples_pattern: "hello_world,simple_synthesis,basic_configuration"
+          - category: performance
+            timeout: 180
+            examples_pattern: "*benchmark*,*performance*"
+          - category: voice
+            timeout: 300
+            examples_pattern: "*voice*,*cloning*,*emotion*"
+          - category: spatial
+            timeout: 120
+            examples_pattern: "*spatial*,*3d*"
+          - category: production
+            timeout: 240
+            examples_pattern: "*production*,*monitoring*"
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Setup Rust cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        key: test-${{ matrix.category }}-${{ env.CACHE_VERSION }}
+        
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libasound2-dev pkg-config ffmpeg
+        
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: voirs-examples-linux
+        path: examples/target/release/examples/
+        
+    - name: Make binaries executable
+      run: chmod +x examples/target/release/examples/*
+      
+    - name: Run tests
+      id: run_tests
+      run: |
+        cd examples
+        python3 ../../tools/enhanced_build_system.py \
+          --test-only \
+          --timeout ${{ matrix.timeout }} \
+          --examples "${{ matrix.examples_pattern }}" \
+          --report "test_report_${{ matrix.category }}.json" \
+          --ci
+          
+    - name: Upload test reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-report-${{ matrix.category }}
+        path: examples/test_report_${{ matrix.category }}.json
+        retention-days: 30
+        
+    - name: Upload test outputs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-outputs-${{ matrix.category }}
+        path: |
+          examples/*.wav
+          examples/*_report.json
+          examples/*_metrics.txt
+        retention-days: 7
+
+  # Job 4: Performance Benchmarking (optional)
+  benchmark:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    needs: build
+    if: ${{ github.event.inputs.run_benchmarks == 'true' || github.event_name == 'schedule' }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Setup Rust cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        key: benchmark-${{ env.CACHE_VERSION }}
+        
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libasound2-dev pkg-config ffmpeg htop
+        
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: voirs-examples-linux
+        path: examples/target/release/examples/
+        
+    - name: Make binaries executable
+      run: chmod +x examples/target/release/examples/*
+      
+    - name: Run performance benchmarks
+      run: |
+        cd examples
+        python3 ../../tools/enhanced_build_system.py \
+          --test-only \
+          --timeout 300 \
+          --examples "*benchmark*,*performance*" \
+          --report "benchmark_report.json" \
+          --ci
+          
+    - name: Process benchmark results
+      run: |
+        cd examples
+        python3 << 'EOF'
+        import json
+        import sys
+        
+        try:
+            with open('benchmark_report.json', 'r') as f:
+                report = json.load(f)
+            
+            print("## Performance Benchmark Results")
+            print("| Example | Duration (s) | RTF | Memory (MB) | Status |")
+            print("|---------|-------------|-----|-------------|--------|")
+            
+            for result in report.get('test_results', {}).get('results', []):
+                name = result['name']
+                duration = result.get('duration', 0)
+                metrics = result.get('performance_metrics', {})
+                rtf = metrics.get('rtf', 'N/A')
+                success = "✅" if result['success'] else "❌"
+                
+                print(f"| {name} | {duration:.2f} | {rtf} | N/A | {success} |")
+                
+        except Exception as e:
+            print(f"Error processing benchmark results: {e}")
+            sys.exit(1)
+        EOF
+        
+    - name: Upload benchmark reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: benchmark-report
+        path: examples/benchmark_report.json
+        retention-days: 90
+
+  # Job 5: Regression Detection
+  regression:
+    name: Performance Regression Detection
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [test, benchmark]
+    if: ${{ github.event_name == 'pull_request' }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Full history for baseline comparison
+        
+    - name: Download current test reports
+      uses: actions/download-artifact@v4
+      with:
+        pattern: test-report-*
+        merge-multiple: true
+        path: current_reports/
+        
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Run regression analysis
+      run: |
+        python3 << 'EOF'
+        import json
+        import os
+        import glob
+        
+        print("## Regression Analysis")
+        
+        # Load current reports
+        current_reports = []
+        for report_file in glob.glob('current_reports/*.json'):
+            try:
+                with open(report_file, 'r') as f:
+                    report = json.load(f)
+                    current_reports.append(report)
+            except Exception as e:
+                print(f"Warning: Could not load {report_file}: {e}")
+        
+        if not current_reports:
+            print("No current reports found for regression analysis")
+            exit(0)
+        
+        # Simple regression detection (in practice, would compare with baseline)
+        performance_issues = []
+        
+        for report in current_reports:
+            for result in report.get('test_results', {}).get('results', []):
+                if not result['success']:
+                    continue
+                    
+                metrics = result.get('performance_metrics', {})
+                rtf = metrics.get('rtf')
+                
+                if rtf and rtf > 2.0:  # Slow synthesis
+                    performance_issues.append({
+                        'example': result['name'],
+                        'issue': f'Slow synthesis: RTF {rtf:.2f}x',
+                        'severity': 'high' if rtf > 5.0 else 'medium'
+                    })
+        
+        if performance_issues:
+            print("### ⚠️ Performance Issues Detected")
+            print("| Example | Issue | Severity |")
+            print("|---------|--------|----------|")
+            
+            for issue in performance_issues:
+                severity_emoji = "🔴" if issue['severity'] == 'high' else "🟡"
+                print(f"| {issue['example']} | {issue['issue']} | {severity_emoji} {issue['severity']} |")
+                
+            if any(issue['severity'] == 'high' for issue in performance_issues):
+                print("\n❌ High severity performance issues detected!")
+                exit(1)
+        else:
+            print("✅ No performance regressions detected")
+        EOF
+
+  # Job 6: Deployment (on successful builds)
+  deploy:
+    name: Deploy Documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [test]
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Generate documentation
+      run: |
+        cd examples
+        cargo doc --all --no-deps
+        
+    - name: Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./examples/target/doc
+        destination_dir: examples
+
+  # Job 7: Notification and Reporting
+  notify:
+    name: Notify Results
+    runs-on: ubuntu-latest
+    needs: [quality, build, test, benchmark, regression]
+    if: always()
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts/
+        
+    - name: Generate final report
+      run: |
+        echo "# VoiRS Examples CI/CD Report" > report.md
+        echo "" >> report.md
+        echo "**Workflow:** ${{ github.workflow }}" >> report.md
+        echo "**Trigger:** ${{ github.event_name }}" >> report.md
+        echo "**Branch:** ${{ github.ref }}" >> report.md
+        echo "**Commit:** ${{ github.sha }}" >> report.md
+        echo "**Date:** $(date -u)" >> report.md
+        echo "" >> report.md
+        
+        echo "## Job Results" >> report.md
+        echo "| Job | Status |" >> report.md
+        echo "|-----|--------|" >> report.md
+        echo "| Code Quality | ${{ needs.quality.result == 'success' && '✅' || '❌' }} |" >> report.md
+        echo "| Build | ${{ needs.build.result == 'success' && '✅' || '❌' }} |" >> report.md
+        echo "| Test | ${{ needs.test.result == 'success' && '✅' || '❌' }} |" >> report.md
+        echo "| Benchmark | ${{ needs.benchmark.result == 'success' && '✅' || needs.benchmark.result == 'skipped' && '⏭️' || '❌' }} |" >> report.md
+        echo "| Regression | ${{ needs.regression.result == 'success' && '✅' || needs.regression.result == 'skipped' && '⏭️' || '❌' }} |" >> report.md
+        
+        echo "" >> report.md
+        echo "## Artifacts Generated" >> report.md
+        find artifacts/ -name "*.json" -o -name "*.wav" | head -20 | while read file; do
+          echo "- $(basename "$file")" >> report.md
+        done
+        
+    - name: Comment on PR (if applicable)
+      if: ${{ github.event_name == 'pull_request' }}
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const report = fs.readFileSync('report.md', 'utf8');
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: report
+          });
+          
+    - name: Upload final report
+      uses: actions/upload-artifact@v4
+      with:
+        name: ci-report
+        path: report.md
+        retention-days: 30
+
+# Workflow-level environment variables and configuration
+env:
+  # Rust configuration
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-D warnings"
+  
+  # Performance monitoring
+  CARGO_PROFILE_RELEASE_DEBUG: 1
+  
+  # Security
+  CARGO_AUDIT_IGNORE: ""

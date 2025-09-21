@@ -1,0 +1,102 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "voirs-recognizer"
+version = "0.1.0"
+description = "Voice recognition and analysis capabilities for VoiRS"
+authors = [{name = "VoiRS Contributors"}]
+license = {text = "MIT OR Apache-2.0"}
+requires-python = ">=3.8"
+readme = "README.md"
+homepage = "https://github.com/cool-japan/voirs"
+repository = "https://github.com/cool-japan/voirs"
+keywords = ["voice", "recognition", "asr", "speech", "audio", "analysis"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Rust",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "numpy>=1.20.0",
+    "soundfile>=0.10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0.0",
+    "pytest-asyncio>=0.20.0",
+    "black>=22.0.0",
+    "flake8>=4.0.0",
+    "mypy>=0.900",
+    "isort>=5.0.0",
+    "pre-commit>=2.0.0",
+]
+docs = [
+    "sphinx>=4.0.0",
+    "sphinx-rtd-theme>=1.0.0",
+    "myst-parser>=0.18.0",
+]
+examples = [
+    "matplotlib>=3.0.0",
+    "jupyter>=1.0.0",
+    "scipy>=1.7.0",
+]
+
+[project.urls]
+Documentation = "https://github.com/cool-japan/voirs"
+Repository = "https://github.com/cool-japan/voirs"
+Issues = "https://github.com/cool-japan/voirs/issues"
+Changelog = "https://github.com/cool-japan/voirs/blob/main/CHANGELOG.md"
+
+[tool.maturin]
+features = ["python"]
+python-source = "python"
+module-name = "voirs_recognizer"
+bindings = "pyo3"
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+    \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+known_first_party = ["voirs_recognizer"]
+
+[tool.mypy]
+python_version = "3.8"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true

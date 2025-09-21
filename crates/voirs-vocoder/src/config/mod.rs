@@ -6,19 +6,19 @@
 //! - Model architecture and backend selection
 //! - Audio processing and enhancement options
 
-pub mod vocoding;
-pub mod streaming;
 pub mod model;
+pub mod streaming;
+pub mod vocoding;
 
-pub use vocoding::*;
-pub use streaming::*;
 pub use model::*;
+pub use streaming::*;
+pub use vocoding::*;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// Master configuration for the vocoder system
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct VocoderConfig {
     /// Vocoding quality and processing settings
     pub vocoding: VocodingConfig,
@@ -28,17 +28,6 @@ pub struct VocoderConfig {
     pub model: ModelConfig,
     /// Audio processing settings
     pub audio: AudioProcessingConfig,
-}
-
-impl Default for VocoderConfig {
-    fn default() -> Self {
-        Self {
-            vocoding: VocodingConfig::default(),
-            streaming: StreamingConfig::default(),
-            model: ModelConfig::default(),
-            audio: AudioProcessingConfig::default(),
-        }
-    }
 }
 
 /// Audio processing configuration
@@ -184,12 +173,14 @@ impl VocoderConfig {
         if self.audio.sample_rate < 8000 {
             errors.push("Sample rate must be at least 8000 Hz".to_string());
         } else if self.audio.sample_rate > 96000 {
-            warnings.push("Sample rate above 96000 Hz may not be supported by all backends".to_string());
+            warnings.push(
+                "Sample rate above 96000 Hz may not be supported by all backends".to_string(),
+            );
         }
 
         // Validate bit depth
         match self.audio.bit_depth {
-            16 | 24 | 32 => {},
+            16 | 24 | 32 => {}
             _ => errors.push("Bit depth must be 16, 24, or 32".to_string()),
         }
 
@@ -284,7 +275,7 @@ mod tests {
     #[test]
     fn test_config_validation() {
         let mut config = VocoderConfig::default();
-        
+
         // Valid configuration should pass
         let result = config.validate();
         assert!(result.is_valid);
@@ -302,7 +293,7 @@ mod tests {
         let config = VocoderConfig::default();
         let json = config.to_json().unwrap();
         let deserialized = VocoderConfig::from_json(&json).unwrap();
-        
+
         assert_eq!(config.audio.sample_rate, deserialized.audio.sample_rate);
         assert_eq!(config.audio.channels, deserialized.audio.channels);
     }

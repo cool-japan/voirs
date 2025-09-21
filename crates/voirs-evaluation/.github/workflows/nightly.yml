@@ -1,0 +1,471 @@
+# VoiRS Evaluation - Nightly Testing Pipeline
+#
+# This workflow runs comprehensive nightly tests including:
+# - Extended performance testing
+# - Fuzzing tests
+# - Memory leak detection
+# - Cross-compilation tests
+
+name: Nightly Tests
+
+on:
+  schedule:
+    # Run every night at 3 AM UTC
+    - cron: '0 3 * * *'
+  workflow_dispatch:  # Allow manual triggers
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: full
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  # ============================================================================
+  # Extended Performance Testing
+  # ============================================================================
+  
+  performance-tests:
+    name: Extended Performance Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+      
+      - name: Setup cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: nightly-perf-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            nightly-perf-
+      
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libasound2-dev perf-tools-unstable
+      
+      - name: Run performance regression tests
+        run: cargo test --release --test performance_regression_monitoring --all-features
+      
+      - name: Run extended benchmarks
+        run: |
+          cargo bench --all-features -- --sample-size 1000
+          
+      - name: Performance profiling
+        run: |
+          cargo build --release --all-features
+          # Run CPU profiling on key benchmarks
+          perf record -g cargo bench --all-features -- --profile-time=60
+          perf report --stdio > perf_report.txt || true
+      
+      - name: Upload performance results
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-results
+          path: |
+            target/criterion/
+            perf_report.txt
+
+  # ============================================================================
+  # Fuzzing Tests
+  # ============================================================================
+
+  fuzzing:
+    name: Fuzzing Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+      
+      - name: Setup cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: nightly-fuzz-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            nightly-fuzz-
+      
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libasound2-dev
+          
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+      
+      - name: Run fuzzing tests
+        run: |
+          cargo test --test fuzzing --all-features --release
+          # Run additional fuzzing if fuzz targets exist
+          if [ -d "fuzz" ]; then
+            timeout 1800 cargo fuzz run audio_quality_fuzz -- -max_total_time=1800 || true
+          fi
+      
+      - name: Check for crashes
+        run: |
+          if [ -d "fuzz/artifacts" ]; then
+            echo "⚠️ Fuzzing found crashes:"
+            find fuzz/artifacts -name "crash-*" -exec echo "Crash: {}" \;
+            exit 1
+          fi
+
+  # ============================================================================
+  # Memory Leak Detection
+  # ============================================================================
+
+  memory-leaks:
+    name: Memory Leak Detection
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: Setup cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: nightly-valgrind-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            nightly-valgrind-
+      
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libasound2-dev valgrind
+      
+      - name: Build debug version
+        run: cargo build --all-features
+      
+      - name: Run memory leak tests
+        run: |
+          export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all --track-origins=yes --error-exitcode=1"
+          cargo test --test memory_tests --all-features 2>&1 | tee valgrind_output.txt
+      
+      - name: Check for leaks
+        run: |
+          if grep -q "definitely lost\|possibly lost" valgrind_output.txt; then
+            echo "❌ Memory leaks detected!"
+            cat valgrind_output.txt
+            exit 1
+          else
+            echo "✅ No memory leaks detected"
+          fi
+      
+      - name: Upload valgrind output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: valgrind-output
+          path: valgrind_output.txt
+
+  # ============================================================================
+  # Cross-compilation Tests
+  # ============================================================================
+
+  cross-compile:
+    name: Cross-compilation (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-gnu
+          - armv7-unknown-linux-gnueabihf
+          - x86_64-pc-windows-gnu
+          - wasm32-unknown-unknown
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      
+      - name: Setup cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cross-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cross-${{ matrix.target }}-
+      
+      - name: Install cross
+        run: cargo install cross
+      
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config
+      
+      - name: Cross-compile
+        run: |
+          if [[ "${{ matrix.target }}" == "wasm32-unknown-unknown" ]]; then
+            # WASM build with limited features
+            cargo build --target ${{ matrix.target }} --no-default-features --features quality
+          else
+            # Full feature build for other targets
+            cross build --target ${{ matrix.target }} --all-features
+          fi
+
+  # ============================================================================
+  # Stress Testing
+  # ============================================================================
+
+  stress-tests:
+    name: Stress Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: Setup cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: nightly-stress-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            nightly-stress-
+      
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libasound2-dev htop
+      
+      - name: Run stress tests
+        run: |
+          echo "🔥 Starting stress tests..."
+          
+          # Monitor system resources
+          htop -d 5 > system_usage.log &
+          HTOP_PID=$!
+          
+          # Run stress tests
+          cargo test --release --test stress_tests --all-features -- --ignored
+          
+          # Stop monitoring
+          kill $HTOP_PID 2>/dev/null || true
+          
+          echo "✅ Stress tests completed"
+      
+      - name: Upload stress test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: stress-test-results
+          path: system_usage.log
+
+  # ============================================================================
+  # Integration with External Services
+  # ============================================================================
+
+  external-integration:
+    name: External Service Integration
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: Setup cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: nightly-integration-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            nightly-integration-
+      
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libasound2-dev python3 python3-pip r-base
+      
+      - name: Install Python packages
+        run: |
+          python3 -m pip install --upgrade pip numpy scipy pandas matplotlib
+      
+      - name: Test Python integration
+        run: |
+          cargo test --features python --test integration_tests
+          
+      - name: Test R integration
+        run: |
+          cargo test --features r-integration --test integration_tests
+
+  # ============================================================================
+  # Regression Testing Against Previous Versions
+  # ============================================================================
+
+  regression-tests:
+    name: Regression Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: Setup cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: nightly-regression-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            nightly-regression-
+      
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libasound2-dev
+      
+      - name: Run regression tests
+        run: |
+          cargo test --release --test regression_tests --all-features
+          
+      - name: Run human perception validation
+        run: |
+          cargo test --release --test human_perception_validation --all-features
+          
+      - name: Run metric validation
+        run: |
+          cargo test --release --test metric_validation --all-features
+
+  # ============================================================================
+  # Results Summary and Notifications
+  # ============================================================================
+
+  nightly-summary:
+    name: Nightly Test Summary
+    runs-on: ubuntu-latest
+    needs: [performance-tests, fuzzing, memory-leaks, cross-compile, stress-tests, external-integration, regression-tests]
+    if: always()
+    
+    steps:
+      - name: Generate summary
+        run: |
+          echo "# 🌙 Nightly Test Results" > summary.md
+          echo "" >> summary.md
+          echo "## Test Results" >> summary.md
+          echo "" >> summary.md
+          
+          # Check each job result
+          if [[ "${{ needs.performance-tests.result }}" == "success" ]]; then
+            echo "✅ Performance Tests: PASSED" >> summary.md
+          else
+            echo "❌ Performance Tests: FAILED" >> summary.md
+          fi
+          
+          if [[ "${{ needs.fuzzing.result }}" == "success" ]]; then
+            echo "✅ Fuzzing Tests: PASSED" >> summary.md
+          else
+            echo "❌ Fuzzing Tests: FAILED" >> summary.md
+          fi
+          
+          if [[ "${{ needs.memory-leaks.result }}" == "success" ]]; then
+            echo "✅ Memory Leak Detection: PASSED" >> summary.md
+          else
+            echo "❌ Memory Leak Detection: FAILED" >> summary.md
+          fi
+          
+          if [[ "${{ needs.cross-compile.result }}" == "success" ]]; then
+            echo "✅ Cross-compilation: PASSED" >> summary.md
+          else
+            echo "❌ Cross-compilation: FAILED" >> summary.md
+          fi
+          
+          if [[ "${{ needs.stress-tests.result }}" == "success" ]]; then
+            echo "✅ Stress Tests: PASSED" >> summary.md
+          else
+            echo "❌ Stress Tests: FAILED" >> summary.md
+          fi
+          
+          if [[ "${{ needs.external-integration.result }}" == "success" ]]; then
+            echo "✅ External Integration: PASSED" >> summary.md
+          else
+            echo "❌ External Integration: FAILED" >> summary.md
+          fi
+          
+          if [[ "${{ needs.regression-tests.result }}" == "success" ]]; then
+            echo "✅ Regression Tests: PASSED" >> summary.md
+          else
+            echo "❌ Regression Tests: FAILED" >> summary.md
+          fi
+          
+          echo "" >> summary.md
+          echo "**Timestamp:** $(date -u)" >> summary.md
+          echo "**Commit:** ${{ github.sha }}" >> summary.md
+          
+          cat summary.md
+      
+      - name: Check overall status
+        run: |
+          failed_jobs=""
+          
+          if [[ "${{ needs.performance-tests.result }}" != "success" ]]; then
+            failed_jobs="$failed_jobs performance-tests"
+          fi
+          if [[ "${{ needs.fuzzing.result }}" != "success" ]]; then
+            failed_jobs="$failed_jobs fuzzing"
+          fi
+          if [[ "${{ needs.memory-leaks.result }}" != "success" ]]; then
+            failed_jobs="$failed_jobs memory-leaks"
+          fi
+          if [[ "${{ needs.cross-compile.result }}" != "success" ]]; then
+            failed_jobs="$failed_jobs cross-compile"
+          fi
+          if [[ "${{ needs.stress-tests.result }}" != "success" ]]; then
+            failed_jobs="$failed_jobs stress-tests"
+          fi
+          if [[ "${{ needs.external-integration.result }}" != "success" ]]; then
+            failed_jobs="$failed_jobs external-integration"
+          fi
+          if [[ "${{ needs.regression-tests.result }}" != "success" ]]; then
+            failed_jobs="$failed_jobs regression-tests"
+          fi
+          
+          if [[ -n "$failed_jobs" ]]; then
+            echo "❌ Nightly tests failed in jobs:$failed_jobs"
+            exit 1
+          else
+            echo "✅ All nightly tests passed!"
+          fi

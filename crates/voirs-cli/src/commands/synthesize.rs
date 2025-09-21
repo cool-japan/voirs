@@ -1,24 +1,22 @@
 //! Synthesis command implementations.
 
-use std::path::Path;
-use std::sync::Arc;
-use voirs_sdk::{
-    error::{Result, VoirsError, IoOperation},
-    types::{AudioFormat, QualityLevel, SynthesisConfig},
-    VoirsPipeline,
-};
-use voirs::config::AppConfig;
-use crate::{GlobalOptions, utils};
 use crate::cli_types::CliAudioFormat;
 use crate::ssml;
+use crate::{utils, GlobalOptions};
+use hound::WavWriter;
 use indicatif::{ProgressBar, ProgressStyle};
-use tokio::sync::Semaphore;
-use tokio::time::{Duration, Instant};
 use regex::Regex;
 use std::collections::VecDeque;
-use hound::WavWriter;
 use std::fs::File;
 use std::io::BufWriter;
+use std::path::Path;
+use std::sync::Arc;
+use tokio::sync::Semaphore;
+use tokio::time::{Duration, Instant};
+use voirs::{AudioFormat, QualityLevel, Result, VoirsError, VoirsPipeline};
+use voirs_sdk::config::AppConfig;
+use voirs_sdk::error::IoOperation;
+use voirs_sdk::types::SynthesisConfig;
 
 /// Enhanced synthesis options with validation
 #[derive(Debug, Clone)]
@@ -173,7 +171,7 @@ fn validate_synthesis_options(options: &EnhancedSynthesisOptions) -> Result<()> 
                     operation: IoOperation::Metadata,
                     source: std::io::Error::new(
                         std::io::ErrorKind::NotFound,
-                        "Output directory does not exist"
+                        "Output directory does not exist",
                     ),
                 });
             }
@@ -182,11 +180,13 @@ fn validate_synthesis_options(options: &EnhancedSynthesisOptions) -> Result<()> 
         // Check if file extension is supported
         if let Some(ext) = output_path.extension().and_then(|e| e.to_str()) {
             match ext.to_lowercase().as_str() {
-                "wav" | "flac" | "mp3" | "opus" | "ogg" => {}, // Supported formats
-                _ => return Err(VoirsError::UnsupportedFileFormat {
-                    path: output_path.clone(),
-                    format: ext.to_string(),
-                }),
+                "wav" | "flac" | "mp3" | "opus" | "ogg" => {} // Supported formats
+                _ => {
+                    return Err(VoirsError::UnsupportedFileFormat {
+                        path: output_path.clone(),
+                        format: ext.to_string(),
+                    })
+                }
             }
         }
     }
@@ -216,13 +216,15 @@ pub async fn run_enhanced_synthesize(
             Err(e) => {
                 last_error = Some(e.clone());
                 retry_count += 1;
-                
+
                 if retry_count <= options.max_retries {
                     let backoff_ms = 1000 * (2_u64.pow(retry_count.saturating_sub(1) as u32));
                     if !global.quiet {
                         tracing::warn!(
-                            "Synthesis attempt {} failed: {}. Retrying in {}ms...", 
-                            retry_count, e, backoff_ms
+                            "Synthesis attempt {} failed: {}. Retrying in {}ms...",
+                            retry_count,
+                            e,
+                            backoff_ms
                         );
                     }
                     tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
@@ -232,20 +234,23 @@ pub async fn run_enhanced_synthesize(
     }
 
     // All retries exhausted
-    let final_error = last_error.unwrap_or_else(|| 
-        VoirsError::SynthesisFailed {
-            text: options.text.clone(),
-            text_length: options.text.len(),
-            stage: voirs_sdk::error::SynthesisStage::AudioFinalization,
-            cause: "Unknown error after all retries".into(),
-        }
-    );
+    let final_error = last_error.unwrap_or_else(|| VoirsError::SynthesisFailed {
+        text: options.text.clone(),
+        text_length: options.text.len(),
+        stage: voirs_sdk::error::SynthesisStage::AudioFinalization,
+        cause: "Unknown error after all retries".into(),
+    });
 
     Err(VoirsError::SynthesisFailed {
         text: options.text.clone(),
         text_length: options.text.len(),
         stage: voirs_sdk::error::SynthesisStage::AudioFinalization,
-        cause: format!("Failed after {} attempts. Last error: {}", options.max_retries + 1, final_error).into(),
+        cause: format!(
+            "Failed after {} attempts. Last error: {}",
+            options.max_retries + 1,
+            final_error
+        )
+        .into(),
     })
 }
 
@@ -264,14 +269,13 @@ async fn try_synthesize(
     };
 
     // Determine if we need streaming synthesis
-    let should_stream = processed_text.len() > 500 || 
-                       processed_text.split_whitespace().count() > 100 ||
-                       options.enable_realtime;
+    let should_stream = processed_text.len() > 500
+        || processed_text.split_whitespace().count() > 100
+        || options.enable_realtime;
 
     if should_stream {
-        return run_enhanced_streaming_synthesis(
-            options, &processed_text, config, global, attempt
-        ).await;
+        return run_enhanced_streaming_synthesis(options, &processed_text, config, global, attempt)
+            .await;
     }
 
     // Build pipeline with enhanced options
@@ -288,7 +292,10 @@ async fn try_synthesize(
         if options.enable_fallback && attempt == 0 {
             VoirsError::ModelError {
                 model_type: voirs_sdk::error::ModelType::Acoustic,
-                message: format!("Pipeline build failed: {}. Will retry with fallback options.", e),
+                message: format!(
+                    "Pipeline build failed: {}. Will retry with fallback options.",
+                    e
+                ),
                 source: Some(e.into()),
             }
         } else {
@@ -308,14 +315,16 @@ async fn try_synthesize(
 
     // Configure real-time streaming if enabled
     if options.enable_realtime {
-        if let Some(latency_ms) = options.target_latency_ms {
-            synth_config.target_latency_ms = Some(latency_ms);
+        // For real-time mode, use streaming chunks
+        if options.enable_realtime {
+            synth_config.streaming_chunk_size = Some(8); // Process in 8-word chunks
         }
-        synth_config.enable_streaming = true;
     }
 
     // Synthesize audio
-    let audio = pipeline.synthesize_with_config(&processed_text, &synth_config).await?;
+    let audio = pipeline
+        .synthesize_with_config(&processed_text, &synth_config)
+        .await?;
 
     // Determine output path
     let output_path = if let Some(path) = &options.output {
@@ -331,13 +340,16 @@ async fn try_synthesize(
         .or(global.format.map(|f| f.into()))
         .unwrap_or_default();
 
-    audio.save(&output_path, format).map_err(|e| {
-        VoirsError::IoError {
+    audio
+        .save(&output_path, format)
+        .map_err(|e| VoirsError::IoError {
             path: output_path.clone(),
             operation: IoOperation::Write,
-            source: std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to save audio: {}", e)),
-        }
-    })?;
+            source: std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to save audio: {}", e),
+            ),
+        })?;
 
     if !global.quiet {
         println!("✓ Synthesis complete: {}", output_path.display());
@@ -359,10 +371,13 @@ async fn run_enhanced_streaming_synthesis(
     global: &GlobalOptions,
     attempt: usize,
 ) -> Result<()> {
-    tracing::info!("Running enhanced streaming synthesis for text of length: {}", processed_text.len());
+    tracing::info!(
+        "Running enhanced streaming synthesis for text of length: {}",
+        processed_text.len()
+    );
 
     let mut streaming_config = StreamingConfig::default();
-    
+
     // Adjust streaming config based on options
     if options.enable_realtime {
         streaming_config.enable_streaming = true;
@@ -375,15 +390,19 @@ async fn run_enhanced_streaming_synthesis(
     }
 
     if !global.quiet {
-        println!("🔄 Processing text ({} characters) with enhanced streaming synthesis...", processed_text.len());
+        println!(
+            "🔄 Processing text ({} characters) with enhanced streaming synthesis...",
+            processed_text.len()
+        );
     }
 
     // Split text into chunks with enhanced error handling
-    let chunks = split_text_into_chunks(processed_text, &streaming_config)
-        .map_err(|e| VoirsError::TextPreprocessingError {
+    let chunks = split_text_into_chunks(processed_text, &streaming_config).map_err(|e| {
+        VoirsError::TextPreprocessingError {
             message: format!("Failed to split text into chunks: {}", e),
             text_sample: processed_text.chars().take(100).collect(),
-        })?;
+        }
+    })?;
 
     if !global.quiet {
         println!("📝 Split into {} chunks for processing", chunks.len());
@@ -398,9 +417,11 @@ async fn run_enhanced_streaming_synthesis(
         pitch_shift: options.pitch,
         volume_gain: options.volume,
         enable_enhancement: options.enhance,
-        quality: options.quality,
-        enable_streaming: options.enable_realtime,
-        target_latency_ms: options.target_latency_ms,
+        streaming_chunk_size: if options.enable_realtime {
+            Some(8)
+        } else {
+            None
+        },
         ..Default::default()
     };
 
@@ -419,30 +440,38 @@ async fn run_enhanced_streaming_synthesis(
         .unwrap_or_default();
 
     let audio_segments = process_chunks_with_enhanced_progress(
-        &chunks,
+        chunks.clone(),
         &pipeline,
         &synth_config,
         &streaming_config,
         global,
         attempt,
-    ).await?;
+    )
+    .await?;
 
     // Combine audio segments and save
-    let combined_audio = combine_audio_segments(audio_segments)
-        .map_err(|e| VoirsError::AudioError {
+    let combined_audio =
+        combine_audio_segments(audio_segments).map_err(|e| VoirsError::AudioError {
             message: format!("Failed to combine audio segments: {}", e),
             buffer_info: None,
         })?;
 
-    combined_audio.save(&output_path, format)
+    combined_audio
+        .save(&output_path, format)
         .map_err(|e| VoirsError::IoError {
             path: output_path.clone(),
             operation: IoOperation::Write,
-            source: std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to save combined audio: {}", e)),
+            source: std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to save combined audio: {}", e),
+            ),
         })?;
 
     if !global.quiet {
-        println!("✅ Enhanced streaming synthesis complete: {}", output_path.display());
+        println!(
+            "✅ Enhanced streaming synthesis complete: {}",
+            output_path.display()
+        );
         println!("  Duration: {:.2}s", combined_audio.duration());
         println!("  Processed {} chunks", chunks.len());
         println!("  Quality: {:?}", options.quality);
@@ -528,30 +557,36 @@ pub async fn run_streaming_synthesis(
     config: &AppConfig,
     global: &GlobalOptions,
 ) -> Result<()> {
-    tracing::info!("Running streaming synthesis for text of length: {}", text.len());
-    
+    tracing::info!(
+        "Running streaming synthesis for text of length: {}",
+        text.len()
+    );
+
     let streaming_config = StreamingConfig::default();
-    
+
     if !global.quiet {
-        println!("Processing long text ({} characters) with streaming synthesis...", text.len());
+        println!(
+            "Processing long text ({} characters) with streaming synthesis...",
+            text.len()
+        );
     }
-    
+
     // Split text into chunks
     let chunks = split_text_into_chunks(text, &streaming_config)?;
-    
+
     if !global.quiet {
         println!("Split into {} chunks for processing", chunks.len());
     }
-    
+
     // Build pipeline
     let pipeline = Arc::new(
         VoirsPipeline::builder()
             .with_quality(quality)
             .with_gpu_acceleration(config.pipeline.use_gpu || global.gpu)
             .build()
-            .await?
+            .await?,
     );
-    
+
     // Create synthesis config
     let synth_config = SynthesisConfig {
         speaking_rate: rate,
@@ -561,7 +596,7 @@ pub async fn run_streaming_synthesis(
         quality,
         ..Default::default()
     };
-    
+
     // Determine output path
     let output_path = if let Some(path) = output {
         path.to_path_buf()
@@ -570,30 +605,26 @@ pub async fn run_streaming_synthesis(
         let filename = utils::generate_output_filename(text, format);
         std::env::current_dir()?.join(filename)
     };
-    
+
     // Process chunks with progress tracking
     let format = utils::format_from_extension(&output_path)
         .or(global.format.map(|f| f.into()))
         .unwrap_or_default();
-    
-    let audio_segments = process_chunks_with_progress(
-        &chunks,
-        &pipeline,
-        &synth_config,
-        &streaming_config,
-        global,
-    ).await?;
-    
+
+    let audio_segments =
+        process_chunks_with_progress(&chunks, &pipeline, &synth_config, &streaming_config, global)
+            .await?;
+
     // Combine audio segments and save
     let combined_audio = combine_audio_segments(audio_segments)?;
     combined_audio.save(&output_path, format)?;
-    
+
     if !global.quiet {
         println!("Streaming synthesis complete: {}", output_path.display());
         println!("Duration: {:.2}s", combined_audio.duration());
         println!("Processed {} chunks", chunks.len());
     }
-    
+
     Ok(())
 }
 
@@ -607,24 +638,23 @@ pub async fn run_synthesize_file(
     global: &GlobalOptions,
 ) -> Result<()> {
     tracing::info!("Synthesizing file: {}", input.display());
-    
+
     // Read input file
-    let content = std::fs::read_to_string(input)
-        .map_err(|e| voirs::VoirsError::from(e))?;
-    
+    let content = std::fs::read_to_string(input).map_err(|e| voirs::VoirsError::from(e))?;
+
     // Determine output directory
     let output_dir = if let Some(dir) = output_dir {
         dir.to_path_buf()
     } else {
-        input.parent()
+        input
+            .parent()
             .unwrap_or_else(|| std::path::Path::new("."))
             .to_path_buf()
     };
-    
+
     // Ensure output directory exists
-    std::fs::create_dir_all(&output_dir)
-        .map_err(|e| voirs::VoirsError::from(e))?;
-    
+    std::fs::create_dir_all(&output_dir).map_err(|e| voirs::VoirsError::from(e))?;
+
     // Process file content
     // If file has multiple lines, treat each line as separate synthesis
     let lines: Vec<&str> = content
@@ -632,51 +662,57 @@ pub async fn run_synthesize_file(
         .map(|line| line.trim())
         .filter(|line| !line.is_empty() && !line.starts_with('#')) // Skip empty lines and comments
         .collect();
-    
+
     if lines.is_empty() {
         if !global.quiet {
             println!("No content to synthesize in file: {}", input.display());
         }
         return Ok(());
     }
-    
+
     // Build pipeline
     let pipeline = VoirsPipeline::builder()
         .with_quality(quality)
         .with_gpu_acceleration(config.pipeline.use_gpu || global.gpu)
         .build()
         .await?;
-    
+
     // Create synthesis config
     let synth_config = SynthesisConfig {
         speaking_rate: rate,
         quality,
         ..Default::default()
     };
-    
+
     if !global.quiet {
         println!("Processing {} lines from {}", lines.len(), input.display());
     }
-    
+
     let mut total_duration = 0.0;
-    let base_name = input.file_stem()
+    let base_name = input
+        .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("output");
-    
+
     // Process each line
     for (i, line) in lines.iter().enumerate() {
         if !global.quiet {
-            let display_line = if line.len() > 50 { 
-                format!("{}...", &line[..47]) 
-            } else { 
-                line.to_string() 
+            let display_line = if line.len() > 50 {
+                format!("{}...", &line[..47])
+            } else {
+                line.to_string()
             };
-            println!("Synthesizing line {}/{}: {}", i + 1, lines.len(), display_line);
+            println!(
+                "Synthesizing line {}/{}: {}",
+                i + 1,
+                lines.len(),
+                display_line
+            );
         }
-        
+
         // Synthesize audio
         let audio = pipeline.synthesize_with_config(line, &synth_config).await?;
-        
+
         // Generate output filename
         let format: AudioFormat = global.format.map(|f| f.into()).unwrap_or_default();
         let output_filename = if lines.len() == 1 {
@@ -685,50 +721,55 @@ pub async fn run_synthesize_file(
             format!("{}_{:03}.{}", base_name, i + 1, format.extension())
         };
         let output_path = output_dir.join(output_filename);
-        
+
         // Save audio
         audio.save(&output_path, format)?;
-        
+
         total_duration += audio.duration();
-        
+
         if !global.quiet {
-            println!("  Saved: {} ({:.2}s)", output_path.display(), audio.duration());
+            println!(
+                "  Saved: {} ({:.2}s)",
+                output_path.display(),
+                audio.duration()
+            );
         }
     }
-    
+
     if !global.quiet {
         println!("File synthesis complete!");
         println!("  Processed: {} lines", lines.len());
         println!("  Total duration: {:.2}s", total_duration);
         println!("  Output directory: {}", output_dir.display());
     }
-    
+
     Ok(())
 }
 
 /// Split text into chunks for processing
 fn split_text_into_chunks(text: &str, config: &StreamingConfig) -> Result<Vec<String>> {
     let mut chunks = Vec::new();
-    
+
     // Use sentence boundaries for cleaner splitting
     let sentence_regex = Regex::new(r"[.!?]\s+").unwrap();
     let sentences: Vec<&str> = sentence_regex.split(text).collect();
-    
+
     let mut current_chunk = String::new();
     let mut current_word_count = 0;
-    
+
     for sentence in sentences {
         let sentence = sentence.trim();
         if sentence.is_empty() {
             continue;
         }
-        
+
         let sentence_word_count = sentence.split_whitespace().count();
-        
+
         // Check if adding this sentence would exceed limits
-        if (!current_chunk.is_empty() && 
-            (current_chunk.len() + sentence.len() > config.max_chunk_size ||
-             current_word_count + sentence_word_count > config.max_words_per_chunk)) {
+        if !current_chunk.is_empty()
+            && (current_chunk.len() + sentence.len() > config.max_chunk_size
+                || current_word_count + sentence_word_count > config.max_words_per_chunk)
+        {
             // Start new chunk
             if !current_chunk.is_empty() {
                 chunks.push(current_chunk.trim().to_string());
@@ -736,24 +777,24 @@ fn split_text_into_chunks(text: &str, config: &StreamingConfig) -> Result<Vec<St
                 current_word_count = 0;
             }
         }
-        
+
         if !current_chunk.is_empty() {
             current_chunk.push(' ');
         }
         current_chunk.push_str(sentence);
         current_word_count += sentence_word_count;
     }
-    
+
     // Add final chunk if not empty
     if !current_chunk.is_empty() {
         chunks.push(current_chunk.trim().to_string());
     }
-    
+
     // If no chunks were created, use the original text
     if chunks.is_empty() {
         chunks.push(text.to_string());
     }
-    
+
     Ok(chunks)
 }
 
@@ -769,44 +810,48 @@ async fn process_chunks_with_progress(
         let pb = ProgressBar::new(chunks.len() as u64);
         pb.set_style(
             ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
+                .template(
+                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})",
+                )
                 .unwrap()
-                .progress_chars("#>-")
+                .progress_chars("#>-"),
         );
         pb.set_message("Processing chunks");
         Some(pb)
     } else {
         None
     };
-    
+
     let semaphore = Arc::new(Semaphore::new(streaming_config.max_concurrent_chunks));
     let mut tasks = Vec::new();
-    
+
     for (i, chunk) in chunks.iter().enumerate() {
         let pipeline_clone = pipeline.clone();
         let synth_config_clone = synth_config.clone();
         let chunk_clone = chunk.clone();
         let semaphore_clone = semaphore.clone();
         let pb_clone = progress_bar.clone();
-        
+
         let task = tokio::spawn(async move {
             let _permit = semaphore_clone.acquire().await.unwrap();
-            
+
             let start_time = Instant::now();
-            let result = pipeline_clone.synthesize_with_config(&chunk_clone, &synth_config_clone).await;
+            let result = pipeline_clone
+                .synthesize_with_config(&chunk_clone, &synth_config_clone)
+                .await;
             let elapsed = start_time.elapsed();
-            
+
             if let Some(pb) = pb_clone {
                 pb.inc(1);
                 pb.set_message(format!("Chunk {}: {:.2}s", i + 1, elapsed.as_secs_f64()));
             }
-            
+
             result.map(|audio| (i, audio))
         });
-        
+
         tasks.push(task);
     }
-    
+
     // Wait for all tasks to complete
     let mut results = Vec::new();
     for task in tasks {
@@ -824,25 +869,29 @@ async fn process_chunks_with_progress(
                 if let Some(pb) = &progress_bar {
                     pb.finish_with_message("Processing failed");
                 }
-                return Err(voirs::VoirsError::model_error(format!("Task failed: {}", e)));
+                return Err(voirs::VoirsError::model_error(format!(
+                    "Task failed: {}",
+                    e
+                )));
             }
         }
     }
-    
+
     if let Some(pb) = &progress_bar {
         pb.finish_with_message("Processing complete");
     }
-    
+
     // Sort results by index to maintain order
     results.sort_by_key(|(index, _)| *index);
-    let audio_segments: Vec<voirs::AudioBuffer> = results.into_iter().map(|(_, audio)| audio).collect();
-    
+    let audio_segments: Vec<voirs::AudioBuffer> =
+        results.into_iter().map(|(_, audio)| audio).collect();
+
     Ok(audio_segments)
 }
 
 /// Process chunks with enhanced progress tracking and error recovery
 async fn process_chunks_with_enhanced_progress(
-    chunks: &[String],
+    chunks: Vec<String>,
     pipeline: &Arc<VoirsPipeline>,
     synth_config: &SynthesisConfig,
     streaming_config: &StreamingConfig,
@@ -857,7 +906,7 @@ async fn process_chunks_with_enhanced_progress(
                 .unwrap()
                 .progress_chars("#>-")
         );
-        
+
         let msg = if attempt > 0 {
             format!("Processing chunks (retry {})", attempt)
         } else {
@@ -868,70 +917,78 @@ async fn process_chunks_with_enhanced_progress(
     } else {
         None
     };
-    
+
     let semaphore = Arc::new(Semaphore::new(streaming_config.max_concurrent_chunks));
     let mut tasks = Vec::new();
-    
-    for (i, chunk) in chunks.iter().enumerate() {
+    let total_chunks = chunks.len();
+    let total_text_length: usize = chunks.iter().map(|c| c.len()).sum();
+
+    for (i, chunk) in chunks.into_iter().enumerate() {
         let pipeline_clone = pipeline.clone();
         let synth_config_clone = synth_config.clone();
-        let chunk_clone = chunk.clone();
         let semaphore_clone = semaphore.clone();
         let pb_clone = progress_bar.clone();
-        
+        let total_chunks_clone = total_chunks;
+
         let task = tokio::spawn(async move {
             let _permit = semaphore_clone.acquire().await.unwrap();
-            
+
             let start_time = Instant::now();
             let mut last_error = None;
-            
+
             // Enhanced retry logic for individual chunks
             for retry in 0..3 {
-                match pipeline_clone.synthesize_with_config(&chunk_clone, &synth_config_clone).await {
+                match pipeline_clone
+                    .synthesize_with_config(&chunk, &synth_config_clone)
+                    .await
+                {
                     Ok(audio) => {
                         let elapsed = start_time.elapsed();
-                        
+
                         if let Some(pb) = pb_clone {
                             pb.inc(1);
                             pb.set_message(format!(
-                                "Chunk {}/{} completed ({:.2}s){}", 
-                                i + 1, 
-                                chunks.len(),
+                                "Chunk {}/{} completed ({:.2}s){}",
+                                i + 1,
+                                total_chunks_clone,
                                 elapsed.as_secs_f64(),
-                                if retry > 0 { format!(" after {} retries", retry) } else { String::new() }
+                                if retry > 0 {
+                                    format!(" after {} retries", retry)
+                                } else {
+                                    String::new()
+                                }
                             ));
                         }
-                        
+
                         return Ok((i, audio));
                     }
                     Err(e) => {
                         last_error = Some(e);
                         if retry < 2 {
                             // Brief backoff before retry
-                            tokio::time::sleep(Duration::from_millis(500 * (retry + 1) as u64)).await;
+                            tokio::time::sleep(Duration::from_millis(500 * (retry + 1) as u64))
+                                .await;
                         }
                     }
                 }
             }
-            
+
             // All retries failed for this chunk
-            Err(last_error.unwrap_or_else(|| 
-                VoirsError::SynthesisFailed {
-                    text: chunk_clone.clone(),
-                    text_length: chunk_clone.len(),
-                    stage: voirs_sdk::error::SynthesisStage::AcousticModeling,
-                    cause: "Chunk processing failed after retries".into(),
-                }
-            ))
+            Err(last_error.unwrap_or_else(|| VoirsError::SynthesisFailed {
+                text: chunk.clone(),
+                text_length: chunk.len(),
+                stage: voirs_sdk::error::SynthesisStage::AcousticModeling,
+                cause: "Chunk processing failed after retries".into(),
+            }))
         });
-        
+
         tasks.push(task);
     }
-    
+
     // Wait for all tasks to complete with enhanced error reporting
     let mut results = Vec::new();
     let mut failed_chunks = Vec::new();
-    
+
     for (task_idx, task) in tasks.into_iter().enumerate() {
         match task.await {
             Ok(Ok((index, audio))) => {
@@ -941,77 +998,91 @@ async fn process_chunks_with_enhanced_progress(
                 failed_chunks.push((task_idx, e));
             }
             Err(e) => {
-                failed_chunks.push((task_idx, VoirsError::InternalError {
-                    component: "synthesis_task".to_string(),
-                    message: format!("Task failed: {}", e),
-                }));
+                failed_chunks.push((
+                    task_idx,
+                    VoirsError::InternalError {
+                        component: "synthesis_task".to_string(),
+                        message: format!("Task failed: {}", e),
+                    },
+                ));
             }
         }
     }
-    
+
     // Handle failures
     if !failed_chunks.is_empty() {
         if let Some(pb) = &progress_bar {
-            pb.finish_with_message(format!("Processing failed ({} chunks failed)", failed_chunks.len()));
+            pb.finish_with_message(format!(
+                "Processing failed ({} chunks failed)",
+                failed_chunks.len()
+            ));
         }
-        
-        let error_details = failed_chunks.iter()
+
+        let error_details = failed_chunks
+            .iter()
             .map(|(idx, err)| format!("Chunk {}: {}", idx + 1, err))
             .collect::<Vec<_>>()
             .join("; ");
-            
+
         return Err(VoirsError::SynthesisFailed {
-            text: format!("{} chunks", chunks.len()),
-            text_length: chunks.iter().map(|c| c.len()).sum(),
+            text: format!("{} chunks", total_chunks),
+            text_length: total_text_length,
             stage: voirs_sdk::error::SynthesisStage::AcousticModeling,
-            cause: format!("{} out of {} chunks failed: {}", failed_chunks.len(), chunks.len(), error_details).into(),
+            cause: format!(
+                "{} out of {} chunks failed: {}",
+                failed_chunks.len(),
+                total_chunks,
+                error_details
+            )
+            .into(),
         });
     }
-    
+
     if let Some(pb) = &progress_bar {
         pb.finish_with_message("✅ All chunks processed successfully");
     }
-    
+
     // Sort results by index to maintain order
     results.sort_by_key(|(index, _)| *index);
-    let audio_segments: Vec<voirs::AudioBuffer> = results.into_iter().map(|(_, audio)| audio).collect();
-    
+    let audio_segments: Vec<voirs::AudioBuffer> =
+        results.into_iter().map(|(_, audio)| audio).collect();
+
     Ok(audio_segments)
 }
 
 /// Combine multiple audio segments into a single audio buffer
-fn combine_audio_segments(segments: Vec<voirs_sdk::AudioBuffer>) -> Result<voirs_sdk::AudioBuffer> {
+fn combine_audio_segments(segments: Vec<voirs::AudioBuffer>) -> Result<voirs::AudioBuffer> {
     if segments.is_empty() {
         return Err(VoirsError::AudioError {
             message: "No audio segments to combine".to_string(),
             buffer_info: None,
         });
     }
-    
+
     if segments.len() == 1 {
         return Ok(segments.into_iter().next().unwrap());
     }
-    
+
     // For now, use the first segment's sample rate and channels
     let first_segment = &segments[0];
     let sample_rate = first_segment.sample_rate();
     let channels = first_segment.channels();
-    
+
     // Combine all samples
     let mut combined_samples = Vec::new();
     for segment in segments {
         combined_samples.extend(segment.samples());
     }
-    
+
     // Create new audio buffer
-    let buffer = voirs_sdk::AudioBuffer::new(combined_samples, sample_rate, channels);
+    let buffer = voirs::AudioBuffer::new(combined_samples, sample_rate, channels);
     Ok(buffer)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_streaming_config_default() {
         let config = StreamingConfig::default();
@@ -1020,7 +1091,7 @@ mod tests {
         assert_eq!(config.chunk_overlap, 50);
         assert_eq!(config.max_concurrent_chunks, 4);
     }
-    
+
     #[test]
     fn test_split_text_into_chunks() {
         let text = "This is the first sentence. This is the second sentence! And this is the third sentence?";
@@ -1029,27 +1100,29 @@ mod tests {
             max_words_per_chunk: 10,
             ..Default::default()
         };
-        
+
         let chunks = split_text_into_chunks(text, &config).unwrap();
         assert!(chunks.len() > 1);
-        assert!(chunks.iter().all(|chunk| chunk.len() <= config.max_chunk_size));
+        assert!(chunks
+            .iter()
+            .all(|chunk| chunk.len() <= config.max_chunk_size));
     }
-    
+
     #[test]
     fn test_split_text_single_chunk() {
         let text = "Short text.";
         let config = StreamingConfig::default();
-        
+
         let chunks = split_text_into_chunks(text, &config).unwrap();
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0], text);
     }
-    
+
     #[test]
     fn test_split_text_empty() {
         let text = "";
         let config = StreamingConfig::default();
-        
+
         let chunks = split_text_into_chunks(text, &config).unwrap();
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0], text);

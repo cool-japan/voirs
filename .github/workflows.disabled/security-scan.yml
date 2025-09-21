@@ -1,0 +1,175 @@
+name: Security Vulnerability Scanning
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  security-scan:
+    name: Security Vulnerability Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+            
+      - name: Install security tools
+        run: |
+          cargo install cargo-audit
+          cargo install cargo-deny
+          
+      - name: Run cargo audit
+        run: |
+          cd ${{ github.workspace }}
+          cargo audit --json > security-audit-results.json || true
+          cargo audit > security-audit-results.txt || true
+          
+      - name: Run cargo deny
+        run: |
+          cd ${{ github.workspace }}
+          cargo deny check > cargo-deny-results.txt 2>&1 || true
+          
+      - name: Check for vulnerabilities
+        id: check-vulnerabilities
+        run: |
+          cd ${{ github.workspace }}
+          # Check if vulnerabilities were found
+          if grep -q '"vulnerability"' security-audit-results.json; then
+            echo "vulnerabilities=true" >> $GITHUB_OUTPUT
+            echo "::error::Security vulnerabilities found"
+          else
+            echo "vulnerabilities=false" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: Upload security reports
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: security-reports
+          path: |
+            security-audit-results.json
+            security-audit-results.txt
+            cargo-deny-results.txt
+          retention-days: 30
+          
+      - name: Comment on PR with results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            
+            let comment = '## 🔒 Security Scan Results\n\n';
+            
+            try {
+              const auditResults = fs.readFileSync('security-audit-results.txt', 'utf8');
+              if (auditResults.includes('vulnerabilities found')) {
+                comment += '❌ **Vulnerabilities detected by cargo-audit**\n\n';
+                comment += '<details><summary>Click to see details</summary>\n\n';
+                comment += '```\n' + auditResults + '\n```\n\n';
+                comment += '</details>\n\n';
+              } else {
+                comment += '✅ **No vulnerabilities found by cargo-audit**\n\n';
+              }
+            } catch (e) {
+              comment += '⚠️ **Could not read cargo-audit results**\n\n';
+            }
+            
+            try {
+              const denyResults = fs.readFileSync('cargo-deny-results.txt', 'utf8');
+              if (denyResults.includes('error')) {
+                comment += '❌ **Issues found by cargo-deny**\n\n';
+                comment += '<details><summary>Click to see details</summary>\n\n';
+                comment += '```\n' + denyResults + '\n```\n\n';
+                comment += '</details>\n\n';
+              } else {
+                comment += '✅ **No issues found by cargo-deny**\n\n';
+              }
+            } catch (e) {
+              comment += '⚠️ **Could not read cargo-deny results**\n\n';
+            }
+            
+            comment += '---\n*This comment was generated automatically by the security scan workflow.*';
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+            
+      - name: Fail on vulnerabilities
+        if: steps.check-vulnerabilities.outputs.vulnerabilities == 'true'
+        run: |
+          echo "::error::Security vulnerabilities found. Please review and fix them."
+          exit 1
+          
+  code-analysis:
+    name: Security Code Analysis
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Run security code analysis
+        run: |
+          # Create reports directory
+          mkdir -p security-reports
+          
+          # Check for unsafe blocks
+          echo "Checking for unsafe blocks..."
+          if grep -r "unsafe" --include="*.rs" crates/ > security-reports/unsafe-blocks.txt; then
+            echo "::warning::Found unsafe blocks (review required)"
+          fi
+          
+          # Check for security TODOs
+          echo "Checking for security TODOs..."
+          if grep -r -i "todo.*secur\|fixme.*secur\|xxx.*secur" --include="*.rs" crates/ > security-reports/security-todos.txt; then
+            echo "::warning::Found security-related TODOs"
+          fi
+          
+          # Check for potential hardcoded secrets
+          echo "Checking for potential hardcoded secrets..."
+          if grep -r -E "(password|secret|key|token).*=.*[\"'][^\"']+[\"']" --include="*.rs" crates/ > security-reports/potential-secrets.txt; then
+            echo "::error::Found potential hardcoded secrets"
+            exit 1
+          fi
+          
+      - name: Upload code analysis reports
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: code-analysis-reports
+          path: security-reports/
+          retention-days: 30

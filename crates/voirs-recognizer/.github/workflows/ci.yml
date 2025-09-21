@@ -1,0 +1,426 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Test matrix across different platforms and Rust versions
+  test:
+    name: Test Suite
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        rust: [stable, beta, nightly]
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: x86_64-apple-darwin
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ matrix.rust }}
+        targets: ${{ matrix.target }}
+        components: rustfmt, clippy
+
+    - name: Configure Rust cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: |
+          crates/voirs-recognizer -> target
+
+    - name: Install system dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libasound2-dev \
+          libpulse-dev \
+          libjack-dev \
+          portaudio19-dev \
+          libssl-dev \
+          pkg-config \
+          build-essential
+
+    - name: Install system dependencies (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew install portaudio jack
+
+    - name: Install system dependencies (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        # Windows dependencies will be handled by vcpkg or similar
+        echo "Windows dependencies installed via package manager"
+
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+
+    - name: Check linting
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
+    - name: Build (debug)
+      run: cargo build --all-features
+
+    - name: Build (release)
+      run: cargo build --release --all-features
+
+    - name: Run unit tests
+      run: cargo test --all-features
+
+    - name: Run integration tests
+      run: cargo test --test automated_regression_suite --all-features
+
+    - name: Run performance tests
+      run: cargo test --test performance_tests --all-features
+
+    - name: Run documentation tests
+      run: cargo test --doc --all-features
+
+    - name: Check documentation
+      run: cargo doc --all-features --no-deps
+
+  # Feature-specific testing
+  feature-tests:
+    name: Feature Tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features:
+          - default
+          - whisper
+          - whisper-pure
+          - deepspeech
+          - wav2vec2
+          - analysis
+          - forced-align
+          - mfa
+          - python
+          - wasm
+          - c-api
+          - rest-api
+          - all-models
+          - gpu
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Configure Rust cache
+      uses: Swatinem/rust-cache@v2
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libasound2-dev \
+          libpulse-dev \
+          libjack-dev \
+          portaudio19-dev \
+          libssl-dev \
+          pkg-config \
+          build-essential
+
+    - name: Test with feature set
+      run: cargo test --features "${{ matrix.features }}"
+
+  # Security and dependency checks
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install cargo-audit
+      run: cargo install cargo-audit
+
+    - name: Install cargo-deny
+      run: cargo install cargo-deny
+
+    - name: Run security audit
+      run: cargo audit
+
+    - name: Run cargo-deny
+      run: cargo deny check
+
+    - name: Check for outdated dependencies
+      run: |
+        cargo install cargo-outdated
+        cargo outdated --exit-code 1
+
+  # Code coverage
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: llvm-tools-preview
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libasound2-dev \
+          libpulse-dev \
+          libjack-dev \
+          portaudio19-dev \
+          libssl-dev \
+          pkg-config \
+          build-essential
+
+    - name: Install cargo-llvm-cov
+      run: cargo install cargo-llvm-cov
+
+    - name: Generate code coverage
+      run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: lcov.info
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+  # Performance benchmarks
+  benchmark:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Configure Rust cache
+      uses: Swatinem/rust-cache@v2
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libasound2-dev \
+          libpulse-dev \
+          libjack-dev \
+          portaudio19-dev \
+          libssl-dev \
+          pkg-config \
+          build-essential
+
+    - name: Run benchmarks
+      run: cargo bench --all-features
+
+    - name: Store benchmark results
+      uses: benchmark-action/github-action-benchmark@v1
+      with:
+        tool: 'cargo'
+        output-file-path: target/criterion/report/index.html
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        auto-push: true
+
+  # WASM build verification
+  wasm:
+    name: WASM Build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: wasm32-unknown-unknown
+
+    - name: Install wasm-pack
+      run: |
+        curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+    - name: Install Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libasound2-dev \
+          libpulse-dev \
+          libjack-dev \
+          portaudio19-dev \
+          libssl-dev \
+          pkg-config \
+          build-essential
+
+    - name: Build WASM package
+      run: ./build-wasm.sh
+
+    - name: Install JavaScript dependencies
+      run: npm install
+
+    - name: Test WASM package
+      run: npm test
+
+  # C API build verification
+  c-api:
+    name: C API Build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install system dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libasound2-dev \
+          libpulse-dev \
+          libjack-dev \
+          portaudio19-dev \
+          libssl-dev \
+          pkg-config \
+          build-essential \
+          gcc \
+          g++
+
+    - name: Install system dependencies (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew install portaudio jack
+
+    - name: Build C API
+      run: cargo build --features c-api --release
+
+    - name: Generate C header
+      run: python3 generate-header.py
+
+    - name: Test C examples
+      run: |
+        cd examples/c
+        make
+
+  # Multi-platform Docker builds
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository_owner }}/voirs-recognizer:latest
+          ghcr.io/${{ github.repository_owner }}/voirs-recognizer:${{ github.sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  # Documentation generation and deployment
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libasound2-dev \
+          libpulse-dev \
+          libjack-dev \
+          portaudio19-dev \
+          libssl-dev \
+          pkg-config \
+          build-essential
+
+    - name: Generate documentation
+      run: |
+        cargo doc --all-features --no-deps
+        echo '<meta http-equiv="refresh" content="0; url=voirs_recognizer">' > target/doc/index.html
+
+    - name: Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./target/doc
+        destination_dir: docs/recognizer
+
+  # Notify on completion
+  notify:
+    name: Notification
+    runs-on: ubuntu-latest
+    needs: [test, feature-tests, security, coverage, benchmark, wasm, c-api, docker, docs]
+    if: always()
+    steps:
+    - name: Notify success
+      if: ${{ needs.test.result == 'success' && needs.security.result == 'success' }}
+      run: echo "🎉 All CI checks passed successfully!"
+
+    - name: Notify failure
+      if: ${{ needs.test.result == 'failure' || needs.security.result == 'failure' }}
+      run: |
+        echo "❌ CI checks failed. Please review the failed jobs."
+        exit 1

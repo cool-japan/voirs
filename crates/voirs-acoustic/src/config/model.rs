@@ -5,9 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
 
-use crate::{Result, AcousticError, LanguageCode};
+use crate::{AcousticError, LanguageCode, Result};
 
 /// Model configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,7 +28,8 @@ pub struct ModelConfig {
 impl ModelConfig {
     /// Create new model configuration
     pub fn new(architecture: ModelArchitecture, model_path: String) -> Self {
-        let architecture_params = ArchitectureParams::default_for_architecture(architecture.clone());
+        let architecture_params =
+            ArchitectureParams::default_for_architecture(architecture.clone());
         Self {
             architecture,
             model_path,
@@ -39,21 +39,25 @@ impl ModelConfig {
             metadata: ModelMetadata::default(),
         }
     }
-    
+
     /// Validate model configuration
     pub fn validate(&self) -> Result<()> {
         if self.model_path.is_empty() {
-            return Err(AcousticError::ConfigError("Model path cannot be empty".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Model path cannot be empty".to_string(),
+            ));
         }
-        
+
         if self.supported_languages.is_empty() {
-            return Err(AcousticError::ConfigError("At least one language must be supported".to_string()));
+            return Err(AcousticError::ConfigError(
+                "At least one language must be supported".to_string(),
+            ));
         }
-        
+
         self.architecture_params.validate()?;
         Ok(())
     }
-    
+
     /// Merge with another model configuration
     pub fn merge(&mut self, other: &ModelConfig) {
         self.architecture = other.architecture.clone();
@@ -139,7 +143,7 @@ impl ArchitectureParams {
             },
         }
     }
-    
+
     /// Validate architecture parameters
     pub fn validate(&self) -> Result<()> {
         if let Some(vits) = &self.vits {
@@ -153,7 +157,7 @@ impl ArchitectureParams {
         }
         Ok(())
     }
-    
+
     /// Merge with another architecture parameters
     pub fn merge(&mut self, other: &ArchitectureParams) {
         if let Some(other_vits) = &other.vits {
@@ -163,7 +167,7 @@ impl ArchitectureParams {
                 self.vits = Some(other_vits.clone());
             }
         }
-        
+
         if let Some(other_fs2) = &other.fastspeech2 {
             if let Some(fs2) = &mut self.fastspeech2 {
                 fs2.merge(other_fs2);
@@ -171,7 +175,7 @@ impl ArchitectureParams {
                 self.fastspeech2 = Some(other_fs2.clone());
             }
         }
-        
+
         if let Some(other_taco2) = &other.tacotron2 {
             if let Some(taco2) = &mut self.tacotron2 {
                 taco2.merge(other_taco2);
@@ -179,7 +183,7 @@ impl ArchitectureParams {
                 self.tacotron2 = Some(other_taco2.clone());
             }
         }
-        
+
         if let Some(other_custom) = &other.custom {
             if let Some(custom) = &mut self.custom {
                 custom.extend(other_custom.clone());
@@ -197,7 +201,7 @@ impl Default for ArchitectureParams {
 }
 
 /// VITS model parameters
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct VitsParams {
     /// Text encoder parameters
     pub text_encoder: TextEncoderParams,
@@ -220,41 +224,30 @@ impl VitsParams {
         self.posterior_encoder.validate()?;
         self.flow.validate()?;
         self.decoder.validate()?;
-        
+
         if let Some(n_speakers) = self.n_speakers {
             if n_speakers == 0 {
-                return Err(AcousticError::ConfigError("Number of speakers must be > 0".to_string()));
+                return Err(AcousticError::ConfigError(
+                    "Number of speakers must be > 0".to_string(),
+                ));
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Merge with another VITS parameters
     pub fn merge(&mut self, other: &VitsParams) {
         self.text_encoder.merge(&other.text_encoder);
         self.posterior_encoder.merge(&other.posterior_encoder);
         self.flow.merge(&other.flow);
         self.decoder.merge(&other.decoder);
-        
+
         if other.n_speakers.is_some() {
             self.n_speakers = other.n_speakers;
         }
         if other.speaker_embed_dim.is_some() {
             self.speaker_embed_dim = other.speaker_embed_dim;
-        }
-    }
-}
-
-impl Default for VitsParams {
-    fn default() -> Self {
-        Self {
-            text_encoder: TextEncoderParams::default(),
-            posterior_encoder: PosteriorEncoderParams::default(),
-            flow: FlowParams::default(),
-            decoder: DecoderParams::default(),
-            n_speakers: None,
-            speaker_embed_dim: None,
         }
     }
 }
@@ -278,20 +271,28 @@ impl TextEncoderParams {
     /// Validate text encoder parameters
     pub fn validate(&self) -> Result<()> {
         if self.n_layers == 0 {
-            return Err(AcousticError::ConfigError("Number of layers must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Number of layers must be > 0".to_string(),
+            ));
         }
         if self.hidden_dim == 0 {
-            return Err(AcousticError::ConfigError("Hidden dimension must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Hidden dimension must be > 0".to_string(),
+            ));
         }
         if self.n_heads == 0 {
-            return Err(AcousticError::ConfigError("Number of heads must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Number of heads must be > 0".to_string(),
+            ));
         }
         if self.dropout < 0.0 || self.dropout > 1.0 {
-            return Err(AcousticError::ConfigError("Dropout must be between 0.0 and 1.0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Dropout must be between 0.0 and 1.0".to_string(),
+            ));
         }
         Ok(())
     }
-    
+
     /// Merge with another text encoder parameters
     pub fn merge(&mut self, other: &TextEncoderParams) {
         self.n_layers = other.n_layers;
@@ -331,17 +332,23 @@ impl PosteriorEncoderParams {
     /// Validate posterior encoder parameters
     pub fn validate(&self) -> Result<()> {
         if self.n_layers == 0 {
-            return Err(AcousticError::ConfigError("Number of layers must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Number of layers must be > 0".to_string(),
+            ));
         }
         if self.hidden_channels == 0 {
-            return Err(AcousticError::ConfigError("Hidden channels must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Hidden channels must be > 0".to_string(),
+            ));
         }
         if self.kernel_size == 0 {
-            return Err(AcousticError::ConfigError("Kernel size must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Kernel size must be > 0".to_string(),
+            ));
         }
         Ok(())
     }
-    
+
     /// Merge with another posterior encoder parameters
     pub fn merge(&mut self, other: &PosteriorEncoderParams) {
         self.n_layers = other.n_layers;
@@ -379,17 +386,23 @@ impl FlowParams {
     /// Validate flow parameters
     pub fn validate(&self) -> Result<()> {
         if self.n_flows == 0 {
-            return Err(AcousticError::ConfigError("Number of flows must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Number of flows must be > 0".to_string(),
+            ));
         }
         if self.n_layers == 0 {
-            return Err(AcousticError::ConfigError("Number of layers must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Number of layers must be > 0".to_string(),
+            ));
         }
         if self.hidden_channels == 0 {
-            return Err(AcousticError::ConfigError("Hidden channels must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Hidden channels must be > 0".to_string(),
+            ));
         }
         Ok(())
     }
-    
+
     /// Merge with another flow parameters
     pub fn merge(&mut self, other: &FlowParams) {
         self.n_flows = other.n_flows;
@@ -431,17 +444,23 @@ impl DecoderParams {
     /// Validate decoder parameters
     pub fn validate(&self) -> Result<()> {
         if self.initial_channels == 0 {
-            return Err(AcousticError::ConfigError("Initial channels must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Initial channels must be > 0".to_string(),
+            ));
         }
         if self.resblock_kernel_sizes.is_empty() {
-            return Err(AcousticError::ConfigError("Resblock kernel sizes cannot be empty".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Resblock kernel sizes cannot be empty".to_string(),
+            ));
         }
         if self.upsample_rates.is_empty() {
-            return Err(AcousticError::ConfigError("Upsample rates cannot be empty".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Upsample rates cannot be empty".to_string(),
+            ));
         }
         Ok(())
     }
-    
+
     /// Merge with another decoder parameters
     pub fn merge(&mut self, other: &DecoderParams) {
         self.initial_channels = other.initial_channels;
@@ -458,11 +477,7 @@ impl Default for DecoderParams {
         Self {
             initial_channels: 512,
             resblock_kernel_sizes: vec![3, 7, 11],
-            resblock_dilation_sizes: vec![
-                vec![1, 3, 5],
-                vec![1, 3, 5],
-                vec![1, 3, 5],
-            ],
+            resblock_dilation_sizes: vec![vec![1, 3, 5], vec![1, 3, 5], vec![1, 3, 5]],
             upsample_rates: vec![8, 8, 2, 2],
             upsample_kernel_sizes: vec![16, 16, 4, 4],
             upsample_initial_channels: 128,
@@ -471,7 +486,7 @@ impl Default for DecoderParams {
 }
 
 /// FastSpeech2 model parameters
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FastSpeech2Params {
     /// Text encoder parameters
     pub text_encoder: TextEncoderParams,
@@ -491,26 +506,15 @@ impl FastSpeech2Params {
         self.mel_decoder.validate()?;
         Ok(())
     }
-    
+
     /// Merge with another FastSpeech2 parameters
     pub fn merge(&mut self, other: &FastSpeech2Params) {
         self.text_encoder.merge(&other.text_encoder);
         self.variance_adaptor.merge(&other.variance_adaptor);
         self.mel_decoder.merge(&other.mel_decoder);
-        
+
         if other.n_speakers.is_some() {
             self.n_speakers = other.n_speakers;
-        }
-    }
-}
-
-impl Default for FastSpeech2Params {
-    fn default() -> Self {
-        Self {
-            text_encoder: TextEncoderParams::default(),
-            variance_adaptor: VarianceAdaptorParams::default(),
-            mel_decoder: MelDecoderParams::default(),
-            n_speakers: None,
         }
     }
 }
@@ -530,17 +534,23 @@ impl VarianceAdaptorParams {
     /// Validate variance adaptor parameters
     pub fn validate(&self) -> Result<()> {
         if self.filter_size == 0 {
-            return Err(AcousticError::ConfigError("Filter size must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Filter size must be > 0".to_string(),
+            ));
         }
         if self.kernel_size == 0 {
-            return Err(AcousticError::ConfigError("Kernel size must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Kernel size must be > 0".to_string(),
+            ));
         }
         if self.dropout < 0.0 || self.dropout > 1.0 {
-            return Err(AcousticError::ConfigError("Dropout must be between 0.0 and 1.0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Dropout must be between 0.0 and 1.0".to_string(),
+            ));
         }
         Ok(())
     }
-    
+
     /// Merge with another variance adaptor parameters
     pub fn merge(&mut self, other: &VarianceAdaptorParams) {
         self.filter_size = other.filter_size;
@@ -578,20 +588,28 @@ impl MelDecoderParams {
     /// Validate mel decoder parameters
     pub fn validate(&self) -> Result<()> {
         if self.n_layers == 0 {
-            return Err(AcousticError::ConfigError("Number of layers must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Number of layers must be > 0".to_string(),
+            ));
         }
         if self.hidden_dim == 0 {
-            return Err(AcousticError::ConfigError("Hidden dimension must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Hidden dimension must be > 0".to_string(),
+            ));
         }
         if self.n_heads == 0 {
-            return Err(AcousticError::ConfigError("Number of heads must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Number of heads must be > 0".to_string(),
+            ));
         }
         if self.dropout < 0.0 || self.dropout > 1.0 {
-            return Err(AcousticError::ConfigError("Dropout must be between 0.0 and 1.0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Dropout must be between 0.0 and 1.0".to_string(),
+            ));
         }
         Ok(())
     }
-    
+
     /// Merge with another mel decoder parameters
     pub fn merge(&mut self, other: &MelDecoderParams) {
         self.n_layers = other.n_layers;
@@ -615,7 +633,7 @@ impl Default for MelDecoderParams {
 }
 
 /// Tacotron2 model parameters
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Tacotron2Params {
     /// Encoder parameters
     pub encoder: EncoderParams,
@@ -633,22 +651,12 @@ impl Tacotron2Params {
         self.postnet.validate()?;
         Ok(())
     }
-    
+
     /// Merge with another Tacotron2 parameters
     pub fn merge(&mut self, other: &Tacotron2Params) {
         self.encoder.merge(&other.encoder);
         self.decoder.merge(&other.decoder);
         self.postnet.merge(&other.postnet);
-    }
-}
-
-impl Default for Tacotron2Params {
-    fn default() -> Self {
-        Self {
-            encoder: EncoderParams::default(),
-            decoder: AttentionDecoderParams::default(),
-            postnet: PostnetParams::default(),
-        }
     }
 }
 
@@ -667,17 +675,23 @@ impl EncoderParams {
     /// Validate encoder parameters
     pub fn validate(&self) -> Result<()> {
         if self.embedding_dim == 0 {
-            return Err(AcousticError::ConfigError("Embedding dimension must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Embedding dimension must be > 0".to_string(),
+            ));
         }
         if self.n_convolutions == 0 {
-            return Err(AcousticError::ConfigError("Number of convolutions must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Number of convolutions must be > 0".to_string(),
+            ));
         }
         if self.kernel_size == 0 {
-            return Err(AcousticError::ConfigError("Kernel size must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Kernel size must be > 0".to_string(),
+            ));
         }
         Ok(())
     }
-    
+
     /// Merge with another encoder parameters
     pub fn merge(&mut self, other: &EncoderParams) {
         self.embedding_dim = other.embedding_dim;
@@ -725,20 +739,28 @@ impl AttentionDecoderParams {
     /// Validate attention decoder parameters
     pub fn validate(&self) -> Result<()> {
         if self.n_mel_channels == 0 {
-            return Err(AcousticError::ConfigError("Number of mel channels must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Number of mel channels must be > 0".to_string(),
+            ));
         }
         if self.n_frames_per_step == 0 {
-            return Err(AcousticError::ConfigError("Frames per step must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Frames per step must be > 0".to_string(),
+            ));
         }
         if self.max_decoder_steps == 0 {
-            return Err(AcousticError::ConfigError("Max decoder steps must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Max decoder steps must be > 0".to_string(),
+            ));
         }
         if self.gate_threshold < 0.0 || self.gate_threshold > 1.0 {
-            return Err(AcousticError::ConfigError("Gate threshold must be between 0.0 and 1.0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Gate threshold must be between 0.0 and 1.0".to_string(),
+            ));
         }
         Ok(())
     }
-    
+
     /// Merge with another attention decoder parameters
     pub fn merge(&mut self, other: &AttentionDecoderParams) {
         self.n_mel_channels = other.n_mel_channels;
@@ -790,23 +812,33 @@ impl PostnetParams {
     /// Validate postnet parameters
     pub fn validate(&self) -> Result<()> {
         if self.n_mel_channels == 0 {
-            return Err(AcousticError::ConfigError("Number of mel channels must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Number of mel channels must be > 0".to_string(),
+            ));
         }
         if self.postnet_embedding_dim == 0 {
-            return Err(AcousticError::ConfigError("Postnet embedding dimension must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Postnet embedding dimension must be > 0".to_string(),
+            ));
         }
         if self.postnet_kernel_size == 0 {
-            return Err(AcousticError::ConfigError("Postnet kernel size must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Postnet kernel size must be > 0".to_string(),
+            ));
         }
         if self.postnet_n_convolutions == 0 {
-            return Err(AcousticError::ConfigError("Number of postnet convolutions must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Number of postnet convolutions must be > 0".to_string(),
+            ));
         }
         if self.postnet_dropout < 0.0 || self.postnet_dropout > 1.0 {
-            return Err(AcousticError::ConfigError("Postnet dropout must be between 0.0 and 1.0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Postnet dropout must be between 0.0 and 1.0".to_string(),
+            ));
         }
         Ok(())
     }
-    
+
     /// Merge with another postnet parameters
     pub fn merge(&mut self, other: &PostnetParams) {
         self.n_mel_channels = other.n_mel_channels;
@@ -895,6 +927,103 @@ impl Default for ModelMetadata {
     }
 }
 
+// Conversion implementations for TOML parsing
+impl TryFrom<toml::Value> for ModelConfig {
+    type Error = AcousticError;
+
+    fn try_from(value: toml::Value) -> Result<Self> {
+        let table = value.as_table().ok_or_else(|| {
+            AcousticError::ConfigError("Expected table for model config".to_string())
+        })?;
+
+        // Parse architecture
+        let architecture_str = table
+            .get("architecture")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| AcousticError::ConfigError("Missing architecture".to_string()))?;
+
+        let architecture = match architecture_str {
+            "vits" => ModelArchitecture::Vits,
+            "fastspeech2" => ModelArchitecture::FastSpeech2,
+            "tacotron2" => ModelArchitecture::Tacotron2,
+            custom => ModelArchitecture::Custom(custom.to_string()),
+        };
+
+        // Parse basic fields
+        let model_path = table
+            .get("model_path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| AcousticError::ConfigError("Missing model_path".to_string()))?
+            .to_string();
+
+        let version = table
+            .get("version")
+            .and_then(|v| v.as_str())
+            .unwrap_or("1.0.0")
+            .to_string();
+
+        // Parse supported languages
+        let supported_languages = if let Some(langs) = table.get("supported_languages") {
+            if let Some(lang_array) = langs.as_array() {
+                lang_array
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .filter_map(|s| match s {
+                        "en-US" | "en_us" | "en" => Some(LanguageCode::EnUs),
+                        "en-GB" | "en_gb" => Some(LanguageCode::EnGb),
+                        "ja" => Some(LanguageCode::JaJp),
+                        "zh-CN" | "zh_cn" | "zh" => Some(LanguageCode::ZhCn),
+                        "ko" => Some(LanguageCode::KoKr),
+                        "de" => Some(LanguageCode::DeDe),
+                        "fr" => Some(LanguageCode::FrFr),
+                        "es" => Some(LanguageCode::EsEs),
+                        _ => None,
+                    })
+                    .collect()
+            } else {
+                vec![LanguageCode::EnUs] // Default
+            }
+        } else {
+            vec![LanguageCode::EnUs] // Default
+        };
+
+        // Parse metadata
+        let mut metadata = ModelMetadata::default();
+        if let Some(name) = table.get("name").and_then(|v| v.as_str()) {
+            metadata.name = name.to_string();
+        }
+        if let Some(description) = table.get("description").and_then(|v| v.as_str()) {
+            metadata.description = description.to_string();
+        }
+        if let Some(author) = table.get("author").and_then(|v| v.as_str()) {
+            metadata.author = author.to_string();
+        }
+        if let Some(license) = table.get("license").and_then(|v| v.as_str()) {
+            metadata.license = license.to_string();
+        }
+        if let Some(tags) = table.get("tags").and_then(|v| v.as_array()) {
+            metadata.tags = tags
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| s.to_string())
+                .collect();
+        }
+
+        // Parse architecture parameters (simplified)
+        let architecture_params =
+            ArchitectureParams::default_for_architecture(architecture.clone());
+
+        Ok(Self {
+            architecture,
+            model_path,
+            version,
+            architecture_params,
+            supported_languages,
+            metadata,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -903,10 +1032,10 @@ mod tests {
     fn test_model_config_validation() {
         let mut config = ModelConfig::default();
         assert!(config.validate().is_ok());
-        
+
         config.model_path = "".to_string();
         assert!(config.validate().is_err());
-        
+
         config.model_path = "test_model".to_string();
         config.supported_languages = vec![];
         assert!(config.validate().is_err());
@@ -917,8 +1046,9 @@ mod tests {
         let vits_params = ArchitectureParams::default_for_architecture(ModelArchitecture::Vits);
         assert!(vits_params.vits.is_some());
         assert!(vits_params.fastspeech2.is_none());
-        
-        let fs2_params = ArchitectureParams::default_for_architecture(ModelArchitecture::FastSpeech2);
+
+        let fs2_params =
+            ArchitectureParams::default_for_architecture(ModelArchitecture::FastSpeech2);
         assert!(fs2_params.fastspeech2.is_some());
         assert!(fs2_params.vits.is_none());
     }
@@ -927,10 +1057,10 @@ mod tests {
     fn test_vits_params_validation() {
         let mut params = VitsParams::default();
         assert!(params.validate().is_ok());
-        
+
         params.n_speakers = Some(0);
         assert!(params.validate().is_err());
-        
+
         params.n_speakers = Some(256);
         assert!(params.validate().is_ok());
     }
@@ -939,14 +1069,14 @@ mod tests {
     fn test_text_encoder_params_validation() {
         let mut params = TextEncoderParams::default();
         assert!(params.validate().is_ok());
-        
+
         params.n_layers = 0;
         assert!(params.validate().is_err());
-        
+
         params.n_layers = 6;
         params.dropout = 1.5;
         assert!(params.validate().is_err());
-        
+
         params.dropout = 0.1;
         assert!(params.validate().is_ok());
     }
@@ -956,7 +1086,7 @@ mod tests {
         assert_eq!(ModelArchitecture::Vits.as_str(), "vits");
         assert_eq!(ModelArchitecture::FastSpeech2.as_str(), "fastspeech2");
         assert_eq!(ModelArchitecture::Tacotron2.as_str(), "tacotron2");
-        
+
         let custom = ModelArchitecture::Custom("custom_arch".to_string());
         assert_eq!(custom.as_str(), "custom_arch");
     }

@@ -1,0 +1,366 @@
+.TH VOIRS-CLI-INTERACTIVE 1 "2025-07-05" "voirs-cli" "VoiRS CLI Manual"
+
+.SH NAME
+voirs-cli-interactive \- Interactive mode for real-time text-to-speech synthesis
+
+.SH SYNOPSIS
+.B voirs-cli interactive
+[\fIOPTIONS\fR]
+
+.SH DESCRIPTION
+The interactive command starts an interactive shell session for real-time text-to-speech synthesis. It provides immediate audio playback, voice switching, parameter adjustment, and session management capabilities.
+
+.SH OPTIONS
+.TP
+.B \-v, \-\-voice \fIVOICE\fR
+Initial voice for the interactive session.
+
+.TP
+.B \-q, \-\-quality \fILEVEL\fR
+Initial quality level: low, medium, high, ultra (default: medium).
+
+.TP
+.B \-f, \-\-format \fIFORMAT\fR
+Audio format for saved files: wav, mp3, flac, opus, ogg (default: wav).
+
+.TP
+.B \-\-no-play
+Disable automatic audio playback.
+
+.TP
+.B \-\-no-history
+Disable command history tracking.
+
+.TP
+.B \-\-session-file \fIFILE\fR
+Load or save session to specific file.
+
+.TP
+.B \-\-auto-save
+Enable automatic session saving.
+
+.TP
+.B \-\-device \fIDEVICE\fR
+Select audio output device for playback.
+
+.TP
+.B \-\-buffer-size \fISIZE\fR
+Audio buffer size in samples (default: 1024).
+
+.SH INTERACTIVE COMMANDS
+.SS SYNTHESIS COMMANDS
+.TP
+.B \fITEXT\fR
+Synthesize text directly. Any text not starting with ':' will be synthesized.
+
+.TP
+.B :synth \fITEXT\fR
+Explicit synthesis command (same as typing text directly).
+
+.TP
+.B :ssml \fISSML_TEXT\fR
+Synthesize SSML markup content.
+
+.SS VOICE COMMANDS
+.TP
+.B :voice
+Display current voice information.
+
+.TP
+.B :voice \fIVOICE_NAME\fR
+Switch to specified voice.
+
+.TP
+.B :voices
+List all available voices.
+
+.TP
+.B :voice-search \fIQUERY\fR
+Search for voices matching query.
+
+.SS PARAMETER COMMANDS
+.TP
+.B :speed
+Show current speaking speed.
+
+.TP
+.B :speed \fIRATE\fR
+Set speaking speed (0.1 to 3.0).
+
+.TP
+.B :pitch
+Show current pitch level.
+
+.TP
+.B :pitch \fIFACTOR\fR
+Set pitch factor (0.1 to 2.0).
+
+.TP
+.B :volume
+Show current volume level.
+
+.TP
+.B :volume \fILEVEL\fR
+Set volume level (0.0 to 2.0).
+
+.TP
+.B :quality
+Show current quality level.
+
+.TP
+.B :quality \fILEVEL\fR
+Set quality level (low, medium, high, ultra).
+
+.TP
+.B :format
+Show current audio format.
+
+.TP
+.B :format \fIFORMAT\fR
+Set audio format (wav, mp3, flac, opus, ogg).
+
+.SS SESSION COMMANDS
+.TP
+.B :save
+Save current session to default file.
+
+.TP
+.B :save \fIFILE\fR
+Save current session to specified file.
+
+.TP
+.B :load \fIFILE\fR
+Load session from specified file.
+
+.TP
+.B :history
+Show synthesis history for current session.
+
+.TP
+.B :export \fIFORMAT\fR [\fIFILE\fR]
+Export session history (json, csv, txt).
+
+.TP
+.B :clear
+Clear synthesis history.
+
+.TP
+.B :stats
+Show session statistics.
+
+.SS UTILITY COMMANDS
+.TP
+.B :help
+Show interactive command help.
+
+.TP
+.B :status
+Show current session status and settings.
+
+.TP
+.B :devices
+List available audio output devices.
+
+.TP
+.B :device \fIDEVICE\fR
+Switch to specified audio device.
+
+.TP
+.B :test
+Test current voice with sample text.
+
+.TP
+.B :quit, :exit, :q
+Exit interactive mode.
+
+.SH KEYBOARD SHORTCUTS
+.TP
+.B Ctrl+C
+Cancel current synthesis operation.
+
+.TP
+.B Ctrl+D
+Exit interactive mode.
+
+.TP
+.B Up/Down arrows
+Navigate command history.
+
+.TP
+.B Tab
+Command completion (where supported).
+
+.TP
+.B Ctrl+L
+Clear terminal screen.
+
+.SH SESSION MANAGEMENT
+.TP
+.B Automatic saving
+Sessions can be automatically saved with --auto-save flag.
+
+.TP
+.B History tracking
+All synthesis operations are tracked with timestamps.
+
+.TP
+.B Export formats
+- JSON: Complete session data with metadata
+- CSV: Tabular format for analysis
+- TXT: Plain text transcript
+
+.TP
+.B Statistics
+- Total synthesis operations
+- Time spent in session
+- Voice usage statistics
+- Average processing times
+
+.SH EXAMPLES
+.TP
+.B Start interactive mode
+voirs-cli interactive
+
+.TP
+.B Start with specific voice
+voirs-cli interactive --voice en-US-female-1
+
+.TP
+.B Start with session file
+voirs-cli interactive --session-file my-session.json
+
+.TP
+.B Disable auto-play
+voirs-cli interactive --no-play
+
+.SS INTERACTIVE SESSION EXAMPLE
+.nf
+$ voirs-cli interactive
+VoiRS Interactive Mode
+Voice: en-US-female-1 | Quality: medium | Format: wav
+Type ':help' for commands, ':quit' to exit
+
+> Hello, world!
+[Audio plays: "Hello, world!"]
+
+> :voice en-GB-male-1
+Voice changed to: en-GB-male-1
+
+> :speed 1.5
+Speed set to: 1.5
+
+> Welcome to VoiRS interactive mode
+[Audio plays with increased speed]
+
+> :save my-session.json
+Session saved to: my-session.json
+
+> :history
+1. 2025-07-05 10:30:15 - "Hello, world!" (en-US-female-1)
+2. 2025-07-05 10:30:45 - "Welcome to VoiRS interactive mode" (en-GB-male-1)
+
+> :quit
+Goodbye!
+.fi
+
+.SH VOICE SWITCHING
+.TP
+.B Real-time switching
+Voices can be changed during the session without restart.
+
+.TP
+.B Voice validation
+Invalid voice names are rejected with suggestions.
+
+.TP
+.B Voice search
+Use :voice-search to find voices matching criteria.
+
+.SH AUDIO PLAYBACK
+.TP
+.B Immediate playback
+Synthesized audio plays immediately after generation.
+
+.TP
+.B Device selection
+Choose specific audio output device.
+
+.TP
+.B Playback control
+Disable playback with --no-play for file-only output.
+
+.TP
+.B Buffer management
+Configurable audio buffer size for low-latency playback.
+
+.SH PARAMETER ADJUSTMENT
+All synthesis parameters can be adjusted in real-time:
+
+.TP
+.B Speaking speed
+Range: 0.1 (very slow) to 3.0 (very fast)
+
+.TP
+.B Pitch factor
+Range: 0.1 (very low) to 2.0 (very high)
+
+.TP
+.B Volume level
+Range: 0.0 (mute) to 2.0 (amplified)
+
+.TP
+.B Quality level
+Options: low, medium, high, ultra
+
+.SH ERROR HANDLING
+.TP
+.B Synthesis errors
+Errors are displayed with context, session continues.
+
+.TP
+.B Voice errors
+Invalid voices are rejected with suggestions.
+
+.TP
+.B Parameter errors
+Invalid parameters are rejected with valid ranges.
+
+.TP
+.B Recovery
+Session state is preserved even after errors.
+
+.SH FILES
+.TP
+.B ~/.config/voirs/interactive-session.json
+Default session file location.
+
+.TP
+.B ~/.config/voirs/interactive-history.json
+Command history file.
+
+.TP
+.B ~/.config/voirs/interactive-preferences.toml
+Interactive mode preferences.
+
+.SH EXIT STATUS
+.TP
+.B 0
+Normal exit.
+
+.TP
+.B 1
+Error during initialization.
+
+.TP
+.B 2
+Configuration error.
+
+.TP
+.B 3
+Audio system error.
+
+.SH SEE ALSO
+.BR voirs-cli (1),
+.BR voirs-cli-synthesize (1),
+.BR voirs-cli-voices (1),
+.BR voirs-cli-config (1)

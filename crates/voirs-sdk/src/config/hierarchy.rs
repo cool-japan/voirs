@@ -9,25 +9,22 @@
 //! - Configuration profiles and environments
 //! - Override and fallback mechanisms
 
-use crate::types::{QualityLevel, SynthesisConfig, AudioFormat};
+use crate::types::{AudioFormat, QualityLevel, SynthesisConfig};
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-};
+use std::{collections::HashMap, path::PathBuf};
 
 /// Trait for configuration types that support hierarchical composition
 pub trait ConfigHierarchy: Clone + Default {
     /// Merge this configuration with another, giving priority to the other
     fn merge_with(&mut self, other: &Self);
-    
+
     /// Create a configuration that inherits from a parent
     fn inherit_from(parent: &Self) -> Self {
         let mut config = parent.clone();
         config.merge_with(&Self::default());
         config
     }
-    
+
     /// Validate the configuration and return any errors
     fn validate(&self) -> Result<(), ConfigValidationError> {
         Ok(())
@@ -43,7 +40,11 @@ pub struct ConfigValidationError {
 
 impl std::fmt::Display for ConfigValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Configuration validation error in '{}': {}", self.field, self.message)
+        write!(
+            f,
+            "Configuration validation error in '{}': {}",
+            self.field, self.message
+        )
     }
 }
 
@@ -54,36 +55,48 @@ impl std::error::Error for ConfigValidationError {}
 pub struct PipelineConfig {
     /// Device to use for computation (cpu, cuda, metal, etc.)
     pub device: String,
-    
+
     /// Enable GPU acceleration if available
     pub use_gpu: bool,
-    
+
     /// Number of threads for CPU computation
     pub num_threads: Option<usize>,
-    
+
     /// Cache directory for models and temporary files
     pub cache_dir: Option<PathBuf>,
-    
+
     /// Maximum cache size in MB
     pub max_cache_size_mb: u32,
-    
+
     /// Default synthesis configuration
     pub default_synthesis: SynthesisConfig,
-    
+
     /// Model loading configuration
     pub model_loading: ModelLoadingConfig,
-    
+
     /// Audio processing configuration
     pub audio_processing: AudioProcessingConfig,
-    
+
     /// Logging configuration
     pub logging: LoggingConfig,
-    
+
     /// Configuration profile name (for environment-specific configs)
     pub profile: Option<String>,
-    
+
     /// Parent configuration to inherit from
     pub inherits_from: Option<String>,
+
+    /// G2P (Grapheme-to-Phoneme) model to use
+    pub g2p_model: Option<String>,
+
+    /// Acoustic model to use
+    pub acoustic_model: Option<String>,
+
+    /// Vocoder model to use
+    pub vocoder_model: Option<String>,
+
+    /// Language code for G2P processing
+    pub language_code: Option<crate::types::LanguageCode>,
 }
 
 impl Default for PipelineConfig {
@@ -100,6 +113,10 @@ impl Default for PipelineConfig {
             logging: LoggingConfig::default(),
             profile: None,
             inherits_from: None,
+            g2p_model: None,
+            acoustic_model: None,
+            vocoder_model: None,
+            language_code: None,
         }
     }
 }
@@ -128,25 +145,40 @@ impl ConfigHierarchy for PipelineConfig {
         if other.inherits_from.is_some() {
             self.inherits_from = other.inherits_from.clone();
         }
-        
+        if other.g2p_model.is_some() {
+            self.g2p_model = other.g2p_model.clone();
+        }
+        if other.acoustic_model.is_some() {
+            self.acoustic_model = other.acoustic_model.clone();
+        }
+        if other.vocoder_model.is_some() {
+            self.vocoder_model = other.vocoder_model.clone();
+        }
+        if other.language_code.is_some() {
+            self.language_code = other.language_code;
+        }
+
         // Merge nested configurations
         self.default_synthesis.merge_with(&other.default_synthesis);
         self.model_loading.merge_with(&other.model_loading);
         self.audio_processing.merge_with(&other.audio_processing);
         self.logging.merge_with(&other.logging);
     }
-    
+
     fn validate(&self) -> Result<(), ConfigValidationError> {
         // Validate device
         let valid_devices = ["cpu", "cuda", "metal", "vulkan", "opencl"];
         if !valid_devices.contains(&self.device.as_str()) {
             return Err(ConfigValidationError {
                 field: "device".to_string(),
-                message: format!("Invalid device '{}'. Must be one of: {}", 
-                    self.device, valid_devices.join(", ")),
+                message: format!(
+                    "Invalid device '{}'. Must be one of: {}",
+                    self.device,
+                    valid_devices.join(", ")
+                ),
             });
         }
-        
+
         // Validate thread count
         if let Some(threads) = self.num_threads {
             if threads == 0 || threads > 256 {
@@ -156,7 +188,7 @@ impl ConfigHierarchy for PipelineConfig {
                 });
             }
         }
-        
+
         // Validate cache size
         if self.max_cache_size_mb > 100_000 {
             return Err(ConfigValidationError {
@@ -164,13 +196,13 @@ impl ConfigHierarchy for PipelineConfig {
                 message: "Cache size must be less than 100GB".to_string(),
             });
         }
-        
+
         // Validate nested configurations
         self.default_synthesis.validate()?;
         self.model_loading.validate()?;
         self.audio_processing.validate()?;
         self.logging.validate()?;
-        
+
         Ok(())
     }
 }
@@ -180,12 +212,13 @@ impl PipelineConfig {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// Create configuration for a specific profile
+    #[allow(clippy::field_reassign_with_default)]
     pub fn for_profile(profile: &str) -> Self {
         let mut config = Self::default();
         config.profile = Some(profile.to_string());
-        
+
         match profile {
             "development" => {
                 config.logging.level = "debug".to_string();
@@ -216,26 +249,53 @@ impl PipelineConfig {
             }
             _ => {}
         }
-        
+
         config
     }
-    
+
     /// Get effective cache directory
     pub fn effective_cache_dir(&self) -> PathBuf {
         self.cache_dir
             .clone()
             .unwrap_or_else(|| std::env::temp_dir().join("voirs-cache"))
     }
-    
+
     /// Get effective thread count
     pub fn effective_thread_count(&self) -> usize {
-        self.num_threads
-            .unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4))
+        self.num_threads.unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4)
+        })
     }
-    
+
     /// Check if GPU is available and enabled
     pub fn should_use_gpu(&self) -> bool {
         self.use_gpu && self.device != "cpu"
+    }
+
+    /// Set speaking speed (fluent method)
+    pub fn speed(mut self, speed: f32) -> Self {
+        self.default_synthesis.speaking_rate = speed;
+        self
+    }
+
+    /// Set pitch shift (fluent method)
+    pub fn pitch(mut self, pitch: f32) -> Self {
+        self.default_synthesis.pitch_shift = pitch;
+        self
+    }
+
+    /// Set volume gain (fluent method)
+    pub fn volume(mut self, volume: f32) -> Self {
+        self.default_synthesis.volume_gain = volume;
+        self
+    }
+
+    /// Set sample rate (fluent method)
+    pub fn sample_rate(mut self, sample_rate: u32) -> Self {
+        self.default_synthesis.sample_rate = sample_rate;
+        self
     }
 }
 
@@ -244,22 +304,25 @@ impl PipelineConfig {
 pub struct ModelLoadingConfig {
     /// Timeout for model downloads in seconds
     pub download_timeout_secs: u64,
-    
+
     /// Number of download retries
     pub download_retries: u32,
-    
+
+    /// Base URL for model downloads
+    pub download_base_url: Option<String>,
+
     /// Automatically download missing models
     pub auto_download: bool,
-    
+
     /// Verify model checksums
     pub verify_checksums: bool,
-    
+
     /// Model repositories to use
     pub repositories: Vec<String>,
-    
+
     /// Preload models on startup
     pub preload_models: bool,
-    
+
     /// Model-specific overrides
     pub model_overrides: HashMap<String, ModelOverride>,
 }
@@ -269,6 +332,7 @@ impl Default for ModelLoadingConfig {
         Self {
             download_timeout_secs: 300,
             download_retries: 3,
+            download_base_url: None,
             auto_download: true,
             verify_checksums: true,
             repositories: vec![
@@ -289,6 +353,9 @@ impl ConfigHierarchy for ModelLoadingConfig {
         if other.download_retries != 3 {
             self.download_retries = other.download_retries;
         }
+        if other.download_base_url.is_some() {
+            self.download_base_url = other.download_base_url.clone();
+        }
         if !other.auto_download {
             self.auto_download = other.auto_download;
         }
@@ -298,20 +365,20 @@ impl ConfigHierarchy for ModelLoadingConfig {
         if other.preload_models {
             self.preload_models = other.preload_models;
         }
-        
+
         // Merge repositories (union)
         for repo in &other.repositories {
             if !self.repositories.contains(repo) {
                 self.repositories.push(repo.clone());
             }
         }
-        
+
         // Merge model overrides
         for (key, value) in &other.model_overrides {
             self.model_overrides.insert(key.clone(), value.clone());
         }
     }
-    
+
     fn validate(&self) -> Result<(), ConfigValidationError> {
         if self.download_timeout_secs > 3600 {
             return Err(ConfigValidationError {
@@ -319,21 +386,21 @@ impl ConfigHierarchy for ModelLoadingConfig {
                 message: "Download timeout must be less than 1 hour".to_string(),
             });
         }
-        
+
         if self.download_retries > 10 {
             return Err(ConfigValidationError {
                 field: "download_retries".to_string(),
                 message: "Download retries must be 10 or less".to_string(),
             });
         }
-        
+
         if self.repositories.is_empty() {
             return Err(ConfigValidationError {
                 field: "repositories".to_string(),
                 message: "At least one repository must be configured".to_string(),
             });
         }
-        
+
         Ok(())
     }
 }
@@ -343,13 +410,13 @@ impl ConfigHierarchy for ModelLoadingConfig {
 pub struct ModelOverride {
     /// Custom download URL
     pub url: Option<String>,
-    
+
     /// Expected checksum
     pub checksum: Option<String>,
-    
+
     /// Local path override
     pub local_path: Option<PathBuf>,
-    
+
     /// Priority for this model
     pub priority: Option<u32>,
 }
@@ -359,25 +426,25 @@ pub struct ModelOverride {
 pub struct AudioProcessingConfig {
     /// Buffer size for audio processing
     pub buffer_size: usize,
-    
+
     /// Enable audio enhancement by default
     pub enable_enhancement: bool,
-    
+
     /// Normalization target level (0.0-1.0)
     pub normalization_level: f32,
-    
+
     /// Apply noise reduction
     pub noise_reduction: bool,
-    
+
     /// Dynamic range compression
     pub compression: bool,
-    
+
     /// High-pass filter frequency (Hz)
     pub highpass_freq: Option<f32>,
-    
+
     /// Low-pass filter frequency (Hz)
     pub lowpass_freq: Option<f32>,
-    
+
     /// Effect chain configuration
     pub effects: Vec<EffectConfig>,
 }
@@ -420,11 +487,11 @@ impl ConfigHierarchy for AudioProcessingConfig {
         if other.lowpass_freq.is_some() {
             self.lowpass_freq = other.lowpass_freq;
         }
-        
+
         // Merge effects (append, allowing duplicates for complex chains)
         self.effects.extend(other.effects.clone());
     }
-    
+
     fn validate(&self) -> Result<(), ConfigValidationError> {
         if self.buffer_size < 512 || self.buffer_size > 65536 {
             return Err(ConfigValidationError {
@@ -432,21 +499,21 @@ impl ConfigHierarchy for AudioProcessingConfig {
                 message: "Buffer size must be between 512 and 65536".to_string(),
             });
         }
-        
+
         if !self.buffer_size.is_power_of_two() {
             return Err(ConfigValidationError {
                 field: "buffer_size".to_string(),
                 message: "Buffer size must be a power of 2".to_string(),
             });
         }
-        
+
         if self.normalization_level <= 0.0 || self.normalization_level > 1.0 {
             return Err(ConfigValidationError {
                 field: "normalization_level".to_string(),
                 message: "Normalization level must be between 0.0 and 1.0".to_string(),
             });
         }
-        
+
         if let Some(freq) = self.highpass_freq {
             if freq <= 0.0 || freq > 20000.0 {
                 return Err(ConfigValidationError {
@@ -455,7 +522,7 @@ impl ConfigHierarchy for AudioProcessingConfig {
                 });
             }
         }
-        
+
         if let Some(freq) = self.lowpass_freq {
             if freq <= 0.0 || freq > 20000.0 {
                 return Err(ConfigValidationError {
@@ -464,7 +531,7 @@ impl ConfigHierarchy for AudioProcessingConfig {
                 });
             }
         }
-        
+
         Ok(())
     }
 }
@@ -474,10 +541,10 @@ impl ConfigHierarchy for AudioProcessingConfig {
 pub struct EffectConfig {
     /// Effect type
     pub effect_type: String,
-    
+
     /// Effect parameters
     pub parameters: HashMap<String, f32>,
-    
+
     /// Whether effect is enabled
     pub enabled: bool,
 }
@@ -487,22 +554,22 @@ pub struct EffectConfig {
 pub struct LoggingConfig {
     /// Log level (trace, debug, info, warn, error)
     pub level: String,
-    
+
     /// Enable structured logging (JSON format)
     pub structured: bool,
-    
+
     /// Log to file
     pub file_path: Option<PathBuf>,
-    
+
     /// Log file rotation size in MB
     pub max_file_size_mb: u32,
-    
+
     /// Number of log files to keep
     pub max_files: u32,
-    
+
     /// Enable performance metrics logging
     pub metrics: bool,
-    
+
     /// Module-specific log levels
     pub module_levels: HashMap<String, String>,
 }
@@ -541,76 +608,68 @@ impl ConfigHierarchy for LoggingConfig {
         if other.metrics {
             self.metrics = other.metrics;
         }
-        
+
         // Merge module levels
         for (module, level) in &other.module_levels {
             self.module_levels.insert(module.clone(), level.clone());
         }
     }
-    
+
     fn validate(&self) -> Result<(), ConfigValidationError> {
         let valid_levels = ["trace", "debug", "info", "warn", "error", "off"];
         if !valid_levels.contains(&self.level.as_str()) {
             return Err(ConfigValidationError {
                 field: "level".to_string(),
-                message: format!("Invalid log level '{}'. Must be one of: {}", 
-                    self.level, valid_levels.join(", ")),
+                message: format!(
+                    "Invalid log level '{}'. Must be one of: {}",
+                    self.level,
+                    valid_levels.join(", ")
+                ),
             });
         }
-        
+
         if self.max_file_size_mb == 0 || self.max_file_size_mb > 1000 {
             return Err(ConfigValidationError {
                 field: "max_file_size_mb".to_string(),
                 message: "Max file size must be between 1 and 1000 MB".to_string(),
             });
         }
-        
+
         if self.max_files == 0 || self.max_files > 100 {
             return Err(ConfigValidationError {
                 field: "max_files".to_string(),
                 message: "Max files must be between 1 and 100".to_string(),
             });
         }
-        
+
         // Validate module levels
         for (module, level) in &self.module_levels {
             if !valid_levels.contains(&level.as_str()) {
                 return Err(ConfigValidationError {
-                    field: format!("module_levels.{}", module),
-                    message: format!("Invalid log level '{}' for module '{}'", level, module),
+                    field: format!("module_levels.{module}"),
+                    message: format!("Invalid log level '{level}' for module '{module}'"),
                 });
             }
         }
-        
+
         Ok(())
     }
 }
 
 /// Application-wide configuration with hierarchy support
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct AppConfig {
     /// Pipeline configuration
     pub pipeline: PipelineConfig,
-    
+
     /// CLI-specific configuration
     pub cli: CliConfig,
-    
+
     /// Server configuration
     pub server: ServerConfig,
-    
+
     /// Environment name
     pub environment: Option<String>,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            pipeline: PipelineConfig::default(),
-            cli: CliConfig::default(),
-            server: ServerConfig::default(),
-            environment: None,
-        }
-    }
 }
 
 impl ConfigHierarchy for AppConfig {
@@ -618,12 +677,12 @@ impl ConfigHierarchy for AppConfig {
         self.pipeline.merge_with(&other.pipeline);
         self.cli.merge_with(&other.cli);
         self.server.merge_with(&other.server);
-        
+
         if other.environment.is_some() {
             self.environment = other.environment.clone();
         }
     }
-    
+
     fn validate(&self) -> Result<(), ConfigValidationError> {
         self.pipeline.validate()?;
         self.cli.validate()?;
@@ -637,19 +696,19 @@ impl ConfigHierarchy for AppConfig {
 pub struct CliConfig {
     /// Default output directory
     pub output_dir: Option<PathBuf>,
-    
+
     /// Default voice to use
     pub default_voice: Option<String>,
-    
+
     /// Default output format
     pub default_format: AudioFormat,
-    
+
     /// Show progress bars
     pub show_progress: bool,
-    
+
     /// Colored output
     pub colored_output: bool,
-    
+
     /// Command aliases
     pub aliases: HashMap<String, String>,
 }
@@ -684,13 +743,13 @@ impl ConfigHierarchy for CliConfig {
         if !other.colored_output {
             self.colored_output = other.colored_output;
         }
-        
+
         // Merge aliases
         for (alias, command) in &other.aliases {
             self.aliases.insert(alias.clone(), command.clone());
         }
     }
-    
+
     fn validate(&self) -> Result<(), ConfigValidationError> {
         // Validate output directory exists if specified
         if let Some(ref path) = self.output_dir {
@@ -701,7 +760,7 @@ impl ConfigHierarchy for CliConfig {
                 });
             }
         }
-        
+
         Ok(())
     }
 }
@@ -711,19 +770,19 @@ impl ConfigHierarchy for CliConfig {
 pub struct ServerConfig {
     /// Server bind address
     pub bind_address: String,
-    
+
     /// Server port
     pub port: u16,
-    
+
     /// Maximum concurrent requests
     pub max_concurrent_requests: usize,
-    
+
     /// Request timeout in seconds
     pub request_timeout_secs: u64,
-    
+
     /// Enable CORS
     pub enable_cors: bool,
-    
+
     /// API key for authentication
     pub api_key: Option<String>,
 }
@@ -762,7 +821,7 @@ impl ConfigHierarchy for ServerConfig {
             self.api_key = other.api_key.clone();
         }
     }
-    
+
     fn validate(&self) -> Result<(), ConfigValidationError> {
         if self.port == 0 {
             return Err(ConfigValidationError {
@@ -770,21 +829,21 @@ impl ConfigHierarchy for ServerConfig {
                 message: "Port must be greater than 0".to_string(),
             });
         }
-        
+
         if self.max_concurrent_requests == 0 {
             return Err(ConfigValidationError {
                 field: "max_concurrent_requests".to_string(),
                 message: "Max concurrent requests must be greater than 0".to_string(),
             });
         }
-        
+
         if self.request_timeout_secs == 0 || self.request_timeout_secs > 3600 {
             return Err(ConfigValidationError {
                 field: "request_timeout_secs".to_string(),
                 message: "Request timeout must be between 1 and 3600 seconds".to_string(),
             });
         }
-        
+
         Ok(())
     }
 }
@@ -793,7 +852,7 @@ impl ConfigHierarchy for ServerConfig {
 pub struct ConfigResolver {
     /// Registered configuration profiles
     profiles: HashMap<String, AppConfig>,
-    
+
     /// Base configuration
     base_config: AppConfig,
 }
@@ -806,26 +865,26 @@ impl ConfigResolver {
             base_config: AppConfig::default(),
         }
     }
-    
+
     /// Register a configuration profile
     pub fn register_profile(&mut self, name: &str, config: AppConfig) {
         self.profiles.insert(name.to_string(), config);
     }
-    
+
     /// Set base configuration
     pub fn set_base_config(&mut self, config: AppConfig) {
         self.base_config = config;
     }
-    
+
     /// Resolve configuration for a given profile with inheritance
     pub fn resolve(&self, profile: Option<&str>) -> Result<AppConfig, ConfigValidationError> {
         let mut resolved = self.base_config.clone();
-        
+
         if let Some(profile_name) = profile {
             if let Some(profile_config) = self.profiles.get(profile_name) {
                 let inherits_from = profile_config.pipeline.inherits_from.clone();
                 resolved.merge_with(profile_config);
-                
+
                 // Handle pipeline profile inheritance
                 if let Some(inherits_from) = inherits_from {
                     if let Some(parent_config) = self.profiles.get(&inherits_from) {
@@ -836,11 +895,11 @@ impl ConfigResolver {
                 }
             }
         }
-        
+
         resolved.validate()?;
         Ok(resolved)
     }
-    
+
     /// Get available profiles
     pub fn available_profiles(&self) -> Vec<&String> {
         self.profiles.keys().collect()
@@ -850,23 +909,32 @@ impl ConfigResolver {
 impl Default for ConfigResolver {
     fn default() -> Self {
         let mut resolver = Self::new();
-        
+
         // Register standard profiles
-        resolver.register_profile("development", AppConfig {
-            pipeline: PipelineConfig::for_profile("development"),
-            ..Default::default()
-        });
-        
-        resolver.register_profile("production", AppConfig {
-            pipeline: PipelineConfig::for_profile("production"),
-            ..Default::default()
-        });
-        
-        resolver.register_profile("testing", AppConfig {
-            pipeline: PipelineConfig::for_profile("testing"),
-            ..Default::default()
-        });
-        
+        resolver.register_profile(
+            "development",
+            AppConfig {
+                pipeline: PipelineConfig::for_profile("development"),
+                ..Default::default()
+            },
+        );
+
+        resolver.register_profile(
+            "production",
+            AppConfig {
+                pipeline: PipelineConfig::for_profile("production"),
+                ..Default::default()
+            },
+        );
+
+        resolver.register_profile(
+            "testing",
+            AppConfig {
+                pipeline: PipelineConfig::for_profile("testing"),
+                ..Default::default()
+            },
+        );
+
         resolver
     }
 }
@@ -874,7 +942,7 @@ impl Default for ConfigResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_config_hierarchy_merge() {
         let mut base = PipelineConfig::default();
@@ -883,53 +951,53 @@ mod tests {
             use_gpu: true,
             ..Default::default()
         };
-        
+
         base.merge_with(&override_config);
-        
+
         assert_eq!(base.device, "cuda");
-        assert_eq!(base.use_gpu, true);
+        assert!(base.use_gpu);
         assert_eq!(base.max_cache_size_mb, 1024); // Should remain default
     }
-    
+
     #[test]
     fn test_config_validation() {
         let invalid_config = PipelineConfig {
             device: "invalid_device".to_string(),
             ..Default::default()
         };
-        
+
         assert!(invalid_config.validate().is_err());
-        
+
         let valid_config = PipelineConfig {
             device: "cuda".to_string(),
             ..Default::default()
         };
-        
+
         assert!(valid_config.validate().is_ok());
     }
-    
+
     #[test]
     fn test_profile_creation() {
         let dev_config = PipelineConfig::for_profile("development");
         assert_eq!(dev_config.logging.level, "debug");
-        assert_eq!(dev_config.logging.metrics, true);
-        
+        assert!(dev_config.logging.metrics);
+
         let prod_config = PipelineConfig::for_profile("production");
         assert_eq!(prod_config.logging.level, "warn");
-        assert_eq!(prod_config.logging.structured, true);
+        assert!(prod_config.logging.structured);
     }
-    
+
     #[test]
     fn test_config_resolver() {
         let resolver = ConfigResolver::default();
-        
+
         let dev_config = resolver.resolve(Some("development")).unwrap();
         assert_eq!(dev_config.pipeline.logging.level, "debug");
-        
+
         let prod_config = resolver.resolve(Some("production")).unwrap();
         assert_eq!(prod_config.pipeline.logging.level, "warn");
     }
-    
+
     #[test]
     fn test_audio_config_validation() {
         let invalid_buffer = AudioProcessingConfig {
@@ -937,32 +1005,34 @@ mod tests {
             ..Default::default()
         };
         assert!(invalid_buffer.validate().is_err());
-        
+
         let invalid_normalization = AudioProcessingConfig {
             normalization_level: 1.5, // > 1.0
             ..Default::default()
         };
         assert!(invalid_normalization.validate().is_err());
-        
+
         let valid_config = AudioProcessingConfig::default();
         assert!(valid_config.validate().is_ok());
     }
-    
+
     #[test]
     fn test_logging_config_merge() {
         let mut base = LoggingConfig::default();
         let override_config = LoggingConfig {
             level: "debug".to_string(),
-            module_levels: [("voirs".to_string(), "trace".to_string())].into_iter().collect(),
+            module_levels: [("voirs".to_string(), "trace".to_string())]
+                .into_iter()
+                .collect(),
             ..Default::default()
         };
-        
+
         base.merge_with(&override_config);
-        
+
         assert_eq!(base.level, "debug");
         assert_eq!(base.module_levels.get("voirs").unwrap(), "trace");
     }
-    
+
     #[test]
     fn test_model_overrides() {
         let mut config = ModelLoadingConfig::default();
@@ -975,7 +1045,7 @@ mod tests {
                 priority: Some(1),
             },
         );
-        
+
         let other = ModelLoadingConfig {
             model_overrides: [(
                 "other-model".to_string(),
@@ -985,12 +1055,14 @@ mod tests {
                     local_path: None,
                     priority: Some(2),
                 },
-            )].into_iter().collect(),
+            )]
+            .into_iter()
+            .collect(),
             ..Default::default()
         };
-        
+
         config.merge_with(&other);
-        
+
         assert_eq!(config.model_overrides.len(), 2);
         assert!(config.model_overrides.contains_key("test-model"));
         assert!(config.model_overrides.contains_key("other-model"));

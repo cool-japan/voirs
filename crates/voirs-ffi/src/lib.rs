@@ -1,32 +1,42 @@
 //! # VoiRS FFI (Foreign Function Interface)
-//! 
+//!
 //! C-compatible bindings for VoiRS speech synthesis framework.
 //! Allows integration with C/C++, Python, and other languages.
 
+use parking_lot::Mutex;
 use std::{
     collections::HashMap,
     ffi::{CStr, CString},
-    os::raw::{c_char, c_float, c_int, c_uchar, c_uint},
+    os::raw::{c_char, c_float, c_int, c_uint},
     ptr,
     sync::Arc,
 };
-use parking_lot::Mutex;
-use voirs::{
-    error::Result,
+use voirs_sdk::{
+    audio::AudioBuffer,
+    error::{Result, VoirsError},
     types::{AudioFormat, LanguageCode, QualityLevel, SynthesisConfig},
-    AudioBuffer, VoirsPipeline,
+    VoirsPipeline,
 };
 
 pub mod c_api;
-pub mod python;
-pub mod nodejs;
-pub mod utils;
-pub mod types;
-pub mod memory;
 pub mod config;
+pub mod error;
+pub mod memory;
+pub mod nodejs;
+pub mod performance;
+pub mod platform;
+pub mod python;
+pub mod threading;
+pub mod types;
+pub mod utils;
+pub mod wasm;
 
 // Re-export for convenience
 pub use c_api::*;
+pub use error::*;
+pub use performance::*;
+pub use types::*;
+pub use utils::audio::VoirsAudioAnalysis;
 
 // Export Python module when feature is enabled
 #[cfg(feature = "python")]
@@ -35,6 +45,10 @@ pub use python::pyo3_bindings::*;
 // Export Node.js module when feature is enabled
 #[cfg(feature = "nodejs")]
 pub use nodejs::napi_bindings::*;
+
+// Export WASM module when feature is enabled
+#[cfg(feature = "wasm")]
+pub use wasm::wasm_bindings::*;
 
 /// FFI-safe error codes
 #[repr(C)]
@@ -47,6 +61,7 @@ pub enum VoirsErrorCode {
     VoiceNotFound = 4,
     IoError = 5,
     OutOfMemory = 6,
+    OperationCancelled = 7,
     InternalError = 99,
 }
 
@@ -155,9 +170,31 @@ impl From<VoirsSynthesisConfig> for SynthesisConfig {
             output_format: config.output_format.into(),
             sample_rate: config.sample_rate,
             quality: config.quality.into(),
-            language: LanguageCode::EnUs, // Default language
-            effects: Vec::new(), // No effects by default
-            streaming_chunk_size: None, // Use default chunk size
+            language: LanguageCode::EnUs,  // Default language
+            effects: Vec::new(),           // No effects by default
+            streaming_chunk_size: None,    // Use default chunk size
+            seed: None,                    // No seed by default
+            enable_emotion: false,         // No emotion by default
+            emotion_type: None,            // No emotion type
+            emotion_intensity: 0.7,        // Default intensity
+            emotion_preset: None,          // No preset
+            auto_emotion_detection: false, // No auto detection
+            enable_cloning: false,
+            cloning_method: None,
+            cloning_quality: 0.85,
+            enable_conversion: false,
+            conversion_target: None,
+            realtime_conversion: false,
+            enable_singing: false,
+            singing_voice_type: None,
+            singing_technique: None,
+            musical_key: None,
+            tempo: None,
+            enable_spatial: false,
+            listener_position: None,
+            hrtf_enabled: false,
+            room_size: None,
+            reverb_level: 0.3,
         }
     }
 }
@@ -181,12 +218,12 @@ impl VoirsAudioBuffer {
         let sample_rate = audio.sample_rate();
         let channels = audio.channels();
         let duration = audio.duration();
-        
+
         // Allocate C-compatible buffer
         let mut c_samples = samples.into_boxed_slice();
         let samples_ptr = c_samples.as_mut_ptr();
         std::mem::forget(c_samples); // Prevent deallocation
-        
+
         Self {
             samples: samples_ptr,
             length,
@@ -195,20 +232,39 @@ impl VoirsAudioBuffer {
             duration,
         }
     }
-    
+
     /// Convert to Rust AudioBuffer
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe because it dereferences raw pointers.
+    /// The caller must ensure that:
+    /// - `self.samples` is a valid pointer to at least `self.length` f32 values
+    /// - The memory referenced by `self.samples` remains valid for the duration of this call
     pub unsafe fn to_audio_buffer(&self) -> AudioBuffer {
         let samples = std::slice::from_raw_parts(self.samples, self.length as usize).to_vec();
         AudioBuffer::new(samples, self.sample_rate, self.channels)
     }
-    
+
     /// Free the audio buffer
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe because it deallocates raw memory.
+    /// The caller must ensure that:
+    /// - `self.samples` was allocated using the same allocator as used by this library
+    /// - This function is called at most once per buffer
+    /// - The buffer is not used after calling this function
     pub unsafe fn free(&mut self) {
         if !self.samples.is_null() {
-            let _ = Box::from_raw(std::slice::from_raw_parts_mut(
+            // Reconstruct the original boxed slice that was forgotten during creation
+            // This is safe because we know the samples pointer came from into_boxed_slice()
+            let boxed_slice = Box::from_raw(std::slice::from_raw_parts_mut(
                 self.samples,
                 self.length as usize,
             ));
+            // Drop the boxed slice to deallocate the memory
+            drop(boxed_slice);
             self.samples = ptr::null_mut();
         }
     }
@@ -219,6 +275,7 @@ use once_cell::sync::Lazy;
 /// Global pipeline manager for FFI
 struct PipelineManager {
     pipelines: HashMap<u32, Arc<VoirsPipeline>>,
+    placeholder_pipelines: std::collections::HashSet<u32>, // Track placeholder IDs for benchmarking
     next_id: u32,
 }
 
@@ -226,10 +283,11 @@ impl PipelineManager {
     fn new() -> Self {
         Self {
             pipelines: HashMap::new(),
+            placeholder_pipelines: std::collections::HashSet::new(),
             next_id: 1,
         }
     }
-    
+
     fn add_pipeline(&mut self, pipeline: VoirsPipeline) -> u32 {
         let id = self.next_id;
         self.pipelines.insert(id, Arc::new(pipeline));
@@ -239,32 +297,48 @@ impl PipelineManager {
         }
         id
     }
-    
+
+    /// Add a placeholder pipeline for benchmarking (doesn't create actual pipeline)
+    fn add_placeholder_pipeline(&mut self) -> u32 {
+        let id = self.next_id;
+        self.placeholder_pipelines.insert(id);
+        self.next_id = self.next_id.wrapping_add(1);
+        if self.next_id == 0 {
+            self.next_id = 1; // Skip 0 as it's reserved for errors
+        }
+        id
+    }
+
     fn get_pipeline(&self, id: u32) -> Option<Arc<VoirsPipeline>> {
         self.pipelines.get(&id).cloned()
     }
-    
+
     fn remove_pipeline(&mut self, id: u32) -> bool {
-        self.pipelines.remove(&id).is_some()
+        // Remove from both real pipelines and placeholders
+        let removed_real = self.pipelines.remove(&id).is_some();
+        let removed_placeholder = self.placeholder_pipelines.remove(&id);
+        removed_real || removed_placeholder
     }
-    
+
+    fn is_valid_pipeline(&self, id: u32) -> bool {
+        self.pipelines.contains_key(&id) || self.placeholder_pipelines.contains(&id)
+    }
+
     fn count(&self) -> usize {
-        self.pipelines.len()
+        self.pipelines.len() + self.placeholder_pipelines.len()
     }
 }
 
 /// Global pipeline manager instance using once_cell for thread-safe initialization
-static PIPELINE_MANAGER: Lazy<Mutex<PipelineManager>> = Lazy::new(|| {
-    Mutex::new(PipelineManager::new())
-});
+static PIPELINE_MANAGER: Lazy<Mutex<PipelineManager>> =
+    Lazy::new(|| Mutex::new(PipelineManager::new()));
 
-/// Thread-local error storage for enhanced error handling
 thread_local! {
-    static LAST_ERROR: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
+    static LAST_ERROR: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
 }
 
 /// Set the last error message for the current thread
-fn set_last_error(error: String) {
+pub fn set_last_error(error: String) {
     LAST_ERROR.with(|e| {
         *e.borrow_mut() = Some(error);
     });
@@ -288,19 +362,23 @@ fn get_pipeline_manager() -> &'static Mutex<PipelineManager> {
 }
 
 /// Global tokio runtime for async operations
-static TOKIO_RUNTIME: Lazy<Mutex<Option<tokio::runtime::Runtime>>> = Lazy::new(|| {
-    Mutex::new(None)
-});
+static TOKIO_RUNTIME: Lazy<Mutex<Option<tokio::runtime::Runtime>>> = Lazy::new(|| Mutex::new(None));
 
 /// Get or create the global tokio runtime
 fn get_runtime() -> std::result::Result<tokio::runtime::Handle, VoirsErrorCode> {
+    // First try to get the current runtime handle if we're already in a runtime context
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        return Ok(handle);
+    }
+
+    // If not in a runtime context, create or get our global runtime
     let mut runtime_guard = TOKIO_RUNTIME.lock();
     if runtime_guard.is_none() {
-        let rt = tokio::runtime::Runtime::new()
-            .map_err(|_| VoirsErrorCode::InitializationFailed)?;
+        let rt =
+            tokio::runtime::Runtime::new().map_err(|_| VoirsErrorCode::InitializationFailed)?;
         *runtime_guard = Some(rt);
     }
-    
+
     match runtime_guard.as_ref() {
         Some(rt) => Ok(rt.handle().clone()),
         None => Err(VoirsErrorCode::InternalError),
@@ -310,17 +388,17 @@ fn get_runtime() -> std::result::Result<tokio::runtime::Handle, VoirsErrorCode> 
 /// Utility function to convert C string to Rust string
 unsafe fn c_str_to_string(c_str: *const c_char) -> Result<String> {
     if c_str.is_null() {
-        let err = voirs::VoirsError::config_error("Null string pointer");
-        set_last_error(format!("{}", err));
+        let err = VoirsError::config_error("Null string pointer");
+        set_last_error(format!("{err}"));
         return Err(err);
     }
-    
+
     CStr::from_ptr(c_str)
         .to_str()
         .map(|s| s.to_string())
         .map_err(|e| {
-            let err = voirs::VoirsError::config_error(format!("Invalid UTF-8: {}", e));
-            set_last_error(format!("{}", err));
+            let err = VoirsError::config_error(format!("Invalid UTF-8: {e}"));
+            set_last_error(format!("{err}"));
             err
         })
 }
@@ -334,6 +412,14 @@ fn string_to_c_str(s: &str) -> *mut c_char {
 }
 
 /// Free a C string allocated by this library
+///
+/// # Safety
+///
+/// This function is unsafe because it deallocates raw memory.
+/// The caller must ensure that:
+/// - `s` was allocated by this library using CString::into_raw() or equivalent
+/// - This function is called at most once per string
+/// - The string is not used after calling this function
 #[no_mangle]
 pub unsafe extern "C" fn voirs_free_string(s: *mut c_char) {
     if !s.is_null() {
@@ -342,6 +428,14 @@ pub unsafe extern "C" fn voirs_free_string(s: *mut c_char) {
 }
 
 /// Free an audio buffer allocated by this library
+///
+/// # Safety
+///
+/// This function is unsafe because it deallocates raw memory and dereferences raw pointers.
+/// The caller must ensure that:
+/// - `buffer` was allocated by this library
+/// - This function is called at most once per buffer
+/// - The buffer is not used after calling this function
 #[no_mangle]
 pub unsafe extern "C" fn voirs_free_audio_buffer(buffer: *mut VoirsAudioBuffer) {
     if !buffer.is_null() {
@@ -361,9 +455,10 @@ pub extern "C" fn voirs_error_message(code: VoirsErrorCode) -> *const c_char {
         VoirsErrorCode::VoiceNotFound => "Voice not found",
         VoirsErrorCode::IoError => "I/O error",
         VoirsErrorCode::OutOfMemory => "Out of memory",
+        VoirsErrorCode::OperationCancelled => "Operation cancelled",
         VoirsErrorCode::InternalError => "Internal error",
     };
-    
+
     message.as_ptr() as *const c_char
 }
 
@@ -385,13 +480,16 @@ pub extern "C" fn voirs_clear_error() {
 /// Check if there is a pending error for the current thread
 #[no_mangle]
 pub extern "C" fn voirs_has_error() -> c_int {
-    if get_last_error().is_some() { 1 } else { 0 }
+    if get_last_error().is_some() {
+        1
+    } else {
+        0
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::ffi::CString;
 
     #[test]
     fn test_error_code_conversion() {
@@ -493,18 +591,19 @@ mod tests {
         let samples = vec![1.0, 2.0, 3.0, 4.0];
         let audio = AudioBuffer::new(samples.clone(), 44100, 1);
         let mut ffi_buffer = VoirsAudioBuffer::from_audio_buffer(audio);
-        
+
         assert_eq!(ffi_buffer.length, 4);
         assert_eq!(ffi_buffer.sample_rate, 44100);
         assert_eq!(ffi_buffer.channels, 1);
         assert!(!ffi_buffer.samples.is_null());
-        
+
         // Test that samples are correctly stored
         unsafe {
-            let samples_slice = std::slice::from_raw_parts(ffi_buffer.samples, ffi_buffer.length as usize);
+            let samples_slice =
+                std::slice::from_raw_parts(ffi_buffer.samples, ffi_buffer.length as usize);
             assert_eq!(samples_slice, &[1.0, 2.0, 3.0, 4.0]);
         }
-        
+
         // Test freeing memory
         unsafe {
             ffi_buffer.free();
@@ -516,14 +615,14 @@ mod tests {
     fn test_string_conversion_utilities() {
         let test_string = "Hello, VoiRS!";
         let c_string = string_to_c_str(test_string);
-        
+
         assert!(!c_string.is_null());
-        
+
         unsafe {
             let converted_back = c_str_to_string(c_string);
             assert!(converted_back.is_ok());
             assert_eq!(converted_back.unwrap(), test_string);
-            
+
             // Free the string
             voirs_free_string(c_string);
         }
@@ -534,7 +633,7 @@ mod tests {
         unsafe {
             let result = c_str_to_string(std::ptr::null());
             assert!(result.is_err());
-            
+
             // Test freeing null string (should not crash)
             voirs_free_string(std::ptr::null_mut());
         }
@@ -582,22 +681,31 @@ mod tests {
     #[test]
     fn test_ffi_struct_alignment() {
         // Ensure structs are properly aligned for FFI
-        assert_eq!(std::mem::align_of::<VoirsErrorCode>(), std::mem::align_of::<i32>());
-        assert_eq!(std::mem::align_of::<VoirsAudioFormat>(), std::mem::align_of::<i32>());
-        assert_eq!(std::mem::align_of::<VoirsQualityLevel>(), std::mem::align_of::<i32>());
+        assert_eq!(
+            std::mem::align_of::<VoirsErrorCode>(),
+            std::mem::align_of::<i32>()
+        );
+        assert_eq!(
+            std::mem::align_of::<VoirsAudioFormat>(),
+            std::mem::align_of::<i32>()
+        );
+        assert_eq!(
+            std::mem::align_of::<VoirsQualityLevel>(),
+            std::mem::align_of::<i32>()
+        );
     }
 
     #[test]
     fn test_repr_c_layout() {
         // Test that repr(C) structs have expected field offsets
         use std::mem::offset_of;
-        
+
         // VoirsSynthesisConfig
         assert_eq!(offset_of!(VoirsSynthesisConfig, speaking_rate), 0);
         assert_eq!(offset_of!(VoirsSynthesisConfig, pitch_shift), 4);
         assert_eq!(offset_of!(VoirsSynthesisConfig, volume_gain), 8);
         assert_eq!(offset_of!(VoirsSynthesisConfig, enable_enhancement), 12);
-        
+
         // VoirsAudioBuffer
         assert_eq!(offset_of!(VoirsAudioBuffer, samples), 0);
         assert_eq!(offset_of!(VoirsAudioBuffer, length), 8);
@@ -605,87 +713,87 @@ mod tests {
         assert_eq!(offset_of!(VoirsAudioBuffer, channels), 16);
         assert_eq!(offset_of!(VoirsAudioBuffer, duration), 20);
     }
-    
+
     #[test]
     fn test_enhanced_error_handling() {
         // Test that error messages are properly stored and retrieved
         clear_last_error();
         assert!(!voirs_has_error() != 0);
-        
+
         set_last_error("Test error message".to_string());
         assert!(voirs_has_error() != 0);
-        
+
         let error_msg = voirs_get_last_error();
         assert!(!error_msg.is_null());
-        
+
         unsafe {
             let c_str = std::ffi::CStr::from_ptr(error_msg);
             assert_eq!(c_str.to_str().unwrap(), "Test error message");
             voirs_free_string(error_msg);
         }
-        
+
         voirs_clear_error();
         assert!(voirs_has_error() == 0);
     }
-    
+
     #[test]
     fn test_memory_management_integration() {
-        use crate::memory::{reset_memory_stats, check_memory_leaks, get_memory_stats};
-        
+        use crate::memory::{check_memory_leaks, get_memory_stats, reset_memory_stats};
+
         reset_memory_stats();
         assert!(check_memory_leaks());
-        
+
         let initial_stats = get_memory_stats();
         assert_eq!(initial_stats.current_allocations, 0);
-        
+
         // Test memory tracking via our C API
         let stats_json = memory::voirs_memory_get_stats();
         assert!(!stats_json.is_null());
-        
+
         unsafe {
             let stats_str = std::ffi::CStr::from_ptr(stats_json).to_str().unwrap();
             assert!(stats_str.contains("total_allocations"));
             voirs_free_string(stats_json);
         }
-        
+
         let leak_check = memory::voirs_memory_check_leaks();
         assert_eq!(leak_check, 1); // Should be leak-free
     }
-    
+
     #[test]
     fn test_memory_pool_integration() {
         use crate::memory::{pool_allocate, pool_deallocate};
-        
+
         // Test memory pool allocation
         let buffer1 = pool_allocate(100);
         assert_eq!(buffer1.len(), 100);
-        
+
         let buffer2 = pool_allocate(100);
         assert_eq!(buffer2.len(), 100);
-        
+
         // Return to pool
         pool_deallocate(buffer1);
         pool_deallocate(buffer2);
-        
+
         // Should reuse from pool
         let buffer3 = pool_allocate(100);
         assert_eq!(buffer3.len(), 100);
     }
-    
+
     #[test]
     fn test_ref_counted_audio_buffer() {
         use crate::memory::RefCountedBuffer;
-        
+
         let buffer = RefCountedBuffer::new(vec![1.0, 2.0, 3.0, 4.0], 44100, 2);
         assert_eq!(buffer.data(), &[1.0, 2.0, 3.0, 4.0]);
         assert_eq!(buffer.sample_rate(), 44100);
         assert_eq!(buffer.channels(), 2);
         assert_eq!(buffer.ref_count(), 1);
-        
+
         let buffer2 = buffer.clone();
         assert_eq!(buffer.ref_count(), 2);
         assert_eq!(buffer2.ref_count(), 2);
-        
+
         drop(buffer2);
         assert_eq!(buffer.ref_count(), 1);
     }

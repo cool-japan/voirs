@@ -1,0 +1,225 @@
+# Reference pronunciation dataset for accuracy validation
+# Format: WORD<TAB>EXPECTED_PHONEMES<TAB>LANGUAGE
+# This file contains known accurate pronunciations for testing
+
+# Common English words
+hello	həˈloʊ	en-US
+world	wɜːrld	en-US
+cat	kæt	en-US
+dog	dɔːɡ	en-US
+house	haʊs	en-US
+tree	triː	en-US
+water	ˈwɔːtər	en-US
+phone	foʊn	en-US
+
+# English vowel patterns
+beat	biːt	en-US
+bit	bɪt	en-US
+bet	bɛt	en-US
+bat	bæt	en-US
+bot	bɑːt	en-US
+boat	boʊt	en-US
+boot	buːt	en-US
+but	bʌt	en-US
+
+# English consonant clusters
+street	striːt	en-US
+spring	sprɪŋ	en-US
+school	skuːl	en-US
+throw	θroʊ	en-US
+three	θriː	en-US
+
+# English irregular words
+one	wʌn	en-US
+two	tuː	en-US
+eight	eɪt	en-US
+through	θruː	en-US
+though	ðoʊ	en-US
+rough	rʌf	en-US
+
+# German words (basic)
+hallo	ˈhalo	de
+welt	vɛlt	de
+katze	ˈkatsə	de
+hund	hʊnt	de
+haus	haʊs	de
+
+# French words (basic)
+bonjour	bonˈʒuʁ	fr
+monde	mɔ̃d	fr
+chat	ʃa	fr
+chien	ʃjɛ̃	fr
+maison	mɛˈzɔ̃	fr
+
+# Spanish words (basic)
+hola	ˈola	es
+mundo	ˈmundo	es
+gato	ˈɡato	es
+perro	ˈpero	es
+casa	ˈkasa	es
+
+# Extended English test cases for CMU-style benchmarking
+# Common words with various phonetic patterns
+about	əˈbaʊt	en-US
+after	ˈæftər	en-US
+again	əˈɡɛn	en-US
+against	əˈɡɛnst	en-US
+another	əˈnʌðər	en-US
+because	bɪˈkɔz	en-US
+before	bɪˈfɔr	en-US
+between	bɪˈtwin	en-US
+business	ˈbɪznəs	en-US
+change	tʃeɪndʒ	en-US
+children	ˈtʃɪldrən	en-US
+different	ˈdɪfərənt	en-US
+education	ˌɛdʒʊˈkeɪʃən	en-US
+family	ˈfæməli	en-US
+government	ˈɡʌvərnmənt	en-US
+important	ɪmˈpɔrtənt	en-US
+information	ˌɪnfərˈmeɪʃən	en-US
+international	ˌɪntərˈnæʃənəl	en-US
+language	ˈlæŋɡwɪdʒ	en-US
+national	ˈnæʃənəl	en-US
+number	ˈnʌmbər	en-US
+people	ˈpipəl	en-US
+problem	ˈprɑbləm	en-US
+program	ˈproʊɡræm	en-US
+question	ˈkwɛstʃən	en-US
+research	rɪˈsɜrtʃ	en-US
+something	ˈsʌmθɪŋ	en-US
+student	ˈstudənt	en-US
+system	ˈsɪstəm	en-US
+thought	θɔt	en-US
+together	təˈɡɛðər	en-US
+university	ˌjunəˈvɜrsəti	en-US
+without	wɪˈθaʊt	en-US
+
+# Complex consonant clusters
+strength	strɛŋθ	en-US
+sixths	sɪksθs	en-US
+twelfths	twɛlfθs	en-US
+glimpsed	ɡlɪmpst	en-US
+scratched	skrætʃt	en-US
+
+# Silent letters and irregulars
+knee	ni	en-US
+knife	naɪf	en-US
+psychology	saɪˈkɑlədʒi	en-US
+pneumonia	nuˈmoʊniə	en-US
+receipt	rɪˈsit	en-US
+doubt	daʊt	en-US
+subtle	ˈsʌtəl	en-US
+island	ˈaɪlənd	en-US
+listen	ˈlɪsən	en-US
+muscle	ˈmʌsəl	en-US
+
+# Vowel patterns and diphthongs
+rain	reɪn	en-US
+pain	peɪn	en-US
+coin	kɔɪn	en-US
+boy	bɔɪ	en-US
+out	aʊt	en-US
+cow	kaʊ	en-US
+fear	fɪr	en-US
+near	nɪr	en-US
+care	kɛr	en-US
+where	wɛr	en-US
+
+# Japanese words (expanded for mora accuracy testing - JVS corpus style)
+# Basic greetings and polite expressions
+こんにちは	ko ɴ ni tʃi wa	ja
+ありがとう	a ɾi ɡa to ː	ja
+さようなら	sa jo ː na ɾa	ja
+おはよう	o ha jo ː	ja
+こんばんは	ko ɴ ba ɴ wa	ja
+すみません	sɯ mi ma se ɴ	ja
+はじめまして	ha dʒi me ma ʃi te	ja
+よろしく	jo ɾo ʃi kɯ	ja
+げんき	ɡe ɴ ki	ja
+がっこう	ɡa ʔ ko ː	ja
+
+# Numbers (important for mora timing)
+いち	i tʃi	ja
+に	ni	ja
+さん	sa ɴ	ja
+よん	jo ɴ	ja
+ご	ɡo	ja
+ろく	ɾo kɯ	ja
+なな	na na	ja
+はち	ha tʃi	ja
+きゅう	kj ɯː	ja
+じゅう	dʒ ɯː	ja
+
+# Common adjectives with various mora patterns
+おおきい	o ː ki ː	ja
+ちいさい	tʃi ː sa i	ja
+あたらしい	a ta ɾa ʃi ː	ja
+ふるい	ɸɯ ɾɯ i	ja
+いい	i ː	ja
+わるい	wa ɾɯ i	ja
+たかい	ta ka i	ja
+やすい	ja sɯ i	ja
+あつい	a tsɯ i	ja
+さむい	sa mɯ i	ja
+
+# Verbs with different conjugations
+いく	i kɯ	ja
+いった	i ʔ ta	ja
+くる	kɯ ɾɯ	ja
+きた	ki ta	ja
+する	sɯ ɾɯ	ja
+した	ʃi ta	ja
+みる	mi ɾɯ	ja
+みた	mi ta	ja
+きく	ki kɯ	ja
+きいた	ki ː ta	ja
+
+# Complex mora patterns and long vowels
+がくせい	ɡa kɯ se ː	ja
+せんせい	se ɴ se ː	ja
+びょういん	bj o ː i ɴ	ja
+きょうしつ	kj o ː ʃi tsɯ	ja
+しんぶん	ʃi ɴ bɯ ɴ	ja
+でんしゃ	de ɴ ʃa	ja
+ひこうき	hi ko ː ki	ja
+りょこう	ɾj o ko ː	ja
+
+# Katakana words (foreign loanwords)
+コーヒー	ko ː hi ː	ja
+テーブル	te ː bɯ ɾɯ	ja
+コンピュータ	ko ɴ pj ɯ ː ta	ja
+アメリカ	a me ɾi ka	ja
+フランス	ɸɯ ɾa ɴ sɯ	ja
+ドイツ	do i tsɯ	ja
+カメラ	ka me ɾa	ja
+バス	ba sɯ	ja
+
+# Complex consonant clusters and special mora
+きょう	kj o ː	ja
+しゅくだい	ʃɯ kɯ da i	ja
+りゅうがく	ɾj ɯ ː ɡa kɯ	ja
+びょうき	bj o ː ki	ja
+ちゅうごく	tʃɯ ː ɡo kɯ	ja
+にほんご	ni ho ɴ ɡo	ja
+えいご	e ː ɡo	ja
+フランスご	ɸɯ ɾa ɴ sɯ ɡo	ja
+
+# Particles and function words (critical for natural speech)
+です	de sɯ	ja
+だった	da ʔ ta	ja
+である	de a ɾɯ	ja
+ではない	de wa na i	ja
+について	ni tsɯ i te	ja
+にたいして	ni ta i ʃi te	ja
+のような	no jo ː na	ja
+という	to i ɯ	ja
+
+# Place names (JVS corpus includes geographical terms)
+とうきょう	to ː kj o ː	ja
+おおさか	o ː sa ka	ja
+よこはま	jo ko ha ma	ja
+きょうと	kj o ː to	ja
+なごや	na ɡo ja	ja
+ひろしま	hi ɾo ʃi ma	ja
+せんだい	se ɴ da i	ja
+ふくおか	ɸɯ kɯ o ka	ja

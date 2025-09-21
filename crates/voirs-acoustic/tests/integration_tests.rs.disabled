@@ -1,0 +1,235 @@
+//! Integration tests for end-to-end VoiRS pipeline
+
+use voirs_acoustic::{AcousticModel, DummyAcousticModel, SynthesisConfig};
+
+// Import dummy components from other crates
+use voirs_g2p::{DummyG2p, G2p};
+use voirs_vocoder::{DummyVocoder, Vocoder};
+
+// Helper conversion functions to handle type mismatches between crates
+fn convert_g2p_phoneme_to_acoustic(g2p_phoneme: &voirs_g2p::Phoneme) -> voirs_acoustic::Phoneme {
+    voirs_acoustic::Phoneme {
+        symbol: g2p_phoneme.symbol.clone(),
+        features: g2p_phoneme.custom_features.clone(),
+        duration: g2p_phoneme.duration_ms.map(|ms| ms / 1000.0), // Convert ms to seconds
+    }
+}
+
+fn convert_acoustic_mel_to_vocoder(
+    acoustic_mel: voirs_acoustic::MelSpectrogram,
+) -> voirs_vocoder::MelSpectrogram {
+    voirs_vocoder::MelSpectrogram {
+        data: acoustic_mel.data,
+        sample_rate: acoustic_mel.sample_rate,
+        hop_length: acoustic_mel.hop_length,
+        n_mels: acoustic_mel.n_mels,
+        n_frames: acoustic_mel.n_frames,
+    }
+}
+
+fn convert_acoustic_config_to_vocoder(
+    acoustic_config: &voirs_acoustic::SynthesisConfig,
+) -> voirs_vocoder::SynthesisConfig {
+    voirs_vocoder::SynthesisConfig {
+        speed: acoustic_config.speed,
+        pitch_shift: acoustic_config.pitch_shift,
+        energy: acoustic_config.energy,
+        speaker_id: acoustic_config.speaker_id,
+        seed: acoustic_config.seed,
+    }
+}
+
+#[tokio::test]
+async fn test_end_to_end_pipeline() {
+    // Initialize dummy components
+    let g2p = DummyG2p::new();
+    let acoustic = DummyAcousticModel::new();
+    let vocoder = DummyVocoder::new();
+
+    let test_text = "Hello, world!";
+
+    // Step 1: Text to phonemes (G2P)
+    let phonemes = g2p.to_phonemes(test_text, None).await.unwrap();
+    assert!(!phonemes.is_empty(), "G2P should produce phonemes");
+    println!(
+        "Generated {} phonemes: {:?}",
+        phonemes.len(),
+        phonemes.iter().map(|p| &p.symbol).collect::<Vec<_>>()
+    );
+
+    // Step 2: Phonemes to mel spectrogram (Acoustic Model)
+    let phonemes_converted: Vec<voirs_acoustic::Phoneme> = phonemes
+        .iter()
+        .map(convert_g2p_phoneme_to_acoustic)
+        .collect();
+    let config = SynthesisConfig::default();
+    let mel = acoustic
+        .synthesize(&phonemes_converted, Some(&config))
+        .await
+        .unwrap();
+    assert!(
+        mel.n_mels > 0,
+        "Acoustic model should produce mel spectrogram"
+    );
+    assert!(mel.n_frames > 0, "Mel spectrogram should have frames");
+    println!(
+        "Generated mel spectrogram: {} mels x {} frames",
+        mel.n_mels, mel.n_frames
+    );
+
+    // Step 3: Mel spectrogram to audio (Vocoder)
+    let vocoder_config = convert_acoustic_config_to_vocoder(&config);
+    let mel_n_mels = mel.n_mels;
+    let mel_n_frames = mel.n_frames;
+    let mel_converted = convert_acoustic_mel_to_vocoder(mel);
+    let audio = vocoder
+        .vocode(&mel_converted, Some(&vocoder_config))
+        .await
+        .unwrap();
+    assert!(
+        audio.duration() > 0.0,
+        "Vocoder should produce audio with duration"
+    );
+    assert!(!audio.is_empty(), "Audio should not be empty");
+    println!(
+        "Generated audio: {:.2}s at {}Hz",
+        audio.duration(),
+        audio.sample_rate()
+    );
+
+    // Verify the complete pipeline works
+    let total_duration = audio.duration();
+    assert!(
+        total_duration > 0.1,
+        "Audio should be at least 100ms for 'Hello, world!'"
+    );
+    assert!(total_duration < 10.0, "Audio should be reasonable length");
+
+    println!("✅ End-to-end pipeline test successful!");
+    println!("   Input: '{test_text}'");
+    println!("   Phonemes: {} generated", phonemes.len());
+    println!("   Mel: {mel_n_mels}x{mel_n_frames} spectrogram");
+    println!(
+        "   Audio: {:.2}s @ {}Hz",
+        audio.duration(),
+        audio.sample_rate()
+    );
+}
+
+#[tokio::test]
+async fn test_batch_synthesis() {
+    let g2p = DummyG2p::new();
+    let acoustic = DummyAcousticModel::new();
+    let vocoder = DummyVocoder::new();
+
+    let test_texts = vec!["Hello", "world", "test"];
+    let mut all_phonemes = Vec::new();
+
+    // Generate phonemes for all texts
+    for text in &test_texts {
+        let phonemes = g2p.to_phonemes(text, None).await.unwrap();
+        all_phonemes.push(phonemes);
+    }
+
+    // Convert phonemes to acoustic types
+    let converted_phonemes: Vec<Vec<voirs_acoustic::Phoneme>> = all_phonemes
+        .iter()
+        .map(|phonemes| {
+            phonemes
+                .iter()
+                .map(convert_g2p_phoneme_to_acoustic)
+                .collect()
+        })
+        .collect();
+
+    // Batch acoustic synthesis
+    let phoneme_refs: Vec<&[voirs_acoustic::Phoneme]> =
+        converted_phonemes.iter().map(|p| p.as_slice()).collect();
+    let mels = acoustic
+        .synthesize_batch(&phoneme_refs, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        mels.len(),
+        test_texts.len(),
+        "Should generate mel for each input"
+    );
+
+    // Batch vocoding
+    let mels_converted: Vec<voirs_vocoder::MelSpectrogram> = mels
+        .into_iter()
+        .map(convert_acoustic_mel_to_vocoder)
+        .collect();
+    let audios = vocoder.vocode_batch(&mels_converted, None).await.unwrap();
+    assert_eq!(
+        audios.len(),
+        test_texts.len(),
+        "Should generate audio for each mel"
+    );
+
+    // Verify all audios have reasonable properties
+    for (i, audio) in audios.iter().enumerate() {
+        assert!(audio.duration() > 0.0, "Audio {i} should have duration");
+        assert!(!audio.is_empty(), "Audio {i} should not be empty");
+    }
+
+    println!("✅ Batch synthesis test successful!");
+    println!("   Processed {} texts in batch", test_texts.len());
+}
+
+#[tokio::test]
+async fn test_synthesis_config_effects() {
+    let g2p = DummyG2p::new();
+    let acoustic = DummyAcousticModel::new();
+    let vocoder = DummyVocoder::new();
+
+    let test_text = "Configuration test";
+    let phonemes = g2p.to_phonemes(test_text, None).await.unwrap();
+
+    // Test different synthesis configurations
+    let configs = [
+        SynthesisConfig {
+            speed: 0.5, // Slow speech
+            ..Default::default()
+        },
+        SynthesisConfig {
+            speed: 2.0, // Fast speech
+            ..Default::default()
+        },
+        SynthesisConfig {
+            pitch_shift: 5.0, // Higher pitch
+            ..Default::default()
+        },
+    ];
+
+    for (i, config) in configs.iter().enumerate() {
+        let phonemes_converted: Vec<voirs_acoustic::Phoneme> = phonemes
+            .iter()
+            .map(convert_g2p_phoneme_to_acoustic)
+            .collect();
+        let mel = acoustic
+            .synthesize(&phonemes_converted, Some(config))
+            .await
+            .unwrap();
+        let vocoder_config = convert_acoustic_config_to_vocoder(config);
+        let mel_converted = convert_acoustic_mel_to_vocoder(mel);
+        let audio = vocoder
+            .vocode(&mel_converted, Some(&vocoder_config))
+            .await
+            .unwrap();
+
+        assert!(
+            audio.duration() > 0.0,
+            "Config {i} should produce valid audio"
+        );
+        println!(
+            "Config {}: {:.2}s audio (speed: {}, pitch: {})",
+            i,
+            audio.duration(),
+            config.speed,
+            config.pitch_shift
+        );
+    }
+
+    println!("✅ Synthesis configuration test successful!");
+}

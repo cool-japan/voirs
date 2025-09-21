@@ -1,8 +1,8 @@
 //! CLI-specific wrapper types for VoiRS types.
 
 use clap::ValueEnum;
-use voirs::types::{AudioFormat, QualityLevel};
 use std::str::FromStr;
+use voirs::{AudioFormat, QualityLevel};
 
 /// CLI wrapper for AudioFormat to implement clap traits
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

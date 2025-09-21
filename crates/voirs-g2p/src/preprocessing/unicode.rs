@@ -8,17 +8,17 @@ use unicode_segmentation::UnicodeSegmentation;
 pub fn normalize_text(text: &str) -> Result<String> {
     // Normalize to NFC form for consistent processing
     let normalized = text.nfc().collect::<String>();
-    
+
     // Additional cleaning steps
     let cleaned = clean_text(&normalized)?;
-    
+
     Ok(cleaned)
 }
 
 /// Clean text by removing unwanted characters and fixing encoding issues
 fn clean_text(text: &str) -> Result<String> {
     let mut result = String::new();
-    
+
     for grapheme in text.graphemes(true) {
         match grapheme {
             // Replace common problematic characters
@@ -26,15 +26,15 @@ fn clean_text(text: &str) -> Result<String> {
             "\u{201c}" | "\u{201d}" => result.push('"'),
             "—" | "–" => result.push('-'),
             "…" => result.push_str("..."),
-            
+
             // Keep regular characters
             g if is_valid_text_char(g) => result.push_str(g),
-            
+
             // Replace other characters with space
             _ => result.push(' '),
         }
     }
-    
+
     // Collapse multiple spaces
     Ok(collapse_spaces(&result))
 }
@@ -43,11 +43,31 @@ fn clean_text(text: &str) -> Result<String> {
 fn is_valid_text_char(grapheme: &str) -> bool {
     if grapheme.len() == 1 {
         let ch = grapheme.chars().next().unwrap();
-        ch.is_alphabetic() || ch.is_numeric() || ch.is_whitespace() || 
-        matches!(ch, '.' | ',' | '!' | '?' | ';' | ':' | '\'' | '"' | '-' | '(' | ')' | '[' | ']' | '{' | '}')
+        ch.is_alphabetic()
+            || ch.is_numeric()
+            || ch.is_whitespace()
+            || matches!(
+                ch,
+                '.' | ','
+                    | '!'
+                    | '?'
+                    | ';'
+                    | ':'
+                    | '\''
+                    | '"'
+                    | '-'
+                    | '('
+                    | ')'
+                    | '['
+                    | ']'
+                    | '{'
+                    | '}'
+            )
     } else {
         // Multi-character graphemes (like accented characters)
-        grapheme.chars().all(|c| c.is_alphabetic() || c.is_numeric())
+        grapheme
+            .chars()
+            .all(|c| c.is_alphabetic() || c.is_numeric())
     }
 }
 
@@ -55,7 +75,7 @@ fn is_valid_text_char(grapheme: &str) -> bool {
 fn collapse_spaces(text: &str) -> String {
     let mut result = String::new();
     let mut last_was_space = false;
-    
+
     for ch in text.chars() {
         if ch.is_whitespace() {
             if !last_was_space {
@@ -67,7 +87,7 @@ fn collapse_spaces(text: &str) -> String {
             last_was_space = false;
         }
     }
-    
+
     result.trim().to_string()
 }
 
@@ -91,11 +111,11 @@ pub enum ScriptType {
 pub fn detect_script(text: &str) -> ScriptType {
     let mut script_counts = std::collections::HashMap::new();
     let mut total_chars = 0;
-    
+
     for ch in text.chars() {
         if ch.is_alphabetic() {
             total_chars += 1;
-            
+
             let script = match ch as u32 {
                 // Latin
                 0x0041..=0x007A | 0x00C0..=0x00FF | 0x0100..=0x017F => ScriptType::Latin,
@@ -117,24 +137,24 @@ pub fn detect_script(text: &str) -> ScriptType {
                 0xAC00..=0xD7AF => ScriptType::Hangul,
                 _ => ScriptType::Unknown,
             };
-            
+
             *script_counts.entry(script).or_insert(0) += 1;
         }
     }
-    
+
     if total_chars == 0 {
         return ScriptType::Unknown;
     }
-    
+
     // Check if it's mixed script
     let is_mixed = script_counts.len() > 2;
-    
+
     let dominant_script = script_counts
         .into_iter()
         .max_by_key(|(_, count)| *count)
         .map(|(script, _)| script)
         .unwrap_or(ScriptType::Unknown);
-    
+
     if is_mixed {
         ScriptType::Mixed
     } else {
@@ -147,8 +167,26 @@ pub fn filter_symbols(text: &str) -> String {
     text.chars()
         .filter(|ch| {
             // Keep letters, numbers, and basic punctuation
-            ch.is_alphabetic() || ch.is_numeric() || ch.is_whitespace() ||
-            matches!(*ch, '.' | ',' | '!' | '?' | ';' | ':' | '\'' | '"' | '-' | '(' | ')' | '[' | ']' | '{' | '}')
+            ch.is_alphabetic()
+                || ch.is_numeric()
+                || ch.is_whitespace()
+                || matches!(
+                    *ch,
+                    '.' | ','
+                        | '!'
+                        | '?'
+                        | ';'
+                        | ':'
+                        | '\''
+                        | '"'
+                        | '-'
+                        | '('
+                        | ')'
+                        | '['
+                        | ']'
+                        | '{'
+                        | '}'
+                )
         })
         .collect()
 }
@@ -175,7 +213,7 @@ mod tests {
         let text = "café"; // This might be composed differently
         let result = normalize_text(text).unwrap();
         assert!(!result.is_empty());
-        
+
         // Test with special characters
         let text = "\u{201c}Hello World\u{201d} \u{2014} it's great!";
         let result = normalize_text(text).unwrap();

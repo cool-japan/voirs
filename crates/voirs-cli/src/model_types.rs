@@ -1,7 +1,7 @@
 //! Model management types for CLI.
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Model type classification
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,7 +70,7 @@ impl ModelInfo {
             metadata: HashMap::new(),
         }
     }
-    
+
     /// Check if model supports a specific backend
     pub fn supports_backend(&self, backend: &str) -> bool {
         self.supported_backends.iter().any(|b| b == backend)
@@ -80,7 +80,7 @@ impl ModelInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_model_info_creation() {
         let model = ModelInfo::new(
@@ -90,12 +90,12 @@ mod tests {
             "en".to_string(),
             "A test model".to_string(),
         );
-        
+
         assert_eq!(model.id, "test-model");
         assert_eq!(model.model_type, ModelType::Acoustic);
         assert!(!model.is_installed);
     }
-    
+
     #[test]
     fn test_supports_backend() {
         let mut model = ModelInfo::new(
@@ -105,9 +105,9 @@ mod tests {
             "en".to_string(),
             "Test".to_string(),
         );
-        
+
         model.supported_backends = vec!["pytorch".to_string(), "onnx".to_string()];
-        
+
         assert!(model.supports_backend("pytorch"));
         assert!(model.supports_backend("onnx"));
         assert!(!model.supports_backend("tensorflow"));

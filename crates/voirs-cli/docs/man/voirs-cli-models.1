@@ -1,0 +1,203 @@
+.TH VOIRS-CLI-MODELS 1 "2025-07-05" "voirs-cli" "VoiRS CLI Manual"
+
+.SH NAME
+voirs-cli-models \- Manage acoustic and vocoder models for VoiRS synthesis
+
+.SH SYNOPSIS
+.B voirs-cli list-models
+[\fB\-\-backend\fR \fIBACKEND\fR]
+[\fB\-\-detailed\fR]
+
+.B voirs-cli download-model
+.I MODEL_ID
+[\fB\-\-force\fR]
+
+.B voirs-cli benchmark-models
+.I MODEL_ID...
+[\fB\-i\fR|\fB\-\-iterations\fR \fIN\fR]
+
+.B voirs-cli optimize-model
+.I MODEL_ID
+[\fB\-o\fR|\fB\-\-output\fR \fIPATH\fR]
+
+.SH DESCRIPTION
+The models commands provide comprehensive management of VoiRS synthesis models including acoustic models (VITS, FastSpeech2) and vocoder models (HiFi-GAN, DiffWave). These commands allow listing, downloading, benchmarking, and optimizing models for your hardware configuration.
+
+VoiRS uses a two-stage synthesis pipeline: acoustic models convert text/phonemes to mel spectrograms, and vocoder models convert mel spectrograms to audio waveforms. Managing these models effectively is crucial for optimal synthesis quality and performance.
+
+.SH COMMANDS
+
+.SS list-models
+List all available acoustic and vocoder models with their specifications and installation status.
+
+.TP
+.B \-\-backend \fIBACKEND\fR
+Filter models by backend type (candle, onnx, pytorch).
+
+.TP
+.B \-\-detailed
+Show detailed information including model size, supported languages, performance characteristics, and hardware requirements.
+
+.SS download-model
+Download and install a specific model from the VoiRS model repository.
+
+.TP
+.I MODEL_ID
+Unique identifier for the model to download (e.g., "vits-en-us-v2", "hifigan-universal-v1").
+
+.TP
+.B \-\-force
+Force download even if the model already exists locally. Useful for updating to newer versions.
+
+.SS benchmark-models
+Run performance benchmarks on specified models to measure synthesis speed, quality, and resource usage.
+
+.TP
+.I MODEL_ID...
+One or more model identifiers to benchmark. Supports both acoustic and vocoder models.
+
+.TP
+.B \-i, \-\-iterations \fIN\fR
+Number of benchmark iterations to run for statistical accuracy (default: 3).
+
+.SS optimize-model
+Optimize a model for the current hardware configuration using quantization, pruning, or hardware-specific optimizations.
+
+.TP
+.I MODEL_ID
+Model identifier to optimize.
+
+.TP
+.B \-o, \-\-output \fIPATH\fR
+Output path for the optimized model. If not specified, the original model is updated in-place.
+
+.SH MODEL TYPES
+
+.SS Acoustic Models
+Convert text or phonemes to mel spectrograms:
+
+.TP
+.B VITS (Variational Inference with adversarial learning for end-to-end TTS)
+High-quality neural synthesis with speaker control and emotion modeling.
+
+.TP
+.B FastSpeech2
+Non-autoregressive synthesis with explicit duration, pitch, and energy control.
+
+.SS Vocoder Models
+Convert mel spectrograms to audio waveforms:
+
+.TP
+.B HiFi-GAN (High Fidelity Generative Adversarial Network)
+Fast, high-quality neural vocoding with multiple architecture variants (V1, V2, V3).
+
+.TP
+.B DiffWave
+Diffusion-based vocoding for exceptional audio quality at the cost of inference speed.
+
+.SH EXAMPLES
+
+.TP
+.B List all available models
+voirs-cli list-models
+
+.TP
+.B List detailed model information
+voirs-cli list-models --detailed
+
+.TP
+.B Filter models by backend
+voirs-cli list-models --backend candle
+
+.TP
+.B Download a specific model
+voirs-cli download-model vits-en-us-v2
+
+.TP
+.B Force update an existing model
+voirs-cli download-model hifigan-universal-v1 --force
+
+.TP
+.B Benchmark multiple models
+voirs-cli benchmark-models vits-en-us-v2 hifigan-universal-v1 --iterations 5
+
+.TP
+.B Optimize model for current hardware
+voirs-cli optimize-model vits-en-us-v2 --output vits-en-us-v2-optimized
+
+.SH MODEL STORAGE
+
+Models are stored in the following locations:
+
+.TP
+.B User models
+~/.local/share/voirs/models/ (Linux/macOS)
+%LOCALAPPDATA%\\VoiRS\\models\\ (Windows)
+
+.TP
+.B System models
+/usr/local/share/voirs/models/ (Linux/macOS)
+C:\\ProgramData\\VoiRS\\models\\ (Windows)
+
+.TP
+.B Cache directory
+~/.cache/voirs/models/ (Linux/macOS)
+%TEMP%\\VoiRS\\models\\ (Windows)
+
+.SH PERFORMANCE CONSIDERATIONS
+
+.TP
+.B Model Size
+Larger models generally provide better quality but require more memory and storage.
+
+.TP
+.B Backend Selection
+- Candle: Best for GPU acceleration and cross-platform compatibility
+- ONNX: Optimized for CPU inference and edge deployment
+- PyTorch: Research and development use
+
+.TP
+.B Hardware Optimization
+Use the optimize-model command to tailor models for your specific hardware configuration.
+
+.SH EXIT STATUS
+.TP
+.B 0
+Successful completion.
+
+.TP
+.B 1
+General error or invalid usage.
+
+.TP
+.B 3
+Model not found or unavailable.
+
+.TP
+.B 5
+Network error during download.
+
+.SH FILES
+.TP
+.B ~/.local/share/voirs/models/
+User model storage directory.
+
+.TP
+.B ~/.cache/voirs/models/
+Model download cache.
+
+.TP
+.B ~/.config/voirs/config.toml
+Configuration file with model preferences.
+
+.SH SEE ALSO
+.BR voirs-cli (1),
+.BR voirs-cli-voices (1),
+.BR voirs-cli-synthesize (1),
+.BR voirs-cli-config (1)
+
+.SH AUTHOR
+VoiRS Development Team
+
+.SH REPORTING BUGS
+Report bugs at: https://github.com/voirs-project/voirs/issues

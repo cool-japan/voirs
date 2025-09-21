@@ -1,0 +1,2369 @@
+//! Feature extraction for machine learning and audio analysis
+//!
+//! Provides comprehensive feature extraction including:
+//! - MFCC (Mel-frequency cepstral coefficients)
+//! - Mel-scale features
+//! - Chroma features
+//! - Spectral features
+//! - Temporal features
+//! - Perceptual features
+
+use crate::{Result, VocoderError};
+use ndarray::{Array1, Array2, s, Axis};
+use realfft::RealFftPlanner;
+use std::f32::consts::PI;
+
+/// Comprehensive feature set for machine learning
+#[derive(Debug, Clone)]
+pub struct FeatureSet {
+    /// MFCC coefficients
+    pub mfcc: Array2<f32>,
+    
+    /// Mel-scale spectrogram
+    pub mel_spectrogram: Array2<f32>,
+    
+    /// Chroma features (12-dimensional)
+    pub chroma: Array2<f32>,
+    
+    /// Spectral features over time
+    pub spectral_features: SpectralFeatureMatrix,
+    
+    /// Temporal features
+    pub temporal_features: TemporalFeatureVector,
+    
+    /// Perceptual features
+    pub perceptual_features: PerceptualFeatureVector,
+    
+    /// Rhythm and beat features
+    pub rhythm_features: RhythmFeatureVector,
+    
+    /// Timbral features
+    pub timbral_features: TimbralFeatureVector,
+    
+    /// Harmonic features
+    pub harmonic_features: HarmonicFeatureVector,
+}
+
+/// Spectral features computed over time
+#[derive(Debug, Clone)]
+pub struct SpectralFeatureMatrix {
+    /// Spectral centroid over time
+    pub centroid: Vec<f32>,
+    
+    /// Spectral rolloff over time
+    pub rolloff: Vec<f32>,
+    
+    /// Spectral flatness over time
+    pub flatness: Vec<f32>,
+    
+    /// Spectral bandwidth over time
+    pub bandwidth: Vec<f32>,
+    
+    /// Spectral contrast over time
+    pub contrast: Vec<f32>,
+    
+    /// Zero crossing rate over time
+    pub zero_crossing_rate: Vec<f32>,
+}
+
+/// Temporal feature vector
+#[derive(Debug, Clone)]
+pub struct TemporalFeatureVector {
+    /// Onset density
+    pub onset_density: f32,
+    
+    /// Tempo estimate
+    pub tempo: f32,
+    
+    /// Rhythmic regularity
+    pub rhythmic_regularity: f32,
+    
+    /// Energy envelope statistics
+    pub energy_stats: EnergyStatistics,
+    
+    /// Temporal centroid
+    pub temporal_centroid: f32,
+    
+    /// Attack time
+    pub attack_time: f32,
+    
+    /// Decay time
+    pub decay_time: f32,
+    
+    /// Sustain level
+    pub sustain_level: f32,
+    
+    /// Release time
+    pub release_time: f32,
+}
+
+/// Energy envelope statistics
+#[derive(Debug, Clone)]
+pub struct EnergyStatistics {
+    /// Mean energy
+    pub mean: f32,
+    
+    /// Energy variance
+    pub variance: f32,
+    
+    /// Energy skewness
+    pub skewness: f32,
+    
+    /// Energy kurtosis
+    pub kurtosis: f32,
+    
+    /// Dynamic range
+    pub dynamic_range: f32,
+}
+
+/// Perceptual feature vector
+#[derive(Debug, Clone)]
+pub struct PerceptualFeatureVector {
+    /// Loudness (LUFS)
+    pub loudness: f32,
+    
+    /// Brightness
+    pub brightness: f32,
+    
+    /// Warmth
+    pub warmth: f32,
+    
+    /// Roughness
+    pub roughness: f32,
+    
+    /// Sharpness
+    pub sharpness: f32,
+    
+    /// Fluctuation strength
+    pub fluctuation_strength: f32,
+    
+    /// Tonality
+    pub tonality: f32,
+}
+
+/// Rhythm and beat features
+#[derive(Debug, Clone)]
+pub struct RhythmFeatureVector {
+    /// Beat strength
+    pub beat_strength: f32,
+    
+    /// Meter clarity
+    pub meter_clarity: f32,
+    
+    /// Syncopation index
+    pub syncopation: f32,
+    
+    /// Pulse clarity
+    pub pulse_clarity: f32,
+    
+    /// Tempo stability
+    pub tempo_stability: f32,
+}
+
+/// Timbral features
+#[derive(Debug, Clone)]
+pub struct TimbralFeatureVector {
+    /// Spectral centroid
+    pub spectral_centroid: f32,
+    
+    /// Spectral rolloff
+    pub spectral_rolloff: f32,
+    
+    /// Spectral flux
+    pub spectral_flux: f32,
+    
+    /// Spectral irregularity
+    pub spectral_irregularity: f32,
+    
+    /// Inharmonicity
+    pub inharmonicity: f32,
+    
+    /// Noisiness
+    pub noisiness: f32,
+}
+
+/// Harmonic features
+#[derive(Debug, Clone)]
+pub struct HarmonicFeatureVector {
+    /// Harmonic-to-noise ratio
+    pub hnr: f32,
+    
+    /// Fundamental frequency
+    pub f0: f32,
+    
+    /// Pitch stability
+    pub pitch_stability: f32,
+    
+    /// Harmonic energy distribution
+    pub harmonic_energy_distribution: Vec<f32>,
+    
+    /// Spectral peaks
+    pub spectral_peaks: Vec<f32>,
+    
+    /// Pitch class profile
+    pub pitch_class_profile: Vec<f32>,
+}
+
+impl Default for FeatureSet {
+    fn default() -> Self {
+        Self {
+            mfcc: Array2::zeros((0, 0)),
+            mel_spectrogram: Array2::zeros((0, 0)),
+            chroma: Array2::zeros((0, 0)),
+            spectral_features: SpectralFeatureMatrix::default(),
+            temporal_features: TemporalFeatureVector::default(),
+            perceptual_features: PerceptualFeatureVector::default(),
+            rhythm_features: RhythmFeatureVector::default(),
+            timbral_features: TimbralFeatureVector::default(),
+            harmonic_features: HarmonicFeatureVector::default(),
+        }
+    }
+}
+
+impl Default for SpectralFeatureMatrix {
+    fn default() -> Self {
+        Self {
+            centroid: Vec::new(),
+            rolloff: Vec::new(),
+            flatness: Vec::new(),
+            bandwidth: Vec::new(),
+            contrast: Vec::new(),
+            zero_crossing_rate: Vec::new(),
+        }
+    }
+}
+
+impl Default for TemporalFeatureVector {
+    fn default() -> Self {
+        Self {
+            onset_density: 0.0,
+            tempo: 0.0,
+            rhythmic_regularity: 0.0,
+            energy_stats: EnergyStatistics::default(),
+            temporal_centroid: 0.0,
+            attack_time: 0.0,
+            decay_time: 0.0,
+            sustain_level: 0.0,
+            release_time: 0.0,
+        }
+    }
+}
+
+impl Default for EnergyStatistics {
+    fn default() -> Self {
+        Self {
+            mean: 0.0,
+            variance: 0.0,
+            skewness: 0.0,
+            kurtosis: 0.0,
+            dynamic_range: 0.0,
+        }
+    }
+}
+
+impl Default for PerceptualFeatureVector {
+    fn default() -> Self {
+        Self {
+            loudness: -70.0,
+            brightness: 0.0,
+            warmth: 0.0,
+            roughness: 0.0,
+            sharpness: 0.0,
+            fluctuation_strength: 0.0,
+            tonality: 0.0,
+        }
+    }
+}
+
+impl Default for RhythmFeatureVector {
+    fn default() -> Self {
+        Self {
+            beat_strength: 0.0,
+            meter_clarity: 0.0,
+            syncopation: 0.0,
+            pulse_clarity: 0.0,
+            tempo_stability: 0.0,
+        }
+    }
+}
+
+impl Default for TimbralFeatureVector {
+    fn default() -> Self {
+        Self {
+            spectral_centroid: 0.0,
+            spectral_rolloff: 0.0,
+            spectral_flux: 0.0,
+            spectral_irregularity: 0.0,
+            inharmonicity: 0.0,
+            noisiness: 0.0,
+        }
+    }
+}
+
+impl Default for HarmonicFeatureVector {
+    fn default() -> Self {
+        Self {
+            hnr: -20.0,
+            f0: 0.0,
+            pitch_stability: 0.0,
+            harmonic_energy_distribution: Vec::new(),
+            spectral_peaks: Vec::new(),
+            pitch_class_profile: vec![0.0; 12],
+        }
+    }
+}
+
+/// Feature extraction configuration
+#[derive(Debug, Clone)]
+pub struct FeatureConfig {
+    /// Number of MFCC coefficients
+    pub n_mfcc: usize,
+    
+    /// Number of mel filter banks
+    pub n_mels: usize,
+    
+    /// FFT size
+    pub fft_size: usize,
+    
+    /// Hop length
+    pub hop_length: usize,
+    
+    /// Frequency range
+    pub freq_range: (f32, f32),
+    
+    /// Enable delta features
+    pub delta_features: bool,
+    
+    /// Enable delta-delta features
+    pub delta_delta_features: bool,
+}
+
+impl Default for FeatureConfig {
+    fn default() -> Self {
+        Self {
+            n_mfcc: 13,
+            n_mels: 80,
+            fft_size: 2048,
+            hop_length: 512,
+            freq_range: (0.0, 8000.0),
+            delta_features: true,
+            delta_delta_features: true,
+        }
+    }
+}
+
+/// Advanced feature extractor
+pub struct FeatureExtractor {
+    config: FeatureConfig,
+    sample_rate: u32,
+    fft_planner: RealFftPlanner<f32>,
+    mel_filterbank: MelFilterbank,
+    chroma_filterbank: ChromaFilterbank,
+}
+
+impl FeatureExtractor {
+    /// Create new feature extractor
+    pub fn new(sample_rate: u32, config: FeatureConfig) -> Self {
+        let mel_filterbank = MelFilterbank::new(
+            sample_rate,
+            config.n_mels,
+            config.fft_size,
+            config.freq_range.0,
+            config.freq_range.1,
+        );
+        
+        let chroma_filterbank = ChromaFilterbank::new(sample_rate, config.fft_size);
+        
+        Self {
+            config,
+            sample_rate,
+            fft_planner: RealFftPlanner::new(),
+            mel_filterbank,
+            chroma_filterbank,
+        }
+    }
+    
+    /// Extract comprehensive feature set
+    pub fn extract_features(&mut self, samples: &Array1<f32>) -> Result<FeatureSet> {
+        if samples.is_empty() {
+            return Ok(FeatureSet::default());
+        }
+        
+        // Compute power spectrogram
+        let power_spectrogram = self.compute_power_spectrogram(samples)?;
+        
+        // Extract different types of features
+        let mfcc = self.extract_mfcc(&power_spectrogram)?;
+        let mel_spectrogram = self.extract_mel_spectrogram(&power_spectrogram)?;
+        let chroma = self.extract_chroma(&power_spectrogram)?;
+        let spectral_features = self.extract_spectral_features(&power_spectrogram)?;
+        let temporal_features = self.extract_temporal_features(samples, &power_spectrogram)?;
+        let perceptual_features = self.extract_perceptual_features(samples)?;
+        let rhythm_features = self.extract_rhythm_features(samples)?;
+        let timbral_features = self.extract_timbral_features(&power_spectrogram)?;
+        let harmonic_features = self.extract_harmonic_features(samples, &power_spectrogram)?;
+        
+        Ok(FeatureSet {
+            mfcc,
+            mel_spectrogram,
+            chroma,
+            spectral_features,
+            temporal_features,
+            perceptual_features,
+            rhythm_features,
+            timbral_features,
+            harmonic_features,
+        })
+    }
+    
+    /// Compute power spectrogram
+    fn compute_power_spectrogram(&mut self, samples: &Array1<f32>) -> Result<Array2<f32>> {
+        let n_frames = (samples.len().saturating_sub(self.config.fft_size)) / self.config.hop_length + 1;
+        let n_bins = self.config.fft_size / 2 + 1;
+        
+        let mut power_spec = Array2::zeros((n_frames, n_bins));
+        let mut fft = self.fft_planner.plan_fft_forward(self.config.fft_size);
+        let mut input = vec![0.0; self.config.fft_size];
+        let mut output = fft.make_output_vec();
+        
+        // Generate Hann window
+        let window: Vec<f32> = (0..self.config.fft_size)
+            .map(|i| 0.5 * (1.0 - (2.0 * PI * i as f32 / (self.config.fft_size - 1) as f32).cos()))
+            .collect();
+        
+        for frame_idx in 0..n_frames {
+            let start = frame_idx * self.config.hop_length;
+            let end = (start + self.config.fft_size).min(samples.len());
+            
+            input.fill(0.0);
+            
+            for (i, &sample) in samples.slice(s![start..end]).iter().enumerate() {
+                input[i] = sample * window[i];
+            }
+            
+            fft.process(&mut input, &mut output)
+                .map_err(|_| VocoderError::ProcessingError("FFT computation failed".to_string()))?;
+            
+            for (bin_idx, complex_val) in output.iter().enumerate() {
+                power_spec[[frame_idx, bin_idx]] = complex_val.norm_sqr();
+            }
+        }
+        
+        Ok(power_spec)
+    }
+    
+    /// Extract MFCC features
+    fn extract_mfcc(&self, power_spectrogram: &Array2<f32>) -> Result<Array2<f32>> {
+        // Apply mel filterbank
+        let mel_spec = self.mel_filterbank.apply(power_spectrogram)?;
+        
+        // Convert to log scale
+        let log_mel_spec = mel_spec.mapv(|x| if x > 1e-10 { x.ln() } else { -23.0 });
+        
+        // Apply DCT
+        let mfcc = self.apply_dct(&log_mel_spec)?;
+        
+        Ok(mfcc)
+    }
+    
+    /// Extract mel-scale spectrogram
+    fn extract_mel_spectrogram(&self, power_spectrogram: &Array2<f32>) -> Result<Array2<f32>> {
+        self.mel_filterbank.apply(power_spectrogram)
+    }
+    
+    /// Extract chroma features
+    fn extract_chroma(&self, power_spectrogram: &Array2<f32>) -> Result<Array2<f32>> {
+        self.chroma_filterbank.apply(power_spectrogram)
+    }
+    
+    /// Extract spectral features over time
+    fn extract_spectral_features(&self, power_spectrogram: &Array2<f32>) -> Result<SpectralFeatureMatrix> {
+        let n_frames = power_spectrogram.nrows();
+        let n_bins = power_spectrogram.ncols();
+        
+        let mut centroid = Vec::with_capacity(n_frames);
+        let mut rolloff = Vec::with_capacity(n_frames);
+        let mut flatness = Vec::with_capacity(n_frames);
+        let mut bandwidth = Vec::with_capacity(n_frames);
+        let mut contrast = Vec::with_capacity(n_frames);
+        let mut zero_crossing_rate = Vec::with_capacity(n_frames);
+        
+        let frequencies: Vec<f32> = (0..n_bins)
+            .map(|i| i as f32 * self.sample_rate as f32 / self.config.fft_size as f32)
+            .collect();
+        
+        for frame_idx in 0..n_frames {
+            let frame = power_spectrogram.row(frame_idx);
+            let magnitudes: Vec<f32> = frame.iter().map(|&x| x.sqrt()).collect();
+            
+            // Spectral centroid
+            let c = self.compute_spectral_centroid(&frequencies, &magnitudes);
+            centroid.push(c);
+            
+            // Spectral rolloff
+            let r = self.compute_spectral_rolloff(&frequencies, &magnitudes, 0.85);
+            rolloff.push(r);
+            
+            // Spectral flatness
+            let f = self.compute_spectral_flatness(&magnitudes);
+            flatness.push(f);
+            
+            // Spectral bandwidth
+            let b = self.compute_spectral_bandwidth(&frequencies, &magnitudes, c);
+            bandwidth.push(b);
+            
+            // Spectral contrast
+            let sc = self.compute_spectral_contrast(&magnitudes);
+            contrast.push(sc);
+            
+            // Zero crossing rate estimated from spectral features
+            let zcr = self.estimate_zcr_from_spectrum(&magnitudes, &frequencies);
+            zero_crossing_rate.push(zcr);
+        }
+        
+        Ok(SpectralFeatureMatrix {
+            centroid,
+            rolloff,
+            flatness,
+            bandwidth,
+            contrast,
+            zero_crossing_rate,
+        })
+    }
+    
+    /// Extract temporal features
+    fn extract_temporal_features(&self, samples: &Array1<f32>, power_spectrogram: &Array2<f32>) -> Result<TemporalFeatureVector> {
+        let energy_envelope = self.compute_energy_envelope(power_spectrogram);
+        let energy_stats = self.compute_energy_statistics(&energy_envelope);
+        
+        let onset_density = self.compute_onset_density(power_spectrogram);
+        let tempo = self.estimate_tempo(power_spectrogram)?;
+        let rhythmic_regularity = self.compute_rhythmic_regularity(power_spectrogram);
+        let temporal_centroid = self.compute_temporal_centroid(&energy_envelope);
+        
+        let (attack_time, decay_time, sustain_level, release_time) = self.compute_adsr_envelope(samples);
+        
+        Ok(TemporalFeatureVector {
+            onset_density,
+            tempo,
+            rhythmic_regularity,
+            energy_stats,
+            temporal_centroid,
+            attack_time,
+            decay_time,
+            sustain_level,
+            release_time,
+        })
+    }
+    
+    /// Extract perceptual features
+    fn extract_perceptual_features(&self, samples: &Array1<f32>) -> Result<PerceptualFeatureVector> {
+        // Compute power spectrogram for perceptual analysis
+        let power_spectrogram = self.compute_power_spectrogram_const(samples)?;
+        
+        // Loudness computation (simplified LUFS approximation)
+        let loudness = self.compute_loudness(samples);
+        
+        // Brightness (high-frequency content relative to total energy)
+        let brightness = self.compute_brightness(&power_spectrogram);
+        
+        // Warmth (low-frequency content)
+        let warmth = self.compute_warmth(&power_spectrogram);
+        
+        // Roughness (amplitude modulation in critical bands)
+        let roughness = self.compute_roughness(samples);
+        
+        // Sharpness (spectral slope and high-frequency emphasis)
+        let sharpness = self.compute_sharpness(&power_spectrogram);
+        
+        // Fluctuation strength (temporal modulation)
+        let fluctuation_strength = self.compute_fluctuation_strength(samples);
+        
+        // Tonality (harmonicity vs noise)
+        let tonality = self.compute_tonality(&power_spectrogram);
+        
+        Ok(PerceptualFeatureVector {
+            loudness,
+            brightness,
+            warmth,
+            roughness,
+            sharpness,
+            fluctuation_strength,
+            tonality,
+        })
+    }
+    
+    /// Extract rhythm features
+    fn extract_rhythm_features(&self, samples: &Array1<f32>) -> Result<RhythmFeatureVector> {
+        // Compute power spectrogram for rhythm analysis
+        let power_spectrogram = self.compute_power_spectrogram_const(samples)?;
+        
+        // Beat strength (peak detection in onset function)
+        let beat_strength = self.compute_beat_strength(&power_spectrogram);
+        
+        // Meter clarity (periodicity strength)
+        let meter_clarity = self.compute_meter_clarity(&power_spectrogram);
+        
+        // Syncopation index (deviation from expected beat patterns)
+        let syncopation = self.compute_syncopation(&power_spectrogram);
+        
+        // Pulse clarity (regularity of rhythmic pulses)
+        let pulse_clarity = self.compute_pulse_clarity(samples);
+        
+        // Tempo stability (consistency of tempo over time)
+        let tempo_stability = self.compute_tempo_stability(&power_spectrogram);
+        
+        Ok(RhythmFeatureVector {
+            beat_strength,
+            meter_clarity,
+            syncopation,
+            pulse_clarity,
+            tempo_stability,
+        })
+    }
+    
+    /// Extract timbral features
+    fn extract_timbral_features(&self, power_spectrogram: &Array2<f32>) -> Result<TimbralFeatureVector> {
+        // Compute aggregate spectral features
+        let spectral_centroid = self.compute_aggregate_spectral_centroid(power_spectrogram);
+        let spectral_rolloff = self.compute_aggregate_spectral_rolloff(power_spectrogram);
+        let spectral_flux = self.compute_aggregate_spectral_flux(power_spectrogram);
+        let spectral_irregularity = self.compute_spectral_irregularity(power_spectrogram);
+        let inharmonicity = self.compute_inharmonicity(power_spectrogram);
+        let noisiness = self.compute_noisiness(power_spectrogram);
+        
+        Ok(TimbralFeatureVector {
+            spectral_centroid,
+            spectral_rolloff,
+            spectral_flux,
+            spectral_irregularity,
+            inharmonicity,
+            noisiness,
+        })
+    }
+    
+    /// Extract harmonic features
+    fn extract_harmonic_features(&self, samples: &Array1<f32>, power_spectrogram: &Array2<f32>) -> Result<HarmonicFeatureVector> {
+        let hnr = self.compute_aggregate_hnr(power_spectrogram);
+        let f0 = self.estimate_fundamental_frequency(power_spectrogram);
+        let pitch_stability = self.compute_pitch_stability(power_spectrogram);
+        let harmonic_energy_distribution = self.compute_harmonic_energy_distribution(power_spectrogram);
+        let spectral_peaks = self.extract_spectral_peaks(power_spectrogram);
+        let pitch_class_profile = self.compute_pitch_class_profile(power_spectrogram);
+        
+        Ok(HarmonicFeatureVector {
+            hnr,
+            f0,
+            pitch_stability,
+            harmonic_energy_distribution,
+            spectral_peaks,
+            pitch_class_profile,
+        })
+    }
+    
+    /// Apply DCT to log mel spectrogram
+    fn apply_dct(&self, log_mel_spec: &Array2<f32>) -> Result<Array2<f32>> {
+        let (n_frames, n_mels) = log_mel_spec.dim();
+        let mut mfcc = Array2::zeros((n_frames, self.config.n_mfcc));
+        
+        for frame_idx in 0..n_frames {
+            let frame = log_mel_spec.row(frame_idx);
+            
+            for k in 0..self.config.n_mfcc {
+                let mut sum = 0.0;
+                for n in 0..n_mels {
+                    sum += frame[n] * (PI * k as f32 * (2.0 * n as f32 + 1.0) / (2.0 * n_mels as f32)).cos();
+                }
+                mfcc[[frame_idx, k]] = sum;
+            }
+        }
+        
+        Ok(mfcc)
+    }
+    
+    /// Estimate zero crossing rate from spectral features
+    fn estimate_zcr_from_spectrum(&self, magnitudes: &[f32], frequencies: &[f32]) -> f32 {
+        // Estimate ZCR from spectral centroid and spectral spread
+        // Higher centroid typically indicates more zero crossings
+        let centroid = self.compute_spectral_centroid(frequencies, magnitudes);
+        let spread = self.compute_spectral_bandwidth(frequencies, magnitudes, centroid);
+        
+        // Normalize by Nyquist frequency and apply empirical scaling
+        let nyquist = self.sample_rate as f32 / 2.0;
+        let normalized_centroid = centroid / nyquist;
+        let normalized_spread = spread / nyquist;
+        
+        // Empirical formula: ZCR correlates with spectral centroid and spread
+        // Scale to reasonable ZCR range (0.0 to 0.5)
+        let zcr_estimate = (normalized_centroid * 0.8 + normalized_spread * 0.2).min(0.5).max(0.0);
+        
+        zcr_estimate
+    }
+
+    /// Compute spectral centroid
+    fn compute_spectral_centroid(&self, frequencies: &[f32], magnitudes: &[f32]) -> f32 {
+        let weighted_sum: f32 = frequencies.iter().zip(magnitudes.iter())
+            .map(|(&freq, &mag)| freq * mag)
+            .sum();
+        let magnitude_sum: f32 = magnitudes.iter().sum();
+        
+        if magnitude_sum > 1e-10 {
+            weighted_sum / magnitude_sum
+        } else {
+            0.0
+        }
+    }
+    
+    /// Compute spectral rolloff
+    fn compute_spectral_rolloff(&self, frequencies: &[f32], magnitudes: &[f32], threshold: f32) -> f32 {
+        let total_energy: f32 = magnitudes.iter().map(|&m| m * m).sum();
+        let target_energy = total_energy * threshold;
+        
+        let mut cumulative_energy = 0.0;
+        for (freq, mag) in frequencies.iter().zip(magnitudes.iter()) {
+            cumulative_energy += mag * mag;
+            if cumulative_energy >= target_energy {
+                return *freq;
+            }
+        }
+        
+        frequencies.last().copied().unwrap_or(0.0)
+    }
+    
+    /// Compute spectral flatness
+    fn compute_spectral_flatness(&self, magnitudes: &[f32]) -> f32 {
+        if magnitudes.len() <= 1 {
+            return 0.0;
+        }
+        
+        let relevant_mags = &magnitudes[1..];
+        let log_sum: f32 = relevant_mags.iter()
+            .map(|&m| if m > 1e-10 { m.ln() } else { -23.0 })
+            .sum();
+        let geometric_mean = (log_sum / relevant_mags.len() as f32).exp();
+        let arithmetic_mean: f32 = relevant_mags.iter().sum::<f32>() / relevant_mags.len() as f32;
+        
+        if arithmetic_mean > 1e-10 {
+            geometric_mean / arithmetic_mean
+        } else {
+            0.0
+        }
+    }
+    
+    /// Compute spectral bandwidth
+    fn compute_spectral_bandwidth(&self, frequencies: &[f32], magnitudes: &[f32], centroid: f32) -> f32 {
+        let weighted_variance: f32 = frequencies.iter().zip(magnitudes.iter())
+            .map(|(&freq, &mag)| (freq - centroid).powi(2) * mag)
+            .sum();
+        let magnitude_sum: f32 = magnitudes.iter().sum();
+        
+        if magnitude_sum > 1e-10 {
+            (weighted_variance / magnitude_sum).sqrt()
+        } else {
+            0.0
+        }
+    }
+    
+    /// Compute spectral contrast
+    fn compute_spectral_contrast(&self, magnitudes: &[f32]) -> f32 {
+        if magnitudes.len() < 2 {
+            return 0.0;
+        }
+        
+        let peaks: Vec<f32> = magnitudes.windows(3)
+            .map(|w| if w[1] > w[0] && w[1] > w[2] { w[1] } else { 0.0 })
+            .collect();
+        
+        let valleys: Vec<f32> = magnitudes.windows(3)
+            .map(|w| if w[1] < w[0] && w[1] < w[2] { w[1] } else { 1.0 })
+            .collect();
+        
+        let peak_mean = peaks.iter().sum::<f32>() / peaks.len() as f32;
+        let valley_mean = valleys.iter().sum::<f32>() / valleys.len() as f32;
+        
+        if valley_mean > 1e-10 {
+            peak_mean / valley_mean
+        } else {
+            0.0
+        }
+    }
+    
+    /// Compute energy envelope
+    fn compute_energy_envelope(&self, power_spectrogram: &Array2<f32>) -> Vec<f32> {
+        power_spectrogram.rows()
+            .into_iter()
+            .map(|row| row.sum())
+            .collect()
+    }
+    
+    /// Compute energy statistics
+    fn compute_energy_statistics(&self, energy_envelope: &[f32]) -> EnergyStatistics {
+        if energy_envelope.is_empty() {
+            return EnergyStatistics::default();
+        }
+        
+        let mean = energy_envelope.iter().sum::<f32>() / energy_envelope.len() as f32;
+        let variance = energy_envelope.iter()
+            .map(|&x| (x - mean).powi(2))
+            .sum::<f32>() / energy_envelope.len() as f32;
+        
+        let std_dev = variance.sqrt();
+        let skewness = if std_dev > 1e-10 {
+            energy_envelope.iter()
+                .map(|&x| ((x - mean) / std_dev).powi(3))
+                .sum::<f32>() / energy_envelope.len() as f32
+        } else {
+            0.0
+        };
+        
+        let kurtosis = if std_dev > 1e-10 {
+            energy_envelope.iter()
+                .map(|&x| ((x - mean) / std_dev).powi(4))
+                .sum::<f32>() / energy_envelope.len() as f32 - 3.0
+        } else {
+            0.0
+        };
+        
+        let min_energy = energy_envelope.iter().copied().fold(f32::INFINITY, f32::min);
+        let max_energy = energy_envelope.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let dynamic_range = if max_energy > 1e-10 && min_energy > 1e-10 {
+            20.0 * (max_energy / min_energy).log10()
+        } else {
+            0.0
+        };
+        
+        EnergyStatistics {
+            mean,
+            variance,
+            skewness,
+            kurtosis,
+            dynamic_range,
+        }
+    }
+    
+    /// Compute onset density
+    fn compute_onset_density(&self, power_spectrogram: &Array2<f32>) -> f32 {
+        if power_spectrogram.nrows() < 2 {
+            return 0.0;
+        }
+        
+        let mut onset_count = 0;
+        for frame_idx in 1..power_spectrogram.nrows() {
+            let current_frame = power_spectrogram.row(frame_idx);
+            let prev_frame = power_spectrogram.row(frame_idx - 1);
+            
+            let flux: f32 = current_frame.iter().zip(prev_frame.iter())
+                .map(|(&curr, &prev)| (curr - prev).max(0.0))
+                .sum();
+            
+            if flux > 0.1 { // Threshold for onset detection
+                onset_count += 1;
+            }
+        }
+        
+        let duration_seconds = power_spectrogram.nrows() as f32 * self.config.hop_length as f32 / self.sample_rate as f32;
+        onset_count as f32 / duration_seconds
+    }
+    
+    /// Estimate tempo
+    fn estimate_tempo(&self, power_spectrogram: &Array2<f32>) -> Result<f32> {
+        // Calculate onset strength function from spectral flux
+        let mut onset_strength = Vec::new();
+        for i in 1..power_spectrogram.shape()[1] {
+            let mut flux = 0.0;
+            for freq_bin in 0..power_spectrogram.shape()[0] {
+                let current = power_spectrogram[[freq_bin, i]];
+                let previous = power_spectrogram[[freq_bin, i - 1]];
+                flux += (current - previous).max(0.0); // Half-wave rectified difference
+            }
+            onset_strength.push(flux);
+        }
+
+        if onset_strength.is_empty() {
+            return Ok(120.0);
+        }
+
+        // Apply simple autocorrelation to find periodic patterns
+        // Tempo range: 60-180 BPM (typical range for most music)
+        let hop_length = 512; // Typical hop length for spectrograms
+        let sample_rate = 22050.0; // Typical sample rate
+        let hop_time = hop_length as f32 / sample_rate;
+        
+        let min_tempo_frames = (60.0 / 180.0 / hop_time) as usize; // 180 BPM
+        let max_tempo_frames = (60.0 / 60.0 / hop_time) as usize;  // 60 BPM
+        
+        let mut best_tempo = 120.0;
+        let mut best_correlation = 0.0;
+        
+        for lag in min_tempo_frames..=max_tempo_frames {
+            if lag >= onset_strength.len() { break; }
+            
+            let mut correlation = 0.0;
+            let mut count = 0;
+            
+            for i in lag..onset_strength.len() {
+                correlation += onset_strength[i] * onset_strength[i - lag];
+                count += 1;
+            }
+            
+            if count > 0 {
+                correlation /= count as f32;
+                if correlation > best_correlation {
+                    best_correlation = correlation;
+                    best_tempo = 60.0 / (lag as f32 * hop_time);
+                }
+            }
+        }
+        
+        Ok(best_tempo.clamp(60.0, 180.0))
+    }
+    
+    /// Compute rhythmic regularity
+    fn compute_rhythmic_regularity(&self, power_spectrogram: &Array2<f32>) -> f32 {
+        // Calculate onset strength function
+        let mut onset_strength = Vec::new();
+        for i in 1..power_spectrogram.shape()[1] {
+            let mut flux = 0.0;
+            for freq_bin in 0..power_spectrogram.shape()[0] {
+                let current = power_spectrogram[[freq_bin, i]];
+                let previous = power_spectrogram[[freq_bin, i - 1]];
+                flux += (current - previous).max(0.0);
+            }
+            onset_strength.push(flux);
+        }
+
+        if onset_strength.len() < 2 {
+            return 0.0;
+        }
+
+        // Calculate mean and variance of inter-onset intervals
+        let threshold = onset_strength.iter().sum::<f32>() / onset_strength.len() as f32 * 1.5;
+        let mut onsets = Vec::new();
+        
+        for (i, &strength) in onset_strength.iter().enumerate() {
+            if strength > threshold {
+                onsets.push(i);
+            }
+        }
+
+        if onsets.len() < 3 {
+            return 0.0;
+        }
+
+        // Calculate inter-onset intervals
+        let intervals: Vec<f32> = onsets.windows(2)
+            .map(|pair| (pair[1] - pair[0]) as f32)
+            .collect();
+
+        if intervals.is_empty() {
+            return 0.0;
+        }
+
+        // Calculate coefficient of variation (std dev / mean)
+        let mean_interval = intervals.iter().sum::<f32>() / intervals.len() as f32;
+        let variance = intervals.iter()
+            .map(|&x| (x - mean_interval).powi(2))
+            .sum::<f32>() / intervals.len() as f32;
+        let std_dev = variance.sqrt();
+        
+        // Higher regularity = lower coefficient of variation
+        // Map to 0-1 scale where 1 = perfectly regular
+        let coefficient_of_variation = if mean_interval > 0.0 { std_dev / mean_interval } else { 1.0 };
+        (1.0 - coefficient_of_variation.min(1.0)).max(0.0)
+    }
+    
+    /// Compute temporal centroid
+    fn compute_temporal_centroid(&self, energy_envelope: &[f32]) -> f32 {
+        if energy_envelope.is_empty() {
+            return 0.0;
+        }
+        
+        let total_energy: f32 = energy_envelope.iter().sum();
+        if total_energy <= 1e-10 {
+            return 0.0;
+        }
+        
+        let weighted_sum: f32 = energy_envelope.iter()
+            .enumerate()
+            .map(|(i, &energy)| i as f32 * energy)
+            .sum();
+        
+        weighted_sum / total_energy
+    }
+    
+    /// Compute ADSR envelope
+    fn compute_adsr_envelope(&self, samples: &Array1<f32>) -> (f32, f32, f32, f32) {
+        // Simplified ADSR computation
+        (0.1, 0.2, 0.7, 0.3)
+    }
+    
+    /// Compute aggregate spectral centroid (frequency-weighted center of mass)
+    fn compute_aggregate_spectral_centroid(&self, power_spectrogram: &Array2<f32>) -> f32 {
+        let (freq_bins, time_frames) = power_spectrogram.dim();
+        if freq_bins == 0 || time_frames == 0 {
+            return 0.0;
+        }
+        
+        let mut total_weighted_freq = 0.0;
+        let mut total_magnitude = 0.0;
+        
+        // Assume sample rate of 22050 Hz for frequency calculation
+        let sample_rate = 22050.0;
+        let nyquist = sample_rate / 2.0;
+        
+        for time_idx in 0..time_frames {
+            let mut frame_weighted_freq = 0.0;
+            let mut frame_magnitude = 0.0;
+            
+            for freq_idx in 1..freq_bins { // Skip DC component
+                let frequency = (freq_idx as f32 / freq_bins as f32) * nyquist;
+                let magnitude = power_spectrogram[[freq_idx, time_idx]];
+                
+                frame_weighted_freq += frequency * magnitude;
+                frame_magnitude += magnitude;
+            }
+            
+            if frame_magnitude > 0.0 {
+                total_weighted_freq += frame_weighted_freq;
+                total_magnitude += frame_magnitude;
+            }
+        }
+        
+        if total_magnitude > 0.0 {
+            total_weighted_freq / total_magnitude
+        } else {
+            0.0
+        }
+    }
+    
+    /// Compute aggregate spectral rolloff (frequency below which 85% of energy is contained)
+    fn compute_aggregate_spectral_rolloff(&self, power_spectrogram: &Array2<f32>) -> f32 {
+        let (freq_bins, time_frames) = power_spectrogram.dim();
+        if freq_bins == 0 || time_frames == 0 {
+            return 0.0;
+        }
+        
+        let sample_rate = 22050.0;
+        let nyquist = sample_rate / 2.0;
+        let rolloff_threshold = 0.85; // 85% energy threshold
+        
+        let mut total_rolloff = 0.0;
+        let mut valid_frames = 0;
+        
+        for time_idx in 0..time_frames {
+            // Calculate total energy for this frame
+            let total_energy: f32 = power_spectrogram.column(time_idx).iter().sum();
+            
+            if total_energy > 0.0 {
+                let target_energy = total_energy * rolloff_threshold;
+                let mut cumulative_energy = 0.0;
+                
+                // Find the frequency bin where 85% of energy is reached
+                for freq_idx in 0..freq_bins {
+                    cumulative_energy += power_spectrogram[[freq_idx, time_idx]];
+                    
+                    if cumulative_energy >= target_energy {
+                        let frequency = (freq_idx as f32 / freq_bins as f32) * nyquist;
+                        total_rolloff += frequency;
+                        valid_frames += 1;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        if valid_frames > 0 {
+            total_rolloff / valid_frames as f32
+        } else {
+            0.0
+        }
+    }
+    
+    /// Compute aggregate spectral flux (measure of spectral change over time)
+    fn compute_aggregate_spectral_flux(&self, power_spectrogram: &Array2<f32>) -> f32 {
+        let (freq_bins, time_frames) = power_spectrogram.dim();
+        if freq_bins == 0 || time_frames < 2 {
+            return 0.0;
+        }
+        
+        let mut total_flux = 0.0;
+        let mut flux_frames = 0;
+        
+        // Calculate spectral flux between consecutive frames
+        for time_idx in 1..time_frames {
+            let mut frame_flux = 0.0;
+            
+            for freq_idx in 0..freq_bins {
+                let current_magnitude = power_spectrogram[[freq_idx, time_idx]];
+                let previous_magnitude = power_spectrogram[[freq_idx, time_idx - 1]];
+                
+                // Spectral flux is the sum of positive differences
+                let diff = current_magnitude - previous_magnitude;
+                if diff > 0.0 {
+                    frame_flux += diff;
+                }
+            }
+            
+            total_flux += frame_flux;
+            flux_frames += 1;
+        }
+        
+        if flux_frames > 0 {
+            total_flux / flux_frames as f32
+        } else {
+            0.0
+        }
+    }
+    
+    /// Compute spectral irregularity (roughness of spectral shape)
+    fn compute_spectral_irregularity(&self, power_spectrogram: &Array2<f32>) -> f32 {
+        let (freq_bins, time_frames) = power_spectrogram.dim();
+        if freq_bins < 3 || time_frames == 0 {
+            return 0.0;
+        }
+        
+        let mut total_irregularity = 0.0;
+        let mut valid_frames = 0;
+        
+        for time_idx in 0..time_frames {
+            let mut frame_irregularity = 0.0;
+            let mut frame_magnitude = 0.0;
+            
+            // Calculate irregularity as deviation from smoothness
+            for freq_idx in 1..(freq_bins - 1) {
+                let prev_mag = power_spectrogram[[freq_idx - 1, time_idx]];
+                let curr_mag = power_spectrogram[[freq_idx, time_idx]];
+                let next_mag = power_spectrogram[[freq_idx + 1, time_idx]];
+                
+                // Expected smooth value (linear interpolation)
+                let expected = (prev_mag + next_mag) / 2.0;
+                
+                // Irregularity is the deviation from expected smooth value
+                let deviation = (curr_mag - expected).abs();
+                frame_irregularity += deviation;
+                frame_magnitude += curr_mag;
+            }
+            
+            // Normalize by frame magnitude to make it relative
+            if frame_magnitude > 0.0 {
+                total_irregularity += frame_irregularity / frame_magnitude;
+                valid_frames += 1;
+            }
+        }
+        
+        if valid_frames > 0 {
+            total_irregularity / valid_frames as f32
+        } else {
+            0.0
+        }
+    }
+    
+    /// Compute inharmonicity (deviation from perfect harmonic structure)
+    fn compute_inharmonicity(&self, power_spectrogram: &Array2<f32>) -> f32 {
+        let (freq_bins, time_frames) = power_spectrogram.dim();
+        if freq_bins < 8 || time_frames == 0 {
+            return 0.0;
+        }
+        
+        let sample_rate = 22050.0;
+        let nyquist = sample_rate / 2.0;
+        
+        let mut total_inharmonicity = 0.0;
+        let mut valid_frames = 0;
+        
+        for time_idx in 0..time_frames {
+            // Find fundamental frequency (strongest peak in lower frequency range)
+            let mut fundamental_bin = 0;
+            let mut max_magnitude = 0.0;
+            
+            // Search for fundamental in 80Hz - 400Hz range
+            let min_bin = ((80.0 / nyquist) * freq_bins as f32) as usize;
+            let max_bin = ((400.0 / nyquist) * freq_bins as f32) as usize;
+            
+            for freq_idx in min_bin..max_bin.min(freq_bins) {
+                let magnitude = power_spectrogram[[freq_idx, time_idx]];
+                if magnitude > max_magnitude {
+                    max_magnitude = magnitude;
+                    fundamental_bin = freq_idx;
+                }
+            }
+            
+            if fundamental_bin > 0 && max_magnitude > 0.01 {
+                let mut harmonic_deviation = 0.0;
+                let mut harmonic_count = 0;
+                
+                // Check first 6 harmonics
+                for harmonic in 2..=6 {
+                    let expected_bin = fundamental_bin * harmonic;
+                    if expected_bin < freq_bins {
+                        // Look for peak within ±2 bins of expected harmonic location
+                        let mut actual_bin = expected_bin;
+                        let mut peak_magnitude = power_spectrogram[[expected_bin, time_idx]];
+                        
+                        for offset in -2i32..=2i32 {
+                            let bin_idx = (expected_bin as i32 + offset) as usize;
+                            if bin_idx < freq_bins {
+                                let magnitude = power_spectrogram[[bin_idx, time_idx]];
+                                if magnitude > peak_magnitude {
+                                    peak_magnitude = magnitude;
+                                    actual_bin = bin_idx;
+                                }
+                            }
+                        }
+                        
+                        // Calculate deviation from perfect harmonic
+                        if peak_magnitude > max_magnitude * 0.1 { // Only consider significant harmonics
+                            let expected_freq = (expected_bin as f32 / freq_bins as f32) * nyquist;
+                            let actual_freq = (actual_bin as f32 / freq_bins as f32) * nyquist;
+                            let deviation = (actual_freq - expected_freq).abs() / expected_freq;
+                            
+                            harmonic_deviation += deviation;
+                            harmonic_count += 1;
+                        }
+                    }
+                }
+                
+                if harmonic_count > 0 {
+                    total_inharmonicity += harmonic_deviation / harmonic_count as f32;
+                    valid_frames += 1;
+                }
+            }
+        }
+        
+        if valid_frames > 0 {
+            total_inharmonicity / valid_frames as f32
+        } else {
+            0.0
+        }
+    }
+    
+    /// Compute noisiness based on spectral flatness and irregularity
+    fn compute_noisiness(&self, power_spectrogram: &Array2<f32>) -> f32 {
+        let (freq_bins, time_frames) = power_spectrogram.dim();
+        if freq_bins == 0 || time_frames == 0 {
+            return 0.0;
+        }
+        
+        let mut total_noisiness = 0.0;
+        let mut valid_frames = 0;
+        
+        for time_idx in 0..time_frames {
+            let frame = power_spectrogram.column(time_idx);
+            
+            // Calculate spectral flatness (Wiener entropy)
+            let geometric_mean = {
+                let log_sum: f32 = frame.iter()
+                    .filter(|&&x| x > 1e-10)
+                    .map(|&x| x.ln())
+                    .sum();
+                let count = frame.iter().filter(|&&x| x > 1e-10).count();
+                if count > 0 {
+                    (log_sum / count as f32).exp()
+                } else {
+                    0.0
+                }
+            };
+            
+            let arithmetic_mean: f32 = frame.iter().filter(|&&x| x > 1e-10).sum::<f32>() 
+                / frame.iter().filter(|&&x| x > 1e-10).count().max(1) as f32;
+            
+            let spectral_flatness = if arithmetic_mean > 1e-10 {
+                geometric_mean / arithmetic_mean
+            } else {
+                0.0
+            };
+            
+            // Calculate spectral irregularity
+            let mut irregularity = 0.0;
+            for i in 1..frame.len()-1 {
+                let prev = frame[i-1].max(1e-10);
+                let curr = frame[i].max(1e-10);
+                let next = frame[i+1].max(1e-10);
+                
+                let expected = (prev + next) / 2.0;
+                irregularity += ((curr - expected) / expected).abs();
+            }
+            irregularity /= (frame.len() - 2).max(1) as f32;
+            
+            // Combine spectral flatness and irregularity
+            let frame_noisiness = (spectral_flatness + irregularity * 0.5).min(1.0);
+            total_noisiness += frame_noisiness;
+            valid_frames += 1;
+        }
+        
+        if valid_frames > 0 {
+            total_noisiness / valid_frames as f32
+        } else {
+            0.0
+        }
+    }
+    
+    /// Compute aggregate Harmonic-to-Noise Ratio
+    fn compute_aggregate_hnr(&self, power_spectrogram: &Array2<f32>) -> f32 {
+        let (freq_bins, time_frames) = power_spectrogram.dim();
+        if freq_bins == 0 || time_frames == 0 {
+            return 0.0;
+        }
+        
+        let mut total_hnr = 0.0;
+        let mut valid_frames = 0;
+        
+        for time_idx in 0..time_frames {
+            let frame = power_spectrogram.column(time_idx);
+            
+            // Estimate fundamental frequency for this frame
+            let f0_bin = self.estimate_f0_bin(&frame);
+            
+            if f0_bin > 0 && f0_bin < freq_bins {
+                // Calculate harmonic energy (fundamental + harmonics)
+                let mut harmonic_energy = 0.0;
+                let mut harmonic_count = 0;
+                
+                for harmonic in 1..=6 { // Consider up to 6th harmonic
+                    let harmonic_bin = f0_bin * harmonic;
+                    if harmonic_bin < freq_bins {
+                        // Sum energy in a small window around the harmonic
+                        let start = (harmonic_bin.saturating_sub(2)).max(0);
+                        let end = (harmonic_bin + 3).min(freq_bins);
+                        
+                        for bin in start..end {
+                            harmonic_energy += frame[bin];
+                        }
+                        harmonic_count += 1;
+                    }
+                }
+                
+                // Calculate total energy
+                let total_energy: f32 = frame.iter().sum();
+                
+                // Noise energy = total - harmonic
+                let noise_energy = (total_energy - harmonic_energy).max(1e-10);
+                
+                if harmonic_energy > 1e-10 && noise_energy > 1e-10 {
+                    let hnr_linear = harmonic_energy / noise_energy;
+                    let hnr_db = 10.0 * hnr_linear.log10();
+                    total_hnr += hnr_db.clamp(-40.0, 40.0); // Clamp to reasonable range
+                    valid_frames += 1;
+                }
+            }
+        }
+        
+        if valid_frames > 0 {
+            total_hnr / valid_frames as f32
+        } else {
+            0.0
+        }
+    }
+    
+    /// Estimate fundamental frequency using spectral peak analysis
+    fn estimate_fundamental_frequency(&self, power_spectrogram: &Array2<f32>) -> f32 {
+        let (freq_bins, time_frames) = power_spectrogram.dim();
+        if freq_bins == 0 || time_frames == 0 {
+            return 0.0;
+        }
+        
+        let sample_rate = 22050.0;
+        let nyquist = sample_rate / 2.0;
+        let mut f0_estimates = Vec::new();
+        
+        for time_idx in 0..time_frames {
+            let frame = power_spectrogram.column(time_idx);
+            
+            // Find the bin with maximum energy in the fundamental frequency range
+            // Typical human voice range: 80-400 Hz
+            let min_f0_bin = ((80.0 / nyquist) * freq_bins as f32) as usize;
+            let max_f0_bin = ((400.0 / nyquist) * freq_bins as f32) as usize;
+            
+            if max_f0_bin > min_f0_bin && max_f0_bin < freq_bins {
+                let mut max_energy = 0.0;
+                let mut peak_bin = min_f0_bin;
+                
+                // Find spectral peaks in the fundamental range
+                for bin in min_f0_bin..max_f0_bin {
+                    if frame[bin] > max_energy {
+                        // Check if this is a local maximum
+                        let is_peak = (bin == 0 || frame[bin] > frame[bin-1]) &&
+                                     (bin == freq_bins-1 || frame[bin] > frame[bin+1]);
+                        
+                        if is_peak {
+                            max_energy = frame[bin];
+                            peak_bin = bin;
+                        }
+                    }
+                }
+                
+                // Convert bin to frequency
+                if max_energy > 1e-10 {
+                    let frequency = (peak_bin as f32 / freq_bins as f32) * nyquist;
+                    f0_estimates.push(frequency);
+                }
+            }
+        }
+        
+        if f0_estimates.is_empty() {
+            return 0.0;
+        }
+        
+        // Return median estimate for robustness
+        f0_estimates.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let mid = f0_estimates.len() / 2;
+        
+        if f0_estimates.len() % 2 == 0 {
+            (f0_estimates[mid - 1] + f0_estimates[mid]) / 2.0
+        } else {
+            f0_estimates[mid]
+        }
+    }
+    
+    /// Compute pitch stability based on frequency variation over time
+    fn compute_pitch_stability(&self, power_spectrogram: &Array2<f32>) -> f32 {
+        let (freq_bins, time_frames) = power_spectrogram.dim();
+        if freq_bins == 0 || time_frames < 2 {
+            return 0.0;
+        }
+        
+        let mut f0_estimates = Vec::new();
+        
+        // Extract F0 for each frame
+        for time_idx in 0..time_frames {
+            let frame = power_spectrogram.column(time_idx);
+            let f0_bin = self.estimate_f0_bin(&frame);
+            
+            if f0_bin > 0 {
+                let sample_rate = 22050.0;
+                let nyquist = sample_rate / 2.0;
+                let frequency = (f0_bin as f32 / freq_bins as f32) * nyquist;
+                f0_estimates.push(frequency);
+            }
+        }
+        
+        if f0_estimates.len() < 2 {
+            return 0.0;
+        }
+        
+        // Calculate pitch stability as inverse of coefficient of variation
+        let mean_f0: f32 = f0_estimates.iter().sum::<f32>() / f0_estimates.len() as f32;
+        
+        if mean_f0 <= 1e-10 {
+            return 0.0;
+        }
+        
+        let variance: f32 = f0_estimates.iter()
+            .map(|&f0| (f0 - mean_f0).powi(2))
+            .sum::<f32>() / f0_estimates.len() as f32;
+        
+        let std_dev = variance.sqrt();
+        let coefficient_of_variation = std_dev / mean_f0;
+        
+        // Convert to stability score (higher = more stable)
+        // Use sigmoid-like function to map CV to 0-1 range
+        let stability = 1.0 / (1.0 + coefficient_of_variation * 10.0);
+        stability.clamp(0.0, 1.0)
+    }
+    
+    /// Compute harmonic energy distribution across multiple harmonics
+    fn compute_harmonic_energy_distribution(&self, power_spectrogram: &Array2<f32>) -> Vec<f32> {
+        let (freq_bins, time_frames) = power_spectrogram.dim();
+        if freq_bins == 0 || time_frames == 0 {
+            return vec![0.0; 6]; // Return 6 harmonics with zero energy
+        }
+        
+        let sample_rate = 22050.0;
+        let nyquist = sample_rate / 2.0;
+        let num_harmonics = 6;
+        let mut harmonic_energies = vec![0.0; num_harmonics];
+        let mut frame_count = 0;
+        
+        for time_idx in 0..time_frames {
+            let frame = power_spectrogram.column(time_idx);
+            let f0_bin = self.estimate_f0_bin(&frame);
+            
+            if f0_bin > 0 && f0_bin < freq_bins / num_harmonics {
+                let mut frame_harmonic_energies = vec![0.0; num_harmonics];
+                let mut total_energy = 0.0;
+                
+                // Calculate energy for each harmonic
+                for harmonic in 1..=num_harmonics {
+                    let harmonic_bin = f0_bin * harmonic;
+                    
+                    if harmonic_bin < freq_bins {
+                        // Sum energy in a window around the harmonic frequency
+                        let window_size = 3; // ±3 bins around harmonic
+                        let start = harmonic_bin.saturating_sub(window_size);
+                        let end = (harmonic_bin + window_size + 1).min(freq_bins);
+                        
+                        let energy: f32 = (start..end)
+                            .map(|bin| frame[bin])
+                            .sum();
+                        
+                        frame_harmonic_energies[harmonic - 1] = energy;
+                        total_energy += energy;
+                    }
+                }
+                
+                // Normalize by total harmonic energy
+                if total_energy > 1e-10 {
+                    for i in 0..num_harmonics {
+                        harmonic_energies[i] += frame_harmonic_energies[i] / total_energy;
+                    }
+                    frame_count += 1;
+                }
+            }
+        }
+        
+        // Average across frames
+        if frame_count > 0 {
+            for energy in &mut harmonic_energies {
+                *energy /= frame_count as f32;
+            }
+        }
+        
+        harmonic_energies
+    }
+    
+    /// Extract prominent spectral peaks across time frames
+    fn extract_spectral_peaks(&self, power_spectrogram: &Array2<f32>) -> Vec<f32> {
+        let (freq_bins, time_frames) = power_spectrogram.dim();
+        if freq_bins == 0 || time_frames == 0 {
+            return Vec::new();
+        }
+        
+        let sample_rate = 22050.0;
+        let nyquist = sample_rate / 2.0;
+        let mut peak_frequencies = Vec::new();
+        
+        // Accumulate spectral magnitude across all frames
+        let mut averaged_spectrum = vec![0.0; freq_bins];
+        for time_idx in 0..time_frames {
+            let frame = power_spectrogram.column(time_idx);
+            for (i, &magnitude) in frame.iter().enumerate() {
+                averaged_spectrum[i] += magnitude;
+            }
+        }
+        
+        // Normalize by number of frames
+        for magnitude in &mut averaged_spectrum {
+            *magnitude /= time_frames as f32;
+        }
+        
+        // Find peaks using simple peak detection
+        let min_peak_distance = 5; // Minimum bins between peaks
+        let mut last_peak_bin = 0;
+        
+        for i in 1..freq_bins-1 {
+            let current = averaged_spectrum[i];
+            let prev = averaged_spectrum[i-1];
+            let next = averaged_spectrum[i+1];
+            
+            // Check if this is a local maximum
+            let is_peak = current > prev && current > next;
+            
+            // Ensure minimum distance from last peak
+            let sufficient_distance = i >= last_peak_bin + min_peak_distance;
+            
+            // Threshold for significant peaks (top 10% of energy)
+            let energy_threshold = averaged_spectrum.iter()
+                .cloned()
+                .fold(0.0, f32::max) * 0.1;
+            
+            if is_peak && sufficient_distance && current > energy_threshold {
+                let frequency = (i as f32 / freq_bins as f32) * nyquist;
+                
+                // Only include peaks in the audible range (20Hz - 8kHz)
+                if frequency >= 20.0 && frequency <= 8000.0 {
+                    peak_frequencies.push(frequency);
+                    last_peak_bin = i;
+                }
+            }
+        }
+        
+        // Sort by magnitude (highest first) and return top peaks
+        peak_frequencies.sort_by(|&a, &b| {
+            let a_bin = ((a / nyquist) * freq_bins as f32) as usize;
+            let b_bin = ((b / nyquist) * freq_bins as f32) as usize;
+            
+            let a_magnitude = averaged_spectrum[a_bin.min(freq_bins-1)];
+            let b_magnitude = averaged_spectrum[b_bin.min(freq_bins-1)];
+            
+            b_magnitude.partial_cmp(&a_magnitude).unwrap()
+        });
+        
+        // Return top 10 peaks or all if fewer
+        peak_frequencies.truncate(10);
+        peak_frequencies
+    }
+    
+    /// Compute pitch class profile (chroma features)
+    fn compute_pitch_class_profile(&self, power_spectrogram: &Array2<f32>) -> Vec<f32> {
+        let (freq_bins, time_frames) = power_spectrogram.dim();
+        if freq_bins == 0 || time_frames == 0 {
+            return vec![0.0; 12];
+        }
+        
+        let sample_rate = 22050.0;
+        let nyquist = sample_rate / 2.0;
+        let mut chroma = vec![0.0; 12];
+        
+        // Reference frequency for A4 (440 Hz)
+        let a4_freq = 440.0;
+        
+        for time_idx in 0..time_frames {
+            let frame = power_spectrogram.column(time_idx);
+            
+            for (bin, &magnitude) in frame.iter().enumerate() {
+                if magnitude > 1e-10 {
+                    let frequency = (bin as f32 / freq_bins as f32) * nyquist;
+                    
+                    // Only consider frequencies in musical range (40 Hz - 4 kHz)
+                    if frequency >= 40.0 && frequency <= 4000.0 {
+                        // Convert frequency to pitch class (0-11, C=0, C#=1, ..., B=11)
+                        let pitch_in_cents = 1200.0 * (frequency / a4_freq).log2();
+                        let pitch_class_float = (pitch_in_cents / 100.0 + 9.0) % 12.0;
+                        let pitch_class = ((pitch_class_float + 12.0) % 12.0) as usize;
+                        
+                        // Add magnitude to the corresponding pitch class
+                        if pitch_class < 12 {
+                            chroma[pitch_class] += magnitude;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Normalize the chroma vector
+        let total_energy: f32 = chroma.iter().sum();
+        if total_energy > 1e-10 {
+            for value in &mut chroma {
+                *value /= total_energy;
+            }
+        }
+        
+        chroma
+    }
+    
+    /// Helper method to estimate F0 bin from a spectral frame
+    fn estimate_f0_bin(&self, frame: &ndarray::ArrayView1<f32>) -> usize {
+        let freq_bins = frame.len();
+        
+        // Fundamental frequency range for human voice: 80-400 Hz
+        // Assuming 22050 Hz sample rate
+        let sample_rate = 22050.0;
+        let nyquist = sample_rate / 2.0;
+        let min_f0_bin = ((80.0 / nyquist) * freq_bins as f32) as usize;
+        let max_f0_bin = ((400.0 / nyquist) * freq_bins as f32) as usize;
+        
+        if max_f0_bin <= min_f0_bin || max_f0_bin >= freq_bins {
+            return 0;
+        }
+        
+        let mut max_energy = 0.0;
+        let mut peak_bin = 0;
+        
+        // Find the bin with maximum energy in the F0 range
+        for bin in min_f0_bin..max_f0_bin {
+            if frame[bin] > max_energy {
+                // Check if this is a local maximum
+                let is_peak = (bin == 0 || frame[bin] > frame[bin-1]) &&
+                             (bin == freq_bins-1 || frame[bin] > frame[bin+1]);
+                
+                if is_peak {
+                    max_energy = frame[bin];
+                    peak_bin = bin;
+                }
+            }
+        }
+        
+        peak_bin
+    }
+
+    /// Compute power spectrogram (const version for new calls)
+    fn compute_power_spectrogram_const(&self, samples: &Array1<f32>) -> Result<Array2<f32>> {
+        // Use the existing mutable method by creating a temporary mutable instance
+        let mut temp_extractor = FeatureExtractor::new(self.sample_rate, self.config.clone());
+        temp_extractor.compute_power_spectrogram(samples)
+    }
+
+    // Perceptual feature computation methods
+    
+    /// Compute loudness (LUFS approximation)
+    fn compute_loudness(&self, samples: &Array1<f32>) -> f32 {
+        if samples.is_empty() {
+            return -80.0; // Silence level in LUFS
+        }
+        
+        // Simplified LUFS: RMS in dB with K-weighting approximation
+        let rms: f32 = samples.iter().map(|&x| x * x).sum::<f32>() / samples.len() as f32;
+        let rms_db = if rms > 1e-10 {
+            20.0 * rms.sqrt().log10()
+        } else {
+            -80.0
+        };
+        
+        // Approximate K-weighting with simple high-pass effect
+        rms_db - 0.691 // K-weighting reference offset
+    }
+    
+    /// Compute brightness (high-frequency content)
+    fn compute_brightness(&self, power_spectrogram: &Array2<f32>) -> f32 {
+        let (n_frames, n_bins) = power_spectrogram.dim();
+        if n_frames == 0 || n_bins == 0 {
+            return 0.0;
+        }
+        
+        let cutoff_bin = n_bins * 2 / 3; // High frequencies above 2/3 of Nyquist
+        let mut high_freq_energy = 0.0;
+        let mut total_energy = 0.0;
+        
+        for frame_idx in 0..n_frames {
+            for bin_idx in 0..n_bins {
+                let energy = power_spectrogram[[frame_idx, bin_idx]];
+                total_energy += energy;
+                
+                if bin_idx >= cutoff_bin {
+                    high_freq_energy += energy;
+                }
+            }
+        }
+        
+        if total_energy > 1e-10 {
+            high_freq_energy / total_energy
+        } else {
+            0.0
+        }
+    }
+    
+    /// Compute warmth (low-frequency content)
+    fn compute_warmth(&self, power_spectrogram: &Array2<f32>) -> f32 {
+        let (n_frames, n_bins) = power_spectrogram.dim();
+        if n_frames == 0 || n_bins == 0 {
+            return 0.0;
+        }
+        
+        let cutoff_bin = n_bins / 3; // Low frequencies below 1/3 of Nyquist
+        let mut low_freq_energy = 0.0;
+        let mut total_energy = 0.0;
+        
+        for frame_idx in 0..n_frames {
+            for bin_idx in 0..n_bins {
+                let energy = power_spectrogram[[frame_idx, bin_idx]];
+                total_energy += energy;
+                
+                if bin_idx <= cutoff_bin {
+                    low_freq_energy += energy;
+                }
+            }
+        }
+        
+        if total_energy > 1e-10 {
+            low_freq_energy / total_energy
+        } else {
+            0.0
+        }
+    }
+    
+    /// Compute roughness (amplitude modulation)
+    fn compute_roughness(&self, samples: &Array1<f32>) -> f32 {
+        if samples.len() < 1024 {
+            return 0.0;
+        }
+        
+        // Compute envelope using moving average
+        let window_size = 256;
+        let mut envelope = Vec::with_capacity(samples.len() - window_size);
+        
+        for i in window_size..samples.len() {
+            let window_rms: f32 = samples.slice(s![i-window_size..i])
+                .iter()
+                .map(|&x| x * x)
+                .sum::<f32>() / window_size as f32;
+            envelope.push(window_rms.sqrt());
+        }
+        
+        // Compute roughness as variance of envelope fluctuations
+        let mean_envelope: f32 = envelope.iter().sum::<f32>() / envelope.len() as f32;
+        let roughness: f32 = envelope.iter()
+            .map(|&x| (x - mean_envelope).powi(2))
+            .sum::<f32>() / envelope.len() as f32;
+        
+        roughness.sqrt()
+    }
+    
+    /// Compute sharpness (spectral slope)
+    fn compute_sharpness(&self, power_spectrogram: &Array2<f32>) -> f32 {
+        let (n_frames, n_bins) = power_spectrogram.dim();
+        if n_frames == 0 || n_bins < 2 {
+            return 0.0;
+        }
+        
+        let mut total_slope = 0.0;
+        let mut valid_frames = 0;
+        
+        for frame_idx in 0..n_frames {
+            let frame = power_spectrogram.row(frame_idx);
+            
+            // Compute spectral slope (linear regression of log magnitude vs frequency)
+            let mut sum_x = 0.0;
+            let mut sum_y = 0.0;
+            let mut sum_xy = 0.0;
+            let mut sum_xx = 0.0;
+            let mut valid_bins = 0;
+            
+            for (bin_idx, &magnitude) in frame.iter().enumerate() {
+                if magnitude > 1e-10 {
+                    let x = bin_idx as f32;
+                    let y = magnitude.ln();
+                    
+                    sum_x += x;
+                    sum_y += y;
+                    sum_xy += x * y;
+                    sum_xx += x * x;
+                    valid_bins += 1;
+                }
+            }
+            
+            if valid_bins > 1 {
+                let slope = (valid_bins as f32 * sum_xy - sum_x * sum_y) / 
+                           (valid_bins as f32 * sum_xx - sum_x * sum_x);
+                total_slope += slope;
+                valid_frames += 1;
+            }
+        }
+        
+        if valid_frames > 0 {
+            -total_slope / valid_frames as f32 // Negative because sharpness is negative slope
+        } else {
+            0.0
+        }
+    }
+    
+    /// Compute fluctuation strength (temporal modulation)
+    fn compute_fluctuation_strength(&self, samples: &Array1<f32>) -> f32 {
+        if samples.len() < 1024 {
+            return 0.0;
+        }
+        
+        // Compute short-time energy
+        let frame_size = 512;
+        let hop_size = 256;
+        let mut energy_envelope = Vec::new();
+        
+        for i in (0..samples.len().saturating_sub(frame_size)).step_by(hop_size) {
+            let frame_energy: f32 = samples.slice(s![i..i+frame_size])
+                .iter()
+                .map(|&x| x * x)
+                .sum::<f32>() / frame_size as f32;
+            energy_envelope.push(frame_energy.sqrt());
+        }
+        
+        if energy_envelope.len() < 4 {
+            return 0.0;
+        }
+        
+        // Compute modulation in 1-20 Hz range (typical fluctuation strength range)
+        let fs = self.sample_rate as f32 / hop_size as f32; // Envelope sample rate
+        let target_freq = 4.0; // Peak fluctuation sensitivity around 4 Hz
+        
+        // Simple autocorrelation-based modulation detection
+        let delay_samples = (fs / target_freq) as usize;
+        if delay_samples >= energy_envelope.len() {
+            return 0.0;
+        }
+        
+        let mut correlation = 0.0;
+        let valid_samples = energy_envelope.len() - delay_samples;
+        
+        for i in 0..valid_samples {
+            correlation += energy_envelope[i] * energy_envelope[i + delay_samples];
+        }
+        
+        correlation / valid_samples as f32
+    }
+    
+    /// Compute tonality (harmonicity vs noise)
+    fn compute_tonality(&self, power_spectrogram: &Array2<f32>) -> f32 {
+        let (n_frames, n_bins) = power_spectrogram.dim();
+        if n_frames == 0 || n_bins < 4 {
+            return 0.0;
+        }
+        
+        let mut total_tonality = 0.0;
+        let mut valid_frames = 0;
+        
+        for frame_idx in 0..n_frames {
+            let frame = power_spectrogram.row(frame_idx);
+            
+            // Estimate fundamental frequency
+            let f0_bin = self.estimate_f0_bin(&frame);
+            
+            if f0_bin > 0 && f0_bin * 5 < n_bins {
+                // Compute harmonic vs inharmonic energy ratio
+                let mut harmonic_energy = 0.0;
+                let mut total_frame_energy = 0.0;
+                
+                // Sum energy at harmonic frequencies
+                for harmonic in 1..=5 {
+                    let harmonic_bin = f0_bin * harmonic;
+                    if harmonic_bin < n_bins {
+                        // Window around harmonic
+                        let window = 2;
+                        let start = harmonic_bin.saturating_sub(window);
+                        let end = (harmonic_bin + window + 1).min(n_bins);
+                        
+                        for bin in start..end {
+                            harmonic_energy += frame[bin];
+                        }
+                    }
+                }
+                
+                // Total energy in frame
+                total_frame_energy = frame.iter().sum();
+                
+                if total_frame_energy > 1e-10 {
+                    let tonality = harmonic_energy / total_frame_energy;
+                    total_tonality += tonality;
+                    valid_frames += 1;
+                }
+            }
+        }
+        
+        if valid_frames > 0 {
+            total_tonality / valid_frames as f32
+        } else {
+            0.0
+        }
+    }
+
+    // Rhythm feature computation methods
+    
+    /// Compute beat strength from onset detection
+    fn compute_beat_strength(&self, power_spectrogram: &Array2<f32>) -> f32 {
+        let (n_frames, _) = power_spectrogram.dim();
+        if n_frames < 3 {
+            return 0.0;
+        }
+        
+        // Compute spectral flux (onset strength)
+        let mut onset_strength = Vec::with_capacity(n_frames - 1);
+        
+        for frame_idx in 1..n_frames {
+            let current_frame = power_spectrogram.row(frame_idx);
+            let prev_frame = power_spectrogram.row(frame_idx - 1);
+            
+            let flux: f32 = current_frame.iter()
+                .zip(prev_frame.iter())
+                .map(|(&curr, &prev)| (curr - prev).max(0.0))
+                .sum();
+            
+            onset_strength.push(flux);
+        }
+        
+        // Peak detection in onset strength
+        let mut beats = 0;
+        let threshold = onset_strength.iter().sum::<f32>() / onset_strength.len() as f32 * 1.5;
+        
+        for i in 1..onset_strength.len()-1 {
+            if onset_strength[i] > threshold && 
+               onset_strength[i] > onset_strength[i-1] && 
+               onset_strength[i] > onset_strength[i+1] {
+                beats += 1;
+            }
+        }
+        
+        beats as f32 / onset_strength.len() as f32
+    }
+    
+    /// Compute meter clarity (periodicity strength)
+    fn compute_meter_clarity(&self, power_spectrogram: &Array2<f32>) -> f32 {
+        let (n_frames, _) = power_spectrogram.dim();
+        if n_frames < 8 {
+            return 0.0;
+        }
+        
+        // Compute energy envelope
+        let mut energy_envelope = Vec::with_capacity(n_frames);
+        for frame_idx in 0..n_frames {
+            let frame_energy: f32 = power_spectrogram.row(frame_idx).iter().sum();
+            energy_envelope.push(frame_energy);
+        }
+        
+        // Autocorrelation at typical beat periods (around 0.5-1.5 seconds)
+        let frame_rate = self.sample_rate as f32 / self.config.hop_length as f32;
+        let min_period = (0.4 * frame_rate) as usize; // 0.4 seconds
+        let max_period = (1.6 * frame_rate) as usize; // 1.6 seconds
+        
+        let mut max_correlation = 0.0;
+        
+        for period in min_period..max_period.min(n_frames / 2) {
+            let mut correlation = 0.0;
+            let valid_samples = n_frames - period;
+            
+            if valid_samples > 0 {
+                for i in 0..valid_samples {
+                    correlation += energy_envelope[i] * energy_envelope[i + period];
+                }
+                correlation /= valid_samples as f32;
+                max_correlation = max_correlation.max(correlation);
+            }
+        }
+        
+        max_correlation
+    }
+    
+    /// Compute syncopation index
+    fn compute_syncopation(&self, power_spectrogram: &Array2<f32>) -> f32 {
+        let (n_frames, _) = power_spectrogram.dim();
+        if n_frames < 16 {
+            return 0.0;
+        }
+        
+        // Compute onset times
+        let mut onset_times = Vec::new();
+        let mut prev_energy = 0.0;
+        
+        for frame_idx in 0..n_frames {
+            let frame_energy: f32 = power_spectrogram.row(frame_idx).iter().sum();
+            
+            if frame_energy > prev_energy * 1.3 { // Simple onset detection
+                onset_times.push(frame_idx);
+            }
+            prev_energy = frame_energy;
+        }
+        
+        if onset_times.len() < 4 {
+            return 0.0;
+        }
+        
+        // Compute syncopation as deviation from regular beat grid
+        let mut syncopation_score = 0.0;
+        
+        // Estimate beat period from onset intervals
+        let mut intervals = Vec::new();
+        for i in 1..onset_times.len() {
+            intervals.push(onset_times[i] - onset_times[i-1]);
+        }
+        
+        intervals.sort_unstable();
+        let median_interval = intervals[intervals.len() / 2] as f32;
+        
+        // Count onsets that are off the regular beat grid
+        let mut off_beat_count = 0;
+        for &onset_time in &onset_times {
+            let expected_beat = (onset_time as f32 / median_interval).round() * median_interval;
+            let deviation = (onset_time as f32 - expected_beat).abs();
+            
+            if deviation > median_interval * 0.25 { // More than 25% off expected beat
+                off_beat_count += 1;
+            }
+        }
+        
+        off_beat_count as f32 / onset_times.len() as f32
+    }
+    
+    /// Compute pulse clarity
+    fn compute_pulse_clarity(&self, samples: &Array1<f32>) -> f32 {
+        if samples.len() < 2048 {
+            return 0.0;
+        }
+        
+        // Compute envelope using Hilbert transform approximation
+        let frame_size = 512;
+        let hop_size = 256;
+        let mut envelope = Vec::new();
+        
+        for i in (0..samples.len().saturating_sub(frame_size)).step_by(hop_size) {
+            // Simple envelope detection using RMS
+            let rms: f32 = samples.slice(s![i..i+frame_size])
+                .iter()
+                .map(|&x| x * x)
+                .sum::<f32>() / frame_size as f32;
+            envelope.push(rms.sqrt());
+        }
+        
+        if envelope.len() < 4 {
+            return 0.0;
+        }
+        
+        // Measure regularity of envelope peaks
+        let mut peak_intervals = Vec::new();
+        let threshold = envelope.iter().sum::<f32>() / envelope.len() as f32 * 1.2;
+        
+        let mut last_peak = 0;
+        for (i, &value) in envelope.iter().enumerate() {
+            if value > threshold && i > last_peak + 2 {
+                if last_peak > 0 {
+                    peak_intervals.push(i - last_peak);
+                }
+                last_peak = i;
+            }
+        }
+        
+        if peak_intervals.is_empty() {
+            return 0.0;
+        }
+        
+        // Compute regularity as inverse of coefficient of variation
+        let mean_interval: f32 = peak_intervals.iter().sum::<f32>() / peak_intervals.len() as f32;
+        let variance: f32 = peak_intervals.iter()
+            .map(|&x| (x as f32 - mean_interval).powi(2))
+            .sum::<f32>() / peak_intervals.len() as f32;
+        
+        let std_dev = variance.sqrt();
+        if mean_interval > 0.0 {
+            let regularity = 1.0 / (1.0 + std_dev / mean_interval);
+            regularity.clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+    
+    /// Compute tempo stability
+    fn compute_tempo_stability(&self, power_spectrogram: &Array2<f32>) -> f32 {
+        let (n_frames, _) = power_spectrogram.dim();
+        if n_frames < 32 {
+            return 0.0;
+        }
+        
+        // Divide into segments and estimate tempo for each
+        let segment_size = n_frames / 4; // 4 segments
+        let mut tempo_estimates = Vec::new();
+        
+        for segment in 0..4 {
+            let start_frame = segment * segment_size;
+            let end_frame = ((segment + 1) * segment_size).min(n_frames);
+            
+            if end_frame - start_frame < 8 {
+                continue;
+            }
+            
+            // Extract segment
+            let segment_spec = power_spectrogram.slice(s![start_frame..end_frame, ..]);
+            
+            // Estimate tempo for this segment
+            let segment_tempo = self.estimate_tempo(&segment_spec.to_owned()).unwrap_or(120.0);
+            tempo_estimates.push(segment_tempo);
+        }
+        
+        if tempo_estimates.len() < 2 {
+            return 0.5; // Default stability
+        }
+        
+        // Compute stability as inverse of coefficient of variation
+        let mean_tempo: f32 = tempo_estimates.iter().sum::<f32>() / tempo_estimates.len() as f32;
+        let variance: f32 = tempo_estimates.iter()
+            .map(|&tempo| (tempo - mean_tempo).powi(2))
+            .sum::<f32>() / tempo_estimates.len() as f32;
+        
+        let std_dev = variance.sqrt();
+        if mean_tempo > 0.0 {
+            let stability = 1.0 / (1.0 + std_dev / mean_tempo);
+            stability.clamp(0.0, 1.0)
+        } else {
+            0.5
+        }
+    }
+}
+
+/// Mel-scale filterbank for mel spectrogram computation
+struct MelFilterbank {
+    filters: Array2<f32>,
+    n_mels: usize,
+}
+
+impl MelFilterbank {
+    fn new(sample_rate: u32, n_mels: usize, fft_size: usize, freq_min: f32, freq_max: f32) -> Self {
+        let n_bins = fft_size / 2 + 1;
+        let mut filters = Array2::zeros((n_mels, n_bins));
+        
+        // Convert frequency range to mel scale
+        let mel_min = Self::hz_to_mel(freq_min);
+        let mel_max = Self::hz_to_mel(freq_max);
+        
+        // Create mel-spaced frequency points
+        let mel_points: Vec<f32> = (0..=n_mels + 1)
+            .map(|i| mel_min + (mel_max - mel_min) * i as f32 / (n_mels + 1) as f32)
+            .collect();
+        
+        // Convert back to Hz
+        let hz_points: Vec<f32> = mel_points.iter()
+            .map(|&mel| Self::mel_to_hz(mel))
+            .collect();
+        
+        // Convert to FFT bin indices
+        let bin_points: Vec<usize> = hz_points.iter()
+            .map(|&hz| ((hz * fft_size as f32) / sample_rate as f32).round() as usize)
+            .collect();
+        
+        // Create triangular filters
+        for m in 0..n_mels {
+            let start = bin_points[m];
+            let center = bin_points[m + 1];
+            let end = bin_points[m + 2];
+            
+            // Rising edge
+            for k in start..center {
+                if center > start {
+                    filters[[m, k]] = (k - start) as f32 / (center - start) as f32;
+                }
+            }
+            
+            // Falling edge
+            for k in center..end {
+                if end > center {
+                    filters[[m, k]] = (end - k) as f32 / (end - center) as f32;
+                }
+            }
+        }
+        
+        Self { filters, n_mels }
+    }
+    
+    fn apply(&self, power_spectrogram: &Array2<f32>) -> Result<Array2<f32>> {
+        let (n_frames, n_bins) = power_spectrogram.dim();
+        let mut mel_spec = Array2::zeros((n_frames, self.n_mels));
+        
+        for frame_idx in 0..n_frames {
+            let frame = power_spectrogram.row(frame_idx);
+            
+            for mel_idx in 0..self.n_mels {
+                let filter = self.filters.row(mel_idx);
+                let energy: f32 = frame.iter().zip(filter.iter())
+                    .map(|(&power, &weight)| power * weight)
+                    .sum();
+                mel_spec[[frame_idx, mel_idx]] = energy;
+            }
+        }
+        
+        Ok(mel_spec)
+    }
+    
+    fn hz_to_mel(hz: f32) -> f32 {
+        2595.0 * (1.0 + hz / 700.0).log10()
+    }
+    
+    fn mel_to_hz(mel: f32) -> f32 {
+        700.0 * (10.0_f32.powf(mel / 2595.0) - 1.0)
+    }
+}
+
+/// Chroma filterbank for chroma feature computation
+struct ChromaFilterbank {
+    filters: Array2<f32>,
+}
+
+impl ChromaFilterbank {
+    fn new(sample_rate: u32, fft_size: usize) -> Self {
+        let n_bins = fft_size / 2 + 1;
+        let mut filters = Array2::zeros((12, n_bins));
+        
+        for bin in 0..n_bins {
+            let freq = bin as f32 * sample_rate as f32 / fft_size as f32;
+            if freq > 0.0 {
+                let pitch_class = Self::freq_to_pitch_class(freq);
+                filters[[pitch_class, bin]] = 1.0;
+            }
+        }
+        
+        Self { filters }
+    }
+    
+    fn apply(&self, power_spectrogram: &Array2<f32>) -> Result<Array2<f32>> {
+        let (n_frames, n_bins) = power_spectrogram.dim();
+        let mut chroma_spec = Array2::zeros((n_frames, 12));
+        
+        for frame_idx in 0..n_frames {
+            let frame = power_spectrogram.row(frame_idx);
+            
+            for chroma_idx in 0..12 {
+                let filter = self.filters.row(chroma_idx);
+                let energy: f32 = frame.iter().zip(filter.iter())
+                    .map(|(&power, &weight)| power * weight)
+                    .sum();
+                chroma_spec[[frame_idx, chroma_idx]] = energy;
+            }
+        }
+        
+        Ok(chroma_spec)
+    }
+    
+    fn freq_to_pitch_class(freq: f32) -> usize {
+        let midi_note = 69.0 + 12.0 * (freq / 440.0).log2();
+        (midi_note.round() as usize) % 12
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::Array1;
+    
+    #[test]
+    fn test_feature_extractor_creation() {
+        let config = FeatureConfig::default();
+        let extractor = FeatureExtractor::new(22050, config);
+        assert_eq!(extractor.sample_rate, 22050);
+    }
+    
+    #[test]
+    fn test_mel_filterbank() {
+        let filterbank = MelFilterbank::new(22050, 80, 2048, 0.0, 8000.0);
+        assert_eq!(filterbank.n_mels, 80);
+    }
+    
+    #[test]
+    fn test_chroma_filterbank() {
+        let filterbank = ChromaFilterbank::new(22050, 2048);
+        assert_eq!(filterbank.filters.nrows(), 12);
+    }
+    
+    #[test]
+    fn test_hz_to_mel_conversion() {
+        let mel_1000 = MelFilterbank::hz_to_mel(1000.0);
+        assert!((mel_1000 - 1000.0).abs() < 100.0); // Approximately 1000 mel
+        
+        let hz_back = MelFilterbank::mel_to_hz(mel_1000);
+        assert!((hz_back - 1000.0).abs() < 1.0);
+    }
+    
+    #[test]
+    fn test_pitch_class_conversion() {
+        let pitch_class_440 = ChromaFilterbank::freq_to_pitch_class(440.0); // A4
+        assert_eq!(pitch_class_440, 9); // A is the 9th pitch class (0-indexed)
+    }
+    
+    #[test]
+    fn test_feature_extraction_empty_input() {
+        let config = FeatureConfig::default();
+        let mut extractor = FeatureExtractor::new(22050, config);
+        
+        let empty_samples = Array1::zeros(0);
+        let features = extractor.extract_features(&empty_samples).unwrap();
+        
+        assert_eq!(features.mfcc.nrows(), 0);
+        assert_eq!(features.mel_spectrogram.nrows(), 0);
+        assert_eq!(features.chroma.nrows(), 0);
+    }
+    
+    #[test]
+    fn test_energy_statistics() {
+        let config = FeatureConfig::default();
+        let extractor = FeatureExtractor::new(22050, config);
+        
+        let energy_envelope = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let stats = extractor.compute_energy_statistics(&energy_envelope);
+        
+        assert!((stats.mean - 3.0).abs() < 1e-6);
+        assert!(stats.variance > 0.0);
+    }
+    
+    #[test]
+    fn test_spectral_centroid() {
+        let config = FeatureConfig::default();
+        let extractor = FeatureExtractor::new(22050, config);
+        
+        let frequencies = vec![100.0, 200.0, 300.0, 400.0];
+        let magnitudes = vec![0.1, 1.0, 0.1, 0.1]; // Peak at 200 Hz
+        
+        let centroid = extractor.compute_spectral_centroid(&frequencies, &magnitudes);
+        assert!((centroid - 200.0).abs() < 50.0);
+    }
+}

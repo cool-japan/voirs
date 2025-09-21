@@ -6,9 +6,9 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-documentation.workspace = true
+documentation = "https://docs.rs/voirs-cli"
 keywords.workspace = true
-categories.workspace = true
+categories = ["command-line-utilities", "multimedia::audio"]
 rust-version.workspace = true
 description = "Command-line interface for VoiRS speech synthesis"
 
@@ -18,11 +18,18 @@ path = "src/main.rs"
 
 [dependencies]
 # Core VoiRS crates
-voirs-sdk = { path = "../voirs-sdk" }
-voirs-g2p = { path = "../voirs-g2p" }
-voirs-acoustic = { path = "../voirs-acoustic" }
-voirs-vocoder = { path = "../voirs-vocoder" }
-# voirs-dataset = { path = "../voirs-dataset" }
+voirs = { version = "0.1.0-alpha.1", path = "../.." }
+voirs-sdk = { version = "0.1.0-alpha.1", path = "../voirs-sdk" }
+voirs-g2p = { version = "0.1.0-alpha.1", path = "../voirs-g2p" }
+voirs-acoustic = { version = "0.1.0-alpha.1", path = "../voirs-acoustic" }
+voirs-evaluation = { version = "0.1.0-alpha.1", path = "../voirs-evaluation" }
+voirs-vocoder = { version = "0.1.0-alpha.1", path = "../voirs-vocoder" }
+voirs-dataset = { version = "0.1.0-alpha.1", path = "../voirs-dataset" }
+voirs-emotion = { version = "0.1.0-alpha.1", path = "../voirs-emotion", optional = true }
+voirs-cloning = { version = "0.1.0-alpha.1", path = "../voirs-cloning", optional = true }
+voirs-conversion = { version = "0.1.0-alpha.1", path = "../voirs-conversion", optional = true }
+voirs-singing = { version = "0.1.0-alpha.1", path = "../voirs-singing", optional = true }
+voirs-spatial = { version = "0.1.0-alpha.1", path = "../voirs-spatial", optional = true }
 
 # CLI framework
 clap.workspace = true
@@ -31,6 +38,7 @@ clap_complete.workspace = true
 # Audio I/O
 hound.workspace = true
 cpal.workspace = true
+dasp.workspace = true
 
 # File handling and formats
 serde.workspace = true
@@ -55,19 +63,29 @@ tracing-subscriber.workspace = true
 
 # Additional utilities
 chrono.workspace = true
-regex = "1.10"
+regex.workspace = true
 csv.workspace = true
 tempfile.workspace = true
 num_cpus.workspace = true
+dirs.workspace = true
+fastrand.workspace = true
+semver.workspace = true
+flate2.workspace = true
+
+# Platform-specific utilities
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
 
 # Serialization formats for config
-serde_yaml = "0.9"
-base64 = "0.22"
+serde_yaml.workspace = true
+base64.workspace = true
 
 # Model management
 hf-hub.workspace = true
 reqwest.workspace = true
 sha2.workspace = true
+futures-util.workspace = true
+safetensors.workspace = true
 
 # HTTP server
 axum.workspace = true
@@ -75,6 +93,23 @@ tower.workspace = true
 tower-http.workspace = true
 hyper.workspace = true
 
+# Plugin system
+libloading.workspace = true
+wasmtime.workspace = true
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.0"
+tempfile = "3.8"
+
 [features]
-default = []
+default = ["emotion", "cloning", "conversion", "singing", "spatial", "cloud"]
 gpu = ["voirs-acoustic/gpu", "voirs-vocoder/gpu"]
+emotion = ["dep:voirs-emotion"]
+cloning = ["dep:voirs-cloning"]
+conversion = ["dep:voirs-conversion"]
+singing = ["dep:voirs-singing"]
+spatial = ["dep:voirs-spatial"]
+cloud = []
+[lints]
+workspace = true

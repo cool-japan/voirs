@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>{{NAME}}</id>
+    <version>{{VERSION}}</version>
+    <packageSourceUrl>{{REPOSITORY}}</packageSourceUrl>
+    <owners>{{AUTHOR}}</owners>
+    <title>VoiRS Speech Synthesis CLI</title>
+    <authors>{{AUTHOR}}</authors>
+    <projectUrl>{{REPOSITORY}}</projectUrl>
+    <iconUrl>{{REPOSITORY}}/raw/main/assets/icon.png</iconUrl>
+    <copyright>2024 VoiRS Team</copyright>
+    <licenseUrl>{{REPOSITORY}}/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <projectSourceUrl>{{REPOSITORY}}</projectSourceUrl>
+    <docsUrl>{{REPOSITORY}}/blob/main/README.md</docsUrl>
+    <bugTrackerUrl>{{REPOSITORY}}/issues</bugTrackerUrl>
+    <tags>speech synthesis tts voice cli audio</tags>
+    <summary>{{DESCRIPTION}}</summary>
+    <description>{{DESCRIPTION}}
+
+VoiRS is a high-performance speech synthesis system that provides neural text-to-speech capabilities with multiple voice options and advanced audio processing features.
+
+Features:
+- Multiple voice options with different languages and styles
+- High-quality neural speech synthesis
+- Batch processing capabilities
+- Interactive mode with real-time synthesis
+- Audio format support (WAV, FLAC, MP3, Opus)
+- SSML support for advanced speech control
+- Configuration profiles and presets
+- Cross-platform compatibility
+    </description>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

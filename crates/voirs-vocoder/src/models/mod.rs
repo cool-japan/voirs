@@ -1,7 +1,10 @@
 //! Vocoder model definitions and implementations.
 
-pub mod hifigan;
 pub mod diffwave;
+pub mod hifigan;
+pub mod singing;
+pub mod spatial;
+pub mod vits2;
 
 use crate::{Result, VocoderError};
 use serde::{Deserialize, Serialize};
@@ -88,8 +91,7 @@ impl ModelLoader {
 
         if !self.supported_formats.iter().any(|f| f == extension) {
             return Err(VocoderError::ModelError(format!(
-                "Unsupported model format: {}",
-                extension
+                "Unsupported model format: {extension}"
             )));
         }
 
@@ -100,16 +102,46 @@ impl ModelLoader {
             .unwrap_or("unknown")
             .to_string();
 
-        // For now, return a basic configuration
-        // TODO: Implement proper model loading based on format
-        Ok(VocoderModelConfig::new(
-            name,
-            "unknown".to_string(),
-            "1.0.0".to_string(),
-            22050,
-            80,
-        )
-        .with_model_path(path.to_string_lossy().to_string()))
+        // Implement proper model loading based on format
+        use crate::backends::loader::ModelLoader;
+
+        let mut loader = ModelLoader::new();
+
+        match tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(loader.load_from_file(path))
+        {
+            Ok(model_info) => {
+                let sample_rate = model_info
+                    .metadata
+                    .supported_sample_rates
+                    .first()
+                    .copied()
+                    .unwrap_or(22050);
+                let config = VocoderModelConfig::new(
+                    model_info.metadata.name.clone(),
+                    format!("{:?}", model_info.format),
+                    model_info.metadata.version.clone(),
+                    sample_rate,
+                    model_info.metadata.mel_channels,
+                )
+                .with_model_path(path.to_string_lossy().to_string());
+
+                Ok(config)
+            }
+            Err(e) => {
+                eprintln!("Warning: Could not load model info: {e}. Using basic config.");
+                // Fallback to basic configuration
+                Ok(VocoderModelConfig::new(
+                    name,
+                    "unknown".to_string(),
+                    "1.0.0".to_string(),
+                    22050,
+                    80,
+                )
+                .with_model_path(path.to_string_lossy().to_string()))
+            }
+        }
     }
 
     /// Check if format is supported
@@ -156,12 +188,12 @@ mod tests {
     #[test]
     fn test_model_loader() {
         let loader = ModelLoader::new();
-        
+
         assert!(loader.supports_format("safetensors"));
         assert!(loader.supports_format("pytorch"));
         assert!(loader.supports_format("onnx"));
         assert!(!loader.supports_format("unknown"));
-        
+
         assert_eq!(loader.supported_formats().len(), 3);
     }
 }

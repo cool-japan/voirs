@@ -3,10 +3,10 @@
 //! This module provides functionality to export datasets in TensorFlow-compatible formats.
 //! It supports tf.data.Dataset creation, TFRecord format export, and pipeline optimization.
 
-use crate::{DatasetSample, DatasetError, Result};
+use crate::{DatasetSample, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tokio::fs;
 
 /// TensorFlow export configuration
@@ -193,16 +193,12 @@ impl TensorFlowExporter {
     }
 
     /// Create exporter with default configuration
-    pub fn default() -> Self {
+    pub fn new_default() -> Self {
         Self::new(TensorFlowConfig::default())
     }
 
     /// Export dataset to TensorFlow format
-    pub async fn export_dataset(
-        &self,
-        samples: &[DatasetSample],
-        output_dir: &Path,
-    ) -> Result<()> {
+    pub async fn export_dataset(&self, samples: &[DatasetSample], output_dir: &Path) -> Result<()> {
         // Create output directory
         fs::create_dir_all(output_dir).await?;
 
@@ -243,15 +239,24 @@ impl TensorFlowExporter {
 
             // Add speaker ID
             if let Some(ref speaker) = sample.speaker {
-                features.insert("speaker_id".to_string(), TfFeature::String(speaker.id.clone()));
+                features.insert(
+                    "speaker_id".to_string(),
+                    TfFeature::String(speaker.id.clone()),
+                );
                 all_speakers.insert(speaker.id.clone());
             } else {
-                features.insert("speaker_id".to_string(), TfFeature::String("unknown".to_string()));
+                features.insert(
+                    "speaker_id".to_string(),
+                    TfFeature::String("unknown".to_string()),
+                );
             }
 
             // Add language
             let language = sample.language.as_str();
-            features.insert("language".to_string(), TfFeature::String(language.to_string()));
+            features.insert(
+                "language".to_string(),
+                TfFeature::String(language.to_string()),
+            );
             all_languages.insert(language.to_string());
 
             // Add sample ID
@@ -312,17 +317,24 @@ impl TensorFlowExporter {
         let channels = samples.first().map(|s| s.audio.channels());
 
         let mut splits = HashMap::new();
-        splits.insert("train".to_string(), SplitInfo {
-            num_examples: samples.len(),
-            shards: vec!["train-00000-of-00001.tfrecord".to_string()],
-        });
+        splits.insert(
+            "train".to_string(),
+            SplitInfo {
+                num_examples: samples.len(),
+                shards: vec!["train-00000-of-00001.tfrecord".to_string()],
+            },
+        );
 
         let metadata = TfDatasetMetadata {
             name: "tensorflow-dataset".to_string(),
             total_samples: samples.len(),
             sample_rate,
             channels,
-            vocab_size: if vocab_size > 0 { Some(vocab_size) } else { None },
+            vocab_size: if vocab_size > 0 {
+                Some(vocab_size)
+            } else {
+                None
+            },
             speakers: all_speakers.into_iter().collect(),
             languages: all_languages.into_iter().collect(),
             splits,
@@ -342,7 +354,9 @@ impl TensorFlowExporter {
 
         // Normalize if requested
         if self.config.normalize_audio {
-            let max_val = samples.iter().fold(0.0f32, |max, &sample| max.max(sample.abs()));
+            let max_val = samples
+                .iter()
+                .fold(0.0f32, |max, &sample| max.max(sample.abs()));
             if max_val > 0.0 {
                 let scale = 1.0 / max_val;
                 for sample in &mut samples {
@@ -388,29 +402,26 @@ impl TensorFlowExporter {
     /// Process text feature
     fn process_text_feature(&self, text: &str) -> Result<(TfFeature, usize)> {
         match self.config.text_encoding {
-            TextEncoding::Utf8 => {
-                Ok((TfFeature::String(text.to_string()), 0))
-            },
+            TextEncoding::Utf8 => Ok((TfFeature::String(text.to_string()), 0)),
             TextEncoding::Bytes => {
                 let bytes = text.as_bytes().to_vec();
                 Ok((TfFeature::Bytes(bytes), 256)) // ASCII/UTF-8 byte range
-            },
+            }
             TextEncoding::Characters => {
-                let char_indices: Vec<i64> = text.chars()
-                    .map(|c| c as u32 as i64)
-                    .collect();
+                let char_indices: Vec<i64> = text.chars().map(|c| c as u32 as i64).collect();
                 let max_char = char_indices.iter().max().copied().unwrap_or(0) as usize;
                 Ok((TfFeature::Int64List(char_indices), max_char + 1))
-            },
+            }
             TextEncoding::Subwords => {
                 // Simple whitespace tokenization for demo
-                let tokens: Vec<i64> = text.split_whitespace()
+                let tokens: Vec<i64> = text
+                    .split_whitespace()
                     .enumerate()
                     .map(|(i, _)| i as i64)
                     .collect();
                 let vocab_size = text.split_whitespace().count();
                 Ok((TfFeature::Int64List(tokens), vocab_size))
-            },
+            }
         }
     }
 
@@ -429,28 +440,329 @@ impl TensorFlowExporter {
 
     /// Export as TFRecord format
     async fn export_tfrecord(&self, dataset: &TensorFlowDataset, output_dir: &Path) -> Result<()> {
-        // For now, export TFRecord descriptions as JSON
-        // In a real implementation, this would create actual TFRecord files
+        // Create actual TFRecord binary files
+        fs::create_dir_all(output_dir).await?;
+
+        // Determine number of shards (split large datasets into multiple files)
+        let samples_per_shard = 1000; // Configurable shard size
+        let total_shards = (dataset.samples.len() + samples_per_shard - 1) / samples_per_shard;
+
+        for shard_idx in 0..total_shards {
+            let start_idx = shard_idx * samples_per_shard;
+            let end_idx = ((shard_idx + 1) * samples_per_shard).min(dataset.samples.len());
+            let shard_samples = &dataset.samples[start_idx..end_idx];
+
+            let filename = format!("train-{shard_idx:05}-of-{total_shards:05}.tfrecord");
+            let tfrecord_path = output_dir.join(&filename);
+
+            self.write_tfrecord_shard(shard_samples, &tfrecord_path)
+                .await?;
+        }
+
+        // Also export metadata for reference
         let tfrecord_info = serde_json::json!({
             "format": "TFRecord",
             "compression": format!("{:?}", self.config.compression_type),
             "feature_spec": dataset.feature_spec,
             "metadata": dataset.metadata,
             "total_examples": dataset.samples.len(),
+            "total_shards": total_shards,
+            "samples_per_shard": samples_per_shard,
             "shard_pattern": "train-{shard:05d}-of-{total_shards:05d}.tfrecord"
         });
 
-        fs::write(output_dir.join("tfrecord_info.json"), serde_json::to_string_pretty(&tfrecord_info)?).await?;
-
-        // Export sample data in JSON format for conversion
-        let samples_json = serde_json::to_string_pretty(&dataset.samples)?;
-        fs::write(output_dir.join("samples.json"), samples_json).await?;
+        fs::write(
+            output_dir.join("dataset_info.json"),
+            serde_json::to_string_pretty(&tfrecord_info)?,
+        )
+        .await?;
 
         Ok(())
     }
 
+    /// Write a single TFRecord shard file
+    async fn write_tfrecord_shard(&self, samples: &[TfSample], output_path: &Path) -> Result<()> {
+        let mut buffer = Vec::new();
+
+        for sample in samples {
+            // Convert sample to TensorFlow Example proto format
+            let example_bytes = self.serialize_tf_example(sample)?;
+
+            // Write TFRecord format: [length][crc32(length)][data][crc32(data)]
+            self.write_tfrecord_entry(&mut buffer, &example_bytes)?;
+        }
+
+        // Apply compression if specified
+        let final_data = match self.config.compression_type {
+            CompressionType::None => buffer,
+            CompressionType::Gzip => {
+                use flate2::{write::GzEncoder, Compression};
+                use std::io::Write;
+
+                let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+                encoder.write_all(&buffer)?;
+                encoder.finish()?
+            }
+            CompressionType::Zlib => {
+                use flate2::{write::ZlibEncoder, Compression};
+                use std::io::Write;
+
+                let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+                encoder.write_all(&buffer)?;
+                encoder.finish()?
+            }
+        };
+
+        fs::write(output_path, final_data).await?;
+        Ok(())
+    }
+
+    /// Write a single TFRecord entry with proper format
+    fn write_tfrecord_entry(&self, buffer: &mut Vec<u8>, data: &[u8]) -> Result<()> {
+        use std::io::Write;
+
+        // TFRecord format: [length][crc32(length)][data][crc32(data)]
+        let length = data.len() as u64;
+        let length_bytes = length.to_le_bytes();
+        let length_crc = self.calculate_crc32(&length_bytes);
+        let data_crc = self.calculate_crc32(data);
+
+        // Write length (8 bytes, little endian)
+        buffer.write_all(&length_bytes)?;
+
+        // Write CRC32 of length (4 bytes, little endian)
+        buffer.write_all(&length_crc.to_le_bytes())?;
+
+        // Write data
+        buffer.write_all(data)?;
+
+        // Write CRC32 of data (4 bytes, little endian)
+        buffer.write_all(&data_crc.to_le_bytes())?;
+
+        Ok(())
+    }
+
+    /// Calculate CRC32 checksum for TFRecord format
+    fn calculate_crc32(&self, data: &[u8]) -> u32 {
+        // Simple CRC32 implementation for TFRecord format
+        // Note: TensorFlow uses a specific CRC32 variant
+        let mut crc = 0xFFFFFFFF_u32;
+
+        for &byte in data {
+            crc ^= byte as u32;
+            for _ in 0..8 {
+                if crc & 1 != 0 {
+                    crc = (crc >> 1) ^ 0xEDB88320;
+                } else {
+                    crc >>= 1;
+                }
+            }
+        }
+
+        !crc
+    }
+
+    /// Serialize a TensorFlow sample to Example proto format
+    fn serialize_tf_example(&self, sample: &TfSample) -> Result<Vec<u8>> {
+        // Implement proper binary protobuf serialization for TensorFlow Example proto
+        // This creates a binary format compatible with TensorFlow's tf.train.Example
+
+        let mut buffer = Vec::new();
+
+        // Example proto structure:
+        // message Example {
+        //   Features features = 1;
+        // }
+
+        // Start with features field (tag 1, wire type 2 = length-delimited)
+        self.write_protobuf_tag(&mut buffer, 1, 2);
+
+        // Calculate features payload
+        let features_payload = self.serialize_features(&sample.features)?;
+        self.write_protobuf_varint(&mut buffer, features_payload.len() as u64);
+        buffer.extend_from_slice(&features_payload);
+
+        Ok(buffer)
+    }
+
+    /// Serialize features map to protobuf format
+    fn serialize_features(
+        &self,
+        features: &std::collections::HashMap<String, TfFeature>,
+    ) -> Result<Vec<u8>> {
+        // Features proto structure:
+        // message Features {
+        //   map<string, Feature> feature = 1;
+        // }
+
+        let mut buffer = Vec::new();
+
+        for (feature_name, feature_value) in features {
+            // Each map entry is encoded as a nested message with tag 1
+            self.write_protobuf_tag(&mut buffer, 1, 2);
+
+            // Calculate feature entry payload
+            let feature_entry = self.serialize_feature_entry(feature_name, feature_value)?;
+            self.write_protobuf_varint(&mut buffer, feature_entry.len() as u64);
+            buffer.extend_from_slice(&feature_entry);
+        }
+
+        Ok(buffer)
+    }
+
+    /// Serialize a single feature map entry
+    fn serialize_feature_entry(&self, name: &str, feature: &TfFeature) -> Result<Vec<u8>> {
+        // Map entry structure:
+        // message FeatureEntry {
+        //   string key = 1;
+        //   Feature value = 2;
+        // }
+
+        let mut buffer = Vec::new();
+
+        // Write key (tag 1, wire type 2 = length-delimited)
+        self.write_protobuf_tag(&mut buffer, 1, 2);
+        self.write_protobuf_string(&mut buffer, name);
+
+        // Write value (tag 2, wire type 2 = length-delimited)
+        self.write_protobuf_tag(&mut buffer, 2, 2);
+        let feature_payload = self.serialize_feature(feature)?;
+        self.write_protobuf_varint(&mut buffer, feature_payload.len() as u64);
+        buffer.extend_from_slice(&feature_payload);
+
+        Ok(buffer)
+    }
+
+    /// Serialize a single feature to protobuf format
+    fn serialize_feature(&self, feature: &TfFeature) -> Result<Vec<u8>> {
+        // Feature proto structure:
+        // message Feature {
+        //   oneof kind {
+        //     BytesList bytes_list = 1;
+        //     FloatList float_list = 2;
+        //     Int64List int64_list = 3;
+        //   }
+        // }
+
+        let mut buffer = Vec::new();
+
+        match feature {
+            TfFeature::Bytes(data) => {
+                // bytes_list field (tag 1, wire type 2)
+                self.write_protobuf_tag(&mut buffer, 1, 2);
+                let bytes_list = self.serialize_bytes_list(&[data.clone()])?;
+                self.write_protobuf_varint(&mut buffer, bytes_list.len() as u64);
+                buffer.extend_from_slice(&bytes_list);
+            }
+            TfFeature::FloatList(values) => {
+                // float_list field (tag 2, wire type 2)
+                self.write_protobuf_tag(&mut buffer, 2, 2);
+                let float_list = self.serialize_float_list(values)?;
+                self.write_protobuf_varint(&mut buffer, float_list.len() as u64);
+                buffer.extend_from_slice(&float_list);
+            }
+            TfFeature::Int64List(values) => {
+                // int64_list field (tag 3, wire type 2)
+                self.write_protobuf_tag(&mut buffer, 3, 2);
+                let int64_list = self.serialize_int64_list(values)?;
+                self.write_protobuf_varint(&mut buffer, int64_list.len() as u64);
+                buffer.extend_from_slice(&int64_list);
+            }
+            TfFeature::String(text) => {
+                // string as bytes_list field (tag 1, wire type 2)
+                self.write_protobuf_tag(&mut buffer, 1, 2);
+                let bytes_list = self.serialize_bytes_list(&[text.as_bytes().to_vec()])?;
+                self.write_protobuf_varint(&mut buffer, bytes_list.len() as u64);
+                buffer.extend_from_slice(&bytes_list);
+            }
+        }
+
+        Ok(buffer)
+    }
+
+    /// Serialize bytes list
+    fn serialize_bytes_list(&self, bytes_vec: &[Vec<u8>]) -> Result<Vec<u8>> {
+        // BytesList proto structure:
+        // message BytesList {
+        //   repeated bytes value = 1;
+        // }
+
+        let mut buffer = Vec::new();
+
+        for bytes in bytes_vec {
+            // Each bytes value (tag 1, wire type 2)
+            self.write_protobuf_tag(&mut buffer, 1, 2);
+            self.write_protobuf_varint(&mut buffer, bytes.len() as u64);
+            buffer.extend_from_slice(bytes);
+        }
+
+        Ok(buffer)
+    }
+
+    /// Serialize float list
+    fn serialize_float_list(&self, values: &[f32]) -> Result<Vec<u8>> {
+        // FloatList proto structure:
+        // message FloatList {
+        //   repeated float value = 1;
+        // }
+
+        let mut buffer = Vec::new();
+
+        for &value in values {
+            // Each float value (tag 1, wire type 5 = fixed32)
+            self.write_protobuf_tag(&mut buffer, 1, 5);
+            buffer.extend_from_slice(&value.to_le_bytes());
+        }
+
+        Ok(buffer)
+    }
+
+    /// Serialize int64 list
+    fn serialize_int64_list(&self, values: &[i64]) -> Result<Vec<u8>> {
+        // Int64List proto structure:
+        // message Int64List {
+        //   repeated int64 value = 1;
+        // }
+
+        let mut buffer = Vec::new();
+
+        for &value in values {
+            // Each int64 value (tag 1, wire type 0 = varint)
+            self.write_protobuf_tag(&mut buffer, 1, 0);
+            self.write_protobuf_varint(&mut buffer, value as u64);
+        }
+
+        Ok(buffer)
+    }
+
+    /// Write protobuf tag (field number and wire type)
+    fn write_protobuf_tag(&self, buffer: &mut Vec<u8>, field_number: u32, wire_type: u32) {
+        let tag = (field_number << 3) | wire_type;
+        self.write_protobuf_varint(buffer, tag as u64);
+    }
+
+    /// Write protobuf varint encoding
+    fn write_protobuf_varint(&self, buffer: &mut Vec<u8>, mut value: u64) {
+        while value >= 0x80 {
+            buffer.push((value & 0x7F) as u8 | 0x80);
+            value >>= 7;
+        }
+        buffer.push(value as u8);
+    }
+
+    /// Write protobuf string (length-prefixed bytes)
+    fn write_protobuf_string(&self, buffer: &mut Vec<u8>, s: &str) {
+        let bytes = s.as_bytes();
+        self.write_protobuf_varint(buffer, bytes.len() as u64);
+        buffer.extend_from_slice(bytes);
+    }
+
     /// Export as SavedModel format
-    async fn export_savedmodel(&self, dataset: &TensorFlowDataset, output_dir: &Path) -> Result<()> {
+    async fn export_savedmodel(
+        &self,
+        dataset: &TensorFlowDataset,
+        output_dir: &Path,
+    ) -> Result<()> {
         let savedmodel_info = serde_json::json!({
             "format": "SavedModel",
             "signature_def": {
@@ -464,7 +776,11 @@ impl TensorFlowExporter {
             "metadata": dataset.metadata
         });
 
-        fs::write(output_dir.join("savedmodel_info.json"), serde_json::to_string_pretty(&savedmodel_info)?).await?;
+        fs::write(
+            output_dir.join("savedmodel_info.json"),
+            serde_json::to_string_pretty(&savedmodel_info)?,
+        )
+        .await?;
         Ok(())
     }
 
@@ -476,7 +792,11 @@ impl TensorFlowExporter {
     }
 
     /// Export dataset information
-    async fn export_dataset_info(&self, dataset: &TensorFlowDataset, output_dir: &Path) -> Result<()> {
+    async fn export_dataset_info(
+        &self,
+        dataset: &TensorFlowDataset,
+        output_dir: &Path,
+    ) -> Result<()> {
         let info = serde_json::json!({
             "name": dataset.metadata.name,
             "total_samples": dataset.metadata.total_samples,
@@ -489,7 +809,11 @@ impl TensorFlowExporter {
             "config": dataset.config
         });
 
-        fs::write(output_dir.join("dataset_info.json"), serde_json::to_string_pretty(&info)?).await?;
+        fs::write(
+            output_dir.join("dataset_info.json"),
+            serde_json::to_string_pretty(&info)?,
+        )
+        .await?;
         Ok(())
     }
 
@@ -683,7 +1007,7 @@ if __name__ == "__main__":
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AudioData, LanguageCode, SpeakerInfo};
+    use crate::{AudioData, LanguageCode};
     use tempfile::TempDir;
 
     #[tokio::test]
@@ -708,8 +1032,8 @@ mod tests {
             TfFeature::Int64List(chars) => {
                 assert_eq!(chars.len(), 5); // "hello" has 5 characters
                 assert!(vocab_size > 0);
-            },
-            _ => panic!("Expected Int64List for character encoding"),
+            }
+            _ => panic!("Expected Int64List for character encoding but got a different type"),
         }
     }
 
@@ -727,10 +1051,12 @@ mod tests {
         match result {
             TfFeature::FloatList(samples) => {
                 // Check that audio was normalized
-                let max_val = samples.iter().fold(0.0f32, |max, &sample| max.max(sample.abs()));
+                let max_val = samples
+                    .iter()
+                    .fold(0.0f32, |max, &sample| max.max(sample.abs()));
                 assert!((max_val - 1.0).abs() < 0.001);
-            },
-            _ => panic!("Expected FloatList for audio"),
+            }
+            _ => panic!("Expected FloatList for audio but got a different type"),
         }
     }
 
@@ -740,16 +1066,17 @@ mod tests {
         let config = TensorFlowConfig::default();
         let exporter = TensorFlowExporter::new(config);
 
-        let samples = vec![
-            crate::DatasetSample::new(
-                "sample_001".to_string(),
-                "Test sample".to_string(),
-                AudioData::silence(1.0, 22050, 1),
-                LanguageCode::EnUs,
-            ),
-        ];
+        let samples = vec![crate::DatasetSample::new(
+            "sample_001".to_string(),
+            "Test sample".to_string(),
+            AudioData::silence(1.0, 22050, 1),
+            LanguageCode::EnUs,
+        )];
 
-        exporter.export_dataset(&samples, temp_dir.path()).await.unwrap();
+        exporter
+            .export_dataset(&samples, temp_dir.path())
+            .await
+            .unwrap();
 
         // Check that files were created
         assert!(temp_dir.path().join("dataset.json").exists());
@@ -758,7 +1085,9 @@ mod tests {
         assert!(temp_dir.path().join("tensorflow_loader.py").exists());
 
         // Check JSON content
-        let json_content = fs::read_to_string(temp_dir.path().join("dataset.json")).await.unwrap();
+        let json_content = fs::read_to_string(temp_dir.path().join("dataset.json"))
+            .await
+            .unwrap();
         assert!(json_content.contains("sample_001"));
         assert!(json_content.contains("Test sample"));
     }

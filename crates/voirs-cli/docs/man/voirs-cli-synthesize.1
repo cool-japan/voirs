@@ -1,0 +1,213 @@
+.TH VOIRS-CLI-SYNTHESIZE 1 "2025-07-05" "voirs-cli" "VoiRS CLI Manual"
+
+.SH NAME
+voirs-cli-synthesize \- Convert text to speech using VoiRS synthesis engine
+
+.SH SYNOPSIS
+.B voirs-cli synthesize
+[\fIOPTIONS\fR]
+.I TEXT
+[\fB\-o\fR|\fB\-\-output\fR \fIFILE\fR]
+
+.SH DESCRIPTION
+The synthesize command converts text to speech using the VoiRS synthesis engine. It supports various input methods, voice selection, quality settings, and output formats. The command can process plain text or SSML (Speech Synthesis Markup Language) input.
+
+.SH OPTIONS
+.TP
+.B \-o, \-\-output \fIFILE\fR
+Specify output file path. If not provided, audio will be played directly.
+
+.TP
+.B \-v, \-\-voice \fIVOICE\fR
+Select voice for synthesis. Use 'voirs-cli voices' to list available voices.
+
+.TP
+.B \-q, \-\-quality \fILEVEL\fR
+Set synthesis quality level. Options: low, medium, high, ultra (default: medium).
+
+.TP
+.B \-f, \-\-format \fIFORMAT\fR
+Output audio format. Options: wav, mp3, flac, opus, ogg (default: wav).
+
+.TP
+.B \-\-speed \fIRATE\fR
+Speaking rate adjustment. Range: 0.1 to 3.0 (default: 1.0).
+
+.TP
+.B \-\-pitch \fIFACTOR\fR
+Pitch modification factor. Range: 0.1 to 2.0 (default: 1.0).
+
+.TP
+.B \-\-volume \fILEVEL\fR
+Volume control. Range: 0.0 to 2.0 (default: 1.0).
+
+.TP
+.B \-\-sample-rate \fIRATE\fR
+Audio sample rate in Hz. Common values: 16000, 22050, 44100, 48000.
+
+.TP
+.B \-\-enhance
+Enable audio enhancement processing for improved quality.
+
+.TP
+.B \-\-ssml
+Treat input as SSML markup. Automatically detected if input contains SSML tags.
+
+.TP
+.B \-\-validate-ssml
+Validate SSML markup without performing synthesis.
+
+.TP
+.B \-\-streaming
+Enable streaming synthesis for long texts with chunk-based processing.
+
+.TP
+.B \-\-chunk-size \fISIZE\fR
+Size of text chunks for streaming synthesis (default: 1000 characters).
+
+.TP
+.B \-\-no-play
+Don't play audio automatically, only save to file.
+
+.TP
+.B \-\-metadata
+Include synthesis metadata in output file.
+
+.SH INPUT METHODS
+.TP
+.B Command line argument
+Provide text directly as command argument.
+
+.TP
+.B Standard input
+Read text from stdin using pipe or redirection.
+
+.TP
+.B File input
+Read text from file using '@filename' syntax.
+
+.SH SSML SUPPORT
+The synthesize command supports SSML (Speech Synthesis Markup Language) for advanced speech control:
+
+.TP
+.B <speak>
+Root element for SSML content.
+
+.TP
+.B <prosody>
+Control speech rate, pitch, and volume.
+
+.TP
+.B <break>
+Insert pauses in speech.
+
+.TP
+.B <emphasis>
+Add emphasis to words or phrases.
+
+.TP
+.B <phoneme>
+Specify phonetic pronunciation.
+
+.TP
+.B <say-as>
+Control how text is interpreted (numbers, dates, etc.).
+
+.SH EXAMPLES
+.TP
+.B Basic synthesis
+voirs-cli synthesize "Hello, world!" -o greeting.wav
+
+.TP
+.B Voice and quality selection
+voirs-cli synthesize "Welcome to VoiRS" --voice en-US-female-1 --quality high
+
+.TP
+.B SSML synthesis
+voirs-cli synthesize '<speak><prosody rate="slow">Hello there!</prosody></speak>' --format mp3
+
+.TP
+.B Speed and pitch adjustment
+voirs-cli synthesize "Fast speech" --speed 1.5 --pitch 1.2 --format flac
+
+.TP
+.B File input
+voirs-cli synthesize @story.txt --output audiobook.mp3 --streaming
+
+.TP
+.B Stdin input
+echo "Piped text" | voirs-cli synthesize --voice en-GB-male-1
+
+.TP
+.B SSML validation
+voirs-cli synthesize '<speak><break time="1s"/>Hello</speak>' --validate-ssml
+
+.TP
+.B Enhanced quality
+voirs-cli synthesize "High quality speech" --quality ultra --enhance --sample-rate 48000
+
+.SH STREAMING MODE
+For long texts, streaming mode processes content in chunks:
+
+.TP
+.B Advantages
+- Lower memory usage
+- Faster time-to-first-audio
+- Progress indication for long texts
+- Concurrent processing of chunks
+
+.TP
+.B Usage
+voirs-cli synthesize @long-document.txt --streaming --chunk-size 2000
+
+.SH AUDIO FORMATS
+.TP
+.B WAV
+Uncompressed audio, best quality, larger file size.
+
+.TP
+.B MP3
+Compressed audio, good quality, smaller file size.
+
+.TP
+.B FLAC
+Lossless compression, excellent quality, moderate file size.
+
+.TP
+.B Opus
+Modern codec, excellent compression, good for streaming.
+
+.TP
+.B OGG
+Open-source codec, good compression, cross-platform.
+
+.SH EXIT STATUS
+.TP
+.B 0
+Successful synthesis.
+
+.TP
+.B 1
+General error or invalid usage.
+
+.TP
+.B 2
+Voice not found or not available.
+
+.TP
+.B 3
+Invalid SSML markup.
+
+.TP
+.B 4
+Audio processing error.
+
+.TP
+.B 5
+File I/O error.
+
+.SH SEE ALSO
+.BR voirs-cli (1),
+.BR voirs-cli-voices (1),
+.BR voirs-cli-batch (1),
+.BR voirs-cli-interactive (1)

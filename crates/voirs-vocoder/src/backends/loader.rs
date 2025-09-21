@@ -3,12 +3,12 @@
 //! This module provides functionality for loading, validating, and managing
 //! neural vocoder models from various sources and formats.
 
-use crate::{Result, VocoderError};
 use crate::config::{ModelConfig, ModelMetadata};
+use crate::{Result, VocoderError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::fs;
+use std::path::{Path, PathBuf};
 
 /// Model format types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -108,25 +108,24 @@ impl ModelLoader {
     /// Load model from local file
     pub async fn load_from_file<P: AsRef<Path>>(&mut self, path: P) -> Result<ModelInfo> {
         let path = path.as_ref();
-        
+
         if !path.exists() {
-            return Err(VocoderError::ModelError(
-                format!("Model file not found: {}", path.display())
-            ));
+            return Err(VocoderError::ModelError(format!(
+                "Model file not found: {}",
+                path.display()
+            )));
         }
 
-        let format = ModelFormat::from_path(path)
-            .ok_or_else(|| VocoderError::ModelError(
-                format!("Unsupported model format: {}", path.display())
-            ))?;
+        let format = ModelFormat::from_path(path).ok_or_else(|| {
+            VocoderError::ModelError(format!("Unsupported model format: {}", path.display()))
+        })?;
 
         let metadata = fs::metadata(path)
-            .map_err(|e| VocoderError::ModelError(
-                format!("Failed to read model metadata: {}", e)
-            ))?;
+            .map_err(|e| VocoderError::ModelError(format!("Failed to read model metadata: {e}")))?;
 
         let size_bytes = metadata.len();
-        let modified_time = metadata.modified()
+        let modified_time = metadata
+            .modified()
             .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
 
         // Extract model metadata
@@ -154,14 +153,15 @@ impl ModelLoader {
 
     /// Load model from URL
     pub async fn load_from_url(&mut self, url: &str, config: &ModelConfig) -> Result<ModelInfo> {
-        let cache_dir = self.cache_dir.as_ref()
+        let cache_dir = self
+            .cache_dir
+            .as_ref()
             .ok_or_else(|| VocoderError::ConfigError("Cache directory not set".to_string()))?;
 
         // Create cache directory if it doesn't exist
-        fs::create_dir_all(cache_dir)
-            .map_err(|e| VocoderError::ConfigError(
-                format!("Failed to create cache directory: {}", e)
-            ))?;
+        fs::create_dir_all(cache_dir).map_err(|e| {
+            VocoderError::ConfigError(format!("Failed to create cache directory: {e}"))
+        })?;
 
         // Generate cache file name from URL
         let cache_filename = self.url_to_filename(url);
@@ -190,10 +190,9 @@ impl ModelLoader {
             let actual_checksum = self.calculate_checksum(&cache_path).await?;
             if actual_checksum != *expected_checksum {
                 fs::remove_file(&cache_path).ok(); // Clean up invalid file
-                return Err(VocoderError::ModelError(
-                    format!("Model checksum mismatch. Expected: {}, Got: {}", 
-                           expected_checksum, actual_checksum)
-                ));
+                return Err(VocoderError::ModelError(format!(
+                    "Model checksum mismatch. Expected: {expected_checksum}, Got: {actual_checksum}"
+                )));
             }
         }
 
@@ -233,8 +232,8 @@ impl ModelLoader {
 
         // Check file size
         let metadata = fs::metadata(path)
-            .map_err(|e| VocoderError::ModelError(format!("Failed to read file metadata: {}", e)))?;
-        
+            .map_err(|e| VocoderError::ModelError(format!("Failed to read file metadata: {e}")))?;
+
         let size_mb = metadata.len() as f64 / (1024.0 * 1024.0);
         if size_mb < 1.0 {
             warnings.push("Model file is very small and may be incomplete".to_string());
@@ -245,13 +244,14 @@ impl ModelLoader {
         // Format-specific validation
         match format {
             ModelFormat::SafeTensors => {
-                self.validate_safetensors(path, &mut errors, &mut warnings).await?;
+                self.validate_safetensors(path, &mut errors, &mut warnings)
+                    .await?;
             }
             ModelFormat::ONNX => {
                 self.validate_onnx(path, &mut errors, &mut warnings).await?;
             }
             _ => {
-                warnings.push(format!("Validation not implemented for {:?} format", format));
+                warnings.push(format!("Validation not implemented for {format:?} format"));
             }
         }
 
@@ -271,17 +271,23 @@ impl ModelLoader {
     }
 
     /// Extract model metadata
-    async fn extract_model_metadata(&self, path: &Path, format: ModelFormat) -> Result<ModelMetadata> {
-        let mut metadata = ModelMetadata::default();
-        
-        metadata.name = path.file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("unknown")
-            .to_string();
+    async fn extract_model_metadata(
+        &self,
+        path: &Path,
+        format: ModelFormat,
+    ) -> Result<ModelMetadata> {
+        let mut metadata = ModelMetadata {
+            name: path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown")
+                .to_string(),
+            ..Default::default()
+        };
 
         let file_metadata = fs::metadata(path)
-            .map_err(|e| VocoderError::ModelError(format!("Failed to read file metadata: {}", e)))?;
-        
+            .map_err(|e| VocoderError::ModelError(format!("Failed to read file metadata: {e}")))?;
+
         metadata.file_size_bytes = Some(file_metadata.len());
 
         if let Ok(created_time) = file_metadata.created() {
@@ -289,7 +295,7 @@ impl ModelLoader {
                 metadata.created_date = Some(
                     chrono::DateTime::from_timestamp(duration.as_secs() as i64, 0)
                         .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-                        .unwrap_or_default()
+                        .unwrap_or_default(),
                 );
             }
         }
@@ -309,13 +315,20 @@ impl ModelLoader {
     }
 
     /// Validate SafeTensors file
-    async fn validate_safetensors(&self, path: &Path, errors: &mut Vec<String>, warnings: &mut Vec<String>) -> Result<()> {
+    async fn validate_safetensors(
+        &self,
+        path: &Path,
+        errors: &mut Vec<String>,
+        warnings: &mut Vec<String>,
+    ) -> Result<()> {
         // Basic SafeTensors validation
-        let file = fs::File::open(path)
-            .map_err(|e| VocoderError::ModelError(format!("Failed to open SafeTensors file: {}", e)))?;
-        
-        let file_size = file.metadata()
-            .map_err(|e| VocoderError::ModelError(format!("Failed to read file metadata: {}", e)))?
+        let file = fs::File::open(path).map_err(|e| {
+            VocoderError::ModelError(format!("Failed to open SafeTensors file: {e}"))
+        })?;
+
+        let file_size = file
+            .metadata()
+            .map_err(|e| VocoderError::ModelError(format!("Failed to read file metadata: {e}")))?
             .len();
 
         if file_size < 8 {
@@ -327,8 +340,9 @@ impl ModelLoader {
         let mut buffer = [0u8; 8];
         use std::io::Read;
         let mut file = file;
-        file.read_exact(&mut buffer)
-            .map_err(|e| VocoderError::ModelError(format!("Failed to read SafeTensors header: {}", e)))?;
+        file.read_exact(&mut buffer).map_err(|e| {
+            VocoderError::ModelError(format!("Failed to read SafeTensors header: {e}"))
+        })?;
 
         // SafeTensors starts with the length of the header as a little-endian u64
         let header_length = u64::from_le_bytes(buffer);
@@ -342,9 +356,140 @@ impl ModelLoader {
     }
 
     /// Validate ONNX file
-    async fn validate_onnx(&self, _path: &Path, _errors: &mut Vec<String>, warnings: &mut Vec<String>) -> Result<()> {
-        // Basic ONNX validation would go here
-        warnings.push("ONNX validation not fully implemented".to_string());
+    async fn validate_onnx(
+        &self,
+        path: &Path,
+        errors: &mut Vec<String>,
+        warnings: &mut Vec<String>,
+    ) -> Result<()> {
+        // Check if the file exists
+        if !path.exists() {
+            errors.push(format!("ONNX model file not found: {}", path.display()));
+            return Err(VocoderError::ModelError(
+                "ONNX model file not found".to_string(),
+            ));
+        }
+
+        // Check file extension
+        if let Some(ext) = path.extension() {
+            if ext != "onnx" {
+                warnings.push(format!(
+                    "File extension '{}' is not '.onnx', but will attempt to load",
+                    ext.to_string_lossy()
+                ));
+            }
+        } else {
+            warnings.push("No file extension found, expected '.onnx'".to_string());
+        }
+
+        // Check file size (ONNX models shouldn't be empty)
+        match std::fs::metadata(path) {
+            Ok(metadata) => {
+                let size = metadata.len();
+                if size == 0 {
+                    errors.push("ONNX model file is empty".to_string());
+                    return Err(VocoderError::ModelError(
+                        "ONNX model file is empty".to_string(),
+                    ));
+                }
+                if size < 1024 {
+                    warnings.push(format!(
+                        "ONNX model file is very small ({size} bytes), may be corrupted"
+                    ));
+                }
+                if size > 1024 * 1024 * 1024 {
+                    // 1GB limit
+                    warnings.push(format!(
+                        "ONNX model file is very large ({} MB), may take long to load",
+                        size / (1024 * 1024)
+                    ));
+                }
+            }
+            Err(e) => {
+                errors.push(format!("Cannot read ONNX model file metadata: {e}"));
+                return Err(VocoderError::ModelError(
+                    "Cannot read ONNX model file metadata".to_string(),
+                ));
+            }
+        }
+
+        // Validate ONNX model structure
+        match self.validate_onnx_structure(path).await {
+            Ok(_) => {
+                tracing::info!("ONNX model validation passed: {}", path.display());
+            }
+            Err(e) => {
+                errors.push(format!("ONNX model structure validation failed: {e}"));
+                return Err(e);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate ONNX model structure
+    async fn validate_onnx_structure(&self, path: &Path) -> Result<()> {
+        use std::io::Read;
+
+        // Read the first few bytes to check for ONNX magic number
+        let mut file = std::fs::File::open(path)
+            .map_err(|e| VocoderError::ModelError(format!("Cannot open ONNX file: {e}")))?;
+
+        let mut buffer = [0u8; 16];
+        file.read_exact(&mut buffer)
+            .map_err(|e| VocoderError::ModelError(format!("Cannot read ONNX file header: {e}")))?;
+
+        // Check for protobuf magic number (ONNX files are protobuf-based)
+        // This is a simplified check - in a full implementation, you'd use the ONNX library
+        if buffer.len() >= 4 {
+            // Look for protobuf-like structure
+            let has_protobuf_markers = buffer.iter().any(|&b| b == 0x08 || b == 0x12 || b == 0x1a);
+            if !has_protobuf_markers {
+                return Err(VocoderError::ModelError(
+                    "File does not appear to be a valid ONNX/protobuf file".to_string(),
+                ));
+            }
+        }
+
+        // In a full implementation, you would:
+        // 1. Parse the ONNX model using the onnx crate
+        // 2. Validate the model graph structure
+        // 3. Check input/output tensor shapes
+        // 4. Verify operator compatibility
+        // 5. Check for required metadata
+
+        // For now, we'll do a basic file structure validation
+        let file_size = file
+            .metadata()
+            .map_err(|e| VocoderError::ModelError(format!("Cannot get file metadata: {e}")))?
+            .len();
+
+        if file_size < 100 {
+            return Err(VocoderError::ModelError(
+                "ONNX file is too small to contain a valid model".to_string(),
+            ));
+        }
+
+        // Check for common ONNX model patterns
+        let mut content = Vec::new();
+        file.read_to_end(&mut content)
+            .map_err(|e| VocoderError::ModelError(format!("Cannot read ONNX file: {e}")))?;
+
+        // Look for ONNX-specific strings/patterns
+        let content_str = String::from_utf8_lossy(&content);
+        let has_onnx_markers = content_str.contains("ir_version")
+            || content_str.contains("producer_name")
+            || content_str.contains("graph")
+            || content_str.contains("node")
+            || content_str.contains("input")
+            || content_str.contains("output");
+
+        if !has_onnx_markers {
+            return Err(VocoderError::ModelError(
+                "File does not contain expected ONNX model structure".to_string(),
+            ));
+        }
+
         Ok(())
     }
 
@@ -352,12 +497,12 @@ impl ModelLoader {
     async fn download_model(&self, url: &str, output_path: &Path) -> Result<()> {
         // This is a simplified implementation - in practice, you'd want to use
         // a proper HTTP client with progress tracking, resumable downloads, etc.
-        
-        tracing::info!("Downloading {} to {}", url, output_path.display());
-        
+
+        tracing::info!("Downloading {url} to {}", output_path.display());
+
         // For now, return an error as we don't have a proper HTTP client
         Err(VocoderError::ModelError(
-            "Model downloading not implemented in this example".to_string()
+            "Model downloading not implemented in this example".to_string(),
         ))
     }
 
@@ -366,25 +511,26 @@ impl ModelLoader {
         // Simple implementation - hash the URL to create a filename
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
-        
+
         let mut hasher = DefaultHasher::new();
         url.hash(&mut hasher);
         let hash = hasher.finish();
-        
+
         // Try to extract a meaningful filename from the URL
-        let path_part = url.split('/').last().unwrap_or("model");
-        format!("{}_{:x}", path_part, hash)
+        let path_part = url.split('/').next_back().unwrap_or("model");
+        format!("{path_part}_{hash:x}")
     }
 
     /// Calculate file checksum
     async fn calculate_checksum(&self, path: &Path) -> Result<String> {
-        let content = fs::read(path)
-            .map_err(|e| VocoderError::ModelError(format!("Failed to read file for checksum: {}", e)))?;
-        
+        let content = fs::read(path).map_err(|e| {
+            VocoderError::ModelError(format!("Failed to read file for checksum: {e}"))
+        })?;
+
         // Simple checksum using hash
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
-        
+
         let mut hasher = DefaultHasher::new();
         content.hash(&mut hasher);
         Ok(format!("{:x}", hasher.finish()))
@@ -420,15 +566,26 @@ mod tests {
 
     #[test]
     fn test_model_format_detection() {
-        assert_eq!(ModelFormat::from_path(Path::new("model.safetensors")), Some(ModelFormat::SafeTensors));
-        assert_eq!(ModelFormat::from_path(Path::new("model.onnx")), Some(ModelFormat::ONNX));
-        assert_eq!(ModelFormat::from_path(Path::new("model.pt")), Some(ModelFormat::PyTorch));
+        assert_eq!(
+            ModelFormat::from_path(Path::new("model.safetensors")),
+            Some(ModelFormat::SafeTensors)
+        );
+        assert_eq!(
+            ModelFormat::from_path(Path::new("model.onnx")),
+            Some(ModelFormat::ONNX)
+        );
+        assert_eq!(
+            ModelFormat::from_path(Path::new("model.pt")),
+            Some(ModelFormat::PyTorch)
+        );
         assert_eq!(ModelFormat::from_path(Path::new("model.unknown")), None);
     }
 
     #[test]
     fn test_model_format_extensions() {
-        assert!(ModelFormat::SafeTensors.extensions().contains(&"safetensors"));
+        assert!(ModelFormat::SafeTensors
+            .extensions()
+            .contains(&"safetensors"));
         assert!(ModelFormat::ONNX.extensions().contains(&"onnx"));
         assert!(ModelFormat::PyTorch.extensions().contains(&"pt"));
     }
@@ -457,7 +614,10 @@ mod tests {
     #[tokio::test]
     async fn test_validate_nonexistent_model() {
         let loader = ModelLoader::new();
-        let result = loader.validate_model("nonexistent.safetensors").await.unwrap();
+        let result = loader
+            .validate_model("nonexistent.safetensors")
+            .await
+            .unwrap();
         assert!(!result.is_valid);
         assert!(!result.errors.is_empty());
     }
@@ -466,20 +626,20 @@ mod tests {
     async fn test_create_dummy_model_file() {
         let temp_dir = tempdir().unwrap();
         let model_path = temp_dir.path().join("test.safetensors");
-        
+
         // Create a dummy SafeTensors file with valid header
         let mut file = fs::File::create(&model_path).unwrap();
-        
+
         // Write SafeTensors header (8 bytes for header length + minimal header)
         let header = b"{}"; // Minimal JSON header
         let header_len = header.len() as u64;
         file.write_all(&header_len.to_le_bytes()).unwrap();
         file.write_all(header).unwrap();
-        
+
         let mut loader = ModelLoader::new();
         let result = loader.load_from_file(&model_path).await;
         assert!(result.is_ok());
-        
+
         let model_info = result.unwrap();
         assert_eq!(model_info.format, ModelFormat::SafeTensors);
         assert!(model_info.size_bytes > 0);
@@ -491,7 +651,7 @@ mod tests {
         let filename1 = loader.url_to_filename("https://example.com/model.safetensors");
         let filename2 = loader.url_to_filename("https://example.com/model.safetensors");
         let filename3 = loader.url_to_filename("https://example.com/other.safetensors");
-        
+
         // Same URL should produce same filename
         assert_eq!(filename1, filename2);
         // Different URL should produce different filename

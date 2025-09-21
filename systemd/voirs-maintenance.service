@@ -1,0 +1,34 @@
+[Unit]
+Description=VoiRS Maintenance Tasks
+Documentation=https://github.com/cool-japan/voirs
+
+[Service]
+Type=oneshot
+User=voirs
+Group=voirs
+WorkingDirectory=/opt/voirs
+ExecStart=/opt/voirs/voirs maintenance --config /etc/voirs/config.toml
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=voirs-maintenance
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/voirs /var/log/voirs /tmp
+
+# Resource limits
+LimitNOFILE=1024
+LimitNPROC=32
+MemoryMax=1G
+CPUQuota=50%
+
+# Environment variables
+Environment=RUST_LOG=info
+Environment=VOIRS_CONFIG_PATH=/etc/voirs
+Environment=VOIRS_DATA_PATH=/var/lib/voirs
+Environment=VOIRS_LOG_PATH=/var/log/voirs
+EnvironmentFile=-/etc/voirs/environment

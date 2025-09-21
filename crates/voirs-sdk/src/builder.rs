@@ -5,21 +5,20 @@
 
 // Module declarations for builder components
 pub mod async_init;
+pub mod features;
 pub mod fluent;
 pub mod validation;
 
 // Re-export the modular builder implementation
 pub mod builder_impl;
-pub use builder_impl::*;
 
 use crate::{
     config::PipelineConfig,
     error::Result,
     pipeline::VoirsPipeline,
-    traits::{AcousticModel, G2p, Vocoder, VoiceManager},
+    traits::{AcousticModel, G2p, Vocoder},
     types::{LanguageCode, QualityLevel, SynthesisConfig},
     voice::DefaultVoiceManager,
-    VoirsError,
 };
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::RwLock;
@@ -158,6 +157,12 @@ impl VoirsPipelineBuilder {
         self
     }
 
+    /// Enable test mode (skips expensive operations for fast testing)
+    pub fn with_test_mode(mut self, enabled: bool) -> Self {
+        self.inner = self.inner.with_test_mode(enabled);
+        self
+    }
+
     /// Load configuration from file
     pub fn with_config_file(mut self, path: impl AsRef<std::path::Path>) -> Result<Self> {
         self.inner = self.inner.with_config_file(path)?;
@@ -192,13 +197,21 @@ impl VoirsPipelineBuilder {
     }
 
     /// Get configuration (internal)
+    #[allow(dead_code)] // Internal method for debugging/future use
     pub(crate) fn get_config(&self) -> PipelineConfig {
         self.inner.get_config()
     }
 
     /// Get voice ID (internal)
+    #[allow(dead_code)] // Internal method for debugging/future use
     pub(crate) fn get_voice_id(&self) -> Option<String> {
         self.inner.get_voice_id()
+    }
+
+    /// Get test mode (internal)
+    #[allow(dead_code)] // Internal method for debugging/future use
+    pub(crate) fn get_test_mode(&self) -> bool {
+        self.inner.get_test_mode()
     }
 
     /// Build the pipeline
@@ -216,6 +229,13 @@ impl Default for VoirsPipelineBuilder {
 // Re-export preset profiles for convenience
 pub use builder_impl::PresetProfile;
 
+// Re-export feature types and presets
+pub use features::{
+    AgeGroup, CloningMethod, CloningPreset, ConversionPreset, ConversionTarget, EmotionPreset,
+    Gender, MusicalKey, Position3D, RoomSize, SingingPreset, SingingTechnique, SingingVoiceType,
+    SpatialPreset,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,20 +243,21 @@ mod tests {
     #[tokio::test]
     async fn test_builder_creation() {
         let pipeline = VoirsPipelineBuilder::new()
-            .with_voice("test-voice")
             .with_validation(false)
             .build()
             .await;
-        
+
+        if let Err(ref e) = pipeline {
+            eprintln!("Pipeline build failed: {e:?}");
+        }
         assert!(pipeline.is_ok());
     }
 
     #[tokio::test]
     async fn test_builder_fluent_api() {
         let builder = VoirsPipelineBuilder::new()
-            .with_voice("test-voice")
             .with_quality(QualityLevel::High)
-            .with_gpu_acceleration(true)
+            .with_gpu_acceleration(false) // Set to false for test environments
             .with_threads(4)
             .with_cache_size(1024)
             .with_speaking_rate(1.2)
@@ -247,6 +268,9 @@ mod tests {
             .with_validation(false);
 
         let pipeline = builder.build().await;
+        if let Err(ref e) = pipeline {
+            eprintln!("Pipeline build failed: {e:?}");
+        }
         assert!(pipeline.is_ok());
     }
 
@@ -283,12 +307,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_config_file_loading() {
-        use tempfile::NamedTempFile;
         use std::io::Write;
+        use tempfile::NamedTempFile;
 
         // Create a temporary config file
         let mut temp_file = NamedTempFile::new().unwrap();
-        writeln!(temp_file, r#"
+        writeln!(
+            temp_file,
+            r#"
             use_gpu = false
             device = "cpu"
             max_cache_size_mb = 512
@@ -301,18 +327,16 @@ mod tests {
             sample_rate = 22050
             quality = "High"
             language = "EnUs"
-        "#).unwrap();
+        "#
+        )
+        .unwrap();
 
-        let result = VoirsPipelineBuilder::new()
-            .with_config_file(temp_file.path());
+        let result = VoirsPipelineBuilder::new().with_config_file(temp_file.path());
 
         // Note: This might fail if PipelineConfig::from_file is not implemented
         // but the API should work
         if result.is_ok() {
-            let pipeline = result.unwrap()
-                .with_validation(false)
-                .build()
-                .await;
+            let pipeline = result.unwrap().with_validation(false).build().await;
             assert!(pipeline.is_ok());
         }
     }

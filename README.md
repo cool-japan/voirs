@@ -8,6 +8,8 @@
 
 VoiRS is a cutting-edge Text-to-Speech (TTS) framework that unifies high-performance crates from the cool-japan ecosystem (SciRS2, NumRS2, PandRS, TrustformeRS) into a cohesive neural speech synthesis solution.
 
+> **🚀 Alpha Release (0.1.0-alpha.1)**: This is the first public alpha of VoiRS. Core TTS functionality is working and ready for evaluation, but APIs may change and some advanced features are still in development. Perfect for early adopters and researchers!
+
 ## 🎯 Key Features
 
 - **Pure Rust Implementation** — Memory-safe, zero-dependency core with optional GPU acceleration
@@ -17,6 +19,33 @@ VoiRS is a cutting-edge Text-to-Speech (TTS) framework that unifies high-perform
 - **Streaming Synthesis** — Low-latency chunk-based audio generation
 - **SSML Support** — Full Speech Synthesis Markup Language compatibility
 - **Multilingual** — 20+ languages with pluggable G2P backends
+
+## 🔥 Alpha Release Status
+
+### ✅ What's Ready Now
+- **Core TTS Pipeline**: Complete text-to-speech synthesis with VITS + HiFi-GAN
+- **Pure Rust**: Memory-safe implementation with no Python dependencies
+- **CLI Tool**: Command-line interface for immediate use
+- **Streaming Synthesis**: Real-time audio generation
+- **Basic SSML**: Essential speech markup support
+- **Cross-platform**: Works on Linux, macOS, and Windows
+- **50+ Examples**: Comprehensive code examples and tutorials
+
+### 🚧 What's Coming Soon (Beta)
+- **GPU Acceleration**: CUDA and Metal backends for faster synthesis
+- **Voice Cloning**: Few-shot speaker adaptation
+- **Production Models**: High-quality pre-trained voices
+- **Enhanced SSML**: Advanced prosody and emotion control
+- **WebAssembly**: Browser-native speech synthesis
+- **FFI Bindings**: C/Python/Node.js integration
+- **Advanced Evaluation**: Comprehensive quality metrics
+
+### ⚠️ Alpha Limitations
+- APIs may change between alpha versions
+- Limited pre-trained model selection
+- Documentation still being expanded
+- Some advanced features are experimental
+- Performance optimizations ongoing
 
 ## 🚀 Quick Start
 
@@ -215,26 +244,20 @@ Explore the `examples/` directory for comprehensive usage patterns:
 
 ### Q3 2025 — MVP 0.1
 - [x] Project structure and workspace
-- [ ] Core G2P, Acoustic, and Vocoder implementations
-- [ ] English VITS + HiFi-GAN pipeline
-- [ ] CLI tool and basic examples
-- [ ] WebAssembly demo
-
-### Q4 2025 — v0.5
+- [x] Core G2P, Acoustic, and Vocoder implementations
+- [x] English VITS + HiFi-GAN pipeline
+- [x] CLI tool and basic examples
+- [x] WebAssembly demo
 - [ ] Multilingual G2P support (10+ languages)
 - [ ] GPU acceleration (CUDA/Metal)
-- [ ] Streaming synthesis
+- [x] Streaming synthesis
 - [ ] C/Python FFI bindings
 - [ ] Performance optimizations
-
-### Q1 2026 — v1.0 LTS
 - [ ] Production-ready stability
 - [ ] Complete model zoo
 - [ ] TrustformeRS integration
 - [ ] Comprehensive documentation
 - [ ] Long-term support
-
-### Q3 2026 — v2.0
 - [ ] End-to-end Rust training pipeline
 - [ ] Voice cloning and adaptation
 - [ ] Advanced prosody control

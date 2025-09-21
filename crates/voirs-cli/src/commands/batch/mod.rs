@@ -3,11 +3,10 @@
 //! This module provides commands for batch processing multiple text inputs,
 //! supporting various input formats (TXT, CSV, JSON) and parallel processing.
 
-use std::path::PathBuf;
-use voirs::config::AppConfig;
-use voirs::error::Result;
-use voirs::types::QualityLevel;
 use crate::GlobalOptions;
+use std::path::PathBuf;
+use voirs::{AudioFormat, QualityLevel, Result};
+use voirs_sdk::config::AppConfig;
 
 pub mod files;
 pub mod parallel;
@@ -30,6 +29,8 @@ pub struct BatchConfig {
     pub pitch: f32,
     /// Volume gain
     pub volume: f32,
+    /// Audio output format
+    pub format: AudioFormat,
     /// Enable resume functionality
     pub enable_resume: bool,
     /// Maximum retries for failed items
@@ -46,6 +47,7 @@ impl Default for BatchConfig {
             speaking_rate: 1.0,
             pitch: 0.0,
             volume: 0.0,
+            format: AudioFormat::Wav,
             enable_resume: true,
             max_retries: 3,
         }
@@ -68,19 +70,25 @@ pub async fn run_batch_process(
     // Create batch configuration
     let mut batch_config = BatchConfig {
         input_path: input.clone(),
-        output_dir: output_dir.cloned().unwrap_or_else(|| input.parent().unwrap_or(std::path::Path::new(".")).to_path_buf()),
+        output_dir: output_dir.cloned().unwrap_or_else(|| {
+            input
+                .parent()
+                .unwrap_or(std::path::Path::new("."))
+                .to_path_buf()
+        }),
         workers: workers.unwrap_or_else(num_cpus::get),
         quality,
         speaking_rate: rate,
         pitch,
         volume,
+        format: AudioFormat::Wav, // Default to WAV format
         enable_resume: resume,
         max_retries: 3,
     };
-    
+
     // Ensure output directory exists
     std::fs::create_dir_all(&batch_config.output_dir)?;
-    
+
     if !global.quiet {
         println!("Batch Processing Configuration:");
         println!("==============================");
@@ -91,16 +99,17 @@ pub async fn run_batch_process(
         println!("Resume: {}", batch_config.enable_resume);
         println!();
     }
-    
+
     // Detect input format and process
     if batch_config.input_path.is_file() {
         files::process_file(&batch_config, config, global).await
     } else if batch_config.input_path.is_dir() {
         files::process_directory(&batch_config, config, global).await
     } else {
-        Err(voirs::VoirsError::config_error(
-            &format!("Input path does not exist: {}", batch_config.input_path.display())
-        ))
+        Err(voirs::VoirsError::config_error(&format!(
+            "Input path does not exist: {}",
+            batch_config.input_path.display()
+        )))
     }
 }
 
@@ -121,7 +130,7 @@ pub fn is_supported_extension(path: &PathBuf) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_batch_config_default() {
         let config = BatchConfig::default();
@@ -129,7 +138,7 @@ mod tests {
         assert_eq!(config.quality, QualityLevel::High);
         assert!(config.enable_resume);
     }
-    
+
     #[test]
     fn test_get_supported_extensions() {
         let extensions = get_supported_extensions();
@@ -137,7 +146,7 @@ mod tests {
         assert!(extensions.contains(&"csv"));
         assert!(extensions.contains(&"json"));
     }
-    
+
     #[test]
     fn test_is_supported_extension() {
         assert!(is_supported_extension(&PathBuf::from("test.txt")));

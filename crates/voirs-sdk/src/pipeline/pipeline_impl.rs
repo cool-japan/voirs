@@ -5,39 +5,41 @@
 //! - Synthesis orchestration
 //! - State management and synchronization
 
-use super::{init, synthesis, state};
+use super::{init, state, synthesis};
 
 use crate::{
     audio::AudioBuffer,
     config::PipelineConfig,
     error::Result,
-    traits::{AcousticModel, G2p, Vocoder},
+    traits::{AcousticModel, G2p, Vocoder, VoiceManager},
     types::{LanguageCode, SynthesisConfig, VoiceConfig},
     VoirsError,
 };
-use futures::StreamExt;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use init::PipelineInitializer;
+use state::{ComponentStates, PipelineState, PipelineStateManager};
 use synthesis::SynthesisOrchestrator;
-use state::{PipelineStateManager, PipelineState, ComponentType, ComponentState, ComponentStates};
 
 // Re-export types for external use
-pub use state::{PipelineState as PublicPipelineState, ComponentType as PublicComponentType, ComponentState as PublicComponentState, ComponentStates as PublicComponentStates};
+pub use state::{
+    ComponentState as PublicComponentState, ComponentStates as PublicComponentStates,
+    ComponentType as PublicComponentType, PipelineState as PublicPipelineState,
+};
 
 /// Main VoiRS synthesis pipeline
 #[derive(Clone)]
 pub struct VoirsPipeline {
     /// Synthesis orchestrator
     orchestrator: SynthesisOrchestrator,
-    
+
     /// State manager
     state_manager: PipelineStateManager,
-    
+
     /// Pipeline configuration
     config: Arc<RwLock<PipelineConfig>>,
-    
+
     /// Current voice configuration
     current_voice: Arc<RwLock<Option<VoiceConfig>>>,
 }
@@ -57,7 +59,26 @@ impl VoirsPipeline {
     ) -> Self {
         let orchestrator = SynthesisOrchestrator::new(g2p, acoustic, vocoder);
         let state_manager = PipelineStateManager::new(config.clone());
-        
+
+        Self {
+            orchestrator,
+            state_manager,
+            config: Arc::new(RwLock::new(config)),
+            current_voice: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Create pipeline with components and test mode
+    pub fn with_test_mode(
+        g2p: Arc<dyn G2p>,
+        acoustic: Arc<dyn AcousticModel>,
+        vocoder: Arc<dyn Vocoder>,
+        config: PipelineConfig,
+        test_mode: bool,
+    ) -> Self {
+        let orchestrator = SynthesisOrchestrator::with_test_mode(g2p, acoustic, vocoder, test_mode);
+        let state_manager = PipelineStateManager::with_test_mode(config.clone(), test_mode);
+
         Self {
             orchestrator,
             state_manager,
@@ -68,29 +89,39 @@ impl VoirsPipeline {
 
     /// Initialize pipeline from builder
     pub async fn from_builder(builder: super::VoirsPipelineBuilder) -> Result<Self> {
+        Self::from_builder_core(&builder).await
+    }
+
+    /// Initialize pipeline from builder core (for advanced features)
+    pub async fn from_builder_core(builder: &super::VoirsPipelineBuilder) -> Result<Self> {
         let config = builder.get_config();
+        let test_mode = builder.get_test_mode();
         let initializer = PipelineInitializer::new(config.clone());
-        
+
         // Initialize components
         let (g2p, acoustic, vocoder) = initializer.initialize_components().await?;
-        
-        // Create pipeline
-        let mut pipeline = Self::new(g2p, acoustic, vocoder, config);
-        
+
+        // Create pipeline with test mode
+        let pipeline = Self::with_test_mode(g2p, acoustic, vocoder, config, test_mode);
+
         // Set voice if specified
         if let Some(voice_id) = builder.get_voice_id() {
             pipeline.set_voice(&voice_id).await?;
         }
-        
+
         // Update state to ready
-        pipeline.state_manager.set_state(PipelineState::Ready).await?;
-        
+        pipeline
+            .state_manager
+            .set_state(PipelineState::Ready)
+            .await?;
+
         Ok(pipeline)
     }
 
     /// Synthesize text to audio
     pub async fn synthesize(&self, text: &str) -> Result<AudioBuffer> {
-        self.synthesize_with_config(text, &SynthesisConfig::default()).await
+        self.synthesize_with_config(text, &SynthesisConfig::default())
+            .await
     }
 
     /// Synthesize with custom configuration
@@ -103,13 +134,13 @@ impl VoirsPipeline {
         if self.state_manager.get_state().await != PipelineState::Ready {
             return Err(VoirsError::PipelineNotReady);
         }
-        
+
         // Set state to busy
         self.state_manager.set_state(PipelineState::Busy).await?;
-        
+
         // Perform synthesis
         let result = self.orchestrator.synthesize(text, config).await;
-        
+
         // Reset state to ready
         match result {
             Ok(_) => {
@@ -119,25 +150,25 @@ impl VoirsPipeline {
                 self.state_manager.set_state(PipelineState::Error).await?;
             }
         }
-        
+
         result
     }
 
     /// Synthesize SSML markup
     pub async fn synthesize_ssml(&self, ssml: &str) -> Result<AudioBuffer> {
         let config = SynthesisConfig::default();
-        
+
         // Check pipeline state
         if self.state_manager.get_state().await != PipelineState::Ready {
             return Err(VoirsError::PipelineNotReady);
         }
-        
+
         // Set state to busy
         self.state_manager.set_state(PipelineState::Busy).await?;
-        
+
         // Perform synthesis
         let result = self.orchestrator.synthesize_ssml(ssml, &config).await;
-        
+
         // Reset state to ready
         match result {
             Ok(_) => {
@@ -147,7 +178,7 @@ impl VoirsPipeline {
                 self.state_manager.set_state(PipelineState::Error).await?;
             }
         }
-        
+
         result
     }
 
@@ -160,7 +191,7 @@ impl VoirsPipeline {
         if self.state_manager.get_state().await != PipelineState::Ready {
             return Err(VoirsError::PipelineNotReady);
         }
-        
+
         let config = SynthesisConfig::default();
         self.orchestrator.synthesize_stream(text, &config).await
     }
@@ -176,14 +207,16 @@ impl VoirsPipeline {
             model_config: Default::default(),
             metadata: Default::default(),
         };
-        
+
         // Update state manager
-        self.state_manager.set_current_voice(Some(voice_config.clone())).await?;
-        
+        self.state_manager
+            .set_current_voice(Some(voice_config.clone()))
+            .await?;
+
         // Update internal voice
         let mut current = self.current_voice.write().await;
         *current = Some(voice_config);
-        
+
         Ok(())
     }
 
@@ -194,25 +227,41 @@ impl VoirsPipeline {
 
     /// List available voices
     pub async fn list_voices(&self) -> Result<Vec<VoiceConfig>> {
-        // TODO: Implement voice discovery
-        Ok(vec![
-            VoiceConfig {
-                id: "en-US-female-calm".to_string(),
-                name: "English US Female Calm".to_string(),
-                language: LanguageCode::EnUs,
-                characteristics: Default::default(),
-                model_config: Default::default(),
-                metadata: Default::default(),
-            },
-            VoiceConfig {
-                id: "en-US-male-news".to_string(),
-                name: "English US Male News".to_string(),
-                language: LanguageCode::EnUs,
-                characteristics: Default::default(),
-                model_config: Default::default(),
-                metadata: Default::default(),
-            },
-        ])
+        // Create voice registry to discover available voices
+        let registry = crate::voice::discovery::VoiceRegistry::new();
+
+        // Get all voices from the registry
+        let mut voices: Vec<VoiceConfig> = registry.list_voices().into_iter().cloned().collect();
+
+        // Create a temporary voice manager to check local availability
+        let config = self.config.read().await;
+        let cache_dir = config.effective_cache_dir();
+        let voice_manager = crate::voice::DefaultVoiceManager::new(&cache_dir);
+
+        // Mark voices as available/unavailable based on local model files
+        for voice in &mut voices {
+            if voice_manager.is_voice_available(&voice.id) {
+                voice
+                    .metadata
+                    .insert("status".to_string(), "available".to_string());
+                voice
+                    .metadata
+                    .insert("location".to_string(), "local".to_string());
+            } else {
+                voice
+                    .metadata
+                    .insert("status".to_string(), "downloadable".to_string());
+                voice
+                    .metadata
+                    .insert("location".to_string(), "remote".to_string());
+            }
+        }
+
+        // Sort voices by language and name for consistent ordering
+        voices.sort_by(|a, b| a.language.cmp(&b.language).then(a.name.cmp(&b.name)));
+
+        tracing::debug!("Discovered {} voices", voices.len());
+        Ok(voices)
     }
 
     /// Get pipeline state
@@ -229,11 +278,11 @@ impl VoirsPipeline {
     pub async fn update_config(&self, new_config: PipelineConfig) -> Result<()> {
         // Update state manager
         self.state_manager.update_config(new_config.clone()).await?;
-        
+
         // Update internal config
         let mut config = self.config.write().await;
         *config = new_config;
-        
+
         Ok(())
     }
 
@@ -257,4 +306,3 @@ impl VoirsPipeline {
         self.state_manager.set_state(PipelineState::Ready).await
     }
 }
-

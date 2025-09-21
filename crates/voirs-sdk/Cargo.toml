@@ -6,30 +6,38 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-documentation.workspace = true
+documentation = "https://docs.rs/voirs-sdk"
 keywords.workspace = true
-categories.workspace = true
+categories = ["api-bindings", "multimedia::audio", "science"]
 rust-version.workspace = true
 description = "Unified SDK and public API for VoiRS speech synthesis"
 
 [lib]
-name = "voirs"
+name = "voirs_sdk"
 path = "src/lib.rs"
 
 [dependencies]
 # Re-export all core crates
-voirs-g2p = { path = "../voirs-g2p" }
-voirs-acoustic = { path = "../voirs-acoustic" }
-voirs-vocoder = { path = "../voirs-vocoder" }
-voirs-dataset = { path = "../voirs-dataset" }
+voirs-g2p = { version = "0.1.0-alpha.1", path = "../voirs-g2p" }
+voirs-acoustic = { version = "0.1.0-alpha.1", path = "../voirs-acoustic" }
+voirs-vocoder = { version = "0.1.0-alpha.1", path = "../voirs-vocoder" }
+voirs-dataset = { version = "0.1.0-alpha.1", path = "../voirs-dataset" }
+
+# New advanced features
+voirs-emotion = { version = "0.1.0-alpha.1", path = "../voirs-emotion", optional = true }
+voirs-cloning = { version = "0.1.0-alpha.1", path = "../voirs-cloning", optional = true }
+voirs-conversion = { version = "0.1.0-alpha.1", path = "../voirs-conversion", optional = true }
+voirs-spatial = { version = "0.1.0-alpha.1", path = "../voirs-spatial", optional = true }
 
 # Common dependencies for the unified API
 tokio.workspace = true
 tokio-stream.workspace = true
 futures.workspace = true
 async-trait.workspace = true
+async-stream = "0.3"
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
@@ -39,10 +47,99 @@ toml.workspace = true
 fastrand.workspace = true
 hf-hub.workspace = true
 reqwest.workspace = true
+regex.workspace = true
+memmap2.workspace = true
+semver.workspace = true
+thread_local.workspace = true
+pin-project.workspace = true
+cpal.workspace = true
+backtrace.workspace = true
+notify.workspace = true
+libc.workspace = true
+rustfft.workspace = true
+realfft.workspace = true
+num-complex.workspace = true
+
+# Audio codec dependencies
+claxon.workspace = true
+flac-bound.workspace = true
+symphonia.workspace = true
+opus.workspace = true
+lewton.workspace = true
+minimp3.workspace = true
+mp3lame-encoder.workspace = true
+
+# Web Integration dependencies
+wasm-bindgen = { workspace = true, optional = true }
+wasm-bindgen-futures = { workspace = true, optional = true }
+web-sys = { workspace = true, optional = true }
+js-sys = { workspace = true, optional = true }
+console_error_panic_hook = { workspace = true, optional = true }
+wasm-logger = { workspace = true, optional = true }
+axum = { workspace = true, optional = true }
+tower = { workspace = true, optional = true }
+tower-http = { workspace = true, optional = true }
+uuid.workspace = true
+chrono.workspace = true
+num_cpus.workspace = true
+
+# Cloud Integration dependencies
+flate2 = { workspace = true, optional = true }
+zstd = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
+aes-gcm = { workspace = true, optional = true }
+bincode = { workspace = true, optional = true }
+
+# Plugin loading dependencies
+libloading = { workspace = true, optional = true }
+wasmtime = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true
+wasm-bindgen-test = "0.3"
+tokio-tungstenite = "0.24"
 
 [features]
 default = []
-gpu = ["voirs-acoustic/gpu", "voirs-vocoder/gpu"]
+gpu = ["voirs-acoustic/gpu", "voirs-vocoder/gpu", "voirs-cloning/gpu", "voirs-conversion/gpu"]
+onnx = ["voirs-acoustic/onnx", "voirs-vocoder/onnx", "voirs-cloning/onnx"]
+wasm = ["wasm-bindgen", "wasm-bindgen-futures", "web-sys", "js-sys", "console_error_panic_hook", "wasm-logger"]
+http = ["axum", "tower", "tower-http"]
+cloud = ["flate2", "zstd", "sha2", "aes-gcm", "bincode"]
+plugins = ["libloading", "wasmtime"]
+
+# Advanced voice features
+emotion = ["voirs-emotion"]
+cloning = ["voirs-cloning"]
+conversion = ["voirs-conversion"]
+singing = []
+spatial = ["voirs-spatial"]
+realtime-conversion = ["conversion", "voirs-conversion/real-time"]
+streaming-conversion = ["conversion", "voirs-conversion/streaming"]
+
+# Complete feature sets
+voice-cloning = ["cloning", "voirs-cloning/acoustic-integration"]
+advanced-emotions = ["emotion", "voirs-emotion/acoustic-integration"]
+all-features = ["emotion", "cloning", "conversion", "gpu", "onnx", "http", "cloud", "plugins"]
+
+[[example]]
+name = "advanced_features_demo"
+path = "examples/advanced/advanced_features_demo.rs"
+required-features = ["emotion", "cloning", "conversion"]
+
+[[example]]
+name = "comprehensive_benchmarking"
+path = "examples/advanced/comprehensive_benchmarking.rs"
+required-features = ["emotion", "cloning", "conversion"]
+
+[[example]]
+name = "multi_modal_integration"
+path = "examples/advanced/multi_modal_integration.rs"
+required-features = ["singing", "spatial", "emotion"]
+
+[[example]]
+name = "real_time_audio_device"
+path = "examples/advanced/real_time_audio_device.rs"
+required-features = ["emotion", "cloning", "conversion"]
+[lints]
+workspace = true

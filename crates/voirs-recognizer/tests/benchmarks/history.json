@@ -1,0 +1,2102 @@
+[
+  {
+    "name": "small_16000_1s",
+    "timestamp": 1753036973,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.05302654,
+    "memory_usage": 4947968,
+    "startup_time_ms": 502,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 301735.69118905946,
+    "cpu_utilization": 5.302654,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "small",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753036975,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.10307713,
+    "memory_usage": 5767168,
+    "startup_time_ms": 1502,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 155223.57652097882,
+    "cpu_utilization": 10.307713,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "large_16000_1s",
+    "timestamp": 1753036978,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.20337142,
+    "memory_usage": 6324224,
+    "startup_time_ms": 3001,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 78673.78924738475,
+    "cpu_utilization": 20.337143,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "large",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_5s",
+    "timestamp": 1753036980,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.100244,
+    "memory_usage": 7979008,
+    "startup_time_ms": 1501,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 159610.5636320252,
+    "cpu_utilization": 10.0244,
+    "audio_duration": 5.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 5.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753036982,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.10309675,
+    "memory_usage": 8142848,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 310388.0578194754,
+    "cpu_utilization": 10.309675,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 2,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "small_16000_1s",
+    "timestamp": 1753042701,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.053012792,
+    "memory_usage": 5423104,
+    "startup_time_ms": 503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 301813.94709412777,
+    "cpu_utilization": 5.301279,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "small",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753042702,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.10302104,
+    "memory_usage": 5849088,
+    "startup_time_ms": 1501,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 155308.07774202092,
+    "cpu_utilization": 10.302104,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "large_16000_1s",
+    "timestamp": 1753042705,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.20302,
+    "memory_usage": 6176768,
+    "startup_time_ms": 3003,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 78809.96946113683,
+    "cpu_utilization": 20.302,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "large",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_5s",
+    "timestamp": 1753042707,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.10060616,
+    "memory_usage": 7618560,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 159035.9899876666,
+    "cpu_utilization": 10.060616,
+    "audio_duration": 5.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 5.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753042709,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.10304496,
+    "memory_usage": 7634944,
+    "startup_time_ms": 1502,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 310544.06368917145,
+    "cpu_utilization": 10.304496,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 2,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "small_16000_1s",
+    "timestamp": 1753056282,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.053515248,
+    "memory_usage": 4964352,
+    "startup_time_ms": 501,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 298980.19723349885,
+    "cpu_utilization": 5.351525,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "small",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753056284,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.103144795,
+    "memory_usage": 5619712,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 155121.74531431255,
+    "cpu_utilization": 10.31448,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "large_16000_1s",
+    "timestamp": 1753056287,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.20309888,
+    "memory_usage": 6471680,
+    "startup_time_ms": 3002,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 78779.3630073037,
+    "cpu_utilization": 20.309887,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "large",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_5s",
+    "timestamp": 1753056289,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.10062387,
+    "memory_usage": 7979008,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 159008.00218305265,
+    "cpu_utilization": 10.0623865,
+    "audio_duration": 5.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 5.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753056291,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.10309366,
+    "memory_usage": 7995392,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 310397.3399258366,
+    "cpu_utilization": 10.309366,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 2,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "small_16000_1s",
+    "timestamp": 1753058038,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.053030375,
+    "memory_usage": 5013504,
+    "startup_time_ms": 503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 301713.87624545366,
+    "cpu_utilization": 5.3030376,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "small",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753058040,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.10343429,
+    "memory_usage": 5685248,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 154687.57841633004,
+    "cpu_utilization": 10.343429,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "large_16000_1s",
+    "timestamp": 1753058043,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.20105436,
+    "memory_usage": 6537216,
+    "startup_time_ms": 3001,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 79580.46175319488,
+    "cpu_utilization": 20.105436,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "large",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_5s",
+    "timestamp": 1753058045,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.10062812,
+    "memory_usage": 8093696,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 159001.27325238346,
+    "cpu_utilization": 10.062812,
+    "audio_duration": 5.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 5.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753058047,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.10309687,
+    "memory_usage": 8159232,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 310387.6814888909,
+    "cpu_utilization": 10.309688,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 2,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "small_16000_1s",
+    "timestamp": 1753060186,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.05299717,
+    "memory_usage": 5079040,
+    "startup_time_ms": 503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 301902.930018882,
+    "cpu_utilization": 5.299717,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "small",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753060188,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.10215262,
+    "memory_usage": 5734400,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 156628.3783701104,
+    "cpu_utilization": 10.215262,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "large_16000_1s",
+    "timestamp": 1753060191,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.20219575,
+    "memory_usage": 6422528,
+    "startup_time_ms": 3002,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 79131.23792166749,
+    "cpu_utilization": 20.219574,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "large",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_5s",
+    "timestamp": 1753060193,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.100612655,
+    "memory_usage": 7897088,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 159025.72887206532,
+    "cpu_utilization": 10.061266,
+    "audio_duration": 5.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 5.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753060195,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.100153506,
+    "memory_usage": 7880704,
+    "startup_time_ms": 1502,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 319509.5528363961,
+    "cpu_utilization": 10.01535,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 2,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "small_16000_1s",
+    "timestamp": 1753061137,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.053027377,
+    "memory_usage": 5029888,
+    "startup_time_ms": 502,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 301730.9455729234,
+    "cpu_utilization": 5.3027377,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "small",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753061139,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.103075124,
+    "memory_usage": 5701632,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 155226.58837425616,
+    "cpu_utilization": 10.307512,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "large_16000_1s",
+    "timestamp": 1753061142,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.20203283,
+    "memory_usage": 6340608,
+    "startup_time_ms": 3003,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 79195.04806827588,
+    "cpu_utilization": 20.203283,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "large",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_5s",
+    "timestamp": 1753061144,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.100213245,
+    "memory_usage": 7847936,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 159659.53912489838,
+    "cpu_utilization": 10.021324,
+    "audio_duration": 5.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 5.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753061146,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.10310571,
+    "memory_usage": 7913472,
+    "startup_time_ms": 1502,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 310361.09077491617,
+    "cpu_utilization": 10.310571,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 2,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "small_16000_1s",
+    "timestamp": 1753066792,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.052670877,
+    "memory_usage": 5029888,
+    "startup_time_ms": 501,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 303773.19533803075,
+    "cpu_utilization": 5.267088,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "small",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753066794,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.10307713,
+    "memory_usage": 5636096,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 155223.57652097882,
+    "cpu_utilization": 10.307713,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "large_16000_1s",
+    "timestamp": 1753066797,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.20232475,
+    "memory_usage": 6553600,
+    "startup_time_ms": 3003,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 79080.78472851196,
+    "cpu_utilization": 20.232475,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "large",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_5s",
+    "timestamp": 1753066799,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.10061719,
+    "memory_usage": 7995392,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 159018.55086164022,
+    "cpu_utilization": 10.061719,
+    "audio_duration": 5.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 5.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753066801,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.10209292,
+    "memory_usage": 8044544,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 313439.96175562305,
+    "cpu_utilization": 10.209292,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 2,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "small_16000_1s",
+    "timestamp": 1753070325,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.053090878,
+    "memory_usage": 5062656,
+    "startup_time_ms": 503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 301370.0565304301,
+    "cpu_utilization": 5.3090878,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "small",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753070326,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.10307087,
+    "memory_usage": 5701632,
+    "startup_time_ms": 1502,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 155232.98895056435,
+    "cpu_utilization": 10.307087,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "large_16000_1s",
+    "timestamp": 1753070330,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.20203295,
+    "memory_usage": 6438912,
+    "startup_time_ms": 3000,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 79194.99946142451,
+    "cpu_utilization": 20.203295,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "large",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_5s",
+    "timestamp": 1753070332,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.10061439,
+    "memory_usage": 8011776,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 159022.97619220507,
+    "cpu_utilization": 10.0614395,
+    "audio_duration": 5.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 5.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753070333,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.10231962,
+    "memory_usage": 8060928,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 312745.47771260893,
+    "cpu_utilization": 10.231962,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 2,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "small_16000_1s",
+    "timestamp": 1753071894,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.05129546,
+    "memory_usage": 5029888,
+    "startup_time_ms": 501,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 311918.448765611,
+    "cpu_utilization": 5.129546,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "small",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753071896,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.10259521,
+    "memory_usage": 5652480,
+    "startup_time_ms": 1501,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 155952.7029761468,
+    "cpu_utilization": 10.2595215,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "large_16000_1s",
+    "timestamp": 1753071899,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.20239963,
+    "memory_usage": 6242304,
+    "startup_time_ms": 3001,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 79051.52986325938,
+    "cpu_utilization": 20.239964,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "large",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_5s",
+    "timestamp": 1753071901,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.100619316,
+    "memory_usage": 7782400,
+    "startup_time_ms": 1501,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 159015.19251622504,
+    "cpu_utilization": 10.061932,
+    "audio_duration": 5.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 5.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753071903,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.103125,
+    "memory_usage": 7798784,
+    "startup_time_ms": 1502,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 310303.03030303033,
+    "cpu_utilization": 10.3125,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 2,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "small_16000_1s",
+    "timestamp": 1753072149,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.05301967,
+    "memory_usage": 5242880,
+    "startup_time_ms": 502,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 301774.81122240925,
+    "cpu_utilization": 5.3019667,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "small",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753072151,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.101620875,
+    "memory_usage": 5685248,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 157447.96529256416,
+    "cpu_utilization": 10.162087,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "large_16000_1s",
+    "timestamp": 1753072154,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.20306817,
+    "memory_usage": 6438912,
+    "startup_time_ms": 3003,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 78791.27603490901,
+    "cpu_utilization": 20.306816,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "large",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_5s",
+    "timestamp": 1753072156,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.10062126,
+    "memory_usage": 7929856,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 159012.12413978737,
+    "cpu_utilization": 10.062126,
+    "audio_duration": 5.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 5.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753072158,
+    "commit_hash": "3ff0db230e6ab02ab02b7749bddf003d228ac288",
+    "rtf": 0.10308792,
+    "memory_usage": 7946240,
+    "startup_time_ms": 1502,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 310414.6531547436,
+    "cpu_utilization": 10.308792,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 2,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "small_16000_1s",
+    "timestamp": 1753102659,
+    "commit_hash": "ff48bf991ec2a3f1c40f8d1f7c0d65791fd33bc6",
+    "rtf": 0.053012792,
+    "memory_usage": 5701632,
+    "startup_time_ms": 503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 301813.95278735657,
+    "cpu_utilization": 5.301279,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "small",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753102660,
+    "commit_hash": "ff48bf991ec2a3f1c40f8d1f7c0d65791fd33bc6",
+    "rtf": 0.10303129,
+    "memory_usage": 6111232,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 155292.62702053663,
+    "cpu_utilization": 10.303129,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "large_16000_1s",
+    "timestamp": 1753102663,
+    "commit_hash": "ff48bf991ec2a3f1c40f8d1f7c0d65791fd33bc6",
+    "rtf": 0.20303875,
+    "memory_usage": 6553600,
+    "startup_time_ms": 3000,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 78802.69160443512,
+    "cpu_utilization": 20.303875,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "large",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_5s",
+    "timestamp": 1753102665,
+    "commit_hash": "ff48bf991ec2a3f1c40f8d1f7c0d65791fd33bc6",
+    "rtf": 0.10050951,
+    "memory_usage": 8060928,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 159188.91908539075,
+    "cpu_utilization": 10.050951,
+    "audio_duration": 5.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 5.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753102667,
+    "commit_hash": "ff48bf991ec2a3f1c40f8d1f7c0d65791fd33bc6",
+    "rtf": 0.10294004,
+    "memory_usage": 8175616,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 310860.5687182447,
+    "cpu_utilization": 10.2940035,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 2,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "small_16000_1s",
+    "timestamp": 1753114769,
+    "commit_hash": "ff48bf991ec2a3f1c40f8d1f7c0d65791fd33bc6",
+    "rtf": 0.052782916,
+    "memory_usage": 5718016,
+    "startup_time_ms": 503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 303128.3776908351,
+    "cpu_utilization": 5.2782917,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "small",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753114770,
+    "commit_hash": "ff48bf991ec2a3f1c40f8d1f7c0d65791fd33bc6",
+    "rtf": 0.10316708,
+    "memory_usage": 6193152,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 155088.22712376193,
+    "cpu_utilization": 10.316708,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "large_16000_1s",
+    "timestamp": 1753114774,
+    "commit_hash": "ff48bf991ec2a3f1c40f8d1f7c0d65791fd33bc6",
+    "rtf": 0.20302099,
+    "memory_usage": 6471680,
+    "startup_time_ms": 3002,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 78809.58127484348,
+    "cpu_utilization": 20.3021,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "large",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_5s",
+    "timestamp": 1753114776,
+    "commit_hash": "ff48bf991ec2a3f1c40f8d1f7c0d65791fd33bc6",
+    "rtf": 0.100604236,
+    "memory_usage": 7946240,
+    "startup_time_ms": 1501,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 159039.03304331526,
+    "cpu_utilization": 10.060424,
+    "audio_duration": 5.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 5.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753114777,
+    "commit_hash": "ff48bf991ec2a3f1c40f8d1f7c0d65791fd33bc6",
+    "rtf": 0.10308517,
+    "memory_usage": 8093696,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 310422.9340774119,
+    "cpu_utilization": 10.3085165,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 2,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "small_16000_1s",
+    "timestamp": 1753262163,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.05200596,
+    "memory_usage": 5537792,
+    "startup_time_ms": 502,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 307657.05729332013,
+    "cpu_utilization": 5.2005963,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "small",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753262165,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.10201375,
+    "memory_usage": 5718016,
+    "startup_time_ms": 1502,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 156841.60223499284,
+    "cpu_utilization": 10.201375,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "large_16000_1s",
+    "timestamp": 1753262168,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.20202774,
+    "memory_usage": 5996544,
+    "startup_time_ms": 3002,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 79197.04100055562,
+    "cpu_utilization": 20.202774,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "large",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_5s",
+    "timestamp": 1753262170,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.10040524,
+    "memory_usage": 7471104,
+    "startup_time_ms": 1501,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 159354.23004977018,
+    "cpu_utilization": 10.040524,
+    "audio_duration": 5.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 5.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753262172,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.101407625,
+    "memory_usage": 7553024,
+    "startup_time_ms": 1502,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 315558.1249437604,
+    "cpu_utilization": 10.140762,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 2,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "small_16000_1s",
+    "timestamp": 1753282055,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.053086206,
+    "memory_usage": 5029888,
+    "startup_time_ms": 503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 301396.5510589869,
+    "cpu_utilization": 5.3086205,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "small",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753282056,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.10286266,
+    "memory_usage": 5668864,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 155547.20159064123,
+    "cpu_utilization": 10.286266,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "large_16000_1s",
+    "timestamp": 1753282060,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.2020408,
+    "memory_usage": 6488064,
+    "startup_time_ms": 3001,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 79191.92872694739,
+    "cpu_utilization": 20.20408,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "large",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_5s",
+    "timestamp": 1753282062,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.10022795,
+    "memory_usage": 7716864,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 159636.09610948633,
+    "cpu_utilization": 10.022795,
+    "audio_duration": 5.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 5.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753282063,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.10284746,
+    "memory_usage": 7749632,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 311140.40454805986,
+    "cpu_utilization": 10.284746,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 2,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "small_16000_1s",
+    "timestamp": 1753282393,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.052976917,
+    "memory_usage": 5226496,
+    "startup_time_ms": 503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 302018.33568416856,
+    "cpu_utilization": 5.297692,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "small",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753282395,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.10305551,
+    "memory_usage": 5816320,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 155256.14838606384,
+    "cpu_utilization": 10.305551,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "large_16000_1s",
+    "timestamp": 1753282398,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.20231608,
+    "memory_usage": 6209536,
+    "startup_time_ms": 3002,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 79084.17246294749,
+    "cpu_utilization": 20.231607,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "large",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_5s",
+    "timestamp": 1753282400,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.1004192,
+    "memory_usage": 7716864,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 159332.0799209713,
+    "cpu_utilization": 10.04192,
+    "audio_duration": 5.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 5.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753282402,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.10282417,
+    "memory_usage": 7831552,
+    "startup_time_ms": 1502,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 311210.88488856907,
+    "cpu_utilization": 10.282416,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 2,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "small_16000_1s",
+    "timestamp": 1753302248,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.053067293,
+    "memory_usage": 5505024,
+    "startup_time_ms": 503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 301503.9904712679,
+    "cpu_utilization": 5.3067293,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "small",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753302250,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.10310254,
+    "memory_usage": 5996544,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 155185.310561984,
+    "cpu_utilization": 10.310254,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "large_16000_1s",
+    "timestamp": 1753302253,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.2030622,
+    "memory_usage": 6488064,
+    "startup_time_ms": 3002,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 78793.58821903483,
+    "cpu_utilization": 20.306221,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "large",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_5s",
+    "timestamp": 1753302255,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.100615814,
+    "memory_usage": 7815168,
+    "startup_time_ms": 1501,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 159020.7239842647,
+    "cpu_utilization": 10.061582,
+    "audio_duration": 5.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 5.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753302257,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.10307813,
+    "memory_usage": 7798784,
+    "startup_time_ms": 1502,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 310444.14127633773,
+    "cpu_utilization": 10.307813,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 2,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "small_16000_1s",
+    "timestamp": 1753322033,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.053027753,
+    "memory_usage": 4997120,
+    "startup_time_ms": 503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 301728.81180136814,
+    "cpu_utilization": 5.3027754,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "small",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753322035,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.103043,
+    "memory_usage": 5849088,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 155274.98228894733,
+    "cpu_utilization": 10.304299,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "large_16000_1s",
+    "timestamp": 1753322038,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.20221816,
+    "memory_usage": 6488064,
+    "startup_time_ms": 3003,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 79122.46578716145,
+    "cpu_utilization": 20.221815,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "large",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_5s",
+    "timestamp": 1753322040,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.10061791,
+    "memory_usage": 7782400,
+    "startup_time_ms": 1502,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 159017.40505726196,
+    "cpu_utilization": 10.06179,
+    "audio_duration": 5.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 5.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753322041,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.10310334,
+    "memory_usage": 7798784,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 310368.2399869653,
+    "cpu_utilization": 10.310334,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 2,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "small_16000_1s",
+    "timestamp": 1753322846,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.05302375,
+    "memory_usage": 5505024,
+    "startup_time_ms": 503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 301751.5735873076,
+    "cpu_utilization": 5.3023753,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "small",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753322848,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.1030605,
+    "memory_usage": 5832704,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 155248.61610413302,
+    "cpu_utilization": 10.30605,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "large_16000_1s",
+    "timestamp": 1753322851,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.20145696,
+    "memory_usage": 6406144,
+    "startup_time_ms": 3002,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 79421.43154966134,
+    "cpu_utilization": 20.145697,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "large",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_5s",
+    "timestamp": 1753322853,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.10041791,
+    "memory_usage": 7733248,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 159334.11627860842,
+    "cpu_utilization": 10.041791,
+    "audio_duration": 5.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 5.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753322855,
+    "commit_hash": "02bc3105fc8e420c575a7b88470d0f5ecc6ff1ca",
+    "rtf": 0.10303825,
+    "memory_usage": 7749632,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 310564.2807404047,
+    "cpu_utilization": 10.303825,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 2,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "small_16000_1s",
+    "timestamp": 1753559191,
+    "commit_hash": "718e9333f1406c5c76845110195de484bfaa1340",
+    "rtf": 0.0529235,
+    "memory_usage": 5357568,
+    "startup_time_ms": 503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 302323.16456772515,
+    "cpu_utilization": 5.29235,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "small",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753559193,
+    "commit_hash": "718e9333f1406c5c76845110195de484bfaa1340",
+    "rtf": 0.10301992,
+    "memory_usage": 5865472,
+    "startup_time_ms": 1502,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 155309.77524772976,
+    "cpu_utilization": 10.301992,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "large_16000_1s",
+    "timestamp": 1753559196,
+    "commit_hash": "718e9333f1406c5c76845110195de484bfaa1340",
+    "rtf": 0.20302096,
+    "memory_usage": 6127616,
+    "startup_time_ms": 3003,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 78809.59719040633,
+    "cpu_utilization": 20.302095,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "large",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_5s",
+    "timestamp": 1753559198,
+    "commit_hash": "718e9333f1406c5c76845110195de484bfaa1340",
+    "rtf": 0.100605175,
+    "memory_usage": 7602176,
+    "startup_time_ms": 1503,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 159037.54453983108,
+    "cpu_utilization": 10.060517,
+    "audio_duration": 5.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 5.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753559200,
+    "commit_hash": "718e9333f1406c5c76845110195de484bfaa1340",
+    "rtf": 0.10305483,
+    "memory_usage": 7749632,
+    "startup_time_ms": 1502,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 310514.3064954557,
+    "cpu_utilization": 10.305483,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 2,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "small_16000_1s",
+    "timestamp": 1753578320,
+    "commit_hash": "718e9333f1406c5c76845110195de484bfaa1340",
+    "rtf": 0.05426521,
+    "memory_usage": 5144576,
+    "startup_time_ms": 502,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 294848.22024454415,
+    "cpu_utilization": 5.426521,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "small",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753578322,
+    "commit_hash": "718e9333f1406c5c76845110195de484bfaa1340",
+    "rtf": 0.10205358,
+    "memory_usage": 5636096,
+    "startup_time_ms": 1501,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 156780.3831367647,
+    "cpu_utilization": 10.2053585,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "large_16000_1s",
+    "timestamp": 1753578325,
+    "commit_hash": "718e9333f1406c5c76845110195de484bfaa1340",
+    "rtf": 0.20215446,
+    "memory_usage": 6209536,
+    "startup_time_ms": 3002,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 79147.40124108468,
+    "cpu_utilization": 20.215446,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "large",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_5s",
+    "timestamp": 1753578327,
+    "commit_hash": "718e9333f1406c5c76845110195de484bfaa1340",
+    "rtf": 0.100615606,
+    "memory_usage": 7749632,
+    "startup_time_ms": 1502,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 159021.06631576017,
+    "cpu_utilization": 10.061561,
+    "audio_duration": 5.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 5.0,
+      "channels": 1,
+      "features": [
+        "whisper"
+      ]
+    }
+  },
+  {
+    "name": "base_16000_1s",
+    "timestamp": 1753578328,
+    "commit_hash": "718e9333f1406c5c76845110195de484bfaa1340",
+    "rtf": 0.10303908,
+    "memory_usage": 8126464,
+    "startup_time_ms": 1502,
+    "streaming_latency_ms": 100,
+    "throughput_samples_per_sec": 310561.77004214993,
+    "cpu_utilization": 10.303907,
+    "audio_duration": 1.0,
+    "config": {
+      "model_type": "base",
+      "sample_rate": 16000,
+      "duration": 1.0,
+      "channels": 2,
+      "features": [
+        "whisper"
+      ]
+    }
+  }
+]

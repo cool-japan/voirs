@@ -7,7 +7,7 @@ use std::path::Path;
 use tracing::debug;
 
 /// Main configuration structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct G2pConfig {
     /// General configuration
     pub general: GeneralConfig,
@@ -37,7 +37,7 @@ pub struct GeneralConfig {
 }
 
 /// Backend configuration settings
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BackendConfigs {
     /// Rule-based backend config
     pub rule_based: RuleBasedConfig,
@@ -169,18 +169,6 @@ pub struct PerformanceConfig {
     pub enable_profiling: bool,
 }
 
-impl Default for G2pConfig {
-    fn default() -> Self {
-        Self {
-            general: GeneralConfig::default(),
-            backends: BackendConfigs::default(),
-            language_detection: LanguageDetectionConfig::default(),
-            preprocessing: PreprocessingConfig::default(),
-            performance: PerformanceConfig::default(),
-        }
-    }
-}
-
 impl Default for GeneralConfig {
     fn default() -> Self {
         Self {
@@ -189,17 +177,6 @@ impl Default for GeneralConfig {
             fallback_backends: vec!["rule_based".to_string(), "dummy".to_string()],
             enable_load_balancing: false,
             log_level: "info".to_string(),
-        }
-    }
-}
-
-impl Default for BackendConfigs {
-    fn default() -> Self {
-        Self {
-            rule_based: RuleBasedConfig::default(),
-            neural: NeuralConfig::default(),
-            phonetisaurus: PhonetisaurusConfig::default(),
-            openjtalk: OpenJTalkConfig::default(),
         }
     }
 }
@@ -316,10 +293,10 @@ impl ConfigManager {
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();
         let content = std::fs::read_to_string(path)
-            .map_err(|e| G2pError::ConfigError(format!("Failed to read config file: {}", e)))?;
+            .map_err(|e| G2pError::ConfigError(format!("Failed to read config file: {e}")))?;
 
         let config: G2pConfig = toml::from_str(&content)
-            .map_err(|e| G2pError::ConfigError(format!("Failed to parse config file: {}", e)))?;
+            .map_err(|e| G2pError::ConfigError(format!("Failed to parse config file: {e}")))?;
 
         debug!("Loaded configuration from: {}", path.display());
         Ok(Self {
@@ -375,10 +352,10 @@ impl ConfigManager {
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let path = path.as_ref();
         let content = toml::to_string_pretty(&self.config)
-            .map_err(|e| G2pError::ConfigError(format!("Failed to serialize config: {}", e)))?;
+            .map_err(|e| G2pError::ConfigError(format!("Failed to serialize config: {e}")))?;
 
         std::fs::write(path, content)
-            .map_err(|e| G2pError::ConfigError(format!("Failed to write config file: {}", e)))?;
+            .map_err(|e| G2pError::ConfigError(format!("Failed to write config file: {e}")))?;
 
         debug!("Saved configuration to: {}", path.display());
         Ok(())
@@ -409,22 +386,31 @@ impl ConfigManager {
     pub fn validate_config(&self) -> Result<()> {
         // Validate general settings
         if self.config.general.default_backend.is_empty() {
-            return Err(G2pError::ConfigError("Default backend cannot be empty".to_string()));
+            return Err(G2pError::ConfigError(
+                "Default backend cannot be empty".to_string(),
+            ));
         }
 
         // Validate performance settings
         if self.config.performance.max_threads == 0 {
-            return Err(G2pError::ConfigError("Max threads must be greater than 0".to_string()));
+            return Err(G2pError::ConfigError(
+                "Max threads must be greater than 0".to_string(),
+            ));
         }
 
         if self.config.performance.cache_size_mb == 0 {
-            return Err(G2pError::ConfigError("Cache size must be greater than 0".to_string()));
+            return Err(G2pError::ConfigError(
+                "Cache size must be greater than 0".to_string(),
+            ));
         }
 
         // Validate language detection settings
-        if self.config.language_detection.confidence_threshold < 0.0 
-            || self.config.language_detection.confidence_threshold > 1.0 {
-            return Err(G2pError::ConfigError("Confidence threshold must be between 0.0 and 1.0".to_string()));
+        if self.config.language_detection.confidence_threshold < 0.0
+            || self.config.language_detection.confidence_threshold > 1.0
+        {
+            return Err(G2pError::ConfigError(
+                "Confidence threshold must be between 0.0 and 1.0".to_string(),
+            ));
         }
 
         // Validate backend priorities
@@ -437,7 +423,9 @@ impl ConfigManager {
 
         for priority in priorities {
             if priority > 100 {
-                return Err(G2pError::ConfigError("Backend priority cannot exceed 100".to_string()));
+                return Err(G2pError::ConfigError(
+                    "Backend priority cannot exceed 100".to_string(),
+                ));
             }
         }
 
@@ -453,13 +441,18 @@ impl ConfigManager {
     /// Generate default configuration file
     pub fn generate_default_config_file<P: AsRef<Path>>(path: P) -> Result<()> {
         let config = G2pConfig::default();
-        let content = toml::to_string_pretty(&config)
-            .map_err(|e| G2pError::ConfigError(format!("Failed to serialize default config: {e}")))?;
+        let content = toml::to_string_pretty(&config).map_err(|e| {
+            G2pError::ConfigError(format!("Failed to serialize default config: {e}"))
+        })?;
 
-        std::fs::write(path.as_ref(), content)
-            .map_err(|e| G2pError::ConfigError(format!("Failed to write default config file: {}", e)))?;
+        std::fs::write(path.as_ref(), content).map_err(|e| {
+            G2pError::ConfigError(format!("Failed to write default config file: {e}"))
+        })?;
 
-        debug!("Generated default configuration file: {}", path.as_ref().display());
+        debug!(
+            "Generated default configuration file: {}",
+            path.as_ref().display()
+        );
         Ok(())
     }
 
@@ -474,7 +467,9 @@ impl ConfigManager {
             "de" => Ok(LanguageCode::De),
             "fr" => Ok(LanguageCode::Fr),
             "es" => Ok(LanguageCode::Es),
-            _ => Err(G2pError::ConfigError(format!("Unsupported language code: {}", lang_str))),
+            _ => Err(G2pError::ConfigError(format!(
+                "Unsupported language code: {lang_str}"
+            ))),
         }
     }
 }
@@ -486,7 +481,6 @@ impl Default for ConfigManager {
 }
 
 // Add missing num_cpus dependency placeholder
-#[cfg(not(feature = "num_cpus"))]
 mod num_cpus {
     pub fn get() -> usize {
         4 // Default to 4 threads
@@ -497,7 +491,6 @@ mod num_cpus {
 mod tests {
     use super::*;
     use std::fs;
-    use std::path::PathBuf;
 
     #[test]
     fn test_default_config_creation() {
@@ -531,12 +524,12 @@ mod tests {
     #[test]
     fn test_config_update() {
         let mut manager = ConfigManager::new();
-        
+
         let result = manager.update_config(|config| {
             config.general.default_language = LanguageCode::De;
             Ok(())
         });
-        
+
         assert!(result.is_ok());
         assert_eq!(manager.config.general.default_language, LanguageCode::De);
     }
@@ -544,9 +537,15 @@ mod tests {
     #[test]
     fn test_language_code_parsing() {
         let manager = ConfigManager::new();
-        
-        assert_eq!(manager.parse_language_code("en-us").unwrap(), LanguageCode::EnUs);
-        assert_eq!(manager.parse_language_code("EN_US").unwrap(), LanguageCode::EnUs);
+
+        assert_eq!(
+            manager.parse_language_code("en-us").unwrap(),
+            LanguageCode::EnUs
+        );
+        assert_eq!(
+            manager.parse_language_code("EN_US").unwrap(),
+            LanguageCode::EnUs
+        );
         assert_eq!(manager.parse_language_code("ja").unwrap(), LanguageCode::Ja);
         assert_eq!(manager.parse_language_code("de").unwrap(), LanguageCode::De);
         assert!(manager.parse_language_code("invalid").is_err());
@@ -556,13 +555,13 @@ mod tests {
     fn test_config_file_generation() {
         let temp_dir = std::env::temp_dir();
         let config_path = temp_dir.join("test_config.toml");
-        
+
         let result = ConfigManager::generate_default_config_file(&config_path);
         assert!(result.is_ok());
-        
+
         // Verify file was created
         assert!(config_path.exists());
-        
+
         // Clean up
         let _ = fs::remove_file(config_path);
     }
@@ -571,16 +570,19 @@ mod tests {
     fn test_config_file_load_save() {
         let temp_dir = std::env::temp_dir();
         let config_path = temp_dir.join("test_load_save.toml");
-        
+
         // Create and save config
         let mut manager = ConfigManager::new();
         manager.config.general.default_language = LanguageCode::De;
         manager.save_to_file(&config_path).unwrap();
-        
+
         // Load config
         let loaded_manager = ConfigManager::load_from_file(&config_path).unwrap();
-        assert_eq!(loaded_manager.config.general.default_language, LanguageCode::De);
-        
+        assert_eq!(
+            loaded_manager.config.general.default_language,
+            LanguageCode::De
+        );
+
         // Clean up
         let _ = fs::remove_file(config_path);
     }
@@ -590,14 +592,14 @@ mod tests {
         std::env::set_var("VOIRS_G2P_DEFAULT_LANGUAGE", "de");
         std::env::set_var("VOIRS_G2P_DEFAULT_BACKEND", "neural");
         std::env::set_var("VOIRS_G2P_LOG_LEVEL", "debug");
-        
+
         let mut manager = ConfigManager::new();
         manager.load_from_env().unwrap();
-        
+
         assert_eq!(manager.config.general.default_language, LanguageCode::De);
         assert_eq!(manager.config.general.default_backend, "neural");
         assert_eq!(manager.config.general.log_level, "debug");
-        
+
         // Clean up
         std::env::remove_var("VOIRS_G2P_DEFAULT_LANGUAGE");
         std::env::remove_var("VOIRS_G2P_DEFAULT_BACKEND");

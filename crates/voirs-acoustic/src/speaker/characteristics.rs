@@ -1,8 +1,8 @@
 //! Voice characteristics for detailed speaker modeling.
 
+use crate::LanguageCode;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::LanguageCode;
 
 /// Age group categories
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -30,7 +30,7 @@ impl AgeGroup {
             AgeGroup::Senior => (56, 100),
         }
     }
-    
+
     /// Get from specific age
     pub fn from_age(age: u8) -> Self {
         match age {
@@ -41,7 +41,7 @@ impl AgeGroup {
             _ => AgeGroup::Senior,
         }
     }
-    
+
     /// Get string representation
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -97,9 +97,9 @@ impl Accent {
     pub fn as_str(&self) -> String {
         match self {
             Accent::Standard => "standard".to_string(),
-            Accent::Regional(name) => format!("regional_{}", name),
-            Accent::International(name) => format!("international_{}", name),
-            Accent::Custom(name) => format!("custom_{}", name),
+            Accent::Regional(name) => format!("regional_{name}"),
+            Accent::International(name) => format!("international_{name}"),
+            Accent::Custom(name) => format!("custom_{name}"),
         }
     }
 }
@@ -142,7 +142,7 @@ impl VoiceQuality {
             VoiceQuality::Resonant => "resonant",
         }
     }
-    
+
     /// Get all voice qualities
     pub fn all() -> Vec<VoiceQuality> {
         vec![
@@ -240,7 +240,7 @@ impl VoiceCharacteristics {
     pub fn new(age_group: AgeGroup, gender: Gender) -> Self {
         let pitch_range = Self::default_pitch_range(age_group, gender);
         let speaking_rate = Self::default_speaking_rate(age_group);
-        
+
         Self {
             age_group,
             age: None,
@@ -258,26 +258,26 @@ impl VoiceCharacteristics {
             custom_characteristics: HashMap::new(),
         }
     }
-    
+
     /// Set specific age
     pub fn with_age(mut self, age: u8) -> Self {
         self.age = Some(age);
         self.age_group = AgeGroup::from_age(age);
         self
     }
-    
+
     /// Set accent
     pub fn with_accent(mut self, accent: Accent) -> Self {
         self.accent = accent;
         self
     }
-    
+
     /// Set voice quality
     pub fn with_voice_quality(mut self, quality: VoiceQuality) -> Self {
         self.voice_quality = quality;
         self
     }
-    
+
     /// Add personality trait
     pub fn with_personality_trait(mut self, trait_type: PersonalityTrait) -> Self {
         if !self.personality_traits.contains(&trait_type) {
@@ -285,55 +285,55 @@ impl VoiceCharacteristics {
         }
         self
     }
-    
+
     /// Set supported languages
     pub fn with_languages(mut self, languages: Vec<LanguageCode>) -> Self {
         self.supported_languages = languages;
         self
     }
-    
+
     /// Set pitch range
     pub fn with_pitch_range(mut self, min_hz: f32, max_hz: f32) -> Self {
         self.pitch_range = (min_hz, max_hz);
         self
     }
-    
+
     /// Set speaking rate
     pub fn with_speaking_rate(mut self, rate: f32) -> Self {
         self.speaking_rate = rate;
         self
     }
-    
+
     /// Set voice brightness
     pub fn with_brightness(mut self, brightness: f32) -> Self {
         self.brightness = brightness.clamp(0.0, 1.0);
         self
     }
-    
+
     /// Set voice warmth
     pub fn with_warmth(mut self, warmth: f32) -> Self {
         self.warmth = warmth.clamp(0.0, 1.0);
         self
     }
-    
+
     /// Set voice roughness
     pub fn with_roughness(mut self, roughness: f32) -> Self {
         self.roughness = roughness.clamp(0.0, 1.0);
         self
     }
-    
+
     /// Set voice breathiness
     pub fn with_breathiness(mut self, breathiness: f32) -> Self {
         self.breathiness = breathiness.clamp(0.0, 1.0);
         self
     }
-    
+
     /// Add custom characteristic
     pub fn with_custom_characteristic(mut self, name: String, value: f32) -> Self {
         self.custom_characteristics.insert(name, value);
         self
     }
-    
+
     /// Get default pitch range for age group and gender
     fn default_pitch_range(age_group: AgeGroup, gender: Gender) -> (f32, f32) {
         match (age_group, gender) {
@@ -350,7 +350,7 @@ impl VoiceCharacteristics {
             (_, Gender::Unspecified) => (120.0, 250.0),
         }
     }
-    
+
     /// Get default speaking rate for age group
     fn default_speaking_rate(age_group: AgeGroup) -> f32 {
         match age_group {
@@ -361,47 +361,51 @@ impl VoiceCharacteristics {
             AgeGroup::Senior => 130.0,
         }
     }
-    
+
     /// Check if characteristics match a filter
     pub fn matches(&self, filter: &VoiceCharacteristics) -> bool {
         // Age group must match
         if self.age_group != filter.age_group {
             return false;
         }
-        
+
         // Gender must match
         if self.gender != filter.gender {
             return false;
         }
-        
+
         // Voice quality must match
         if self.voice_quality != filter.voice_quality {
             return false;
         }
-        
+
         // At least one personality trait must match (if filter has any)
         if !filter.personality_traits.is_empty() {
-            let has_matching_trait = filter.personality_traits.iter()
+            let has_matching_trait = filter
+                .personality_traits
+                .iter()
                 .any(|trait_type| self.personality_traits.contains(trait_type));
             if !has_matching_trait {
                 return false;
             }
         }
-        
+
         // At least one language must match
-        let has_matching_language = filter.supported_languages.iter()
+        let has_matching_language = filter
+            .supported_languages
+            .iter()
             .any(|lang| self.supported_languages.contains(lang));
         if !has_matching_language {
             return false;
         }
-        
+
         true
     }
-    
+
     /// Get voice characteristics as feature vector
     pub fn to_feature_vector(&self) -> Vec<f32> {
         let mut features = Vec::new();
-        
+
         // Age group (one-hot encoding)
         let age_groups = [
             AgeGroup::Child,
@@ -411,21 +415,34 @@ impl VoiceCharacteristics {
             AgeGroup::Senior,
         ];
         for age_group in &age_groups {
-            features.push(if self.age_group == *age_group { 1.0 } else { 0.0 });
+            features.push(if self.age_group == *age_group {
+                1.0
+            } else {
+                0.0
+            });
         }
-        
+
         // Gender (one-hot encoding)
-        let genders = [Gender::Male, Gender::Female, Gender::NonBinary, Gender::Unspecified];
+        let genders = [
+            Gender::Male,
+            Gender::Female,
+            Gender::NonBinary,
+            Gender::Unspecified,
+        ];
         for gender in &genders {
             features.push(if self.gender == *gender { 1.0 } else { 0.0 });
         }
-        
+
         // Voice quality (one-hot encoding)
         let qualities = VoiceQuality::all();
         for quality in &qualities {
-            features.push(if self.voice_quality == *quality { 1.0 } else { 0.0 });
+            features.push(if self.voice_quality == *quality {
+                1.0
+            } else {
+                0.0
+            });
         }
-        
+
         // Personality traits (multi-hot encoding)
         let all_traits = [
             PersonalityTrait::Extroverted,
@@ -440,9 +457,13 @@ impl VoiceCharacteristics {
             PersonalityTrait::Playful,
         ];
         for trait_type in &all_traits {
-            features.push(if self.personality_traits.contains(trait_type) { 1.0 } else { 0.0 });
+            features.push(if self.personality_traits.contains(trait_type) {
+                1.0
+            } else {
+                0.0
+            });
         }
-        
+
         // Continuous features
         features.push(self.pitch_range.0 / 400.0); // Normalized min pitch
         features.push(self.pitch_range.1 / 400.0); // Normalized max pitch
@@ -451,10 +472,10 @@ impl VoiceCharacteristics {
         features.push(self.warmth);
         features.push(self.roughness);
         features.push(self.breathiness);
-        
+
         features
     }
-    
+
     /// Create preset characteristics
     pub fn preset_professional_male() -> Self {
         Self::new(AgeGroup::MiddleAged, Gender::Male)
@@ -464,7 +485,7 @@ impl VoiceCharacteristics {
             .with_brightness(0.6)
             .with_warmth(0.4)
     }
-    
+
     pub fn preset_friendly_female() -> Self {
         Self::new(AgeGroup::YoungAdult, Gender::Female)
             .with_voice_quality(VoiceQuality::Warm)
@@ -473,7 +494,7 @@ impl VoiceCharacteristics {
             .with_brightness(0.7)
             .with_warmth(0.8)
     }
-    
+
     pub fn preset_child() -> Self {
         Self::new(AgeGroup::Child, Gender::Unspecified)
             .with_voice_quality(VoiceQuality::Bright)
@@ -482,7 +503,7 @@ impl VoiceCharacteristics {
             .with_brightness(0.9)
             .with_warmth(0.6)
     }
-    
+
     pub fn preset_elderly_wise() -> Self {
         Self::new(AgeGroup::Senior, Gender::Male)
             .with_voice_quality(VoiceQuality::Deep)
@@ -503,7 +524,7 @@ impl Default for VoiceCharacteristics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_age_group_from_age() {
         assert_eq!(AgeGroup::from_age(8), AgeGroup::Child);
@@ -512,13 +533,13 @@ mod tests {
         assert_eq!(AgeGroup::from_age(45), AgeGroup::MiddleAged);
         assert_eq!(AgeGroup::from_age(65), AgeGroup::Senior);
     }
-    
+
     #[test]
     fn test_age_group_range() {
         assert_eq!(AgeGroup::Child.age_range(), (0, 12));
         assert_eq!(AgeGroup::Senior.age_range(), (56, 100));
     }
-    
+
     #[test]
     fn test_voice_characteristics_creation() {
         let characteristics = VoiceCharacteristics::new(AgeGroup::YoungAdult, Gender::Female);
@@ -527,7 +548,7 @@ mod tests {
         assert_eq!(characteristics.voice_quality, VoiceQuality::Clear);
         assert_eq!(characteristics.pitch_range, (180.0, 280.0));
     }
-    
+
     #[test]
     fn test_voice_characteristics_builder() {
         let characteristics = VoiceCharacteristics::new(AgeGroup::MiddleAged, Gender::Male)
@@ -536,86 +557,100 @@ mod tests {
             .with_personality_trait(PersonalityTrait::Confident)
             .with_brightness(0.8)
             .with_warmth(0.6);
-        
+
         assert_eq!(characteristics.age, Some(42));
         assert_eq!(characteristics.voice_quality, VoiceQuality::Deep);
-        assert!(characteristics.personality_traits.contains(&PersonalityTrait::Confident));
+        assert!(characteristics
+            .personality_traits
+            .contains(&PersonalityTrait::Confident));
         assert_eq!(characteristics.brightness, 0.8);
         assert_eq!(characteristics.warmth, 0.6);
     }
-    
+
     #[test]
     fn test_voice_characteristics_matching() {
         let characteristics = VoiceCharacteristics::new(AgeGroup::YoungAdult, Gender::Female)
             .with_voice_quality(VoiceQuality::Warm)
             .with_personality_trait(PersonalityTrait::Friendly)
-            .with_languages(vec![LanguageCode::EnUs, LanguageCode::Fr]);
-        
+            .with_languages(vec![LanguageCode::EnUs, LanguageCode::FrFr]);
+
         let filter = VoiceCharacteristics::new(AgeGroup::YoungAdult, Gender::Female)
             .with_voice_quality(VoiceQuality::Warm)
             .with_personality_trait(PersonalityTrait::Friendly)
             .with_languages(vec![LanguageCode::EnUs]);
-        
+
         assert!(characteristics.matches(&filter));
-        
+
         let non_matching_filter = VoiceCharacteristics::new(AgeGroup::YoungAdult, Gender::Male)
             .with_voice_quality(VoiceQuality::Warm)
             .with_languages(vec![LanguageCode::EnUs]);
-        
+
         assert!(!characteristics.matches(&non_matching_filter));
     }
-    
+
     #[test]
     fn test_voice_characteristics_feature_vector() {
         let characteristics = VoiceCharacteristics::new(AgeGroup::YoungAdult, Gender::Female)
             .with_voice_quality(VoiceQuality::Warm)
             .with_personality_trait(PersonalityTrait::Friendly);
-        
+
         let features = characteristics.to_feature_vector();
-        
+
         // Should have features for age groups, genders, voice qualities, personality traits, and continuous features
         assert!(features.len() > 20);
-        
+
         // YoungAdult should be set (index 2)
         assert_eq!(features[2], 1.0);
-        
+
         // Female should be set (index 6)
         assert_eq!(features[6], 1.0);
     }
-    
+
     #[test]
     fn test_preset_characteristics() {
         let professional = VoiceCharacteristics::preset_professional_male();
         assert_eq!(professional.age_group, AgeGroup::MiddleAged);
         assert_eq!(professional.gender, Gender::Male);
         assert_eq!(professional.voice_quality, VoiceQuality::Clear);
-        assert!(professional.personality_traits.contains(&PersonalityTrait::Confident));
-        
+        assert!(professional
+            .personality_traits
+            .contains(&PersonalityTrait::Confident));
+
         let friendly = VoiceCharacteristics::preset_friendly_female();
         assert_eq!(friendly.age_group, AgeGroup::YoungAdult);
         assert_eq!(friendly.gender, Gender::Female);
         assert_eq!(friendly.voice_quality, VoiceQuality::Warm);
-        assert!(friendly.personality_traits.contains(&PersonalityTrait::Friendly));
-        
+        assert!(friendly
+            .personality_traits
+            .contains(&PersonalityTrait::Friendly));
+
         let child = VoiceCharacteristics::preset_child();
         assert_eq!(child.age_group, AgeGroup::Child);
         assert_eq!(child.voice_quality, VoiceQuality::Bright);
-        assert!(child.personality_traits.contains(&PersonalityTrait::Playful));
-        
+        assert!(child
+            .personality_traits
+            .contains(&PersonalityTrait::Playful));
+
         let elderly = VoiceCharacteristics::preset_elderly_wise();
         assert_eq!(elderly.age_group, AgeGroup::Senior);
         assert_eq!(elderly.voice_quality, VoiceQuality::Deep);
         assert!(elderly.personality_traits.contains(&PersonalityTrait::Calm));
     }
-    
+
     #[test]
     fn test_accent_string_representation() {
         assert_eq!(Accent::Standard.as_str(), "standard");
-        assert_eq!(Accent::Regional("southern".to_string()).as_str(), "regional_southern");
-        assert_eq!(Accent::International("british".to_string()).as_str(), "international_british");
+        assert_eq!(
+            Accent::Regional("southern".to_string()).as_str(),
+            "regional_southern"
+        );
+        assert_eq!(
+            Accent::International("british".to_string()).as_str(),
+            "international_british"
+        );
         assert_eq!(Accent::Custom("robot".to_string()).as_str(), "custom_robot");
     }
-    
+
     #[test]
     fn test_voice_quality_all() {
         let qualities = VoiceQuality::all();
@@ -624,14 +659,22 @@ mod tests {
         assert!(qualities.contains(&VoiceQuality::Warm));
         assert!(qualities.contains(&VoiceQuality::Deep));
     }
-    
+
     #[test]
     fn test_custom_characteristics() {
         let mut characteristics = VoiceCharacteristics::default();
-        characteristics = characteristics.with_custom_characteristic("naturalness".to_string(), 0.9);
-        characteristics = characteristics.with_custom_characteristic("expressiveness".to_string(), 0.7);
-        
-        assert_eq!(characteristics.custom_characteristics.get("naturalness"), Some(&0.9));
-        assert_eq!(characteristics.custom_characteristics.get("expressiveness"), Some(&0.7));
+        characteristics =
+            characteristics.with_custom_characteristic("naturalness".to_string(), 0.9);
+        characteristics =
+            characteristics.with_custom_characteristic("expressiveness".to_string(), 0.7);
+
+        assert_eq!(
+            characteristics.custom_characteristics.get("naturalness"),
+            Some(&0.9)
+        );
+        assert_eq!(
+            characteristics.custom_characteristics.get("expressiveness"),
+            Some(&0.7)
+        );
     }
 }

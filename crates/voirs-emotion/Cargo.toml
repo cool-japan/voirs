@@ -1,0 +1,89 @@
+[package]
+name = "voirs-emotion"
+version = { workspace = true }
+edition = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = "https://docs.rs/voirs-emotion"
+keywords = { workspace = true }
+categories = ["science", "multimedia::audio", "algorithms"]
+rust-version = { workspace = true }
+description = "Emotion expression control system for VoiRS voice synthesis"
+
+[dependencies]
+# Core emotion processing
+ndarray = { workspace = true }
+
+# Async and concurrency
+tokio = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling and utilities
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+# Math and random
+rand = { workspace = true }
+fastrand = { workspace = true }
+wide = { workspace = true }
+
+# Performance monitoring
+chrono = { workspace = true }
+num_cpus = { workspace = true }
+
+# GPU acceleration (optional)
+candle-core = { workspace = true, optional = true }
+candle-nn = { workspace = true, optional = true }
+
+# VoiRS dependencies
+voirs-acoustic = { version = "0.1.0-alpha.1", path = "../voirs-acoustic", optional = true }
+# voirs-sdk = { path = "../voirs-sdk", optional = true } # Commented out to break cyclic dependency
+# voirs-evaluation = { path = "../voirs-evaluation", optional = true } # Commented out to break cyclic dependency
+
+# WebAssembly dependencies (optional)
+wasm-bindgen = { workspace = true, optional = true }
+wasm-bindgen-futures = { workspace = true, optional = true }
+js-sys = { workspace = true, optional = true }
+web-sys = { workspace = true, optional = true, features = [
+    "console",
+    "AudioContext",
+    "AudioBuffer",
+] }
+console_error_panic_hook = { workspace = true, optional = true }
+wasm-logger = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+criterion = { workspace = true }
+futures = { workspace = true }
+wasm-bindgen-test = { workspace = true }
+
+[features]
+default = ["acoustic-integration"]
+acoustic-integration = ["voirs-acoustic"]
+# sdk-integration = ["voirs-sdk"] # Commented out to break cyclic dependency
+# evaluation-integration = ["voirs-evaluation"] # Commented out to break cyclic dependency
+full-integration = ["acoustic-integration"]
+gpu = ["candle-core", "candle-nn"]
+cuda = ["gpu", "candle-core/cuda"]
+wasm = [
+    "wasm-bindgen",
+    "wasm-bindgen-futures", 
+    "js-sys",
+    "web-sys",
+    "console_error_panic_hook",
+    "wasm-logger"
+]
+onnx = []
+
+[[bench]]
+name = "emotion_processing"
+harness = false
+[lints]
+workspace = true

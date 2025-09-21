@@ -1,0 +1,452 @@
+.TH VOIRS-CLI-CONFIG 1 "2025-07-05" "voirs-cli" "VoiRS CLI Manual"
+
+.SH NAME
+voirs-cli-config \- Manage VoiRS configuration settings and profiles
+
+.SH SYNOPSIS
+.B voirs-cli config
+[\fIOPTIONS\fR]
+[\fISUBCOMMAND\fR]
+
+.SH DESCRIPTION
+The config command provides comprehensive configuration management for VoiRS CLI, including settings management, profile handling, and preference configuration. It supports hierarchical configuration loading and environment variable integration.
+
+.SH SUBCOMMANDS
+.TP
+.B show
+Display current configuration settings (default subcommand).
+
+.TP
+.B get \fIKEY\fR
+Get value of a specific configuration key.
+
+.TP
+.B set \fIKEY\fR \fIVALUE\fR
+Set value of a specific configuration key.
+
+.TP
+.B unset \fIKEY\fR
+Remove a configuration key.
+
+.TP
+.B reset
+Reset configuration to default values.
+
+.TP
+.B export \fIFILE\fR
+Export current configuration to file.
+
+.TP
+.B import \fIFILE\fR
+Import configuration from file.
+
+.TP
+.B validate
+Validate current configuration.
+
+.TP
+.B profile
+Manage configuration profiles.
+
+.SH OPTIONS
+.TP
+.B \-\-format \fIFORMAT\fR
+Output format: table, json, yaml, toml (default: table).
+
+.TP
+.B \-\-global
+Operate on global configuration.
+
+.TP
+.B \-\-user
+Operate on user configuration.
+
+.TP
+.B \-\-local
+Operate on local/project configuration.
+
+.TP
+.B \-\-file \fIFILE\fR
+Use specific configuration file.
+
+.TP
+.B \-\-no-defaults
+Don't include default values in output.
+
+.TP
+.B \-\-comments
+Include comments in exported configuration.
+
+.SH PROFILE MANAGEMENT
+.TP
+.B profile list
+List all configuration profiles.
+
+.TP
+.B profile show \fIPROFILE\fR
+Show profile information.
+
+.TP
+.B profile create \fINAME\fR
+Create new configuration profile.
+
+.TP
+.B profile copy \fISOURCE\fR \fIDEST\fR
+Copy profile to new profile.
+
+.TP
+.B profile switch \fIPROFILE\fR
+Switch to specified profile.
+
+.TP
+.B profile delete \fIPROFILE\fR
+Delete configuration profile.
+
+.TP
+.B profile export \fIPROFILE\fR \fIFILE\fR
+Export profile to file.
+
+.TP
+.B profile import \fIFILE\fR [\fINAME\fR]
+Import profile from file.
+
+.SH CONFIGURATION KEYS
+.SS SYNTHESIS SETTINGS
+.TP
+.B voice
+Default voice for synthesis operations.
+
+.TP
+.B quality
+Default quality level: low, medium, high, ultra.
+
+.TP
+.B format
+Default audio format: wav, mp3, flac, opus, ogg.
+
+.TP
+.B sample_rate
+Default sample rate in Hz.
+
+.TP
+.B speed
+Default speaking speed (0.1 to 3.0).
+
+.TP
+.B pitch
+Default pitch factor (0.1 to 2.0).
+
+.TP
+.B volume
+Default volume level (0.0 to 2.0).
+
+.SS DIRECTORY SETTINGS
+.TP
+.B models_path
+Directory containing voice models.
+
+.TP
+.B cache_path
+Directory for caching temporary files.
+
+.TP
+.B output_path
+Default output directory for audio files.
+
+.TP
+.B config_path
+Configuration file directory.
+
+.SS PROCESSING SETTINGS
+.TP
+.B workers
+Number of parallel processing workers.
+
+.TP
+.B chunk_size
+Text chunk size for streaming synthesis.
+
+.TP
+.B timeout
+Operation timeout in seconds.
+
+.TP
+.B max_retries
+Maximum number of retry attempts.
+
+.SS INTERFACE SETTINGS
+.TP
+.B verbose
+Enable verbose output by default.
+
+.TP
+.B progress
+Show progress indicators.
+
+.TP
+.B colors
+Enable colored output.
+
+.TP
+.B interactive_auto_play
+Auto-play audio in interactive mode.
+
+.SS SERVER SETTINGS
+.TP
+.B server.port
+Default server port.
+
+.TP
+.B server.host
+Default server host.
+
+.TP
+.B server.auth
+Enable authentication by default.
+
+.TP
+.B server.rate_limit
+Default rate limit per minute.
+
+.SH CONFIGURATION HIERARCHY
+Configuration is loaded in the following order (later values override earlier):
+
+.TP
+.B 1. Built-in defaults
+Hard-coded default values.
+
+.TP
+.B 2. System configuration
+/etc/voirs/config.toml (Unix) or system-wide location (Windows).
+
+.TP
+.B 3. User configuration
+~/.config/voirs/config.toml (Unix) or user AppData (Windows).
+
+.TP
+.B 4. Project configuration
+./voirs.toml in current directory.
+
+.TP
+.B 5. Environment variables
+Variables starting with VOIRS_ (e.g., VOIRS_VOICE).
+
+.TP
+.B 6. Command line arguments
+Explicit command line flags and options.
+
+.SH ENVIRONMENT VARIABLES
+.TP
+.B VOIRS_CONFIG_PATH
+Path to configuration file.
+
+.TP
+.B VOIRS_VOICE
+Default voice setting.
+
+.TP
+.B VOIRS_QUALITY
+Default quality setting.
+
+.TP
+.B VOIRS_FORMAT
+Default format setting.
+
+.TP
+.B VOIRS_MODELS_PATH
+Models directory path.
+
+.TP
+.B VOIRS_CACHE_PATH
+Cache directory path.
+
+.TP
+.B VOIRS_WORKERS
+Number of workers.
+
+.TP
+.B VOIRS_VERBOSE
+Enable verbose output (true/false).
+
+.SH EXAMPLES
+.TP
+.B Show current configuration
+voirs-cli config show
+
+.TP
+.B Get specific setting
+voirs-cli config get voice
+
+.TP
+.B Set default voice
+voirs-cli config set voice en-US-female-1
+
+.TP
+.B Set quality level
+voirs-cli config set quality high
+
+.TP
+.B Reset to defaults
+voirs-cli config reset
+
+.TP
+.B Export configuration
+voirs-cli config export my-config.toml
+
+.TP
+.B Import configuration
+voirs-cli config import my-config.toml
+
+.TP
+.B JSON output
+voirs-cli config show --format json
+
+.TP
+.B User-level setting
+voirs-cli config set --user voice en-GB-male-1
+
+.TP
+.B Create profile
+voirs-cli config profile create production
+
+.TP
+.B Switch profile
+voirs-cli config profile switch production
+
+.TP
+.B List profiles
+voirs-cli config profile list
+
+.SS CONFIGURATION FILE EXAMPLE
+.nf
+# VoiRS Configuration File
+# ~/.config/voirs/config.toml
+
+[synthesis]
+voice = "en-US-female-1"
+quality = "high"
+format = "wav"
+sample_rate = 22050
+speed = 1.0
+pitch = 1.0
+volume = 1.0
+
+[directories]
+models_path = "~/.local/share/voirs/models"
+cache_path = "~/.cache/voirs"
+output_path = "~/voirs-output"
+
+[processing]
+workers = 4
+chunk_size = 1000
+timeout = 300
+max_retries = 3
+
+[interface]
+verbose = false
+progress = true
+colors = true
+interactive_auto_play = true
+
+[server]
+port = 3000
+host = "127.0.0.1"
+auth = false
+rate_limit = 100
+.fi
+
+.SH PROFILE SYSTEM
+.TP
+.B Profile types
+- System profiles: Shared across all users
+- User profiles: Personal to current user
+- Project profiles: Specific to current project
+
+.TP
+.B Profile metadata
+- Name and description
+- Creation and modification dates
+- Tags for organization
+- Usage statistics
+
+.TP
+.B Profile inheritance
+Profiles can inherit from other profiles with override capability.
+
+.SH VALIDATION
+.TP
+.B Schema validation
+Configuration is validated against built-in schema.
+
+.TP
+.B Value validation
+Values are checked for correct type and range.
+
+.TP
+.B Dependency validation
+Related settings are validated for consistency.
+
+.TP
+.B Error reporting
+Validation errors include context and suggestions.
+
+.SH MIGRATION
+.TP
+.B Version compatibility
+Automatic migration of old configuration formats.
+
+.TP
+.B Backup creation
+Backups are created before migration.
+
+.TP
+.B Rollback capability
+Failed migrations can be rolled back.
+
+.SH FILES
+.TP
+.B ~/.config/voirs/config.toml
+User configuration file.
+
+.TP
+.B ~/.config/voirs/profiles/
+Directory containing configuration profiles.
+
+.TP
+.B ./voirs.toml
+Project-specific configuration file.
+
+.TP
+.B /etc/voirs/config.toml
+System-wide configuration file (Unix systems).
+
+.SH EXIT STATUS
+.TP
+.B 0
+Configuration operation successful.
+
+.TP
+.B 1
+General configuration error.
+
+.TP
+.B 2
+Configuration file not found.
+
+.TP
+.B 3
+Invalid configuration format.
+
+.TP
+.B 4
+Configuration validation failed.
+
+.TP
+.B 5
+Profile operation failed.
+
+.SH SEE ALSO
+.BR voirs-cli (1),
+.BR voirs-cli-synthesize (1),
+.BR voirs-cli-voices (1),
+.BR voirs-cli-server (1)

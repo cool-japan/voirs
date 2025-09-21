@@ -11,19 +11,20 @@
 //! - Quality validation at each step
 //! - Memory-efficient streaming processing
 
-use crate::audio::io::{load_audio, save_audio};
-use crate::audio::processing::{normalize_audio, resample_audio, detect_silence, mix_channels};
-use crate::processing::validation::{validate_audio_quality, validate_text, AudioQualityThresholds, TextValidationConfig};
-use crate::processing::features::{extract_mel_spectrogram, extract_mfcc, extract_fundamental_frequency};
-use crate::{AudioData, DatasetError, DatasetSample, LanguageCode, Result};
+use crate::audio::io::save_audio;
+use crate::audio::processing::{detect_silence, mix_channels, normalize_audio, resample_audio};
+use crate::processing::features::{
+    extract_fundamental_frequency, extract_mel_spectrogram, extract_mfcc,
+};
+use crate::processing::validation::{AudioQualityThresholds, TextValidationConfig};
+use crate::{DatasetError, DatasetSample, Result};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::fs;
 use tokio::sync::mpsc;
 
 /// Processing step configuration
@@ -195,16 +196,16 @@ impl ProcessingProgress {
             throughput: 0.0,
         }
     }
-    
+
     pub fn update(&mut self, processed: usize, failed: usize, current_step: String) {
         self.processed_items = processed;
         self.failed_items = failed;
         self.current_step = current_step;
-        
+
         let elapsed = self.start_time.elapsed();
         if !elapsed.is_zero() {
             self.throughput = self.processed_items as f64 / elapsed.as_secs_f64();
-            
+
             if self.throughput > 0.0 {
                 let remaining_items = self.total_items.saturating_sub(self.processed_items);
                 let eta_seconds = remaining_items as f64 / self.throughput;
@@ -212,7 +213,7 @@ impl ProcessingProgress {
             }
         }
     }
-    
+
     pub fn completion_percentage(&self) -> f64 {
         if self.total_items == 0 {
             100.0
@@ -264,31 +265,36 @@ impl ProcessingPipeline {
             progress_sender: None,
         }
     }
-    
+
     /// Create a pipeline with progress reporting
-    pub fn with_progress_reporting(mut self) -> (Self, mpsc::UnboundedReceiver<ProcessingProgress>) {
+    pub fn with_progress_reporting(
+        mut self,
+    ) -> (Self, mpsc::UnboundedReceiver<ProcessingProgress>) {
         let (sender, receiver) = mpsc::unbounded_channel();
         self.progress_sender = Some(sender);
         (self, receiver)
     }
-    
+
     /// Cancel the processing pipeline
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Relaxed);
     }
-    
+
     /// Check if pipeline is cancelled
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Relaxed)
     }
-    
+
     /// Get current processing progress
     pub fn get_progress(&self) -> ProcessingProgress {
         self.progress.lock().unwrap().clone()
     }
-    
+
     /// Process a batch of dataset samples
-    pub async fn process_samples(&mut self, samples: Vec<DatasetSample>) -> Result<Vec<ProcessingResult>> {
+    pub async fn process_samples(
+        &mut self,
+        samples: Vec<DatasetSample>,
+    ) -> Result<Vec<ProcessingResult>> {
         // Update progress tracking
         {
             let mut progress = self.progress.lock().unwrap();
@@ -297,21 +303,23 @@ impl ProcessingPipeline {
             progress.failed_items = 0;
             progress.start_time = Instant::now();
         }
-        
+
         // Set up parallel processing
         let num_workers = self.config.num_workers.unwrap_or_else(|| {
-            std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4)
+            std::thread::available_parallelism()
+                .map(std::num::NonZero::get)
+                .unwrap_or(4)
         });
-        
+
         // Process samples in parallel batches
         let mut results = Vec::with_capacity(samples.len());
         let batch_size = self.config.batch_size;
-        
+
         for (batch_idx, batch) in samples.chunks(batch_size).enumerate() {
             if self.is_cancelled() {
                 break;
             }
-            
+
             let batch_results: Vec<_> = batch
                 .par_iter()
                 .with_max_len(num_workers)
@@ -327,41 +335,46 @@ impl ProcessingPipeline {
                             quality_metrics: None,
                         };
                     }
-                    
+
                     self.process_single_sample(sample.clone())
                 })
                 .collect();
-            
+
             // Update progress
-            let processed_count = (batch_idx + 1) * batch_size.min(samples.len() - batch_idx * batch_size);
+            let processed_count =
+                (batch_idx + 1) * batch_size.min(samples.len() - batch_idx * batch_size);
             let failed_count = batch_results.iter().filter(|r| !r.success).count();
-            
+
             {
                 let mut progress = self.progress.lock().unwrap();
                 progress.update(
                     processed_count,
                     failed_count,
-                    format!("Processing batch {}/{}", batch_idx + 1, (samples.len() + batch_size - 1) / batch_size)
+                    format!(
+                        "Processing batch {}/{}",
+                        batch_idx + 1,
+                        (samples.len() + batch_size - 1) / batch_size
+                    ),
                 );
-                
+
                 // Send progress update if sender is available
                 if let Some(ref sender) = self.progress_sender {
                     let _ = sender.send(progress.clone());
                 }
             }
-            
+
             results.extend(batch_results);
         }
-        
+
         Ok(results)
     }
-    
+
     /// Process a single dataset sample
     fn process_single_sample(&self, mut sample: DatasetSample) -> ProcessingResult {
         let start_time = Instant::now();
         let mut features = HashMap::new();
         let mut quality_metrics = HashMap::new();
-        
+
         for step in &self.config.steps {
             if self.is_cancelled() {
                 return ProcessingResult {
@@ -374,9 +387,9 @@ impl ProcessingPipeline {
                     quality_metrics: None,
                 };
             }
-            
+
             match self.process_step(step, &mut sample, &mut features, &mut quality_metrics) {
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(e) => {
                     if !self.config.continue_on_error {
                         return ProcessingResult {
@@ -394,7 +407,7 @@ impl ProcessingPipeline {
                 }
             }
         }
-        
+
         ProcessingResult {
             sample_id: sample.id.clone(),
             success: true,
@@ -405,7 +418,7 @@ impl ProcessingPipeline {
             quality_metrics: Some(quality_metrics),
         }
     }
-    
+
     /// Process a single step for a sample
     fn process_step(
         &self,
@@ -423,100 +436,142 @@ impl ProcessingPipeline {
                     quality_metrics.insert("duration".to_string(), audio.duration());
                     quality_metrics.insert("sample_rate".to_string(), audio.sample_rate() as f32);
                     quality_metrics.insert("channels".to_string(), audio.channels() as f32);
-                    
+
                     // Add more quality metrics here
                     if let Some(rms) = audio.rms() {
                         quality_metrics.insert("rms".to_string(), rms);
                     }
                 }
-            },
-            
-            ProcessingStep::NormalizeAudio { method, target_level } => {
+            }
+
+            ProcessingStep::NormalizeAudio {
+                method,
+                target_level,
+            } => {
                 sample.audio = normalize_audio(&sample.audio, method, *target_level)?;
-            },
-            
-            ProcessingStep::ResampleAudio { target_sample_rate, quality: _ } => {
+            }
+
+            ProcessingStep::ResampleAudio {
+                target_sample_rate,
+                quality: _,
+            } => {
                 if sample.audio.sample_rate() != *target_sample_rate {
                     sample.audio = resample_audio(&sample.audio, *target_sample_rate)?;
                 }
-            },
-            
-            ProcessingStep::TrimSilence { threshold_db, min_leading_silence: _, min_trailing_silence: _ } => {
+            }
+
+            ProcessingStep::TrimSilence {
+                threshold_db,
+                min_leading_silence: _,
+                min_trailing_silence: _,
+            } => {
                 let (_start, _end) = detect_silence(&sample.audio, *threshold_db)?;
                 // Trim audio based on silence detection
                 // This would need to be implemented in the audio processing module
-            },
-            
-            ProcessingStep::ConvertChannels { target_channels, mix_method } => {
-                if sample.audio.channels() as u32 != *target_channels {
-                    sample.audio = mix_channels(&sample.audio, *target_channels as usize, mix_method)?;
+            }
+
+            ProcessingStep::ConvertChannels {
+                target_channels,
+                mix_method,
+            } => {
+                if sample.audio.channels() != *target_channels {
+                    sample.audio =
+                        mix_channels(&sample.audio, *target_channels as usize, mix_method)?;
                 }
-            },
-            
+            }
+
             ProcessingStep::ValidateText { config: _ } => {
                 // Validate text content
                 // This would use the validation functions
-            },
-            
-            ProcessingStep::ExtractFeatures { features: feature_types } => {
+            }
+
+            ProcessingStep::ExtractFeatures {
+                features: feature_types,
+            } => {
                 for feature_type in feature_types {
                     match feature_type {
-                        FeatureType::MelSpectrogram { n_mels, n_fft, hop_length } => {
-                            if let Ok(mel_spec) = extract_mel_spectrogram(&sample.audio, *n_mels, *n_fft, *hop_length) {
+                        FeatureType::MelSpectrogram {
+                            n_mels,
+                            n_fft,
+                            hop_length,
+                        } => {
+                            if let Ok(mel_spec) =
+                                extract_mel_spectrogram(&sample.audio, *n_mels, *n_fft, *hop_length)
+                            {
                                 features.insert("mel_spectrogram".to_string(), mel_spec.values);
                             }
-                        },
-                        FeatureType::Mfcc { n_mfcc, include_energy } => {
-                            if let Ok(mfcc) = extract_mfcc(&sample.audio, *n_mfcc, *include_energy) {
+                        }
+                        FeatureType::Mfcc {
+                            n_mfcc,
+                            include_energy,
+                        } => {
+                            if let Ok(mfcc) = extract_mfcc(&sample.audio, *n_mfcc, *include_energy)
+                            {
                                 features.insert("mfcc".to_string(), mfcc);
                             }
-                        },
+                        }
                         FeatureType::F0 { f_min, f_max } => {
-                            if let Ok(f0) = extract_fundamental_frequency(&sample.audio, *f_min, *f_max) {
+                            if let Ok(f0) =
+                                extract_fundamental_frequency(&sample.audio, *f_min, *f_max)
+                            {
                                 features.insert("f0".to_string(), f0);
                             }
-                        },
+                        }
                         FeatureType::SpectralFeatures => {
                             // Extract spectral features
-                        },
+                        }
                         FeatureType::EnergyFeatures => {
                             // Extract energy features
-                        },
+                        }
                     }
                 }
-            },
-            
-            ProcessingStep::SaveAudio { output_dir, format, preserve_structure: _ } => {
+            }
+
+            ProcessingStep::SaveAudio {
+                output_dir,
+                format,
+                preserve_structure: _,
+            } => {
                 if let Some(ref base_output_dir) = self.config.output_dir {
-                    let output_path = base_output_dir.join(output_dir).join(format!("{}.{}", sample.id, format));
+                    let output_path = base_output_dir
+                        .join(output_dir)
+                        .join(format!("{}.{format}", sample.id));
                     if let Some(parent) = output_path.parent() {
                         std::fs::create_dir_all(parent).map_err(|e| {
-                            DatasetError::ProcessingError(format!("Failed to create output directory: {}", e))
+                            DatasetError::ProcessingError(format!(
+                                "Failed to create output directory: {e}"
+                            ))
                         })?;
                     }
                     save_audio(&sample.audio, &output_path)?;
                 }
-            },
+            }
         }
-        
+
         Ok(())
     }
-    
+
     /// Get pipeline statistics
     pub fn get_statistics(&self) -> HashMap<String, f64> {
         let progress = self.progress.lock().unwrap();
         let mut stats = HashMap::new();
-        
+
         stats.insert("total_items".to_string(), progress.total_items as f64);
-        stats.insert("processed_items".to_string(), progress.processed_items as f64);
+        stats.insert(
+            "processed_items".to_string(),
+            progress.processed_items as f64,
+        );
         stats.insert("failed_items".to_string(), progress.failed_items as f64);
-        stats.insert("completion_percentage".to_string(), progress.completion_percentage());
+        stats.insert(
+            "completion_percentage".to_string(),
+            progress.completion_percentage(),
+        );
         stats.insert("throughput".to_string(), progress.throughput);
-        
+
         if let Some(eta) = progress.eta {
             stats.insert("eta_seconds".to_string(), eta.as_secs_f64());
         }
-        
+
         stats
     }
 }
@@ -532,32 +587,32 @@ impl PipelineBuilder {
             config: PipelineConfig::default(),
         }
     }
-    
+
     pub fn with_steps(mut self, steps: Vec<ProcessingStep>) -> Self {
         self.config.steps = steps;
         self
     }
-    
+
     pub fn with_workers(mut self, num_workers: usize) -> Self {
         self.config.num_workers = Some(num_workers);
         self
     }
-    
+
     pub fn with_batch_size(mut self, batch_size: usize) -> Self {
         self.config.batch_size = batch_size;
         self
     }
-    
+
     pub fn with_output_dir<P: AsRef<Path>>(mut self, output_dir: P) -> Self {
         self.config.output_dir = Some(output_dir.as_ref().to_path_buf());
         self
     }
-    
+
     pub fn continue_on_error(mut self, continue_on_error: bool) -> Self {
         self.config.continue_on_error = continue_on_error;
         self
     }
-    
+
     pub fn build(self) -> ProcessingPipeline {
         ProcessingPipeline::new(self.config)
     }
@@ -572,9 +627,9 @@ impl Default for PipelineBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::datasets::dummy::{DummyDataset, DummyConfig};
+    use crate::datasets::dummy::DummyDataset;
     use crate::traits::Dataset;
-    
+
     #[tokio::test]
     async fn test_pipeline_builder() {
         let pipeline = PipelineBuilder::new()
@@ -582,28 +637,28 @@ mod tests {
             .with_batch_size(5)
             .continue_on_error(true)
             .build();
-        
+
         assert_eq!(pipeline.config.num_workers, Some(2));
         assert_eq!(pipeline.config.batch_size, 5);
         assert!(pipeline.config.continue_on_error);
     }
-    
+
     #[tokio::test]
     async fn test_processing_progress() {
         let mut progress = ProcessingProgress::new(100);
         assert_eq!(progress.completion_percentage(), 0.0);
-        
+
         progress.update(50, 5, "Processing".to_string());
         assert_eq!(progress.completion_percentage(), 50.0);
         assert_eq!(progress.processed_items, 50);
         assert_eq!(progress.failed_items, 5);
     }
-    
+
     #[tokio::test]
     async fn test_pipeline_processing() {
         // Create a dummy dataset for testing
         let dataset = DummyDataset::small();
-        
+
         // Get a few samples
         let mut samples = Vec::new();
         for i in 0..3 {
@@ -611,7 +666,7 @@ mod tests {
                 samples.push(sample);
             }
         }
-        
+
         // Create a simple pipeline
         let pipeline_config = PipelineConfig {
             steps: vec![
@@ -625,10 +680,10 @@ mod tests {
             continue_on_error: true,
             ..Default::default()
         };
-        
+
         let mut pipeline = ProcessingPipeline::new(pipeline_config);
         let results = pipeline.process_samples(samples).await.unwrap();
-        
+
         assert_eq!(results.len(), 3);
         // All samples should process successfully with dummy data
         assert!(results.iter().all(|r| r.success));

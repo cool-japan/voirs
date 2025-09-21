@@ -1,0 +1,419 @@
+.TH VOIRS-CLI-SERVER 1 "2025-07-05" "voirs-cli" "VoiRS CLI Manual"
+
+.SH NAME
+voirs-cli-server \- HTTP server mode for REST API access to VoiRS synthesis
+
+.SH SYNOPSIS
+.B voirs-cli server
+[\fIOPTIONS\fR]
+
+.SH DESCRIPTION
+The server command starts an HTTP server providing REST API access to VoiRS text-to-speech synthesis functionality. It includes authentication, rate limiting, CORS support, and interactive API documentation.
+
+.SH OPTIONS
+.TP
+.B \-p, \-\-port \fIPORT\fR
+Server port number (default: 3000).
+
+.TP
+.B \-H, \-\-host \fIHOST\fR
+Server host address (default: 127.0.0.1).
+
+.TP
+.B \-\-workers \fIN\fR
+Number of synthesis workers (default: CPU cores).
+
+.TP
+.B \-\-auth
+Enable API key authentication.
+
+.TP
+.B \-\-api-key \fIKEY\fR
+Set API key for authentication.
+
+.TP
+.B \-\-rate-limit \fILIMIT\fR
+Requests per minute per client (default: 100).
+
+.TP
+.B \-\-cors
+Enable CORS for cross-origin requests.
+
+.TP
+.B \-\-cors-origins \fIORIGINS\fR
+Allowed CORS origins (comma-separated).
+
+.TP
+.B \-\-docs
+Enable interactive API documentation.
+
+.TP
+.B \-\-docs-path \fIPATH\fR
+Path for API documentation (default: /docs).
+
+.TP
+.B \-\-log-level \fILEVEL\fR
+Logging level: error, warn, info, debug, trace (default: info).
+
+.TP
+.B \-\-log-file \fIFILE\fR
+Log file path (default: stderr).
+
+.TP
+.B \-\-access-log
+Enable access logging.
+
+.TP
+.B \-\-metrics
+Enable metrics collection.
+
+.TP
+.B \-\-health-check
+Enable health check endpoint.
+
+.TP
+.B \-\-shutdown-timeout \fISECONDS\fR
+Graceful shutdown timeout (default: 30).
+
+.SH API ENDPOINTS
+.SS SYNTHESIS ENDPOINTS
+.TP
+.B POST /api/v1/synthesize
+Synthesize text to speech and return audio data.
+
+.TP
+.B POST /api/v1/synthesize/stream
+Stream synthesis for long texts with chunked processing.
+
+.TP
+.B POST /api/v1/validate/ssml
+Validate SSML markup without performing synthesis.
+
+.SS VOICE ENDPOINTS
+.TP
+.B GET /api/v1/voices
+List available voices with optional filtering.
+
+.TP
+.B GET /api/v1/voices/{voice_id}
+Get detailed information about a specific voice.
+
+.TP
+.B GET /api/v1/voices/{voice_id}/sample
+Get sample audio for a voice.
+
+.SS MODEL ENDPOINTS
+.TP
+.B GET /api/v1/models
+List available models and their status.
+
+.TP
+.B GET /api/v1/models/{model_id}
+Get detailed model information.
+
+.SS SYSTEM ENDPOINTS
+.TP
+.B GET /api/v1/health
+Health check endpoint.
+
+.TP
+.B GET /api/v1/stats
+System statistics and metrics.
+
+.TP
+.B GET /api/v1/version
+API version information.
+
+.SS AUTHENTICATION ENDPOINTS
+.TP
+.B GET /api/v1/auth/info
+Authentication information for current API key.
+
+.TP
+.B GET /api/v1/auth/usage
+Usage statistics for current API key.
+
+.SS DOCUMENTATION ENDPOINTS
+.TP
+.B GET /docs
+Interactive API documentation (if enabled).
+
+.TP
+.B GET /api/v1/openapi.json
+OpenAPI specification.
+
+.SH AUTHENTICATION
+.TP
+.B API Key Authentication
+Use Bearer token or X-API-Key header.
+
+.TP
+.B Header formats
+- Authorization: Bearer YOUR_API_KEY
+- X-API-Key: YOUR_API_KEY
+
+.TP
+.B Rate limiting
+Per-API-key rate limiting with sliding window.
+
+.TP
+.B Usage tracking
+Comprehensive usage statistics per API key.
+
+.SH REQUEST EXAMPLES
+.SS Basic Synthesis
+.nf
+POST /api/v1/synthesize
+Content-Type: application/json
+
+{
+  "text": "Hello, world!",
+  "voice": "en-US-female-1",
+  "quality": "high",
+  "format": "wav"
+}
+.fi
+
+.SS SSML Synthesis
+.nf
+POST /api/v1/synthesize
+Content-Type: application/json
+
+{
+  "text": "<speak><prosody rate='slow'>Hello there!</prosody></speak>",
+  "voice": "en-US-female-1",
+  "format": "mp3",
+  "ssml": true
+}
+.fi
+
+.SS Voice Listing
+.nf
+GET /api/v1/voices?language=en-US&gender=female&quality=high
+.fi
+
+.SS Stream Synthesis
+.nf
+POST /api/v1/synthesize/stream
+Content-Type: application/json
+
+{
+  "text": "Very long text content...",
+  "voice": "en-US-female-1",
+  "chunk_size": 1000,
+  "format": "wav"
+}
+.fi
+
+.SH RESPONSE FORMATS
+.SS Synthesis Response
+.nf
+{
+  "audio": "base64-encoded-audio-data",
+  "format": "wav",
+  "sample_rate": 22050,
+  "duration": 2.5,
+  "voice": "en-US-female-1",
+  "metadata": {
+    "synthesis_time": 0.8,
+    "text_length": 13
+  }
+}
+.fi
+
+.SS Voice List Response
+.nf
+{
+  "voices": [
+    {
+      "id": "en-US-female-1",
+      "name": "American Female Voice 1",
+      "language": "en-US",
+      "gender": "female",
+      "quality": "high",
+      "sample_rate": 22050,
+      "installed": true
+    }
+  ],
+  "total": 1
+}
+.fi
+
+.SS Error Response
+.nf
+{
+  "error": "Invalid voice",
+  "code": "VOICE_NOT_FOUND",
+  "message": "Voice 'invalid-voice' not found",
+  "suggestions": ["en-US-female-1", "en-US-male-1"]
+}
+.fi
+
+.SH RATE LIMITING
+.TP
+.B Algorithm
+Sliding window rate limiting per API key and IP address.
+
+.TP
+.B Default limits
+- 100 requests per minute per API key
+- 60 requests per minute per IP address
+
+.TP
+.B Headers
+- X-RateLimit-Limit: Request limit
+- X-RateLimit-Remaining: Remaining requests
+- X-RateLimit-Reset: Reset time
+
+.TP
+.B Exceeded response
+HTTP 429 Too Many Requests with retry-after header.
+
+.SH CORS SUPPORT
+.TP
+.B Default behavior
+CORS disabled by default for security.
+
+.TP
+.B Enable CORS
+Use --cors flag to enable cross-origin requests.
+
+.TP
+.B Origin control
+Specify allowed origins with --cors-origins flag.
+
+.TP
+.B Preflight requests
+Automatic handling of OPTIONS preflight requests.
+
+.SH LOGGING
+.TP
+.B Access logging
+Optional access logging with IP, timestamp, and response time.
+
+.TP
+.B Error logging
+Automatic error logging with context information.
+
+.TP
+.B Structured logging
+JSON-formatted logs for machine processing.
+
+.TP
+.B Log levels
+Configurable log levels from error to trace.
+
+.SH MONITORING
+.TP
+.B Health checks
+/api/v1/health endpoint for service monitoring.
+
+.TP
+.B Metrics
+Optional metrics collection for performance monitoring.
+
+.TP
+.B Statistics
+Real-time statistics via /api/v1/stats endpoint.
+
+.TP
+.B Usage tracking
+Per-API-key usage statistics and quotas.
+
+.SH DEPLOYMENT
+.TP
+.B Production settings
+- Bind to specific interface (not 0.0.0.0 in production)
+- Enable authentication
+- Configure rate limiting
+- Set up reverse proxy
+
+.TP
+.B Security considerations
+- Use HTTPS in production
+- Implement proper API key management
+- Monitor for abuse patterns
+- Set up firewall rules
+
+.SH EXAMPLES
+.TP
+.B Basic server
+voirs-cli server
+
+.TP
+.B Production server
+voirs-cli server --host 0.0.0.0 --port 8080 --auth --rate-limit 200
+
+.TP
+.B Development server
+voirs-cli server --docs --cors --log-level debug
+
+.TP
+.B Authenticated server
+voirs-cli server --auth --api-key "your-secret-key" --access-log
+
+.TP
+.B Custom configuration
+voirs-cli server --workers 8 --rate-limit 500 --cors-origins "https://myapp.com"
+
+.SH CURL EXAMPLES
+.TP
+.B Basic synthesis
+curl -X POST http://localhost:3000/api/v1/synthesize \
+     -H "Content-Type: application/json" \
+     -d '{"text": "Hello world", "voice": "en-US-female-1"}'
+
+.TP
+.B With authentication
+curl -X POST http://localhost:3000/api/v1/synthesize \
+     -H "Authorization: Bearer YOUR_API_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"text": "Hello world", "voice": "en-US-female-1"}'
+
+.TP
+.B List voices
+curl http://localhost:3000/api/v1/voices
+
+.TP
+.B Health check
+curl http://localhost:3000/api/v1/health
+
+.SH EXIT STATUS
+.TP
+.B 0
+Server shutdown gracefully.
+
+.TP
+.B 1
+Server initialization error.
+
+.TP
+.B 2
+Configuration error.
+
+.TP
+.B 3
+Port binding error.
+
+.TP
+.B 4
+Authentication setup error.
+
+.SH FILES
+.TP
+.B ~/.config/voirs/server.toml
+Server configuration file.
+
+.TP
+.B ~/.config/voirs/api-keys.json
+API key configuration file.
+
+.TP
+.B /var/log/voirs/server.log
+Default server log file location.
+
+.SH SEE ALSO
+.BR voirs-cli (1),
+.BR voirs-cli-synthesize (1),
+.BR voirs-cli-voices (1),
+.BR voirs-cli-config (1)

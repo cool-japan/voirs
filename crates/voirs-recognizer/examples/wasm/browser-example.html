@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VoiRS Recognizer - Browser Example</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .control-panel {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 8px;
+        }
+        .results {
+            background: #e8f5e8;
+            padding: 15px;
+            border-radius: 8px;
+            min-height: 100px;
+        }
+        .error {
+            background: #ffe8e8;
+            color: #d00;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .status {
+            background: #e8f0ff;
+            color: #0066cc;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        button {
+            padding: 10px 15px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        select, input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .metric {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>VoiRS Speech Recognition - Browser Demo</h1>
+        
+        <div class="control-panel">
+            <h3>Configuration</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px;">
+                <div>
+                    <label>Model:</label>
+                    <select id="modelSelect">
+                        <option value="whisper-tiny">Whisper Tiny (Fast)</option>
+                        <option value="whisper-base" selected>Whisper Base (Balanced)</option>
+                        <option value="whisper-small">Whisper Small (Better)</option>
+                        <option value="whisper-medium">Whisper Medium (Best)</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Language:</label>
+                    <select id="languageSelect">
+                        <option value="en" selected>English</option>
+                        <option value="es">Spanish</option>
+                        <option value="fr">French</option>
+                        <option value="de">German</option>
+                        <option value="ja">Japanese</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Sample Rate:</label>
+                    <select id="sampleRateSelect">
+                        <option value="16000" selected>16 kHz</option>
+                        <option value="22050">22.05 kHz</option>
+                        <option value="44100">44.1 kHz</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div style="margin-top: 15px;">
+                <button id="initButton">Initialize Recognizer</button>
+                <button id="micButton" disabled>Start Microphone</button>
+                <button id="stopButton" disabled>Stop Recording</button>
+                <input type="file" id="fileInput" accept="audio/*" disabled style="margin-left: 10px;">
+            </div>
+        </div>
+        
+        <div id="status" class="status" style="display: none;"></div>
+        <div id="error" class="error" style="display: none;"></div>
+        
+        <div class="results">
+            <h3>Recognition Results</h3>
+            <div id="transcription">No transcription yet. Initialize the recognizer and start recording or upload an audio file.</div>
+            
+            <div class="metrics">
+                <div class="metric">
+                    <div>Confidence</div>
+                    <div id="confidence">--</div>
+                </div>
+                <div class="metric">
+                    <div>Processing Time</div>
+                    <div id="processingTime">--</div>
+                </div>
+                <div class="metric">
+                    <div>Language Detected</div>
+                    <div id="detectedLanguage">--</div>
+                </div>
+                <div class="metric">
+                    <div>Audio Duration</div>
+                    <div id="audioDuration">--</div>
+                </div>
+            </div>
+        </div>
+        
+        <div id="capabilities" style="display: none;">
+            <h3>Recognizer Capabilities</h3>
+            <pre id="capabilitiesText"></pre>
+        </div>
+    </div>
+
+    <script type="module">
+        import init, { 
+            WasmVoirsRecognizer, 
+            init_wasm_logger,
+            check_browser_compatibility,
+            get_wasm_memory_usage
+        } from '../pkg/web/voirs_recognizer.js';
+
+        let recognizer = null;
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let stream = null;
+
+        const elements = {
+            initButton: document.getElementById('initButton'),
+            micButton: document.getElementById('micButton'),
+            stopButton: document.getElementById('stopButton'),
+            fileInput: document.getElementById('fileInput'),
+            modelSelect: document.getElementById('modelSelect'),
+            languageSelect: document.getElementById('languageSelect'),
+            sampleRateSelect: document.getElementById('sampleRateSelect'),
+            status: document.getElementById('status'),
+            error: document.getElementById('error'),
+            transcription: document.getElementById('transcription'),
+            confidence: document.getElementById('confidence'),
+            processingTime: document.getElementById('processingTime'),
+            detectedLanguage: document.getElementById('detectedLanguage'),
+            audioDuration: document.getElementById('audioDuration'),
+            capabilities: document.getElementById('capabilities'),
+            capabilitiesText: document.getElementById('capabilitiesText')
+        };
+
+        function showStatus(message) {
+            elements.status.textContent = message;
+            elements.status.style.display = 'block';
+            elements.error.style.display = 'none';
+            console.log('[STATUS]', message);
+        }
+
+        function showError(message) {
+            elements.error.textContent = message;
+            elements.error.style.display = 'block';
+            elements.status.style.display = 'none';
+            console.error('[ERROR]', message);
+        }
+
+        function hideMessages() {
+            elements.status.style.display = 'none';
+            elements.error.style.display = 'none';
+        }
+
+        async function initializeWasm() {
+            try {
+                showStatus('Loading WASM module...');
+                await init();
+                
+                // Initialize logger
+                init_wasm_logger();
+                
+                // Check browser compatibility
+                const compatibility = check_browser_compatibility();
+                console.log('Browser compatibility:', compatibility);
+                
+                showStatus('WASM module loaded successfully');
+                return true;
+            } catch (error) {
+                showError(`Failed to load WASM module: ${error.message}`);
+                return false;
+            }
+        }
+
+        async function initializeRecognizer() {
+            try {
+                showStatus('Initializing speech recognizer...');
+                
+                recognizer = new WasmVoirsRecognizer();
+                
+                const config = {
+                    model_name: elements.modelSelect.value,
+                    language: elements.languageSelect.value,
+                    sample_rate: parseInt(elements.sampleRateSelect.value),
+                    enable_vad: true,
+                    confidence_threshold: 0.5
+                };
+                
+                await recognizer.initialize(config);
+                
+                // Show capabilities
+                const capabilities = recognizer.get_capabilities();
+                elements.capabilitiesText.textContent = JSON.stringify(capabilities, null, 2);
+                elements.capabilities.style.display = 'block';
+                
+                elements.micButton.disabled = false;
+                elements.fileInput.disabled = false;
+                elements.initButton.textContent = 'Reinitialize';
+                
+                showStatus('Speech recognizer initialized successfully');
+                
+                // Show memory usage
+                const memoryUsage = get_wasm_memory_usage();
+                console.log('Memory usage:', memoryUsage);
+                
+            } catch (error) {
+                showError(`Failed to initialize recognizer: ${error.message}`);
+            }
+        }
+
+        async function startMicrophone() {
+            try {
+                showStatus('Requesting microphone access...');
+                
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        sampleRate: parseInt(elements.sampleRateSelect.value),
+                        channelCount: 1,
+                        echoCancellation: true,
+                        noiseSuppression: true
+                    } 
+                });
+                
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    audioChunks.push(event.data);
+                };
+                
+                mediaRecorder.onstop = async () => {
+                    try {
+                        showStatus('Processing recorded audio...');
+                        
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                        const audioArrayBuffer = await audioBlob.arrayBuffer();
+                        const audioBytes = new Uint8Array(audioArrayBuffer);
+                        
+                        await processAudio(audioBytes);
+                        
+                    } catch (error) {
+                        showError(`Failed to process recorded audio: ${error.message}`);
+                    }
+                };
+                
+                mediaRecorder.start();
+                
+                elements.micButton.disabled = true;
+                elements.stopButton.disabled = false;
+                
+                showStatus('Recording... Click "Stop Recording" when finished.');
+                
+            } catch (error) {
+                showError(`Failed to access microphone: ${error.message}`);
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+            }
+            
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            
+            elements.micButton.disabled = false;
+            elements.stopButton.disabled = true;
+        }
+
+        async function processAudioFile(file) {
+            try {
+                showStatus('Processing uploaded audio file...');
+                
+                const arrayBuffer = await file.arrayBuffer();
+                const audioBytes = new Uint8Array(arrayBuffer);
+                
+                await processAudio(audioBytes);
+                
+            } catch (error) {
+                showError(`Failed to process audio file: ${error.message}`);
+            }
+        }
+
+        async function processAudio(audioBytes) {
+            try {
+                const startTime = performance.now();
+                
+                const result = await recognizer.recognize_audio(audioBytes);
+                
+                const endTime = performance.now();
+                const processingTime = endTime - startTime;
+                
+                // Display results
+                elements.transcription.textContent = result.text || 'No speech detected';
+                elements.confidence.textContent = `${(result.confidence * 100).toFixed(1)}%`;
+                elements.processingTime.textContent = `${processingTime.toFixed(0)}ms`;
+                elements.detectedLanguage.textContent = result.language || 'Unknown';
+                elements.audioDuration.textContent = `${(audioBytes.length / (parseInt(elements.sampleRateSelect.value) * 2)).toFixed(2)}s`;
+                
+                hideMessages();
+                
+                console.log('Recognition result:', result);
+                
+            } catch (error) {
+                showError(`Recognition failed: ${error.message}`);
+            }
+        }
+
+        // Event listeners
+        elements.initButton.addEventListener('click', initializeRecognizer);
+        elements.micButton.addEventListener('click', startMicrophone);
+        elements.stopButton.addEventListener('click', stopRecording);
+        elements.fileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                processAudioFile(file);
+            }
+        });
+
+        // Initialize on page load
+        window.addEventListener('load', async () => {
+            const wasmLoaded = await initializeWasm();
+            if (wasmLoaded) {
+                elements.initButton.disabled = false;
+            }
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+        });
+    </script>
+</body>
+</html>

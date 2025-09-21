@@ -52,6 +52,82 @@ export interface AudioBufferResult {
 }
 
 /**
+ * Synthesis metrics for performance monitoring
+ */
+export interface SynthesisMetrics {
+  /** Processing time in milliseconds */
+  processingTimeMs: number
+  /** Audio duration in milliseconds */
+  audioDurationMs: number
+  /** Real-time factor (processing time / audio duration) */
+  realTimeFactor: number
+  /** Memory usage in MB */
+  memoryUsageMb: number
+  /** Cache hit rate (0.0 to 1.0) */
+  cacheHitRate: number
+}
+
+/**
+ * Enhanced synthesis result with metrics
+ */
+export interface SynthesisResult {
+  /** Audio buffer result */
+  audio: AudioBufferResult
+  /** Performance metrics */
+  metrics: SynthesisMetrics
+}
+
+/**
+ * Structured error information
+ */
+export interface ErrorInfo {
+  /** Error code */
+  code: string
+  /** Error message */
+  message: string
+  /** Additional details */
+  details?: string
+  /** Suggested solution */
+  suggestion?: string
+}
+
+/**
+ * Audio analysis result
+ */
+export interface AudioAnalysis {
+  /** Duration in seconds */
+  durationSeconds: number
+  /** Sample rate in Hz */
+  sampleRate: number
+  /** Number of channels */
+  channels: number
+  /** RMS energy level */
+  rmsEnergy: number
+  /** Zero crossing rate */
+  zeroCrossingRate: number
+  /** Spectral centroid */
+  spectralCentroid: number
+  /** Silence regions [start, end] in samples */
+  silenceRegions: number[][]
+}
+
+/**
+ * Performance information
+ */
+export interface PerformanceInfo {
+  /** Number of CPU cores */
+  cpuCores: number
+  /** Memory usage in MB */
+  memoryUsageMb: number
+  /** Whether GPU is available */
+  gpuAvailable: boolean
+  /** Cache size in MB */
+  cacheSizeMb: number
+  /** Number of threads */
+  threadCount: number
+}
+
+/**
  * Voice information
  */
 export interface VoiceInfo {
@@ -149,6 +225,47 @@ export class VoirsPipeline {
   listVoices(): Promise<VoiceInfo[]>
 
   /**
+   * Enhanced synthesis with metrics
+   * @param text Text to synthesize
+   * @param options Synthesis options
+   * @returns Promise resolving to synthesis result with metrics
+   */
+  synthesizeWithMetrics(text: string, options?: SynthesisOptions): Promise<SynthesisResult>
+
+  /**
+   * Enhanced SSML synthesis with metrics
+   * @param ssml SSML content to synthesize
+   * @returns Promise resolving to synthesis result with metrics
+   */
+  synthesizeSsmlWithMetrics(ssml: string): Promise<SynthesisResult>
+
+  /**
+   * Batch synthesis with progress tracking
+   * @param texts Array of texts to synthesize
+   * @param options Synthesis options
+   * @param progressCallback Called with progress updates (current, total, progress)
+   * @returns Promise resolving to array of synthesis results
+   */
+  batchSynthesize(
+    texts: string[],
+    options?: SynthesisOptions,
+    progressCallback?: (current: number, total: number, progress: number) => void
+  ): Promise<SynthesisResult[]>
+
+  /**
+   * Analyze audio buffer
+   * @param audioBuffer Audio buffer to analyze
+   * @returns Promise resolving to audio analysis result
+   */
+  analyzeAudio(audioBuffer: AudioBufferResult): Promise<AudioAnalysis>
+
+  /**
+   * Get performance information
+   * @returns Promise resolving to performance information
+   */
+  getPerformanceInfo(): Promise<PerformanceInfo>
+
+  /**
    * Get pipeline information
    * @returns Pipeline and runtime information
    */
@@ -200,6 +317,104 @@ export namespace utils {
    * @returns True if valid, throws error if invalid
    */
   export function validateSynthesisOptions(options: SynthesisOptions): boolean
+
+  /**
+   * Resample audio buffer to target sample rate
+   * @param audioBuffer Audio buffer to resample
+   * @param targetSampleRate Target sample rate in Hz
+   * @returns Resampled audio buffer
+   */
+  export function resampleAudio(
+    audioBuffer: AudioBufferResult,
+    targetSampleRate: number
+  ): Promise<AudioBufferResult>
+
+  /**
+   * Mix two audio buffers
+   * @param audio1 First audio buffer
+   * @param audio2 Second audio buffer
+   * @param mixRatio Mix ratio (0.0 to 1.0)
+   * @returns Mixed audio buffer
+   */
+  export function mixAudio(
+    audio1: AudioBufferResult,
+    audio2: AudioBufferResult,
+    mixRatio?: number
+  ): Promise<AudioBufferResult>
+}
+
+/**
+ * Recognition result
+ */
+export interface RecognitionResult {
+  /** Recognized text */
+  text: string
+  /** Confidence score (0.0 to 1.0) */
+  confidence: number
+  /** Detected language */
+  language: string
+  /** Processing time in milliseconds */
+  processingTimeMs: number
+}
+
+/**
+ * Audio analysis result for recognition
+ */
+export interface AudioAnalysisResult {
+  /** Duration in seconds */
+  durationSeconds: number
+  /** Sample rate in Hz */
+  sampleRate: number
+  /** Number of channels */
+  channels: number
+  /** RMS energy level */
+  rmsEnergy: number
+  /** Zero crossing rate */
+  zeroCrossingRate: number
+  /** Spectral centroid */
+  spectralCentroid: number
+}
+
+/**
+ * ASR Model for speech recognition
+ */
+export class ASRModel {
+  /**
+   * Create a new ASR model with Whisper
+   * @param modelSize Model size (tiny, base, small, medium, large)
+   * @returns ASR model instance
+   */
+  static whisper(modelSize?: string): ASRModel
+
+  /**
+   * Recognize speech from audio buffer
+   * @param audio Audio buffer to recognize
+   * @returns Promise resolving to recognition result
+   */
+  recognize(audio: AudioBufferResult): Promise<RecognitionResult>
+
+  /**
+   * Get supported languages
+   * @returns Array of supported language codes
+   */
+  supportedLanguages(): string[]
+}
+
+/**
+ * Audio analyzer for advanced analysis
+ */
+export class AudioAnalyzer {
+  /**
+   * Create a new audio analyzer
+   */
+  constructor()
+
+  /**
+   * Analyze audio buffer
+   * @param audio Audio buffer to analyze
+   * @returns Promise resolving to analysis result
+   */
+  analyze(audio: AudioBufferResult): Promise<AudioAnalysisResult>
 }
 
 /**

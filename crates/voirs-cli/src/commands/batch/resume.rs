@@ -1,10 +1,10 @@
 //! Resume functionality for batch processing.
 
+use super::files::BatchInput;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
-use voirs::error::Result;
-use super::files::BatchInput;
+use voirs::Result;
 
 /// State file for tracking batch processing progress
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,7 +74,7 @@ impl BatchState {
             config_hash,
         }
     }
-    
+
     /// Get the state file path for a given input
     pub fn get_state_file_path(input_path: &PathBuf) -> PathBuf {
         let mut state_path = input_path.clone();
@@ -87,34 +87,34 @@ impl BatchState {
         }
         state_path
     }
-    
+
     /// Load state from file
     pub fn load_from_file(path: &PathBuf) -> Result<Option<Self>> {
         if !path.exists() {
             return Ok(None);
         }
-        
+
         let content = std::fs::read_to_string(path)?;
         let state: BatchState = serde_json::from_str(&content)
             .map_err(|e| voirs::VoirsError::config_error(&e.to_string()))?;
-        
+
         Ok(Some(state))
     }
-    
+
     /// Save state to file
     pub fn save_to_file(&self, path: &PathBuf) -> Result<()> {
         let content = serde_json::to_string_pretty(self)
             .map_err(|e| voirs::VoirsError::config_error(&e.to_string()))?;
-        
+
         // Create parent directory if it doesn't exist
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        
+
         std::fs::write(path, content)?;
         Ok(())
     }
-    
+
     /// Mark an item as completed
     pub fn mark_completed(
         &mut self,
@@ -129,34 +129,36 @@ impl BatchState {
             duration_ms,
             audio_duration,
         };
-        
-        self.completed_items.insert(item_id.to_string(), completed_item);
+
+        self.completed_items
+            .insert(item_id.to_string(), completed_item);
         self.failed_items.remove(item_id); // Remove from failed if it was there
         self.updated_at = chrono::Utc::now();
     }
-    
+
     /// Mark an item as failed
     pub fn mark_failed(&mut self, item_id: &str, error: &str) {
-        let current_count = self.failed_items
+        let current_count = self
+            .failed_items
             .get(item_id)
             .map(|f| f.retry_count)
             .unwrap_or(0);
-        
+
         let failed_item = FailedItem {
             retry_count: current_count + 1,
             last_error: error.to_string(),
             failed_at: chrono::Utc::now(),
         };
-        
+
         self.failed_items.insert(item_id.to_string(), failed_item);
         self.updated_at = chrono::Utc::now();
     }
-    
+
     /// Check if an item is already completed
     pub fn is_completed(&self, item_id: &str) -> bool {
         self.completed_items.contains_key(item_id)
     }
-    
+
     /// Check if an item should be retried
     pub fn should_retry(&self, item_id: &str, max_retries: u32) -> bool {
         if let Some(failed_item) = self.failed_items.get(item_id) {
@@ -165,7 +167,7 @@ impl BatchState {
             true // First attempt
         }
     }
-    
+
     /// Get items that need processing (not completed and under retry limit)
     pub fn get_pending_items<'a>(
         &self,
@@ -174,20 +176,20 @@ impl BatchState {
     ) -> Vec<&'a BatchInput> {
         all_items
             .iter()
-            .filter(|item| {
-                !self.is_completed(&item.id) && self.should_retry(&item.id, max_retries)
-            })
+            .filter(|item| !self.is_completed(&item.id) && self.should_retry(&item.id, max_retries))
             .collect()
     }
-    
+
     /// Get progress information
     pub fn get_progress(&self) -> BatchProgress {
         let completed = self.completed_items.len();
-        let failed_permanently = self.failed_items.values()
+        let failed_permanently = self
+            .failed_items
+            .values()
             .filter(|f| f.retry_count >= 3) // Assuming max retries is 3
             .count();
         let pending = self.total_items - completed - failed_permanently;
-        
+
         BatchProgress {
             total: self.total_items,
             completed,
@@ -200,7 +202,7 @@ impl BatchState {
             },
         }
     }
-    
+
     /// Check if configuration has changed
     pub fn config_changed(&self, new_config_hash: &str) -> bool {
         self.config_hash != new_config_hash
@@ -219,20 +221,20 @@ pub struct BatchProgress {
 
 /// Calculate configuration hash for detecting changes
 pub fn calculate_config_hash(
-    quality: &voirs::types::QualityLevel,
+    quality: &voirs_sdk::types::QualityLevel,
     rate: f32,
     pitch: f32,
     volume: f32,
 ) -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
-    
+
     let mut hasher = DefaultHasher::new();
     format!("{:?}", quality).hash(&mut hasher);
     rate.to_bits().hash(&mut hasher);
     pitch.to_bits().hash(&mut hasher);
     volume.to_bits().hash(&mut hasher);
-    
+
     format!("{:x}", hasher.finish())
 }
 
@@ -243,7 +245,7 @@ pub async fn resume_batch_processing(
     batch_config: &super::BatchConfig,
 ) -> Result<Option<BatchState>> {
     let state_file = BatchState::get_state_file_path(input_path);
-    
+
     if let Some(mut state) = BatchState::load_from_file(&state_file)? {
         // Check if configuration has changed
         let current_hash = calculate_config_hash(
@@ -252,18 +254,18 @@ pub async fn resume_batch_processing(
             batch_config.pitch,
             batch_config.volume,
         );
-        
+
         if state.config_changed(&current_hash) {
             tracing::warn!("Configuration has changed since last run. Cannot resume.");
             return Ok(None);
         }
-        
+
         // Check if input file has changed
         if state.total_items != all_items.len() {
             tracing::warn!("Input file has changed since last run. Cannot resume.");
             return Ok(None);
         }
-        
+
         Ok(Some(state))
     } else {
         Ok(None)
@@ -273,12 +275,13 @@ pub async fn resume_batch_processing(
 /// Clean up old state files
 pub fn cleanup_old_state_files(directory: &PathBuf, max_age_days: u32) -> Result<()> {
     let cutoff_time = chrono::Utc::now() - chrono::Duration::days(max_age_days as i64);
-    
+
     for entry in std::fs::read_dir(directory)? {
         let entry = entry?;
         let path = entry.path();
-        
-        if path.extension()
+
+        if path
+            .extension()
             .and_then(|e| e.to_str())
             .map(|e| e.ends_with("voirs_state.json"))
             .unwrap_or(false)
@@ -288,14 +291,18 @@ pub fn cleanup_old_state_files(directory: &PathBuf, max_age_days: u32) -> Result
                     let modified_datetime = chrono::DateTime::<chrono::Utc>::from(modified);
                     if modified_datetime < cutoff_time {
                         if let Err(e) = std::fs::remove_file(&path) {
-                            tracing::warn!("Failed to remove old state file {}: {}", path.display(), e);
+                            tracing::warn!(
+                                "Failed to remove old state file {}: {}",
+                                path.display(),
+                                e
+                            );
                         }
                     }
                 }
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -304,7 +311,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use tempfile::tempdir;
-    
+
     #[test]
     fn test_batch_state_creation() {
         let state = BatchState::new(
@@ -313,13 +320,13 @@ mod tests {
             100,
             "hash123".to_string(),
         );
-        
+
         assert_eq!(state.total_items, 100);
         assert_eq!(state.config_hash, "hash123");
         assert!(state.completed_items.is_empty());
         assert!(state.failed_items.is_empty());
     }
-    
+
     #[test]
     fn test_mark_completed() {
         let mut state = BatchState::new(
@@ -328,13 +335,13 @@ mod tests {
             100,
             "hash123".to_string(),
         );
-        
+
         state.mark_completed("item1", PathBuf::from("/output/item1.wav"), 1000, 2.5);
-        
+
         assert!(state.is_completed("item1"));
         assert!(!state.is_completed("item2"));
     }
-    
+
     #[test]
     fn test_mark_failed_and_retry() {
         let mut state = BatchState::new(
@@ -343,40 +350,25 @@ mod tests {
             100,
             "hash123".to_string(),
         );
-        
+
         state.mark_failed("item1", "Test error");
         assert!(state.should_retry("item1", 3));
-        
+
         state.mark_failed("item1", "Test error 2");
         state.mark_failed("item1", "Test error 3");
         assert!(!state.should_retry("item1", 3));
     }
-    
+
     #[test]
     fn test_calculate_config_hash() {
-        let hash1 = calculate_config_hash(
-            &voirs::types::QualityLevel::High,
-            1.0,
-            0.0,
-            0.0,
-        );
-        
-        let hash2 = calculate_config_hash(
-            &voirs::types::QualityLevel::Medium,
-            1.0,
-            0.0,
-            0.0,
-        );
-        
+        let hash1 = calculate_config_hash(&voirs::QualityLevel::High, 1.0, 0.0, 0.0);
+
+        let hash2 = calculate_config_hash(&voirs::QualityLevel::Medium, 1.0, 0.0, 0.0);
+
         assert_ne!(hash1, hash2);
-        
-        let hash3 = calculate_config_hash(
-            &voirs::types::QualityLevel::High,
-            1.0,
-            0.0,
-            0.0,
-        );
-        
+
+        let hash3 = calculate_config_hash(&voirs::QualityLevel::High, 1.0, 0.0, 0.0);
+
         assert_eq!(hash1, hash3);
     }
 }

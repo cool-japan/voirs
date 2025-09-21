@@ -1,0 +1,28 @@
+[Unit]
+Description=VoiRS Socket
+Documentation=https://github.com/cool-japan/voirs
+PartOf=voirs.service
+
+[Socket]
+ListenStream=8080
+ListenStream=[::]:8080
+# For Unix socket (optional)
+ListenStream=/run/voirs/voirs.socket
+SocketUser=voirs
+SocketGroup=voirs
+SocketMode=0660
+Service=voirs.service
+
+# Security
+NoDelay=true
+KeepAlive=true
+ReusePort=true
+FreeBind=true
+
+# Performance
+Backlog=128
+MaxConnections=1000
+MaxConnectionsPerSource=10
+
+[Install]
+WantedBy=sockets.target

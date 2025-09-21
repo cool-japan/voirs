@@ -1,0 +1,219 @@
+.TH VOIRS-CLI 1 "2025-07-05" "voirs-cli" "VoiRS CLI Manual"
+
+.SH NAME
+voirs-cli \- Command-line interface for the VoiRS text-to-speech synthesis system
+
+.SH SYNOPSIS
+.B voirs-cli
+[\fIOPTIONS\fR]
+.I COMMAND
+[\fICOMMAND_OPTIONS\fR]
+
+.SH DESCRIPTION
+VoiRS CLI is a comprehensive command-line interface for the VoiRS (Voice Synthesis) system, providing high-quality text-to-speech synthesis with advanced features including SSML support, voice management, batch processing, and interactive modes.
+
+.SH GLOBAL OPTIONS
+.TP
+.B \-v, \-\-verbose
+Enable verbose output with detailed information about operations.
+
+.TP
+.B \-q, \-\-quiet
+Suppress non-essential output, showing only errors and critical information.
+
+.TP
+.B \-c, \-\-config \fIFILE\fR
+Use a custom configuration file instead of the default location.
+
+.TP
+.B \-\-version
+Display version information and exit.
+
+.TP
+.B \-h, \-\-help
+Show help information and exit.
+
+.SH COMMANDS
+.SS SYNTHESIS COMMANDS
+.TP
+.B synthesize, synth
+Synthesize text to speech with various options and formats.
+
+.TP
+.B interactive, i
+Start interactive mode for real-time text-to-speech synthesis.
+
+.TP
+.B batch
+Process multiple text files in batch mode with parallel processing.
+
+.SS VOICE MANAGEMENT
+.TP
+.B voices
+List available voices with filtering and search capabilities.
+
+.TP
+.B voice-search
+Search for voices based on text queries and criteria.
+
+.SS MODEL MANAGEMENT
+.TP
+.B models
+Manage acoustic and vocoder models with listing, download, and optimization.
+
+.SS CONFIGURATION
+.TP
+.B config
+Manage configuration settings, profiles, and preferences.
+
+.TP
+.B completion
+Generate and install shell completion scripts for bash, zsh, fish, and PowerShell.
+
+.SS SERVER MODE
+.TP
+.B server
+Start HTTP server mode for REST API access to synthesis functionality.
+
+.SS HELP AND GUIDANCE
+.TP
+.B guide
+Display getting started guide and command-specific help.
+
+.SH CONFIGURATION
+VoiRS CLI uses a hierarchical configuration system:
+
+.TP
+.B System-wide configuration
+/etc/voirs/config.toml (Linux/macOS)
+C:\\ProgramData\\VoiRS\\config.toml (Windows)
+
+.TP
+.B User configuration
+~/.config/voirs/config.toml (Linux/macOS)
+%APPDATA%\\VoiRS\\config.toml (Windows)
+
+.TP
+.B Project configuration
+./voirs.toml (current directory)
+
+.TP
+.B Environment variables
+VOIRS_CONFIG_PATH, VOIRS_VOICE, VOIRS_QUALITY, etc.
+
+.SH EXAMPLES
+.TP
+.B Basic synthesis
+voirs-cli synthesize "Hello, world!" -o output.wav
+
+.TP
+.B Voice selection
+voirs-cli synthesize "Welcome to VoiRS" --voice en-US-female-1 --quality high
+
+.TP
+.B SSML synthesis
+voirs-cli synthesize '<speak><prosody rate="slow">Hello there!</prosody></speak>' --format mp3
+
+.TP
+.B Batch processing
+voirs-cli batch input.txt --output-dir results/ --workers 4
+
+.TP
+.B Interactive mode
+voirs-cli interactive
+
+.TP
+.B Voice search
+voirs-cli voice-search "female English"
+
+.TP
+.B Server mode
+voirs-cli server --port 8080 --host 0.0.0.0
+
+.SH ENVIRONMENT VARIABLES
+.TP
+.B VOIRS_CONFIG_PATH
+Path to configuration file.
+
+.TP
+.B VOIRS_VOICE
+Default voice to use for synthesis.
+
+.TP
+.B VOIRS_QUALITY
+Default quality level (low, medium, high, ultra).
+
+.TP
+.B VOIRS_OUTPUT_FORMAT
+Default output format (wav, mp3, flac, opus, ogg).
+
+.TP
+.B VOIRS_MODELS_PATH
+Directory containing voice and model files.
+
+.TP
+.B VOIRS_CACHE_PATH
+Directory for caching downloaded models and temporary files.
+
+.SH FILES
+.TP
+.B ~/.config/voirs/config.toml
+User configuration file.
+
+.TP
+.B ~/.config/voirs/profiles/
+Directory containing configuration profiles.
+
+.TP
+.B ~/.cache/voirs/
+Cache directory for models and temporary files.
+
+.TP
+.B ~/.local/share/voirs/
+User data directory for downloaded models.
+
+.SH EXIT STATUS
+.TP
+.B 0
+Successful completion.
+
+.TP
+.B 1
+General error or invalid usage.
+
+.TP
+.B 2
+Configuration error.
+
+.TP
+.B 3
+Model or voice not found.
+
+.TP
+.B 4
+Audio processing error.
+
+.TP
+.B 5
+Network or download error.
+
+.SH AUTHOR
+VoiRS Development Team
+
+.SH REPORTING BUGS
+Report bugs at: https://github.com/voirs-project/voirs/issues
+
+.SH COPYRIGHT
+Copyright (c) 2025 VoiRS Project. Licensed under the MIT License.
+
+.SH SEE ALSO
+.BR voirs-cli-synthesize (1),
+.BR voirs-cli-voices (1),
+.BR voirs-cli-models (1),
+.BR voirs-cli-batch (1),
+.BR voirs-cli-interactive (1),
+.BR voirs-cli-server (1),
+.BR voirs-cli-config (1),
+.BR voirs-cli-test (1),
+.BR voirs-cli-guide (1),
+.BR voirs-cli-completion (1)

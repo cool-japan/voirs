@@ -3,14 +3,15 @@
 //! This module provides commands for managing TTS models, including
 //! listing, downloading, benchmarking, and optimizing models.
 
-use voirs::config::AppConfig;
-use voirs::error::Result;
 use crate::GlobalOptions;
+use voirs::Result;
+use voirs_sdk::config::AppConfig;
 
-pub mod list;
-pub mod download;
 pub mod benchmark;
+pub mod download;
+pub mod list;
 pub mod optimize;
+pub mod safetensors_support;
 
 /// List available models
 pub async fn run_list_models(
@@ -36,18 +37,20 @@ pub async fn run_download_model(
 pub async fn run_benchmark_models(
     model_ids: &[String],
     iterations: u32,
+    include_accuracy: bool,
     config: &AppConfig,
     global: &GlobalOptions,
 ) -> Result<()> {
-    benchmark::run_benchmark_models(model_ids, iterations, config, global).await
+    benchmark::run_benchmark_models(model_ids, iterations, include_accuracy, config, global).await
 }
 
 /// Optimize model for current hardware
 pub async fn run_optimize_model(
     model_id: &str,
     output_path: Option<&str>,
+    strategy: Option<&str>,
     config: &AppConfig,
     global: &GlobalOptions,
 ) -> Result<()> {
-    optimize::run_optimize_model(model_id, output_path, config, global).await
+    optimize::run_optimize_model(model_id, output_path, strategy, config, global).await
 }

@@ -3,10 +3,10 @@
 //! This module provides functionality to export datasets in PyTorch-compatible formats.
 //! It supports tensor conversion, DataLoader integration, and efficient data loading.
 
-use crate::{DatasetSample, DatasetError, Result};
+use crate::{DatasetSample, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tokio::fs;
 
 /// PyTorch export configuration
@@ -157,7 +157,7 @@ impl PyTorchExporter {
     }
 
     /// Create exporter with default configuration
-    pub fn default() -> Self {
+    pub fn new_default() -> Self {
         Self::new(PyTorchConfig::default())
     }
 
@@ -167,6 +167,20 @@ impl PyTorchExporter {
         samples: &[DatasetSample],
         output_path: &Path,
     ) -> Result<()> {
+        // Create output directory structure
+        let output_dir = if output_path.is_dir() {
+            output_path.to_path_buf()
+        } else {
+            output_path.parent().unwrap_or(Path::new(".")).to_path_buf()
+        };
+
+        fs::create_dir_all(&output_dir).await?;
+
+        // If not including audio data, save audio files separately
+        if !self.config.include_audio_data {
+            self.save_audio_files(samples, &output_dir).await?;
+        }
+
         let pytorch_dataset = self.convert_to_pytorch(samples).await?;
 
         match self.config.format {
@@ -177,7 +191,8 @@ impl PyTorchExporter {
         }
 
         // Also export dataset info and loader script
-        self.export_dataset_info(&pytorch_dataset, output_path).await?;
+        self.export_dataset_info(&pytorch_dataset, output_path)
+            .await?;
         self.export_loader_script(output_path).await?;
 
         Ok(())
@@ -195,7 +210,7 @@ impl PyTorchExporter {
             let text_data = self.encode_text(&sample.text, &mut vocabulary)?;
 
             // Process audio
-            let audio_data = self.process_audio(&sample.audio)?;
+            let audio_data = self.process_audio(&sample.audio, &sample.id)?;
 
             // Collect metadata
             if let Some(ref speaker) = sample.speaker {
@@ -216,7 +231,7 @@ impl PyTorchExporter {
         // Create metadata
         let sample_rate = samples.first().map(|s| s.audio.sample_rate());
         let channels = samples.first().map(|s| s.audio.channels());
-        
+
         let vocab_vec = if vocabulary.is_empty() {
             None
         } else {
@@ -243,21 +258,27 @@ impl PyTorchExporter {
     }
 
     /// Encode text based on configuration
-    fn encode_text(&self, text: &str, vocabulary: &mut std::collections::HashSet<String>) -> Result<TextData> {
+    fn encode_text(
+        &self,
+        text: &str,
+        vocabulary: &mut std::collections::HashSet<String>,
+    ) -> Result<TextData> {
         match self.config.text_encoding {
             TextEncoding::Raw => Ok(TextData::Raw(text.to_string())),
             TextEncoding::Character => {
-                let char_indices: Vec<u32> = text.chars()
+                let char_indices: Vec<u32> = text
+                    .chars()
                     .map(|c| {
                         vocabulary.insert(c.to_string());
                         c as u32
                     })
                     .collect();
                 Ok(TextData::Characters(char_indices))
-            },
+            }
             TextEncoding::TokenIds => {
                 // Simple whitespace tokenization for demo
-                let tokens: Vec<u32> = text.split_whitespace()
+                let tokens: Vec<u32> = text
+                    .split_whitespace()
                     .enumerate()
                     .map(|(i, token)| {
                         vocabulary.insert(token.to_string());
@@ -265,17 +286,16 @@ impl PyTorchExporter {
                     })
                     .collect();
                 Ok(TextData::Tokens(tokens))
-            },
+            }
             TextEncoding::OneHot => {
                 // Create one-hot character encoding
                 let chars: Vec<char> = text.chars().collect();
                 let char_set: std::collections::BTreeSet<char> = chars.iter().cloned().collect();
-                let char_to_idx: HashMap<char, usize> = char_set.iter()
-                    .enumerate()
-                    .map(|(i, &c)| (c, i))
-                    .collect();
+                let char_to_idx: HashMap<char, usize> =
+                    char_set.iter().enumerate().map(|(i, &c)| (c, i)).collect();
 
-                let one_hot: Vec<Vec<f32>> = chars.iter()
+                let one_hot: Vec<Vec<f32>> = chars
+                    .iter()
                     .map(|&c| {
                         let mut vec = vec![0.0; char_set.len()];
                         if let Some(&idx) = char_to_idx.get(&c) {
@@ -291,17 +311,19 @@ impl PyTorchExporter {
                 }
 
                 Ok(TextData::OneHot(one_hot))
-            },
+            }
         }
     }
 
     /// Process audio based on configuration
-    fn process_audio(&self, audio: &crate::AudioData) -> Result<PyTorchAudioData> {
+    fn process_audio(&self, audio: &crate::AudioData, sample_id: &str) -> Result<PyTorchAudioData> {
         let mut samples = audio.samples().to_vec();
 
         // Normalize if requested
         if self.config.normalize_audio {
-            let max_val = samples.iter().fold(0.0f32, |max, &sample| max.max(sample.abs()));
+            let max_val = samples
+                .iter()
+                .fold(0.0f32, |max, &sample| max.max(sample.abs()));
             if max_val > 0.0 {
                 let scale = 1.0 / max_val;
                 for sample in &mut samples {
@@ -313,15 +335,37 @@ impl PyTorchExporter {
         // Resample if needed
         if let Some(target_sr) = self.config.target_sample_rate {
             if target_sr != audio.sample_rate() {
-                // Simple resampling (linear interpolation)
+                // Enhanced resampling using cubic interpolation for better quality
                 let ratio = target_sr as f32 / audio.sample_rate() as f32;
                 let new_length = (samples.len() as f32 * ratio) as usize;
                 let mut resampled = Vec::with_capacity(new_length);
 
                 for i in 0..new_length {
-                    let original_idx = (i as f32 / ratio) as usize;
-                    if original_idx < samples.len() {
-                        resampled.push(samples[original_idx]);
+                    let original_pos = i as f32 / ratio;
+                    let original_idx = original_pos as usize;
+
+                    if original_idx + 3 < samples.len() {
+                        // Cubic interpolation for smoother resampling
+                        let frac = original_pos - original_idx as f32;
+                        let y0 = samples[original_idx.saturating_sub(1).min(samples.len() - 1)];
+                        let y1 = samples[original_idx];
+                        let y2 = samples[original_idx + 1];
+                        let y3 = samples[original_idx + 2];
+
+                        // Catmull-Rom spline interpolation
+                        let a = -0.5 * y0 + 1.5 * y1 - 1.5 * y2 + 0.5 * y3;
+                        let b = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3;
+                        let c = -0.5 * y0 + 0.5 * y2;
+                        let d = y1;
+
+                        let interpolated = a * frac.powi(3) + b * frac.powi(2) + c * frac + d;
+                        resampled.push(interpolated);
+                    } else if original_idx < samples.len() {
+                        // Linear interpolation for edge cases
+                        let frac = original_pos - original_idx as f32;
+                        let y1 = samples[original_idx];
+                        let y2 = samples.get(original_idx + 1).copied().unwrap_or(0.0);
+                        resampled.push(y1 + frac * (y2 - y1));
                     } else {
                         resampled.push(0.0);
                     }
@@ -346,30 +390,498 @@ impl PyTorchExporter {
         if self.config.include_audio_data {
             Ok(PyTorchAudioData::Samples(samples))
         } else {
-            // Return placeholder path - in real implementation, save to file
-            Ok(PyTorchAudioData::Path("audio/placeholder.wav".to_string()))
+            // Save audio to file and return the path reference
+            let audio_filename = format!("{sample_id}.wav");
+            let audio_path = format!("audio/{audio_filename}");
+            Ok(PyTorchAudioData::Path(audio_path))
         }
+    }
+
+    /// Save audio files to disk when using path references
+    async fn save_audio_files(&self, samples: &[DatasetSample], output_dir: &Path) -> Result<()> {
+        let audio_dir = output_dir.join("audio");
+        fs::create_dir_all(&audio_dir).await?;
+
+        for sample in samples {
+            let audio_filename = format!("{}.wav", sample.id);
+            let audio_path = audio_dir.join(&audio_filename);
+
+            // Save audio as WAV file
+            self.save_wav_file(&sample.audio, &audio_path).await?;
+        }
+
+        Ok(())
+    }
+
+    /// Save audio as WAV file
+    async fn save_wav_file(&self, audio: &crate::AudioData, path: &Path) -> Result<()> {
+        use hound::{WavSpec, WavWriter};
+        use std::io::Cursor;
+
+        let spec = WavSpec {
+            channels: audio.channels() as u16,
+            sample_rate: audio.sample_rate(),
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+
+        let mut cursor = Cursor::new(Vec::new());
+        {
+            let mut writer = WavWriter::new(&mut cursor, spec)?;
+            for &sample in audio.samples() {
+                writer.write_sample(sample)?;
+            }
+            writer.finalize()?;
+        }
+
+        fs::write(path, cursor.into_inner()).await?;
+        Ok(())
     }
 
     /// Export as pickle format
     async fn export_pickle(&self, dataset: &PyTorchDataset, output_path: &Path) -> Result<()> {
-        // Export as JSON for now (Python pickle requires Python)
-        let json_data = serde_json::to_string_pretty(dataset)?;
-        fs::write(output_path.with_extension("json"), json_data).await?;
+        // Implement simplified Python pickle protocol v4 compatible format
+        // This creates binary data that can be read by Python's pickle module
+
+        let mut pickle_data = Vec::new();
+
+        // Pickle protocol header (protocol version 4)
+        pickle_data.extend_from_slice(b"\x80\x04");
+
+        // Build dictionary structure for the dataset
+        self.write_pickle_dict_start(&mut pickle_data);
+
+        // Add 'samples' key and list
+        self.write_pickle_string(&mut pickle_data, "samples");
+        self.write_pickle_list_start(&mut pickle_data);
+
+        for sample in &dataset.samples {
+            // Each sample as a dictionary
+            self.write_pickle_dict_start(&mut pickle_data);
+
+            // Add sample fields
+            self.write_pickle_string(&mut pickle_data, "id");
+            self.write_pickle_string(&mut pickle_data, &sample.id);
+
+            self.write_pickle_string(&mut pickle_data, "text");
+            match &sample.text {
+                TextData::Raw(text) => {
+                    self.write_pickle_string(&mut pickle_data, text);
+                }
+                TextData::Characters(chars) => {
+                    self.write_pickle_list_start(&mut pickle_data);
+                    for &char_idx in chars {
+                        self.write_pickle_int(&mut pickle_data, char_idx as i64);
+                    }
+                    self.write_pickle_list_end(&mut pickle_data);
+                }
+                TextData::Tokens(tokens) => {
+                    self.write_pickle_list_start(&mut pickle_data);
+                    for &token_idx in tokens {
+                        self.write_pickle_int(&mut pickle_data, token_idx as i64);
+                    }
+                    self.write_pickle_list_end(&mut pickle_data);
+                }
+                TextData::OneHot(matrix) => {
+                    self.write_pickle_list_start(&mut pickle_data);
+                    for row in matrix {
+                        self.write_pickle_list_start(&mut pickle_data);
+                        for &value in row {
+                            // Write float as string for pickle compatibility
+                            let float_str = format!("{value}");
+                            self.write_pickle_string(&mut pickle_data, &float_str);
+                        }
+                        self.write_pickle_list_end(&mut pickle_data);
+                    }
+                    self.write_pickle_list_end(&mut pickle_data);
+                }
+            }
+
+            // Add audio data as numpy-like array metadata
+            self.write_pickle_string(&mut pickle_data, "audio_shape");
+            match &sample.audio {
+                PyTorchAudioData::Samples(samples) => {
+                    self.write_pickle_tuple_start(&mut pickle_data);
+                    self.write_pickle_int(&mut pickle_data, samples.len() as i64);
+                    self.write_pickle_tuple_end(&mut pickle_data);
+                }
+                PyTorchAudioData::Path(path) => {
+                    self.write_pickle_string(&mut pickle_data, path);
+                }
+                PyTorchAudioData::Spectrogram(spectrogram) => {
+                    self.write_pickle_tuple_start(&mut pickle_data);
+                    self.write_pickle_int(&mut pickle_data, spectrogram.len() as i64);
+                    if !spectrogram.is_empty() {
+                        self.write_pickle_int(&mut pickle_data, spectrogram[0].len() as i64);
+                    }
+                    self.write_pickle_tuple_end(&mut pickle_data);
+                }
+            }
+
+            // Add metadata
+            self.write_pickle_string(&mut pickle_data, "metadata");
+            self.write_pickle_dict_start(&mut pickle_data);
+            for (key, value) in &sample.metadata {
+                self.write_pickle_string(&mut pickle_data, key);
+                // Convert serde_json::Value to string for pickle compatibility
+                let value_str = match value {
+                    serde_json::Value::String(s) => s.clone(),
+                    _ => value.to_string(),
+                };
+                self.write_pickle_string(&mut pickle_data, &value_str);
+            }
+            self.write_pickle_dict_end(&mut pickle_data);
+
+            self.write_pickle_dict_end(&mut pickle_data);
+        }
+
+        self.write_pickle_list_end(&mut pickle_data);
+
+        // Add dataset metadata
+        self.write_pickle_string(&mut pickle_data, "dataset_metadata");
+        self.write_pickle_dict_start(&mut pickle_data);
+
+        self.write_pickle_string(&mut pickle_data, "name");
+        self.write_pickle_string(&mut pickle_data, &dataset.metadata.name);
+
+        self.write_pickle_string(&mut pickle_data, "total_samples");
+        self.write_pickle_int(&mut pickle_data, dataset.metadata.total_samples as i64);
+
+        if let Some(sample_rate) = dataset.metadata.sample_rate {
+            self.write_pickle_string(&mut pickle_data, "sample_rate");
+            self.write_pickle_int(&mut pickle_data, sample_rate as i64);
+        }
+
+        if let Some(channels) = dataset.metadata.channels {
+            self.write_pickle_string(&mut pickle_data, "channels");
+            self.write_pickle_int(&mut pickle_data, channels as i64);
+        }
+
+        self.write_pickle_string(&mut pickle_data, "speakers");
+        self.write_pickle_list_start(&mut pickle_data);
+        for speaker in &dataset.metadata.speakers {
+            self.write_pickle_string(&mut pickle_data, speaker);
+        }
+        self.write_pickle_list_end(&mut pickle_data);
+
+        self.write_pickle_string(&mut pickle_data, "languages");
+        self.write_pickle_list_start(&mut pickle_data);
+        for language in &dataset.metadata.languages {
+            self.write_pickle_string(&mut pickle_data, language);
+        }
+        self.write_pickle_list_end(&mut pickle_data);
+
+        self.write_pickle_dict_end(&mut pickle_data);
+
+        self.write_pickle_dict_end(&mut pickle_data);
+
+        // Pickle stop opcode
+        pickle_data.push(b'.');
+
+        fs::write(output_path.with_extension("pkl"), pickle_data).await?;
         Ok(())
+    }
+
+    /// Write pickle dictionary start
+    fn write_pickle_dict_start(&self, data: &mut Vec<u8>) {
+        data.push(b'}'); // EMPTY_DICT opcode
+    }
+
+    /// Write pickle dictionary end
+    fn write_pickle_dict_end(&self, data: &mut Vec<u8>) {
+        data.push(b's'); // SETITEMS opcode
+    }
+
+    /// Write pickle list start
+    fn write_pickle_list_start(&self, data: &mut Vec<u8>) {
+        data.push(b']'); // EMPTY_LIST opcode
+    }
+
+    /// Write pickle list end
+    fn write_pickle_list_end(&self, data: &mut Vec<u8>) {
+        data.push(b'e'); // APPENDS opcode
+    }
+
+    /// Write pickle tuple start
+    fn write_pickle_tuple_start(&self, data: &mut Vec<u8>) {
+        data.push(b')'); // EMPTY_TUPLE opcode
+    }
+
+    /// Write pickle tuple end
+    fn write_pickle_tuple_end(&self, data: &mut Vec<u8>) {
+        data.push(b't'); // TUPLE opcode
+    }
+
+    /// Write pickle string
+    fn write_pickle_string(&self, data: &mut Vec<u8>, s: &str) {
+        let bytes = s.as_bytes();
+        if bytes.len() < 256 {
+            data.push(b'U'); // SHORT_BINUNICODE opcode
+            data.push(bytes.len() as u8);
+        } else {
+            data.push(b'X'); // BINUNICODE opcode
+            data.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        }
+        data.extend_from_slice(bytes);
+    }
+
+    /// Write pickle integer
+    fn write_pickle_int(&self, data: &mut Vec<u8>, value: i64) {
+        if (0..256).contains(&value) {
+            data.push(b'K'); // BININT1 opcode
+            data.push(value as u8);
+        } else if (i32::MIN as i64..=i32::MAX as i64).contains(&value) {
+            data.push(b'J'); // BININT opcode
+            data.extend_from_slice(&(value as i32).to_le_bytes());
+        } else {
+            data.push(b'L'); // LONG opcode
+            let value_str = format!("{value}L");
+            data.extend_from_slice(value_str.as_bytes());
+            data.push(b'\n');
+        }
     }
 
     /// Export as tensor format
     async fn export_tensor(&self, dataset: &PyTorchDataset, output_path: &Path) -> Result<()> {
-        // Export tensor descriptions as JSON
+        // Create tensor directory structure
+        let tensor_dir = output_path.with_extension("tensors");
+        fs::create_dir_all(&tensor_dir).await?;
+
+        // Export audio tensors
+        let audio_dir = tensor_dir.join("audio");
+        fs::create_dir_all(&audio_dir).await?;
+
+        // Export text tensors
+        let text_dir = tensor_dir.join("text");
+        fs::create_dir_all(&text_dir).await?;
+
+        // Export metadata
+        let metadata_dir = tensor_dir.join("metadata");
+        fs::create_dir_all(&metadata_dir).await?;
+
+        for (idx, sample) in dataset.samples.iter().enumerate() {
+            // Export audio tensor (binary format for PyTorch compatibility)
+            if let PyTorchAudioData::Samples(ref audio_samples) = sample.audio {
+                let audio_tensor_path = audio_dir.join(format!("{}.bin", sample.id));
+                let mut audio_bytes = Vec::new();
+
+                // Write tensor header: [dimensions, shape, data_type]
+                // Format: [num_dims=1, shape=[length], dtype=float32]
+                audio_bytes.extend_from_slice(&1u32.to_le_bytes()); // num_dims
+                audio_bytes.extend_from_slice(&(audio_samples.len() as u32).to_le_bytes()); // shape
+                audio_bytes.extend_from_slice(&1u32.to_le_bytes()); // dtype indicator (1 = float32)
+
+                // Write actual audio data
+                for &sample_val in audio_samples {
+                    audio_bytes.extend_from_slice(&sample_val.to_le_bytes());
+                }
+
+                fs::write(audio_tensor_path, audio_bytes).await?;
+            }
+
+            // Export text tensor
+            let text_tensor_path = text_dir.join(format!("{}.bin", sample.id));
+            let mut text_bytes = Vec::new();
+
+            match &sample.text {
+                TextData::Characters(chars) => {
+                    // Write tensor header for character indices
+                    text_bytes.extend_from_slice(&1u32.to_le_bytes()); // num_dims
+                    text_bytes.extend_from_slice(&(chars.len() as u32).to_le_bytes()); // shape
+                    text_bytes.extend_from_slice(&2u32.to_le_bytes()); // dtype indicator (2 = uint32)
+
+                    // Write character data
+                    for &char_idx in chars {
+                        text_bytes.extend_from_slice(&char_idx.to_le_bytes());
+                    }
+                }
+                TextData::Tokens(tokens) => {
+                    // Write tensor header for token indices
+                    text_bytes.extend_from_slice(&1u32.to_le_bytes()); // num_dims
+                    text_bytes.extend_from_slice(&(tokens.len() as u32).to_le_bytes()); // shape
+                    text_bytes.extend_from_slice(&2u32.to_le_bytes()); // dtype indicator (2 = uint32)
+
+                    // Write token data
+                    for &token_idx in tokens {
+                        text_bytes.extend_from_slice(&token_idx.to_le_bytes());
+                    }
+                }
+                TextData::OneHot(matrix) => {
+                    // Write tensor header for one-hot matrix
+                    text_bytes.extend_from_slice(&2u32.to_le_bytes()); // num_dims
+                    text_bytes.extend_from_slice(&(matrix.len() as u32).to_le_bytes()); // shape[0]
+                    text_bytes.extend_from_slice(
+                        &(matrix.first().map(|v| v.len()).unwrap_or(0) as u32).to_le_bytes(),
+                    ); // shape[1]
+                    text_bytes.extend_from_slice(&1u32.to_le_bytes()); // dtype indicator (1 = float32)
+
+                    // Write one-hot data
+                    for row in matrix {
+                        for &val in row {
+                            text_bytes.extend_from_slice(&val.to_le_bytes());
+                        }
+                    }
+                }
+                TextData::Raw(text) => {
+                    // For raw text, just save as UTF-8 bytes with length prefix
+                    let text_bytes_raw = text.as_bytes();
+                    text_bytes.extend_from_slice(&1u32.to_le_bytes()); // num_dims
+                    text_bytes.extend_from_slice(&(text_bytes_raw.len() as u32).to_le_bytes()); // shape
+                    text_bytes.extend_from_slice(&3u32.to_le_bytes()); // dtype indicator (3 = utf8)
+                    text_bytes.extend_from_slice(text_bytes_raw);
+                }
+            }
+
+            fs::write(text_tensor_path, text_bytes).await?;
+
+            // Export sample metadata
+            let metadata_path = metadata_dir.join(format!("{}.json", sample.id));
+            let metadata_json = serde_json::json!({
+                "id": sample.id,
+                "speaker_id": sample.speaker_id,
+                "language": sample.language,
+                "metadata": sample.metadata,
+                "sample_index": idx
+            });
+            fs::write(metadata_path, serde_json::to_string_pretty(&metadata_json)?).await?;
+        }
+
+        // Export tensor info and loading instructions
         let tensor_info = serde_json::json!({
             "metadata": dataset.metadata,
             "config": dataset.config,
             "samples": dataset.samples.len(),
-            "tensor_format": "Individual tensors per sample"
+            "tensor_format": "Binary tensor format with custom header",
+            "format_specification": {
+                "audio_format": "1D float32 tensors with header [num_dims, shape, dtype]",
+                "text_format": "Variable format based on encoding (see dtype indicator)",
+                "dtype_indicators": {
+                    "1": "float32",
+                    "2": "uint32",
+                    "3": "utf8_string"
+                }
+            },
+            "directory_structure": {
+                "audio/": "Audio tensor files (.bin)",
+                "text/": "Text tensor files (.bin)",
+                "metadata/": "Sample metadata files (.json)"
+            }
         });
 
-        fs::write(output_path.with_extension("tensor_info.json"), serde_json::to_string_pretty(&tensor_info)?).await?;
+        fs::write(
+            output_path.with_extension("tensor_info.json"),
+            serde_json::to_string_pretty(&tensor_info)?,
+        )
+        .await?;
+
+        // Export PyTorch tensor loading utility
+        let loader_script = r#"#!/usr/bin/env python3
+"""
+PyTorch Tensor Loader for VoiRS binary tensor format.
+"""
+
+import torch
+import json
+import struct
+from pathlib import Path
+from typing import Dict, Any, Union, Tuple
+
+class VoiRSTensorLoader:
+    """Loader for VoiRS binary tensor format."""
+    
+    def __init__(self, tensor_dir: str):
+        self.tensor_dir = Path(tensor_dir)
+        self.info_path = self.tensor_dir.parent / f"{self.tensor_dir.stem}.tensor_info.json"
+        
+        # Load tensor info
+        with open(self.info_path) as f:
+            self.info = json.load(f)
+    
+    def load_audio_tensor(self, sample_id: str) -> torch.Tensor:
+        """Load audio tensor for a sample."""
+        audio_path = self.tensor_dir / "audio" / f"{sample_id}.bin"
+        
+        with open(audio_path, 'rb') as f:
+            # Read header
+            num_dims = struct.unpack('<I', f.read(4))[0]
+            shape = struct.unpack('<I', f.read(4))[0]
+            dtype = struct.unpack('<I', f.read(4))[0]
+            
+            # Read data
+            if dtype == 1:  # float32
+                data = struct.unpack(f'<{shape}f', f.read(shape * 4))
+                return torch.tensor(data, dtype=torch.float32)
+            else:
+                raise ValueError(f"Unsupported dtype: {dtype}")
+    
+    def load_text_tensor(self, sample_id: str) -> Union[torch.Tensor, str]:
+        """Load text tensor for a sample."""
+        text_path = self.tensor_dir / "text" / f"{sample_id}.bin"
+        
+        with open(text_path, 'rb') as f:
+            # Read header
+            num_dims = struct.unpack('<I', f.read(4))[0]
+            
+            if num_dims == 1:
+                shape = struct.unpack('<I', f.read(4))[0]
+                dtype = struct.unpack('<I', f.read(4))[0]
+                
+                if dtype == 2:  # uint32
+                    data = struct.unpack(f'<{shape}I', f.read(shape * 4))
+                    return torch.tensor(data, dtype=torch.long)
+                elif dtype == 3:  # utf8
+                    data = f.read(shape)
+                    return data.decode('utf-8')
+                else:
+                    raise ValueError(f"Unsupported dtype: {dtype}")
+            elif num_dims == 2:
+                shape0 = struct.unpack('<I', f.read(4))[0]
+                shape1 = struct.unpack('<I', f.read(4))[0]
+                dtype = struct.unpack('<I', f.read(4))[0]
+                
+                if dtype == 1:  # float32
+                    data = struct.unpack(f'<{shape0 * shape1}f', f.read(shape0 * shape1 * 4))
+                    return torch.tensor(data, dtype=torch.float32).reshape(shape0, shape1)
+                else:
+                    raise ValueError(f"Unsupported dtype: {dtype}")
+    
+    def load_metadata(self, sample_id: str) -> Dict[str, Any]:
+        """Load metadata for a sample."""
+        metadata_path = self.tensor_dir / "metadata" / f"{sample_id}.json"
+        
+        with open(metadata_path) as f:
+            return json.load(f)
+    
+    def get_sample_ids(self) -> List[str]:
+        """Get all available sample IDs."""
+        audio_files = list((self.tensor_dir / "audio").glob("*.bin"))
+        return [f.stem for f in audio_files]
+
+# Example usage
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Load VoiRS tensors')
+    parser.add_argument('tensor_dir', help='Path to tensor directory')
+    parser.add_argument('--sample_id', help='Sample ID to load', required=True)
+    
+    args = parser.parse_args()
+    
+    loader = VoiRSTensorLoader(args.tensor_dir)
+    
+    # Load sample data
+    audio = loader.load_audio_tensor(args.sample_id)
+    text = loader.load_text_tensor(args.sample_id)
+    metadata = loader.load_metadata(args.sample_id)
+    
+    print(f"Audio shape: {audio.shape}")
+    print(f"Text: {text}")
+    print(f"Metadata: {metadata}")
+"#;
+
+        let loader_path = output_path.with_file_name("pytorch_tensor_loader.py");
+        fs::write(loader_path, loader_script).await?;
+
         Ok(())
     }
 
@@ -387,7 +899,11 @@ impl PyTorchExporter {
             }
         });
 
-        fs::write(output_path.with_extension("numpy_info.json"), serde_json::to_string_pretty(&numpy_info)?).await?;
+        fs::write(
+            output_path.with_extension("numpy_info.json"),
+            serde_json::to_string_pretty(&numpy_info)?,
+        )
+        .await?;
         Ok(())
     }
 
@@ -399,7 +915,11 @@ impl PyTorchExporter {
     }
 
     /// Export dataset information
-    async fn export_dataset_info(&self, dataset: &PyTorchDataset, output_path: &Path) -> Result<()> {
+    async fn export_dataset_info(
+        &self,
+        dataset: &PyTorchDataset,
+        output_path: &Path,
+    ) -> Result<()> {
         let info = serde_json::json!({
             "name": dataset.metadata.name,
             "total_samples": dataset.metadata.total_samples,
@@ -407,7 +927,7 @@ impl PyTorchExporter {
             "channels": dataset.metadata.channels,
             "speakers": dataset.metadata.speakers,
             "languages": dataset.metadata.languages,
-            "vocabulary_size": dataset.metadata.vocabulary.as_ref().map(|v| v.len()),
+            "vocabulary_size": dataset.metadata.vocabulary.as_ref().map(Vec::len),
             "config": dataset.config
         });
 
@@ -572,7 +1092,7 @@ if __name__ == "__main__":
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AudioData, LanguageCode, SpeakerInfo};
+    use crate::{AudioData, LanguageCode};
     use tempfile::TempDir;
 
     #[tokio::test]
@@ -597,8 +1117,8 @@ mod tests {
         match result {
             TextData::Characters(chars) => {
                 assert_eq!(chars.len(), 5); // "hello" has 5 characters
-            },
-            _ => panic!("Expected Characters encoding"),
+            }
+            _ => panic!("Expected Characters encoding but got a different type"),
         }
     }
 
@@ -612,15 +1132,17 @@ mod tests {
         let exporter = PyTorchExporter::new(config);
 
         let audio = AudioData::new(vec![0.5, -0.8, 0.3], 22050, 1);
-        let result = exporter.process_audio(&audio).unwrap();
+        let result = exporter.process_audio(&audio, "test_sample").unwrap();
 
         match result {
             PyTorchAudioData::Samples(samples) => {
                 // Check that audio was normalized (max absolute value should be 1.0)
-                let max_val = samples.iter().fold(0.0f32, |max, &sample| max.max(sample.abs()));
+                let max_val = samples
+                    .iter()
+                    .fold(0.0f32, |max, &sample| max.max(sample.abs()));
                 assert!((max_val - 1.0).abs() < 0.001);
-            },
-            _ => panic!("Expected Samples format"),
+            }
+            _ => panic!("Expected Samples format but got a different type"),
         }
     }
 
@@ -630,26 +1152,28 @@ mod tests {
         let config = PyTorchConfig::default();
         let exporter = PyTorchExporter::new(config);
 
-        let samples = vec![
-            crate::DatasetSample::new(
-                "sample_001".to_string(),
-                "Test sample".to_string(),
-                AudioData::silence(1.0, 22050, 1),
-                LanguageCode::EnUs,
-            ),
-        ];
+        let samples = vec![crate::DatasetSample::new(
+            "sample_001".to_string(),
+            "Test sample".to_string(),
+            AudioData::silence(1.0, 22050, 1),
+            LanguageCode::EnUs,
+        )];
 
         let output_path = temp_dir.path().join("dataset");
-        exporter.export_dataset(&samples, &output_path).await.unwrap();
+        exporter
+            .export_dataset(&samples, &output_path)
+            .await
+            .unwrap();
 
         // Check that files were created
-        assert!(temp_dir.path().join("dataset.json").exists());
+        assert!(temp_dir.path().join("dataset.pkl").exists());
         assert!(temp_dir.path().join("dataset_info.json").exists());
         assert!(temp_dir.path().join("pytorch_loader.py").exists());
 
-        // Check JSON content
-        let json_content = fs::read_to_string(temp_dir.path().join("dataset.json")).await.unwrap();
-        assert!(json_content.contains("sample_001"));
-        assert!(json_content.contains("Test sample"));
+        // Check pickle file exists and has content
+        let pickle_content = fs::read(temp_dir.path().join("dataset.pkl")).await.unwrap();
+        assert!(!pickle_content.is_empty());
+        // Verify it's a valid pickle file by checking the protocol header
+        assert_eq!(&pickle_content[0..2], b"\x80\x04");
     }
 }

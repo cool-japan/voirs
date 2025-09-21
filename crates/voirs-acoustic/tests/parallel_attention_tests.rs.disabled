@@ -1,0 +1,433 @@
+//! Comprehensive tests for parallel attention features
+
+use voirs_acoustic::{
+    parallel_attention::{
+        ParallelAttentionConfig, AttentionMemoryOptimization, AttentionStrategy,
+        FlashAttentionConfig, FlashMemoryLevel, EmotionAwareMultiHeadAttention, EmotionAttentionConfig,
+        EmotionConditioningStrategy,
+    },
+    conditioning::ConditioningStrategy as AttentionConditioningStrategy,
+    speaker::emotion::{EmotionConfig, EmotionType, EmotionIntensity},
+    Result,
+};
+use candle_core::Device;
+use std::collections::HashMap;
+
+/// Test parallel attention configuration defaults
+#[tokio::test]
+async fn test_parallel_attention_config_defaults() -> Result<()> {
+    let config = ParallelAttentionConfig::default();
+    
+    // Verify default configuration values
+    assert_eq!(config.num_heads, 8);
+    assert_eq!(config.hidden_dim, 512);
+    assert_eq!(config.max_seq_len, 2048);
+    assert!(config.num_workers > 0);
+    assert!(config.use_simd);
+    assert!(config.chunk_size > 0);
+    
+    // Verify memory optimization is set
+    assert!(matches!(config.memory_optimization, AttentionMemoryOptimization::Balanced));
+    
+    // Verify computation strategy is set
+    assert!(matches!(config.computation_strategy, AttentionStrategy::MultiThreaded));
+    
+    Ok(())
+}
+
+/// Test Flash Attention configuration
+#[tokio::test]
+async fn test_flash_attention_config() -> Result<()> {
+    let flash_config = FlashAttentionConfig {
+        block_size_q: 64,
+        block_size_kv: 64,
+        gradient_checkpointing: true,
+        causal: false,
+        scale: None,
+        stable_softmax: true,
+        memory_level: FlashMemoryLevel::Balanced,
+    };
+    
+    // Verify configuration parameters
+    assert_eq!(flash_config.block_size_q, 64);
+    assert_eq!(flash_config.block_size_kv, 64);
+    assert!(flash_config.gradient_checkpointing);
+    assert!(!flash_config.causal);
+    assert!(flash_config.scale.is_none());
+    assert!(flash_config.stable_softmax);
+    assert!(matches!(flash_config.memory_level, FlashMemoryLevel::Balanced));
+    
+    // Test with custom scale factor
+    let flash_config_with_scale = FlashAttentionConfig {
+        scale: Some(0.125),
+        ..flash_config
+    };
+    
+    assert_eq!(flash_config_with_scale.scale, Some(0.125));
+    
+    Ok(())
+}
+
+/// Test attention memory optimization modes
+#[tokio::test]
+async fn test_attention_memory_optimization_modes() -> Result<()> {
+    let optimization_modes = vec![
+        AttentionMemoryOptimization::Memory,
+        AttentionMemoryOptimization::Balanced,
+        AttentionMemoryOptimization::Speed,
+        AttentionMemoryOptimization::Custom { chunk_size: 1024 },
+    ];
+    
+    for mode in optimization_modes {
+        let config = ParallelAttentionConfig {
+            memory_optimization: mode.clone(),
+            ..ParallelAttentionConfig::default()
+        };
+        
+        // Verify mode is set correctly
+        assert!(matches!(config.memory_optimization, _));
+        
+        // Test that different modes are distinct
+        match mode {
+            AttentionMemoryOptimization::Memory => {
+                assert!(matches!(config.memory_optimization, AttentionMemoryOptimization::Memory));
+            }
+            AttentionMemoryOptimization::Balanced => {
+                assert!(matches!(config.memory_optimization, AttentionMemoryOptimization::Balanced));
+            }
+            AttentionMemoryOptimization::Speed => {
+                assert!(matches!(config.memory_optimization, AttentionMemoryOptimization::Speed));
+            }
+            AttentionMemoryOptimization::Custom { chunk_size } => {
+                assert!(matches!(config.memory_optimization, AttentionMemoryOptimization::Custom { chunk_size: cs } if cs == chunk_size));
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// Test attention computation strategies
+#[tokio::test]
+async fn test_attention_computation_strategies() -> Result<()> {
+    let strategies = vec![
+        AttentionStrategy::Sequential,
+        AttentionStrategy::MultiThreaded,
+        AttentionStrategy::Chunked,
+        AttentionStrategy::Fused,
+        AttentionStrategy::FlashAttention,
+    ];
+    
+    for strategy in strategies {
+        let config = ParallelAttentionConfig {
+            computation_strategy: strategy.clone(),
+            ..ParallelAttentionConfig::default()
+        };
+        
+        // Verify strategy is set correctly
+        match strategy {
+            AttentionStrategy::Sequential => {
+                assert!(matches!(config.computation_strategy, AttentionStrategy::Sequential));
+            }
+            AttentionStrategy::MultiThreaded => {
+                assert!(matches!(config.computation_strategy, AttentionStrategy::MultiThreaded));
+            }
+            AttentionStrategy::Chunked => {
+                assert!(matches!(config.computation_strategy, AttentionStrategy::Chunked));
+            }
+            AttentionStrategy::Fused => {
+                assert!(matches!(config.computation_strategy, AttentionStrategy::Fused));
+            }
+            AttentionStrategy::FlashAttention => {
+                assert!(matches!(config.computation_strategy, AttentionStrategy::FlashAttention));
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// Test emotion-aware attention configuration
+#[tokio::test]
+async fn test_emotion_aware_attention_config() -> Result<()> {
+    let emotion_config = EmotionAttentionConfig {
+        conditioning_strategy: AttentionConditioningStrategy::ScaleBias,
+        emotion_dim: 256,
+        num_heads: 8,
+        dropout: 0.1,
+        temperature: 1.0,
+        enable_cross_attention: true,
+        attention_mask_strategy: String::from("emotion_guided"),
+    };
+    
+    // Verify configuration parameters
+    assert!(matches!(emotion_config.conditioning_strategy, AttentionConditioningStrategy::ScaleBias));
+    assert_eq!(emotion_config.emotion_dim, 256);
+    assert_eq!(emotion_config.num_heads, 8);
+    assert!((emotion_config.dropout - 0.1).abs() < f32::EPSILON);
+    assert!((emotion_config.temperature - 1.0).abs() < f32::EPSILON);
+    assert!(emotion_config.enable_cross_attention);
+    assert_eq!(emotion_config.attention_mask_strategy, "emotion_guided");
+    
+    Ok(())
+}
+
+/// Test attention conditioning strategies
+#[tokio::test]
+async fn test_attention_conditioning_strategies() -> Result<()> {
+    let strategies = vec![
+        AttentionConditioningStrategy::ScaleBias,
+        AttentionConditioningStrategy::WeightModulation,
+        AttentionConditioningStrategy::QueryKeyConditioned,
+        AttentionConditioningStrategy::AttentionMasking,
+        AttentionConditioningStrategy::CrossModalAttention,
+        AttentionConditioningStrategy::AdaptiveAttention,
+    ];
+    
+    for strategy in strategies {
+        let config = EmotionAttentionConfig {
+            conditioning_strategy: strategy.clone(),
+            emotion_dim: 128,
+            num_heads: 4,
+            dropout: 0.0,
+            temperature: 1.0,
+            enable_cross_attention: false,
+            attention_mask_strategy: String::from("standard"),
+        };
+        
+        // Verify strategy is set correctly
+        match strategy {
+            AttentionConditioningStrategy::ScaleBias => {
+                assert!(matches!(config.conditioning_strategy, AttentionConditioningStrategy::ScaleBias));
+            }
+            AttentionConditioningStrategy::WeightModulation => {
+                assert!(matches!(config.conditioning_strategy, AttentionConditioningStrategy::WeightModulation));
+            }
+            AttentionConditioningStrategy::QueryKeyConditioned => {
+                assert!(matches!(config.conditioning_strategy, AttentionConditioningStrategy::QueryKeyConditioned));
+            }
+            AttentionConditioningStrategy::AttentionMasking => {
+                assert!(matches!(config.conditioning_strategy, AttentionConditioningStrategy::AttentionMasking));
+            }
+            AttentionConditioningStrategy::CrossModalAttention => {
+                assert!(matches!(config.conditioning_strategy, AttentionConditioningStrategy::CrossModalAttention));
+            }
+            AttentionConditioningStrategy::AdaptiveAttention => {
+                assert!(matches!(config.conditioning_strategy, AttentionConditioningStrategy::AdaptiveAttention));
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// Test parallel attention configuration validation
+#[tokio::test]
+async fn test_parallel_attention_config_validation() -> Result<()> {
+    // Test valid configuration
+    let valid_config = ParallelAttentionConfig {
+        num_heads: 12,
+        hidden_dim: 768,
+        max_seq_len: 4096,
+        num_workers: 6,
+        use_simd: true,
+        chunk_size: 128,
+        memory_optimization: AttentionMemoryOptimization::Speed,
+        computation_strategy: AttentionStrategy::FlashAttention,
+        flash_config: FlashAttentionConfig::default(),
+    };
+    
+    // Verify configuration constraints
+    assert!(valid_config.num_heads > 0);
+    assert!(valid_config.hidden_dim > 0);
+    assert!(valid_config.hidden_dim % valid_config.num_heads == 0); // Hidden dim should be divisible by num_heads
+    assert!(valid_config.max_seq_len > 0);
+    assert!(valid_config.num_workers > 0);
+    assert!(valid_config.chunk_size > 0);
+    
+    // Test edge cases
+    let minimal_config = ParallelAttentionConfig {
+        num_heads: 1,
+        hidden_dim: 64,
+        max_seq_len: 32,
+        num_workers: 1,
+        use_simd: false,
+        chunk_size: 8,
+        memory_optimization: AttentionMemoryOptimization::Memory,
+        computation_strategy: AttentionStrategy::Sequential,
+        flash_config: FlashAttentionConfig::default(),
+    };
+    
+    assert_eq!(minimal_config.num_heads, 1);
+    assert_eq!(minimal_config.hidden_dim, 64);
+    assert!(!minimal_config.use_simd);
+    
+    Ok(())
+}
+
+/// Test Flash Attention configuration with different settings
+#[tokio::test]
+async fn test_flash_attention_variants() -> Result<()> {
+    // Test memory-efficient Flash Attention
+    let memory_efficient = FlashAttentionConfig {
+        block_size_q: 32,
+        block_size_kv: 32,
+        gradient_checkpointing: true,
+        causal: false,
+        scale: Some(0.0625), // 1/sqrt(256)
+        stable_softmax: true,
+        memory_level: FlashMemoryLevel::Maximum,
+    };
+    
+    assert_eq!(memory_efficient.block_size_q, 32);
+    assert!(matches!(memory_efficient.memory_level, FlashMemoryLevel::Maximum));
+    assert_eq!(memory_efficient.scale, Some(0.0625));
+    
+    // Test causal Flash Attention
+    let causal = FlashAttentionConfig {
+        block_size_q: 64,
+        block_size_kv: 64,
+        gradient_checkpointing: false,
+        causal: true,
+        scale: None,
+        stable_softmax: true,
+        memory_level: FlashMemoryLevel::Speed,
+    };
+    
+    assert!(causal.causal);
+    assert!(!causal.gradient_checkpointing);
+    assert!(matches!(causal.memory_level, FlashMemoryLevel::Speed));
+    
+    Ok(())
+}
+
+/// Test attention strategy modes
+#[tokio::test]
+async fn test_attention_strategy_modes() -> Result<()> {
+    let strategies = vec![
+        AttentionStrategy::Sequential,
+        AttentionStrategy::MultiThreaded,
+    ];
+    
+    for strategy in strategies {
+        // Test that each strategy can be properly instantiated and compared
+        let strategy_clone = strategy.clone();
+        assert_eq!(strategy, strategy_clone);
+        
+        // Verify strategy-specific properties
+        match strategy {
+            AttentionStrategy::Sequential => {
+                // Sequential mode for basic attention computation
+                assert!(matches!(strategy, AttentionStrategy::Sequential));
+            }
+            AttentionStrategy::MultiThreaded => {
+                // MultiThreaded mode for optimized computation
+                assert!(matches!(strategy, AttentionStrategy::MultiThreaded));
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// Test emotion-specific attention patterns
+#[tokio::test]
+async fn test_emotion_specific_attention_patterns() -> Result<()> {
+    let emotions = vec![
+        EmotionType::Happy,
+        EmotionType::Sad,
+        EmotionType::Angry,
+        EmotionType::Calm,
+        EmotionType::Excited,
+    ];
+    
+    for emotion in emotions {
+        let emotion_config = EmotionConfig {
+            emotion_type: emotion.clone(),
+            intensity: EmotionIntensity::Medium,
+            secondary_emotions: Vec::new(),
+            custom_params: HashMap::new(),
+        };
+        
+        let attention_config = EmotionAttentionConfig {
+            base_config: ParallelAttentionConfig::default(),
+            emotion_dim: 256,
+            conditioning_strategy: EmotionConditioningStrategy::CrossAttention,
+            emotion_head_scaling: true,
+            emotion_bias: true,
+            emotion_kv_transform: true,
+            emotion_smoothing: 0.1,
+        };
+        
+        // Verify emotion-specific configuration
+        assert_eq!(emotion_config.emotion_type, emotion);
+        assert_eq!(attention_config.emotion_dim, 256);
+        assert!(attention_config.emotion_head_scaling);
+    }
+    
+    Ok(())
+}
+
+/// Test parallel attention worker configuration
+#[tokio::test]
+async fn test_parallel_attention_worker_config() -> Result<()> {
+    let num_cpus = std::thread::available_parallelism()
+        .map(|p| p.get())
+        .unwrap_or(4);
+    
+    // Test worker configuration based on available CPUs
+    let config = ParallelAttentionConfig {
+        num_workers: num_cpus.min(8), // Cap at 8 workers
+        ..ParallelAttentionConfig::default()
+    };
+    
+    assert!(config.num_workers > 0);
+    assert!(config.num_workers <= 8);
+    assert!(config.num_workers <= num_cpus);
+    
+    // Test chunk size scaling with workers
+    let chunk_size = config.max_seq_len / config.num_workers;
+    assert!(chunk_size > 0);
+    
+    Ok(())
+}
+
+/// Test attention configuration serialization compatibility
+#[tokio::test]
+async fn test_attention_config_serialization() -> Result<()> {
+    let config = ParallelAttentionConfig {
+        num_heads: 16,
+        hidden_dim: 1024,
+        max_seq_len: 8192,
+        num_workers: 4,
+        use_simd: true,
+        chunk_size: 256,
+        memory_optimization: AttentionMemoryOptimization::Speed,
+        computation_strategy: AttentionStrategy::FlashAttention,
+        flash_config: FlashAttentionConfig {
+            block_size_q: 128,
+            block_size_kv: 128,
+            gradient_checkpointing: true,
+            causal: false,
+            scale: Some(0.03125), // 1/sqrt(1024)
+            stable_softmax: true,
+            memory_level: FlashMemoryLevel::Balanced,
+        },
+    };
+    
+    // Test that configuration can be serialized (serde traits)
+    let serialized = serde_json::to_string(&config).expect("Should serialize");
+    assert!(!serialized.is_empty());
+    
+    // Test deserialization
+    let deserialized: ParallelAttentionConfig = serde_json::from_str(&serialized)
+        .expect("Should deserialize");
+    
+    // Verify deserialized config matches original
+    assert_eq!(config.num_heads, deserialized.num_heads);
+    assert_eq!(config.hidden_dim, deserialized.hidden_dim);
+    assert_eq!(config.max_seq_len, deserialized.max_seq_len);
+    assert_eq!(config.use_simd, deserialized.use_simd);
+    
+    Ok(())
+}

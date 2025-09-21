@@ -1,0 +1,292 @@
+.TH VOIRS-CLI-VOICES 1 "2025-07-05" "voirs-cli" "VoiRS CLI Manual"
+
+.SH NAME
+voirs-cli-voices \- List and manage available voices for text-to-speech synthesis
+
+.SH SYNOPSIS
+.B voirs-cli voices
+[\fIOPTIONS\fR]
+[\fISUBCOMMAND\fR]
+
+.SH DESCRIPTION
+The voices command provides comprehensive voice management capabilities for the VoiRS text-to-speech system. It allows listing available voices, viewing detailed voice information, downloading new voices, and searching for voices based on various criteria.
+
+.SH SUBCOMMANDS
+.TP
+.B list
+List all available voices with filtering options (default subcommand).
+
+.TP
+.B info \fIVOICE\fR
+Display detailed information about a specific voice.
+
+.TP
+.B download \fIVOICE\fR
+Download a voice from the model repository.
+
+.TP
+.B search \fIQUERY\fR
+Search for voices using text queries and criteria.
+
+.SH OPTIONS
+.SS LIST OPTIONS
+.TP
+.B \-l, \-\-language \fILANG\fR
+Filter voices by language code (e.g., en-US, fr-FR, ja-JP).
+
+.TP
+.B \-g, \-\-gender \fIGENDER\fR
+Filter voices by gender (male, female, neutral).
+
+.TP
+.B \-s, \-\-style \fISTYLE\fR
+Filter voices by speaking style (formal, casual, expressive, etc.).
+
+.TP
+.B \-q, \-\-quality \fILEVEL\fR
+Filter voices by quality level (low, medium, high, ultra).
+
+.TP
+.B \-\-installed
+Show only installed voices.
+
+.TP
+.B \-\-available
+Show only available voices for download.
+
+.TP
+.B \-\-detailed
+Show detailed information for each voice.
+
+.TP
+.B \-\-format \fIFORMAT\fR
+Output format: table, json, csv (default: table).
+
+.SS INFO OPTIONS
+.TP
+.B \-\-samples
+Include audio samples in the information display.
+
+.TP
+.B \-\-technical
+Show technical specifications and model details.
+
+.TP
+.B \-\-usage
+Display usage examples and recommended settings.
+
+.SS DOWNLOAD OPTIONS
+.TP
+.B \-\-verify
+Verify downloaded files using checksums.
+
+.TP
+.B \-\-resume
+Resume interrupted downloads.
+
+.TP
+.B \-\-force
+Force re-download even if voice is already installed.
+
+.TP
+.B \-\-no-progress
+Disable progress indicators during download.
+
+.SS SEARCH OPTIONS
+.TP
+.B \-\-limit \fIN\fR
+Limit search results to N voices (default: 10).
+
+.TP
+.B \-\-sort \fIFIELD\fR
+Sort results by field: name, language, quality, size (default: name).
+
+.TP
+.B \-\-recommendations
+Show voice recommendations based on query.
+
+.SH VOICE PROPERTIES
+.TP
+.B Name
+Unique identifier for the voice.
+
+.TP
+.B Language
+Language and region code (e.g., en-US, de-DE).
+
+.TP
+.B Gender
+Speaker gender: male, female, or neutral.
+
+.TP
+.B Style
+Speaking style: formal, casual, expressive, robotic, etc.
+
+.TP
+.B Quality
+Voice quality level: low, medium, high, ultra.
+
+.TP
+.B Sample Rate
+Audio sample rate in Hz (16000, 22050, 44100, 48000).
+
+.TP
+.B Model Size
+Size of the voice model files in MB.
+
+.TP
+.B Backend
+Synthesis backend: ONNX, Candle, or CPU.
+
+.TP
+.B Installation Status
+Whether the voice is installed, available, or requires download.
+
+.SH EXAMPLES
+.TP
+.B List all voices
+voirs-cli voices
+
+.TP
+.B List English voices
+voirs-cli voices --language en-US
+
+.TP
+.B List female voices
+voirs-cli voices --gender female
+
+.TP
+.B List high-quality voices
+voirs-cli voices --quality high --detailed
+
+.TP
+.B Show installed voices only
+voirs-cli voices --installed
+
+.TP
+.B Voice information
+voirs-cli voices info en-US-female-1 --technical
+
+.TP
+.B Download a voice
+voirs-cli voices download en-GB-male-2 --verify
+
+.TP
+.B Search for voices
+voirs-cli voices search "expressive female English"
+
+.TP
+.B JSON output
+voirs-cli voices --format json --language ja-JP
+
+.TP
+.B Search with recommendations
+voirs-cli voices search "news reader" --recommendations --limit 5
+
+.SH VOICE NAMING CONVENTION
+Voice names follow the pattern: \fIlanguage\fR-\fIgender\fR-\fInumber\fR[\fI-style\fR]
+
+.TP
+.B Examples
+en-US-female-1, en-GB-male-2-formal, fr-FR-female-1-expressive
+
+.TP
+.B Language codes
+en-US (American English), en-GB (British English), fr-FR (French), de-DE (German), ja-JP (Japanese), etc.
+
+.SH VOICE SEARCH
+The voice search functionality supports various query formats:
+
+.TP
+.B Language queries
+"English", "French", "Japanese"
+
+.TP
+.B Gender queries
+"male", "female", "neutral"
+
+.TP
+.B Style queries
+"formal", "casual", "expressive", "robotic"
+
+.TP
+.B Quality queries
+"high quality", "professional", "studio quality"
+
+.TP
+.B Combined queries
+"high quality female English news reader"
+
+.SH TECHNICAL SPECIFICATIONS
+.TP
+.B Model Types
+- Acoustic models (text-to-mel spectrogram)
+- Vocoder models (mel spectrogram-to-audio)
+- End-to-end models (text-to-audio)
+
+.TP
+.B Backend Support
+- ONNX Runtime for optimized inference
+- Candle for native Rust inference
+- CPU fallback for compatibility
+
+.TP
+.B File Formats
+- .onnx for ONNX Runtime models
+- .safetensors for Candle models
+- .bin for legacy model formats
+
+.SH CONFIGURATION
+Voice preferences can be configured in the VoiRS configuration file:
+
+.TP
+.B Default voice
+Set preferred voice for synthesis operations.
+
+.TP
+.B Download mirrors
+Configure alternative download sources.
+
+.TP
+.B Cache settings
+Configure model cache location and size limits.
+
+.SH EXIT STATUS
+.TP
+.B 0
+Successful operation.
+
+.TP
+.B 1
+General error or invalid usage.
+
+.TP
+.B 2
+Voice not found.
+
+.TP
+.B 3
+Download error or network issue.
+
+.TP
+.B 4
+Installation or verification error.
+
+.SH FILES
+.TP
+.B ~/.local/share/voirs/voices/
+Directory containing installed voice models.
+
+.TP
+.B ~/.cache/voirs/downloads/
+Temporary directory for voice downloads.
+
+.TP
+.B ~/.config/voirs/voice-preferences.toml
+User voice preferences and settings.
+
+.SH SEE ALSO
+.BR voirs-cli (1),
+.BR voirs-cli-synthesize (1),
+.BR voirs-cli-voice-search (1),
+.BR voirs-cli-models (1)

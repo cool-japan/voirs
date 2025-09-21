@@ -1,0 +1,13 @@
+[Unit]
+Description=VoiRS Maintenance Timer
+Documentation=https://github.com/cool-japan/voirs
+Requires=voirs-maintenance.service
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=600
+AccuracySec=1h
+
+[Install]
+WantedBy=timers.target

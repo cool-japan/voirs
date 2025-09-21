@@ -1,0 +1,254 @@
+//! Utility functions for acoustic modeling.
+
+use crate::{MelSpectrogram, Phoneme, SynthesisConfig};
+
+/// Mel spectrogram processing utilities
+pub fn normalize_mel_spectrogram(mel: &mut MelSpectrogram) {
+    // Compute global statistics across all mel channels and frames
+    let mut all_values: Vec<f32> = Vec::new();
+    for mel_channel in &mel.data {
+        all_values.extend_from_slice(mel_channel);
+    }
+    
+    if all_values.is_empty() {
+        return;
+    }
+    
+    // Compute mean and standard deviation
+    let mean = all_values.iter().sum::<f32>() / all_values.len() as f32;
+    let variance = all_values.iter()
+        .map(|x| (x - mean).powi(2))
+        .sum::<f32>() / all_values.len() as f32;
+    let std_dev = variance.sqrt().max(1e-8); // Avoid division by zero
+    
+    // Apply Z-score normalization to all channels
+    for mel_channel in &mut mel.data {
+        for value in mel_channel {
+            *value = (*value - mean) / std_dev;
+        }
+    }
+    
+    // Apply dynamic range compression (tanh normalization)
+    for mel_channel in &mut mel.data {
+        for value in mel_channel {
+            *value = value.tanh(); // Compress to [-1, 1] range
+        }
+    }
+    
+    // Spectral smoothing using simple moving average
+    if mel.n_frames > 2 {
+        for mel_channel in &mut mel.data {
+            let original = mel_channel.clone();
+            for i in 1..mel_channel.len() - 1 {
+                mel_channel[i] = (original[i - 1] + original[i] + original[i + 1]) / 3.0;
+            }
+        }
+    }
+}
+
+/// Phoneme sequence processing
+pub fn process_phoneme_sequence(phonemes: &[Phoneme], config: &SynthesisConfig) -> Vec<Phoneme> {
+    let mut processed_phonemes = phonemes.to_vec();
+    
+    // Duration adjustment based on speaking rate
+    for phoneme in &mut processed_phonemes {
+        if let Some(duration) = phoneme.duration {
+            phoneme.duration = Some(duration / config.speed);
+        }
+    }
+    
+    // Stress pattern modification
+    for (i, phoneme) in processed_phonemes.iter_mut().enumerate() {
+        // Add stress information if not present
+        if phoneme.stress.is_none() {
+            // Simple heuristic: stress every 3rd phoneme in content words
+            if is_content_phoneme(&phoneme.symbol) && i % 3 == 0 {
+                phoneme.stress = Some(crate::StressLevel::Primary);
+            } else {
+                phoneme.stress = Some(crate::StressLevel::Unstressed);
+            }
+        }
+        
+        // Adjust duration based on stress
+        if let (Some(stress), Some(duration)) = (phoneme.stress, phoneme.duration) {
+            let stress_factor = match stress {
+                crate::StressLevel::Primary => 1.2,
+                crate::StressLevel::Secondary => 1.1,
+                crate::StressLevel::Unstressed => 0.9,
+            };
+            phoneme.duration = Some(duration * stress_factor);
+        }
+    }
+    
+    // Apply energy adjustments based on synthesis config
+    if config.energy != 1.0 {
+        for phoneme in &mut processed_phonemes {
+            let features = phoneme.features.get_or_insert_with(std::collections::HashMap::new);
+            features.insert("energy_scale".to_string(), config.energy.to_string());
+        }
+    }
+    
+    // Apply pitch shift adjustments
+    if config.pitch_shift != 0.0 {
+        for phoneme in &mut processed_phonemes {
+            let features = phoneme.features.get_or_insert_with(std::collections::HashMap::new);
+            features.insert("pitch_shift".to_string(), config.pitch_shift.to_string());
+        }
+    }
+    
+    processed_phonemes
+}
+
+/// Duration prediction utilities
+pub fn predict_phoneme_durations(phonemes: &[Phoneme]) -> Vec<f32> {
+    let mut durations = Vec::with_capacity(phonemes.len());
+    
+    for (i, phoneme) in phonemes.iter().enumerate() {
+        // Start with base duration based on phoneme type
+        let base_duration = get_base_phoneme_duration(&phoneme.symbol);
+        
+        // Context-aware adjustments
+        let context_factor = calculate_context_factor(phonemes, i);
+        
+        // Stress-based adjustments
+        let stress_factor = match phoneme.stress {
+            Some(crate::StressLevel::Primary) => 1.3,
+            Some(crate::StressLevel::Secondary) => 1.15,
+            Some(crate::StressLevel::Unstressed) => 0.85,
+            None => 1.0,
+        };
+        
+        // Position-based adjustments (phrase-initial and phrase-final lengthening)
+        let position_factor = if i == 0 || i == phonemes.len() - 1 {
+            1.2 // Lengthen initial and final phonemes
+        } else {
+            1.0
+        };
+        
+        // Calculate final duration
+        let final_duration = base_duration * context_factor * stress_factor * position_factor;
+        durations.push(final_duration.max(20.0).min(500.0)); // Clamp between 20ms and 500ms
+    }
+    
+    durations
+}
+
+/// Prosody control utilities
+pub fn apply_prosody_control(mel: &mut MelSpectrogram, pitch_shift: f32, speaking_rate: f32) {
+    // Duration modification through resampling
+    if speaking_rate != 1.0 && speaking_rate > 0.0 {
+        let new_frame_count = (mel.n_frames as f32 / speaking_rate) as usize;
+        
+        for mel_channel in &mut mel.data {
+            let original = mel_channel.clone();
+            mel_channel.resize(new_frame_count, 0.0);
+            
+            // Linear interpolation for resampling
+            for i in 0..new_frame_count {
+                let src_idx = (i as f32 * speaking_rate) as usize;
+                let frac = (i as f32 * speaking_rate) % 1.0;
+                
+                if src_idx < original.len() {
+                    if src_idx + 1 < original.len() {
+                        mel_channel[i] = original[src_idx] * (1.0 - frac) + original[src_idx + 1] * frac;
+                    } else {
+                        mel_channel[i] = original[src_idx];
+                    }
+                }
+            }
+        }
+        
+        mel.n_frames = new_frame_count;
+    }
+    
+    // Pitch shifting through spectral modification
+    if pitch_shift != 0.0 {
+        let shift_factor = 2.0f32.powf(pitch_shift / 12.0); // Convert semitones to frequency ratio
+        
+        // Apply pitch shift by modifying lower mel channels more strongly
+        for (mel_idx, mel_channel) in mel.data.iter_mut().enumerate() {
+            let mel_factor = (-mel_idx as f32 / mel.n_mels as f32).exp(); // Exponential decay with frequency
+            let actual_shift = pitch_shift * mel_factor;
+            
+            for value in mel_channel {
+                *value += actual_shift * 0.01; // Scale down the effect
+            }
+        }
+    }
+    
+    // Energy adjustment (simple gain)
+    let energy_factor = 1.0 + pitch_shift.abs() * 0.1; // Slight energy boost with pitch changes
+    for mel_channel in &mut mel.data {
+        for value in mel_channel {
+            *value *= energy_factor;
+        }
+    }
+}
+
+/// Speaker embedding utilities
+pub fn get_speaker_embedding(speaker_id: Option<u32>) -> Option<Vec<f32>> {
+    speaker_id.map(|id| {
+        // Generate deterministic embedding based on speaker ID
+        let mut embedding = vec![0.0; 256];
+        
+        // Use speaker ID as seed for deterministic generation
+        let mut state = id as u64;
+        for i in 0..256 {
+            // Simple linear congruential generator
+            state = state.wrapping_mul(1103515245).wrapping_add(12345);
+            let normalized = (state as f32 / u64::MAX as f32) * 2.0 - 1.0; // Range [-1, 1]
+            
+            // Create speaker-specific characteristics
+            embedding[i] = match i {
+                // Fundamental frequency characteristics (0-31)
+                0..=31 => normalized * 0.5 + get_speaker_f0_bias(id),
+                // Formant characteristics (32-95)
+                32..=95 => normalized * 0.3 + get_speaker_formant_bias(id, i - 32),
+                // Voice quality characteristics (96-159)
+                96..=159 => normalized * 0.4 + get_speaker_quality_bias(id, i - 96),
+                // Prosody characteristics (160-223)
+                160..=223 => normalized * 0.6 + get_speaker_prosody_bias(id, i - 160),
+                // General characteristics (224-255)
+                _ => normalized * 0.2,
+            };
+        }
+        
+        // Normalize the embedding vector
+        let norm = embedding.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-8);
+        for value in &mut embedding {
+            *value /= norm;
+        }
+        
+        embedding
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Phoneme;
+
+    #[test]
+    fn test_predict_phoneme_durations() {
+        let phonemes = vec![
+            Phoneme::new("h"),
+            Phoneme::new("ɛ"),
+            Phoneme::new("l"),
+            Phoneme::new("oʊ"),
+        ];
+
+        let durations = predict_phoneme_durations(&phonemes);
+        assert_eq!(durations.len(), 4);
+        assert!(durations.iter().all(|&d| d > 0.0));
+    }
+
+    #[test]
+    fn test_speaker_embedding() {
+        let embedding = get_speaker_embedding(Some(42));
+        assert!(embedding.is_some());
+        assert_eq!(embedding.unwrap().len(), 256);
+
+        let no_embedding = get_speaker_embedding(None);
+        assert!(no_embedding.is_none());
+    }
+}

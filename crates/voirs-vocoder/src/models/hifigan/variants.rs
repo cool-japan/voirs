@@ -1,7 +1,7 @@
 //! HiFi-GAN model variants with different architectures.
 
-use crate::{Result, VocoderError};
 use super::{HiFiGanConfig, HiFiGanVariant};
+use crate::{Result, VocoderError};
 use serde::{Deserialize, Serialize};
 
 /// HiFi-GAN model variants with predefined configurations
@@ -19,11 +19,7 @@ impl HiFiGanVariants {
             upsample_rates: vec![8, 8, 2, 2],
             upsample_kernel_sizes: vec![16, 16, 4, 4],
             mrf_kernel_sizes: vec![3, 7, 11],
-            mrf_dilation_sizes: vec![
-                vec![1, 3, 5],
-                vec![1, 3, 5],
-                vec![1, 3, 5],
-            ],
+            mrf_dilation_sizes: vec![vec![1, 3, 5], vec![1, 3, 5], vec![1, 3, 5]],
             initial_channels: 512,
             leaky_relu_slope: 0.1,
         }
@@ -39,11 +35,7 @@ impl HiFiGanVariants {
             upsample_rates: vec![8, 8, 4, 2],
             upsample_kernel_sizes: vec![16, 16, 8, 4],
             mrf_kernel_sizes: vec![3, 7, 11],
-            mrf_dilation_sizes: vec![
-                vec![1, 3, 5],
-                vec![1, 3, 5],
-                vec![1, 3, 5],
-            ],
+            mrf_dilation_sizes: vec![vec![1, 3, 5], vec![1, 3, 5], vec![1, 3, 5]],
             initial_channels: 256,
             leaky_relu_slope: 0.1,
         }
@@ -59,11 +51,7 @@ impl HiFiGanVariants {
             upsample_rates: vec![8, 8, 8, 2],
             upsample_kernel_sizes: vec![16, 16, 16, 4],
             mrf_kernel_sizes: vec![3, 5, 7],
-            mrf_dilation_sizes: vec![
-                vec![1, 2, 4],
-                vec![1, 2, 4],
-                vec![1, 2, 4],
-            ],
+            mrf_dilation_sizes: vec![vec![1, 2, 4], vec![1, 2, 4], vec![1, 2, 4]],
             initial_channels: 128,
             leaky_relu_slope: 0.1,
         }
@@ -80,11 +68,7 @@ impl HiFiGanVariants {
 
     /// Get all available variants
     pub fn all_variants() -> Vec<HiFiGanVariant> {
-        vec![
-            HiFiGanVariant::V1,
-            HiFiGanVariant::V2,
-            HiFiGanVariant::V3,
-        ]
+        vec![HiFiGanVariant::V1, HiFiGanVariant::V2, HiFiGanVariant::V3]
     }
 
     /// Get variant by name
@@ -94,8 +78,7 @@ impl HiFiGanVariants {
             "v2" | "hifigan-v2" | "hifigan_v2" => Ok(HiFiGanVariant::V2),
             "v3" | "hifigan-v3" | "hifigan_v3" => Ok(HiFiGanVariant::V3),
             _ => Err(VocoderError::ConfigError(format!(
-                "Unknown HiFi-GAN variant: {}",
-                name
+                "Unknown HiFi-GAN variant: {name}"
             ))),
         }
     }
@@ -106,43 +89,43 @@ impl HiFiGanVariants {
         modifications: VariantModifications,
     ) -> HiFiGanConfig {
         let mut config = Self::get_variant(base_variant);
-        
+
         if let Some(sample_rate) = modifications.sample_rate {
             config.sample_rate = sample_rate;
         }
-        
+
         if let Some(mel_channels) = modifications.mel_channels {
             config.mel_channels = mel_channels;
         }
-        
+
         if let Some(initial_channels) = modifications.initial_channels {
             config.initial_channels = initial_channels;
         }
-        
+
         if let Some(num_residual_blocks) = modifications.num_residual_blocks {
             config.num_residual_blocks = num_residual_blocks;
         }
-        
+
         if let Some(upsample_rates) = modifications.upsample_rates {
             config.upsample_rates = upsample_rates;
         }
-        
+
         if let Some(upsample_kernel_sizes) = modifications.upsample_kernel_sizes {
             config.upsample_kernel_sizes = upsample_kernel_sizes;
         }
-        
+
         if let Some(mrf_kernel_sizes) = modifications.mrf_kernel_sizes {
             config.mrf_kernel_sizes = mrf_kernel_sizes;
         }
-        
+
         if let Some(mrf_dilation_sizes) = modifications.mrf_dilation_sizes {
             config.mrf_dilation_sizes = mrf_dilation_sizes;
         }
-        
+
         if let Some(leaky_relu_slope) = modifications.leaky_relu_slope {
             config.leaky_relu_slope = leaky_relu_slope;
         }
-        
+
         config
     }
 }
@@ -263,12 +246,12 @@ impl HiFiGanVariants {
     /// Analyze a specific variant
     pub fn analyze_variant(variant: HiFiGanVariant) -> VariantComparison {
         let config = Self::get_variant(variant);
-        
+
         let parameters = Self::estimate_parameters(&config);
         let model_size_mb = (parameters * 4) as f32 / 1024.0 / 1024.0; // 4 bytes per float32
         let upsampling_factor = config.upsample_rates.iter().product();
         let receptive_field_size = Self::estimate_receptive_field(&config);
-        
+
         // Estimated scores based on variant characteristics
         let (quality_score, speed_score) = match variant {
             HiFiGanVariant::V1 => (4.5, 2.0), // High quality, slower
@@ -290,46 +273,50 @@ impl HiFiGanVariants {
     /// Estimate parameters for a configuration
     fn estimate_parameters(config: &HiFiGanConfig) -> u64 {
         let mut total = 0u64;
-        
+
         // Input convolution
         total += (config.mel_channels * config.initial_channels * 7) as u64;
-        
+
         // Upsampling blocks
         let mut current_channels = config.initial_channels;
-        for (&upsample_rate, &kernel_size) in config.upsample_rates.iter()
+        for (&_upsample_rate, &kernel_size) in config
+            .upsample_rates
+            .iter()
             .zip(config.upsample_kernel_sizes.iter())
         {
             let output_channels = current_channels / 2;
-            
+
             // Transposed convolution
             total += (current_channels * output_channels * kernel_size) as u64;
-            
+
             // MRF blocks
             for &mrf_kernel in &config.mrf_kernel_sizes {
                 total += (output_channels * output_channels * mrf_kernel * 3) as u64;
             }
-            
+
             current_channels = output_channels;
         }
-        
+
         // Output convolution
-        total += (current_channels * 1 * 7) as u64;
-        
+        total += (current_channels * 7) as u64;
+
         total
     }
 
     /// Estimate receptive field size
     fn estimate_receptive_field(config: &HiFiGanConfig) -> u32 {
-        let kernel_contribution = config.mrf_kernel_sizes.iter()
+        let kernel_contribution = config
+            .mrf_kernel_sizes
+            .iter()
             .zip(config.mrf_dilation_sizes.iter())
             .map(|(&kernel, dilations)| {
                 let max_dilation = *dilations.iter().max().unwrap_or(&1);
                 (kernel - 1) * max_dilation + 1
             })
             .sum::<u32>();
-        
+
         let upsample_contribution = config.upsample_kernel_sizes.iter().sum::<u32>();
-        
+
         kernel_contribution + upsample_contribution
     }
 }
@@ -362,10 +349,19 @@ mod tests {
 
     #[test]
     fn test_variant_from_name() {
-        assert_eq!(HiFiGanVariants::from_name("v1").unwrap(), HiFiGanVariant::V1);
-        assert_eq!(HiFiGanVariants::from_name("V2").unwrap(), HiFiGanVariant::V2);
-        assert_eq!(HiFiGanVariants::from_name("hifigan-v3").unwrap(), HiFiGanVariant::V3);
-        
+        assert_eq!(
+            HiFiGanVariants::from_name("v1").unwrap(),
+            HiFiGanVariant::V1
+        );
+        assert_eq!(
+            HiFiGanVariants::from_name("V2").unwrap(),
+            HiFiGanVariant::V2
+        );
+        assert_eq!(
+            HiFiGanVariants::from_name("hifigan-v3").unwrap(),
+            HiFiGanVariant::V3
+        );
+
         assert!(HiFiGanVariants::from_name("invalid").is_err());
     }
 
@@ -386,7 +382,7 @@ mod tests {
             .initial_channels(1024);
 
         let custom = HiFiGanVariants::custom(HiFiGanVariant::V1, modifications);
-        
+
         assert_eq!(custom.sample_rate, 44100);
         assert_eq!(custom.mel_channels, 128);
         assert_eq!(custom.initial_channels, 1024);
@@ -418,12 +414,12 @@ mod tests {
     #[test]
     fn test_variant_comparison() {
         let comparisons = HiFiGanVariants::compare_variants();
-        
+
         assert_eq!(comparisons.len(), 3);
         assert!(comparisons.iter().any(|c| c.name == "HiFi-GAN V1"));
         assert!(comparisons.iter().any(|c| c.name == "HiFi-GAN V2"));
         assert!(comparisons.iter().any(|c| c.name == "HiFi-GAN V3"));
-        
+
         // Check that all have reasonable parameter counts
         for comparison in &comparisons {
             assert!(comparison.parameters > 0);

@@ -1,0 +1,191 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: voirs-feedback
+  labels:
+    app: voirs-feedback
+    version: v1
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: voirs-feedback
+  template:
+    metadata:
+      labels:
+        app: voirs-feedback
+        version: v1
+    spec:
+      containers:
+      - name: voirs-feedback
+        image: voirs/feedback:latest
+        ports:
+        - containerPort: 8080
+          name: http-api
+        - containerPort: 8081
+          name: websocket
+        - containerPort: 8082
+          name: metrics
+        env:
+        - name: RUST_LOG
+          value: "info"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: voirs-secrets
+              key: database-url
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: voirs-config
+              key: redis-url
+        - name: VOIRS_ENV
+          value: "production"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8082
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8082
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        volumeMounts:
+        - name: data-volume
+          mountPath: /app/data
+        - name: config-volume
+          mountPath: /app/config
+          readOnly: true
+      volumes:
+      - name: data-volume
+        persistentVolumeClaim:
+          claimName: voirs-data-pvc
+      - name: config-volume
+        configMap:
+          name: voirs-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: voirs-feedback-service
+  labels:
+    app: voirs-feedback
+spec:
+  selector:
+    app: voirs-feedback
+  ports:
+  - name: http-api
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  - name: websocket
+    port: 8081
+    targetPort: 8081
+    protocol: TCP
+  - name: metrics
+    port: 8082
+    targetPort: 8082
+    protocol: TCP
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: voirs-feedback-loadbalancer
+  labels:
+    app: voirs-feedback
+spec:
+  selector:
+    app: voirs-feedback
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  - name: websocket
+    port: 8081
+    targetPort: 8081
+    protocol: TCP
+  type: LoadBalancer
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: voirs-config
+data:
+  redis-url: "redis://redis-service:6379"
+  log-level: "info"
+  metrics-enabled: "true"
+  cache-ttl: "300"
+  max-connections: "100"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: voirs-secrets
+type: Opaque
+data:
+  # Base64 encoded values (replace with actual values)
+  database-url: cG9zdGdyZXNxbDovL3ZvaXJzOnZvaXJzMTIzQHBvc3RncmVzOjU0MzIvdm9pcnNfZmVlZGJhY2s=
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: voirs-data-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: voirs-feedback-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: voirs-feedback
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80

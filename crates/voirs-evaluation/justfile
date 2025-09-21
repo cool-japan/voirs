@@ -1,0 +1,382 @@
+# VoiRS Evaluation - Justfile
+#
+# This justfile provides convenient build automation using the `just` command runner
+# Install just: https://github.com/casey/just
+
+# Default recipe
+default:
+    @just --list
+
+# Project configuration
+project_name := "voirs-evaluation"
+cargo_target_dir := env_var_or_default("CARGO_TARGET_DIR", "target")
+
+# Colors
+blue := '\033[0;34m'
+green := '\033[0;32m'
+yellow := '\033[1;33m'
+red := '\033[0;31m'
+reset := '\033[0m'
+
+# Logging helpers
+log_info message:
+    @echo "{{blue}}[INFO]{{reset}} {{message}}"
+
+log_success message:
+    @echo "{{green}}[SUCCESS]{{reset}} {{message}}"
+
+log_warning message:
+    @echo "{{yellow}}[WARNING]{{reset}} {{message}}"
+
+log_error message:
+    @echo "{{red}}[ERROR]{{reset}} {{message}}"
+
+# Show build environment information
+info:
+    @just log_info "Build environment information"
+    @echo "Project: {{project_name}}"
+    @echo "Platform: {{os()}}"
+    @echo "Architecture: {{arch()}}"
+    @echo "Cargo target directory: {{cargo_target_dir}}"
+    @echo "Rust version: $(rustc --version 2>/dev/null || echo 'Not found')"
+    @echo "Cargo version: $(cargo --version 2>/dev/null || echo 'Not found')"
+
+# Clean build artifacts
+clean:
+    @just log_info "Cleaning build artifacts..."
+    cargo clean
+    @-rm -rf {{cargo_target_dir}}/doc
+    @just log_success "Clean completed"
+
+# Build the project (debug mode)
+build *args:
+    @just log_info "Building {{project_name}} (debug mode)..."
+    cargo build {{args}}
+    @just log_success "Build completed"
+
+# Build the project (release mode)
+build-release *args:
+    @just log_info "Building {{project_name}} (release mode)..."
+    cargo build --release {{args}}
+    @just log_success "Release build completed"
+
+# Build with all features
+build-all *args:
+    @just log_info "Building {{project_name}} with all features..."
+    cargo build --all-features {{args}}
+    @just log_success "Build with all features completed"
+
+# Build examples
+examples *args:
+    @just log_info "Building examples..."
+    cargo build --examples {{args}}
+    @just log_success "Examples built"
+
+# Build benchmarks
+benchmarks *args:
+    @just log_info "Building benchmarks..."
+    cargo build --benches {{args}}
+    @just log_success "Benchmarks built"
+
+# Run tests
+test *args:
+    @just log_info "Running tests..."
+    cargo test {{args}}
+    @just log_success "All tests passed"
+
+# Run tests in release mode
+test-release *args:
+    @just log_info "Running tests (release mode)..."
+    cargo test --release {{args}}
+    @just log_success "All release tests passed"
+
+# Run integration tests
+integration-tests *args:
+    @just log_info "Running integration tests..."
+    cargo test --test integration_tests {{args}}
+    @just log_success "Integration tests passed"
+
+# Run documentation tests
+doc-tests *args:
+    @just log_info "Running documentation tests..."
+    cargo test --doc {{args}}
+    @just log_success "Documentation tests passed"
+
+# Run all test types
+test-all *args:
+    @just test {{args}}
+    @just integration-tests {{args}}
+    @just doc-tests {{args}}
+
+# Run benchmarks
+bench:
+    @just log_info "Running benchmarks..."
+    cargo bench --all
+    @just log_success "Benchmarks completed"
+
+# Generate documentation
+docs *args:
+    @just log_info "Generating documentation..."
+    cargo doc --all-features --no-deps {{args}}
+    @just log_success "Documentation generated"
+
+# Generate and open documentation
+docs-open:
+    @just docs --open
+
+# Format code
+format:
+    @just log_info "Formatting code..."
+    cargo fmt
+    @just log_success "Code formatted"
+
+# Check code formatting
+format-check:
+    @just log_info "Checking code formatting..."
+    cargo fmt -- --check
+    @just log_success "Code formatting is correct"
+
+# Run Clippy lints
+clippy *args:
+    @just log_info "Running Clippy lints..."
+    cargo clippy --all-features -- -D warnings {{args}}
+    @just log_success "Clippy checks passed"
+
+# Run all code quality checks
+check: format-check clippy
+    @just log_success "All code quality checks passed"
+
+# Install the package
+install:
+    @just log_info "Installing {{project_name}}..."
+    cargo install --path . --all-features
+    @just log_success "Installation completed"
+
+# Build Python bindings
+python:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just log_info "Building Python bindings..."
+    
+    # Check Python availability
+    if ! command -v python3 >/dev/null 2>&1 && ! command -v python >/dev/null 2>&1; then
+        just log_error "Python is required for building Python bindings"
+        exit 1
+    fi
+    
+    # Build with Python feature
+    cargo build --release --features python
+    
+    # Build Python wheel if maturin is available
+    if command -v maturin >/dev/null 2>&1; then
+        maturin build --release --features python
+    else
+        just log_warning "maturin not found. Install with: pip install maturin"
+    fi
+    
+    just log_success "Python bindings built"
+
+# Run security audit
+audit:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v cargo-audit >/dev/null 2>&1; then
+        just log_info "Running security audit..."
+        cargo audit
+        just log_success "Security audit completed"
+    else
+        just log_warning "cargo-audit not installed. Install with: cargo install cargo-audit"
+    fi
+
+# Check for unused dependencies
+unused-deps:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v cargo-udeps >/dev/null 2>&1; then
+        just log_info "Checking for unused dependencies..."
+        cargo +nightly udeps --all-features
+        just log_success "Unused dependency check completed"
+    else
+        just log_warning "cargo-udeps not installed. Install with: cargo install cargo-udeps"
+    fi
+
+# Watch files and run commands
+watch command="test":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v cargo-watch >/dev/null 2>&1; then
+        just log_info "Starting file watcher for: {{command}}"
+        cargo watch -x "{{command}}"
+    else
+        just log_error "cargo-watch not installed. Install with: cargo install cargo-watch"
+        exit 1
+    fi
+
+# Development cycle (format, clippy, test)
+dev:
+    @just format
+    @just clippy
+    @just test
+    @just log_success "Development cycle completed"
+
+# Setup development environment
+dev-setup:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just log_info "Setting up development environment..."
+    
+    # Install rustfmt and clippy if not already installed
+    if ! command -v rustfmt >/dev/null 2>&1; then
+        echo "Installing rustfmt..."
+        rustup component add rustfmt
+    fi
+    
+    if ! command -v cargo-clippy >/dev/null 2>&1; then
+        echo "Installing clippy..."
+        rustup component add clippy
+    fi
+    
+    # Suggest additional tools
+    echo "Consider installing additional development tools:"
+    echo "  cargo install cargo-udeps   # Find unused dependencies"
+    echo "  cargo install cargo-audit   # Security audit"
+    echo "  cargo install cargo-watch   # File watching"
+    echo "  cargo install just          # Command runner (this tool)"
+    
+    just log_success "Development environment setup completed"
+
+# Run full CI pipeline
+ci:
+    @just log_info "Running full CI pipeline..."
+    @just clean
+    @just check
+    @just build-all
+    @just test --all-features
+    @just docs
+    @just log_success "CI pipeline completed successfully"
+
+# Build with different optimization profiles
+profile-build profile="release":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{profile}}" in
+        "debug")
+            just log_info "Building debug profile..."
+            cargo build
+            ;;
+        "release")
+            just log_info "Building release profile..."
+            cargo build --release
+            ;;
+        "size")
+            just log_info "Building for size optimization..."
+            RUSTFLAGS="-C opt-level=z -C target-cpu=native" cargo build --release
+            ;;
+        "perf")
+            just log_info "Building for performance optimization..."
+            RUSTFLAGS="-C opt-level=3 -C target-cpu=native" cargo build --release
+            ;;
+        "profile")
+            just log_info "Building with profiling enabled..."
+            RUSTFLAGS="-C force-frame-pointers=yes" cargo build --release
+            ;;
+        *)
+            just log_error "Unknown profile: {{profile}}"
+            echo "Available profiles: debug, release, size, perf, profile"
+            exit 1
+            ;;
+    esac
+    just log_success "Profile build completed"
+
+# Run specific test by name
+test-one test_name:
+    @just log_info "Running test: {{test_name}}"
+    cargo test {{test_name}}
+    @just log_success "Test completed"
+
+# Run specific benchmark by name
+bench-one bench_name:
+    @just log_info "Running benchmark: {{bench_name}}"
+    cargo bench {{bench_name}}
+    @just log_success "Benchmark completed"
+
+# Check dependencies for updates
+deps-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v cargo-outdated >/dev/null 2>&1; then
+        just log_info "Checking for dependency updates..."
+        cargo outdated
+        just log_success "Dependency check completed"
+    else
+        just log_warning "cargo-outdated not installed. Install with: cargo install cargo-outdated"
+    fi
+
+# Update dependencies
+deps-update:
+    @just log_info "Updating dependencies..."
+    cargo update
+    @just log_success "Dependencies updated"
+
+# Generate test coverage report
+coverage:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v cargo-tarpaulin >/dev/null 2>&1; then
+        just log_info "Generating test coverage report..."
+        cargo tarpaulin --all-features --out Html
+        just log_success "Coverage report generated"
+    else
+        just log_warning "cargo-tarpaulin not installed. Install with: cargo install cargo-tarpaulin"
+    fi
+
+# Lint Cargo.toml
+lint-toml:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v cargo-toml-lint >/dev/null 2>&1; then
+        just log_info "Linting Cargo.toml..."
+        cargo toml-lint
+        just log_success "Cargo.toml lint completed"
+    else
+        just log_warning "cargo-toml-lint not installed. Install with: cargo install cargo-toml-lint"
+    fi
+
+# Show project statistics
+stats:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v tokei >/dev/null 2>&1; then
+        just log_info "Generating project statistics..."
+        tokei
+        just log_success "Statistics generated"
+    else
+        just log_warning "tokei not installed. Install with: cargo install tokei"
+    fi
+
+# Create a new release (requires cargo-release)
+release version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v cargo-release >/dev/null 2>&1; then
+        just log_info "Creating release: {{version}}"
+        cargo release {{version}}
+        just log_success "Release created"
+    else
+        just log_error "cargo-release not installed. Install with: cargo install cargo-release"
+        exit 1
+    fi
+
+# Show help for recipes
+help:
+    @echo "VoiRS Evaluation Build Automation"
+    @echo ""
+    @echo "Common recipes:"
+    @echo "  just build            Build the project"
+    @echo "  just test             Run tests"
+    @echo "  just check            Run code quality checks"
+    @echo "  just docs             Generate documentation"
+    @echo "  just ci               Run full CI pipeline"
+    @echo "  just dev              Quick development cycle"
+    @echo ""
+    @echo "For all available recipes, run: just --list"

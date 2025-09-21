@@ -1,8 +1,10 @@
 //! Voice search functionality.
 
+use crate::error::{CliError, Result};
 use std::collections::HashMap;
-use voirs::{config::AppConfig, error::Result, VoirsPipeline, types::VoiceConfig};
-use crate::error::{CliError, CliResult};
+use voirs::{QualityLevel, Result as VoirsResult, VoirsPipeline};
+use voirs_sdk::config::AppConfig;
+use voirs_sdk::types::VoiceConfig;
 
 /// Voice search functionality
 pub struct VoiceSearch {
@@ -15,17 +17,17 @@ impl VoiceSearch {
     pub async fn new(config: &AppConfig) -> Result<Self> {
         let pipeline = VoirsPipeline::builder().build().await?;
         let voices = pipeline.list_voices().await?;
-        
+
         Ok(Self { voices })
     }
-    
+
     /// Search voices by query string
     pub fn search(&self, query: &str) -> Vec<VoiceSearchResult> {
         let query_lower = query.to_lowercase();
         let terms: Vec<&str> = query_lower.split_whitespace().collect();
-        
+
         let mut results = Vec::new();
-        
+
         for voice in &self.voices {
             let score = self.calculate_relevance_score(voice, &terms);
             if score > 0.0 {
@@ -36,22 +38,22 @@ impl VoiceSearch {
                 });
             }
         }
-        
+
         // Sort by relevance score (highest first)
         results.sort_by(|a, b| b.relevance_score.partial_cmp(&a.relevance_score).unwrap());
-        
+
         results
     }
-    
+
     /// Search voices by specific criteria
     pub fn search_by_criteria(&self, criteria: &VoiceSearchCriteria) -> Vec<VoiceSearchResult> {
         let mut results = Vec::new();
-        
+
         for voice in &self.voices {
             let mut score = 1.0;
             let mut reasons = Vec::new();
             let mut matches = true;
-            
+
             // Language filter
             if let Some(ref language) = criteria.language {
                 if voice.language.as_str().to_lowercase() != language.to_lowercase() {
@@ -60,7 +62,7 @@ impl VoiceSearch {
                     reasons.push("Matching language".to_string());
                 }
             }
-            
+
             // Gender filter
             if let Some(ref gender) = criteria.gender {
                 if let Some(voice_gender) = &voice.characteristics.gender {
@@ -74,7 +76,7 @@ impl VoiceSearch {
                     matches = false;
                 }
             }
-            
+
             // Age filter
             if let Some(ref age) = criteria.age {
                 if let Some(voice_age) = &voice.characteristics.age {
@@ -88,24 +90,26 @@ impl VoiceSearch {
                     matches = false;
                 }
             }
-            
+
             // Style filter
             if let Some(ref style) = criteria.style {
-                if format!("{:?}", voice.characteristics.style).to_lowercase() != style.to_lowercase() {
+                if format!("{:?}", voice.characteristics.style).to_lowercase()
+                    != style.to_lowercase()
+                {
                     matches = false;
                 } else {
                     reasons.push("Matching style".to_string());
                     score += 0.4;
                 }
             }
-            
+
             // Quality filter
             if let Some(ref quality) = criteria.min_quality {
                 let voice_quality_score = match voice.characteristics.quality {
-                    voirs::types::QualityLevel::Low => 1,
-                    voirs::types::QualityLevel::Medium => 2,
-                    voirs::types::QualityLevel::High => 3,
-                    voirs::types::QualityLevel::Ultra => 4,
+                    QualityLevel::Low => 1,
+                    QualityLevel::Medium => 2,
+                    QualityLevel::High => 3,
+                    QualityLevel::Ultra => 4,
                 };
                 let min_quality_score = match quality.as_str() {
                     "low" => 1,
@@ -114,7 +118,7 @@ impl VoiceSearch {
                     "ultra" => 4,
                     _ => 1,
                 };
-                
+
                 if voice_quality_score < min_quality_score {
                     matches = false;
                 } else {
@@ -124,7 +128,7 @@ impl VoiceSearch {
                     }
                 }
             }
-            
+
             // Emotion support filter
             if criteria.emotion_support {
                 if voice.characteristics.emotion_support {
@@ -134,7 +138,7 @@ impl VoiceSearch {
                     matches = false;
                 }
             }
-            
+
             if matches {
                 results.push(VoiceSearchResult {
                     voice: voice.clone(),
@@ -143,23 +147,23 @@ impl VoiceSearch {
                 });
             }
         }
-        
+
         // Sort by relevance score
         results.sort_by(|a, b| b.relevance_score.partial_cmp(&a.relevance_score).unwrap());
-        
+
         results
     }
-    
+
     /// Get voice recommendations based on text content
     pub fn recommend_for_text(&self, text: &str) -> Vec<VoiceSearchResult> {
         let mut criteria = VoiceSearchCriteria::default();
-        
+
         // Analyze text to suggest appropriate voice characteristics
         let word_count = text.split_whitespace().count();
         let has_questions = text.contains('?');
         let has_exclamations = text.contains('!');
         let is_formal = self.is_formal_text(text);
-        
+
         // Suggest style based on content
         if has_exclamations || text.to_uppercase() == text {
             criteria.style = Some("Energetic".to_string());
@@ -168,61 +172,64 @@ impl VoiceSearch {
         } else if word_count > 100 {
             criteria.style = Some("Narrative".to_string());
         }
-        
+
         // Suggest quality based on text length
         if word_count > 50 {
             criteria.min_quality = Some("high".to_string());
         } else {
             criteria.min_quality = Some("medium".to_string());
         }
-        
+
         self.search_by_criteria(&criteria)
     }
-    
+
     /// Calculate relevance score for a voice given search terms
     fn calculate_relevance_score(&self, voice: &VoiceConfig, terms: &[&str]) -> f32 {
         let mut score = 0.0;
-        
+
         for term in terms {
             // Check voice ID (highest weight)
             if voice.id.to_lowercase().contains(term) {
                 score += 3.0;
             }
-            
+
             // Check voice name
             if voice.name.to_lowercase().contains(term) {
                 score += 2.5;
             }
-            
+
             // Check language
             if voice.language.as_str().to_lowercase().contains(term) {
                 score += 2.0;
             }
-            
+
             // Check description in metadata
             if let Some(description) = voice.metadata.get("description") {
                 if description.to_lowercase().contains(term) {
                     score += 1.5;
                 }
             }
-            
+
             // Check characteristics
             if let Some(gender) = &voice.characteristics.gender {
                 if format!("{:?}", gender).to_lowercase().contains(term) {
                     score += 1.0;
                 }
             }
-            
+
             if let Some(age) = &voice.characteristics.age {
                 if format!("{:?}", age).to_lowercase().contains(term) {
                     score += 1.0;
                 }
             }
-            
-            if format!("{:?}", voice.characteristics.style).to_lowercase().contains(term) {
+
+            if format!("{:?}", voice.characteristics.style)
+                .to_lowercase()
+                .contains(term)
+            {
                 score += 1.0;
             }
-            
+
             // Check metadata tags
             for (key, value) in &voice.metadata {
                 if key.to_lowercase().contains(term) || value.to_lowercase().contains(term) {
@@ -230,14 +237,14 @@ impl VoiceSearch {
                 }
             }
         }
-        
+
         score
     }
-    
+
     /// Get reasons why a voice matched the search terms
     fn get_match_reasons(&self, voice: &VoiceConfig, terms: &[&str]) -> Vec<String> {
         let mut reasons = Vec::new();
-        
+
         for term in terms {
             if voice.id.to_lowercase().contains(term) {
                 reasons.push(format!("ID contains '{}'", term));
@@ -254,37 +261,47 @@ impl VoiceSearch {
                 }
             }
         }
-        
+
         if reasons.is_empty() {
             reasons.push("General match".to_string());
         }
-        
+
         reasons
     }
-    
+
     /// Check if text appears to be formal
     fn is_formal_text(&self, text: &str) -> bool {
         let formal_indicators = [
-            "please", "thank you", "regarding", "furthermore", "however",
-            "therefore", "moreover", "nevertheless", "consequently", "accordingly"
+            "please",
+            "thank you",
+            "regarding",
+            "furthermore",
+            "however",
+            "therefore",
+            "moreover",
+            "nevertheless",
+            "consequently",
+            "accordingly",
         ];
-        
+
         let text_lower = text.to_lowercase();
-        formal_indicators.iter().any(|&indicator| text_lower.contains(indicator))
+        formal_indicators
+            .iter()
+            .any(|&indicator| text_lower.contains(indicator))
     }
-    
+
     /// Get voice statistics
     pub fn get_statistics(&self) -> VoiceStatistics {
         let mut stats = VoiceStatistics::default();
-        
+
         stats.total_voices = self.voices.len();
-        
+
         // Language distribution
         for voice in &self.voices {
             let lang = voice.language.as_str();
             *stats.languages.entry(lang.to_string()).or_insert(0) += 1;
         }
-        
+
         // Gender distribution
         for voice in &self.voices {
             if let Some(gender) = &voice.characteristics.gender {
@@ -294,18 +311,20 @@ impl VoiceSearch {
                 *stats.genders.entry("Unknown".to_string()).or_insert(0) += 1;
             }
         }
-        
+
         // Quality distribution
         for voice in &self.voices {
             let quality_str = format!("{:?}", voice.characteristics.quality);
             *stats.qualities.entry(quality_str).or_insert(0) += 1;
         }
-        
+
         // Emotion support
-        stats.emotion_support_count = self.voices.iter()
+        stats.emotion_support_count = self
+            .voices
+            .iter()
             .filter(|v| v.characteristics.emotion_support)
             .count();
-        
+
         stats
     }
 }
@@ -355,12 +374,12 @@ pub async fn run_voice_search(
     config: &AppConfig,
 ) -> Result<()> {
     let search = VoiceSearch::new(config).await?;
-    
+
     if show_stats {
         print_voice_statistics(&search.get_statistics());
         return Ok(());
     }
-    
+
     let results = if let Some(query) = query {
         search.search(query)
     } else {
@@ -377,7 +396,7 @@ pub async fn run_voice_search(
         };
         search.search_by_criteria(&criteria)
     };
-    
+
     if results.is_empty() {
         println!("No voices found matching your criteria.");
         if let Some(query) = query {
@@ -385,22 +404,26 @@ pub async fn run_voice_search(
         }
         return Ok(());
     }
-    
+
     println!("Found {} voice(s):", results.len());
     println!();
-    
-    for (i, result) in results.iter().enumerate().take(10) { // Limit to top 10 results
+
+    for (i, result) in results.iter().enumerate().take(10) {
+        // Limit to top 10 results
         print_voice_search_result(i + 1, result);
         if i < results.len() - 1 {
             println!("---");
         }
     }
-    
+
     if results.len() > 10 {
         println!();
-        println!("... and {} more results. Use more specific search criteria to narrow down.", results.len() - 10);
+        println!(
+            "... and {} more results. Use more specific search criteria to narrow down.",
+            results.len() - 10
+        );
     }
-    
+
     Ok(())
 }
 
@@ -408,25 +431,25 @@ pub async fn run_voice_search(
 fn print_voice_search_result(index: usize, result: &VoiceSearchResult) {
     println!("{}. {} ({})", index, result.voice.name, result.voice.id);
     println!("   Language: {}", result.voice.language.as_str());
-    
+
     if let Some(gender) = &result.voice.characteristics.gender {
         println!("   Gender: {:?}", gender);
     }
-    
+
     if let Some(age) = &result.voice.characteristics.age {
         println!("   Age: {:?}", age);
     }
-    
+
     println!("   Style: {:?}", result.voice.characteristics.style);
     println!("   Quality: {:?}", result.voice.characteristics.quality);
-    
+
     if result.voice.characteristics.emotion_support {
         println!("   ✓ Emotion support");
     }
-    
+
     println!("   Relevance: {:.1}", result.relevance_score);
     println!("   Matches: {}", result.match_reasons.join(", "));
-    
+
     if let Some(description) = result.voice.metadata.get("description") {
         if description.len() <= 100 {
             println!("   Description: {}", description);
@@ -442,7 +465,7 @@ fn print_voice_statistics(stats: &VoiceStatistics) {
     println!("========================");
     println!("Total voices: {}", stats.total_voices);
     println!();
-    
+
     println!("By Language:");
     let mut lang_vec: Vec<_> = stats.languages.iter().collect();
     lang_vec.sort_by_key(|(_, count)| **count);
@@ -451,7 +474,7 @@ fn print_voice_statistics(stats: &VoiceStatistics) {
         println!("  {}: {}", lang, count);
     }
     println!();
-    
+
     println!("By Gender:");
     let mut gender_vec: Vec<_> = stats.genders.iter().collect();
     gender_vec.sort_by_key(|(_, count)| **count);
@@ -460,7 +483,7 @@ fn print_voice_statistics(stats: &VoiceStatistics) {
         println!("  {}: {}", gender, count);
     }
     println!();
-    
+
     println!("By Quality:");
     let mut quality_vec: Vec<_> = stats.qualities.iter().collect();
     quality_vec.sort_by_key(|(_, count)| **count);
@@ -469,8 +492,10 @@ fn print_voice_statistics(stats: &VoiceStatistics) {
         println!("  {}: {}", quality, count);
     }
     println!();
-    
-    println!("Emotion Support: {} voices ({:.1}%)", 
-        stats.emotion_support_count, 
-        (stats.emotion_support_count as f32 / stats.total_voices as f32) * 100.0);
+
+    println!(
+        "Emotion Support: {} voices ({:.1}%)",
+        stats.emotion_support_count,
+        (stats.emotion_support_count as f32 / stats.total_voices as f32) * 100.0
+    );
 }

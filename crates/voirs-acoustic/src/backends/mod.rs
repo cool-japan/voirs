@@ -5,10 +5,9 @@
 
 use async_trait::async_trait;
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use crate::{Result, AcousticError, AcousticModel};
-use crate::config::{DeviceConfig, DeviceType, BackendType, BackendOptions};
+use crate::config::{BackendOptions, BackendType, DeviceConfig, DeviceType};
+use crate::{AcousticError, AcousticModel, Result};
 
 pub mod candle;
 pub mod loader;
@@ -41,70 +40,79 @@ impl BackendManager {
             device_config: DeviceConfig::default(),
         }
     }
-    
+
     /// Add backend to manager
     pub fn add_backend(&mut self, backend_type: BackendType, backend: Box<dyn Backend>) {
         self.backends.insert(backend_type, backend);
-        
+
         // Set as default if it's the first backend
         if self.default_backend.is_none() {
             self.default_backend = Some(backend_type);
         }
     }
-    
+
     /// Set default backend
     pub fn set_default_backend(&mut self, backend_type: BackendType) -> Result<()> {
         if self.backends.contains_key(&backend_type) {
             self.default_backend = Some(backend_type);
             Ok(())
         } else {
-            Err(AcousticError::ConfigError(format!("Backend {:?} not available", backend_type)))
+            Err(AcousticError::ConfigError(format!(
+                "Backend {backend_type:?} not available"
+            )))
         }
     }
-    
+
     /// Set device configuration
     pub fn set_device_config(&mut self, config: DeviceConfig) {
         self.device_config = config;
     }
-    
+
     /// Get backend by type
     pub fn get_backend(&self, backend_type: BackendType) -> Result<&dyn Backend> {
         self.backends
             .get(&backend_type)
             .map(|b| b.as_ref())
-            .ok_or_else(|| AcousticError::ConfigError(format!("Backend {:?} not found", backend_type)))
+            .ok_or_else(|| {
+                AcousticError::ConfigError(format!("Backend {backend_type:?} not found"))
+            })
     }
-    
+
     /// Get default backend
     pub fn get_default_backend(&self) -> Result<&dyn Backend> {
-        let backend_type = self.default_backend
+        let backend_type = self
+            .default_backend
             .ok_or_else(|| AcousticError::ConfigError("No default backend set".to_string()))?;
         self.get_backend(backend_type)
     }
-    
+
     /// Load model using specified backend
-    pub async fn load_model(&self, backend_type: BackendType, model_path: &str) -> Result<Box<dyn AcousticModel>> {
+    pub async fn load_model(
+        &self,
+        backend_type: BackendType,
+        model_path: &str,
+    ) -> Result<Box<dyn AcousticModel>> {
         let backend = self.get_backend(backend_type)?;
         backend.create_model(model_path).await
     }
-    
+
     /// Load model using default backend
     pub async fn load_model_default(&self, model_path: &str) -> Result<Box<dyn AcousticModel>> {
         let backend = self.get_default_backend()?;
         backend.create_model(model_path).await
     }
-    
+
     /// List available backends
     pub fn list_backends(&self) -> Vec<BackendType> {
         self.backends.keys().copied().collect()
     }
-    
+
     /// Get device capabilities for a backend
     pub fn get_device_capabilities(&self, backend_type: BackendType) -> Result<DeviceCapabilities> {
         let backend = self.get_backend(backend_type)?;
         let devices = backend.available_devices();
         let supports_gpu = backend.supports_gpu();
-        
+
         Ok(DeviceCapabilities {
             backend_name: backend.name().to_string(),
             supports_gpu,
@@ -112,7 +120,7 @@ impl BackendManager {
             supports_mixed_precision: supports_gpu, // Generally true for GPU backends
         })
     }
-    
+
     /// Auto-detect best backend for current system
     pub fn auto_detect_backend(&self) -> Result<BackendType> {
         // Priority order: GPU-capable backends first, then CPU
@@ -121,7 +129,7 @@ impl BackendManager {
             #[cfg(feature = "onnx")]
             BackendType::Onnx,
         ];
-        
+
         for &backend_type in &preferred_order {
             if let Ok(backend) = self.get_backend(backend_type) {
                 // Prefer GPU-capable backends
@@ -130,9 +138,10 @@ impl BackendManager {
                 }
             }
         }
-        
+
         // Fallback to any available backend
-        preferred_order.into_iter()
+        preferred_order
+            .into_iter()
             .find(|&bt| self.backends.contains_key(&bt))
             .ok_or_else(|| AcousticError::ConfigError("No suitable backend found".to_string()))
     }
@@ -149,16 +158,33 @@ impl Default for BackendManager {
 pub trait Backend: Send + Sync {
     /// Get backend name
     fn name(&self) -> &'static str;
-    
+
     /// Check if GPU acceleration is available
     fn supports_gpu(&self) -> bool;
-    
+
     /// Get available devices
     fn available_devices(&self) -> Vec<String>;
-    
+
     /// Create model instance from path
     async fn create_model(&self, model_path: &str) -> Result<Box<dyn AcousticModel>>;
-    
+
+    /// Create model instance with configuration (including memory mapping)
+    async fn create_model_with_config(
+        &self,
+        model_path: &str,
+        config: &ModelLoadConfig,
+    ) -> Result<Box<dyn AcousticModel>> {
+        // Default implementation delegates to create_model for backward compatibility
+        // Backends can override this to support memory mapping and other config options
+        if config.memory_map {
+            tracing::debug!(
+                "Memory mapping requested but not implemented by backend: {}",
+                self.name()
+            );
+        }
+        self.create_model(model_path).await
+    }
+
     /// Get backend capabilities
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
@@ -170,7 +196,7 @@ pub trait Backend: Send + Sync {
             memory_efficient: true,
         }
     }
-    
+
     /// Validate model format compatibility
     fn validate_model(&self, model_path: &str) -> Result<ModelInfo> {
         // Default implementation - backends should override
@@ -182,16 +208,14 @@ pub trait Backend: Send + Sync {
             metadata: HashMap::new(),
         })
     }
-    
+
     /// Get optimization options for this backend
     fn optimization_options(&self) -> Vec<OptimizationOption> {
-        vec![
-            OptimizationOption {
-                name: "default".to_string(),
-                description: "Default optimization level".to_string(),
-                enabled: true,
-            }
-        ]
+        vec![OptimizationOption {
+            name: "default".to_string(),
+            description: "Default optimization level".to_string(),
+            enabled: true,
+        }]
     }
 }
 
@@ -269,7 +293,7 @@ impl ModelFormat {
             ModelFormat::Unknown => "",
         }
     }
-    
+
     /// Detect format from file extension
     pub fn from_extension(ext: &str) -> Self {
         match ext.to_lowercase().as_str() {
@@ -320,33 +344,33 @@ impl ModelLoadConfig {
             custom: HashMap::new(),
         }
     }
-    
+
     /// Set device configuration
     pub fn with_device(mut self, device: DeviceConfig) -> Self {
         self.device = device;
         self
     }
-    
+
     /// Enable/disable memory mapping
     pub fn with_memory_map(mut self, enabled: bool) -> Self {
         self.memory_map = enabled;
         self
     }
-    
+
     /// Enable/disable validation
     pub fn with_validation(mut self, enabled: bool) -> Self {
         self.validate = enabled;
         self
     }
-    
+
     /// Set optimization options
     pub fn with_optimizations(mut self, optimizations: Vec<String>) -> Self {
         self.optimizations = optimizations;
         self
     }
-    
+
     /// Add custom option
-    pub fn with_custom<K, V>(mut self, key: K, value: V) -> Self 
+    pub fn with_custom<K, V>(mut self, key: K, value: V) -> Self
     where
         K: Into<String>,
         V: Into<serde_json::Value>,
@@ -365,22 +389,22 @@ impl Default for ModelLoadConfig {
 /// Create default backend manager with available backends
 pub fn create_default_backend_manager() -> Result<BackendManager> {
     let mut manager = BackendManager::new();
-    
+
     // Add Candle backend
     let candle_backend = CandleBackend::new()?;
     manager.add_backend(BackendType::Candle, Box::new(candle_backend));
-    
+
     // Add ONNX backend if available
     #[cfg(feature = "onnx")]
     {
         let onnx_backend = OnnxBackend::new()?;
         manager.add_backend(BackendType::Onnx, Box::new(onnx_backend));
     }
-    
+
     // Auto-detect best backend
     let best_backend = manager.auto_detect_backend()?;
     manager.set_default_backend(best_backend)?;
-    
+
     Ok(manager)
 }
 
@@ -397,7 +421,7 @@ impl BackendFactory {
         };
         Ok(Box::new(backend))
     }
-    
+
     /// Create ONNX backend with configuration
     #[cfg(feature = "onnx")]
     pub fn create_onnx(config: Option<BackendOptions>) -> Result<Box<dyn Backend>> {
@@ -408,16 +432,23 @@ impl BackendFactory {
         };
         Ok(Box::new(backend))
     }
-    
+
     /// Create backend by type
-    pub fn create_backend(backend_type: BackendType, config: Option<BackendOptions>) -> Result<Box<dyn Backend>> {
+    pub fn create_backend(
+        backend_type: BackendType,
+        config: Option<BackendOptions>,
+    ) -> Result<Box<dyn Backend>> {
         match backend_type {
             BackendType::Candle => Self::create_candle(config),
             #[cfg(feature = "onnx")]
             BackendType::Onnx => Self::create_onnx(config),
             #[cfg(not(feature = "onnx"))]
-            BackendType::Onnx => Err(AcousticError::ConfigError("ONNX backend not available (feature not enabled)".to_string())),
-            BackendType::Custom(_) => Err(AcousticError::ConfigError("Custom backends not yet supported".to_string())),
+            BackendType::Onnx => Err(AcousticError::ConfigError(
+                "ONNX backend not available (feature not enabled)".to_string(),
+            )),
+            BackendType::Custom(_) => Err(AcousticError::ConfigError(
+                "Custom backends not yet supported".to_string(),
+            )),
         }
     }
 }
@@ -435,7 +466,10 @@ mod tests {
 
     #[test]
     fn test_model_format_detection() {
-        assert_eq!(ModelFormat::from_extension("safetensors"), ModelFormat::SafeTensors);
+        assert_eq!(
+            ModelFormat::from_extension("safetensors"),
+            ModelFormat::SafeTensors
+        );
         assert_eq!(ModelFormat::from_extension("onnx"), ModelFormat::Onnx);
         assert_eq!(ModelFormat::from_extension("pth"), ModelFormat::PyTorch);
         assert_eq!(ModelFormat::from_extension("pt"), ModelFormat::PyTorch);
@@ -462,7 +496,7 @@ mod tests {
             .with_validation(false)
             .with_optimizations(vec!["fast".to_string()])
             .with_custom("test", serde_json::Value::String("value".to_string()));
-        
+
         assert_eq!(config.device.device_type, DeviceType::Cpu);
         assert!(!config.memory_map);
         assert!(!config.validate);
@@ -495,7 +529,7 @@ mod tests {
                 // Expected if Candle is not available
             }
         }
-        
+
         // Test ONNX backend creation
         #[cfg(feature = "onnx")]
         {
@@ -508,7 +542,7 @@ mod tests {
                 }
             }
         }
-        
+
         // Test invalid backend type
         assert!(BackendFactory::create_backend(BackendType::Custom(999), None).is_err());
     }

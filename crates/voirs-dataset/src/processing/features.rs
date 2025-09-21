@@ -178,12 +178,12 @@ impl FeatureResult {
             metadata: HashMap::new(),
         }
     }
-    
+
     /// Get feature as 2D matrix (frames x coefficients)
     pub fn as_matrix(&self) -> Vec<Vec<f32>> {
         let (n_frames, n_coeffs) = self.shape;
         let mut matrix = Vec::with_capacity(n_frames);
-        
+
         for frame_idx in 0..n_frames {
             let mut frame = Vec::with_capacity(n_coeffs);
             for coeff_idx in 0..n_coeffs {
@@ -196,20 +196,19 @@ impl FeatureResult {
             }
             matrix.push(frame);
         }
-        
+
         matrix
     }
-    
+
     /// Get time axis for the features
     pub fn time_axis(&self) -> Vec<f32> {
         let (n_frames, _) = self.shape;
-        (0..n_frames)
-            .map(|i| i as f32 / self.frame_rate)
-            .collect()
+        (0..n_frames).map(|i| i as f32 / self.frame_rate).collect()
     }
 }
 
 /// Main feature extractor
+#[derive(Default)]
 pub struct FeatureExtractor {
     /// Mel spectrogram configuration
     pub mel_config: MelSpectrogramConfig,
@@ -221,23 +220,12 @@ pub struct FeatureExtractor {
     pub spectral_config: SpectralConfig,
 }
 
-impl Default for FeatureExtractor {
-    fn default() -> Self {
-        Self {
-            mel_config: MelSpectrogramConfig::default(),
-            mfcc_config: MfccConfig::default(),
-            f0_config: F0Config::default(),
-            spectral_config: SpectralConfig::default(),
-        }
-    }
-}
-
 impl FeatureExtractor {
     /// Create a new feature extractor with default configuration
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// Create a feature extractor with custom configurations
     pub fn with_configs(
         mel_config: MelSpectrogramConfig,
@@ -252,7 +240,7 @@ impl FeatureExtractor {
             spectral_config,
         }
     }
-    
+
     /// Extract mel spectrogram features
     pub fn extract_mel_spectrogram(&self, audio: &AudioData) -> Result<FeatureResult> {
         extract_mel_spectrogram(
@@ -262,46 +250,46 @@ impl FeatureExtractor {
             self.mel_config.hop_length,
         )
     }
-    
+
     /// Extract MFCC features
     pub fn extract_mfcc(&self, audio: &AudioData) -> Result<FeatureResult> {
         extract_mfcc_with_config(audio, &self.mfcc_config)
     }
-    
+
     /// Extract fundamental frequency
     pub fn extract_f0(&self, audio: &AudioData) -> Result<FeatureResult> {
         extract_fundamental_frequency_with_config(audio, &self.f0_config)
     }
-    
+
     /// Extract spectral features
     pub fn extract_spectral_features(&self, audio: &AudioData) -> Result<Vec<FeatureResult>> {
         extract_spectral_features_with_config(audio, &self.spectral_config)
     }
-    
+
     /// Extract all available features
     pub fn extract_all_features(&self, audio: &AudioData) -> Result<Vec<FeatureResult>> {
         let mut features = Vec::new();
-        
+
         // Mel spectrogram
         if let Ok(mel) = self.extract_mel_spectrogram(audio) {
             features.push(mel);
         }
-        
+
         // MFCC
         if let Ok(mfcc) = self.extract_mfcc(audio) {
             features.push(mfcc);
         }
-        
+
         // F0
         if let Ok(f0) = self.extract_f0(audio) {
             features.push(f0);
         }
-        
+
         // Spectral features
         if let Ok(mut spectral) = self.extract_spectral_features(audio) {
             features.append(&mut spectral);
         }
-        
+
         Ok(features)
     }
 }
@@ -315,21 +303,23 @@ pub fn extract_mel_spectrogram(
 ) -> Result<FeatureResult> {
     // Simplified mel spectrogram extraction
     // In a real implementation, this would use proper STFT and mel filter banks
-    
+
     let sample_rate = audio.sample_rate() as f32;
     let samples = audio.samples();
-    
+
     if samples.is_empty() {
-        return Err(DatasetError::ProcessingError("Empty audio data".to_string()));
+        return Err(DatasetError::ProcessingError(
+            "Empty audio data".to_string(),
+        ));
     }
-    
+
     // Calculate number of frames
     let n_frames = if samples.len() > n_fft {
         (samples.len() - n_fft) / hop_length + 1
     } else {
         1
     };
-    
+
     // Generate mock mel spectrogram data for now
     // In a real implementation, this would compute actual mel spectrograms
     let values: Vec<f32> = (0..n_frames * n_mels)
@@ -350,9 +340,9 @@ pub fn extract_mel_spectrogram(
             amplitude.max(1e-8).ln() // Log magnitude
         })
         .collect();
-    
+
     let frame_rate = sample_rate / hop_length as f32;
-    
+
     Ok(FeatureResult::new(
         "mel_spectrogram".to_string(),
         values,
@@ -368,18 +358,18 @@ pub fn extract_mfcc(audio: &AudioData, n_mfcc: usize, include_energy: bool) -> R
     // 1. Compute mel spectrogram
     // 2. Apply DCT to get cepstral coefficients
     // 3. Optionally include energy coefficient
-    
+
     let n_coeffs = if include_energy { n_mfcc + 1 } else { n_mfcc };
-    
+
     // Mock MFCC computation
     let mel_result = extract_mel_spectrogram(audio, 26, 1024, 256)?;
     let (n_frames, _) = mel_result.shape;
-    
+
     let values: Vec<f32> = (0..n_frames * n_coeffs)
         .map(|i| {
             let coeff_idx = i % n_coeffs;
             let frame_idx = i / n_coeffs;
-            
+
             if coeff_idx == 0 && include_energy {
                 // Energy coefficient (C0)
                 frame_idx as f32 * 0.1
@@ -390,7 +380,7 @@ pub fn extract_mfcc(audio: &AudioData, n_mfcc: usize, include_energy: bool) -> R
             }
         })
         .collect();
-    
+
     Ok(values)
 }
 
@@ -399,7 +389,7 @@ pub fn extract_mfcc_with_config(audio: &AudioData, config: &MfccConfig) -> Resul
     let values = extract_mfcc(audio, config.n_mfcc, false)?;
     let n_frames = values.len() / config.n_mfcc;
     let frame_rate = audio.sample_rate() as f32 / config.mel_config.hop_length as f32;
-    
+
     Ok(FeatureResult::new(
         "mfcc".to_string(),
         values,
@@ -409,26 +399,30 @@ pub fn extract_mfcc_with_config(audio: &AudioData, config: &MfccConfig) -> Resul
 }
 
 /// Extract fundamental frequency using YIN algorithm (simplified)
-pub fn extract_fundamental_frequency(audio: &AudioData, f_min: f32, f_max: f32) -> Result<Vec<f32>> {
+pub fn extract_fundamental_frequency(
+    audio: &AudioData,
+    f_min: f32,
+    f_max: f32,
+) -> Result<Vec<f32>> {
     // Simplified F0 extraction
     // In a real implementation, this would use YIN, autocorrelation, or other F0 algorithms
-    
+
     let sample_rate = audio.sample_rate() as f32;
     let samples = audio.samples();
-    
+
     if samples.is_empty() {
         return Ok(vec![]);
     }
-    
+
     let frame_length = (0.025 * sample_rate) as usize; // 25ms frames
-    let hop_length = (0.010 * sample_rate) as usize;   // 10ms hop
-    
+    let hop_length = (0.010 * sample_rate) as usize; // 10ms hop
+
     let n_frames = if samples.len() > frame_length {
         (samples.len() - frame_length) / hop_length + 1
     } else {
         1
     };
-    
+
     // Mock F0 extraction
     let f0_values: Vec<f32> = (0..n_frames)
         .map(|frame_idx| {
@@ -439,7 +433,7 @@ pub fn extract_fundamental_frequency(audio: &AudioData, f_min: f32, f_max: f32) 
                     .iter()
                     .map(|&x| x * x)
                     .sum();
-                
+
                 if frame_energy > 1e-6 {
                     // Mock F0 based on energy and position
                     let base_f0 = f_min + (f_max - f_min) * 0.5;
@@ -453,16 +447,19 @@ pub fn extract_fundamental_frequency(audio: &AudioData, f_min: f32, f_max: f32) 
             }
         })
         .collect();
-    
+
     Ok(f0_values)
 }
 
 /// Extract fundamental frequency with configuration
-pub fn extract_fundamental_frequency_with_config(audio: &AudioData, config: &F0Config) -> Result<FeatureResult> {
+pub fn extract_fundamental_frequency_with_config(
+    audio: &AudioData,
+    config: &F0Config,
+) -> Result<FeatureResult> {
     let values = extract_fundamental_frequency(audio, config.f_min, config.f_max)?;
     let frame_rate = 1.0 / config.hop_length;
     let values_len = values.len();
-    
+
     Ok(FeatureResult::new(
         "f0".to_string(),
         values,
@@ -472,23 +469,26 @@ pub fn extract_fundamental_frequency_with_config(audio: &AudioData, config: &F0C
 }
 
 /// Extract spectral features
-pub fn extract_spectral_features_with_config(audio: &AudioData, config: &SpectralConfig) -> Result<Vec<FeatureResult>> {
+pub fn extract_spectral_features_with_config(
+    audio: &AudioData,
+    config: &SpectralConfig,
+) -> Result<Vec<FeatureResult>> {
     let mut features = Vec::new();
     let sample_rate = audio.sample_rate() as f32;
     let samples = audio.samples();
-    
+
     if samples.is_empty() {
         return Ok(features);
     }
-    
+
     let n_frames = if samples.len() > config.n_fft {
         (samples.len() - config.n_fft) / config.hop_length + 1
     } else {
         1
     };
-    
+
     let frame_rate = sample_rate / config.hop_length as f32;
-    
+
     // Spectral centroid
     if config.centroid {
         let centroid_values: Vec<f32> = (0..n_frames)
@@ -502,7 +502,7 @@ pub fn extract_spectral_features_with_config(audio: &AudioData, config: &Spectra
                 }
             })
             .collect();
-        
+
         features.push(FeatureResult::new(
             "spectral_centroid".to_string(),
             centroid_values,
@@ -510,14 +510,14 @@ pub fn extract_spectral_features_with_config(audio: &AudioData, config: &Spectra
             frame_rate,
         ));
     }
-    
+
     // Zero crossing rate
     if config.zcr {
         let zcr_values: Vec<f32> = (0..n_frames)
             .map(|frame_idx| {
                 let start_idx = frame_idx * config.hop_length;
                 let end_idx = (start_idx + config.n_fft).min(samples.len());
-                
+
                 if end_idx > start_idx + 1 {
                     let mut crossings = 0;
                     for i in start_idx..end_idx - 1 {
@@ -531,7 +531,7 @@ pub fn extract_spectral_features_with_config(audio: &AudioData, config: &Spectra
                 }
             })
             .collect();
-        
+
         features.push(FeatureResult::new(
             "zero_crossing_rate".to_string(),
             zcr_values,
@@ -539,87 +539,87 @@ pub fn extract_spectral_features_with_config(audio: &AudioData, config: &Spectra
             frame_rate,
         ));
     }
-    
+
     // Add more spectral features as needed (bandwidth, rolloff, flatness)
-    
+
     Ok(features)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::datasets::dummy::{DummyDataset, DummyConfig};
+    use crate::datasets::dummy::DummyDataset;
     use crate::traits::Dataset;
-    
+
     #[tokio::test]
     async fn test_mel_spectrogram_extraction() {
         let dataset = DummyDataset::small();
         let sample = dataset.get(0).await.unwrap();
-        
+
         let result = extract_mel_spectrogram(&sample.audio, 80, 1024, 256).unwrap();
         assert_eq!(result.name, "mel_spectrogram");
         assert_eq!(result.shape.1, 80); // 80 mel bins
         assert!(!result.values.is_empty());
     }
-    
+
     #[tokio::test]
     async fn test_mfcc_extraction() {
         let dataset = DummyDataset::small();
         let sample = dataset.get(0).await.unwrap();
-        
+
         let result = extract_mfcc(&sample.audio, 13, true).unwrap();
         assert!(!result.is_empty());
         // Should have 14 coefficients (13 MFCC + 1 energy)
         assert!(result.len() % 14 == 0);
     }
-    
+
     #[tokio::test]
     async fn test_f0_extraction() {
         let dataset = DummyDataset::small();
         let sample = dataset.get(0).await.unwrap();
-        
+
         let result = extract_fundamental_frequency(&sample.audio, 80.0, 400.0).unwrap();
         assert!(!result.is_empty());
         // All F0 values should be within the specified range or 0 (unvoiced)
         for &f0 in &result {
-            assert!(f0 == 0.0 || (f0 >= 80.0 && f0 <= 400.0));
+            assert!(f0 == 0.0 || (80.0..=400.0).contains(&f0));
         }
     }
-    
+
     #[tokio::test]
     async fn test_feature_extractor() {
         let dataset = DummyDataset::small();
         let sample = dataset.get(0).await.unwrap();
-        
+
         let extractor = FeatureExtractor::new();
         let features = extractor.extract_all_features(&sample.audio).unwrap();
-        
+
         assert!(!features.is_empty());
-        
+
         // Check that we got at least some expected features
         let feature_names: Vec<&str> = features.iter().map(|f| f.name.as_str()).collect();
         assert!(feature_names.contains(&"mel_spectrogram"));
         assert!(feature_names.contains(&"mfcc"));
         assert!(feature_names.contains(&"f0"));
     }
-    
+
     #[test]
     fn test_feature_result_matrix_conversion() {
         let values = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
         let result = FeatureResult::new("test".to_string(), values, (2, 3), 100.0);
-        
+
         let matrix = result.as_matrix();
         assert_eq!(matrix.len(), 2); // 2 frames
         assert_eq!(matrix[0].len(), 3); // 3 coefficients
         assert_eq!(matrix[0], vec![1.0, 2.0, 3.0]);
         assert_eq!(matrix[1], vec![4.0, 5.0, 6.0]);
     }
-    
+
     #[test]
     fn test_time_axis_generation() {
         let values = vec![1.0, 2.0, 3.0, 4.0];
         let result = FeatureResult::new("test".to_string(), values, (4, 1), 100.0);
-        
+
         let time_axis = result.time_axis();
         assert_eq!(time_axis.len(), 4);
         assert_eq!(time_axis[0], 0.0);

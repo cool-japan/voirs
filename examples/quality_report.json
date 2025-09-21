@@ -1,0 +1,4193 @@
+{
+  "timestamp": "2025-07-25 13:59:21",
+  "total_files": 47,
+  "total_issues": 405,
+  "issues_by_severity": {
+    "warning": 196,
+    "info": 207,
+    "error": 2
+  },
+  "issues_by_category": {
+    "style": 1,
+    "documentation": 236,
+    "performance": 165,
+    "security": 2,
+    "testing": 1
+  },
+  "overall_score": 0,
+  "metrics_summary": {
+    "avg_documentation_ratio": 0.07552569562123551,
+    "avg_complexity": 41.57446808510638,
+    "avg_maintainability": 31.42127659574468,
+    "avg_performance_score": 64.8936170212766,
+    "avg_security_score": 99.57446808510639
+  },
+  "files_analyzed": [
+    "production_monitoring_example.rs",
+    "ssml_synthesis.rs",
+    "production_pipeline_example.rs",
+    "voice_cloning_example.rs",
+    "mobile_integration_example.rs",
+    "realtime_voice_coach.rs",
+    "batch_evaluation_comparison.rs",
+    "vr_ar_immersive_example.rs",
+    "production_whisper_example.rs",
+    "streaming_synthesis_optimization.rs",
+    "faq_examples.rs",
+    "hello_world.rs",
+    "emotion_control_example_fixed.rs",
+    "memory_profiling_analysis.rs",
+    "profiling_optimization_example.rs",
+    "wasm_integration_example.rs",
+    "documentation_testing_example.rs",
+    "comprehensive_testing_framework.rs",
+    "spatial_audio_example.rs",
+    "comprehensive_benchmark_suite.rs",
+    "cloud_deployment_example.rs",
+    "use_case_gallery.rs",
+    "game_integration_example.rs",
+    "performance_benchmarking.rs",
+    "educational_tools_example.rs",
+    "robust_error_handling_patterns.rs",
+    "iot_edge_synthesis_example.rs",
+    "debug_troubleshooting_example.rs",
+    "community_contributions_gallery.rs",
+    "complete_voice_pipeline.rs",
+    "basic_configuration.rs",
+    "emotion_control_example.rs",
+    "streaming_synthesis.rs",
+    "singing_synthesis_example.rs",
+    "creative_applications_example.rs",
+    "testing_framework_example.rs",
+    "best_practices_guide.rs",
+    "examples_testing_framework.rs",
+    "desktop_integration_example.rs",
+    "ai_integration_example.rs",
+    "batch_synthesis.rs",
+    "multimodal_integration_example.rs",
+    "voice_conversion_example.rs",
+    "simple_synthesis.rs",
+    "ab_testing_quality_comparison.rs",
+    "voice_cloning_example_fixed.rs",
+    "complete_pipeline.rs"
+  ],
+  "issues": [
+    {
+      "severity": "warning",
+      "category": "style",
+      "file_path": "cargo_fmt",
+      "line_number": null,
+      "description": "Code formatting issues detected",
+      "suggestion": "Run 'cargo fmt' to fix formatting",
+      "auto_fixable": true
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "production_monitoring_example.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.04 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "ssml_synthesis.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.00 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "production_pipeline_example.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.12 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "voice_cloning_example.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.14 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "mobile_integration_example.rs",
+      "line_number": 68,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "mobile_integration_example.rs",
+      "line_number": 76,
+      "description": "Public function 'synthesize' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "realtime_voice_coach.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.03 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "realtime_voice_coach.rs",
+      "line_number": 76,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "realtime_voice_coach.rs",
+      "line_number": 104,
+      "description": "Public function 'start_coaching_session' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "realtime_voice_coach.rs",
+      "line_number": 318,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "realtime_voice_coach.rs",
+      "line_number": 325,
+      "description": "Public function 'process_chunk' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "realtime_voice_coach.rs",
+      "line_number": 351,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "realtime_voice_coach.rs",
+      "line_number": 357,
+      "description": "Public function 'render_realtime_feedback' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "batch_evaluation_comparison.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.09 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.02 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 88,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 92,
+      "description": "Public function 'zero' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 100,
+      "description": "Public function 'distance_to' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 107,
+      "description": "Public function 'lerp' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 125,
+      "description": "Public function 'identity' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 134,
+      "description": "Public function 'to_forward_vector' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 401,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 434,
+      "description": "Public function 'load_scene' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 458,
+      "description": "Public function 'update_head_tracking' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 479,
+      "description": "Public function 'update_hand_tracking' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 494,
+      "description": "Public function 'process_frame' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 534,
+      "description": "Public function 'speak_at_position' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 565,
+      "description": "Public function 'create_ambient_soundscape' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 654,
+      "description": "Public function 'get_performance_stats' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 668,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 678,
+      "description": "Public function 'add_audio_object' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 684,
+      "description": "Public function 'update_listener_position' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 694,
+      "description": "Public function 'process_frame' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 746,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 753,
+      "description": "Public function 'process_position' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 785,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 789,
+      "description": "Public function 'calculate_occlusion' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 824,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 831,
+      "description": "Public function 'add_interaction_zone' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 836,
+      "description": "Public function 'check_interactions' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 863,
+      "description": "Public function 'process_hand_gesture' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 887,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 895,
+      "description": "Public function 'record_frame_time' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 902,
+      "description": "Public function 'get_cpu_usage' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 910,
+      "description": "Public function 'get_memory_usage' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 915,
+      "description": "Public function 'get_average_frame_time' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 923,
+      "description": "Public function 'get_stats' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 958,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 965,
+      "description": "Public function 'update' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 978,
+      "description": "Public function 'trigger_haptic' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "production_whisper_example.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.05 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "faq_examples.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.00 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "faq_examples.rs",
+      "line_number": 64,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "faq_examples.rs",
+      "line_number": 75,
+      "description": "Public function 'add_entry' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "faq_examples.rs",
+      "line_number": 130,
+      "description": "Public function 'search' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "faq_examples.rs",
+      "line_number": 146,
+      "description": "Public function 'get_by_category' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "faq_examples.rs",
+      "line_number": 154,
+      "description": "Public function 'get_popular' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "faq_examples.rs",
+      "line_number": 161,
+      "description": "Public function 'get_trending' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "faq_examples.rs",
+      "line_number": 168,
+      "description": "Public function 'get_by_difficulty' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "emotion_control_example_fixed.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.04 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "memory_profiling_analysis.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.02 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "memory_profiling_analysis.rs",
+      "line_number": 551,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "memory_profiling_analysis.rs",
+      "line_number": 578,
+      "description": "Public function 'run_comprehensive_analysis' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "memory_profiling_analysis.rs",
+      "line_number": 1238,
+      "description": "Public function 'generate_memory_reports' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "memory_profiling_analysis.rs",
+      "line_number": 1639,
+      "description": "Public function 'random' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "profiling_optimization_example.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.06 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "wasm_integration_example.rs",
+      "line_number": 80,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "wasm_integration_example.rs",
+      "line_number": 102,
+      "description": "Public function 'synthesize' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "wasm_integration_example.rs",
+      "line_number": 130,
+      "description": "Public function 'get_audio_info' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "wasm_integration_example.rs",
+      "line_number": 150,
+      "description": "Public function 'create_audio_buffer' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "wasm_integration_example.rs",
+      "line_number": 301,
+      "description": "Public function 'main' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "comprehensive_testing_framework.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.01 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "comprehensive_testing_framework.rs",
+      "line_number": 145,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "spatial_audio_example.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.04 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "comprehensive_benchmark_suite.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.02 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "comprehensive_benchmark_suite.rs",
+      "line_number": 273,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "comprehensive_benchmark_suite.rs",
+      "line_number": 294,
+      "description": "Public function 'run_all_benchmarks' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "comprehensive_benchmark_suite.rs",
+      "line_number": 1030,
+      "description": "Public function 'generate_comprehensive_reports' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "comprehensive_benchmark_suite.rs",
+      "line_number": 1474,
+      "description": "Public function 'random' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "comprehensive_benchmark_suite.rs",
+      "line_number": 1496,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "comprehensive_benchmark_suite.rs",
+      "line_number": 1499,
+      "description": "Public function 'with_quality' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "comprehensive_benchmark_suite.rs",
+      "line_number": 1502,
+      "description": "Public function 'build' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "comprehensive_benchmark_suite.rs",
+      "line_number": 1508,
+      "description": "Public function 'synthesize' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "comprehensive_benchmark_suite.rs",
+      "line_number": 1518,
+      "description": "Public function 'get' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "cloud_deployment_example.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.01 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "cloud_deployment_example.rs",
+      "line_number": 414,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "cloud_deployment_example.rs",
+      "line_number": 440,
+      "description": "Public function 'deploy' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "cloud_deployment_example.rs",
+      "line_number": 566,
+      "description": "Public function 'submit_request' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "cloud_deployment_example.rs",
+      "line_number": 612,
+      "description": "Public function 'process_requests' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "cloud_deployment_example.rs",
+      "line_number": 890,
+      "description": "Public function 'get_deployment_status' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "cloud_deployment_example.rs",
+      "line_number": 915,
+      "description": "Public function 'generate_infrastructure_code' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "cloud_deployment_example.rs",
+      "line_number": 2057,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "cloud_deployment_example.rs",
+      "line_number": 2064,
+      "description": "Public function 'update_targets' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "cloud_deployment_example.rs",
+      "line_number": 2073,
+      "description": "Public function 'select_instance' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "cloud_deployment_example.rs",
+      "line_number": 2093,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "cloud_deployment_example.rs",
+      "line_number": 2099,
+      "description": "Public function 'store_audio' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "cloud_deployment_example.rs",
+      "line_number": 2117,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "cloud_deployment_example.rs",
+      "line_number": 2123,
+      "description": "Public function 'initialize_dashboards' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "cloud_deployment_example.rs",
+      "line_number": 2130,
+      "description": "Public function 'configure_alerts' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "cloud_deployment_example.rs",
+      "line_number": 2137,
+      "description": "Public function 'record_request' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "cloud_deployment_example.rs",
+      "line_number": 2144,
+      "description": "Public function 'record_success' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "cloud_deployment_example.rs",
+      "line_number": 2151,
+      "description": "Public function 'record_failure' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "cloud_deployment_example.rs",
+      "line_number": 2164,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "cloud_deployment_example.rs",
+      "line_number": 2170,
+      "description": "Public function 'set_scaling_policies' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "use_case_gallery.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.00 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "use_case_gallery.rs",
+      "line_number": 217,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "use_case_gallery.rs",
+      "line_number": 229,
+      "description": "Public function 'add_use_case' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "use_case_gallery.rs",
+      "line_number": 273,
+      "description": "Public function 'get_by_industry' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "use_case_gallery.rs",
+      "line_number": 281,
+      "description": "Public function 'get_by_use_case_type' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "use_case_gallery.rs",
+      "line_number": 289,
+      "description": "Public function 'get_by_company_size' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "use_case_gallery.rs",
+      "line_number": 297,
+      "description": "Public function 'get_success_stories' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "use_case_gallery.rs",
+      "line_number": 304,
+      "description": "Public function 'get_featured_cases' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "use_case_gallery.rs",
+      "line_number": 311,
+      "description": "Public function 'search' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "use_case_gallery.rs",
+      "line_number": 331,
+      "description": "Public function 'get_statistics' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.02 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 126,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 130,
+      "description": "Public function 'distance_to' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 147,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 204,
+      "description": "Public function 'unity_update_character_position' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 218,
+      "description": "Public function 'unity_set_listener_position' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 237,
+      "description": "Public function 'unity_get_performance_stats' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 350,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 683,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 689,
+      "description": "Public function 'on_dialogue_complete' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 693,
+      "description": "Public function 'trigger_dialogue_complete' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 705,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 711,
+      "description": "Public function 'on_audio_event' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 715,
+      "description": "Public function 'trigger_audio_event' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 748,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 757,
+      "description": "Public function 'add_character' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 761,
+      "description": "Public function 'queue_dialogue' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 795,
+      "description": "Public function 'update_character_position' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 811,
+      "description": "Public function 'get_character' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 815,
+      "description": "Public function 'process_dialogue_queue' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 875,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 893,
+      "description": "Public function 'set_listener_position' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 903,
+      "description": "Public function 'add_audio_source' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 908,
+      "description": "Public function 'remove_completed_sources' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 913,
+      "description": "Public function 'get_performance_stats' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "game_integration_example.rs",
+      "line_number": 922,
+      "description": "Public function 'update_performance_stats' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "performance_benchmarking.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.08 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "educational_tools_example.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.02 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "robust_error_handling_patterns.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.02 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "robust_error_handling_patterns.rs",
+      "line_number": 329,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "robust_error_handling_patterns.rs",
+      "line_number": 341,
+      "description": "Public function 'call' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "robust_error_handling_patterns.rs",
+      "line_number": 419,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "robust_error_handling_patterns.rs",
+      "line_number": 423,
+      "description": "Public function 'retry_with_backoff' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "robust_error_handling_patterns.rs",
+      "line_number": 499,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "robust_error_handling_patterns.rs",
+      "line_number": 506,
+      "description": "Public function 'log_error' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "robust_error_handling_patterns.rs",
+      "line_number": 625,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "robust_error_handling_patterns.rs",
+      "line_number": 642,
+      "description": "Public function 'with_user_id' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "robust_error_handling_patterns.rs",
+      "line_number": 647,
+      "description": "Public function 'with_session_id' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "robust_error_handling_patterns.rs",
+      "line_number": 652,
+      "description": "Public function 'with_request_id' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "robust_error_handling_patterns.rs",
+      "line_number": 657,
+      "description": "Public function 'with_metadata' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "robust_error_handling_patterns.rs",
+      "line_number": 668,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "robust_error_handling_patterns.rs",
+      "line_number": 698,
+      "description": "Public function 'run_error_handling_demos' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "robust_error_handling_patterns.rs",
+      "line_number": 1196,
+      "description": "Public function 'generate_error_reports' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "robust_error_handling_patterns.rs",
+      "line_number": 1433,
+      "description": "Public function 'random' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.02 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 125,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 151,
+      "description": "Public function 'synthesize_text' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 210,
+      "description": "Public function 'process_requests' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 338,
+      "description": "Public function 'start_voice_assistant_service' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 399,
+      "description": "Public function 'setup_multi_room_audio' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 424,
+      "description": "Public function 'get_device_status' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 485,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 495,
+      "description": "Public function 'contains' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 507,
+      "description": "Public function 'store' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 543,
+      "description": "Public function 'hit_rate' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 559,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 604,
+      "description": "Public function 'synthesize' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 662,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 686,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 705,
+      "description": "Public function 'get_status' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 734,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 742,
+      "description": "Public function 'get_current_usage' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 776,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 782,
+      "description": "Public function 'add_room' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "debug_troubleshooting_example.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.05 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "community_contributions_gallery.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.00 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "community_contributions_gallery.rs",
+      "line_number": 73,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "community_contributions_gallery.rs",
+      "line_number": 85,
+      "description": "Public function 'load_from_directory' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "community_contributions_gallery.rs",
+      "line_number": 105,
+      "description": "Public function 'add_example' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "community_contributions_gallery.rs",
+      "line_number": 117,
+      "description": "Public function 'build_indices' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "community_contributions_gallery.rs",
+      "line_number": 133,
+      "description": "Public function 'get_by_category' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "community_contributions_gallery.rs",
+      "line_number": 141,
+      "description": "Public function 'search' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "community_contributions_gallery.rs",
+      "line_number": 156,
+      "description": "Public function 'get_trending' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "community_contributions_gallery.rs",
+      "line_number": 163,
+      "description": "Public function 'get_featured' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "community_contributions_gallery.rs",
+      "line_number": 190,
+      "description": "Public function 'validate' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "community_contributions_gallery.rs",
+      "line_number": 224,
+      "description": "Public function 'to_community_example' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "community_contributions_gallery.rs",
+      "line_number": 256,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "community_contributions_gallery.rs",
+      "line_number": 265,
+      "description": "Public function 'submit_contribution' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "community_contributions_gallery.rs",
+      "line_number": 284,
+      "description": "Public function 'approve_contribution' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "community_contributions_gallery.rs",
+      "line_number": 299,
+      "description": "Public function 'get_pending_submissions' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "community_contributions_gallery.rs",
+      "line_number": 303,
+      "description": "Public function 'get_gallery' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "community_contributions_gallery.rs",
+      "line_number": 307,
+      "description": "Public function 'export_gallery' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "complete_voice_pipeline.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.04 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "basic_configuration.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.10 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "singing_synthesis_example.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.07 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "creative_applications_example.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.11 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "creative_applications_example.rs",
+      "line_number": 905,
+      "description": "Public function 'builder' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "creative_applications_example.rs",
+      "line_number": 909,
+      "description": "Public function 'synthesize' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "creative_applications_example.rs",
+      "line_number": 924,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "creative_applications_example.rs",
+      "line_number": 932,
+      "description": "Public function 'with_creative_mode' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "creative_applications_example.rs",
+      "line_number": 937,
+      "description": "Public function 'with_experimental_features' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "creative_applications_example.rs",
+      "line_number": 942,
+      "description": "Public function 'with_artistic_style' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "creative_applications_example.rs",
+      "line_number": 947,
+      "description": "Public function 'build' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "testing_framework_example.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.04 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "best_practices_guide.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.00 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "best_practices_guide.rs",
+      "line_number": 94,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "best_practices_guide.rs",
+      "line_number": 105,
+      "description": "Public function 'add_practice' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "best_practices_guide.rs",
+      "line_number": 132,
+      "description": "Public function 'get_by_category' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "best_practices_guide.rs",
+      "line_number": 140,
+      "description": "Public function 'get_by_difficulty' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "best_practices_guide.rs",
+      "line_number": 148,
+      "description": "Public function 'search_by_tag' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "best_practices_guide.rs",
+      "line_number": 156,
+      "description": "Public function 'search' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "best_practices_guide.rs",
+      "line_number": 173,
+      "description": "Public function 'get_community_favorites' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "best_practices_guide.rs",
+      "line_number": 180,
+      "description": "Public function 'get_related_practices' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "best_practices_guide.rs",
+      "line_number": 214,
+      "description": "Public function 'synthesize_async' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "best_practices_guide.rs",
+      "line_number": 224,
+      "description": "Public function 'batch_synthesize' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "best_practices_guide.rs",
+      "line_number": 347,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "best_practices_guide.rs",
+      "line_number": 356,
+      "description": "Public function 'get_model' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "best_practices_guide.rs",
+      "line_number": 436,
+      "description": "Public function 'preload_popular_models' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "best_practices_guide.rs",
+      "line_number": 564,
+      "description": "Public function 'handle_synthesis_error' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "best_practices_guide.rs",
+      "line_number": 604,
+      "description": "Public function 'to_user_message' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "best_practices_guide.rs",
+      "line_number": 645,
+      "description": "Public function 'should_retry' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "best_practices_guide.rs",
+      "line_number": 657,
+      "description": "Public function 'next_delay' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "examples_testing_framework.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.01 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "examples_testing_framework.rs",
+      "line_number": 211,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "ai_integration_example.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.02 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "batch_synthesis.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.00 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "multimodal_integration_example.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.02 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "voice_conversion_example.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.04 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "ab_testing_quality_comparison.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.03 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "documentation",
+      "file_path": "ab_testing_quality_comparison.rs",
+      "line_number": 231,
+      "description": "Public function 'new' lacks documentation",
+      "suggestion": "Add documentation comment with /// before the function",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "voice_cloning_example_fixed.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.05 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "documentation",
+      "file_path": "complete_pipeline.rs",
+      "line_number": null,
+      "description": "Low documentation ratio: 0.06 (minimum: 0.15)",
+      "suggestion": "Add more documentation comments (/// or //!)",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "performance",
+      "file_path": "production_monitoring_example.rs",
+      "line_number": 252,
+      "description": "Potential unnecessary clone in loop",
+      "suggestion": "Consider using references or iterators",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "production_monitoring_example.rs",
+      "line_number": 868,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "production_monitoring_example.rs",
+      "line_number": 891,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "production_monitoring_example.rs",
+      "line_number": 905,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "production_monitoring_example.rs",
+      "line_number": 925,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "production_monitoring_example.rs",
+      "line_number": 930,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "production_monitoring_example.rs",
+      "line_number": 937,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "production_monitoring_example.rs",
+      "line_number": 955,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "production_monitoring_example.rs",
+      "line_number": 984,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "production_monitoring_example.rs",
+      "line_number": 1021,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "production_monitoring_example.rs",
+      "line_number": 1031,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "production_monitoring_example.rs",
+      "line_number": 1073,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "production_monitoring_example.rs",
+      "line_number": 1083,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "production_monitoring_example.rs",
+      "line_number": 1125,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "production_monitoring_example.rs",
+      "line_number": 1140,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "production_monitoring_example.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 62 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "production_pipeline_example.rs",
+      "line_number": 498,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "production_pipeline_example.rs",
+      "line_number": 686,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "production_pipeline_example.rs",
+      "line_number": 704,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "production_pipeline_example.rs",
+      "line_number": 724,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "production_pipeline_example.rs",
+      "line_number": 744,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "production_pipeline_example.rs",
+      "line_number": 807,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "production_pipeline_example.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 44 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "mobile_integration_example.rs",
+      "line_number": 340,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "mobile_integration_example.rs",
+      "line_number": 352,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "mobile_integration_example.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 63 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "realtime_voice_coach.rs",
+      "line_number": 124,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "realtime_voice_coach.rs",
+      "line_number": 155,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "realtime_voice_coach.rs",
+      "line_number": 159,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "realtime_voice_coach.rs",
+      "line_number": 253,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "realtime_voice_coach.rs",
+      "line_number": 285,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "realtime_voice_coach.rs",
+      "line_number": 303,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "realtime_voice_coach.rs",
+      "line_number": 358,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "realtime_voice_coach.rs",
+      "line_number": 401,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "realtime_voice_coach.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 35 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "batch_evaluation_comparison.rs",
+      "line_number": 89,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "batch_evaluation_comparison.rs",
+      "line_number": 92,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 1449,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 1473,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": 1480,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "vr_ar_immersive_example.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 57 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "streaming_synthesis_optimization.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 20 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "faq_examples.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 88 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "memory_profiling_analysis.rs",
+      "line_number": 1000,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "memory_profiling_analysis.rs",
+      "line_number": 1001,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "memory_profiling_analysis.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 69 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "profiling_optimization_example.rs",
+      "line_number": 330,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "profiling_optimization_example.rs",
+      "line_number": 361,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "profiling_optimization_example.rs",
+      "line_number": 395,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "profiling_optimization_example.rs",
+      "line_number": 431,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "profiling_optimization_example.rs",
+      "line_number": 473,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "profiling_optimization_example.rs",
+      "line_number": 489,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "profiling_optimization_example.rs",
+      "line_number": 570,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "profiling_optimization_example.rs",
+      "line_number": 589,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "profiling_optimization_example.rs",
+      "line_number": 754,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "profiling_optimization_example.rs",
+      "line_number": 755,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "profiling_optimization_example.rs",
+      "line_number": 818,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "profiling_optimization_example.rs",
+      "line_number": 819,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "profiling_optimization_example.rs",
+      "line_number": 872,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "profiling_optimization_example.rs",
+      "line_number": 1099,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "profiling_optimization_example.rs",
+      "line_number": 1100,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "profiling_optimization_example.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 73 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "wasm_integration_example.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 17 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "documentation_testing_example.rs",
+      "line_number": 398,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "documentation_testing_example.rs",
+      "line_number": 460,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "documentation_testing_example.rs",
+      "line_number": 468,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "documentation_testing_example.rs",
+      "line_number": 470,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "documentation_testing_example.rs",
+      "line_number": 543,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "documentation_testing_example.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 58 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "comprehensive_testing_framework.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 48 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "comprehensive_benchmark_suite.rs",
+      "line_number": 354,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "performance",
+      "file_path": "comprehensive_benchmark_suite.rs",
+      "line_number": 518,
+      "description": "Potential unnecessary clone in loop",
+      "suggestion": "Consider using references or iterators",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "comprehensive_benchmark_suite.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 79 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "cloud_deployment_example.rs",
+      "line_number": 726,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "cloud_deployment_example.rs",
+      "line_number": 2825,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "cloud_deployment_example.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 54 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "use_case_gallery.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 35 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "game_integration_example.rs",
+      "line_number": 1249,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "game_integration_example.rs",
+      "line_number": 1283,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "game_integration_example.rs",
+      "line_number": 1379,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "game_integration_example.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 39 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "performance",
+      "file_path": "performance_benchmarking.rs",
+      "line_number": 104,
+      "description": "Potential unnecessary clone in loop",
+      "suggestion": "Consider using references or iterators",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "performance",
+      "file_path": "performance_benchmarking.rs",
+      "line_number": 132,
+      "description": "Potential unnecessary clone in loop",
+      "suggestion": "Consider using references or iterators",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "performance",
+      "file_path": "performance_benchmarking.rs",
+      "line_number": 250,
+      "description": "Potential unnecessary clone in loop",
+      "suggestion": "Consider using references or iterators",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "performance_benchmarking.rs",
+      "line_number": 320,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "performance_benchmarking.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 30 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "educational_tools_example.rs",
+      "line_number": 2392,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "educational_tools_example.rs",
+      "line_number": 2404,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "educational_tools_example.rs",
+      "line_number": 2408,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "educational_tools_example.rs",
+      "line_number": 2422,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "educational_tools_example.rs",
+      "line_number": 2489,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "educational_tools_example.rs",
+      "line_number": 2547,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "educational_tools_example.rs",
+      "line_number": 2559,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "educational_tools_example.rs",
+      "line_number": 2575,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "educational_tools_example.rs",
+      "line_number": 2622,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "educational_tools_example.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 74 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "robust_error_handling_patterns.rs",
+      "line_number": 793,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "robust_error_handling_patterns.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 67 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 371,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 1171,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 1176,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 1192,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 1193,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 1224,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 1269,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 1274,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 1293,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": 1305,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "iot_edge_synthesis_example.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 70 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "performance",
+      "file_path": "debug_troubleshooting_example.rs",
+      "line_number": 682,
+      "description": "Potential unnecessary clone in loop",
+      "suggestion": "Consider using references or iterators",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "debug_troubleshooting_example.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 50 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "community_contributions_gallery.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 25 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "complete_voice_pipeline.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 17 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "basic_configuration.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 23 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "emotion_control_example.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 18 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "streaming_synthesis.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 22 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "creative_applications_example.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 72 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "performance",
+      "file_path": "testing_framework_example.rs",
+      "line_number": 1262,
+      "description": "Potential unnecessary clone in loop",
+      "suggestion": "Consider using references or iterators",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "testing_framework_example.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 110 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "best_practices_guide.rs",
+      "line_number": 232,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "best_practices_guide.rs",
+      "line_number": 370,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "best_practices_guide.rs",
+      "line_number": 400,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "best_practices_guide.rs",
+      "line_number": 407,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "best_practices_guide.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 81 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "examples_testing_framework.rs",
+      "line_number": 535,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "examples_testing_framework.rs",
+      "line_number": 625,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "examples_testing_framework.rs",
+      "line_number": 1055,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "examples_testing_framework.rs",
+      "line_number": 1057,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "examples_testing_framework.rs",
+      "line_number": 1065,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "examples_testing_framework.rs",
+      "line_number": 1067,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "examples_testing_framework.rs",
+      "line_number": 1106,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "examples_testing_framework.rs",
+      "line_number": 1108,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "examples_testing_framework.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 129 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "desktop_integration_example.rs",
+      "line_number": 307,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "desktop_integration_example.rs",
+      "line_number": 406,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "desktop_integration_example.rs",
+      "line_number": 454,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "desktop_integration_example.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 31 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "ai_integration_example.rs",
+      "line_number": 2064,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "ai_integration_example.rs",
+      "line_number": 2078,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "ai_integration_example.rs",
+      "line_number": 2090,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "ai_integration_example.rs",
+      "line_number": 2102,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "ai_integration_example.rs",
+      "line_number": 2116,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "ai_integration_example.rs",
+      "line_number": 2118,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "ai_integration_example.rs",
+      "line_number": 2120,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "ai_integration_example.rs",
+      "line_number": 2122,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "ai_integration_example.rs",
+      "line_number": 2141,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "ai_integration_example.rs",
+      "line_number": 2175,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "ai_integration_example.rs",
+      "line_number": 2209,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "ai_integration_example.rs",
+      "line_number": 2221,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "ai_integration_example.rs",
+      "line_number": 2234,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "ai_integration_example.rs",
+      "line_number": 2264,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "ai_integration_example.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 89 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "multimodal_integration_example.rs",
+      "line_number": 1594,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "multimodal_integration_example.rs",
+      "line_number": 1673,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "multimodal_integration_example.rs",
+      "line_number": 1715,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "multimodal_integration_example.rs",
+      "line_number": 1732,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "multimodal_integration_example.rs",
+      "line_number": 1748,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "multimodal_integration_example.rs",
+      "line_number": 1821,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "multimodal_integration_example.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 84 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "performance",
+      "file_path": "ab_testing_quality_comparison.rs",
+      "line_number": 251,
+      "description": "Potential unnecessary clone in loop",
+      "suggestion": "Consider using references or iterators",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "ab_testing_quality_comparison.rs",
+      "line_number": 525,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "ab_testing_quality_comparison.rs",
+      "line_number": 527,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "info",
+      "category": "performance",
+      "file_path": "ab_testing_quality_comparison.rs",
+      "line_number": 652,
+      "description": "Potential unnecessary clone in loop",
+      "suggestion": "Consider using references or iterators",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "ab_testing_quality_comparison.rs",
+      "line_number": 672,
+      "description": "Use of unwrap() can cause panics",
+      "suggestion": "Use proper error handling with ? or match",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file_path": "ab_testing_quality_comparison.rs",
+      "line_number": null,
+      "description": "High cyclomatic complexity: 59 (max: 15)",
+      "suggestion": "Consider breaking down complex functions",
+      "auto_fixable": false
+    },
+    {
+      "severity": "error",
+      "category": "security",
+      "file_path": "cargo_audit",
+      "line_number": null,
+      "description": "Security vulnerabilities found in dependencies",
+      "suggestion": "Run 'cargo audit' for details and update dependencies",
+      "auto_fixable": false
+    },
+    {
+      "severity": "error",
+      "category": "security",
+      "file_path": "faq_examples.rs",
+      "line_number": 368,
+      "description": "Potential hardcoded secret detected",
+      "suggestion": "Use environment variables or secure storage",
+      "auto_fixable": false
+    },
+    {
+      "severity": "warning",
+      "category": "testing",
+      "file_path": "overall",
+      "line_number": null,
+      "description": "Low test coverage: 5.81% (minimum: 70.00%)",
+      "suggestion": "Add more unit tests to improve coverage",
+      "auto_fixable": false
+    }
+  ],
+  "metrics": [
+    {
+      "file_path": "production_monitoring_example.rs",
+      "lines_of_code": 1002,
+      "documentation_ratio": 0.043912175648702596,
+      "cyclomatic_complexity": 62,
+      "test_coverage": 0.0,
+      "performance_score": -60,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "ssml_synthesis.rs",
+      "lines_of_code": 36,
+      "documentation_ratio": 0.0,
+      "cyclomatic_complexity": 1,
+      "test_coverage": 0.0,
+      "performance_score": 100,
+      "security_score": 100,
+      "maintainability_index": 98.0
+    },
+    {
+      "file_path": "production_pipeline_example.rs",
+      "lines_of_code": 781,
+      "documentation_ratio": 0.11907810499359796,
+      "cyclomatic_complexity": 44,
+      "test_coverage": 0.0,
+      "performance_score": 30,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "voice_cloning_example.rs",
+      "lines_of_code": 257,
+      "documentation_ratio": 0.14396887159533073,
+      "cyclomatic_complexity": 11,
+      "test_coverage": 0.0,
+      "performance_score": 100,
+      "security_score": 100,
+      "maintainability_index": 62.3
+    },
+    {
+      "file_path": "mobile_integration_example.rs",
+      "lines_of_code": 362,
+      "documentation_ratio": 0.20718232044198895,
+      "cyclomatic_complexity": 63,
+      "test_coverage": 0.0,
+      "performance_score": 70,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "realtime_voice_coach.rs",
+      "lines_of_code": 368,
+      "documentation_ratio": 0.03260869565217391,
+      "cyclomatic_complexity": 35,
+      "test_coverage": 0.0,
+      "performance_score": 10,
+      "security_score": 100,
+      "maintainability_index": 3.1999999999999993
+    },
+    {
+      "file_path": "batch_evaluation_comparison.rs",
+      "lines_of_code": 82,
+      "documentation_ratio": 0.08536585365853659,
+      "cyclomatic_complexity": 5,
+      "test_coverage": 0.0,
+      "performance_score": 80,
+      "security_score": 100,
+      "maintainability_index": 90.0
+    },
+    {
+      "file_path": "vr_ar_immersive_example.rs",
+      "lines_of_code": 1292,
+      "documentation_ratio": 0.015479876160990712,
+      "cyclomatic_complexity": 57,
+      "test_coverage": 0.0,
+      "performance_score": 60,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "production_whisper_example.rs",
+      "lines_of_code": 122,
+      "documentation_ratio": 0.04918032786885246,
+      "cyclomatic_complexity": 5,
+      "test_coverage": 0.0,
+      "performance_score": 100,
+      "security_score": 100,
+      "maintainability_index": 87.8
+    },
+    {
+      "file_path": "streaming_synthesis_optimization.rs",
+      "lines_of_code": 171,
+      "documentation_ratio": 0.15789473684210525,
+      "cyclomatic_complexity": 20,
+      "test_coverage": 0.0,
+      "performance_score": 90,
+      "security_score": 100,
+      "maintainability_index": 52.9
+    },
+    {
+      "file_path": "faq_examples.rs",
+      "lines_of_code": 916,
+      "documentation_ratio": 0.0,
+      "cyclomatic_complexity": 88,
+      "test_coverage": 0.0,
+      "performance_score": 90,
+      "security_score": 80,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "hello_world.rs",
+      "lines_of_code": 63,
+      "documentation_ratio": 0.3492063492063492,
+      "cyclomatic_complexity": 5,
+      "test_coverage": 0.0,
+      "performance_score": 100,
+      "security_score": 100,
+      "maintainability_index": 90.0
+    },
+    {
+      "file_path": "emotion_control_example_fixed.rs",
+      "lines_of_code": 67,
+      "documentation_ratio": 0.04477611940298507,
+      "cyclomatic_complexity": 7,
+      "test_coverage": 0.0,
+      "performance_score": 100,
+      "security_score": 100,
+      "maintainability_index": 86.0
+    },
+    {
+      "file_path": "memory_profiling_analysis.rs",
+      "lines_of_code": 1358,
+      "documentation_ratio": 0.017673048600883652,
+      "cyclomatic_complexity": 69,
+      "test_coverage": 0.0,
+      "performance_score": 70,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "profiling_optimization_example.rs",
+      "lines_of_code": 1217,
+      "documentation_ratio": 0.06080525883319639,
+      "cyclomatic_complexity": 73,
+      "test_coverage": 0.0,
+      "performance_score": -60,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "wasm_integration_example.rs",
+      "lines_of_code": 203,
+      "documentation_ratio": 0.21674876847290642,
+      "cyclomatic_complexity": 17,
+      "test_coverage": 0.0,
+      "performance_score": 90,
+      "security_score": 100,
+      "maintainability_index": 55.7
+    },
+    {
+      "file_path": "documentation_testing_example.rs",
+      "lines_of_code": 573,
+      "documentation_ratio": 0.15008726003490402,
+      "cyclomatic_complexity": 58,
+      "test_coverage": 0.0,
+      "performance_score": 40,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "comprehensive_testing_framework.rs",
+      "lines_of_code": 632,
+      "documentation_ratio": 0.014240506329113924,
+      "cyclomatic_complexity": 48,
+      "test_coverage": 0.0,
+      "performance_score": 90,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "spatial_audio_example.rs",
+      "lines_of_code": 109,
+      "documentation_ratio": 0.03669724770642202,
+      "cyclomatic_complexity": 6,
+      "test_coverage": 0.0,
+      "performance_score": 100,
+      "security_score": 100,
+      "maintainability_index": 87.1
+    },
+    {
+      "file_path": "comprehensive_benchmark_suite.rs",
+      "lines_of_code": 1241,
+      "documentation_ratio": 0.019339242546333603,
+      "cyclomatic_complexity": 79,
+      "test_coverage": 0.0,
+      "performance_score": 70,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "cloud_deployment_example.rs",
+      "lines_of_code": 2568,
+      "documentation_ratio": 0.007398753894080997,
+      "cyclomatic_complexity": 54,
+      "test_coverage": 0.0,
+      "performance_score": 70,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "use_case_gallery.rs",
+      "lines_of_code": 724,
+      "documentation_ratio": 0.0,
+      "cyclomatic_complexity": 35,
+      "test_coverage": 0.0,
+      "performance_score": 90,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "game_integration_example.rs",
+      "lines_of_code": 1125,
+      "documentation_ratio": 0.018666666666666668,
+      "cyclomatic_complexity": 39,
+      "test_coverage": 0.0,
+      "performance_score": 60,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "performance_benchmarking.rs",
+      "lines_of_code": 354,
+      "documentation_ratio": 0.0847457627118644,
+      "cyclomatic_complexity": 30,
+      "test_coverage": 0.0,
+      "performance_score": 50,
+      "security_score": 100,
+      "maintainability_index": 14.599999999999998
+    },
+    {
+      "file_path": "educational_tools_example.rs",
+      "lines_of_code": 2253,
+      "documentation_ratio": 0.023524189968930315,
+      "cyclomatic_complexity": 74,
+      "test_coverage": 0.0,
+      "performance_score": 0,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "robust_error_handling_patterns.rs",
+      "lines_of_code": 1147,
+      "documentation_ratio": 0.024411508282476024,
+      "cyclomatic_complexity": 67,
+      "test_coverage": 0.0,
+      "performance_score": 80,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "iot_edge_synthesis_example.rs",
+      "lines_of_code": 1097,
+      "documentation_ratio": 0.01731996353691887,
+      "cyclomatic_complexity": 70,
+      "test_coverage": 0.0,
+      "performance_score": -10,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "debug_troubleshooting_example.rs",
+      "lines_of_code": 654,
+      "documentation_ratio": 0.05045871559633028,
+      "cyclomatic_complexity": 50,
+      "test_coverage": 0.0,
+      "performance_score": 80,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "community_contributions_gallery.rs",
+      "lines_of_code": 467,
+      "documentation_ratio": 0.0,
+      "cyclomatic_complexity": 25,
+      "test_coverage": 0.0,
+      "performance_score": 90,
+      "security_score": 100,
+      "maintainability_index": 13.299999999999997
+    },
+    {
+      "file_path": "complete_voice_pipeline.rs",
+      "lines_of_code": 395,
+      "documentation_ratio": 0.035443037974683546,
+      "cyclomatic_complexity": 17,
+      "test_coverage": 0.0,
+      "performance_score": 90,
+      "security_score": 100,
+      "maintainability_index": 36.5
+    },
+    {
+      "file_path": "basic_configuration.rs",
+      "lines_of_code": 200,
+      "documentation_ratio": 0.105,
+      "cyclomatic_complexity": 23,
+      "test_coverage": 0.0,
+      "performance_score": 90,
+      "security_score": 100,
+      "maintainability_index": 44.0
+    },
+    {
+      "file_path": "emotion_control_example.rs",
+      "lines_of_code": 197,
+      "documentation_ratio": 0.18781725888324874,
+      "cyclomatic_complexity": 18,
+      "test_coverage": 0.0,
+      "performance_score": 90,
+      "security_score": 100,
+      "maintainability_index": 54.3
+    },
+    {
+      "file_path": "streaming_synthesis.rs",
+      "lines_of_code": 163,
+      "documentation_ratio": 0.2085889570552147,
+      "cyclomatic_complexity": 22,
+      "test_coverage": 0.0,
+      "performance_score": 90,
+      "security_score": 100,
+      "maintainability_index": 49.7
+    },
+    {
+      "file_path": "singing_synthesis_example.rs",
+      "lines_of_code": 45,
+      "documentation_ratio": 0.06666666666666667,
+      "cyclomatic_complexity": 3,
+      "test_coverage": 0.0,
+      "performance_score": 100,
+      "security_score": 100,
+      "maintainability_index": 94.0
+    },
+    {
+      "file_path": "creative_applications_example.rs",
+      "lines_of_code": 847,
+      "documentation_ratio": 0.11216056670602124,
+      "cyclomatic_complexity": 72,
+      "test_coverage": 0.0,
+      "performance_score": 90,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "testing_framework_example.rs",
+      "lines_of_code": 1064,
+      "documentation_ratio": 0.03665413533834586,
+      "cyclomatic_complexity": 110,
+      "test_coverage": 0.0,
+      "performance_score": 80,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "best_practices_guide.rs",
+      "lines_of_code": 863,
+      "documentation_ratio": 0.0,
+      "cyclomatic_complexity": 81,
+      "test_coverage": 0.0,
+      "performance_score": 50,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "examples_testing_framework.rs",
+      "lines_of_code": 1219,
+      "documentation_ratio": 0.009844134536505332,
+      "cyclomatic_complexity": 129,
+      "test_coverage": 0.0,
+      "performance_score": 10,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "desktop_integration_example.rs",
+      "lines_of_code": 488,
+      "documentation_ratio": 0.17008196721311475,
+      "cyclomatic_complexity": 31,
+      "test_coverage": 0.0,
+      "performance_score": 60,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "ai_integration_example.rs",
+      "lines_of_code": 1904,
+      "documentation_ratio": 0.022058823529411766,
+      "cyclomatic_complexity": 89,
+      "test_coverage": 0.0,
+      "performance_score": -50,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "batch_synthesis.rs",
+      "lines_of_code": 31,
+      "documentation_ratio": 0.0,
+      "cyclomatic_complexity": 2,
+      "test_coverage": 0.0,
+      "performance_score": 100,
+      "security_score": 100,
+      "maintainability_index": 96.0
+    },
+    {
+      "file_path": "multimodal_integration_example.rs",
+      "lines_of_code": 1543,
+      "documentation_ratio": 0.02462734931950745,
+      "cyclomatic_complexity": 84,
+      "test_coverage": 0.0,
+      "performance_score": 30,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "voice_conversion_example.rs",
+      "lines_of_code": 139,
+      "documentation_ratio": 0.03597122302158273,
+      "cyclomatic_complexity": 5,
+      "test_coverage": 0.0,
+      "performance_score": 100,
+      "security_score": 100,
+      "maintainability_index": 86.1
+    },
+    {
+      "file_path": "simple_synthesis.rs",
+      "lines_of_code": 59,
+      "documentation_ratio": 0.4067796610169492,
+      "cyclomatic_complexity": 4,
+      "test_coverage": 0.0,
+      "performance_score": 100,
+      "security_score": 100,
+      "maintainability_index": 92.0
+    },
+    {
+      "file_path": "ab_testing_quality_comparison.rs",
+      "lines_of_code": 821,
+      "documentation_ratio": 0.028014616321559074,
+      "cyclomatic_complexity": 59,
+      "test_coverage": 0.0,
+      "performance_score": 40,
+      "security_score": 100,
+      "maintainability_index": 0
+    },
+    {
+      "file_path": "voice_cloning_example_fixed.rs",
+      "lines_of_code": 107,
+      "documentation_ratio": 0.04672897196261682,
+      "cyclomatic_complexity": 5,
+      "test_coverage": 0.0,
+      "performance_score": 100,
+      "security_score": 100,
+      "maintainability_index": 89.3
+    },
+    {
+      "file_path": "complete_pipeline.rs",
+      "lines_of_code": 96,
+      "documentation_ratio": 0.0625,
+      "cyclomatic_complexity": 3,
+      "test_coverage": 0.0,
+      "performance_score": 100,
+      "security_score": 100,
+      "maintainability_index": 94.0
+    }
+  ]
+}

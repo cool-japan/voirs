@@ -1,0 +1,24 @@
+Package: {{NAME}}
+Version: {{VERSION}}
+Section: utils
+Priority: optional
+Architecture: amd64
+Depends: {{DEPENDENCIES}}
+Maintainer: {{MAINTAINER}}
+Description: {{DESCRIPTION}}
+ VoiRS is a high-performance speech synthesis system that provides neural
+ text-to-speech capabilities with multiple voice options and advanced audio
+ processing features.
+ .
+ Features:
+  - Multiple voice options with different languages and styles
+  - High-quality neural speech synthesis
+  - Batch processing capabilities
+  - Interactive mode with real-time synthesis
+  - Audio format support (WAV, FLAC, MP3, Opus)
+  - SSML support for advanced speech control
+  - Configuration profiles and presets
+  - Cross-platform compatibility
+Homepage: {{HOMEPAGE}}
+Vcs-Git: {{REPOSITORY}}
+Vcs-Browser: {{REPOSITORY}}

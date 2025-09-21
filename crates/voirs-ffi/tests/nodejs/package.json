@@ -1,0 +1,24 @@
+{
+  "name": "voirs-ffi-nodejs-tests",
+  "version": "1.0.0",
+  "description": "Node.js test suite for VoiRS FFI bindings",
+  "private": true,
+  "scripts": {
+    "test": "node test-runner.js",
+    "test:unit": "node unit-tests.js",
+    "test:integration": "node integration-tests.js",
+    "test:performance": "node performance-tests.js",
+    "test:errors": "node error-tests.js",
+    "test:memory": "node memory-tests.js",
+    "test:concurrent": "node concurrent-tests.js",
+    "test:all": "npm run test:unit && npm run test:integration && npm run test:performance && npm run test:errors && npm run test:memory && npm run test:concurrent"
+  },
+  "devDependencies": {
+    "mocha": "^10.0.0",
+    "chai": "^4.3.0",
+    "sinon": "^15.0.0"
+  },
+  "engines": {
+    "node": ">= 16"
+  }
+}

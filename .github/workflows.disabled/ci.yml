@@ -1,0 +1,336 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, develop ]
+  pull_request:
+    branches: [ master, develop ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        rust: [stable, beta]
+        include:
+          - os: ubuntu-latest
+            rust: 1.70.0  # MSRV
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        lfs: true
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ matrix.rust }}
+        components: rustfmt, clippy
+
+    - name: Cache dependencies
+      uses: Swatinem/rust-cache@v2
+
+    - name: Install system dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libasound2-dev pkg-config
+
+    - name: Install system dependencies (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew install pkg-config
+
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+
+    - name: Lint with clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
+    - name: Build all crates
+      run: cargo build --workspace --all-features
+
+    - name: Run tests
+      run: cargo nextest run --workspace --all-features --no-fail-fast
+
+    - name: Run doctests
+      run: cargo test --workspace --doc --all-features
+
+  benchmark:
+    name: Benchmarks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        lfs: true
+        fetch-depth: 0  # Fetch full history for regression detection
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache dependencies
+      uses: Swatinem/rust-cache@v2
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libasound2-dev pkg-config
+
+    - name: Install critcmp for benchmark comparison
+      run: cargo install critcmp
+
+    - name: Run benchmarks
+      run: cargo bench --workspace --all-features -- --output-format bencher | tee benchmark_results.txt
+
+    - name: Run VoiRS Evaluation specific benchmarks
+      run: |
+        cd crates/voirs-evaluation
+        cargo bench -- --output-format bencher | tee ../../evaluation_benchmarks.txt
+
+    - name: Store benchmark results
+      uses: benchmark-action/github-action-benchmark@v1
+      with:
+        tool: 'cargo'
+        output-file-path: benchmark_results.txt
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        auto-push: true
+        alert-threshold: '200%'
+        comment-on-alert: true
+        fail-on-alert: true
+        alert-comment-cc-users: '@maintainers'
+
+    - name: Store VoiRS Evaluation benchmark results
+      uses: benchmark-action/github-action-benchmark@v1
+      with:
+        tool: 'cargo'
+        output-file-path: evaluation_benchmarks.txt
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        auto-push: true
+        alert-threshold: '150%'  # More sensitive for evaluation metrics
+        comment-on-alert: true
+        fail-on-alert: true
+        alert-comment-cc-users: '@maintainers'
+
+  performance-regression:
+    name: Performance Regression Detection
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        lfs: true
+        fetch-depth: 0
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache dependencies
+      uses: Swatinem/rust-cache@v2
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libasound2-dev pkg-config
+
+    - name: Install critcmp for benchmark comparison
+      run: cargo install critcmp
+
+    - name: Run VoiRS Recognizer performance tests
+      run: |
+        # Run performance validation tests for recognizer specifically
+        cd crates/voirs-recognizer
+        cargo test --release --features all-models test_performance_validation -- --test-threads=1
+        cargo test --release --features all-models test_rtf_requirements -- --test-threads=1
+        cargo test --release --features all-models test_memory_requirements -- --test-threads=1
+        cargo test --release --features all-models test_streaming_latency -- --test-threads=1
+
+    - name: Run VoiRS Evaluation performance tests
+      run: |
+        # Run performance validation tests for evaluation crate
+        cd crates/voirs-evaluation
+        cargo test --release performance_test -- --test-threads=1
+        cargo test --release benchmark_runner -- --test-threads=1
+        cargo test --release regression_detector -- --test-threads=1
+        
+        # Run benchmark regression detection example
+        cargo run --release --example benchmark_regression_detection
+
+    - name: Check performance requirements
+      run: |
+        cd crates/voirs-recognizer
+        cargo run --example stress_testing_reliability --features all-models -- --performance-check
+
+    - name: Performance regression check
+      run: |
+        # Compare current benchmarks with main branch
+        git checkout main
+        cargo bench --workspace --all-features -- --output-format bencher > main_benchmarks.txt
+        git checkout -
+        cargo bench --workspace --all-features -- --output-format bencher > pr_benchmarks.txt
+        
+        # Use critcmp to compare results (if available)
+        if command -v critcmp &> /dev/null; then
+          critcmp main_benchmarks.txt pr_benchmarks.txt
+        fi
+
+  documentation:
+    name: Documentation Generation
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        lfs: true
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache dependencies
+      uses: Swatinem/rust-cache@v2
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libasound2-dev pkg-config
+
+    - name: Install mdbook for documentation
+      run: cargo install mdbook
+
+    - name: Generate API documentation
+      run: cargo doc --workspace --all-features --no-deps
+
+    - name: Generate user guide
+      run: |
+        cd docs/guide
+        mdbook build
+
+    - name: Check documentation completeness
+      run: |
+        # Check that all public APIs have documentation
+        cargo doc --workspace --all-features --no-deps 2>&1 | tee doc_warnings.txt
+        if grep -q "warning: missing documentation" doc_warnings.txt; then
+          echo "::error::Missing documentation found"
+          grep "warning: missing documentation" doc_warnings.txt
+          exit 1
+        fi
+
+    - name: Upload documentation
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./target/doc
+        destination_dir: api-docs
+
+    - name: Upload user guide
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./docs/guide/book
+        destination_dir: guide
+
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache dependencies
+      uses: Swatinem/rust-cache@v2
+
+    - name: Install cargo-audit
+      run: cargo install cargo-audit
+
+    - name: Run security audit
+      run: cargo audit
+
+    - name: Install cargo-deny
+      run: cargo install cargo-deny
+
+    - name: Check licenses and dependencies
+      run: cargo deny check
+
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        lfs: true
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: llvm-tools-preview
+
+    - name: Cache dependencies
+      uses: Swatinem/rust-cache@v2
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libasound2-dev pkg-config
+
+    - name: Install cargo-llvm-cov
+      run: cargo install cargo-llvm-cov
+
+    - name: Generate coverage report
+      run: cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info
+
+    - name: Generate detailed coverage report
+      run: |
+        # Generate HTML coverage report for detailed analysis
+        cargo llvm-cov --workspace --all-features --html --output-dir coverage-html
+
+        # Generate coverage summary
+        cargo llvm-cov --workspace --all-features --summary-only | tee coverage-summary.txt
+
+        # Check coverage thresholds
+        COVERAGE_PERCENT=$(grep -oP 'TOTAL.*\K\d+\.\d+(?=%)' coverage-summary.txt | head -1)
+        echo "Coverage: $COVERAGE_PERCENT%"
+        
+        # Fail if coverage is below 90% (as specified in TODO.md for Version 0.1.0)
+        if (( $(echo "$COVERAGE_PERCENT < 90" | bc -l) )); then
+          echo "::error::Code coverage ($COVERAGE_PERCENT%) is below required 90%"
+          exit 1
+        fi
+
+    - name: Upload coverage to codecov.io
+      uses: codecov/codecov-action@v3
+      with:
+        file: lcov.info
+        fail_ci_if_error: true
+
+    - name: Upload HTML coverage report
+      uses: actions/upload-artifact@v3
+      with:
+        name: coverage-report
+        path: coverage-html/
+
+    - name: Coverage monitoring
+      run: |
+        # Generate coverage per module for recognizer
+        echo "## VoiRS Recognizer Coverage Report" > coverage-report.md
+        echo "Date: $(date)" >> coverage-report.md
+        echo "" >> coverage-report.md
+        
+        # Extract coverage for each module
+        cargo llvm-cov --workspace --all-features --summary-only | grep -E "(voirs-recognizer|src/)" >> coverage-report.md
+        
+        # Store as artifact for tracking
+        echo "Coverage report generated for monitoring"

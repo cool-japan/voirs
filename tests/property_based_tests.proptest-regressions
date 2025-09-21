@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b9074d063df7f6f9cb65828ef20f57b651ac9994dfc98a6267b29c192737a20f # shrinks to phoneme_symbols = ["ŋ", "ə"], slow_speed = 0.1, fast_speed = 1.1
+cc d35d29ed49bf30697c2d192a14779f853e655c33d8661fea24d5a4aac75ab201 # shrinks to text = "", speed = 0.1, energy = 0.1

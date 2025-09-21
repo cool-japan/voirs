@@ -1,0 +1,142 @@
+[package]
+name = "voirs-recognizer"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/voirs-recognizer"
+keywords.workspace = true
+categories = ["multimedia::audio", "science", "algorithms"]
+rust-version.workspace = true
+description = "Voice recognition and analysis capabilities for VoiRS"
+
+[lib]
+name = "voirs_recognizer"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Core VoiRS dependencies
+voirs-sdk = { version = "0.1.0-alpha.1", path = "../voirs-sdk" }
+
+# Async and traits
+async-trait.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tokio-stream.workspace = true
+futures.workspace = true
+async-stream.workspace = true
+
+# Audio processing
+hound.workspace = true
+cpal.workspace = true
+dasp.workspace = true
+realfft.workspace = true
+rustfft.workspace = true
+
+# Math and arrays
+ndarray.workspace = true
+num-complex.workspace = true
+
+# Serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+hex = "0.4"
+rand.workspace = true
+
+# Error handling
+anyhow.workspace = true
+thiserror.workspace = true
+
+# Logging
+tracing.workspace = true
+
+# Utilities
+once_cell.workspace = true
+parking_lot.workspace = true
+chrono.workspace = true
+num_cpus.workspace = true
+
+# Machine learning backends
+candle-core.workspace = true
+candle-nn.workspace = true
+candle-transformers.workspace = true
+ort.workspace = true
+safetensors.workspace = true
+hf-hub.workspace = true
+
+# Text processing
+unicode-normalization.workspace = true
+unicode-segmentation.workspace = true
+regex.workspace = true
+
+# Audio format support
+claxon.workspace = true
+lewton.workspace = true
+minimp3.workspace = true
+symphonia.workspace = true
+
+# Performance
+rayon.workspace = true
+crossbeam-utils.workspace = true
+
+# Additional dependencies for Pure Rust Whisper
+half.workspace = true  # For F16 support
+
+# Compression
+flate2.workspace = true
+
+# Python bindings (optional)
+pyo3 = { workspace = true, features = ["extension-module", "abi3-py38"], optional = true }
+numpy = { workspace = true, optional = true }
+pyo3-async-runtimes = { workspace = true, optional = true }  # Using maintained fork for pyo3 0.25 compatibility
+
+# WASM bindings (optional)
+wasm-bindgen = { workspace = true, optional = true }
+wasm-bindgen-futures = { workspace = true, optional = true }
+js-sys = { workspace = true, optional = true }
+web-sys = { workspace = true, features = ["console", "AudioContext", "AudioBuffer", "AudioBufferSourceNode", "AudioDestinationNode", "Window", "Performance", "Worker", "MessageEvent", "MessagePort", "DedicatedWorkerGlobalScope", "AudioWorkletNode"], optional = true }
+console_error_panic_hook = { workspace = true, optional = true }
+wasm-logger = { workspace = true, optional = true }
+
+# REST API dependencies (optional)
+axum = { workspace = true, features = ["ws", "macros", "multipart"], optional = true }
+tower = { workspace = true, features = ["full"], optional = true }
+tower-http = { workspace = true, features = ["fs", "trace", "cors", "compression-br", "compression-gzip", "limit"], optional = true }
+hyper = { workspace = true, features = ["full"], optional = true }
+tokio-tungstenite = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
+mime = { workspace = true, optional = true }
+reqwest = { workspace = true, features = ["json", "stream"], optional = true }
+url = { version = "2.5", optional = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile.workspace = true
+criterion.workspace = true
+wasm-bindgen-test = "0.3"
+
+[features]
+default = ["whisper", "analysis"]
+whisper = []
+whisper-pure = []  # Pure Rust Whisper implementation (no Python dependencies)
+deepspeech = []
+wav2vec2 = []
+transformer = []  # Transformer-based end-to-end ASR
+conformer = []  # Conformer: Convolution-augmented Transformer for Speech Recognition
+analysis = []
+forced-align = []
+mfa = []
+python = ["pyo3", "numpy", "pyo3-async-runtimes"]  # Python bindings with async support
+wasm = ["wasm-bindgen", "wasm-bindgen-futures", "js-sys", "web-sys", "console_error_panic_hook", "wasm-logger"]  # WASM bindings for browser/Node.js
+c-api = []  # C/C++ API bindings
+rest-api = ["axum", "tower", "tower-http", "hyper", "tokio-tungstenite", "base64", "mime", "reqwest", "url"]  # REST API and microservice support
+all-models = ["whisper", "whisper-pure", "deepspeech", "wav2vec2", "transformer", "conformer", "forced-align", "mfa"]
+gpu = ["ort/cuda"]
+
+# Windows-specific dependencies
+[target.'cfg(windows)'.dependencies]
+winapi = { workspace = true }
+[lints]
+workspace = true

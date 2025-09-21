@@ -1,18 +1,19 @@
 //! Manual quality review tools for dataset curation
-//! 
+//!
 //! This module provides tools for manual review and annotation of audio samples,
 //! including interactive browsing, quality scoring, and batch approval workflows.
 
-use crate::{DatasetSample, DatasetError, Result, QualityMetrics};
+use crate::{DatasetError, DatasetSample, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
 /// Review status for individual samples
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum ReviewStatus {
     /// Not yet reviewed
+    #[default]
     Pending,
     /// Approved for inclusion
     Approved,
@@ -22,12 +23,6 @@ pub enum ReviewStatus {
     NeedsReview,
     /// Conditionally approved with notes
     Conditional,
-}
-
-impl Default for ReviewStatus {
-    fn default() -> Self {
-        ReviewStatus::Pending
-    }
 }
 
 /// Review annotation with metadata
@@ -91,7 +86,10 @@ impl ReviewAnnotation {
 
     /// Check if approved
     pub fn is_approved(&self) -> bool {
-        matches!(self.status, ReviewStatus::Approved | ReviewStatus::Conditional)
+        matches!(
+            self.status,
+            ReviewStatus::Approved | ReviewStatus::Conditional
+        )
     }
 
     /// Check if rejected
@@ -109,21 +107,21 @@ pub enum QualityIssue {
     AudioDistortion,
     AudioTooQuiet,
     AudioTooLoud,
-    
+
     /// Text-related issues
     TextMismatch,
     TextErrors,
     PronunciationIssues,
-    
+
     /// Content issues
     InappropriateContent,
     IncompleteUtterance,
     BackgroundNoise,
-    
+
     /// Technical issues
     FileCorruption,
     FormatIssues,
-    
+
     /// Custom issue with description
     Custom(String),
 }
@@ -179,7 +177,7 @@ impl ReviewSession {
     /// Create new review session
     pub fn new(config: ReviewSessionConfig, sample_ids: Vec<String>) -> Self {
         let mut sample_queue: VecDeque<String> = sample_ids.into_iter().collect();
-        
+
         if config.randomize_order {
             use rand::seq::SliceRandom;
             let mut vec: Vec<String> = sample_queue.into_iter().collect();
@@ -224,9 +222,10 @@ impl ReviewSession {
 
     /// Add review annotation
     pub fn add_annotation(&mut self, annotation: ReviewAnnotation) {
-        self.annotations.insert(annotation.sample_id.clone(), annotation);
+        self.annotations
+            .insert(annotation.sample_id.clone(), annotation);
         self.reviewed_count += 1;
-        
+
         if self.config.auto_advance {
             self.next_sample();
         }
@@ -238,10 +237,14 @@ impl ReviewSession {
             total_samples: self.sample_queue.len(),
             reviewed_samples: self.reviewed_count,
             current_index: self.current_index,
-            approved_count: self.annotations.values()
+            approved_count: self
+                .annotations
+                .values()
                 .filter(|a| a.is_approved())
                 .count(),
-            rejected_count: self.annotations.values()
+            rejected_count: self
+                .annotations
+                .values()
                 .filter(|a| a.is_rejected())
                 .count(),
             session_duration: chrono::Utc::now() - self.start_time,
@@ -250,8 +253,8 @@ impl ReviewSession {
 
     /// Check if session is complete
     pub fn is_complete(&self) -> bool {
-        self.reviewed_count >= self.config.batch_size || 
-        self.current_index >= self.sample_queue.len()
+        self.reviewed_count >= self.config.batch_size
+            || self.current_index >= self.sample_queue.len()
     }
 
     /// Get all annotations
@@ -332,14 +335,12 @@ impl QualityReviewer {
 
     /// Start new review session
     pub async fn start_session(
-        &mut self, 
-        config: ReviewSessionConfig, 
-        samples: &[DatasetSample]
+        &mut self,
+        config: ReviewSessionConfig,
+        samples: &[DatasetSample],
     ) -> Result<()> {
-        let sample_ids: Vec<String> = samples.iter()
-            .map(|s| s.id.clone())
-            .collect();
-            
+        let sample_ids: Vec<String> = samples.iter().map(|s| s.id.clone()).collect();
+
         self.current_session = Some(ReviewSession::new(config, sample_ids));
         Ok(())
     }
@@ -356,16 +357,19 @@ impl QualityReviewer {
 
     /// Review current sample
     pub fn review_sample(
-        &mut self, 
-        status: ReviewStatus, 
+        &mut self,
+        status: ReviewStatus,
         quality_score: f32,
         comments: String,
-        issues: Vec<QualityIssue>
+        issues: Vec<QualityIssue>,
     ) -> Result<()> {
-        let session = self.current_session.as_mut()
+        let session = self
+            .current_session
+            .as_mut()
             .ok_or_else(|| DatasetError::ConfigError("No active review session".to_string()))?;
 
-        let sample_id = session.current_sample()
+        let sample_id = session
+            .current_sample()
             .ok_or_else(|| DatasetError::ConfigError("No current sample".to_string()))?
             .clone();
 
@@ -376,7 +380,8 @@ impl QualityReviewer {
         annotation.issues = issues;
 
         session.add_annotation(annotation.clone());
-        self.annotations.insert(annotation.sample_id.clone(), annotation);
+        self.annotations
+            .insert(annotation.sample_id.clone(), annotation);
 
         Ok(())
     }
@@ -384,7 +389,7 @@ impl QualityReviewer {
     /// Save annotations to storage
     pub async fn save_annotations(&self) -> Result<()> {
         let annotations_path = self.storage_path.join("annotations.json");
-        
+
         // Ensure directory exists
         if let Some(parent) = annotations_path.parent() {
             fs::create_dir_all(parent).await?;
@@ -399,7 +404,7 @@ impl QualityReviewer {
     /// Load annotations from storage
     pub async fn load_annotations(&mut self) -> Result<()> {
         let annotations_path = self.storage_path.join("annotations.json");
-        
+
         if annotations_path.exists() {
             let json = fs::read_to_string(annotations_path).await?;
             self.annotations = serde_json::from_str(&json)?;
@@ -411,19 +416,23 @@ impl QualityReviewer {
     /// Generate review report
     pub fn generate_report(&self) -> ReviewReport {
         let total_annotations = self.annotations.len();
-        let approved = self.annotations.values()
+        let approved = self
+            .annotations
+            .values()
             .filter(|a| a.is_approved())
             .count();
-        let rejected = self.annotations.values()
+        let rejected = self
+            .annotations
+            .values()
             .filter(|a| a.is_rejected())
             .count();
-        let pending = self.annotations.values()
+        let pending = self
+            .annotations
+            .values()
             .filter(|a| a.status == ReviewStatus::Pending)
             .count();
 
-        let quality_scores: Vec<f32> = self.annotations.values()
-            .map(|a| a.quality_score)
-            .collect();
+        let quality_scores: Vec<f32> = self.annotations.values().map(|a| a.quality_score).collect();
 
         let avg_quality = if !quality_scores.is_empty() {
             quality_scores.iter().sum::<f32>() / quality_scores.len() as f32
@@ -468,7 +477,8 @@ impl QualityReviewer {
 
     /// Get samples by status
     pub fn samples_by_status(&self, status: ReviewStatus) -> Vec<&ReviewAnnotation> {
-        self.annotations.values()
+        self.annotations
+            .values()
             .filter(|a| a.status == status)
             .collect()
     }
@@ -481,10 +491,11 @@ impl QualityReviewer {
     /// Bulk approve samples meeting criteria
     pub async fn bulk_approve(&mut self, min_quality_score: f32) -> Result<usize> {
         let mut approved_count = 0;
-        
+
         for annotation in self.annotations.values_mut() {
-            if annotation.status == ReviewStatus::Pending && 
-               annotation.quality_score >= min_quality_score {
+            if annotation.status == ReviewStatus::Pending
+                && annotation.quality_score >= min_quality_score
+            {
                 annotation.set_status(ReviewStatus::Approved);
                 approved_count += 1;
             }
@@ -496,7 +507,9 @@ impl QualityReviewer {
 
     /// Export approved samples list
     pub async fn export_approved_list<P: AsRef<Path>>(&self, output_path: P) -> Result<()> {
-        let approved_ids: Vec<String> = self.annotations.values()
+        let approved_ids: Vec<String> = self
+            .annotations
+            .values()
             .filter(|a| a.is_approved())
             .map(|a| a.sample_id.clone())
             .collect();
@@ -541,7 +554,9 @@ impl ReviewReport {
 
     /// Get most common issues
     pub fn top_issues(&self, limit: usize) -> Vec<(String, usize)> {
-        let mut issues: Vec<_> = self.issue_distribution.iter()
+        let mut issues: Vec<_> = self
+            .issue_distribution
+            .iter()
             .map(|(k, v)| (k.clone(), *v))
             .collect();
         issues.sort_by(|a, b| b.1.cmp(&a.1));
@@ -557,10 +572,7 @@ mod tests {
 
     #[test]
     fn test_review_annotation_creation() {
-        let annotation = ReviewAnnotation::new(
-            "test-001".to_string(),
-            "reviewer-1".to_string()
-        );
+        let annotation = ReviewAnnotation::new("test-001".to_string(), "reviewer-1".to_string());
 
         assert_eq!(annotation.sample_id, "test-001");
         assert_eq!(annotation.reviewer_id, "reviewer-1");
@@ -572,10 +584,8 @@ mod tests {
 
     #[test]
     fn test_review_annotation_status_changes() {
-        let mut annotation = ReviewAnnotation::new(
-            "test-001".to_string(),
-            "reviewer-1".to_string()
-        );
+        let mut annotation =
+            ReviewAnnotation::new("test-001".to_string(), "reviewer-1".to_string());
 
         annotation.set_status(ReviewStatus::Approved);
         assert!(annotation.is_approved());
@@ -590,9 +600,9 @@ mod tests {
     fn test_review_session_creation() {
         let config = ReviewSessionConfig::default();
         let sample_ids = vec!["001".to_string(), "002".to_string(), "003".to_string()];
-        
+
         let session = ReviewSession::new(config, sample_ids);
-        
+
         assert_eq!(session.sample_queue.len(), 3);
         assert_eq!(session.current_index, 0);
         assert_eq!(session.reviewed_count, 0);
@@ -606,14 +616,14 @@ mod tests {
             ..Default::default()
         };
         let sample_ids = vec!["001".to_string(), "002".to_string(), "003".to_string()];
-        
+
         let mut session = ReviewSession::new(config, sample_ids);
-        
+
         assert_eq!(session.current_sample().unwrap(), "001");
-        
+
         session.next_sample();
         assert_eq!(session.current_sample().unwrap(), "002");
-        
+
         session.previous_sample();
         assert_eq!(session.current_sample().unwrap(), "001");
     }
@@ -622,9 +632,9 @@ mod tests {
     fn test_review_progress() {
         let config = ReviewSessionConfig::default();
         let sample_ids = vec!["001".to_string(), "002".to_string(), "003".to_string()];
-        
+
         let mut session = ReviewSession::new(config, sample_ids);
-        
+
         let progress = session.progress();
         assert_eq!(progress.total_samples, 3);
         assert_eq!(progress.reviewed_samples, 0);
@@ -633,7 +643,7 @@ mod tests {
         // Add annotation
         let annotation = ReviewAnnotation::new("001".to_string(), "reviewer-1".to_string());
         session.add_annotation(annotation);
-        
+
         let progress = session.progress();
         assert_eq!(progress.reviewed_samples, 1);
         assert!((progress.completion_percent() - 33.33).abs() < 0.1);
@@ -662,18 +672,20 @@ mod tests {
 
         // Start review session
         let config = ReviewSessionConfig {
-            randomize_order: false,  // Ensure deterministic order for testing
+            randomize_order: false, // Ensure deterministic order for testing
             ..Default::default()
         };
         reviewer.start_session(config, &samples).await.unwrap();
 
         // Review first sample
-        reviewer.review_sample(
-            ReviewStatus::Approved,
-            8.0,
-            "Good quality".to_string(),
-            vec![]
-        ).unwrap();
+        reviewer
+            .review_sample(
+                ReviewStatus::Approved,
+                8.0,
+                "Good quality".to_string(),
+                vec![],
+            )
+            .unwrap();
 
         // Check session progress
         let session = reviewer.current_session().unwrap();
@@ -683,10 +695,10 @@ mod tests {
 
         // Save and load annotations
         reviewer.save_annotations().await.unwrap();
-        
+
         let mut reviewer2 = QualityReviewer::new(temp_dir.path());
         reviewer2.load_annotations().await.unwrap();
-        
+
         assert_eq!(reviewer2.annotations.len(), 1);
         assert!(reviewer2.get_annotation("test-001").unwrap().is_approved());
     }
@@ -694,16 +706,16 @@ mod tests {
     #[test]
     fn test_review_report_generation() {
         let mut annotations = HashMap::new();
-        
+
         let mut ann1 = ReviewAnnotation::new("001".to_string(), "reviewer-1".to_string());
         ann1.set_status(ReviewStatus::Approved);
         ann1.quality_score = 8.0;
-        
+
         let mut ann2 = ReviewAnnotation::new("002".to_string(), "reviewer-1".to_string());
         ann2.set_status(ReviewStatus::Rejected);
         ann2.quality_score = 3.0;
         ann2.add_issue(QualityIssue::AudioNoise);
-        
+
         annotations.insert(ann1.sample_id.clone(), ann1);
         annotations.insert(ann2.sample_id.clone(), ann2);
 

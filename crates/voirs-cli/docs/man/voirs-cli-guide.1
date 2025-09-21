@@ -1,0 +1,310 @@
+.TH VOIRS-CLI-GUIDE 1 "2025-07-05" "voirs-cli" "VoiRS CLI Manual"
+
+.SH NAME
+voirs-cli-guide \- Display contextual help, tutorials, and getting started information
+
+.SH SYNOPSIS
+.B voirs-cli guide
+[\fIOPTIONS\fR]
+[\fICOMMAND\fR]
+
+.SH DESCRIPTION
+The guide command provides comprehensive help and tutorial information for VoiRS CLI. It offers context-sensitive help, getting started tutorials, command examples, and troubleshooting guidance to help users master the VoiRS text-to-speech system.
+
+Unlike the standard \fB\-\-help\fR option which provides brief usage information, the guide command offers detailed explanations, practical examples, and step-by-step instructions for common workflows.
+
+.SH OPTIONS
+.TP
+.I COMMAND
+Show detailed help for a specific command. Supported commands include synthesize, voices, models, batch, interactive, server, config, and others.
+
+.TP
+.B \-\-getting-started
+Display the getting started guide with installation verification, first synthesis, and basic configuration.
+
+.TP
+.B \-\-examples
+Show comprehensive examples for all commands with explanations and expected outputs.
+
+.TP
+.B \-\-workflow \fIWORKFLOW\fR
+Display help for specific workflows:
+- synthesis: Basic text-to-speech synthesis
+- batch: Bulk processing workflows
+- voices: Voice management and selection
+- server: Setting up HTTP API server
+- config: Configuration and customization
+
+.TP
+.B \-\-troubleshooting
+Show common issues and their solutions, including performance tuning and error resolution.
+
+.TP
+.B \-\-tips
+Display productivity tips, advanced features, and best practices.
+
+.TP
+.B \-\-format \fIFORMAT\fR
+Output format for guide content:
+- text: Plain text (default)
+- markdown: Markdown formatted output
+- html: HTML formatted output
+
+.SH GUIDE CONTENT
+
+.SS Getting Started Guide
+The getting started guide covers:
+
+.TP
+.B Installation verification
+Testing that VoiRS is properly installed and configured.
+
+.TP
+.B First synthesis
+Step-by-step instructions for your first text-to-speech conversion.
+
+.TP
+.B Voice selection
+How to list, download, and use different voices.
+
+.TP
+.B Configuration
+Setting up preferences, quality levels, and output formats.
+
+.SS Command-Specific Help
+Detailed help for each command includes:
+
+.TP
+.B Purpose and use cases
+When and why to use the command.
+
+.TP
+.B Option explanations
+Detailed descriptions of all command-line options.
+
+.TP
+.B Practical examples
+Real-world usage examples with expected outputs.
+
+.TP
+.B Related commands
+Cross-references to related functionality.
+
+.SS Workflow Guides
+Comprehensive workflows covering:
+
+.TP
+.B Basic synthesis
+Single-file text-to-speech conversion.
+
+.TP
+.B Batch processing
+Processing multiple files efficiently.
+
+.TP
+.B Voice customization
+Selecting and customizing voices for different use cases.
+
+.TP
+.B Quality optimization
+Balancing quality and performance for your needs.
+
+.TP
+.B Server deployment
+Setting up VoiRS as a service or API.
+
+.SH EXAMPLES
+
+.TP
+.B Show general help overview
+voirs-cli guide
+
+.TP
+.B Display getting started guide
+voirs-cli guide --getting-started
+
+.TP
+.B Get help for specific command
+voirs-cli guide synthesize
+
+.TP
+.B Show all command examples
+voirs-cli guide --examples
+
+.TP
+.B Display batch processing workflow
+voirs-cli guide --workflow batch
+
+.TP
+.B Show troubleshooting information
+voirs-cli guide --troubleshooting
+
+.TP
+.B Get productivity tips
+voirs-cli guide --tips
+
+.TP
+.B Export guide as markdown
+voirs-cli guide --format markdown > voirs-guide.md
+
+.SH COMMAND-SPECIFIC GUIDES
+
+.SS Synthesis Guide
+.TP
+.B Basic usage
+Simple text-to-speech conversion with default settings.
+
+.TP
+.B Voice selection
+Choosing appropriate voices for different content types.
+
+.TP
+.B Quality settings
+Understanding and selecting quality levels.
+
+.TP
+.B SSML support
+Using Speech Synthesis Markup Language for enhanced control.
+
+.SS Voice Management Guide
+.TP
+.B Voice discovery
+Finding voices for specific languages and use cases.
+
+.TP
+.B Voice installation
+Downloading and installing voice models.
+
+.TP
+.B Voice comparison
+Evaluating different voices for your needs.
+
+.SS Batch Processing Guide
+.TP
+.B File organization
+Preparing input files and directory structures.
+
+.TP
+.B Performance tuning
+Optimizing parallel processing and resource usage.
+
+.TP
+.B Resume functionality
+Handling interruptions and resuming large batches.
+
+.SS Server Deployment Guide
+.TP
+.B Server setup
+Starting and configuring the HTTP API server.
+
+.TP
+.B API usage
+Making requests to the synthesis API.
+
+.TP
+.B Authentication
+Setting up API keys and access control.
+
+.TP
+.B Performance monitoring
+Monitoring server health and performance.
+
+.SH TROUBLESHOOTING TOPICS
+
+.SS Installation Issues
+- Model download failures
+- Configuration file problems
+- Permission and path issues
+
+.SS Performance Problems
+- Slow synthesis speed
+- High memory usage
+- GPU acceleration setup
+
+.SS Quality Concerns
+- Audio artifacts or distortion
+- Voice quality optimization
+- Format conversion issues
+
+.SS Integration Challenges
+- Server API integration
+- Batch processing optimization
+- Configuration management
+
+.SH OUTPUT FORMATS
+
+.SS Text Format (Default)
+Plain text output suitable for terminal display with:
+- Clear section headers
+- Proper indentation
+- Code examples with syntax highlighting
+- Cross-references to related topics
+
+.SS Markdown Format
+Structured markdown output for:
+- Documentation generation
+- Web publishing
+- Integration with documentation systems
+
+.SS HTML Format
+Rich HTML output featuring:
+- Interactive navigation
+- Syntax-highlighted code examples
+- Embedded links and references
+
+.SH FILES
+.TP
+.B ~/.config/voirs/guide-preferences.toml
+User preferences for guide display and formatting.
+
+.TP
+.B ~/.cache/voirs/guide-cache/
+Cached guide content for faster access.
+
+.SH ENVIRONMENT VARIABLES
+.TP
+.B VOIRS_GUIDE_PAGER
+Pager to use for displaying long guide content (default: less).
+
+.TP
+.B VOIRS_GUIDE_BROWSER
+Browser to open HTML-formatted guides.
+
+.TP
+.B VOIRS_GUIDE_EDITOR
+Editor for opening guide content for reference.
+
+.SH INTEGRATION
+The guide system integrates with:
+
+.TP
+.B Built-in help
+Extends standard \fB\-\-help\fR with detailed explanations.
+
+.TP
+.B Manual pages
+Complements manual pages with interactive examples.
+
+.TP
+.B Error messages
+Provides contextual help when errors occur.
+
+.TP
+.B Configuration system
+Offers guidance on configuration options and values.
+
+.SH SEE ALSO
+.BR voirs-cli (1),
+.BR voirs-cli-synthesize (1),
+.BR voirs-cli-voices (1),
+.BR voirs-cli-models (1),
+.BR voirs-cli-batch (1),
+.BR voirs-cli-interactive (1),
+.BR voirs-cli-server (1),
+.BR voirs-cli-config (1)
+
+.SH AUTHOR
+VoiRS Development Team
+
+.SH REPORTING BUGS
+Report bugs at: https://github.com/voirs-project/voirs/issues

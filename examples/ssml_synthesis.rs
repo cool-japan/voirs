@@ -5,11 +5,14 @@ use voirs::prelude::*;
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
-    let pipeline = VoirsPipeline::builder()
-        .with_g2p(G2pBackend::Phonetisaurus)
-        .with_acoustic(AcousticBackend::Vits)
-        .with_vocoder(VocoderBackend::HifiGan)
-        .with_ssml_support(true)
+    let g2p = create_g2p(G2pBackend::RuleBased);
+    let acoustic = create_acoustic(AcousticBackend::Vits);
+    let vocoder = create_vocoder(VocoderBackend::HifiGan);
+
+    let pipeline = VoirsPipelineBuilder::new()
+        .with_g2p(g2p)
+        .with_acoustic_model(acoustic)
+        .with_vocoder(vocoder)
         .build()
         .await?;
 
@@ -32,14 +35,14 @@ async fn main() -> Result<()> {
     "#;
 
     println!("Synthesizing SSML content...");
-    
+
     let audio = pipeline.synthesize_ssml(ssml_text).await?;
-    
+
     audio.save_wav("ssml_output.wav")?;
-    
+
     println!("SSML synthesis complete!");
     println!("Output saved to ssml_output.wav");
     println!("Duration: {:.2} seconds", audio.duration());
-    
+
     Ok(())
 }

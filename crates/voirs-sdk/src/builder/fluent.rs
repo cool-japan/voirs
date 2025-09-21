@@ -9,8 +9,8 @@ use crate::{
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::RwLock;
 
-use super::{PresetProfile};
 use super::builder_impl::VoirsPipelineBuilder;
+use super::PresetProfile;
 
 impl VoirsPipelineBuilder {
     /// Set the voice to use for synthesis
@@ -24,7 +24,7 @@ impl VoirsPipelineBuilder {
         // Store language preference - will be used during build to select voice
         self.config.default_synthesis.sample_rate = match language {
             LanguageCode::JaJp => 22050, // Japanese typically uses 22kHz
-            _ => 16000, // Other languages default to 16kHz
+            _ => 16000,                  // Other languages default to 16kHz
         };
         self.config.default_synthesis.language = language;
         self
@@ -144,8 +144,43 @@ impl VoirsPipelineBuilder {
         self
     }
 
+    /// Enable test mode (skips expensive operations for fast testing)
+    pub fn with_test_mode(mut self, enabled: bool) -> Self {
+        self.test_mode = enabled;
+        // In test mode, disable expensive operations
+        if enabled {
+            self.auto_download = false;
+            self.validation_enabled = false;
+            self.config.model_loading.auto_download = false;
+        }
+        self
+    }
+
+    /// Enable emotion control with default settings (legacy)
+    pub fn with_emotion_control_legacy(mut self, enabled: bool) -> Self {
+        self.config.default_synthesis.enable_emotion = enabled;
+        self
+    }
+
+    /// Set default emotion type for synthesis (legacy)
+    pub fn with_emotion(mut self, emotion: &str, intensity: Option<f32>) -> Self {
+        self.config.default_synthesis.emotion_type = Some(emotion.to_string());
+        self.config.default_synthesis.emotion_intensity = intensity.unwrap_or(0.7);
+        self.config.default_synthesis.enable_emotion = true;
+        self
+    }
+
+    /// Set emotion intensity (0.0 - 1.0)
+    pub fn with_emotion_intensity(mut self, intensity: f32) -> Self {
+        self.config.default_synthesis.emotion_intensity = intensity.clamp(0.0, 1.0);
+        self
+    }
+
     /// Load configuration from file
-    pub fn with_config_file(mut self, path: impl AsRef<std::path::Path>) -> crate::error::Result<Self> {
+    pub fn with_config_file(
+        mut self,
+        path: impl AsRef<std::path::Path>,
+    ) -> crate::error::Result<Self> {
         self.config = PipelineConfig::from_file(path)?;
         Ok(self)
     }
@@ -206,8 +241,8 @@ impl VoirsPipelineBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::AudioFormat;
     use crate::builder::builder_impl::VoirsPipelineBuilder;
+    use crate::types::AudioFormat;
 
     #[test]
     fn test_fluent_api_chaining() {
@@ -232,25 +267,37 @@ mod tests {
         assert_eq!(builder.config.default_synthesis.volume_gain, 3.0);
         assert!(builder.config.default_synthesis.enable_enhancement);
         assert_eq!(builder.config.default_synthesis.sample_rate, 22050);
-        assert_eq!(builder.config.default_synthesis.output_format, AudioFormat::Wav);
+        assert_eq!(
+            builder.config.default_synthesis.output_format,
+            AudioFormat::Wav
+        );
     }
 
     #[test]
     fn test_preset_configurations() {
         let high_quality = VoirsPipelineBuilder::new().with_preset(PresetProfile::HighQuality);
-        assert_eq!(high_quality.config.default_synthesis.quality, QualityLevel::Ultra);
+        assert_eq!(
+            high_quality.config.default_synthesis.quality,
+            QualityLevel::Ultra
+        );
         assert!(high_quality.config.use_gpu);
         assert!(high_quality.config.default_synthesis.enable_enhancement);
         assert_eq!(high_quality.config.default_synthesis.sample_rate, 48000);
 
         let fast_synthesis = VoirsPipelineBuilder::new().with_preset(PresetProfile::FastSynthesis);
-        assert_eq!(fast_synthesis.config.default_synthesis.quality, QualityLevel::Medium);
+        assert_eq!(
+            fast_synthesis.config.default_synthesis.quality,
+            QualityLevel::Medium
+        );
         assert!(fast_synthesis.config.use_gpu);
         assert!(!fast_synthesis.config.default_synthesis.enable_enhancement);
         assert_eq!(fast_synthesis.config.default_synthesis.sample_rate, 16000);
 
         let low_memory = VoirsPipelineBuilder::new().with_preset(PresetProfile::LowMemory);
-        assert_eq!(low_memory.config.default_synthesis.quality, QualityLevel::Low);
+        assert_eq!(
+            low_memory.config.default_synthesis.quality,
+            QualityLevel::Low
+        );
         assert!(!low_memory.config.use_gpu);
         assert_eq!(low_memory.config.max_cache_size_mb, 256);
         assert_eq!(low_memory.config.default_synthesis.sample_rate, 16000);
@@ -274,10 +321,16 @@ mod tests {
     fn test_language_configuration() {
         let japanese = VoirsPipelineBuilder::new().with_language(LanguageCode::JaJp);
         assert_eq!(japanese.config.default_synthesis.sample_rate, 22050);
-        assert_eq!(japanese.config.default_synthesis.language, LanguageCode::JaJp);
+        assert_eq!(
+            japanese.config.default_synthesis.language,
+            LanguageCode::JaJp
+        );
 
         let english = VoirsPipelineBuilder::new().with_language(LanguageCode::EnUs);
         assert_eq!(english.config.default_synthesis.sample_rate, 16000);
-        assert_eq!(english.config.default_synthesis.language, LanguageCode::EnUs);
+        assert_eq!(
+            english.config.default_synthesis.language,
+            LanguageCode::EnUs
+        );
     }
 }

@@ -3,12 +3,12 @@
 //! This module implements DDPM, DDIM, and fast sampling techniques
 //! for high-quality audio generation from mel spectrograms.
 
-use candle_core::{Result as CandleResult, Tensor, Device};
+use candle_core::{Device, Result as CandleResult, Tensor};
 use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
 
-use crate::{Result, VocoderError};
 use super::{EnhancedUNet, NoiseScheduler};
+use crate::Result;
 
 /// Sampling algorithm types
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -68,7 +68,7 @@ pub struct SamplingStats {
 }
 
 /// Advanced diffusion sampler with multiple algorithms
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DiffusionSampler {
     config: SamplingConfig,
     scheduler: NoiseScheduler,
@@ -77,18 +77,14 @@ pub struct DiffusionSampler {
 
 impl DiffusionSampler {
     /// Create a new diffusion sampler
-    pub fn new(
-        config: SamplingConfig,
-        scheduler: NoiseScheduler,
-        device: Device,
-    ) -> Result<Self> {
+    pub fn new(config: SamplingConfig, scheduler: NoiseScheduler, device: Device) -> Result<Self> {
         Ok(Self {
             config,
             scheduler,
             device,
         })
     }
-    
+
     /// Generate audio using the configured sampling algorithm
     pub fn sample(
         &self,
@@ -97,16 +93,16 @@ impl DiffusionSampler {
         mel_condition: &Tensor,
     ) -> CandleResult<(Tensor, SamplingStats)> {
         let start_time = std::time::Instant::now();
-        
+
         let result = match self.config.algorithm {
             SamplingAlgorithm::DDPM => self.ddpm_sample(unet, shape, mel_condition),
             SamplingAlgorithm::DDIM => self.ddim_sample(unet, shape, mel_condition),
             SamplingAlgorithm::FastDDIM => self.fast_ddim_sample(unet, shape, mel_condition),
             SamplingAlgorithm::Adaptive => self.adaptive_sample(unet, shape, mel_condition),
         };
-        
+
         let total_time = start_time.elapsed().as_millis() as f32;
-        
+
         match result {
             Ok(audio) => {
                 let stats = SamplingStats {
@@ -122,7 +118,7 @@ impl DiffusionSampler {
             Err(e) => Err(e),
         }
     }
-    
+
     /// DDPM sampling - original stochastic algorithm
     fn ddpm_sample(
         &self,
@@ -132,35 +128,35 @@ impl DiffusionSampler {
     ) -> CandleResult<Tensor> {
         // Start from random noise
         let mut x = self.sample_noise(shape)?;
-        
+
         let num_steps = self.config.num_steps as usize;
         let total_timesteps = self.scheduler.config().num_steps as usize;
-        
+
         // Create timestep schedule
         let step_size = total_timesteps / num_steps;
         let timesteps: Vec<usize> = (0..num_steps)
             .map(|i| total_timesteps - 1 - i * step_size)
             .collect();
-        
+
         for &t in &timesteps {
             // Create timestep tensor
             let t_tensor = Tensor::new(&[t as f32], &self.device)?;
-            
+
             // Predict noise
             let predicted_noise = unet.forward(&x, &t_tensor, mel_condition)?;
-            
+
             // DDPM reverse step
             x = self.ddpm_step(&x, &predicted_noise, t)?;
-            
+
             // Apply temperature scaling
             if self.config.temperature != 1.0 {
                 x = x.affine(self.config.temperature as f64, 0.0)?;
             }
         }
-        
+
         Ok(x)
     }
-    
+
     /// DDIM sampling - deterministic and faster
     fn ddim_sample(
         &self,
@@ -170,16 +166,16 @@ impl DiffusionSampler {
     ) -> CandleResult<Tensor> {
         // Start from random noise
         let mut x = self.sample_noise(shape)?;
-        
+
         let num_steps = self.config.num_steps as usize;
         let total_timesteps = self.scheduler.config().num_steps as usize;
-        
+
         // Create DDIM timestep schedule
         let timesteps: Vec<usize> = (0..num_steps)
             .map(|i| total_timesteps * i / num_steps)
             .rev()
             .collect();
-        
+
         for i in 0..timesteps.len() {
             let t = timesteps[i];
             let prev_t = if i == timesteps.len() - 1 {
@@ -187,20 +183,20 @@ impl DiffusionSampler {
             } else {
                 timesteps[i + 1]
             };
-            
+
             // Create timestep tensor
             let t_tensor = Tensor::new(&[t as f32], &self.device)?;
-            
+
             // Predict noise
             let predicted_noise = unet.forward(&x, &t_tensor, mel_condition)?;
-            
+
             // DDIM reverse step
             x = self.ddim_step(&x, &predicted_noise, t, prev_t)?;
         }
-        
+
         Ok(x)
     }
-    
+
     /// Fast DDIM with significantly reduced steps
     fn fast_ddim_sample(
         &self,
@@ -210,10 +206,10 @@ impl DiffusionSampler {
     ) -> CandleResult<Tensor> {
         // Use fewer steps for speed
         let fast_steps = (self.config.num_steps / 4).max(10);
-        
+
         let mut fast_config = self.config.clone();
         fast_config.num_steps = fast_steps;
-        
+
         // Create fast sampler directly without error conversion
         let fast_scheduler = self.scheduler.clone();
         let fast_sampler = DiffusionSampler {
@@ -223,7 +219,7 @@ impl DiffusionSampler {
         };
         fast_sampler.ddim_sample(unet, shape, mel_condition)
     }
-    
+
     /// Adaptive sampling that adjusts steps based on convergence
     fn adaptive_sample(
         &self,
@@ -234,15 +230,15 @@ impl DiffusionSampler {
         // Start with DDIM but monitor convergence
         let mut x = self.sample_noise(shape)?;
         let mut prev_x = x.clone();
-        
+
         let num_steps = self.config.num_steps as usize;
         let total_timesteps = self.scheduler.config().num_steps as usize;
-        
+
         let timesteps: Vec<usize> = (0..num_steps)
             .map(|i| total_timesteps * i / num_steps)
             .rev()
             .collect();
-        
+
         for i in 0..timesteps.len() {
             let t = timesteps[i];
             let prev_t = if i == timesteps.len() - 1 {
@@ -250,12 +246,12 @@ impl DiffusionSampler {
             } else {
                 timesteps[i + 1]
             };
-            
+
             let t_tensor = Tensor::new(&[t as f32], &self.device)?;
             let predicted_noise = unet.forward(&x, &t_tensor, mel_condition)?;
-            
+
             x = self.ddim_step(&x, &predicted_noise, t, prev_t)?;
-            
+
             // Check convergence (simplified)
             if i > 5 {
                 let diff = x.sub(&prev_x)?.abs()?.mean_all()?;
@@ -265,13 +261,13 @@ impl DiffusionSampler {
                     break;
                 }
             }
-            
+
             prev_x = x.clone();
         }
-        
+
         Ok(x)
     }
-    
+
     /// DDPM reverse diffusion step
     fn ddpm_step(
         &self,
@@ -281,23 +277,23 @@ impl DiffusionSampler {
     ) -> CandleResult<Tensor> {
         let alpha_t = self.scheduler.alphas_cumprod()[timestep];
         let beta_t = self.scheduler.betas()[timestep];
-        
+
         let alpha_t_sqrt = alpha_t.sqrt();
         let one_minus_alpha_t_sqrt = (1.0_f32 - alpha_t).sqrt();
-        
+
         // Predict x0 from noise
-        let x0_pred = (x.affine(1.0 / alpha_t_sqrt as f64, 0.0)?
+        let _x0_pred = (x.affine(1.0 / alpha_t_sqrt as f64, 0.0)?
             - predicted_noise.affine(one_minus_alpha_t_sqrt as f64 / alpha_t_sqrt as f64, 0.0)?)?;
-        
+
         // Compute direction pointing to x_t
         let direction = predicted_noise.affine(beta_t.sqrt() as f64, 0.0)?;
-        
+
         // Compute x_{t-1}
         let x_prev = x.sub(&direction)?;
-        
+
         // Add noise for stochasticity (DDPM)
         if timestep > 0 {
-            let noise = self.sample_noise(&x.dims())?;
+            let noise = self.sample_noise(x.dims())?;
             let sigma = beta_t.sqrt();
             let x_prev = x_prev.add(&noise.affine(sigma as f64, 0.0)?)?;
             Ok(x_prev)
@@ -305,7 +301,7 @@ impl DiffusionSampler {
             Ok(x_prev)
         }
     }
-    
+
     /// DDIM reverse diffusion step
     fn ddim_step(
         &self,
@@ -320,33 +316,38 @@ impl DiffusionSampler {
         } else {
             self.scheduler.alphas_cumprod()[prev_timestep]
         };
-        
+
         let alpha_t_sqrt = alpha_t.sqrt();
         let one_minus_alpha_t_sqrt = (1.0_f32 - alpha_t).sqrt();
-        
+
         // Predict x0
         let x0_pred = (x.affine(1.0 / alpha_t_sqrt as f64, 0.0)?
             - predicted_noise.affine(one_minus_alpha_t_sqrt as f64 / alpha_t_sqrt as f64, 0.0)?)?;
-        
+
         // Compute direction for x_t
         let alpha_t_prev_sqrt = alpha_t_prev.sqrt();
         let one_minus_alpha_t_prev: f32 = 1.0 - alpha_t_prev;
-        
+
         // DDIM deterministic step
-        let x_prev = x0_pred.affine(alpha_t_prev_sqrt as f64, 0.0)?
-            .add(&predicted_noise.affine(one_minus_alpha_t_prev.sqrt() as f64 * self.config.eta as f64, 0.0)?)?;
-        
+        let x_prev =
+            x0_pred
+                .affine(alpha_t_prev_sqrt as f64, 0.0)?
+                .add(&predicted_noise.affine(
+                    one_minus_alpha_t_prev.sqrt() as f64 * self.config.eta as f64,
+                    0.0,
+                )?)?;
+
         Ok(x_prev)
     }
-    
+
     /// Sample random noise tensor
     fn sample_noise(&self, shape: &[usize]) -> CandleResult<Tensor> {
         let device = &self.device;
-        
+
         // Generate random noise
         let total_elements: usize = shape.iter().product();
         let mut noise_data = Vec::with_capacity(total_elements);
-        
+
         // Use Box-Muller transform for Gaussian noise
         for _ in 0..total_elements {
             let u1: f32 = fastrand::f32();
@@ -354,15 +355,15 @@ impl DiffusionSampler {
             let noise = (-2.0 * u1.ln()).sqrt() * (2.0 * PI * u2).cos();
             noise_data.push(noise * self.config.temperature);
         }
-        
+
         Tensor::from_vec(noise_data, shape, device)
     }
-    
+
     /// Get sampling configuration
     pub fn config(&self) -> &SamplingConfig {
         &self.config
     }
-    
+
     /// Update sampling configuration
     pub fn set_config(&mut self, config: SamplingConfig) {
         self.config = config;
@@ -374,8 +375,8 @@ impl DiffusionSampler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use candle_core::Device;
-    
+    // use candle_core::Device;
+
     #[test]
     fn test_sampling_config() {
         let config = SamplingConfig::default();
@@ -383,7 +384,7 @@ mod tests {
         assert_eq!(config.eta, 0.0);
         assert!(matches!(config.algorithm, SamplingAlgorithm::DDIM));
     }
-    
+
     #[test]
     fn test_sampling_algorithms() {
         // Test that all algorithm variants can be created
@@ -393,7 +394,7 @@ mod tests {
             SamplingAlgorithm::FastDDIM,
             SamplingAlgorithm::Adaptive,
         ];
-        
+
         for algorithm in &algorithms {
             let config = SamplingConfig {
                 algorithm: *algorithm,
@@ -402,7 +403,7 @@ mod tests {
             assert_eq!(config.algorithm as u8, *algorithm as u8);
         }
     }
-    
+
     #[test]
     fn test_sampling_stats() {
         let stats = SamplingStats {
@@ -413,7 +414,7 @@ mod tests {
             total_time_ms: 500.0,
             convergence_score: 0.95,
         };
-        
+
         assert_eq!(stats.total_steps, 50);
         assert_eq!(stats.total_time_ms, 500.0);
     }

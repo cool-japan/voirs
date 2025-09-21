@@ -1,0 +1,417 @@
+# VoiRS Examples CI/CD Docker Image
+# ==================================
+#
+# Multi-stage Docker image for building and testing VoiRS examples in CI/CD pipelines.
+# Provides a consistent environment across different platforms and CI systems.
+#
+# Usage:
+#   docker build -f Dockerfile.ci -t voirs-ci .
+#   docker run -v $(pwd):/workspace voirs-ci
+#
+# Build arguments:
+#   RUST_VERSION - Rust version to use (default: 1.75)
+#   TARGET_ARCH - Target architecture (default: x86_64-unknown-linux-gnu)
+#   BUILD_PROFILE - Build profile (default: release)
+
+# Build stage - Install dependencies and build tools
+FROM rust:1.75-slim as builder
+
+# Build arguments
+ARG RUST_VERSION=1.75
+ARG TARGET_ARCH=x86_64-unknown-linux-gnu
+ARG BUILD_PROFILE=release
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV RUST_BACKTRACE=1
+ENV CARGO_TERM_COLOR=always
+ENV RUSTFLAGS="-D warnings"
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    # Build essentials
+    build-essential \
+    pkg-config \
+    cmake \
+    git \
+    curl \
+    # Audio libraries
+    libasound2-dev \
+    libpulse-dev \
+    libportaudio2 \
+    libportaudio-dev \
+    # FFmpeg for audio processing
+    ffmpeg \
+    libavcodec-dev \
+    libavformat-dev \
+    libavutil-dev \
+    # System monitoring tools
+    htop \
+    iotop \
+    nethogs \
+    # Python for build scripts
+    python3 \
+    python3-pip \
+    python3-venv \
+    # Utilities
+    jq \
+    wget \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust components
+RUN rustup component add rustfmt clippy
+RUN rustup target add $TARGET_ARCH
+
+# Install cargo tools
+RUN cargo install \
+    cargo-audit \
+    cargo-watch \
+    cargo-cache \
+    cargo-tarpaulin
+
+# Install Python dependencies for build system
+RUN pip3 install --no-cache-dir \
+    toml \
+    psutil \
+    matplotlib \
+    numpy \
+    pandas
+
+# Create workspace directory
+WORKDIR /workspace
+
+# Production stage - Runtime environment
+FROM ubuntu:22.04 as runtime
+
+# Runtime dependencies
+RUN apt-get update && apt-get install -y \
+    # Runtime libraries
+    libasound2 \
+    libpulse0 \
+    libportaudio2 \
+    # FFmpeg runtime
+    ffmpeg \
+    # System tools
+    curl \
+    git \
+    jq \
+    python3 \
+    python3-pip \
+    # Monitoring tools
+    htop \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Rust toolchain from builder
+COPY --from=builder /usr/local/cargo /usr/local/cargo
+COPY --from=builder /usr/local/rustup /usr/local/rustup
+
+# Set up environment
+ENV PATH="/usr/local/cargo/bin:$PATH"
+ENV RUST_BACKTRACE=1
+ENV CARGO_TERM_COLOR=always
+
+# Create workspace and user
+RUN groupadd -r voirs && useradd -r -g voirs -m voirs
+WORKDIR /workspace
+RUN chown -R voirs:voirs /workspace
+
+# Switch to non-root user
+USER voirs
+
+# CI/CD stage - Full development environment
+FROM builder as ci
+
+# Set up CI-specific environment
+ENV CI=true
+ENV CARGO_INCREMENTAL=0
+ENV CARGO_PROFILE_RELEASE_DEBUG=1
+
+# Install additional tools for CI
+RUN cargo install \
+    cargo-deny \
+    cargo-machete \
+    cargo-udeps
+
+# Install Python CI tools
+RUN pip3 install --no-cache-dir \
+    pytest \
+    coverage \
+    black \
+    flake8 \
+    mypy
+
+# Create CI user and workspace
+RUN groupadd -r ci && useradd -r -g ci -m ci
+RUN mkdir -p /ci-workspace /ci-reports /ci-artifacts
+RUN chown -R ci:ci /ci-workspace /ci-reports /ci-artifacts
+
+# Copy CI scripts
+COPY tools/ /ci-tools/
+RUN chmod +x /ci-tools/*.sh /ci-tools/*.py
+
+# Switch to CI user
+USER ci
+WORKDIR /ci-workspace
+
+# Entry point script
+COPY <<'EOF' /entrypoint.sh
+#!/bin/bash
+set -euo pipefail
+
+# Configuration
+WORKSPACE_DIR="${WORKSPACE_DIR:-/ci-workspace}"
+REPORTS_DIR="${REPORTS_DIR:-/ci-reports}"
+ARTIFACTS_DIR="${ARTIFACTS_DIR:-/ci-artifacts}"
+BUILD_PROFILE="${BUILD_PROFILE:-ci}"
+PARALLEL_JOBS="${PARALLEL_JOBS:-$(nproc)}"
+TEST_TIMEOUT="${TEST_TIMEOUT:-300}"
+
+# Create directories
+mkdir -p "$REPORTS_DIR" "$ARTIFACTS_DIR"
+
+# Change to workspace
+cd "$WORKSPACE_DIR"
+
+# Validate environment
+echo "🔍 Validating CI environment..."
+echo "  Workspace: $WORKSPACE_DIR"
+echo "  Reports: $REPORTS_DIR"
+echo "  Artifacts: $ARTIFACTS_DIR"
+echo "  Profile: $BUILD_PROFILE"
+echo "  Parallel Jobs: $PARALLEL_JOBS"
+echo "  Rust Version: $(rustc --version)"
+echo "  Cargo Version: $(cargo --version)"
+
+# Check if we have VoiRS examples
+if [[ ! -f "examples/Cargo.toml" ]]; then
+    echo "❌ VoiRS examples not found. Please mount the repository to $WORKSPACE_DIR"
+    exit 1
+fi
+
+# Run CI pipeline based on arguments
+case "${1:-full}" in
+    "build")
+        echo "🔨 Running build-only pipeline..."
+        cd examples
+        /ci-tools/enhanced_build_system.py \
+            --build-only \
+            --parallel "$PARALLEL_JOBS" \
+            --report "$REPORTS_DIR/build_report.json"
+        ;;
+    
+    "test")
+        echo "🧪 Running test-only pipeline..."
+        cd examples
+        /ci-tools/enhanced_build_system.py \
+            --test-only \
+            --parallel "$PARALLEL_JOBS" \
+            --timeout "$TEST_TIMEOUT" \
+            --report "$REPORTS_DIR/test_report.json"
+        ;;
+    
+    "quality")
+        echo "📊 Running quality checks..."
+        cd examples
+        cargo fmt --all -- --check
+        cargo clippy --all-targets --all-features -- -D warnings
+        cargo audit
+        ;;
+    
+    "benchmark")
+        echo "🏃 Running performance benchmarks..."
+        cd examples
+        /ci-tools/enhanced_build_system.py \
+            --parallel "$PARALLEL_JOBS" \
+            --timeout 600 \
+            --examples "*benchmark*,*performance*" \
+            --report "$REPORTS_DIR/benchmark_report.json"
+        ;;
+    
+    "full"|*)
+        echo "🚀 Running full CI/CD pipeline..."
+        
+        # Quality checks
+        echo "📊 Step 1/4: Quality checks..."
+        cd examples
+        cargo fmt --all -- --check
+        cargo clippy --all-targets --all-features -- -D warnings
+        cargo audit
+        
+        # Build
+        echo "🔨 Step 2/4: Building examples..."
+        /ci-tools/enhanced_build_system.py \
+            --build-only \
+            --parallel "$PARALLEL_JOBS" \
+            --report "$REPORTS_DIR/build_report.json"
+        
+        # Test
+        echo "🧪 Step 3/4: Testing examples..."
+        /ci-tools/enhanced_build_system.py \
+            --test-only \
+            --parallel "$PARALLEL_JOBS" \
+            --timeout "$TEST_TIMEOUT" \
+            --report "$REPORTS_DIR/test_report.json"
+        
+        # Generate final report
+        echo "📋 Step 4/4: Generating final report..."
+        python3 << 'PYTHON_EOF'
+import json
+import os
+from datetime import datetime
+
+reports_dir = os.environ['REPORTS_DIR']
+artifacts_dir = os.environ['ARTIFACTS_DIR']
+
+# Collect all reports
+final_report = {
+    'timestamp': datetime.utcnow().isoformat(),
+    'pipeline': 'full',
+    'environment': {
+        'rust_version': os.popen('rustc --version').read().strip(),
+        'platform': os.popen('uname -a').read().strip(),
+        'parallel_jobs': os.environ['PARALLEL_JOBS']
+    },
+    'reports': {}
+}
+
+# Load individual reports
+for report_file in ['build_report.json', 'test_report.json', 'benchmark_report.json']:
+    report_path = os.path.join(reports_dir, report_file)
+    if os.path.exists(report_path):
+        try:
+            with open(report_path, 'r') as f:
+                final_report['reports'][report_file] = json.load(f)
+        except Exception as e:
+            print(f"Warning: Could not load {report_file}: {e}")
+
+# Save final report
+final_report_path = os.path.join(reports_dir, 'final_report.json')
+with open(final_report_path, 'w') as f:
+    json.dump(final_report, f, indent=2)
+
+print(f"✅ Final report saved to: {final_report_path}")
+
+# Generate summary
+build_report = final_report['reports'].get('build_report.json', {})
+test_report = final_report['reports'].get('test_report.json', {})
+
+build_results = build_report.get('build_results', {})
+test_results = test_report.get('test_results', {})
+
+print("\n" + "="*50)
+print("CI/CD Pipeline Summary")
+print("="*50)
+print(f"Build: {build_results.get('successful', 0)}/{build_results.get('total', 0)} successful")
+print(f"Test: {test_results.get('successful', 0)}/{test_results.get('total', 0)} successful")
+
+# Check if pipeline succeeded
+build_success = build_results.get('successful', 0) == build_results.get('total', 0)
+test_success = test_results.get('successful', 0) == test_results.get('total', 0)
+
+if build_success and test_success:
+    print("✅ Pipeline completed successfully!")
+    exit(0)
+else:
+    print("❌ Pipeline failed!")
+    exit(1)
+PYTHON_EOF
+        ;;
+esac
+
+echo "🎉 CI/CD pipeline completed!"
+EOF
+
+RUN chmod +x /entrypoint.sh
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD cargo --version && rustc --version || exit 1
+
+# Default entry point
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["full"]
+
+# Testing stage - Lightweight image for quick tests
+FROM runtime as test
+
+# Install minimal testing dependencies
+RUN pip3 install --no-cache-dir pytest
+
+# Copy only essential tools
+COPY tools/enhanced_build_system.py /test-tools/
+RUN chmod +x /test-tools/*.py
+
+USER voirs
+WORKDIR /workspace
+
+# Quick test entry point
+COPY <<'EOF' /test-entrypoint.sh
+#!/bin/bash
+set -euo pipefail
+
+cd /workspace/examples
+python3 /test-tools/enhanced_build_system.py \
+    --parallel $(nproc) \
+    --timeout 60 \
+    --examples "${TEST_EXAMPLES:-*}" \
+    --report "/tmp/test_report.json" \
+    "$@"
+EOF
+
+RUN chmod +x /test-entrypoint.sh
+
+ENTRYPOINT ["/test-entrypoint.sh"]
+
+# Benchmark stage - Optimized for performance testing
+FROM ci as benchmark
+
+# Install performance monitoring tools
+RUN apt-get update && apt-get install -y \
+    perf-tools-unstable \
+    sysstat \
+    && rm -rf /var/lib/apt/lists/*
+
+# Performance-optimized configuration
+ENV CARGO_PROFILE_RELEASE_LTO=true
+ENV CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+ENV RUSTFLAGS="-C target-cpu=native -C opt-level=3"
+
+# Benchmark entry point
+COPY <<'EOF' /benchmark-entrypoint.sh
+#!/bin/bash
+set -euo pipefail
+
+cd /ci-workspace/examples
+
+echo "🏃 Starting performance benchmarks..."
+echo "CPU Info: $(nproc) cores, $(grep 'model name' /proc/cpuinfo | head -1 | cut -d: -f2)"
+echo "Memory: $(free -h | grep 'Mem:' | awk '{print $2}')"
+
+# Run system monitoring in background
+iostat -x 1 > /ci-reports/iostat.log 2>&1 &
+IOSTAT_PID=$!
+
+# Run benchmarks
+/ci-tools/enhanced_build_system.py \
+    --parallel $(nproc) \
+    --timeout 1800 \
+    --examples "*benchmark*,*performance*" \
+    --report "/ci-reports/benchmark_report.json" \
+    --verbose
+
+# Stop monitoring
+kill $IOSTAT_PID 2>/dev/null || true
+
+echo "✅ Benchmarks completed!"
+EOF
+
+RUN chmod +x /benchmark-entrypoint.sh
+
+ENTRYPOINT ["/benchmark-entrypoint.sh"]
+
+# Labels for metadata
+LABEL maintainer="VoiRS Team"
+LABEL description="VoiRS Examples CI/CD Environment"
+LABEL version="1.0"
+LABEL rust.version="1.75"

@@ -1,0 +1,110 @@
+[package]
+name = "voirs-conversion"
+version = { workspace = true }
+edition = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = "https://docs.rs/voirs-conversion"
+keywords = { workspace = true }
+categories = ["multimedia::audio", "science", "asynchronous"]
+rust-version = { workspace = true }
+description = "Real-time voice conversion system for VoiRS"
+
+[dependencies]
+# Core ML and tensor operations
+ndarray = { workspace = true }
+candle-core = { workspace = true }
+candle-nn = { workspace = true }
+
+# Real-time audio processing
+cpal = { workspace = true }
+dasp = { workspace = true }
+realfft = { workspace = true }
+rustfft = { workspace = true }
+
+# Async and concurrency
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+rayon = { workspace = true }
+async-stream = { workspace = true }
+tokio-stream = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling and utilities
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# Math and random
+rand = { workspace = true }
+fastrand = { workspace = true }
+num-complex = { workspace = true }
+num_cpus = { workspace = true }
+
+# Time and synchronization
+parking_lot = { workspace = true }
+crossbeam-utils = { workspace = true }
+chrono = { workspace = true }
+
+# Compression for cache optimization
+flate2 = { workspace = true }
+
+# HTTP client for IoT cloud connectivity
+reqwest = { version = "0.11.22", default-features = false, features = ["json", "rustls-tls"], optional = true }
+
+# VoiRS dependencies
+voirs-acoustic = { version = "0.1.0-alpha.1", path = "../voirs-acoustic", optional = true }
+voirs-cloning = { version = "0.1.0-alpha.1", path = "../voirs-cloning", optional = true }
+voirs-emotion = { version = "0.1.0-alpha.1", path = "../voirs-emotion", optional = true }
+voirs-spatial = { version = "0.1.0-alpha.1", path = "../voirs-spatial", optional = true }
+
+# WebAssembly dependencies
+wasm-bindgen = { version = "0.2.92", optional = true }
+wasm-bindgen-futures = { version = "0.4.42", optional = true }
+js-sys = { version = "0.3.69", optional = true }
+web-sys = { version = "0.3.69", optional = true, features = [
+    "console",
+    "AudioContext",
+    "AudioContextState",
+    "AudioBuffer",
+    "AudioDestinationNode",
+    "AudioNode",
+    "GainNode",
+    "ScriptProcessorNode",
+    "AudioProcessingEvent",
+    "Performance",
+    "Window",
+    "Document",
+    "Navigator",
+] }
+getrandom = { version = "0.2", features = ["js"], optional = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+criterion = { workspace = true }
+tempfile = "3.8"
+
+[features]
+default = ["real-time"]
+real-time = []
+acoustic-integration = ["voirs-acoustic"]
+cloning-integration = ["voirs-cloning"]
+emotion-integration = ["voirs-emotion"]
+spatial-integration = ["voirs-spatial"]
+gpu = []
+cuda = ["candle-core/cuda"]
+metal = ["candle-core/metal"]
+streaming = ["real-time"]
+wasm = ["wasm-bindgen", "wasm-bindgen-futures", "js-sys", "web-sys", "getrandom"]
+iot = ["reqwest"]
+all-integrations = ["acoustic-integration", "cloning-integration", "emotion-integration", "spatial-integration"]
+
+
+[lints]
+workspace = true

@@ -1,0 +1,58 @@
+[Unit]
+Description=VoiRS - Neural Speech Synthesis Service
+Documentation=https://github.com/cool-japan/voirs
+After=network.target network-online.target
+Wants=network-online.target
+Requires=network.target
+
+[Service]
+Type=notify
+User=voirs
+Group=voirs
+WorkingDirectory=/opt/voirs
+ExecStartPre=/usr/bin/test -f /opt/voirs/voirs
+ExecStart=/opt/voirs/voirs server --config /etc/voirs/config.toml
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStartSec=30
+TimeoutStopSec=30
+Restart=always
+RestartSec=10
+StartLimitInterval=60
+StartLimitBurst=3
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/voirs /var/log/voirs /tmp
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+MemoryAccounting=true
+MemoryMax=4G
+CPUAccounting=true
+CPUQuota=200%
+
+# Environment variables
+Environment=RUST_LOG=info
+Environment=VOIRS_CONFIG_PATH=/etc/voirs
+Environment=VOIRS_DATA_PATH=/var/lib/voirs
+Environment=VOIRS_LOG_PATH=/var/log/voirs
+Environment=VOIRS_MODELS_PATH=/var/lib/voirs/models
+EnvironmentFile=-/etc/voirs/environment
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=voirs
+
+[Install]
+WantedBy=multi-user.target
+Alias=voirs.service

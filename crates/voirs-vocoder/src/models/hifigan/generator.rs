@@ -1,7 +1,9 @@
 //! HiFi-GAN generator implementation.
 
-use crate::{Result, VocoderError};
-use super::{HiFiGanConfig, mrf::MultiReceptiveField};
+use super::{mrf::MultiReceptiveField, HiFiGanConfig};
+use crate::Result;
+#[cfg(not(feature = "candle"))]
+use crate::VocoderError;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "candle")]
@@ -44,7 +46,7 @@ impl HiFiGanGenerator {
     #[cfg(feature = "candle")]
     pub fn new(config: HiFiGanConfig, vb: VarBuilder) -> Result<Self> {
         let device = vb.device().clone();
-        
+
         // Input convolution: mel_channels -> initial_channels
         let input_conv = candle_nn::conv1d(
             config.mel_channels as usize,
@@ -60,13 +62,15 @@ impl HiFiGanGenerator {
         // Build upsampling blocks
         let mut upsample_blocks = Vec::new();
         let mut current_channels = config.initial_channels;
-        
-        for (i, (&upsample_rate, &kernel_size)) in config.upsample_rates.iter()
+
+        for (i, (&upsample_rate, &kernel_size)) in config
+            .upsample_rates
+            .iter()
             .zip(config.upsample_kernel_sizes.iter())
             .enumerate()
         {
             let output_channels = current_channels / 2;
-            
+
             // Transposed convolution for upsampling
             let transpose_conv = candle_nn::conv_transpose1d(
                 current_channels as usize,
@@ -79,26 +83,26 @@ impl HiFiGanGenerator {
                     groups: 1,
                     output_padding: 0,
                 },
-                vb.pp(format!("upsample_blocks.{}.transpose_conv", i)),
+                vb.pp(format!("upsample_blocks.{i}.transpose_conv")),
             )?;
-            
+
             // Multi-receptive field block
             let mrf = MultiReceptiveField::new(
                 output_channels,
                 &config.mrf_kernel_sizes,
                 &config.mrf_dilation_sizes,
                 config.leaky_relu_slope,
-                vb.pp(format!("upsample_blocks.{}.mrf", i)),
+                vb.pp(format!("upsample_blocks.{i}.mrf")),
             )?;
-            
+
             upsample_blocks.push(UpsampleBlock {
                 transpose_conv,
                 mrf,
             });
-            
+
             current_channels = output_channels;
         }
-        
+
         // Output convolution: final_channels -> 1 (mono audio)
         let output_conv = candle_nn::conv1d(
             current_channels as usize,
@@ -123,9 +127,7 @@ impl HiFiGanGenerator {
     /// Create generator without Candle (for testing)
     #[cfg(not(feature = "candle"))]
     pub fn new(config: HiFiGanConfig) -> Result<Self> {
-        Ok(Self {
-            config,
-        })
+        Ok(Self { config })
     }
 
     /// Forward pass through generator
@@ -133,26 +135,26 @@ impl HiFiGanGenerator {
     pub fn forward(&self, mel: &Tensor) -> Result<Tensor> {
         // Input convolution
         let mut x = self.input_conv.forward(mel)?;
-        
+
         // Apply upsampling blocks
         for block in &self.upsample_blocks {
             // Transposed convolution
             x = block.transpose_conv.forward(&x)?;
-            
+
             // Leaky ReLU activation: max(x, slope * x)
             let negative_part = x.affine(self.config.leaky_relu_slope as f64, 0.0)?;
             x = x.maximum(&negative_part)?;
-            
+
             // Multi-receptive field
             x = block.mrf.forward(&x)?;
         }
-        
+
         // Output convolution
         x = self.output_conv.forward(&x)?;
-        
+
         // Tanh activation for audio output
         x = x.tanh()?;
-        
+
         Ok(x)
     }
 
@@ -183,17 +185,20 @@ impl HiFiGanGenerator {
     /// Calculate receptive field size
     pub fn receptive_field_size(&self) -> u32 {
         // Simplified calculation - actual receptive field depends on kernel sizes and dilations
-        let kernel_contribution = self.config.mrf_kernel_sizes.iter()
+        let kernel_contribution = self
+            .config
+            .mrf_kernel_sizes
+            .iter()
             .zip(self.config.mrf_dilation_sizes.iter())
             .map(|(&kernel, dilations)| {
                 let max_dilation = *dilations.iter().max().unwrap_or(&1);
                 (kernel - 1) * max_dilation + 1
             })
             .sum::<u32>();
-        
+
         // Add upsampling contributions
         let upsample_contribution = self.config.upsample_kernel_sizes.iter().sum::<u32>();
-        
+
         kernel_contribution + upsample_contribution
     }
 }
@@ -225,31 +230,35 @@ impl HiFiGanGenerator {
     /// Estimate number of parameters
     fn estimate_parameters(&self) -> u64 {
         let mut total = 0u64;
-        
+
         // Input convolution
         total += (self.config.mel_channels * self.config.initial_channels * 7) as u64;
-        
+
         // Upsampling blocks
         let mut current_channels = self.config.initial_channels;
-        for (&upsample_rate, &kernel_size) in self.config.upsample_rates.iter()
+        for (&_upsample_rate, &kernel_size) in self
+            .config
+            .upsample_rates
+            .iter()
             .zip(self.config.upsample_kernel_sizes.iter())
         {
             let output_channels = current_channels / 2;
-            
+
             // Transposed convolution parameters
             total += (current_channels * output_channels * kernel_size) as u64;
-            
+
             // MRF parameters (simplified estimate)
             for &mrf_kernel in &self.config.mrf_kernel_sizes {
-                total += (output_channels * output_channels * mrf_kernel * 3) as u64; // 3 residual blocks
+                total += (output_channels * output_channels * mrf_kernel * 3) as u64;
+                // 3 residual blocks
             }
-            
+
             current_channels = output_channels;
         }
-        
+
         // Output convolution
-        total += (current_channels * 1 * 7) as u64;
-        
+        total += current_channels as u64 * 7;
+
         total
     }
 
@@ -266,8 +275,8 @@ mod tests {
 
     #[test]
     fn test_generator_config() {
-        let config = HiFiGanConfig::default();
-        
+        let _config = HiFiGanConfig::default();
+
         #[cfg(not(feature = "candle"))]
         {
             let generator = HiFiGanGenerator::new(config.clone());
@@ -280,12 +289,12 @@ mod tests {
 
     #[test]
     fn test_generator_stats() {
-        let config = HiFiGanConfig::default();
-        
+        let _config = HiFiGanConfig::default();
+
         #[cfg(not(feature = "candle"))]
         {
             let generator = HiFiGanGenerator::new(config).unwrap();
-            
+
             let stats = generator.stats();
             assert!(stats.num_parameters > 0);
             assert!(stats.model_size_bytes > 0);
@@ -296,12 +305,12 @@ mod tests {
 
     #[test]
     fn test_upsampling_factor() {
-        let config = HiFiGanConfig::default();
-        
+        let _config = HiFiGanConfig::default();
+
         #[cfg(not(feature = "candle"))]
         {
             let generator = HiFiGanGenerator::new(config).unwrap();
-            
+
             // Default V1 config: [8, 8, 2, 2]
             assert_eq!(generator.total_upsampling_factor(), 256);
         }
@@ -309,12 +318,12 @@ mod tests {
 
     #[test]
     fn test_receptive_field() {
-        let config = HiFiGanConfig::default();
-        
+        let _config = HiFiGanConfig::default();
+
         #[cfg(not(feature = "candle"))]
         {
             let generator = HiFiGanGenerator::new(config).unwrap();
-            
+
             let rf_size = generator.receptive_field_size();
             assert!(rf_size > 0);
             assert!(rf_size < 10000); // Reasonable upper bound

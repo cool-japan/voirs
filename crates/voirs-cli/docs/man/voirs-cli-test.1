@@ -1,0 +1,237 @@
+.TH VOIRS-CLI-TEST 1 "2025-07-05" "voirs-cli" "VoiRS CLI Manual"
+
+.SH NAME
+voirs-cli-test \- Test VoiRS synthesis pipeline and validate installation
+
+.SH SYNOPSIS
+.B voirs-cli test
+[\fIOPTIONS\fR]
+[\fITEST_TEXT\fR]
+
+.SH DESCRIPTION
+The test command provides a quick way to validate that the VoiRS synthesis pipeline is working correctly. It performs end-to-end synthesis with a test phrase, verifying that all components (G2P, acoustic model, vocoder) are functioning properly.
+
+This command is particularly useful after installation, model downloads, or configuration changes to ensure the system is operating correctly.
+
+.SH OPTIONS
+.TP
+.I TEST_TEXT
+Custom text to use for testing. If not provided, uses the default test phrase: "Hello, this is a test of VoiRS speech synthesis."
+
+.TP
+.B \-\-play
+Play the generated audio through system speakers instead of saving to file.
+
+.TP
+.B \-v, \-\-voice \fIVOICE\fR
+Specify voice to use for testing. Uses default voice if not provided.
+
+.TP
+.B \-q, \-\-quality \fILEVEL\fR
+Set synthesis quality level for testing (low, medium, high, ultra).
+
+.TP
+.B \-f, \-\-format \fIFORMAT\fR
+Output format for test audio file (wav, mp3, flac, opus, ogg).
+
+.TP
+.B \-o, \-\-output \fIFILE\fR
+Specify output file for test audio. Default: "voirs_test_TIMESTAMP.wav"
+
+.TP
+.B \-\-benchmark
+Include performance benchmarking in the test, measuring synthesis speed and quality metrics.
+
+.TP
+.B \-\-verbose
+Enable detailed output showing each pipeline stage and timing information.
+
+.TP
+.B \-\-validate-models
+Perform additional validation of loaded models including checksum verification.
+
+.SH PIPELINE VALIDATION
+
+The test command validates the following pipeline components:
+
+.SS Text Processing
+.TP
+.B Text normalization
+Validates unicode handling, number expansion, and abbreviation processing.
+
+.TP
+.B SSML parsing
+Tests Speech Synthesis Markup Language parsing capabilities.
+
+.SS Grapheme-to-Phoneme (G2P)
+.TP
+.B Phoneme conversion
+Verifies text-to-phoneme conversion accuracy.
+
+.TP
+.B Language detection
+Tests automatic language detection for multilingual text.
+
+.SS Acoustic Modeling
+.TP
+.B Mel spectrogram generation
+Validates acoustic model inference and mel spectrogram quality.
+
+.TP
+.B Speaker conditioning
+Tests speaker embedding and voice characteristics.
+
+.SS Vocoding
+.TP
+.B Audio generation
+Verifies vocoder model inference and waveform generation.
+
+.TP
+.B Audio post-processing
+Tests audio enhancement, normalization, and format conversion.
+
+.SH EXAMPLES
+
+.TP
+.B Basic system test
+voirs-cli test
+
+.TP
+.B Test with custom text
+voirs-cli test "The quick brown fox jumps over the lazy dog"
+
+.TP
+.B Test with audio playback
+voirs-cli test --play
+
+.TP
+.B Test specific voice
+voirs-cli test --voice en-US-female-calm
+
+.TP
+.B Comprehensive test with benchmarking
+voirs-cli test --benchmark --verbose --validate-models
+
+.TP
+.B Test different quality levels
+voirs-cli test --quality ultra --format flac
+
+.TP
+.B Test SSML capabilities
+voirs-cli test '<speak><prosody rate="slow">Testing SSML</prosody></speak>'
+
+.SH OUTPUT
+
+The test command provides detailed feedback:
+
+.SS Success Output
+- Pipeline validation results
+- Synthesis timing information
+- Audio quality metrics
+- Generated file location
+
+.SS Error Diagnostics
+- Component failure identification
+- Suggested troubleshooting steps
+- Configuration recommendations
+- Model availability status
+
+.SH PERFORMANCE METRICS
+
+When using \fB\-\-benchmark\fR, the following metrics are reported:
+
+.TP
+.B Real-Time Factor (RTF)
+Ratio of synthesis time to audio duration. Values < 1.0 indicate real-time capability.
+
+.TP
+.B Audio Quality
+Basic quality metrics including peak amplitude, RMS level, and THD+N.
+
+.TP
+.B Memory Usage
+Peak memory consumption during synthesis.
+
+.TP
+.B Component Timing
+Individual timing for G2P, acoustic model, and vocoder stages.
+
+.SH TROUBLESHOOTING
+
+Common issues and solutions:
+
+.TP
+.B Model not found
+Run 'voirs-cli download-model MODEL_ID' to install required models.
+
+.TP
+.B Audio playback fails
+Check system audio configuration or use file output instead.
+
+.TP
+.B Poor synthesis quality
+Try different voice or quality settings, or update models.
+
+.TP
+.B Performance issues
+Use 'voirs-cli optimize-model' or adjust thread/GPU settings.
+
+.SH EXIT STATUS
+.TP
+.B 0
+Test completed successfully, all components working.
+
+.TP
+.B 1
+General test failure or invalid usage.
+
+.TP
+.B 2
+Configuration error preventing test execution.
+
+.TP
+.B 3
+Required models or voices not available.
+
+.TP
+.B 4
+Audio processing or output error.
+
+.SH FILES
+.TP
+.B voirs_test_TIMESTAMP.wav
+Default output file for test audio.
+
+.TP
+.B ~/.config/voirs/config.toml
+Configuration file affecting test behavior.
+
+.TP
+.B ~/.cache/voirs/
+Cache directory for temporary test files.
+
+.SH ENVIRONMENT VARIABLES
+.TP
+.B VOIRS_TEST_VOICE
+Default voice for testing.
+
+.TP
+.B VOIRS_TEST_QUALITY
+Default quality level for testing.
+
+.TP
+.B VOIRS_AUDIO_DEVICE
+Audio output device for playback testing.
+
+.SH SEE ALSO
+.BR voirs-cli (1),
+.BR voirs-cli-synthesize (1),
+.BR voirs-cli-models (1),
+.BR voirs-cli-voices (1),
+.BR voirs-cli-config (1)
+
+.SH AUTHOR
+VoiRS Development Team
+
+.SH REPORTING BUGS
+Report bugs at: https://github.com/voirs-project/voirs/issues

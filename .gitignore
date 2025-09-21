@@ -88,3 +88,6 @@ yarn-error.log*
 test_outputs/
 synthesis_results/
 */target/
+security-reports/
+crates/voirs-recognizer/coverage-reports/
+crates/voirs-recognizer/coverage-report/

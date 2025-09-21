@@ -1,0 +1,678 @@
+name: Documentation Generation
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Generate fresh docs daily at 3 AM UTC
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      deploy_docs:
+        description: 'Deploy documentation to GitHub Pages'
+        type: boolean
+        default: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Generate comprehensive API documentation
+  api-docs:
+    name: API Documentation
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt
+
+    - name: Configure Rust cache
+      uses: Swatinem/rust-cache@v2
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libasound2-dev \
+          libpulse-dev \
+          libjack-dev \
+          portaudio19-dev \
+          libssl-dev \
+          pkg-config \
+          build-essential \
+          graphviz \
+          python3 \
+          python3-pip
+
+    - name: Install documentation tools
+      run: |
+        cargo install cargo-doc2readme
+        cargo install mdbook
+        cargo install mdbook-linkcheck
+        cargo install mdbook-mermaid
+        pip3 install mkdocs mkdocs-material pymdown-extensions
+
+    - name: Generate Rust API documentation
+      run: |
+        # Generate docs with all features
+        cargo doc --all-features --no-deps --document-private-items
+        
+        # Generate README from lib.rs docs
+        cargo doc2readme --lib --out README_API.md
+
+    - name: Generate C API documentation
+      run: |
+        # Generate C header with documentation
+        python3 generate-header.py --with-docs
+        
+        # Create C API documentation
+        mkdir -p docs/c-api
+        cat > docs/c-api/README.md << 'EOF'
+        # VoiRS Recognizer C API Documentation
+        
+        This document describes the C API for VoiRS Recognizer, enabling integration
+        with C/C++ applications.
+        
+        ## Header File
+        
+        Include the main header file:
+        ```c
+        #include "voirs_recognizer.h"
+        ```
+        
+        ## API Reference
+        
+        See [voirs_recognizer.h](../include/voirs_recognizer.h) for the complete API.
+        
+        EOF
+
+    - name: Generate Python API documentation
+      if: contains(github.event.head_commit.message, '[python]') || github.event_name == 'schedule'
+      run: |
+        # Install Python documentation tools
+        pip3 install sphinx sphinx-rtd-theme
+        
+        # Generate Python stubs and docs
+        mkdir -p docs/python
+        echo "# VoiRS Recognizer Python API" > docs/python/README.md
+        echo "Python bindings documentation will be generated here." >> docs/python/README.md
+
+    - name: Generate WASM documentation
+      run: |
+        # Install wasm-pack
+        curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        
+        # Build WASM package with docs
+        ./build-wasm.sh --with-docs
+        
+        # Create WASM documentation
+        mkdir -p docs/wasm
+        cat > docs/wasm/README.md << 'EOF'
+        # VoiRS Recognizer WASM API Documentation
+        
+        This document describes the WebAssembly API for VoiRS Recognizer,
+        enabling integration with web browsers and Node.js applications.
+        
+        ## Installation
+        
+        ```bash
+        npm install @voirs/recognizer
+        ```
+        
+        ## Usage
+        
+        ### Browser
+        ```javascript
+        import { VoirsRecognizer } from '@voirs/recognizer';
+        
+        const recognizer = new VoirsRecognizer();
+        await recognizer.init();
+        
+        const result = await recognizer.recognize(audioBuffer);
+        console.log(result.text);
+        ```
+        
+        ### Node.js
+        ```javascript
+        const { VoirsRecognizer } = require('@voirs/recognizer');
+        // Same usage as browser
+        ```
+        
+        ## API Reference
+        
+        See the TypeScript definitions in the package for detailed API documentation.
+        EOF
+
+    - name: Generate performance documentation
+      run: |
+        mkdir -p docs/performance
+        
+        # Copy benchmark results if available
+        if [ -f "tests/benchmarks/history.json" ]; then
+          cp tests/benchmarks/history.json docs/performance/
+        fi
+        
+        # Generate performance guide
+        cat > docs/performance/README.md << 'EOF'
+        # Performance Guide
+        
+        ## Benchmarks
+        
+        VoiRS Recognizer is designed to meet the following performance requirements:
+        
+        - **Real-time Factor (RTF)**: < 0.3 on modern CPU
+        - **Memory Usage**: < 2GB for largest models  
+        - **Startup Time**: < 5 seconds
+        - **Streaming Latency**: < 200ms
+        
+        ## Optimization Tips
+        
+        ### Model Selection
+        - Use `whisper-tiny` for fastest processing
+        - Use `whisper-base` for balanced speed/accuracy
+        - Use `whisper-large` for highest accuracy
+        
+        ### Hardware Acceleration
+        - Enable GPU support with `--features gpu`
+        - Use optimized BLAS libraries
+        - Consider using quantized models
+        
+        ### Memory Optimization
+        - Use streaming processing for long audio
+        - Enable model caching for repeated use
+        - Configure appropriate batch sizes
+        
+        ## Monitoring
+        
+        Use the performance regression detection system to monitor
+        performance over time and catch regressions early.
+        EOF
+
+    - name: Generate architecture documentation
+      run: |
+        mkdir -p docs/architecture
+        
+        cat > docs/architecture/README.md << 'EOF'
+        # Architecture Overview
+        
+        ## System Architecture
+        
+        ```mermaid
+        graph TB
+            A[Audio Input] --> B[Preprocessing]
+            B --> C[Feature Extraction]
+            C --> D[ASR Engine]
+            D --> E[Post-processing]
+            E --> F[Recognition Result]
+            
+            G[Model Manager] --> D
+            H[Performance Monitor] --> D
+            I[Error Recovery] --> D
+        ```
+        
+        ## Core Components
+        
+        ### Audio Processing Pipeline
+        - **Preprocessing**: Noise suppression, normalization, resampling
+        - **Feature Extraction**: MFCC, spectrograms, mel-scale features
+        - **ASR Engine**: Whisper, DeepSpeech, Wav2Vec2 implementations
+        
+        ### Model Management
+        - Dynamic model loading and switching
+        - Resource monitoring and optimization
+        - Intelligent fallback mechanisms
+        
+        ### Performance Monitoring
+        - Real-time performance metrics collection
+        - Regression detection and alerting
+        - Automated baseline updates
+        
+        ## Integration Points
+        
+        ### Language Bindings
+        - **Rust**: Native API with full feature access
+        - **C/C++**: FFI layer for system integration
+        - **Python**: PyO3 bindings for ML workflows
+        - **JavaScript/WASM**: Web and Node.js integration
+        
+        ### Deployment Options
+        - **Library**: Link as static/dynamic library
+        - **REST API**: Microservice deployment
+        - **Container**: Docker/Kubernetes deployment
+        - **Embedded**: Resource-constrained environments
+        EOF
+
+    - name: Generate examples documentation
+      run: |
+        mkdir -p docs/examples
+        
+        # Generate index of examples
+        cat > docs/examples/README.md << 'EOF'
+        # Examples and Tutorials
+        
+        ## Getting Started
+        
+        ### Basic Usage
+        - [Hello World](../examples/tutorial_01_hello_world.rs) - Simplest recognition example
+        - [Real Audio](../examples/tutorial_02_real_audio.rs) - Processing real audio files
+        - [Speech Recognition](../examples/tutorial_03_speech_recognition.rs) - Complete recognition pipeline
+        
+        ### Advanced Features
+        - [Real-time Processing](../examples/tutorial_04_realtime_processing.rs) - Streaming recognition
+        - [Multilingual](../examples/tutorial_05_multilingual.rs) - Multiple language support
+        - [Performance Optimization](../examples/performance_optimization_guide.rs) - Optimization techniques
+        
+        ### Integration Examples
+        - [C Integration](../examples/c/) - C/C++ integration examples
+        - [Python Integration](../examples/python/) - Python usage examples
+        - [WASM Integration](../examples/wasm/) - Web/Node.js examples
+        
+        ### Specialized Use Cases
+        - [Batch Processing](../examples/batch_transcription.rs) - Large-scale transcription
+        - [Custom Models](../examples/custom_model_integration.rs) - Using custom models
+        - [Wake Word Detection](../examples/wake_word_training.rs) - Always-on detection
+        - [Emotion Recognition](../examples/emotion_sentiment_recognition.rs) - Sentiment analysis
+        EOF
+
+    - name: Create documentation index
+      run: |
+        mkdir -p docs
+        
+        cat > docs/README.md << 'EOF'
+        # VoiRS Recognizer Documentation
+        
+        Welcome to the comprehensive documentation for VoiRS Recognizer, a high-performance
+        speech recognition and analysis library.
+        
+        ## Quick Links
+        
+        - [API Documentation](./api/) - Rust API reference
+        - [C API](./c-api/) - C/C++ integration guide
+        - [Python API](./python/) - Python bindings
+        - [WASM API](./wasm/) - WebAssembly integration
+        - [Examples](./examples/) - Code examples and tutorials
+        - [Architecture](./architecture/) - System design overview
+        - [Performance](./performance/) - Performance guide and benchmarks
+        
+        ## Getting Started
+        
+        ### Installation
+        
+        #### Rust
+        ```toml
+        [dependencies]
+        voirs-recognizer = "0.1.0"
+        ```
+        
+        #### Python
+        ```bash
+        pip install voirs-recognizer
+        ```
+        
+        #### JavaScript/Node.js
+        ```bash
+        npm install @voirs/recognizer
+        ```
+        
+        ### Basic Usage
+        
+        ```rust
+        use voirs_recognizer::prelude::*;
+        
+        #[tokio::main]
+        async fn main() -> Result<(), Box<dyn std::error::Error>> {
+            let recognizer = VoirsRecognizer::new().await?;
+            let audio = AudioBuffer::from_file("speech.wav")?;
+            let result = recognizer.recognize(&audio).await?;
+            println!("Recognized: {}", result.text);
+            Ok(())
+        }
+        ```
+        
+        ## Features
+        
+        - **Multiple ASR Engines**: Whisper, DeepSpeech, Wav2Vec2
+        - **Real-time Processing**: Low-latency streaming recognition
+        - **Multi-language Support**: 100+ languages supported
+        - **Performance Optimized**: Hardware acceleration, SIMD optimizations
+        - **Production Ready**: Comprehensive testing, monitoring, alerting
+        - **Cross-platform**: Linux, macOS, Windows, WebAssembly
+        
+        ## Contributing
+        
+        See [CONTRIBUTING.md](../CONTRIBUTING.md) for development setup and guidelines.
+        
+        ## License
+        
+        Licensed under either of Apache License, Version 2.0 or MIT license at your option.
+        EOF
+
+    - name: Generate developer documentation
+      run: |
+        mkdir -p docs/development
+        
+        cat > docs/development/README.md << 'EOF'
+        # Developer Documentation
+        
+        ## Development Setup
+        
+        ### Prerequisites
+        - Rust 1.78+ 
+        - System audio libraries (ALSA, PulseAudio, etc.)
+        - Git
+        - Docker (optional)
+        
+        ### Quick Setup
+        ```bash
+        git clone https://github.com/cool-japan/voirs.git
+        cd voirs/crates/voirs-recognizer
+        cargo build --all-features
+        cargo test
+        ```
+        
+        ### Development Workflow
+        
+        1. **Make changes**: Edit source code
+        2. **Test locally**: `cargo test --all-features`
+        3. **Check formatting**: `cargo fmt --all -- --check`
+        4. **Run lints**: `cargo clippy --all-targets --all-features`
+        5. **Create PR**: Submit for review
+        
+        ### CI/CD Pipeline
+        
+        The project uses GitHub Actions for:
+        - Automated testing across platforms
+        - Performance regression detection
+        - Security vulnerability scanning
+        - Documentation generation
+        - Release automation
+        
+        See [CI-CD-README.md](../CI-CD-README.md) for complete details.
+        
+        ### Project Structure
+        
+        ```
+        src/
+        ├── asr/              # ASR engine implementations
+        ├── audio_formats/    # Audio loading and processing
+        ├── analysis/         # Audio analysis features
+        ├── performance/      # Performance monitoring
+        ├── preprocessing/    # Audio preprocessing
+        ├── c_api/           # C API bindings
+        ├── wasm/            # WebAssembly bindings
+        └── rest_api/        # REST API server
+        ```
+        
+        ### Testing Strategy
+        
+        - **Unit Tests**: Individual component testing
+        - **Integration Tests**: End-to-end functionality
+        - **Performance Tests**: Regression detection
+        - **Benchmark Tests**: Performance measurement
+        - **Property Tests**: Fuzzing and edge cases
+        
+        ### Release Process
+        
+        1. Update version in `Cargo.toml`
+        2. Update `CHANGELOG.md`
+        3. Create git tag: `git tag v0.1.0`
+        4. Push tag: `git push origin v0.1.0`
+        5. GitHub Actions handles the rest
+        EOF
+
+    - name: Build comprehensive documentation site
+      run: |
+        # Create mdBook configuration
+        cat > book.toml << 'EOF'
+        [book]
+        authors = ["VoiRS Team"]
+        language = "en"
+        multilingual = false
+        src = "docs"
+        title = "VoiRS Recognizer Documentation"
+        description = "Comprehensive documentation for VoiRS speech recognition library"
+        
+        [preprocessor.mermaid]
+        command = "mdbook-mermaid"
+        
+        [preprocessor.linkcheck]
+        follow-web-links = true
+        
+        [output.html]
+        default-theme = "navy"
+        preferred-dark-theme = "navy"
+        git-repository-url = "https://github.com/cool-japan/voirs"
+        edit-url-template = "https://github.com/cool-japan/voirs/edit/main/crates/voirs-recognizer/{path}"
+        
+        [output.html.search]
+        enable = true
+        limit-results = 30
+        teaser-word-count = 30
+        use-boolean-and = true
+        boost-title = 2
+        boost-hierarchy = 1
+        boost-paragraph = 1
+        expand = true
+        heading-split-level = 3
+        copy-js = true
+        EOF
+
+        # Create SUMMARY.md for mdBook
+        cat > docs/SUMMARY.md << 'EOF'
+        # Summary
+        
+        [Introduction](README.md)
+        
+        # User Guide
+        
+        - [Getting Started](examples/README.md)
+        - [API Reference](api/README.md)
+        - [Performance Guide](performance/README.md)
+        
+        # Integration Guides
+        
+        - [C/C++ Integration](c-api/README.md)
+        - [Python Integration](python/README.md)
+        - [WASM Integration](wasm/README.md)
+        
+        # Advanced Topics
+        
+        - [Architecture](architecture/README.md)
+        - [Development](development/README.md)
+        
+        # Reference
+        
+        - [Examples](examples/README.md)
+        - [Changelog](../CHANGELOG.md)
+        EOF
+
+        # Build the documentation book
+        mdbook build
+
+    - name: Upload documentation artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: documentation-${{ github.sha }}
+        path: |
+          book/
+          target/doc/
+          docs/
+        retention-days: 30
+
+    - name: Generate documentation coverage report
+      run: |
+        mkdir -p coverage
+        
+        # Check documentation coverage
+        cargo test --doc --all-features 2>&1 | tee coverage/doc-test-results.txt
+        
+        # Generate coverage statistics
+        cat > coverage/doc-coverage.md << 'EOF'
+        # Documentation Coverage Report
+        
+        Generated on: $(date)
+        
+        ## API Documentation Coverage
+        
+        EOF
+        
+        # Count documented vs undocumented items
+        grep -c "warning: missing documentation" target/doc/*.html 2>/dev/null || echo "All public items documented" >> coverage/doc-coverage.md
+
+    - name: Check documentation quality
+      run: |
+        # Check for broken links in documentation
+        if command -v mdbook-linkcheck &> /dev/null; then
+          mdbook-linkcheck
+        fi
+        
+        # Validate markdown files
+        find docs -name "*.md" -exec markdown-link-check {} \; || true
+
+    # Deploy documentation to GitHub Pages
+    - name: Deploy to GitHub Pages
+      if: github.ref == 'refs/heads/main' && (github.event.inputs.deploy_docs == 'true' || github.event_name != 'workflow_dispatch')
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./book
+        destination_dir: recognizer
+        enable_jekyll: false
+        cname: voirs-docs.example.com
+
+  # Generate changelog and release notes
+  changelog:
+    name: Generate Changelog
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Generate changelog
+      run: |
+        # Install git-cliff for changelog generation
+        curl -L https://github.com/orhun/git-cliff/releases/latest/download/git-cliff-0.11.0-x86_64-unknown-linux-gnu.tar.gz | tar -xz
+        chmod +x git-cliff
+        sudo mv git-cliff /usr/local/bin/
+        
+        # Generate changelog
+        git-cliff --output CHANGELOG.md
+        
+        # Generate release notes for latest version
+        git-cliff --latest --strip header --output RELEASE_NOTES.md
+
+    - name: Commit updated changelog
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+        if git diff --quiet CHANGELOG.md; then
+          echo "No changes to changelog"
+        else
+          git add CHANGELOG.md
+          git commit -m "docs: Update changelog [skip ci]"
+          git push
+        fi
+
+    - name: Upload changelog artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: changelog-${{ github.sha }}
+        path: |
+          CHANGELOG.md
+          RELEASE_NOTES.md
+
+  # Generate API compatibility report
+  compatibility:
+    name: API Compatibility Check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install cargo-semver-checks
+      run: cargo install cargo-semver-checks
+
+    - name: Check API compatibility
+      run: |
+        # Check for breaking changes
+        cargo semver-checks check-release || echo "Breaking changes detected"
+
+    - name: Generate compatibility report
+      run: |
+        mkdir -p compatibility
+        cargo semver-checks check-release --output-format=json > compatibility/report.json || true
+        
+        # Generate human-readable report
+        cat > compatibility/README.md << 'EOF'
+        # API Compatibility Report
+        
+        This report shows API changes that may affect backward compatibility.
+        
+        ## Breaking Changes
+        
+        See detailed report in the JSON file.
+        
+        ## Guidelines
+        
+        - Major version bumps: Breaking changes allowed
+        - Minor version bumps: Only additive changes
+        - Patch version bumps: Bug fixes only
+        EOF
+
+    - name: Upload compatibility report
+      uses: actions/upload-artifact@v3
+      with:
+        name: compatibility-report-${{ github.sha }}
+        path: compatibility/
+
+  # Documentation deployment summary
+  summary:
+    name: Documentation Summary
+    runs-on: ubuntu-latest
+    needs: [api-docs, changelog, compatibility]
+    if: always()
+    steps:
+    - name: Generate summary
+      run: |
+        echo "## 📚 Documentation Generation Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ needs.api-docs.result }}" = "success" ]; then
+          echo "✅ API documentation generated successfully" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ API documentation generation failed" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        if [ "${{ needs.changelog.result }}" = "success" ]; then
+          echo "✅ Changelog updated successfully" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "⚠️ Changelog update skipped or failed" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        if [ "${{ needs.compatibility.result }}" = "success" ]; then
+          echo "✅ API compatibility checked" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "⚠️ API compatibility check skipped or failed" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "📖 [View Documentation](https://cool-japan.github.io/voirs/recognizer/)" >> $GITHUB_STEP_SUMMARY

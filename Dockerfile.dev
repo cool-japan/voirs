@@ -1,0 +1,61 @@
+# Development Dockerfile for VoiRS - Enhanced Version
+FROM rust:1.78-bookworm
+
+# Install comprehensive system dependencies for development
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    libasound2-dev \
+    libpulse-dev \
+    libjack-dev \
+    portaudio19-dev \
+    build-essential \
+    cmake \
+    libclang-dev \
+    git \
+    curl \
+    vim \
+    htop \
+    valgrind \
+    gdb \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust development tools
+RUN rustup component add clippy rustfmt
+RUN cargo install cargo-watch cargo-audit cargo-deny cargo-tarpaulin
+
+# Set working directory
+WORKDIR /app
+
+# Create non-root user for development
+RUN useradd -m -s /bin/bash dev && \
+    chown -R dev:dev /app /usr/local/cargo
+
+# Switch to development user
+USER dev
+
+# Copy workspace files
+COPY --chown=dev:dev Cargo.toml Cargo.lock ./
+COPY --chown=dev:dev .cargo/ .cargo/
+COPY --chown=dev:dev crates/ crates/
+
+# Pre-build dependencies for faster rebuilds
+RUN cargo build --workspace --release && rm -rf target/release/deps/voirs*
+
+# Set development environment variables
+ENV RUST_LOG=debug
+ENV CARGO_TERM_COLOR=always
+ENV RUST_BACKTRACE=1
+
+# Default command for development with hot reloading
+CMD ["cargo", "watch", "-x", "run --bin voirs-cli"]
+
+# Health check for development environment
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD cargo check --workspace || exit 1
+
+# Labels
+LABEL org.opencontainers.image.title="VoiRS Development"
+LABEL org.opencontainers.image.description="Development environment for VoiRS"
+LABEL org.opencontainers.image.vendor="cool-japan"
+LABEL org.opencontainers.image.licenses="MIT OR Apache-2.0"

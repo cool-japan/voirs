@@ -1,0 +1,133 @@
+version: '3.8'
+
+services:
+  # VoiRS Feedback Service
+  voirs-feedback:
+    build:
+      context: ../../
+      dockerfile: crates/voirs-feedback/Dockerfile
+    ports:
+      - "8080:8080"  # Main API
+      - "8081:8081"  # WebSocket
+      - "8082:8082"  # Health/Metrics
+    environment:
+      - RUST_LOG=debug
+      - DATABASE_URL=postgresql://voirs:voirs123@postgres:5432/voirs_feedback
+      - REDIS_URL=redis://redis:6379
+      - VOIRS_ENV=development
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - voirs_data:/app/data
+      - voirs_logs:/app/logs
+    networks:
+      - voirs-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=voirs
+      - POSTGRES_PASSWORD=voirs123
+      - POSTGRES_DB=voirs_feedback
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./config/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - voirs-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U voirs -d voirs_feedback"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - voirs-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Prometheus Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    networks:
+      - voirs-network
+
+  # Grafana Dashboard
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana:/etc/grafana/provisioning
+    networks:
+      - voirs-network
+    depends_on:
+      - prometheus
+
+  # Nginx Load Balancer/Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config/nginx.conf:/etc/nginx/nginx.conf
+      - ./config/ssl:/etc/nginx/ssl
+    depends_on:
+      - voirs-feedback
+    networks:
+      - voirs-network
+
+volumes:
+  voirs_data:
+    driver: local
+  voirs_logs:
+    driver: local
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  voirs-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

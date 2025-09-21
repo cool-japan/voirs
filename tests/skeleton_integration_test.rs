@@ -1,11 +1,23 @@
 //! Skeleton integration test for VoiRS MVP pipeline
 //! Tests the basic flow: text -> phonemes -> mel -> audio -> WAV file
 
-use voirs_g2p::{DummyG2p, G2p, LanguageCode};
-use voirs_acoustic::{DummyAcousticModel, AcousticModel, Phoneme};
 use voirs_acoustic::SynthesisConfig as AcousticSynthesisConfig;
-use voirs_vocoder::{DummyVocoder, Vocoder, SynthesisConfig as VocoderSynthesisConfig};
+use voirs_acoustic::{AcousticModel, DummyAcousticModel, Phoneme as AcousticPhoneme};
+use voirs_g2p::{DummyG2p, G2p, LanguageCode, Phoneme as G2pPhoneme};
 use voirs_vocoder::audio::io::convenience;
+use voirs_vocoder::{DummyVocoder, SynthesisConfig as VocoderSynthesisConfig, Vocoder};
+
+/// Convert G2P phonemes to acoustic phonemes
+fn convert_phonemes(g2p_phonemes: &[G2pPhoneme]) -> Vec<AcousticPhoneme> {
+    g2p_phonemes
+        .iter()
+        .map(|p| AcousticPhoneme {
+            symbol: p.symbol.clone(),
+            features: None,
+            duration: p.duration_ms.map(|d| d / 1000.0), // Convert ms to seconds
+        })
+        .collect()
+}
 
 #[tokio::test]
 async fn test_skeleton_end_to_end_pipeline() {
@@ -18,12 +30,15 @@ async fn test_skeleton_end_to_end_pipeline() {
 
     // Test text
     let text = "Hello world";
-    println!("📝 Input text: '{}'", text);
+    println!("📝 Input text: '{text}'");
 
     // Step 1: G2P - Text to Phonemes
     let g2p = DummyG2p::new();
-    let phonemes = g2p.to_phonemes(text, Some(LanguageCode::EnUs)).await.unwrap();
-    
+    let phonemes = g2p
+        .to_phonemes(text, Some(LanguageCode::EnUs))
+        .await
+        .unwrap();
+
     println!("🔤 G2P Result: {} phonemes", phonemes.len());
     for (i, phoneme) in phonemes.iter().enumerate() {
         println!("   {}: {}", i, phoneme.symbol);
@@ -32,24 +47,37 @@ async fn test_skeleton_end_to_end_pipeline() {
     // Step 2: Acoustic Model - Phonemes to Mel Spectrogram
     let acoustic_model = DummyAcousticModel::new();
     let acoustic_config = AcousticSynthesisConfig::default();
-    let acoustic_mel = acoustic_model.synthesize(&phonemes, Some(&acoustic_config)).await.unwrap();
-    
+
+    // Convert G2P phonemes to acoustic phonemes
+    let acoustic_phonemes = convert_phonemes(&phonemes);
+
+    let acoustic_mel = acoustic_model
+        .synthesize(&acoustic_phonemes, Some(&acoustic_config))
+        .await
+        .unwrap();
+
     // Convert acoustic mel to vocoder mel format
     let mel_spectrogram = voirs_vocoder::MelSpectrogram::new(
         acoustic_mel.data.clone(),
         acoustic_mel.sample_rate,
         acoustic_mel.hop_length,
     );
-    
-    println!("🎵 Acoustic Result: {}x{} mel spectrogram", mel_spectrogram.n_mels, mel_spectrogram.n_frames);
+
+    println!(
+        "🎵 Acoustic Result: {}x{} mel spectrogram",
+        mel_spectrogram.n_mels, mel_spectrogram.n_frames
+    );
     println!("   Duration: {:.3}s", mel_spectrogram.duration());
     println!("   Sample rate: {} Hz", mel_spectrogram.sample_rate);
 
     // Step 3: Vocoder - Mel Spectrogram to Audio
     let vocoder = DummyVocoder::new();
     let vocoder_config = VocoderSynthesisConfig::default();
-    let audio_buffer = vocoder.vocode(&mel_spectrogram, Some(&vocoder_config)).await.unwrap();
-    
+    let audio_buffer = vocoder
+        .vocode(&mel_spectrogram, Some(&vocoder_config))
+        .await
+        .unwrap();
+
     println!("🔊 Vocoder Result: {:.3}s audio", audio_buffer.duration());
     println!("   Sample rate: {} Hz", audio_buffer.sample_rate());
     println!("   Channels: {}", audio_buffer.channels());
@@ -59,18 +87,24 @@ async fn test_skeleton_end_to_end_pipeline() {
     assert!(!phonemes.is_empty(), "Should generate phonemes from text");
     assert!(mel_spectrogram.n_frames > 0, "Should generate mel frames");
     assert!(mel_spectrogram.n_mels > 0, "Should generate mel channels");
-    assert!(audio_buffer.duration() > 0.0, "Should generate audio with duration");
-    assert!(!audio_buffer.samples().is_empty(), "Should generate audio samples");
+    assert!(
+        audio_buffer.duration() > 0.0,
+        "Should generate audio with duration"
+    );
+    assert!(
+        !audio_buffer.samples().is_empty(),
+        "Should generate audio samples"
+    );
 
     // Verify audio quality (basic checks)
     let samples = audio_buffer.samples();
     let peak = samples.iter().map(|s| s.abs()).fold(0.0, f32::max);
     let rms = (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
-    
+
     println!("📊 Audio Stats:");
-    println!("   Peak amplitude: {:.3}", peak);
-    println!("   RMS level: {:.3}", rms);
-    
+    println!("   Peak amplitude: {peak:.3}");
+    println!("   RMS level: {rms:.3}");
+
     assert!(peak > 0.0, "Audio should have non-zero amplitude");
     assert!(peak <= 1.0, "Audio should not clip");
     assert!(rms > 0.0, "Audio should have energy");
@@ -78,25 +112,30 @@ async fn test_skeleton_end_to_end_pipeline() {
     // Step 5: Save audio to WAV file
     let wav_path = "/tmp/voirs_skeleton_test.wav";
     convenience::write_wav(&audio_buffer, wav_path).unwrap();
-    
-    println!("💾 WAV Output: Saved to {}", wav_path);
-    
+
+    println!("💾 WAV Output: Saved to {wav_path}");
+
     // Verify WAV file was created and is readable
     let loaded_audio = convenience::read_wav(wav_path).unwrap();
     assert_eq!(loaded_audio.sample_rate(), audio_buffer.sample_rate());
     assert_eq!(loaded_audio.samples().len(), audio_buffer.samples().len());
 
     println!("✅ Skeleton end-to-end pipeline test PASSED!");
-    println!("   '{}' -> {} phonemes -> {}x{} mel -> {:.3}s audio -> WAV file", 
-             text, phonemes.len(), mel_spectrogram.n_mels, 
-             mel_spectrogram.n_frames, audio_buffer.duration());
+    println!(
+        "   '{}' -> {} phonemes -> {}x{} mel -> {:.3}s audio -> WAV file",
+        text,
+        phonemes.len(),
+        mel_spectrogram.n_mels,
+        mel_spectrogram.n_frames,
+        audio_buffer.duration()
+    );
 }
 
 #[tokio::test]
 async fn test_skeleton_batch_processing() {
     println!("🚀 Starting skeleton batch processing test");
 
-    let texts = vec!["Hello", "world", "test"];
+    let texts = ["Hello", "world", "test"];
     let g2p = DummyG2p::new();
     let acoustic_model = DummyAcousticModel::new();
     let vocoder = DummyVocoder::new();
@@ -109,8 +148,15 @@ async fn test_skeleton_batch_processing() {
         println!("📝 Processing text {}: '{}'", i + 1, text);
 
         // Process each text through the pipeline
-        let phonemes = g2p.to_phonemes(text, Some(LanguageCode::EnUs)).await.unwrap();
-        let acoustic_mel = acoustic_model.synthesize(&phonemes, Some(&acoustic_config)).await.unwrap();
+        let phonemes = g2p
+            .to_phonemes(text, Some(LanguageCode::EnUs))
+            .await
+            .unwrap();
+        let acoustic_phonemes = convert_phonemes(&phonemes);
+        let acoustic_mel = acoustic_model
+            .synthesize(&acoustic_phonemes, Some(&acoustic_config))
+            .await
+            .unwrap();
         let mel = voirs_vocoder::MelSpectrogram::new(
             acoustic_mel.data.clone(),
             acoustic_mel.sample_rate,
@@ -119,13 +165,18 @@ async fn test_skeleton_batch_processing() {
         let audio = vocoder.vocode(&mel, Some(&vocoder_config)).await.unwrap();
 
         total_audio_duration += audio.duration();
-        
-        println!("   Result: {} phonemes -> {}x{} mel -> {:.3}s audio", 
-                 phonemes.len(), mel.n_mels, mel.n_frames, audio.duration());
+
+        println!(
+            "   Result: {} phonemes -> {}x{} mel -> {:.3}s audio",
+            phonemes.len(),
+            mel.n_mels,
+            mel.n_frames,
+            audio.duration()
+        );
     }
 
     println!("✅ Batch processing test PASSED!");
-    println!("   Total audio generated: {:.3}s", total_audio_duration);
+    println!("   Total audio generated: {total_audio_duration:.3}s");
 }
 
 #[tokio::test]
@@ -173,18 +224,49 @@ async fn test_skeleton_synthesis_config_effects() {
 
     // Test different synthesis configurations
     let acoustic_configs = vec![
-        ("Normal", AcousticSynthesisConfig { speed: 1.0, ..Default::default() }),
-        ("Fast", AcousticSynthesisConfig { speed: 1.5, ..Default::default() }),
-        ("Slow", AcousticSynthesisConfig { speed: 0.7, ..Default::default() }),
-        ("High Energy", AcousticSynthesisConfig { energy: 1.3, ..Default::default() }),
+        (
+            "Normal",
+            AcousticSynthesisConfig {
+                speed: 1.0,
+                ..Default::default()
+            },
+        ),
+        (
+            "Fast",
+            AcousticSynthesisConfig {
+                speed: 1.5,
+                ..Default::default()
+            },
+        ),
+        (
+            "Slow",
+            AcousticSynthesisConfig {
+                speed: 0.7,
+                ..Default::default()
+            },
+        ),
+        (
+            "High Energy",
+            AcousticSynthesisConfig {
+                energy: 1.3,
+                ..Default::default()
+            },
+        ),
     ];
     let vocoder_config = VocoderSynthesisConfig::default();
 
     for (name, acoustic_config) in acoustic_configs {
-        println!("⚙️  Testing config: {}", name);
-        
-        let phonemes = g2p.to_phonemes(text, Some(LanguageCode::EnUs)).await.unwrap();
-        let acoustic_mel = acoustic.synthesize(&phonemes, Some(&acoustic_config)).await.unwrap();
+        println!("⚙️  Testing config: {name}");
+
+        let phonemes = g2p
+            .to_phonemes(text, Some(LanguageCode::EnUs))
+            .await
+            .unwrap();
+        let acoustic_phonemes = convert_phonemes(&phonemes);
+        let acoustic_mel = acoustic
+            .synthesize(&acoustic_phonemes, Some(&acoustic_config))
+            .await
+            .unwrap();
         let mel = voirs_vocoder::MelSpectrogram::new(
             acoustic_mel.data.clone(),
             acoustic_mel.sample_rate,
@@ -192,8 +274,12 @@ async fn test_skeleton_synthesis_config_effects() {
         );
         let audio = vocoder.vocode(&mel, Some(&vocoder_config)).await.unwrap();
 
-        println!("   Result: {:.3}s audio (speed: {:.1}x, energy: {:.1}x)", 
-                 audio.duration(), acoustic_config.speed, acoustic_config.energy);
+        println!(
+            "   Result: {:.3}s audio (speed: {:.1}x, energy: {:.1}x)",
+            audio.duration(),
+            acoustic_config.speed,
+            acoustic_config.energy
+        );
     }
 
     println!("✅ Synthesis config effects test PASSED!");
@@ -209,14 +295,27 @@ async fn test_skeleton_wav_file_output() {
     let text = "WAV output test";
 
     // Generate audio
-    let phonemes = g2p.to_phonemes(text, Some(LanguageCode::EnUs)).await.unwrap();
-    let acoustic_mel = acoustic.synthesize(&phonemes, Some(&AcousticSynthesisConfig::default())).await.unwrap();
+    let phonemes = g2p
+        .to_phonemes(text, Some(LanguageCode::EnUs))
+        .await
+        .unwrap();
+    let acoustic_phonemes = convert_phonemes(&phonemes);
+    let acoustic_mel = acoustic
+        .synthesize(
+            &acoustic_phonemes,
+            Some(&AcousticSynthesisConfig::default()),
+        )
+        .await
+        .unwrap();
     let mel = voirs_vocoder::MelSpectrogram::new(
         acoustic_mel.data.clone(),
         acoustic_mel.sample_rate,
         acoustic_mel.hop_length,
     );
-    let audio = vocoder.vocode(&mel, Some(&VocoderSynthesisConfig::default())).await.unwrap();
+    let audio = vocoder
+        .vocode(&mel, Some(&VocoderSynthesisConfig::default()))
+        .await
+        .unwrap();
 
     // Test different WAV output formats
     let outputs = vec![
@@ -226,8 +325,8 @@ async fn test_skeleton_wav_file_output() {
     ];
 
     for (path, description) in outputs {
-        println!("💾 Testing {}", description);
-        
+        println!("💾 Testing {description}");
+
         // Write file based on description
         match description {
             "16-bit WAV" => convenience::write_wav(&audio, path).unwrap(),
@@ -235,11 +334,15 @@ async fn test_skeleton_wav_file_output() {
             "32-bit float WAV" => convenience::write_wav_float(&audio, path).unwrap(),
             _ => convenience::write_wav(&audio, path).unwrap(),
         }
-        
+
         // Verify file exists and can be read
         let loaded_audio = convenience::read_wav(path).unwrap();
-        
-        println!("   ✓ Saved {:.3}s audio to {}", loaded_audio.duration(), path);
+
+        println!(
+            "   ✓ Saved {:.3}s audio to {}",
+            loaded_audio.duration(),
+            path
+        );
         assert_eq!(loaded_audio.sample_rate(), audio.sample_rate());
         assert!(loaded_audio.duration() > 0.0);
     }

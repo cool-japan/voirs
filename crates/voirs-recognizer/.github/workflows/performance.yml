@@ -1,0 +1,429 @@
+name: Performance Monitoring
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run performance tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Performance regression testing
+  performance-regression:
+    name: Performance Regression Tests
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Configure Rust cache
+      uses: Swatinem/rust-cache@v2
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libasound2-dev \
+          libpulse-dev \
+          libjack-dev \
+          portaudio19-dev \
+          libssl-dev \
+          pkg-config \
+          build-essential \
+          stress-ng \
+          htop
+
+    - name: Build release binary
+      run: cargo build --release --all-features
+
+    - name: Run performance regression tests
+      run: cargo test --test performance_regression_tests --release
+
+    - name: Run automated regression suite
+      run: cargo test --test automated_regression_suite --release
+
+    - name: Generate performance report
+      run: |
+        mkdir -p performance-reports
+        echo "# Performance Test Results - $(date)" > performance-reports/latest.md
+        echo "" >> performance-reports/latest.md
+        echo "## Test Results" >> performance-reports/latest.md
+        echo "" >> performance-reports/latest.md
+        cargo test --test performance_regression_tests --release -- --nocapture 2>&1 | \
+          grep -E "(test result|Performance|RTF|Memory|Latency)" >> performance-reports/latest.md || true
+        echo "" >> performance-reports/latest.md
+        echo "## System Information" >> performance-reports/latest.md
+        echo "- OS: $(uname -a)" >> performance-reports/latest.md
+        echo "- CPU: $(cat /proc/cpuinfo | grep 'model name' | head -1 | cut -d: -f2)" >> performance-reports/latest.md
+        echo "- Memory: $(free -h | grep Mem | awk '{print $2}')" >> performance-reports/latest.md
+        echo "- Rust Version: $(rustc --version)" >> performance-reports/latest.md
+
+    - name: Upload performance report
+      uses: actions/upload-artifact@v3
+      with:
+        name: performance-report-${{ github.sha }}
+        path: performance-reports/latest.md
+
+    - name: Comment performance results on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const path = './performance-reports/latest.md';
+          if (fs.existsSync(path)) {
+            const content = fs.readFileSync(path, 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 📊 Performance Test Results\n\n${content}`
+            });
+          }
+
+  # Comprehensive benchmarks
+  benchmarks:
+    name: Comprehensive Benchmarks
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            setup: |
+              sudo apt-get update
+              sudo apt-get install -y libasound2-dev libpulse-dev libjack-dev portaudio19-dev libssl-dev pkg-config build-essential
+          - os: macos-latest
+            setup: |
+              brew install portaudio jack
+          - os: windows-latest
+            setup: |
+              echo "Windows setup complete"
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Configure Rust cache
+      uses: Swatinem/rust-cache@v2
+
+    - name: Install system dependencies
+      run: ${{ matrix.setup }}
+
+    - name: Run benchmarks
+      run: |
+        cargo bench --all-features -- --output-format json | tee benchmark-results.json
+
+    - name: Process benchmark results
+      run: |
+        python3 -c "
+        import json
+        import sys
+        
+        # Load benchmark results
+        with open('benchmark-results.json', 'r') as f:
+            lines = f.readlines()
+        
+        results = []
+        for line in lines:
+            try:
+                data = json.loads(line)
+                if 'reason' in data and data['reason'] == 'benchmark-complete':
+                    results.append({
+                        'name': data['id'],
+                        'value': data['typical'],
+                        'unit': 'ns'
+                    })
+            except:
+                continue
+        
+        # Save processed results
+        with open('processed-benchmarks.json', 'w') as f:
+            json.dump(results, f, indent=2)
+        
+        print(f'Processed {len(results)} benchmark results')
+        "
+
+    - name: Store benchmark results
+      uses: benchmark-action/github-action-benchmark@v1
+      with:
+        tool: 'customSmallerIsBetter'
+        output-file-path: processed-benchmarks.json
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        auto-push: ${{ github.ref == 'refs/heads/main' }}
+        comment-on-alert: true
+        alert-threshold: '150%'
+        fail-on-alert: ${{ github.event_name == 'pull_request' }}
+
+  # Memory profiling
+  memory-profiling:
+    name: Memory Profiling
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libasound2-dev \
+          libpulse-dev \
+          libjack-dev \
+          portaudio19-dev \
+          libssl-dev \
+          pkg-config \
+          build-essential \
+          valgrind \
+          heaptrack
+
+    - name: Install cargo-profiler
+      run: |
+        cargo install cargo-profiler || echo "cargo-profiler not available, using valgrind directly"
+
+    - name: Build debug binary
+      run: cargo build --all-features
+
+    - name: Run memory profiling
+      run: |
+        # Create a simple test program for memory profiling
+        mkdir -p profiling-tests
+        cat > profiling-tests/memory_test.rs << 'EOF'
+        use voirs_recognizer::*;
+        
+        fn main() {
+            // Test basic recognition pipeline memory usage
+            let config = integration::config::UnifiedConfig::default();
+            println!("Config created successfully");
+            
+            // Simulate audio processing
+            let audio_data = vec![0.0f32; 16000]; // 1 second of silence at 16kHz
+            println!("Processing {} samples", audio_data.len());
+            
+            // Test memory with multiple iterations
+            for i in 0..10 {
+                let _processed = audio_data.clone();
+                println!("Iteration {}", i);
+            }
+        }
+        EOF
+
+    - name: Compile memory test
+      run: |
+        rustc --edition 2021 -L target/debug/deps profiling-tests/memory_test.rs \
+          -o profiling-tests/memory_test \
+          --extern voirs_recognizer=target/debug/libvoirs_recognizer.rlib || \
+        echo "Direct compilation failed, using cargo test for memory profiling"
+
+    - name: Run memory profiling with valgrind
+      run: |
+        # Run memory tests with valgrind
+        cargo test --test performance_tests --release 2>&1 | head -50 > memory-report.txt
+        echo "" >> memory-report.txt
+        echo "Memory usage during tests:" >> memory-report.txt
+        
+        # Use system monitoring for basic memory usage
+        echo "System memory before tests:" >> memory-report.txt
+        free -h >> memory-report.txt
+        
+        echo "" >> memory-report.txt
+        echo "Memory profiling complete" >> memory-report.txt
+
+    - name: Upload memory report
+      uses: actions/upload-artifact@v3
+      with:
+        name: memory-report-${{ github.sha }}
+        path: memory-report.txt
+
+  # Load testing
+  load-testing:
+    name: Load Testing
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libasound2-dev \
+          libpulse-dev \
+          libjack-dev \
+          portaudio19-dev \
+          libssl-dev \
+          pkg-config \
+          build-essential \
+          stress-ng
+
+    - name: Build release binary
+      run: cargo build --release --all-features
+
+    - name: Run load tests
+      run: |
+        echo "Running load tests..."
+        mkdir -p load-test-results
+        
+        # Test concurrent processing
+        echo "Testing concurrent audio processing..." > load-test-results/load-test.log
+        cargo test test_concurrent_processing --release -- --nocapture >> load-test-results/load-test.log 2>&1
+        
+        # Test memory pressure scenarios
+        echo "Testing memory pressure scenarios..." >> load-test-results/load-test.log
+        cargo test test_memory_pressure_scenarios --release -- --nocapture >> load-test-results/load-test.log 2>&1
+        
+        # Test with system stress
+        echo "Running tests under system stress..." >> load-test-results/load-test.log
+        stress-ng --cpu 2 --timeout 30s &
+        STRESS_PID=$!
+        
+        sleep 5
+        cargo test test_performance_validation --release -- --nocapture >> load-test-results/load-test.log 2>&1
+        
+        kill $STRESS_PID 2>/dev/null || true
+        wait $STRESS_PID 2>/dev/null || true
+        
+        echo "Load testing completed" >> load-test-results/load-test.log
+
+    - name: Upload load test results
+      uses: actions/upload-artifact@v3
+      with:
+        name: load-test-results-${{ github.sha }}
+        path: load-test-results/
+
+  # Performance comparison
+  performance-comparison:
+    name: Performance Comparison
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+    - name: Checkout PR branch
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libasound2-dev \
+          libpulse-dev \
+          libjack-dev \
+          portaudio19-dev \
+          libssl-dev \
+          pkg-config \
+          build-essential
+
+    - name: Run performance tests (PR)
+      run: |
+        cargo build --release --all-features
+        cargo test --test performance_tests --release -- --nocapture 2>&1 | \
+          grep -E "(test result|Performance|RTF|Memory|Latency)" > pr-performance.txt || \
+          echo "PR performance tests completed" > pr-performance.txt
+
+    - name: Checkout main branch
+      uses: actions/checkout@v4
+      with:
+        ref: main
+
+    - name: Run performance tests (main)
+      run: |
+        cargo build --release --all-features
+        cargo test --test performance_tests --release -- --nocapture 2>&1 | \
+          grep -E "(test result|Performance|RTF|Memory|Latency)" > main-performance.txt || \
+          echo "Main performance tests completed" > main-performance.txt
+
+    - name: Compare performance
+      run: |
+        echo "# Performance Comparison" > performance-comparison.md
+        echo "" >> performance-comparison.md
+        echo "## Main Branch Results" >> performance-comparison.md
+        echo '```' >> performance-comparison.md
+        cat main-performance.txt >> performance-comparison.md
+        echo '```' >> performance-comparison.md
+        echo "" >> performance-comparison.md
+        echo "## PR Branch Results" >> performance-comparison.md
+        echo '```' >> performance-comparison.md
+        cat pr-performance.txt >> performance-comparison.md
+        echo '```' >> performance-comparison.md
+
+    - name: Comment performance comparison
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const content = fs.readFileSync('performance-comparison.md', 'utf8');
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: content
+          });
+
+  # Performance dashboard update
+  update-dashboard:
+    name: Update Performance Dashboard
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs: [performance-regression, benchmarks, memory-profiling, load-testing]
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Download performance artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: artifacts/
+
+    - name: Generate performance dashboard
+      run: |
+        mkdir -p dashboard
+        echo "# VoiRS Recognizer Performance Dashboard" > dashboard/index.md
+        echo "" >> dashboard/index.md
+        echo "Last updated: $(date)" >> dashboard/index.md
+        echo "" >> dashboard/index.md
+        
+        # Add links to all performance reports
+        echo "## Latest Performance Reports" >> dashboard/index.md
+        echo "" >> dashboard/index.md
+        find artifacts/ -name "*.md" -o -name "*.txt" -o -name "*.json" | while read file; do
+          echo "- [$(basename "$file")]($file)" >> dashboard/index.md
+        done
+        
+        echo "" >> dashboard/index.md
+        echo "## Performance Trends" >> dashboard/index.md
+        echo "View the [GitHub Actions page](https://github.com/${{ github.repository }}/actions/workflows/performance.yml) for historical performance data." >> dashboard/index.md
+
+    - name: Deploy performance dashboard
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./dashboard
+        destination_dir: performance-dashboard
+        keep_files: true

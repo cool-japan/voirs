@@ -1,14 +1,13 @@
 //! HiFi-GAN vocoder implementation.
 
 pub mod generator;
+pub mod inference;
 pub mod mrf;
 pub mod variants;
-pub mod inference;
 
 // Re-export commonly used types
 pub use variants::HiFiGanVariants;
 
-use crate::{Result, VocoderError};
 use serde::{Deserialize, Serialize};
 
 /// HiFi-GAN configuration
@@ -56,7 +55,7 @@ impl HiFiGanVariant {
             HiFiGanVariant::V3 => "HiFi-GAN V3",
         }
     }
-    
+
     /// Get default configuration for variant
     pub fn default_config(&self) -> HiFiGanConfig {
         match self {
@@ -68,11 +67,7 @@ impl HiFiGanVariant {
                 upsample_rates: vec![8, 8, 2, 2],
                 upsample_kernel_sizes: vec![16, 16, 4, 4],
                 mrf_kernel_sizes: vec![3, 7, 11],
-                mrf_dilation_sizes: vec![
-                    vec![1, 3, 5],
-                    vec![1, 3, 5],
-                    vec![1, 3, 5],
-                ],
+                mrf_dilation_sizes: vec![vec![1, 3, 5], vec![1, 3, 5], vec![1, 3, 5]],
                 initial_channels: 512,
                 leaky_relu_slope: 0.1,
             },
@@ -84,11 +79,7 @@ impl HiFiGanVariant {
                 upsample_rates: vec![8, 8, 4, 2],
                 upsample_kernel_sizes: vec![16, 16, 8, 4],
                 mrf_kernel_sizes: vec![3, 7, 11],
-                mrf_dilation_sizes: vec![
-                    vec![1, 3, 5],
-                    vec![1, 3, 5],
-                    vec![1, 3, 5],
-                ],
+                mrf_dilation_sizes: vec![vec![1, 3, 5], vec![1, 3, 5], vec![1, 3, 5]],
                 initial_channels: 256,
                 leaky_relu_slope: 0.1,
             },
@@ -100,11 +91,7 @@ impl HiFiGanVariant {
                 upsample_rates: vec![8, 8, 8, 2],
                 upsample_kernel_sizes: vec![16, 16, 16, 4],
                 mrf_kernel_sizes: vec![3, 5, 7],
-                mrf_dilation_sizes: vec![
-                    vec![1, 2, 4],
-                    vec![1, 2, 4],
-                    vec![1, 2, 4],
-                ],
+                mrf_dilation_sizes: vec![vec![1, 2, 4], vec![1, 2, 4], vec![1, 2, 4]],
                 initial_channels: 128,
                 leaky_relu_slope: 0.1,
             },
@@ -148,7 +135,7 @@ mod tests {
     #[test]
     fn test_hifigan_config() {
         let config = HiFiGanConfig::default();
-        
+
         assert_eq!(config.mel_channels, 80);
         assert_eq!(config.sample_rate, 22050);
         assert!(!config.upsample_rates.is_empty());

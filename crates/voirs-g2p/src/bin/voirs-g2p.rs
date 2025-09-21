@@ -1,20 +1,14 @@
 //! VoiRS G2P Command Line Interface
 
-use std::path::PathBuf;
 use std::fs;
-use std::io::{self, Write};
-use std::collections::HashMap;
+use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use serde_json;
-use tokio;
 
 use voirs_g2p::{
-    G2p, LanguageCode, Result, G2pError,
-    DummyG2p, G2pConverter,
+    performance::{BatchProcessor, CachedG2p},
     rules::EnglishRuleG2p,
-    performance::{CachedG2p, BatchProcessor},
-    config::ConfigManager,
+    DummyG2p, G2p, G2pError, LanguageCode, Result,
 };
 
 /// VoiRS G2P - Grapheme-to-Phoneme conversion tool
@@ -23,11 +17,11 @@ use voirs_g2p::{
 struct Cli {
     #[command(subcommand)]
     command: Commands,
-    
+
     /// Verbose output
     #[arg(short, long)]
     verbose: bool,
-    
+
     /// Configuration file path
     #[arg(short, long)]
     config: Option<PathBuf>,
@@ -39,99 +33,99 @@ enum Commands {
     Convert {
         /// Input text to convert
         text: String,
-        
+
         /// Language code (e.g., en-US, ja, de)
         #[arg(short, long)]
         lang: Option<String>,
-        
+
         /// Output format (plain, json, csv, ssml)
         #[arg(short, long, default_value = "plain")]
         format: String,
-        
+
         /// Output file path (stdout if not specified)
         #[arg(short, long)]
         output: Option<PathBuf>,
-        
+
         /// G2P backend to use
         #[arg(short, long, default_value = "rule-based")]
         backend: String,
-        
+
         /// Show confidence scores
         #[arg(long)]
         show_confidence: bool,
-        
+
         /// Show stress information
         #[arg(long)]
         show_stress: bool,
-        
+
         /// Show syllable positions
         #[arg(long)]
         show_syllables: bool,
     },
-    
+
     /// Process file or multiple files
     File {
         /// Input file path
         input: PathBuf,
-        
+
         /// Output file path
         #[arg(short, long)]
         output: Option<PathBuf>,
-        
+
         /// Language code
         #[arg(short, long)]
         lang: Option<String>,
-        
+
         /// Output format (plain, json, csv)
         #[arg(short, long, default_value = "json")]
         format: String,
-        
+
         /// G2P backend to use
         #[arg(short, long, default_value = "rule-based")]
         backend: String,
     },
-    
+
     /// Batch process multiple texts
     Batch {
         /// Input CSV file with text and optional language columns
         input: PathBuf,
-        
+
         /// Output file path
         #[arg(short, long)]
         output: Option<PathBuf>,
-        
+
         /// Maximum concurrent processing
         #[arg(short, long, default_value = "4")]
         concurrency: usize,
-        
+
         /// G2P backend to use
         #[arg(short, long, default_value = "rule-based")]
         backend: String,
     },
-    
+
     /// Configuration management
     Config {
         #[command(subcommand)]
         config_cmd: ConfigCommands,
     },
-    
+
     /// List available backends and models
     List {
         /// List type (backends, languages, models)
         #[arg(default_value = "backends")]
         list_type: String,
     },
-    
+
     /// Benchmark performance
     Benchmark {
         /// Test text to benchmark
         #[arg(default_value = "The quick brown fox jumps over the lazy dog")]
         text: String,
-        
+
         /// Number of iterations
         #[arg(short, long, default_value = "100")]
         iterations: usize,
-        
+
         /// G2P backend to use
         #[arg(short, long, default_value = "rule-based")]
         backend: String,
@@ -142,7 +136,7 @@ enum Commands {
 enum ConfigCommands {
     /// Show current configuration
     Show,
-    
+
     /// Set configuration value
     Set {
         /// Configuration key
@@ -150,13 +144,13 @@ enum ConfigCommands {
         /// Configuration value
         value: String,
     },
-    
+
     /// Get configuration value
     Get {
         /// Configuration key
         key: String,
     },
-    
+
     /// Generate default configuration file
     Generate {
         /// Output file path
@@ -198,55 +192,61 @@ fn format_phonemes(
             let mut result = Vec::new();
             for phoneme in phonemes {
                 let mut parts = vec![phoneme.symbol.clone()];
-                
+
                 if show_stress && phoneme.stress > 0 {
-                    parts.push(format!("(stress:{})", phoneme.stress));
+                    parts.push(format!("(stress:{stress})", stress = phoneme.stress));
                 }
-                
+
                 if show_syllables {
-                    parts.push(format!("(pos:{:?})", phoneme.syllable_position));
+                    parts.push(format!("(pos:{pos:?})", pos = phoneme.syllable_position));
                 }
-                
+
                 if show_confidence {
-                    parts.push(format!("(conf:{:.2})", phoneme.confidence));
+                    parts.push(format!("(conf:{conf:.2})", conf = phoneme.confidence));
                 }
-                
+
                 result.push(parts.join(" "));
             }
             Ok(result.join(" "))
         }
-        
+
         OutputFormat::Json => {
             let json_value = serde_json::to_string_pretty(phonemes)
-                .map_err(|e| G2pError::ConfigError(format!("JSON serialization failed: {}", e)))?;
+                .map_err(|e| G2pError::ConfigError(format!("JSON serialization failed: {e}")))?;
             Ok(json_value)
         }
-        
+
         OutputFormat::Csv => {
-            let mut result = vec!["symbol,stress,syllable_position,confidence,duration_ms".to_string()];
-            
+            let mut result =
+                vec!["symbol,stress,syllable_position,confidence,duration_ms".to_string()];
+
             for phoneme in phonemes {
-                let row = format!("{},{},{:?},{},{}",
-                    phoneme.symbol,
-                    phoneme.stress,
-                    phoneme.syllable_position,
-                    phoneme.confidence,
-                    phoneme.duration_ms.map_or("".to_string(), |d| d.to_string())
+                let row = format!(
+                    "{symbol},{stress},{syllable_position:?},{confidence},{duration}",
+                    symbol = phoneme.symbol,
+                    stress = phoneme.stress,
+                    syllable_position = phoneme.syllable_position,
+                    confidence = phoneme.confidence,
+                    duration = phoneme
+                        .duration_ms
+                        .map_or("".to_string(), |d| d.to_string())
                 );
                 result.push(row);
             }
-            
+
             Ok(result.join("\n"))
         }
-        
+
         OutputFormat::Ssml => {
-            let phoneme_str = phonemes.iter()
+            let phoneme_str = phonemes
+                .iter()
                 .map(|p| p.symbol.as_str())
                 .collect::<Vec<_>>()
                 .join(" ");
-            
-            Ok(format!("<phoneme alphabet=\"ipa\" ph=\"{}\">{}</phoneme>",
-                phoneme_str, phoneme_str))
+
+            Ok(format!(
+                "<phoneme alphabet=\"ipa\" ph=\"{phoneme_str}\">{phoneme_str}</phoneme>"
+            ))
         }
     }
 }
@@ -262,7 +262,9 @@ fn parse_language_code(lang: &str) -> Result<LanguageCode> {
         "de" => Ok(LanguageCode::De),
         "fr" => Ok(LanguageCode::Fr),
         "es" => Ok(LanguageCode::Es),
-        _ => Err(G2pError::ConfigError(format!("Unsupported language: {}", lang))),
+        _ => Err(G2pError::ConfigError(format!(
+            "Unsupported language: {lang}"
+        ))),
     }
 }
 
@@ -282,7 +284,7 @@ async fn create_backend(name: &str) -> Result<Box<dyn G2p>> {
             let cached_backend = CachedG2p::new(backend, 1000);
             Ok(Box::new(cached_backend))
         }
-        _ => Err(G2pError::ConfigError(format!("Unknown backend: {}", name))),
+        _ => Err(G2pError::ConfigError(format!("Unknown backend: {name}"))),
     }
 }
 
@@ -297,16 +299,22 @@ async fn process_convert(
     show_syllables: bool,
 ) -> Result<String> {
     let backend = create_backend(backend_name).await?;
-    
+
     let language_code = if let Some(lang) = lang {
         Some(parse_language_code(&lang)?)
     } else {
         None
     };
-    
+
     let phonemes = backend.to_phonemes(text, language_code).await?;
-    
-    format_phonemes(&phonemes, format, show_confidence, show_stress, show_syllables)
+
+    format_phonemes(
+        &phonemes,
+        format,
+        show_confidence,
+        show_stress,
+        show_syllables,
+    )
 }
 
 /// Process file conversion
@@ -318,27 +326,27 @@ async fn process_file(
     backend_name: &str,
 ) -> Result<()> {
     let content = fs::read_to_string(input_path)
-        .map_err(|e| G2pError::ConfigError(format!("Failed to read file: {}", e)))?;
-    
+        .map_err(|e| G2pError::ConfigError(format!("Failed to read file: {e}")))?;
+
     let backend = create_backend(backend_name).await?;
-    
+
     let language_code = if let Some(lang) = lang {
         Some(parse_language_code(&lang)?)
     } else {
         None
     };
-    
+
     let phonemes = backend.to_phonemes(&content, language_code).await?;
-    
+
     let output = format_phonemes(&phonemes, format, false, false, false)?;
-    
+
     if let Some(output_path) = output_path {
         fs::write(output_path, output)
-            .map_err(|e| G2pError::ConfigError(format!("Failed to write file: {}", e)))?;
+            .map_err(|e| G2pError::ConfigError(format!("Failed to write file: {e}")))?;
     } else {
-        println!("{}", output);
+        println!("{output}");
     }
-    
+
     Ok(())
 }
 
@@ -350,10 +358,10 @@ async fn process_batch(
     backend_name: &str,
 ) -> Result<()> {
     let content = fs::read_to_string(input_path)
-        .map_err(|e| G2pError::ConfigError(format!("Failed to read file: {}", e)))?;
-    
+        .map_err(|e| G2pError::ConfigError(format!("Failed to read file: {e}")))?;
+
     let backend = std::sync::Arc::new(create_backend(backend_name).await?);
-    
+
     // Parse CSV-like input
     let mut texts = Vec::new();
     for line in content.lines() {
@@ -361,40 +369,44 @@ async fn process_batch(
             texts.push(line.trim().to_string());
         }
     }
-    
+
     if texts.is_empty() {
-        return Err(G2pError::ConfigError("No texts found in input file".to_string()));
+        return Err(G2pError::ConfigError(
+            "No texts found in input file".to_string(),
+        ));
     }
-    
+
     let results = BatchProcessor::process_batch(
         backend,
         texts,
         Some(LanguageCode::EnUs), // Default language
         concurrency,
-    ).await?;
-    
+    )
+    .await?;
+
     let mut output_results = Vec::new();
     for (i, result) in results.iter().enumerate() {
         match result {
             Ok(phonemes) => {
-                let formatted = format_phonemes(phonemes, &OutputFormat::Json, false, false, false)?;
-                output_results.push(format!("{{\"index\": {}, \"phonemes\": {}}}", i, formatted));
+                let formatted =
+                    format_phonemes(phonemes, &OutputFormat::Json, false, false, false)?;
+                output_results.push(format!("{{\"index\": {i}, \"phonemes\": {formatted}}}"));
             }
             Err(e) => {
-                output_results.push(format!("{{\"index\": {}, \"error\": \"{}\"}}", i, e));
+                output_results.push(format!("{{\"index\": {i}, \"error\": \"{e}\"}}"));
             }
         }
     }
-    
+
     let output = format!("[{}]", output_results.join(", "));
-    
+
     if let Some(output_path) = output_path {
         fs::write(output_path, output)
-            .map_err(|e| G2pError::ConfigError(format!("Failed to write file: {}", e)))?;
+            .map_err(|e| G2pError::ConfigError(format!("Failed to write file: {e}")))?;
     } else {
-        println!("{}", output);
+        println!("{output}");
     }
-    
+
     Ok(())
 }
 
@@ -424,7 +436,9 @@ async fn list_items(list_type: &str) -> Result<()> {
             println!("  Dummy model for testing (built-in)");
         }
         _ => {
-            return Err(G2pError::ConfigError(format!("Unknown list type: {}", list_type)));
+            return Err(G2pError::ConfigError(format!(
+                "Unknown list type: {list_type}"
+            )));
         }
     }
     Ok(())
@@ -433,48 +447,51 @@ async fn list_items(list_type: &str) -> Result<()> {
 /// Run performance benchmark
 async fn benchmark(text: &str, iterations: usize, backend_name: &str) -> Result<()> {
     let backend = create_backend(backend_name).await?;
-    
+
     println!("Running benchmark...");
-    println!("Text: {}", text);
-    println!("Iterations: {}", iterations);
-    println!("Backend: {}", backend_name);
-    
+    println!("Text: {text}");
+    println!("Iterations: {iterations}");
+    println!("Backend: {backend_name}");
+
     let start = std::time::Instant::now();
-    
+
     for _ in 0..iterations {
         let _ = backend.to_phonemes(text, Some(LanguageCode::EnUs)).await?;
     }
-    
+
     let duration = start.elapsed();
     let avg_duration = duration / iterations as u32;
-    
+
     println!("\nResults:");
-    println!("  Total time: {:?}", duration);
-    println!("  Average time per conversion: {:?}", avg_duration);
-    println!("  Throughput: {:.2} conversions/second", iterations as f64 / duration.as_secs_f64());
-    
+    println!("  Total time: {duration:?}");
+    println!("  Average time per conversion: {avg_duration:?}");
+    println!(
+        "  Throughput: {:.2} conversions/second",
+        iterations as f64 / duration.as_secs_f64()
+    );
+
     Ok(())
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    
+
     if cli.verbose {
         std::env::set_var("RUST_LOG", "debug");
     }
-    
+
     tracing_subscriber::fmt::init();
-    
+
     match &cli.command {
-        Commands::Convert { 
-            text, 
-            lang, 
-            format, 
-            output, 
-            backend, 
-            show_confidence, 
-            show_stress, 
+        Commands::Convert {
+            text,
+            lang,
+            format,
+            output,
+            backend,
+            show_confidence,
+            show_stress,
             show_syllables,
         } => {
             let output_format = OutputFormat::from(format.as_str());
@@ -486,35 +503,53 @@ async fn main() -> Result<()> {
                 *show_confidence,
                 *show_stress,
                 *show_syllables,
-            ).await?;
-            
+            )
+            .await?;
+
             if let Some(output_path) = output {
                 fs::write(output_path, result)
-                    .map_err(|e| G2pError::ConfigError(format!("Failed to write file: {}", e)))?;
+                    .map_err(|e| G2pError::ConfigError(format!("Failed to write file: {e}")))?;
             } else {
-                println!("{}", result);
+                println!("{result}");
             }
         }
-        
-        Commands::File { input, output, lang, format, backend } => {
+
+        Commands::File {
+            input,
+            output,
+            lang,
+            format,
+            backend,
+        } => {
             let output_format = OutputFormat::from(format.as_str());
-            process_file(input, output.as_ref(), lang.clone(), &output_format, backend).await?;
+            process_file(
+                input,
+                output.as_ref(),
+                lang.clone(),
+                &output_format,
+                backend,
+            )
+            .await?;
         }
-        
-        Commands::Batch { input, output, concurrency, backend } => {
+
+        Commands::Batch {
+            input,
+            output,
+            concurrency,
+            backend,
+        } => {
             process_batch(input, output.as_ref(), *concurrency, backend).await?;
         }
-        
-        Commands::Config { config_cmd } => {
-            match config_cmd {
-                ConfigCommands::Show => {
-                    println!("Current configuration:");
-                    println!("  Default backend: rule-based");
-                    println!("  Default language: en-US");
-                    println!("  Cache size: 1000");
-                }
-                ConfigCommands::Generate { output } => {
-                    let default_config = r#"
+
+        Commands::Config { config_cmd } => match config_cmd {
+            ConfigCommands::Show => {
+                println!("Current configuration:");
+                println!("  Default backend: rule-based");
+                println!("  Default language: en-US");
+                println!("  Cache size: 1000");
+            }
+            ConfigCommands::Generate { output } => {
+                let default_config = r#"
 # VoiRS G2P Configuration File
 
 [general]
@@ -536,29 +571,33 @@ hybrid_enabled = false
 max_concurrent = 4
 batch_size = 100
 "#;
-                    
-                    if let Some(output_path) = output {
-                        fs::write(output_path, default_config)
-                            .map_err(|e| G2pError::ConfigError(format!("Failed to write config: {}", e)))?;
-                        println!("Configuration written to: {}", output_path.display());
-                    } else {
-                        println!("{}", default_config);
-                    }
-                }
-                _ => {
-                    println!("Configuration management not fully implemented yet");
+
+                if let Some(output_path) = output {
+                    fs::write(output_path, default_config).map_err(|e| {
+                        G2pError::ConfigError(format!("Failed to write config: {e}"))
+                    })?;
+                    println!("Configuration written to: {}", output_path.display());
+                } else {
+                    println!("{default_config}");
                 }
             }
-        }
-        
+            _ => {
+                println!("Configuration management not fully implemented yet");
+            }
+        },
+
         Commands::List { list_type } => {
             list_items(list_type).await?;
         }
-        
-        Commands::Benchmark { text, iterations, backend } => {
+
+        Commands::Benchmark {
+            text,
+            iterations,
+            backend,
+        } => {
             benchmark(text, *iterations, backend).await?;
         }
     }
-    
+
     Ok(())
 }

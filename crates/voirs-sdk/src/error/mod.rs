@@ -19,6 +19,8 @@
 //! ```no_run
 //! use voirs_sdk::error::{VoirsError, ErrorReporter, ErrorRecoveryManager};
 //!
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create error recovery manager
 //! let mut recovery_manager = ErrorRecoveryManager::default();
 //!
@@ -26,8 +28,12 @@
 //! let mut reporter = ErrorReporter::default();
 //!
 //! // Report an error
-//! let error = VoirsError::synthesis_failed("Hello world", 
-//!     std::io::Error::new(std::io::ErrorKind::Other, "test"));
+//! let error = VoirsError::SynthesisFailed {
+//!     text: "Hello world".to_string(),
+//!     text_length: 11,
+//!     stage: voirs_sdk::error::SynthesisStage::TextPreprocessing,
+//!     cause: Box::new(std::io::Error::new(std::io::ErrorKind::Other, "test")),
+//! };
 //! reporter.report_error(&error, Some("synthesis"));
 //!
 //! // Execute operation with recovery
@@ -37,6 +43,8 @@
 //!         Ok(())
 //!     })
 //! }).await;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Error Context
@@ -94,46 +102,38 @@
 //! println!("System health score: {:.2}", diagnostic.system_health.overall_score);
 //! ```
 
-pub mod types;
 pub mod recovery;
 pub mod reporting;
+pub mod types;
 
 // Re-export main types for convenience
 pub use types::{
-    VoirsError, ErrorSeverity, ErrorWithContext, ErrorContext,
-    SynthesisStage, ModelType, IoOperation, AudioBufferErrorType,
-    QualityMetrics, AudioBufferInfo, Result, ContextResult,
+    AudioBufferErrorType, AudioBufferInfo, ContextResult, ErrorContext, ErrorSeverity,
+    ErrorWithContext, IoOperation, ModelType, QualityMetrics, Result, SynthesisStage, VoirsError,
 };
 
 pub use recovery::{
-    ErrorRecoveryManager, RecoveryStrategy, RecoveryContext,
-    CircuitBreaker, CircuitBreakerConfig, CircuitState,
-    CircuitBreakerError,
+    CircuitBreaker, CircuitBreakerConfig, CircuitBreakerError, CircuitState, ErrorRecoveryManager,
+    RecoveryContext, RecoveryStrategy,
 };
 
 pub use reporting::{
-    ErrorReporter, ErrorReporterConfig, ErrorReport, ErrorCategory,
-    ErrorListener, ConsoleErrorListener, FileErrorListener,
-    ErrorStatistics, DiagnosticReport, SystemHealth, SystemContext,
-    RuntimeInfo, PerformanceImpact,
+    ConsoleErrorListener, DiagnosticReport, ErrorCategory, ErrorListener, ErrorReport,
+    ErrorReporter, ErrorReporterConfig, ErrorStatistics, FileErrorListener, PerformanceImpact,
+    RuntimeInfo, SystemContext, SystemHealth,
 };
 
 /// Global error reporter instance
-static mut GLOBAL_ERROR_REPORTER: Option<ErrorReporter> = None;
-static REPORTER_INIT: std::sync::Once = std::sync::Once::new();
+static GLOBAL_ERROR_REPORTER: std::sync::OnceLock<ErrorReporter> = std::sync::OnceLock::new();
 
 /// Initialize global error reporter
 pub fn init_global_error_reporter(config: ErrorReporterConfig) {
-    REPORTER_INIT.call_once(|| {
-        unsafe {
-            GLOBAL_ERROR_REPORTER = Some(ErrorReporter::new(config));
-        }
-    });
+    let _ = GLOBAL_ERROR_REPORTER.set(ErrorReporter::new(config));
 }
 
 /// Get global error reporter
 pub fn get_global_error_reporter() -> Option<&'static ErrorReporter> {
-    unsafe { GLOBAL_ERROR_REPORTER.as_ref() }
+    GLOBAL_ERROR_REPORTER.get()
 }
 
 /// Report error using global reporter
@@ -150,37 +150,37 @@ macro_rules! voirs_error {
     (synthesis_failed: $text:expr, $cause:expr) => {
         $crate::error::VoirsError::synthesis_failed($text, $cause)
     };
-    
+
     // Device error
     (device_error: $device:expr, $message:expr) => {
         $crate::error::VoirsError::device_error($device, $message)
     };
-    
+
     // Config error
     (config_error: $message:expr) => {
         $crate::error::VoirsError::config_error($message)
     };
-    
+
     // Model error
     (model_error: $message:expr) => {
         $crate::error::VoirsError::model_error($message)
     };
-    
+
     // Audio error
     (audio_error: $message:expr) => {
         $crate::error::VoirsError::audio_error($message)
     };
-    
+
     // G2P error
     (g2p_error: $message:expr) => {
         $crate::error::VoirsError::g2p_error($message)
     };
-    
+
     // Timeout error
     (timeout: $message:expr) => {
         $crate::error::VoirsError::timeout($message)
     };
-    
+
     // Internal error
     (internal: $component:expr, $message:expr) => {
         $crate::error::VoirsError::InternalError {
@@ -194,9 +194,9 @@ macro_rules! voirs_error {
 #[macro_export]
 macro_rules! with_recovery {
     ($manager:expr, $component:expr, $operation:expr) => {
-        $manager.execute_with_recovery($component, || {
-            Box::pin(async move { $operation })
-        }).await
+        $manager
+            .execute_with_recovery($component, || Box::pin(async move { $operation }))
+            .await
     };
 }
 
@@ -215,14 +215,19 @@ macro_rules! report_error {
 pub trait ResultExt<T> {
     /// Report error if Result is Err, then return the Result unchanged
     fn report_on_error(self, context: Option<&str>) -> Self;
-    
+
     /// Report error and convert to a different error type
     fn report_and_convert<E, F>(self, context: Option<&str>, f: F) -> std::result::Result<T, E>
     where
         F: FnOnce(VoirsError) -> E;
-    
+
     /// Add error context
-    fn with_error_context(self, component: impl Into<String>, operation: impl Into<String>) -> ContextResult<T>;
+    #[allow(clippy::result_large_err)]
+    fn with_error_context(
+        self,
+        component: impl Into<String>,
+        operation: impl Into<String>,
+    ) -> ContextResult<T>;
 }
 
 impl<T> ResultExt<T> for Result<T> {
@@ -232,7 +237,7 @@ impl<T> ResultExt<T> for Result<T> {
         }
         self
     }
-    
+
     fn report_and_convert<E, F>(self, context: Option<&str>, f: F) -> std::result::Result<T, E>
     where
         F: FnOnce(VoirsError) -> E,
@@ -245,8 +250,12 @@ impl<T> ResultExt<T> for Result<T> {
             }
         }
     }
-    
-    fn with_error_context(self, component: impl Into<String>, operation: impl Into<String>) -> ContextResult<T> {
+
+    fn with_error_context(
+        self,
+        component: impl Into<String>,
+        operation: impl Into<String>,
+    ) -> ContextResult<T> {
         match self {
             Ok(value) => Ok(value),
             Err(error) => Err(error.with_context(component, operation)),
@@ -258,16 +267,16 @@ impl<T> ResultExt<T> for Result<T> {
 pub trait VoirsErrorExt {
     /// Check if error indicates a permanent failure
     fn is_permanent(&self) -> bool;
-    
+
     /// Check if error indicates a temporary failure
     fn is_temporary(&self) -> bool;
-    
+
     /// Check if error is related to user input
     fn is_user_error(&self) -> bool;
-    
+
     /// Check if error is related to system resources
     fn is_resource_error(&self) -> bool;
-    
+
     /// Get recommended wait time before retry
     fn recommended_retry_delay(&self) -> Option<std::time::Duration>;
 }
@@ -277,42 +286,42 @@ impl VoirsErrorExt for VoirsError {
         matches!(
             self,
             VoirsError::UnsupportedDevice { .. }
-            | VoirsError::ModelNotFound { .. }
-            | VoirsError::FileCorrupted { .. }
-            | VoirsError::LanguageNotSupported { .. }
-            | VoirsError::NotImplemented { .. }
+                | VoirsError::ModelNotFound { .. }
+                | VoirsError::FileCorrupted { .. }
+                | VoirsError::LanguageNotSupported { .. }
+                | VoirsError::NotImplemented { .. }
         )
     }
-    
+
     fn is_temporary(&self) -> bool {
         !self.is_permanent() && self.is_recoverable()
     }
-    
+
     fn is_user_error(&self) -> bool {
         matches!(
             self,
             VoirsError::VoiceNotFound { .. }
-            | VoirsError::InvalidConfiguration { .. }
-            | VoirsError::ConfigError { .. }
+                | VoirsError::InvalidConfiguration { .. }
+                | VoirsError::ConfigError { .. }
         )
     }
-    
+
     fn is_resource_error(&self) -> bool {
         matches!(
             self,
             VoirsError::OutOfMemory { .. }
-            | VoirsError::GpuOutOfMemory { .. }
-            | VoirsError::ResourceExhausted { .. }
+                | VoirsError::GpuOutOfMemory { .. }
+                | VoirsError::ResourceExhausted { .. }
         )
     }
-    
+
     fn recommended_retry_delay(&self) -> Option<std::time::Duration> {
         use std::time::Duration;
-        
+
         if !self.is_recoverable() {
             return None;
         }
-        
+
         Some(match self {
             VoirsError::NetworkError { .. } => Duration::from_secs(1),
             VoirsError::TimeoutError { .. } => Duration::from_millis(500),
@@ -321,79 +330,6 @@ impl VoirsErrorExt for VoirsError {
             VoirsError::OutOfMemory { .. } => Duration::from_secs(5),
             _ => Duration::from_millis(200),
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::Duration;
-
-    #[test]
-    fn test_error_macros() {
-        let error = voirs_error!(config_error: "Test error");
-        assert!(matches!(error, VoirsError::ConfigError { .. }));
-        
-        let error = voirs_error!(internal: "test_component", "Test message");
-        assert!(matches!(error, VoirsError::InternalError { .. }));
-    }
-
-    #[test]
-    fn test_error_extensions() {
-        let error = VoirsError::NetworkError {
-            message: "Connection failed".to_string(),
-            retry_count: 1,
-            max_retries: 3,
-            source: None,
-        };
-        
-        assert!(error.is_temporary());
-        assert!(!error.is_permanent());
-        assert!(!error.is_user_error());
-        assert!(error.recommended_retry_delay().is_some());
-    }
-
-    #[test]
-    fn test_result_extensions() {
-        let result: Result<i32> = Err(VoirsError::InternalError {
-            component: "test".to_string(),
-            message: "test error".to_string(),
-        });
-        
-        let context_result = result.with_error_context("test_component", "test_operation");
-        assert!(context_result.is_err());
-        
-        if let Err(error_with_context) = context_result {
-            assert_eq!(error_with_context.context.component, "test_component");
-            assert_eq!(error_with_context.context.operation, "test_operation");
-        }
-    }
-
-    #[tokio::test]
-    async fn test_integration() {
-        // Initialize global error reporter
-        init_global_error_reporter(ErrorReporterConfig::default());
-        
-        // Create recovery manager
-        let manager = ErrorRecoveryManager::default();
-        
-        // Test operation with recovery
-        let result: Result<()> = manager.execute_with_recovery("test", || -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>> {
-            Box::pin(async {
-                Err(VoirsError::InternalError {
-                    component: "test".to_string(),
-                    message: "test error".to_string(),
-                })
-            })
-        }).await;
-        
-        assert!(result.is_err());
-        
-        // Check that error was reported
-        if let Some(reporter) = get_global_error_reporter() {
-            let stats = reporter.get_statistics();
-            // Note: The error might not be reported due to severity filtering
-        }
     }
 }
 
@@ -414,7 +350,7 @@ impl VoirsError {
     pub fn invalid_configuration_legacy(field: String, value: String, reason: String) -> Self {
         Self::InvalidConfiguration {
             field,
-            value, 
+            value,
             reason,
             valid_values: None,
         }
@@ -468,7 +404,7 @@ impl From<toml::ser::Error> for VoirsError {
 impl From<hf_hub::api::sync::ApiError> for VoirsError {
     fn from(err: hf_hub::api::sync::ApiError) -> Self {
         Self::NetworkError {
-            message: format!("HuggingFace Hub API error: {}", err),
+            message: format!("HuggingFace Hub API error: {err}"),
             retry_count: 0,
             max_retries: 3,
             source: Some(Box::new(err)),
@@ -476,10 +412,46 @@ impl From<hf_hub::api::sync::ApiError> for VoirsError {
     }
 }
 
+impl From<voirs_acoustic::AcousticError> for VoirsError {
+    fn from(err: voirs_acoustic::AcousticError) -> Self {
+        Self::SynthesisFailed {
+            text: "unknown".to_string(),
+            text_length: 0,
+            stage: SynthesisStage::AcousticModeling,
+            cause: Box::new(err),
+        }
+    }
+}
+
+impl From<voirs_vocoder::VocoderError> for VoirsError {
+    fn from(err: voirs_vocoder::VocoderError) -> Self {
+        Self::SynthesisFailed {
+            text: "unknown".to_string(),
+            text_length: 0,
+            stage: SynthesisStage::Vocoding,
+            cause: Box::new(err),
+        }
+    }
+}
+
+impl From<voirs_g2p::G2pError> for VoirsError {
+    fn from(err: voirs_g2p::G2pError) -> Self {
+        Self::SynthesisFailed {
+            text: "unknown".to_string(),
+            text_length: 0,
+            stage: SynthesisStage::G2pConversion,
+            cause: Box::new(err),
+        }
+    }
+}
+
 /// Compatibility wrapper to maintain backward compatibility with old error type
 impl VoirsError {
     /// Create a new synthesis error (legacy API)
-    pub fn synthesis_failed(text: impl Into<String>, cause: impl std::error::Error + Send + Sync + 'static) -> Self {
+    pub fn synthesis_failed(
+        text: impl Into<String>,
+        cause: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
         let text = text.into();
         Self::SynthesisFailed {
             text_length: text.len(),
@@ -540,8 +512,16 @@ impl VoirsError {
         }
     }
 
+    /// Create a new cache error (legacy API)
+    pub fn cache_error(message: impl Into<String>) -> Self {
+        Self::ConfigError {
+            field: "cache".to_string(),
+            message: message.into(),
+        }
+    }
+
     /// Create a new timeout error (legacy API)
-    pub fn timeout(message: impl Into<String>) -> Self {
+    pub fn timeout(_message: impl Into<String>) -> Self {
         Self::TimeoutError {
             operation: "unknown".to_string(),
             duration: std::time::Duration::from_secs(30),
@@ -552,12 +532,13 @@ impl VoirsError {
     /// Create voice not found error with automatic suggestions
     pub fn voice_not_found(voice: impl Into<String>, available: Vec<String>) -> Self {
         let voice_str = voice.into();
-        let suggestions = available.iter()
+        let suggestions = available
+            .iter()
             .filter(|v| v.contains(&voice_str) || voice_str.contains(*v))
             .take(3)
             .cloned()
             .collect();
-        
+
         Self::VoiceNotFound {
             voice: voice_str,
             available,
@@ -566,7 +547,11 @@ impl VoirsError {
     }
 
     /// Create invalid configuration error
-    pub fn invalid_config(field: impl Into<String>, value: impl Into<String>, reason: impl Into<String>) -> Self {
+    pub fn invalid_config(
+        field: impl Into<String>,
+        value: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> Self {
         Self::InvalidConfiguration {
             field: field.into(),
             value: value.into(),
@@ -577,10 +562,10 @@ impl VoirsError {
 
     /// Create invalid configuration error with valid values
     pub fn invalid_config_with_values(
-        field: impl Into<String>, 
-        value: impl Into<String>, 
+        field: impl Into<String>,
+        value: impl Into<String>,
         reason: impl Into<String>,
-        valid_values: Vec<String>
+        valid_values: Vec<String>,
     ) -> Self {
         Self::InvalidConfiguration {
             field: field.into(),
@@ -607,7 +592,11 @@ impl VoirsError {
     }
 
     /// Create I/O error
-    pub fn io_error(path: impl Into<std::path::PathBuf>, operation: IoOperation, source: std::io::Error) -> Self {
+    pub fn io_error(
+        path: impl Into<std::path::PathBuf>,
+        operation: IoOperation,
+        source: std::io::Error,
+    ) -> Self {
         Self::IoError {
             path: path.into(),
             operation,
@@ -621,6 +610,93 @@ impl VoirsError {
             model_type,
             message: message.into(),
             source: None,
+        }
+    }
+
+    /// Create invalid argument error (alias for config error)
+    pub fn invalid_argument(message: impl Into<String>) -> Self {
+        Self::config_error(message)
+    }
+
+    /// Create cancellation error
+    pub fn cancelled(message: impl Into<String>) -> Self {
+        Self::config_error(format!("Operation cancelled: {}", message.into()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_macros() {
+        let error = voirs_error!(config_error: "Test error");
+        assert!(matches!(error, VoirsError::ConfigError { .. }));
+
+        let error = voirs_error!(internal: "test_component", "Test message");
+        assert!(matches!(error, VoirsError::InternalError { .. }));
+    }
+
+    #[test]
+    fn test_error_extensions() {
+        let error = VoirsError::NetworkError {
+            message: "Connection failed".to_string(),
+            retry_count: 1,
+            max_retries: 3,
+            source: None,
+        };
+
+        assert!(error.is_temporary());
+        assert!(!error.is_permanent());
+        assert!(!error.is_user_error());
+        assert!(error.recommended_retry_delay().is_some());
+    }
+
+    #[test]
+    fn test_result_extensions() {
+        let result: Result<i32> = Err(VoirsError::InternalError {
+            component: "test".to_string(),
+            message: "test error".to_string(),
+        });
+
+        let context_result = result.with_error_context("test_component", "test_operation");
+        assert!(context_result.is_err());
+
+        if let Err(error_with_context) = context_result {
+            assert_eq!(error_with_context.context.component, "test_component");
+            assert_eq!(error_with_context.context.operation, "test_operation");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_integration() {
+        // Initialize global error reporter
+        init_global_error_reporter(ErrorReporterConfig::default());
+
+        // Create recovery manager
+        let manager = ErrorRecoveryManager::default();
+
+        // Test operation with recovery
+        let result: Result<()> = manager
+            .execute_with_recovery(
+                "test",
+                || -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>> {
+                    Box::pin(async {
+                        Err(VoirsError::InternalError {
+                            component: "test".to_string(),
+                            message: "test error".to_string(),
+                        })
+                    })
+                },
+            )
+            .await;
+
+        assert!(result.is_err());
+
+        // Check that error was reported
+        if let Some(reporter) = get_global_error_reporter() {
+            let _stats = reporter.get_statistics();
+            // Note: The error might not be reported due to severity filtering
         }
     }
 }

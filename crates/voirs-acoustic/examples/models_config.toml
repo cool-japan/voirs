@@ -1,0 +1,283 @@
+# VoiRS Neural TTS Models Configuration
+# This file demonstrates how to configure pre-trained models for neural inference
+
+[models.vits_en_us_single]
+name = "VITS English US Single Speaker"
+description = "High-quality VITS model for English (US) speech synthesis"
+architecture = "vits"
+# Use HuggingFace Hub model (requires internet connection)
+model_path = "facebook/mms-tts-eng"
+# Or use local model file
+# model_path = "./models/vits_en_us.safetensors"
+version = "1.0.0"
+author = "Facebook Research"
+license = "MIT"
+supported_languages = ["en-US"]
+tags = ["tts", "vits", "english", "single-speaker"]
+
+# VITS architecture parameters
+[models.vits_en_us_single.vits]
+# Text encoder configuration
+[models.vits_en_us_single.vits.text_encoder]
+n_layers = 6
+hidden_dim = 192
+n_heads = 2
+filter_dim = 768
+dropout = 0.1
+
+# Posterior encoder configuration  
+[models.vits_en_us_single.vits.posterior_encoder]
+n_layers = 16
+hidden_channels = 192
+kernel_size = 5
+dilation_rate = 1
+
+# Flow configuration
+[models.vits_en_us_single.vits.flow]
+n_flows = 4
+n_layers = 4
+hidden_channels = 192
+kernel_size = 5
+
+# Decoder configuration
+[models.vits_en_us_single.vits.decoder]
+initial_channels = 512
+resblock_kernel_sizes = [3, 7, 11]
+resblock_dilation_sizes = [[1, 3, 5], [1, 3, 5], [1, 3, 5]]
+upsample_rates = [8, 8, 2, 2]
+upsample_kernel_sizes = [16, 16, 4, 4]
+upsample_initial_channels = 128
+
+[models.vits_multi_speaker]
+name = "VITS Multi-Speaker"
+description = "Multi-speaker VITS model with voice selection"
+architecture = "vits"
+model_path = "microsoft/speecht5_tts"
+version = "1.0.0"
+author = "Microsoft Research"
+license = "MIT"
+supported_languages = ["en-US"]
+tags = ["tts", "vits", "multi-speaker", "voice-cloning"]
+
+# Multi-speaker configuration
+[models.vits_multi_speaker.vits]
+n_speakers = 109
+speaker_embed_dim = 512
+
+# Use same architecture as single speaker but with speaker embedding
+[models.vits_multi_speaker.vits.text_encoder]
+n_layers = 6
+hidden_dim = 256  # Larger for multi-speaker
+n_heads = 4
+filter_dim = 1024
+dropout = 0.1
+
+[models.vits_multi_speaker.vits.posterior_encoder]
+n_layers = 16
+hidden_channels = 256
+kernel_size = 5
+dilation_rate = 1
+
+[models.vits_multi_speaker.vits.flow]
+n_flows = 4
+n_layers = 4
+hidden_channels = 256
+kernel_size = 5
+
+[models.vits_multi_speaker.vits.decoder]
+initial_channels = 512
+resblock_kernel_sizes = [3, 7, 11]
+resblock_dilation_sizes = [[1, 3, 5], [1, 3, 5], [1, 3, 5]]
+upsample_rates = [8, 8, 2, 2] 
+upsample_kernel_sizes = [16, 16, 4, 4]
+upsample_initial_channels = 128
+
+[models.vits_japanese]
+name = "VITS Japanese"
+description = "VITS model for Japanese speech synthesis"
+architecture = "vits"
+model_path = "espnet/kan-bayashi_ljspeech_vits"
+version = "1.0.0"
+author = "ESPnet"
+license = "Apache-2.0"
+supported_languages = ["ja"]
+tags = ["tts", "vits", "japanese"]
+
+# Japanese-specific configuration
+[models.vits_japanese.vits]
+[models.vits_japanese.vits.text_encoder]
+n_layers = 6
+hidden_dim = 192
+n_heads = 2
+filter_dim = 768
+dropout = 0.1
+
+[models.vits_japanese.vits.posterior_encoder]
+n_layers = 16
+hidden_channels = 192
+kernel_size = 5
+dilation_rate = 1
+
+[models.vits_japanese.vits.flow]
+n_flows = 4
+n_layers = 4
+hidden_channels = 192
+kernel_size = 5
+
+[models.vits_japanese.vits.decoder]
+initial_channels = 512
+resblock_kernel_sizes = [3, 7, 11]
+resblock_dilation_sizes = [[1, 3, 5], [1, 3, 5], [1, 3, 5]]
+upsample_rates = [8, 8, 2, 2]
+upsample_kernel_sizes = [16, 16, 4, 4]
+upsample_initial_channels = 128
+
+# HiFi-GAN Vocoder Configurations
+[vocoders.hifigan_v1]
+name = "HiFi-GAN V1 Universal"
+description = "Highest quality HiFi-GAN vocoder (slower inference)"
+variant = "V1"
+# Example URLs for pre-trained models
+model_path = "https://github.com/jik876/hifi-gan/releases/download/pretrained_models/generator_v1"
+# Or HuggingFace Hub
+# model_path = "nvidia/hifigan_v1_universal"
+mel_channels = 80
+sample_rate = 22050
+num_residual_blocks = 3
+upsample_rates = [8, 8, 2, 2]
+upsample_kernel_sizes = [16, 16, 4, 4]
+mrf_kernel_sizes = [3, 7, 11]
+mrf_dilation_sizes = [[1, 3, 5], [1, 3, 5], [1, 3, 5]]
+initial_channels = 512
+leaky_relu_slope = 0.1
+
+[vocoders.hifigan_v2]
+name = "HiFi-GAN V2 Balanced"
+description = "Balanced quality and speed HiFi-GAN vocoder"
+variant = "V2"
+model_path = "https://github.com/jik876/hifi-gan/releases/download/pretrained_models/generator_v2"
+mel_channels = 80
+sample_rate = 22050
+num_residual_blocks = 3
+upsample_rates = [8, 8, 4, 2]
+upsample_kernel_sizes = [16, 16, 8, 4]
+mrf_kernel_sizes = [3, 7, 11]
+mrf_dilation_sizes = [[1, 3, 5], [1, 3, 5], [1, 3, 5]]
+initial_channels = 256
+leaky_relu_slope = 0.1
+
+[vocoders.hifigan_v3]
+name = "HiFi-GAN V3 Fast"
+description = "Fastest HiFi-GAN vocoder (real-time capable)"
+variant = "V3"
+model_path = "https://github.com/jik876/hifi-gan/releases/download/pretrained_models/generator_v3"
+mel_channels = 80
+sample_rate = 22050
+num_residual_blocks = 2
+upsample_rates = [8, 8, 8, 2]
+upsample_kernel_sizes = [16, 16, 16, 4]
+mrf_kernel_sizes = [3, 5, 7]
+mrf_dilation_sizes = [[1, 2, 4], [1, 2, 4], [1, 2, 4]]
+initial_channels = 128
+leaky_relu_slope = 0.1
+
+# Backend Configuration
+[backends]
+default = "candle"
+
+[backends.candle]
+device = "auto"  # auto, cpu, cuda, metal
+dtype = "f32"    # f16, f32
+compilation_cache = true
+memory_pool_enabled = true
+
+[backends.onnx]
+device = "cpu"   # cpu, gpu
+inter_op_num_threads = 4
+intra_op_num_threads = 4
+memory_pattern = true
+enable_cpu_mem_arena = true
+
+# Synthesis Configuration
+[synthesis]
+default_speed = 1.0
+default_pitch_shift = 0.0
+default_energy = 1.0
+noise_scale = 0.667      # VITS-specific
+noise_scale_w = 0.8      # VITS-specific
+length_scale = 1.0       # VITS-specific
+
+# Quality and Performance Settings
+[performance]
+max_sequence_length = 1000
+batch_size = 1
+chunk_size_frames = 50
+overlap_frames = 5
+real_time_factor_target = 0.3  # Target 30% real-time for quality
+
+[quality]
+sample_rate = 22050
+mel_channels = 80
+hop_length = 256
+win_length = 1024
+n_fft = 1024
+mel_fmin = 0.0
+mel_fmax = 8000.0
+normalize_before = true
+normalize_after = false
+
+# Cache Settings
+[cache]
+enabled = true
+cache_dir = "./cache/models"
+max_cache_size = "2GB"
+ttl_hours = 24
+
+# Example Pipeline Configurations
+[pipelines.high_quality]
+name = "High Quality Pipeline"
+acoustic_model = "vits_en_us_single"
+vocoder = "hifigan_v1"
+description = "Best quality pipeline for offline processing"
+
+[pipelines.real_time]
+name = "Real-time Pipeline" 
+acoustic_model = "vits_en_us_single"
+vocoder = "hifigan_v3"
+description = "Fast pipeline for real-time applications"
+
+[pipelines.multi_speaker]
+name = "Multi-speaker Pipeline"
+acoustic_model = "vits_multi_speaker"
+vocoder = "hifigan_v2" 
+description = "Voice cloning and speaker selection"
+
+# Model Registry - Alternative models from various sources
+[registry.coqui_tts]
+name = "Coqui TTS Models"
+base_url = "https://github.com/coqui-ai/TTS"
+models = [
+    "tts_models/en/ljspeech/vits",
+    "tts_models/en/vctk/vits",
+    "tts_models/ja/kokoro/tacotron2"
+]
+
+[registry.huggingface]
+name = "HuggingFace Hub Models"
+base_url = "https://huggingface.co"
+models = [
+    "microsoft/speecht5_tts",
+    "facebook/mms-tts-eng", 
+    "facebook/mms-tts-jpn",
+    "espnet/kan-bayashi_ljspeech_vits"
+]
+
+[registry.local]
+name = "Local Models"
+base_path = "./models"
+models = [
+    "vits_en_us.safetensors",
+    "vits_multi_speaker.safetensors", 
+    "hifigan_v1.pth",
+    "hifigan_universal.onnx"
+]

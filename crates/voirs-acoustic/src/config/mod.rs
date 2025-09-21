@@ -4,18 +4,17 @@
 //! including model-specific settings, synthesis parameters, and runtime options.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::{Result, AcousticError, LanguageCode};
+use crate::{AcousticError, Result};
 
 pub mod model;
-pub mod synthesis;
 pub mod runtime;
+pub mod synthesis;
 
 pub use model::*;
-pub use synthesis::*;
 pub use runtime::*;
+pub use synthesis::*;
 
 /// Main configuration structure that combines all config types
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,30 +36,30 @@ impl AcousticConfig {
             runtime: RuntimeConfig::default(),
         }
     }
-    
+
     /// Load configuration from file
     pub fn load_from_file(path: &str) -> Result<Self> {
         let content = std::fs::read_to_string(path)
-            .map_err(|e| AcousticError::ConfigError(format!("Failed to read config file: {}", e)))?;
-        
+            .map_err(|e| AcousticError::ConfigError(format!("Failed to read config file: {e}")))?;
+
         let config: AcousticConfig = serde_json::from_str(&content)
-            .map_err(|e| AcousticError::ConfigError(format!("Failed to parse config: {}", e)))?;
-        
+            .map_err(|e| AcousticError::ConfigError(format!("Failed to parse config: {e}")))?;
+
         config.validate()?;
         Ok(config)
     }
-    
+
     /// Save configuration to file
     pub fn save_to_file(&self, path: &str) -> Result<()> {
         let content = serde_json::to_string_pretty(self)
-            .map_err(|e| AcousticError::ConfigError(format!("Failed to serialize config: {}", e)))?;
-        
+            .map_err(|e| AcousticError::ConfigError(format!("Failed to serialize config: {e}")))?;
+
         std::fs::write(path, content)
-            .map_err(|e| AcousticError::ConfigError(format!("Failed to write config file: {}", e)))?;
-        
+            .map_err(|e| AcousticError::ConfigError(format!("Failed to write config file: {e}")))?;
+
         Ok(())
     }
-    
+
     /// Validate configuration
     pub fn validate(&self) -> Result<()> {
         self.model.validate()?;
@@ -68,7 +67,7 @@ impl AcousticConfig {
         self.runtime.validate()?;
         Ok(())
     }
-    
+
     /// Merge with another configuration (other takes precedence)
     pub fn merge(&mut self, other: &AcousticConfig) {
         self.model.merge(&other.model);
@@ -106,7 +105,7 @@ impl DeviceConfig {
             max_memory_mb: None,
         }
     }
-    
+
     /// Create CUDA configuration
     pub fn cuda(device_index: Option<u32>) -> Self {
         Self {
@@ -116,7 +115,7 @@ impl DeviceConfig {
             max_memory_mb: None,
         }
     }
-    
+
     /// Create Metal configuration
     pub fn metal() -> Self {
         Self {
@@ -179,10 +178,10 @@ impl CacheConfig {
             enabled: true,
             cache_dir,
             max_size_mb: 1024, // 1GB default
-            ttl_seconds: 3600,  // 1 hour default
+            ttl_seconds: 3600, // 1 hour default
         }
     }
-    
+
     /// Disable caching
     pub fn disabled() -> Self {
         Self {
@@ -201,6 +200,17 @@ impl Default for CacheConfig {
     }
 }
 
+/// G2P (Grapheme-to-Phoneme) engine types
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum G2pEngine {
+    /// Rule-based G2P
+    RuleBased,
+    /// Neural sequence-to-sequence model
+    Neural,
+    /// Hybrid rule-based + neural
+    Hybrid,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,7 +220,7 @@ mod tests {
         let cpu_config = DeviceConfig::cpu();
         assert_eq!(cpu_config.device_type, DeviceType::Cpu);
         assert!(!cpu_config.mixed_precision);
-        
+
         let cuda_config = DeviceConfig::cuda(Some(0));
         assert_eq!(cuda_config.device_type, DeviceType::Cuda);
         assert!(cuda_config.mixed_precision);
@@ -230,7 +240,7 @@ mod tests {
         let cache = CacheConfig::disabled();
         assert!(!cache.enabled);
         assert_eq!(cache.max_size_mb, 0);
-        
+
         let cache = CacheConfig::default();
         assert!(cache.enabled);
         assert_eq!(cache.max_size_mb, 1024);
@@ -240,7 +250,7 @@ mod tests {
     fn test_acoustic_config() {
         let config = AcousticConfig::new();
         assert!(config.validate().is_ok());
-        
+
         let mut config1 = AcousticConfig::default();
         let config2 = AcousticConfig::default();
         config1.merge(&config2);

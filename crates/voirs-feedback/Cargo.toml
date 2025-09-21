@@ -1,0 +1,136 @@
+[package]
+name = "voirs-feedback"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Real-time feedback and interactive training system for VoiRS"
+homepage.workspace = true
+repository.workspace = true
+documentation = "https://docs.rs/voirs-feedback"
+keywords = ["speech", "tts", "feedback", "training", "ai"]
+categories = ["multimedia::audio", "science", "accessibility"]
+
+[dependencies]
+# Core VoiRS dependencies
+voirs-sdk = { version = "0.1.0-alpha.1", path = "../voirs-sdk" }
+voirs-recognizer = { version = "0.1.0-alpha.1", path = "../voirs-recognizer" }
+voirs-evaluation = { version = "0.1.0-alpha.1", path = "../voirs-evaluation" }
+
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+async-trait = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Time and date
+chrono = { version = "0.4", features = ["serde"] }
+
+# Math and statistics
+nalgebra = "0.32"
+statrs = "0.16"
+
+# Real-time features
+crossbeam = "0.8"
+futures = "0.3"
+futures-util = "0.3"
+
+# HTTP client for microservices
+reqwest = { version = "0.11", features = ["json"], optional = true }
+
+# Email support for alerts
+lettre = "0.11"
+
+# GraphQL support
+async-graphql = { version = "7.0", optional = true }
+
+# UI and visualization (optional)
+egui = { version = "0.24", optional = true }
+eframe = { version = "0.24", optional = true }
+plotters = { version = "0.3", optional = true }
+
+# Audio visualization
+rustfft = "6.1"
+hound = { version = "3.5", optional = true }
+
+# Machine learning for adaptive feedback
+candle-core = { workspace = true, optional = true }
+candle-nn = { workspace = true, optional = true }
+
+# Configuration management
+config = "0.13"
+
+# Logging
+log = "0.4"
+env_logger = "0.10"
+
+# Collections and utilities
+indexmap = "2.0"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+rand = "0.8"
+base64 = "0.21"
+libc = "0.2"
+num_cpus = "1.16"
+regex = "1.10"
+
+# OAuth 2.0 and JWT support
+jsonwebtoken = "9.2"
+urlencoding = "2.1"
+
+# Database and persistence
+sqlx = { version = "0.8.1", features = ["sqlite", "postgres", "runtime-tokio-rustls", "chrono", "uuid", "json"], optional = true }
+sea-orm = { version = "1.0", features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros", "chrono", "uuid"], optional = true }
+bincode = { workspace = true }
+flate2 = "1.0"
+
+# Privacy and encryption
+aes-gcm = { version = "0.10", optional = true }
+argon2 = { version = "0.5", optional = true }
+ring = { version = "0.17", optional = true }
+sha2 = { version = "0.10", optional = true }
+hex = { version = "0.4", optional = true }
+
+[features]
+default = ["realtime", "adaptive", "progress-tracking", "sqlx", "privacy", "microservices"]
+
+# Core features
+realtime = []
+adaptive = ["candle-core", "candle-nn"]
+progress-tracking = []
+gamification = []
+microservices = ["reqwest"]
+graphql = ["async-graphql"]
+
+# Database and persistence features
+persistence = ["sqlx"]
+orm = ["sea-orm", "persistence"]
+
+# Privacy and security features
+privacy = ["aes-gcm", "argon2", "ring", "sha2", "hex"]
+
+# UI features
+ui = ["egui", "eframe", "plotters"]
+audio-export = ["hound"]
+
+# All features
+all-features = [
+    "realtime", "adaptive", "progress-tracking", 
+    "gamification", "ui", "audio-export", "persistence", "orm", "privacy"
+]
+
+[dev-dependencies]
+tokio-test = "0.4"
+criterion = "0.5"
+tempfile = "3.8"
+
+[package.metadata.docs.rs]
+features = ["all-features"]
+rustdoc-args = ["--cfg", "docsrs"]
+[lints]
+workspace = true

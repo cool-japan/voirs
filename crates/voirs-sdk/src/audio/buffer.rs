@@ -4,17 +4,17 @@ use crate::types::AudioFormat;
 use serde::{Deserialize, Serialize};
 
 /// Audio buffer containing synthesized speech
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioBuffer {
     /// Audio samples as f32 values in range [-1.0, 1.0]
     pub(super) samples: Vec<f32>,
-    
+
     /// Sample rate in Hz
     pub(super) sample_rate: u32,
-    
+
     /// Number of audio channels (1=mono, 2=stereo)
     pub(super) channels: u32,
-    
+
     /// Audio metadata
     pub(super) metadata: AudioMetadata,
 }
@@ -23,7 +23,7 @@ impl AudioBuffer {
     /// Create new audio buffer
     pub fn new(samples: Vec<f32>, sample_rate: u32, channels: u32) -> Self {
         let metadata = AudioMetadata::from_samples(&samples, sample_rate, channels);
-        
+
         Self {
             samples,
             sample_rate,
@@ -90,16 +90,21 @@ impl AudioBuffer {
     }
 
     /// Create audio buffer with sine wave (for testing)
-    pub fn sine_wave(frequency: f32, duration_seconds: f32, sample_rate: u32, amplitude: f32) -> Self {
+    pub fn sine_wave(
+        frequency: f32,
+        duration_seconds: f32,
+        sample_rate: u32,
+        amplitude: f32,
+    ) -> Self {
         let sample_count = (duration_seconds * sample_rate as f32) as usize;
         let mut samples = Vec::with_capacity(sample_count);
-        
+
         for i in 0..sample_count {
             let t = i as f32 / sample_rate as f32;
             let sample = amplitude * (2.0 * std::f32::consts::PI * frequency * t).sin();
             samples.push(sample);
         }
-        
+
         Self::mono(samples, sample_rate)
     }
 
@@ -132,16 +137,16 @@ impl AudioBuffer {
 pub struct AudioMetadata {
     /// Duration in seconds
     pub duration: f32,
-    
+
     /// Peak amplitude (0.0 - 1.0)
     pub peak_amplitude: f32,
-    
+
     /// RMS amplitude (0.0 - 1.0)
     pub rms_amplitude: f32,
-    
+
     /// Dynamic range in dB
     pub dynamic_range: f32,
-    
+
     /// Audio format
     pub format: AudioFormat,
 }
@@ -157,7 +162,7 @@ impl AudioMetadata {
         } else {
             (sum_squares / samples.len() as f32).sqrt()
         };
-        
+
         // Calculate dynamic range (simplified)
         let dynamic_range = if rms_amplitude > 0.0 {
             20.0 * (peak_amplitude / rms_amplitude).log10()
@@ -199,7 +204,10 @@ pub struct BufferFormat {
 impl BufferFormat {
     /// Create new buffer format
     pub fn new(sample_rate: u32, channels: u32) -> Self {
-        Self { sample_rate, channels }
+        Self {
+            sample_rate,
+            channels,
+        }
     }
 
     /// Mono format
@@ -226,7 +234,7 @@ mod tests {
     fn test_audio_buffer_creation() {
         let samples = vec![0.1, 0.2, 0.3, 0.4];
         let buffer = AudioBuffer::mono(samples.clone(), 44100);
-        
+
         assert_eq!(buffer.samples(), &samples);
         assert_eq!(buffer.sample_rate(), 44100);
         assert_eq!(buffer.channels(), 1);
@@ -236,7 +244,7 @@ mod tests {
     #[test]
     fn test_sine_wave_generation() {
         let buffer = AudioBuffer::sine_wave(440.0, 1.0, 44100, 0.5);
-        
+
         assert_eq!(buffer.sample_rate(), 44100);
         assert_eq!(buffer.channels(), 1);
         assert_eq!(buffer.len(), 44100);
@@ -246,7 +254,7 @@ mod tests {
     #[test]
     fn test_silence_generation() {
         let buffer = AudioBuffer::silence(2.0, 22050, 2);
-        
+
         assert_eq!(buffer.sample_rate(), 22050);
         assert_eq!(buffer.channels(), 2);
         assert_eq!(buffer.len(), 88200); // 2 seconds * 22050 Hz * 2 channels
@@ -257,7 +265,7 @@ mod tests {
     fn test_metadata_calculation() {
         let samples = vec![0.5, -0.3, 0.8, -0.1];
         let buffer = AudioBuffer::mono(samples, 44100);
-        
+
         let metadata = buffer.metadata();
         assert_eq!(metadata.peak_amplitude, 0.8);
         assert!(metadata.rms_amplitude > 0.0);
@@ -281,10 +289,10 @@ mod tests {
     fn test_buffer_cloning() {
         let samples = vec![0.1, 0.2, 0.3];
         let buffer = AudioBuffer::mono(samples.clone(), 44100);
-        
+
         let format = buffer.clone_format();
         let new_buffer = AudioBuffer::from_format(&format, vec![0.4, 0.5, 0.6]);
-        
+
         assert_eq!(new_buffer.sample_rate(), 44100);
         assert_eq!(new_buffer.channels(), 1);
         assert_eq!(new_buffer.samples(), &[0.4, 0.5, 0.6]);

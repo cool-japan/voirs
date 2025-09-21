@@ -3,8 +3,8 @@
 //! This module provides configuration options for vocoding quality,
 //! performance modes, and processing parameters.
 
-use serde::{Deserialize, Serialize};
 use super::{PerformanceProfile, ValidationResult};
+use serde::{Deserialize, Serialize};
 
 /// Vocoding quality levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -214,7 +214,7 @@ impl VocodingConfig {
 
         // Validate bit depth
         match self.bit_depth {
-            16 | 24 | 32 => {},
+            16 | 24 | 32 => {}
             _ => errors.push("Bit depth must be 16, 24, or 32".to_string()),
         }
 
@@ -271,7 +271,9 @@ impl VocodingConfig {
         match self.mode {
             VocodingMode::Realtime => {
                 if self.inference_steps > 20 {
-                    warnings.push("High inference steps may not be suitable for real-time mode".to_string());
+                    warnings.push(
+                        "High inference steps may not be suitable for real-time mode".to_string(),
+                    );
                 }
                 if self.enable_post_processing {
                     warnings.push("Post-processing may add latency in real-time mode".to_string());
@@ -279,7 +281,8 @@ impl VocodingConfig {
             }
             VocodingMode::Quality => {
                 if self.inference_steps < 50 {
-                    warnings.push("Low inference steps may reduce quality in quality mode".to_string());
+                    warnings
+                        .push("Low inference steps may reduce quality in quality mode".to_string());
                 }
             }
             _ => {}
@@ -297,7 +300,7 @@ impl VocodingConfig {
         let fft_memory = (self.fft_size * 8) as f32; // Complex numbers
         let mel_memory = (self.mel_channels * 1024 * 4) as f32; // Float values
         let buffer_memory = (self.sample_rate * 4) as f32; // 1 second buffer
-        
+
         (fft_memory + mel_memory + buffer_memory) / (1024.0 * 1024.0)
     }
 
@@ -317,10 +320,18 @@ impl VocodingConfig {
         rtf *= (self.inference_steps as f32 / 50.0).min(10.0);
 
         // Adjust based on enhancements
-        if self.enable_hf_enhancement { rtf *= 1.2; }
-        if self.enable_spectral_enhancement { rtf *= 1.3; }
-        if self.enable_temporal_smoothing { rtf *= 1.1; }
-        if self.enable_post_processing { rtf *= 1.2; }
+        if self.enable_hf_enhancement {
+            rtf *= 1.2;
+        }
+        if self.enable_spectral_enhancement {
+            rtf *= 1.3;
+        }
+        if self.enable_temporal_smoothing {
+            rtf *= 1.1;
+        }
+        if self.enable_post_processing {
+            rtf *= 1.2;
+        }
 
         rtf
     }
@@ -357,7 +368,7 @@ mod tests {
     #[test]
     fn test_config_validation() {
         let mut config = VocodingConfig::default();
-        
+
         // Valid configuration
         let result = config.validate();
         assert!(result.is_valid);
@@ -387,10 +398,10 @@ mod tests {
     fn test_rtf_estimation() {
         let low_config = VocodingConfig::low_resource();
         let high_config = VocodingConfig::high_quality();
-        
+
         let low_rtf = low_config.estimated_rtf();
         let high_rtf = high_config.estimated_rtf();
-        
+
         assert!(low_rtf > 0.0);
         assert!(high_rtf > low_rtf); // High quality should take longer
     }

@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VoiRS Recognizer - Web Worker Example</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .control-panel {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 8px;
+        }
+        .results {
+            background: #e8f5e8;
+            padding: 15px;
+            border-radius: 8px;
+            min-height: 100px;
+        }
+        .worker-status {
+            background: #fff3cd;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+        .log {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-line;
+        }
+        button {
+            padding: 10px 15px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .performance-metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .metric {
+            background: #e3f2fd;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>VoiRS Speech Recognition - Web Worker Demo</h1>
+        <p>This example demonstrates using VoiRS speech recognition in a Web Worker for non-blocking background processing.</p>
+        
+        <div class="worker-status">
+            <strong>Worker Status:</strong> <span id="workerStatus">Not initialized</span>
+        </div>
+        
+        <div class="control-panel">
+            <h3>Controls</h3>
+            <button id="initWorkerButton">Initialize Worker</button>
+            <button id="testRecognitionButton" disabled>Test Recognition</button>
+            <button id="startStreamingButton" disabled>Start Streaming</button>
+            <button id="stopStreamingButton" disabled>Stop Streaming</button>
+            <button id="getCapabilitiesButton" disabled>Get Capabilities</button>
+            <button id="terminateWorkerButton" disabled>Terminate Worker</button>
+        </div>
+        
+        <div class="results">
+            <h3>Recognition Results</h3>
+            <div id="transcription">No results yet...</div>
+            
+            <div class="performance-metrics">
+                <div class="metric">
+                    <div>Messages Sent</div>
+                    <div id="messagesSent">0</div>
+                </div>
+                <div class="metric">
+                    <div>Messages Received</div>
+                    <div id="messagesReceived">0</div>
+                </div>
+                <div class="metric">
+                    <div>Average Latency</div>
+                    <div id="averageLatency">-- ms</div>
+                </div>
+                <div class="metric">
+                    <div>Worker Uptime</div>
+                    <div id="workerUptime">--</div>
+                </div>
+            </div>
+        </div>
+        
+        <div>
+            <h3>Communication Log</h3>
+            <div id="log" class="log">Worker communication log will appear here...\n</div>
+            <button onclick="clearLog()">Clear Log</button>
+        </div>
+        
+        <div id="capabilities" style="display: none;">
+            <h3>Worker Capabilities</h3>
+            <pre id="capabilitiesText"></pre>
+        </div>
+    </div>
+
+    <script>
+        class VoirsWorkerManager {
+            constructor() {
+                this.worker = null;
+                this.messageId = 0;
+                this.pendingMessages = new Map();
+                this.messagesSent = 0;
+                this.messagesReceived = 0;
+                this.latencies = [];
+                this.workerStartTime = null;
+                
+                this.elements = {
+                    workerStatus: document.getElementById('workerStatus'),
+                    initWorkerButton: document.getElementById('initWorkerButton'),
+                    testRecognitionButton: document.getElementById('testRecognitionButton'),
+                    startStreamingButton: document.getElementById('startStreamingButton'),
+                    stopStreamingButton: document.getElementById('stopStreamingButton'),
+                    getCapabilitiesButton: document.getElementById('getCapabilitiesButton'),
+                    terminateWorkerButton: document.getElementById('terminateWorkerButton'),
+                    transcription: document.getElementById('transcription'),
+                    messagesSent: document.getElementById('messagesSent'),
+                    messagesReceived: document.getElementById('messagesReceived'),
+                    averageLatency: document.getElementById('averageLatency'),
+                    workerUptime: document.getElementById('workerUptime'),
+                    log: document.getElementById('log'),
+                    capabilities: document.getElementById('capabilities'),
+                    capabilitiesText: document.getElementById('capabilitiesText')
+                };
+                
+                this.setupEventListeners();
+                this.startUptimeTimer();
+            }
+            
+            setupEventListeners() {
+                this.elements.initWorkerButton.addEventListener('click', () => this.initializeWorker());
+                this.elements.testRecognitionButton.addEventListener('click', () => this.testRecognition());
+                this.elements.startStreamingButton.addEventListener('click', () => this.startStreaming());
+                this.elements.stopStreamingButton.addEventListener('click', () => this.stopStreaming());
+                this.elements.getCapabilitiesButton.addEventListener('click', () => this.getCapabilities());
+                this.elements.terminateWorkerButton.addEventListener('click', () => this.terminateWorker());
+            }
+            
+            log(message) {
+                const timestamp = new Date().toLocaleTimeString();
+                this.elements.log.textContent += `[${timestamp}] ${message}\n`;
+                this.elements.log.scrollTop = this.elements.log.scrollHeight;
+                console.log(`[Worker] ${message}`);
+            }
+            
+            updateStatus(status) {
+                this.elements.workerStatus.textContent = status;
+                this.log(`Status: ${status}`);
+            }
+            
+            generateMessageId() {
+                return `msg_${++this.messageId}_${Date.now()}`;
+            }
+            
+            sendMessage(command, data = null) {
+                if (!this.worker) {
+                    throw new Error('Worker not initialized');
+                }
+                
+                const id = this.generateMessageId();
+                const message = { id, command, data };
+                const startTime = performance.now();
+                
+                this.pendingMessages.set(id, { startTime, command });
+                this.worker.postMessage(message);
+                
+                this.messagesSent++;
+                this.elements.messagesSent.textContent = this.messagesSent;
+                
+                this.log(`→ Sent: ${command} (${id})`);
+                
+                return new Promise((resolve, reject) => {
+                    const originalPending = this.pendingMessages.get(id);
+                    this.pendingMessages.set(id, {
+                        ...originalPending,
+                        resolve,
+                        reject
+                    });
+                });
+            }
+            
+            handleWorkerMessage(event) {
+                const response = event.data;
+                const pending = this.pendingMessages.get(response.id);
+                
+                if (pending) {
+                    const latency = performance.now() - pending.startTime;
+                    this.latencies.push(latency);
+                    
+                    // Keep only last 100 latencies for average calculation
+                    if (this.latencies.length > 100) {
+                        this.latencies.shift();
+                    }
+                    
+                    const avgLatency = this.latencies.reduce((a, b) => a + b, 0) / this.latencies.length;
+                    this.elements.averageLatency.textContent = `${avgLatency.toFixed(1)} ms`;
+                    
+                    this.messagesReceived++;
+                    this.elements.messagesReceived.textContent = this.messagesReceived;
+                    
+                    this.log(`← Received: ${pending.command} (${response.id}) - ${latency.toFixed(1)}ms`);
+                    
+                    if (response.success) {
+                        pending.resolve(response.data);
+                    } else {
+                        pending.reject(new Error(response.error));
+                    }
+                    
+                    this.pendingMessages.delete(response.id);
+                } else {
+                    this.log(`← Received unexpected message: ${response.id}`);
+                }
+            }
+            
+            async initializeWorker() {
+                try {
+                    this.updateStatus('Creating worker...');
+                    
+                    // Create worker with the generated script
+                    const workerScript = this.createWorkerScript();
+                    const blob = new Blob([workerScript], { type: 'application/javascript' });
+                    const workerUrl = URL.createObjectURL(blob);
+                    
+                    this.worker = new Worker(workerUrl);
+                    this.workerStartTime = Date.now();
+                    
+                    this.worker.onmessage = (event) => this.handleWorkerMessage(event);
+                    this.worker.onerror = (error) => {
+                        this.log(`Worker error: ${error.message}`);
+                        this.updateStatus('Worker error');
+                    };
+                    
+                    this.updateStatus('Initializing recognizer in worker...');
+                    
+                    // Initialize the recognizer in the worker
+                    const config = {
+                        model_name: 'whisper-base',
+                        language: 'en',
+                        sample_rate: 16000,
+                        enable_vad: true,
+                        confidence_threshold: 0.5
+                    };
+                    
+                    await this.sendMessage('initialize', config);
+                    
+                    this.updateStatus('Worker ready');
+                    
+                    // Enable controls
+                    this.elements.testRecognitionButton.disabled = false;
+                    this.elements.startStreamingButton.disabled = false;
+                    this.elements.getCapabilitiesButton.disabled = false;
+                    this.elements.terminateWorkerButton.disabled = false;
+                    this.elements.initWorkerButton.disabled = true;
+                    
+                    URL.revokeObjectURL(workerUrl);
+                    
+                } catch (error) {
+                    this.log(`Failed to initialize worker: ${error.message}`);
+                    this.updateStatus('Initialization failed');
+                }
+            }
+            
+            async testRecognition() {
+                try {
+                    this.log('Testing recognition with sample audio...');
+                    
+                    // Generate sample audio data (sine wave)
+                    const sampleRate = 16000;
+                    const duration = 2; // 2 seconds
+                    const frequency = 440; // 440 Hz tone
+                    const samples = sampleRate * duration;
+                    
+                    const audioData = [];
+                    for (let i = 0; i < samples; i++) {
+                        const sample = Math.sin(2 * Math.PI * frequency * i / sampleRate) * 0.1;
+                        const intSample = Math.round(sample * 32767);
+                        audioData.push(intSample & 0xFF);
+                        audioData.push((intSample >> 8) & 0xFF);
+                    }
+                    
+                    const result = await this.sendMessage('recognize', audioData);
+                    
+                    this.elements.transcription.innerHTML = `
+                        <strong>Test Recognition Result:</strong><br>
+                        Text: "${result.text || 'No speech detected'}"<br>
+                        Confidence: ${(result.confidence * 100).toFixed(1)}%<br>
+                        Language: ${result.language || 'Unknown'}
+                    `;
+                    
+                } catch (error) {
+                    this.log(`Recognition test failed: ${error.message}`);
+                }
+            }
+            
+            async startStreaming() {
+                try {
+                    this.log('Starting streaming mode...');
+                    
+                    const streamingConfig = {
+                        chunk_duration: 1.0,
+                        overlap_duration: 0.1,
+                        vad_threshold: 0.5
+                    };
+                    
+                    await this.sendMessage('stream_start', streamingConfig);
+                    
+                    this.elements.startStreamingButton.disabled = true;
+                    this.elements.stopStreamingButton.disabled = false;
+                    
+                    // Simulate streaming chunks
+                    this.streamingInterval = setInterval(async () => {
+                        try {
+                            // Generate dummy audio chunk
+                            const chunkSize = 8000; // 0.5 seconds
+                            const audioChunk = [];
+                            
+                            for (let i = 0; i < chunkSize; i++) {
+                                const sample = Math.random() * 0.001; // Very low volume noise
+                                const intSample = Math.round(sample * 32767);
+                                audioChunk.push(intSample & 0xFF);
+                                audioChunk.push((intSample >> 8) & 0xFF);
+                            }
+                            
+                            const result = await this.sendMessage('stream_audio', audioChunk);
+                            
+                            if (result && result.text && result.text.trim()) {
+                                this.elements.transcription.innerHTML += `<br>Streaming: "${result.text}" (${(result.confidence * 100).toFixed(1)}%)`;
+                            }
+                            
+                        } catch (error) {
+                            this.log(`Streaming chunk failed: ${error.message}`);
+                        }
+                    }, 500); // Send chunk every 500ms
+                    
+                } catch (error) {
+                    this.log(`Failed to start streaming: ${error.message}`);
+                }
+            }
+            
+            async stopStreaming() {
+                try {
+                    if (this.streamingInterval) {
+                        clearInterval(this.streamingInterval);
+                        this.streamingInterval = null;
+                    }
+                    
+                    await this.sendMessage('stream_stop');
+                    
+                    this.elements.startStreamingButton.disabled = false;
+                    this.elements.stopStreamingButton.disabled = true;
+                    
+                    this.log('Streaming stopped');
+                    
+                } catch (error) {
+                    this.log(`Failed to stop streaming: ${error.message}`);
+                }
+            }
+            
+            async getCapabilities() {
+                try {
+                    const capabilities = await this.sendMessage('get_capabilities');
+                    
+                    this.elements.capabilitiesText.textContent = JSON.stringify(capabilities, null, 2);
+                    this.elements.capabilities.style.display = 'block';
+                    
+                    this.log('Retrieved capabilities');
+                    
+                } catch (error) {
+                    this.log(`Failed to get capabilities: ${error.message}`);
+                }
+            }
+            
+            terminateWorker() {
+                if (this.worker) {
+                    if (this.streamingInterval) {
+                        clearInterval(this.streamingInterval);
+                        this.streamingInterval = null;
+                    }
+                    
+                    this.worker.terminate();
+                    this.worker = null;
+                    
+                    this.updateStatus('Worker terminated');
+                    
+                    // Reset controls
+                    this.elements.testRecognitionButton.disabled = true;
+                    this.elements.startStreamingButton.disabled = true;
+                    this.elements.stopStreamingButton.disabled = true;
+                    this.elements.getCapabilitiesButton.disabled = true;
+                    this.elements.terminateWorkerButton.disabled = true;
+                    this.elements.initWorkerButton.disabled = false;
+                    
+                    // Reset metrics
+                    this.messagesSent = 0;
+                    this.messagesReceived = 0;
+                    this.latencies = [];
+                    this.pendingMessages.clear();
+                    this.workerStartTime = null;
+                    
+                    this.elements.messagesSent.textContent = '0';
+                    this.elements.messagesReceived.textContent = '0';
+                    this.elements.averageLatency.textContent = '-- ms';
+                    this.elements.workerUptime.textContent = '--';
+                }
+            }
+            
+            startUptimeTimer() {
+                setInterval(() => {
+                    if (this.workerStartTime) {
+                        const uptime = Date.now() - this.workerStartTime;
+                        const seconds = Math.floor(uptime / 1000) % 60;
+                        const minutes = Math.floor(uptime / 60000) % 60;
+                        const hours = Math.floor(uptime / 3600000);
+                        
+                        this.elements.workerUptime.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                    }
+                }, 1000);
+            }
+            
+            createWorkerScript() {
+                // This would normally load from a separate file, but for this demo we'll embed it
+                return `
+                    // Web Worker script for VoiRS Recognizer
+                    importScripts('../pkg/web/voirs_recognizer.js');
+                    
+                    let wasmModule;
+                    let recognizer;
+                    
+                    async function initializeWasm() {
+                        try {
+                            // Import and initialize the WASM module
+                            wasmModule = await import('../pkg/web/voirs_recognizer.js');
+                            await wasmModule.default();
+                            
+                            console.log('WASM module loaded in worker');
+                            return true;
+                        } catch (error) {
+                            console.error('Failed to load WASM in worker:', error);
+                            return false;
+                        }
+                    }
+                    
+                    self.onmessage = async function(event) {
+                        const { id, command, data } = event.data;
+                        
+                        try {
+                            let responseData = null;
+                            
+                            switch (command) {
+                                case 'initialize':
+                                    if (!wasmModule) {
+                                        const loaded = await initializeWasm();
+                                        if (!loaded) {
+                                            throw new Error('Failed to load WASM module');
+                                        }
+                                    }
+                                    
+                                    recognizer = new wasmModule.WasmVoirsRecognizer();
+                                    await recognizer.initialize(data);
+                                    responseData = { initialized: true };
+                                    break;
+                                    
+                                case 'recognize':
+                                    if (!recognizer) throw new Error('Recognizer not initialized');
+                                    responseData = await recognizer.recognize_audio(new Uint8Array(data));
+                                    break;
+                                    
+                                case 'stream_start':
+                                    if (!recognizer) throw new Error('Recognizer not initialized');
+                                    await recognizer.start_streaming(data);
+                                    responseData = { streaming: true };
+                                    break;
+                                    
+                                case 'stream_audio':
+                                    if (!recognizer) throw new Error('Recognizer not initialized');
+                                    responseData = await recognizer.stream_audio(new Uint8Array(data));
+                                    break;
+                                    
+                                case 'stream_stop':
+                                    if (!recognizer) throw new Error('Recognizer not initialized');
+                                    recognizer.stop_streaming();
+                                    responseData = { streaming: false };
+                                    break;
+                                    
+                                case 'get_capabilities':
+                                    if (!recognizer) throw new Error('Recognizer not initialized');
+                                    responseData = recognizer.get_capabilities();
+                                    break;
+                                    
+                                default:
+                                    throw new Error('Unknown command: ' + command);
+                            }
+                            
+                            self.postMessage({
+                                id,
+                                success: true,
+                                data: responseData,
+                                error: null
+                            });
+                            
+                        } catch (error) {
+                            self.postMessage({
+                                id,
+                                success: false,
+                                data: null,
+                                error: error.message
+                            });
+                        }
+                    };
+                    
+                    console.log('VoiRS Recognizer Worker ready');
+                `;
+            }
+        }
+        
+        function clearLog() {
+            document.getElementById('log').textContent = 'Worker communication log will appear here...\n';
+        }
+        
+        // Initialize the worker manager when the page loads
+        window.addEventListener('load', () => {
+            new VoirsWorkerManager();
+        });
+    </script>
+</body>
+</html>

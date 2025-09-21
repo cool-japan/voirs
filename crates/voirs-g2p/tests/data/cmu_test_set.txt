@@ -1,0 +1,179 @@
+# CMU Pronunciation Dictionary Test Set
+# Format: WORD<TAB>EXPECTED_PHONEMES<TAB>LANGUAGE
+# Based on CMU Pronouncing Dictionary phoneme set
+# Target: >95% phoneme accuracy for English
+
+# Common words - basic test
+the	ð ə	en-US
+and	æ n d	en-US
+that	ð æ t	en-US
+have	hh æ v	en-US
+for	f ao r	en-US
+not	n aa t	en-US
+with	w ih th	en-US
+you	y uw	en-US
+this	th ih s	en-US
+but	b ah t	en-US
+his	hh ih z	en-US
+from	f r ah m	en-US
+they	th ey	en-US
+she	sh iy	en-US
+her	hh er	en-US
+been	b ih n	en-US
+than	th ae n	en-US
+its	ih t s	en-US
+
+# Vowel contrasts
+beat	b iy t	en-US
+bit	b ih t	en-US
+bait	b ey t	en-US
+bet	b eh t	en-US
+bat	b ae t	en-US
+bot	b aa t	en-US
+bought	b ao t	en-US
+boat	b ow t	en-US
+boot	b uw t	en-US
+but	b ah t	en-US
+
+# Consonant clusters
+street	s t r iy t	en-US
+string	s t r ih ng	en-US
+spring	s p r ih ng	en-US
+splash	s p l ae sh	en-US
+squash	s k w aa sh	en-US
+chrome	k r ow m	en-US
+throne	th r ow n	en-US
+scream	s k r iy m	en-US
+
+# Difficult words
+psychology	s ay k aa l ax jh iy	en-US
+pneumonia	n ax m ow n y ax	en-US
+rhythm	r ih dh ax m	en-US
+although	ao l dh ow	en-US
+through	th r uw	en-US
+enough	ih n ah f	en-US
+rough	r ah f	en-US
+cough	k ao f	en-US
+laugh	l ae f	en-US
+night	n ay t	en-US
+knight	n ay t	en-US
+know	n ow	en-US
+knife	n ay f	en-US
+
+# Stress patterns
+photograph	f ow t ax g r ae f	en-US
+photography	f ax t aa g r ax f iy	en-US
+photographer	f ax t aa g r ax f er	en-US
+record	r eh k er d	en-US
+record	r ih k ao r d	en-US
+object	aa b jh eh k t	en-US
+object	ax b jh eh k t	en-US
+
+# Regular inflections
+cats	k ae t s	en-US
+dogs	d ao g z	en-US
+houses	hh aw s ax z	en-US
+walked	w ao k t	en-US
+wanted	w aa n t ax d	en-US
+singing	s ih ng ih ng	en-US
+running	r ah n ih ng	en-US
+
+# Compound words
+baseball	b ey s b ao l	en-US
+basketball	b ae s k ih t b ao l	en-US
+understand	ah n d er s t ae n d	en-US
+everything	eh v r iy th ih ng	en-US
+sometimes	s ah m t ay m z	en-US
+everybody	eh v r iy b aa d iy	en-US
+
+# Technical/scientific terms
+algorithm	ae l g ax r ih dh ax m	en-US
+computer	k ax m p y uw t er	en-US
+technology	t eh k n aa l ax jh iy	en-US
+artificial	aa r t ax f ih sh ax l	en-US
+intelligence	ih n t eh l ax jh ax n s	en-US
+machine	m ax sh iy n	en-US
+learning	l er n ih ng	en-US
+neural	n ux r ax l	en-US
+network	n eh t w er k	en-US
+
+# Proper nouns (common names/places)
+john	jh aa n	en-US
+mary	m eh r iy	en-US
+michael	m ay k ax l	en-US
+sarah	s eh r ax	en-US
+david	d ey v ih d	en-US
+america	ax m eh r ax k ax	en-US
+california	k ae l ax f ao r n y ax	en-US
+new_york	n uw y ao r k	en-US
+washington	w aa sh ih ng t ax n	en-US
+chicago	sh ax k aa g ow	en-US
+
+# Numbers and quantities
+one	w ah n	en-US
+two	t uw	en-US
+three	th r iy	en-US
+four	f ao r	en-US
+five	f ay v	en-US
+six	s ih k s	en-US
+seven	s eh v ax n	en-US
+eight	ey t	en-US
+nine	n ay n	en-US
+ten	t eh n	en-US
+eleven	ih l eh v ax n	en-US
+twelve	t w eh l v	en-US
+thirteen	th er t iy n	en-US
+twenty	t w eh n t iy	en-US
+hundred	hh ah n d r ax d	en-US
+thousand	th aw z ax n d	en-US
+
+# Function words
+about	ax b aw t	en-US
+after	ae f t er	en-US
+again	ax g eh n	en-US
+against	ax g eh n s t	en-US
+before	b ih f ao r	en-US
+being	b iy ih ng	en-US
+between	b ih t w iy n	en-US
+during	d ux r ih ng	en-US
+under	ah n d er	en-US
+over	ow v er	en-US
+through	th r uw	en-US
+without	w ih dh aw t	en-US
+
+# Words with silent letters
+write	r ay t	en-US
+wrong	r ao ng	en-US
+wrist	r ih s t	en-US
+island	ay l ax n d	en-US
+listen	l ih s ax n	en-US
+castle	k ae s ax l	en-US
+christmas	k r ih s m ax s	en-US
+answer	ae n s er	en-US
+sword	s ao r d	en-US
+thumb	th ah m	en-US
+bomb	b aa m	en-US
+lamb	l ae m	en-US
+
+# Homophones
+there	dh eh r	en-US
+their	dh eh r	en-US
+they're	dh eh r	en-US
+to	t uw	en-US
+too	t uw	en-US
+two	t uw	en-US
+your	y ux r	en-US
+you're	y ux r	en-US
+its	ih t s	en-US
+it's	ih t s	en-US
+
+# Contractions
+can't	k ae n t	en-US
+won't	w ow n t	en-US
+shouldn't	sh ux d ax n t	en-US
+wouldn't	w ux d ax n t	en-US
+i'm	ay m	en-US
+we're	w ih r	en-US
+they're	dh eh r	en-US
+i'll	ay l	en-US
+you'll	y ux l	en-US

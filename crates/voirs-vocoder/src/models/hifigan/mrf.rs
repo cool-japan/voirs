@@ -4,7 +4,7 @@ use crate::{Result, VocoderError};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "candle")]
-use candle_core::{Device, Tensor};
+use candle_core::Tensor;
 #[cfg(feature = "candle")]
 use candle_nn::{Conv1d, Module, VarBuilder};
 
@@ -31,8 +31,10 @@ struct ResidualBlock {
     #[cfg(feature = "candle")]
     conv_layers: Vec<Conv1d>,
     /// Kernel size
+    #[allow(dead_code)]
     kernel_size: u32,
     /// Dilation sizes
+    #[allow(dead_code)]
     dilations: Vec<u32>,
     /// Leaky ReLU slope
     leaky_relu_slope: f32,
@@ -55,14 +57,16 @@ impl MultiReceptiveField {
         }
 
         let mut residual_blocks = Vec::new();
-        
-        for (i, (&kernel_size, dilations)) in kernel_sizes.iter().zip(dilation_sizes.iter()).enumerate() {
+
+        for (i, (&kernel_size, dilations)) in
+            kernel_sizes.iter().zip(dilation_sizes.iter()).enumerate()
+        {
             let block = ResidualBlock::new(
                 channels,
                 kernel_size,
                 dilations,
                 leaky_relu_slope,
-                vb.pp(format!("residual_blocks.{}", i)),
+                vb.pp(format!("residual_blocks.{i}")),
             )?;
             residual_blocks.push(block);
         }
@@ -102,23 +106,23 @@ impl MultiReceptiveField {
     #[cfg(feature = "candle")]
     pub fn forward(&self, x: &Tensor) -> Result<Tensor> {
         let mut outputs = Vec::new();
-        
+
         // Process input through each residual block
         for block in &self.residual_blocks {
             let output = block.forward(x)?;
             outputs.push(output);
         }
-        
+
         // Sum all outputs (parallel processing)
         let mut result = outputs[0].clone();
         for output in outputs.iter().skip(1) {
             result = (&result + output)?;
         }
-        
+
         // Average the outputs
         let scale = 1.0 / outputs.len() as f32;
         result = result.affine(scale as f64, 0.0)?;
-        
+
         Ok(result)
     }
 
@@ -142,7 +146,8 @@ impl MultiReceptiveField {
 
     /// Calculate receptive field size
     pub fn receptive_field_size(&self) -> u32 {
-        self.kernel_sizes.iter()
+        self.kernel_sizes
+            .iter()
             .zip(self.dilation_sizes.iter())
             .map(|(&kernel, dilations)| {
                 let max_dilation = *dilations.iter().max().unwrap_or(&1);
@@ -164,11 +169,11 @@ impl ResidualBlock {
         vb: VarBuilder,
     ) -> Result<Self> {
         let mut conv_layers = Vec::new();
-        
+
         for (i, &dilation) in dilations.iter().enumerate() {
             // Calculate padding to maintain input size: (kernel_size - 1) * dilation / 2
             let padding = (kernel_size - 1) * dilation / 2;
-            
+
             let conv = candle_nn::conv1d(
                 channels as usize,
                 channels as usize,
@@ -178,7 +183,7 @@ impl ResidualBlock {
                     dilation: dilation as usize,
                     ..Default::default()
                 },
-                vb.pp(format!("conv_layers.{}", i)),
+                vb.pp(format!("conv_layers.{i}")),
             )?;
             conv_layers.push(conv);
         }
@@ -195,25 +200,25 @@ impl ResidualBlock {
     #[cfg(feature = "candle")]
     fn forward(&self, x: &Tensor) -> Result<Tensor> {
         let mut residual = x.clone();
-        
+
         for (i, conv) in self.conv_layers.iter().enumerate() {
             // Apply convolution
             residual = conv.forward(&residual)?;
-            
+
             // Apply Leaky ReLU activation (except for last layer)
             if i < self.conv_layers.len() - 1 {
                 let negative_part = residual.affine(self.leaky_relu_slope as f64, 0.0)?;
                 residual = residual.maximum(&negative_part)?;
             }
         }
-        
+
         // Add residual connection
         let output = (x + &residual)?;
-        
+
         // Apply final Leaky ReLU
         let negative_part = output.affine(self.leaky_relu_slope as f64, 0.0)?;
         let output = output.maximum(&negative_part)?;
-        
+
         Ok(output)
     }
 }
@@ -236,11 +241,7 @@ impl Default for MRFConfig {
         Self {
             channels: 512,
             kernel_sizes: vec![3, 7, 11],
-            dilation_sizes: vec![
-                vec![1, 3, 5],
-                vec![1, 3, 5],
-                vec![1, 3, 5],
-            ],
+            dilation_sizes: vec![vec![1, 3, 5], vec![1, 3, 5], vec![1, 3, 5]],
             leaky_relu_slope: 0.1,
         }
     }
@@ -267,13 +268,17 @@ impl MultiReceptiveField {
         let num_blocks = self.residual_blocks.len();
         let num_parameters = self.estimate_parameters();
         let receptive_field_size = self.receptive_field_size();
-        
+
         let avg_kernel_size = self.kernel_sizes.iter().sum::<u32>() as f32 / num_blocks as f32;
-        
-        let total_dilations: u32 = self.dilation_sizes.iter()
+
+        let total_dilations: u32 = self
+            .dilation_sizes
+            .iter()
             .flat_map(|dilations| dilations.iter())
             .sum();
-        let num_dilations = self.dilation_sizes.iter()
+        let num_dilations = self
+            .dilation_sizes
+            .iter()
             .map(|dilations| dilations.len())
             .sum::<usize>();
         let avg_dilation = total_dilations as f32 / num_dilations as f32;
@@ -290,14 +295,14 @@ impl MultiReceptiveField {
     /// Estimate number of parameters
     fn estimate_parameters(&self) -> u64 {
         let mut total = 0u64;
-        
+
         for (&kernel_size, dilations) in self.kernel_sizes.iter().zip(self.dilation_sizes.iter()) {
             // Each residual block has multiple conv layers
             let layers_per_block = dilations.len();
             let params_per_layer = (self.channels * self.channels * kernel_size) as u64;
             total += params_per_layer * layers_per_block as u64;
         }
-        
+
         total
     }
 }
@@ -309,7 +314,7 @@ mod tests {
     #[test]
     fn test_mrf_config() {
         let config = MRFConfig::default();
-        
+
         assert_eq!(config.channels, 512);
         assert_eq!(config.kernel_sizes.len(), 3);
         assert_eq!(config.dilation_sizes.len(), 3);
@@ -318,25 +323,16 @@ mod tests {
 
     #[test]
     fn test_mrf_creation() {
-        let kernel_sizes = vec![3, 7, 11];
-        let dilation_sizes = vec![
-            vec![1, 3, 5],
-            vec![1, 3, 5],
-            vec![1, 3, 5],
-        ];
-        
+        let _kernel_sizes = [3, 7, 11];
+        let _dilation_sizes = [vec![1, 3, 5], vec![1, 3, 5], vec![1, 3, 5]];
+
         #[cfg(not(feature = "candle"))]
         {
-            let mrf = MultiReceptiveField::new(
-                512,
-                &kernel_sizes,
-                &dilation_sizes,
-                0.1,
-            );
-            
+            let mrf = MultiReceptiveField::new(512, &kernel_sizes, &dilation_sizes, 0.1);
+
             assert!(mrf.is_ok());
             let mrf = mrf.unwrap();
-            
+
             let config = mrf.config();
             assert_eq!(config.channels, 512);
             assert_eq!(config.kernel_sizes, kernel_sizes);
@@ -346,46 +342,29 @@ mod tests {
 
     #[test]
     fn test_mrf_mismatched_sizes() {
-        let kernel_sizes = vec![3, 7];
-        let dilation_sizes = vec![
-            vec![1, 3, 5],
-            vec![1, 3, 5],
-            vec![1, 3, 5],
-        ];
-        
+        let _kernel_sizes = [3, 7];
+        let _dilation_sizes = [vec![1, 3, 5], vec![1, 3, 5], vec![1, 3, 5]];
+
         #[cfg(not(feature = "candle"))]
         {
-            let mrf = MultiReceptiveField::new(
-                512,
-                &kernel_sizes,
-                &dilation_sizes,
-                0.1,
-            );
-            
+            let mrf = MultiReceptiveField::new(512, &kernel_sizes, &dilation_sizes, 0.1);
+
             assert!(mrf.is_err());
         }
     }
 
     #[test]
+    #[allow(unused_variables)]
     fn test_receptive_field_calculation() {
-        let kernel_sizes = vec![3, 7, 11];
-        let dilation_sizes = vec![
-            vec![1, 3, 5],
-            vec![1, 3, 5],
-            vec![1, 3, 5],
-        ];
-        
+        let kernel_sizes = [3, 7, 11];
+        let dilation_sizes = [vec![1, 3, 5], vec![1, 3, 5], vec![1, 3, 5]];
+
         #[cfg(not(feature = "candle"))]
         {
-            let mrf = MultiReceptiveField::new(
-                512,
-                &kernel_sizes,
-                &dilation_sizes,
-                0.1,
-            ).unwrap();
-            
+            let mrf = MultiReceptiveField::new(512, &kernel_sizes, &dilation_sizes, 0.1).unwrap();
+
             let rf_size = mrf.receptive_field_size();
-            
+
             // Should be max of (kernel-1)*max_dilation + 1 for each kernel
             // For kernel=11, max_dilation=5: (11-1)*5 + 1 = 51
             assert_eq!(rf_size, 51);
@@ -393,25 +372,17 @@ mod tests {
     }
 
     #[test]
+    #[allow(unused_variables)]
     fn test_mrf_stats() {
-        let kernel_sizes = vec![3, 7, 11];
-        let dilation_sizes = vec![
-            vec![1, 3, 5],
-            vec![1, 3, 5],
-            vec![1, 3, 5],
-        ];
-        
+        let kernel_sizes = [3, 7, 11];
+        let dilation_sizes = [vec![1, 3, 5], vec![1, 3, 5], vec![1, 3, 5]];
+
         #[cfg(not(feature = "candle"))]
         {
-            let mrf = MultiReceptiveField::new(
-                512,
-                &kernel_sizes,
-                &dilation_sizes,
-                0.1,
-            ).unwrap();
-            
+            let mrf = MultiReceptiveField::new(512, &kernel_sizes, &dilation_sizes, 0.1).unwrap();
+
             let stats = mrf.stats();
-            
+
             assert_eq!(stats.num_blocks, 3);
             assert!(stats.num_parameters > 0);
             assert_eq!(stats.receptive_field_size, 51);

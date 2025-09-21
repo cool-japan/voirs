@@ -1,0 +1,100 @@
+# VoiRS Docker Ignore File
+
+# Rust build artifacts
+target/
+**/*.rs.bk
+*.pdb
+
+# Cargo lock files for libraries (keep for binaries)
+# Cargo.lock
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Git files
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+docs/
+README.md
+*.md
+
+# CI/CD files
+.github/
+.gitlab-ci.yml
+.travis.yml
+Jenkinsfile
+
+# Test files
+tests/
+benches/
+coverage/
+
+# Example files
+examples/
+
+# Development files
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+
+# Log files
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+
+# Coverage reports
+tarpaulin-report.html
+*.profraw
+*.profdata
+
+# Cache directories
+.cache/
+node_modules/
+
+# Python files (if any)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Rust-specific ignores
+**/*.rs.bk
+**/*.orig
+**/Cargo.lock.orig

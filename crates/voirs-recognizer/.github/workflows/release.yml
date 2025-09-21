@@ -1,0 +1,414 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v0.1.0)'
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Create GitHub release
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      tag_name: ${{ steps.get_tag.outputs.tag_name }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Get tag name
+      id: get_tag
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "tag_name=${{ inputs.version }}" >> $GITHUB_OUTPUT
+        else
+          echo "tag_name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Generate changelog from commits since last tag
+        LAST_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+        if [ -n "$LAST_TAG" ]; then
+          CHANGELOG=$(git log --pretty=format:"- %s" $LAST_TAG..HEAD)
+        else
+          CHANGELOG=$(git log --pretty=format:"- %s" HEAD~10..HEAD)
+        fi
+        echo "changelog<<EOF" >> $GITHUB_OUTPUT
+        echo "$CHANGELOG" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.get_tag.outputs.tag_name }}
+        release_name: VoiRS Recognizer ${{ steps.get_tag.outputs.tag_name }}
+        body: |
+          ## What's Changed
+          ${{ steps.changelog.outputs.changelog }}
+
+          ## Installation
+
+          ### Rust Crate
+          ```bash
+          cargo add voirs-recognizer
+          ```
+
+          ### npm Package (WASM)
+          ```bash
+          npm install @voirs/recognizer
+          ```
+
+          ### Pre-compiled Binaries
+          Download the appropriate binary for your platform from the assets below.
+
+          ## Documentation
+          - [API Documentation](https://cool-japan.github.io/voirs/docs/recognizer/)
+          - [User Guide](https://github.com/cool-japan/voirs/blob/main/crates/voirs-recognizer/README.md)
+          - [Examples](https://github.com/cool-japan/voirs/tree/main/crates/voirs-recognizer/examples)
+
+          **Full Changelog**: https://github.com/cool-japan/voirs/compare/${{ steps.get_tag.outputs.tag_name }}
+        draft: false
+        prerelease: ${{ contains(steps.get_tag.outputs.tag_name, 'alpha') || contains(steps.get_tag.outputs.tag_name, 'beta') || contains(steps.get_tag.outputs.tag_name, 'rc') }}
+
+  # Build and upload pre-compiled binaries
+  build-binaries:
+    name: Build Binaries
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive_name: voirs-recognizer-linux-x86_64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            archive_name: voirs-recognizer-linux-aarch64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive_name: voirs-recognizer-windows-x86_64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            archive_name: voirs-recognizer-macos-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive_name: voirs-recognizer-macos-aarch64
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ matrix.target }}
+
+    - name: Configure Rust cache
+      uses: Swatinem/rust-cache@v2
+
+    - name: Install cross-compilation tools (Linux ARM64)
+      if: matrix.target == 'aarch64-unknown-linux-gnu'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-aarch64-linux-gnu
+
+    - name: Install system dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libasound2-dev \
+          libpulse-dev \
+          libjack-dev \
+          portaudio19-dev \
+          libssl-dev \
+          pkg-config \
+          build-essential
+
+    - name: Install system dependencies (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew install portaudio jack
+
+    - name: Build release binary
+      run: |
+        if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+          export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+          export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
+        fi
+        cargo build --release --target ${{ matrix.target }} --features c-api,rest-api
+
+    - name: Generate C header
+      if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
+      run: python3 generate-header.py
+
+    - name: Create archive (Unix)
+      if: matrix.os != 'windows-latest'
+      run: |
+        mkdir -p release
+        cp target/${{ matrix.target }}/release/libvoirs_recognizer.* release/ 2>/dev/null || true
+        cp target/${{ matrix.target }}/release/voirs_recognizer release/ 2>/dev/null || true
+        cp include/voirs_recognizer.h release/ 2>/dev/null || true
+        cp README.md LICENSE-* release/
+        tar czf ${{ matrix.archive_name }}.tar.gz -C release .
+
+    - name: Create archive (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        mkdir release
+        copy target\${{ matrix.target }}\release\voirs_recognizer.dll release\ 2>nul || echo "DLL not found"
+        copy target\${{ matrix.target }}\release\voirs_recognizer.exe release\ 2>nul || echo "EXE not found"
+        copy target\${{ matrix.target }}\release\voirs_recognizer.lib release\ 2>nul || echo "LIB not found"
+        copy include\voirs_recognizer.h release\ 2>nul || echo "Header not found"
+        copy README.md release\
+        copy LICENSE-* release\
+        7z a ${{ matrix.archive_name }}.zip .\release\*
+
+    - name: Upload binary (Unix)
+      if: matrix.os != 'windows-latest'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ./${{ matrix.archive_name }}.tar.gz
+        asset_name: ${{ matrix.archive_name }}.tar.gz
+        asset_content_type: application/gzip
+
+    - name: Upload binary (Windows)
+      if: matrix.os == 'windows-latest'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ./${{ matrix.archive_name }}.zip
+        asset_name: ${{ matrix.archive_name }}.zip
+        asset_content_type: application/zip
+
+  # Build and publish WASM package
+  publish-wasm:
+    name: Publish WASM Package
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: wasm32-unknown-unknown
+
+    - name: Install wasm-pack
+      run: |
+        curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+    - name: Install Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        registry-url: 'https://registry.npmjs.org'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libasound2-dev \
+          libpulse-dev \
+          libjack-dev \
+          portaudio19-dev \
+          libssl-dev \
+          pkg-config \
+          build-essential
+
+    - name: Build WASM package
+      run: ./build-wasm.sh
+
+    - name: Update package version
+      run: |
+        VERSION=${{ needs.create-release.outputs.tag_name }}
+        # Remove 'v' prefix if present
+        VERSION=${VERSION#v}
+        npm version $VERSION --no-git-tag-version
+
+    - name: Publish to npm
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      run: npm publish --access public
+
+    - name: Upload WASM package
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ./pkg
+        asset_name: voirs-recognizer-wasm.tar.gz
+        asset_content_type: application/gzip
+
+  # Publish Rust crate
+  publish-crate:
+    name: Publish Rust Crate
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libasound2-dev \
+          libpulse-dev \
+          libjack-dev \
+          portaudio19-dev \
+          libssl-dev \
+          pkg-config \
+          build-essential
+
+    - name: Verify crate
+      run: cargo package --allow-dirty
+
+    - name: Publish to crates.io
+      env:
+        CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      run: cargo publish --allow-dirty
+
+  # Build and push Docker images
+  publish-docker:
+    name: Publish Docker Images
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: |
+          ghcr.io/${{ github.repository_owner }}/voirs-recognizer
+          voirs/recognizer
+        tags: |
+          type=ref,event=tag
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+
+    - name: Build and push Docker images
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  # Update documentation
+  update-docs:
+    name: Update Documentation
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libasound2-dev \
+          libpulse-dev \
+          libjack-dev \
+          portaudio19-dev \
+          libssl-dev \
+          pkg-config \
+          build-essential
+
+    - name: Generate documentation
+      run: |
+        cargo doc --all-features --no-deps
+        echo '<meta http-equiv="refresh" content="0; url=voirs_recognizer">' > target/doc/index.html
+
+    - name: Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./target/doc
+        destination_dir: docs/recognizer/${{ needs.create-release.outputs.tag_name }}
+
+    - name: Update latest docs link
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./target/doc
+        destination_dir: docs/recognizer/latest
+
+  # Notify stakeholders
+  notify-release:
+    name: Notify Release
+    needs: [create-release, build-binaries, publish-wasm, publish-crate, publish-docker, update-docs]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+    - name: Notify success
+      if: ${{ needs.create-release.result == 'success' && needs.publish-crate.result == 'success' }}
+      run: |
+        echo "🎉 Release ${{ needs.create-release.outputs.tag_name }} published successfully!"
+        echo "- ✅ GitHub Release created"
+        echo "- ✅ Rust crate published to crates.io"
+        echo "- ✅ WASM package published to npm"
+        echo "- ✅ Docker images published"
+        echo "- ✅ Documentation updated"
+
+    - name: Notify failure
+      if: ${{ needs.create-release.result == 'failure' || needs.publish-crate.result == 'failure' }}
+      run: |
+        echo "❌ Release ${{ needs.create-release.outputs.tag_name }} failed!"
+        echo "Please check the failed jobs and retry."
+        exit 1

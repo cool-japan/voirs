@@ -3,9 +3,9 @@
 //! This module provides a comprehensive error type system for the VoiRS SDK,
 //! categorized by operation type and severity level.
 
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf, time::Duration};
 use thiserror::Error;
-use serde::{Deserialize, Serialize};
 
 /// Main error type for VoiRS operations with enhanced categorization
 #[derive(Debug, Error)]
@@ -40,11 +40,17 @@ pub enum VoirsError {
 
     /// Synthesis quality degraded
     #[error("Synthesis quality degraded: {reason}")]
-    SynthesisQualityDegraded { reason: String, metrics: QualityMetrics },
+    SynthesisQualityDegraded {
+        reason: String,
+        metrics: QualityMetrics,
+    },
 
     /// Synthesis interrupted
     #[error("Synthesis was interrupted at stage '{stage}'")]
-    SynthesisInterrupted { stage: SynthesisStage, reason: String },
+    SynthesisInterrupted {
+        stage: SynthesisStage,
+        reason: String,
+    },
 
     // === Device and Hardware Errors ===
     /// Device or hardware error with recovery hints
@@ -67,7 +73,9 @@ pub enum VoirsError {
     UnsupportedDevice { device: String },
 
     /// GPU out of memory
-    #[error("GPU out of memory on device '{device}': {used_mb}MB used, {available_mb}MB available")]
+    #[error(
+        "GPU out of memory on device '{device}': {used_mb}MB used, {available_mb}MB available"
+    )]
     GpuOutOfMemory {
         device: String,
         used_mb: u32,
@@ -170,7 +178,10 @@ pub enum VoirsError {
 
     /// Text preprocessing error
     #[error("Text preprocessing failed: {message}")]
-    TextPreprocessingError { message: String, text_sample: String },
+    TextPreprocessingError {
+        message: String,
+        text_sample: String,
+    },
 
     /// Language not supported
     #[error("Language '{language}' is not supported")]
@@ -276,15 +287,172 @@ pub enum VoirsError {
     #[error("Feature '{feature}' is not implemented")]
     NotImplemented { feature: String },
 
+    /// Feature not available
+    #[error("Feature '{feature}' is not available: {reason}")]
+    FeatureUnavailable { feature: String, reason: String },
+
     /// Deprecated functionality used
     #[error("Deprecated functionality '{feature}' used. Use '{replacement}' instead")]
-    DeprecatedFunctionality { feature: String, replacement: String },
+    DeprecatedFunctionality {
+        feature: String,
+        replacement: String,
+    },
+
+    // === Advanced Feature-Specific Errors ===
+
+    // Emotion Control Errors
+    /// Emotion control error
+    #[error("Emotion control error: {message}")]
+    EmotionError {
+        message: String,
+        emotion_type: Option<String>,
+        intensity: Option<f32>,
+    },
+
+    /// Emotion not supported
+    #[error("Emotion '{emotion}' is not supported. Available emotions: {available:?}")]
+    EmotionNotSupported {
+        emotion: String,
+        available: Vec<String>,
+    },
+
+    /// Emotion intensity out of range
+    #[error("Emotion intensity {intensity} is out of range (0.0-1.0)")]
+    EmotionIntensityOutOfRange { intensity: f32 },
+
+    /// Emotion configuration invalid
+    #[error("Emotion configuration invalid: {reason}")]
+    EmotionConfigurationInvalid { reason: String },
+
+    // Voice Cloning Errors
+    /// Voice cloning error
+    #[error("Voice cloning error: {message}")]
+    VoiceCloningError {
+        message: String,
+        cloning_method: Option<String>,
+    },
+
+    /// Voice cloning source invalid
+    #[error("Voice cloning source is invalid: {reason}")]
+    VoiceCloningSourceInvalid {
+        reason: String,
+        audio_duration: Option<f32>,
+        required_duration: Option<f32>,
+    },
+
+    /// Voice cloning quality too low
+    #[error("Voice cloning quality {quality} is below threshold {threshold}")]
+    VoiceCloningQualityTooLow { quality: f32, threshold: f32 },
+
+    /// Voice cloning method not supported
+    #[error("Voice cloning method '{method}' is not supported")]
+    VoiceCloningMethodNotSupported {
+        method: String,
+        supported: Vec<String>,
+    },
+
+    // Voice Conversion Errors
+    /// Voice conversion error
+    #[error("Voice conversion error: {message}")]
+    VoiceConversionError {
+        message: String,
+        conversion_type: Option<String>,
+    },
+
+    /// Voice conversion target invalid
+    #[error("Voice conversion target is invalid: {reason}")]
+    VoiceConversionTargetInvalid { reason: String, target: String },
+
+    /// Voice conversion not supported
+    #[error("Voice conversion from '{from}' to '{to}' is not supported")]
+    VoiceConversionNotSupported { from: String, to: String },
+
+    /// Real-time conversion buffer overflow
+    #[error("Real-time conversion buffer overflow: {details}")]
+    RealTimeConversionBufferOverflow { details: String, buffer_size: usize },
+
+    // Singing Synthesis Errors
+    /// Singing synthesis error
+    #[error("Singing synthesis error: {message}")]
+    SingingError {
+        message: String,
+        voice_type: Option<String>,
+    },
+
+    /// Musical score parsing error
+    #[error("Musical score parsing error: {message}")]
+    MusicalScoreParsingError {
+        message: String,
+        line: Option<usize>,
+        column: Option<usize>,
+    },
+
+    /// Musical note invalid
+    #[error("Musical note '{note}' is invalid: {reason}")]
+    MusicalNoteInvalid { note: String, reason: String },
+
+    /// Singing technique not supported
+    #[error("Singing technique '{technique}' is not supported")]
+    SingingTechniqueNotSupported {
+        technique: String,
+        supported: Vec<String>,
+    },
+
+    /// Tempo out of range
+    #[error("Tempo {tempo} BPM is out of range ({min_tempo}-{max_tempo})")]
+    TempoOutOfRange {
+        tempo: f32,
+        min_tempo: f32,
+        max_tempo: f32,
+    },
+
+    // 3D Spatial Audio Errors
+    /// 3D spatial audio error
+    #[error("3D spatial audio error: {message}")]
+    SpatialAudioError {
+        message: String,
+        position: Option<String>,
+    },
+
+    /// HRTF processing error
+    #[error("HRTF processing error: {message}")]
+    HrtfProcessingError {
+        message: String,
+        sample_rate: Option<u32>,
+    },
+
+    /// 3D position invalid
+    #[error("3D position ({x}, {y}, {z}) is invalid: {reason}")]
+    Position3DInvalid {
+        x: f32,
+        y: f32,
+        z: f32,
+        reason: String,
+    },
+
+    /// Room acoustics configuration invalid
+    #[error("Room acoustics configuration invalid: {reason}")]
+    RoomAcousticsConfigurationInvalid {
+        reason: String,
+        room_size: Option<String>,
+    },
+
+    /// Binaural rendering error
+    #[error("Binaural rendering error: {message}")]
+    BinauralRenderingError {
+        message: String,
+        channel_count: Option<u32>,
+    },
 }
 
 impl Clone for VoirsError {
     fn clone(&self) -> Self {
         match self {
-            Self::VoiceNotFound { voice, available, suggestions } => Self::VoiceNotFound {
+            Self::VoiceNotFound {
+                voice,
+                available,
+                suggestions,
+            } => Self::VoiceNotFound {
                 voice: voice.clone(),
                 available: available.clone(),
                 suggestions: suggestions.clone(),
@@ -297,7 +465,12 @@ impl Clone for VoirsError {
                 voice: voice.clone(),
                 issue: issue.clone(),
             },
-            Self::SynthesisFailed { text, text_length, stage, cause: _ } => Self::SynthesisFailed {
+            Self::SynthesisFailed {
+                text,
+                text_length,
+                stage,
+                cause: _,
+            } => Self::SynthesisFailed {
                 text: text.clone(),
                 text_length: *text_length,
                 stage: *stage,
@@ -311,24 +484,39 @@ impl Clone for VoirsError {
                 stage: *stage,
                 reason: reason.clone(),
             },
-            Self::DeviceError { device, message, recovery_hint } => Self::DeviceError {
+            Self::DeviceError {
+                device,
+                message,
+                recovery_hint,
+            } => Self::DeviceError {
                 device: device.clone(),
                 message: message.clone(),
                 recovery_hint: recovery_hint.clone(),
             },
-            Self::DeviceNotAvailable { device, alternatives } => Self::DeviceNotAvailable {
+            Self::DeviceNotAvailable {
+                device,
+                alternatives,
+            } => Self::DeviceNotAvailable {
                 device: device.clone(),
                 alternatives: alternatives.clone(),
             },
             Self::UnsupportedDevice { device } => Self::UnsupportedDevice {
                 device: device.clone(),
             },
-            Self::GpuOutOfMemory { device, used_mb, available_mb } => Self::GpuOutOfMemory {
+            Self::GpuOutOfMemory {
+                device,
+                used_mb,
+                available_mb,
+            } => Self::GpuOutOfMemory {
                 device: device.clone(),
                 used_mb: *used_mb,
                 available_mb: *available_mb,
             },
-            Self::IoError { path, operation, source: _ } => Self::IoError {
+            Self::IoError {
+                path,
+                operation,
+                source: _,
+            } => Self::IoError {
                 path: path.clone(),
                 operation: *operation,
                 source: std::io::Error::new(std::io::ErrorKind::Other, "Cloned error"),
@@ -345,7 +533,12 @@ impl Clone for VoirsError {
                 field: field.clone(),
                 message: message.clone(),
             },
-            Self::InvalidConfiguration { field, value, reason, valid_values } => Self::InvalidConfiguration {
+            Self::InvalidConfiguration {
+                field,
+                value,
+                reason,
+                valid_values,
+            } => Self::InvalidConfiguration {
                 field: field.clone(),
                 value: value.clone(),
                 reason: reason.clone(),
@@ -356,7 +549,11 @@ impl Clone for VoirsError {
                 to: to.clone(),
                 reason: reason.clone(),
             },
-            Self::ModelError { model_type, message, source: _ } => Self::ModelError {
+            Self::ModelError {
+                model_type,
+                message,
+                source: _,
+            } => Self::ModelError {
                 model_type: *model_type,
                 message: message.clone(),
                 source: None,
@@ -373,39 +570,67 @@ impl Clone for VoirsError {
                 model_name: model_name.clone(),
                 device: device.clone(),
             },
-            Self::AudioError { message, buffer_info } => Self::AudioError {
+            Self::AudioError {
+                message,
+                buffer_info,
+            } => Self::AudioError {
                 message: message.clone(),
                 buffer_info: buffer_info.clone(),
             },
-            Self::AudioFormatConversionFailed { from, to, reason } => Self::AudioFormatConversionFailed {
-                from: from.clone(),
-                to: to.clone(),
-                reason: reason.clone(),
-            },
-            Self::AudioBufferError { error_type, details } => Self::AudioBufferError {
+            Self::AudioFormatConversionFailed { from, to, reason } => {
+                Self::AudioFormatConversionFailed {
+                    from: from.clone(),
+                    to: to.clone(),
+                    reason: reason.clone(),
+                }
+            }
+            Self::AudioBufferError {
+                error_type,
+                details,
+            } => Self::AudioBufferError {
                 error_type: *error_type,
                 details: details.clone(),
             },
-            Self::G2pError { text, message, language } => Self::G2pError {
+            Self::G2pError {
+                text,
+                message,
+                language,
+            } => Self::G2pError {
                 text: text.clone(),
                 message: message.clone(),
                 language: language.clone(),
             },
-            Self::TextPreprocessingError { message, text_sample } => Self::TextPreprocessingError {
+            Self::TextPreprocessingError {
+                message,
+                text_sample,
+            } => Self::TextPreprocessingError {
                 message: message.clone(),
                 text_sample: text_sample.clone(),
             },
-            Self::LanguageNotSupported { language, supported } => Self::LanguageNotSupported {
+            Self::LanguageNotSupported {
+                language,
+                supported,
+            } => Self::LanguageNotSupported {
                 language: language.clone(),
                 supported: supported.clone(),
             },
-            Self::NetworkError { message, retry_count, max_retries, source: _ } => Self::NetworkError {
+            Self::NetworkError {
+                message,
+                retry_count,
+                max_retries,
+                source: _,
+            } => Self::NetworkError {
                 message: message.clone(),
                 retry_count: *retry_count,
                 max_retries: *max_retries,
                 source: None,
             },
-            Self::DownloadFailed { url, reason, bytes_downloaded, total_bytes } => Self::DownloadFailed {
+            Self::DownloadFailed {
+                url,
+                reason,
+                bytes_downloaded,
+                total_bytes,
+            } => Self::DownloadFailed {
                 url: url.clone(),
                 reason: reason.clone(),
                 bytes_downloaded: *bytes_downloaded,
@@ -421,16 +646,26 @@ impl Clone for VoirsError {
                 to: to.clone(),
                 reason: reason.clone(),
             },
-            Self::ComponentSynchronizationFailed { component, reason } => Self::ComponentSynchronizationFailed {
-                component: component.clone(),
-                reason: reason.clone(),
-            },
-            Self::TimeoutError { operation, duration, expected_duration } => Self::TimeoutError {
+            Self::ComponentSynchronizationFailed { component, reason } => {
+                Self::ComponentSynchronizationFailed {
+                    component: component.clone(),
+                    reason: reason.clone(),
+                }
+            }
+            Self::TimeoutError {
+                operation,
+                duration,
+                expected_duration,
+            } => Self::TimeoutError {
                 operation: operation.clone(),
                 duration: *duration,
                 expected_duration: *expected_duration,
             },
-            Self::PerformanceDegradation { metric, value, threshold } => Self::PerformanceDegradation {
+            Self::PerformanceDegradation {
+                metric,
+                value,
+                threshold,
+            } => Self::PerformanceDegradation {
                 metric: metric.clone(),
                 value: *value,
                 threshold: *threshold,
@@ -438,7 +673,10 @@ impl Clone for VoirsError {
             Self::RealTimeConstraintViolation { constraint } => Self::RealTimeConstraintViolation {
                 constraint: constraint.clone(),
             },
-            Self::OutOfMemory { message, requested_mb } => Self::OutOfMemory {
+            Self::OutOfMemory {
+                message,
+                requested_mb,
+            } => Self::OutOfMemory {
                 message: message.clone(),
                 requested_mb: *requested_mb,
             },
@@ -446,7 +684,10 @@ impl Clone for VoirsError {
                 resource: resource.clone(),
                 details: details.clone(),
             },
-            Self::MemoryLeak { component, leaked_mb } => Self::MemoryLeak {
+            Self::MemoryLeak {
+                component,
+                leaked_mb,
+            } => Self::MemoryLeak {
                 component: component.clone(),
                 leaked_mb: *leaked_mb,
             },
@@ -469,9 +710,159 @@ impl Clone for VoirsError {
             Self::NotImplemented { feature } => Self::NotImplemented {
                 feature: feature.clone(),
             },
-            Self::DeprecatedFunctionality { feature, replacement } => Self::DeprecatedFunctionality {
+            Self::DeprecatedFunctionality {
+                feature,
+                replacement,
+            } => Self::DeprecatedFunctionality {
                 feature: feature.clone(),
                 replacement: replacement.clone(),
+            },
+
+            // Advanced Feature-Specific Errors
+            Self::EmotionError {
+                message,
+                emotion_type,
+                intensity,
+            } => Self::EmotionError {
+                message: message.clone(),
+                emotion_type: emotion_type.clone(),
+                intensity: *intensity,
+            },
+            Self::EmotionNotSupported { emotion, available } => Self::EmotionNotSupported {
+                emotion: emotion.clone(),
+                available: available.clone(),
+            },
+            Self::EmotionIntensityOutOfRange { intensity } => Self::EmotionIntensityOutOfRange {
+                intensity: *intensity,
+            },
+            Self::EmotionConfigurationInvalid { reason } => Self::EmotionConfigurationInvalid {
+                reason: reason.clone(),
+            },
+
+            Self::VoiceCloningError {
+                message,
+                cloning_method,
+            } => Self::VoiceCloningError {
+                message: message.clone(),
+                cloning_method: cloning_method.clone(),
+            },
+            Self::VoiceCloningSourceInvalid {
+                reason,
+                audio_duration,
+                required_duration,
+            } => Self::VoiceCloningSourceInvalid {
+                reason: reason.clone(),
+                audio_duration: *audio_duration,
+                required_duration: *required_duration,
+            },
+            Self::VoiceCloningQualityTooLow { quality, threshold } => {
+                Self::VoiceCloningQualityTooLow {
+                    quality: *quality,
+                    threshold: *threshold,
+                }
+            }
+            Self::VoiceCloningMethodNotSupported { method, supported } => {
+                Self::VoiceCloningMethodNotSupported {
+                    method: method.clone(),
+                    supported: supported.clone(),
+                }
+            }
+
+            Self::VoiceConversionError {
+                message,
+                conversion_type,
+            } => Self::VoiceConversionError {
+                message: message.clone(),
+                conversion_type: conversion_type.clone(),
+            },
+            Self::VoiceConversionTargetInvalid { reason, target } => {
+                Self::VoiceConversionTargetInvalid {
+                    reason: reason.clone(),
+                    target: target.clone(),
+                }
+            }
+            Self::VoiceConversionNotSupported { from, to } => Self::VoiceConversionNotSupported {
+                from: from.clone(),
+                to: to.clone(),
+            },
+            Self::RealTimeConversionBufferOverflow {
+                details,
+                buffer_size,
+            } => Self::RealTimeConversionBufferOverflow {
+                details: details.clone(),
+                buffer_size: *buffer_size,
+            },
+
+            Self::SingingError {
+                message,
+                voice_type,
+            } => Self::SingingError {
+                message: message.clone(),
+                voice_type: voice_type.clone(),
+            },
+            Self::MusicalScoreParsingError {
+                message,
+                line,
+                column,
+            } => Self::MusicalScoreParsingError {
+                message: message.clone(),
+                line: *line,
+                column: *column,
+            },
+            Self::MusicalNoteInvalid { note, reason } => Self::MusicalNoteInvalid {
+                note: note.clone(),
+                reason: reason.clone(),
+            },
+            Self::SingingTechniqueNotSupported {
+                technique,
+                supported,
+            } => Self::SingingTechniqueNotSupported {
+                technique: technique.clone(),
+                supported: supported.clone(),
+            },
+            Self::TempoOutOfRange {
+                tempo,
+                min_tempo,
+                max_tempo,
+            } => Self::TempoOutOfRange {
+                tempo: *tempo,
+                min_tempo: *min_tempo,
+                max_tempo: *max_tempo,
+            },
+
+            Self::SpatialAudioError { message, position } => Self::SpatialAudioError {
+                message: message.clone(),
+                position: position.clone(),
+            },
+            Self::HrtfProcessingError {
+                message,
+                sample_rate,
+            } => Self::HrtfProcessingError {
+                message: message.clone(),
+                sample_rate: *sample_rate,
+            },
+            Self::Position3DInvalid { x, y, z, reason } => Self::Position3DInvalid {
+                x: *x,
+                y: *y,
+                z: *z,
+                reason: reason.clone(),
+            },
+            Self::RoomAcousticsConfigurationInvalid { reason, room_size } => {
+                Self::RoomAcousticsConfigurationInvalid {
+                    reason: reason.clone(),
+                    room_size: room_size.clone(),
+                }
+            }
+            Self::BinauralRenderingError {
+                message,
+                channel_count,
+            } => Self::BinauralRenderingError {
+                message: message.clone(),
+                channel_count: *channel_count,
+            },
+            Self::FeatureUnavailable { feature, reason } => Self::FeatureUnavailable {
+                feature: feature.clone(),
+                reason: reason.clone(),
             },
         }
     }
@@ -509,6 +900,7 @@ pub enum ModelType {
     Vocoder,
     Preprocessor,
     Postprocessor,
+    ASR,
 }
 
 impl std::fmt::Display for ModelType {
@@ -519,6 +911,7 @@ impl std::fmt::Display for ModelType {
             Self::Vocoder => write!(f, "vocoder"),
             Self::Preprocessor => write!(f, "preprocessor"),
             Self::Postprocessor => write!(f, "postprocessor"),
+            Self::ASR => write!(f, "ASR"),
         }
     }
 }
@@ -689,13 +1082,35 @@ impl VoirsError {
             | Self::G2pError { .. }
             | Self::NetworkError { .. }
             | Self::TimeoutError { .. }
-            | Self::InvalidStateTransition { .. } => ErrorSeverity::Error,
+            | Self::InvalidStateTransition { .. }
+            | Self::EmotionError { .. }
+            | Self::EmotionNotSupported { .. }
+            | Self::EmotionConfigurationInvalid { .. }
+            | Self::VoiceCloningError { .. }
+            | Self::VoiceCloningSourceInvalid { .. }
+            | Self::VoiceCloningMethodNotSupported { .. }
+            | Self::VoiceConversionError { .. }
+            | Self::VoiceConversionTargetInvalid { .. }
+            | Self::VoiceConversionNotSupported { .. }
+            | Self::RealTimeConversionBufferOverflow { .. }
+            | Self::SingingError { .. }
+            | Self::MusicalScoreParsingError { .. }
+            | Self::MusicalNoteInvalid { .. }
+            | Self::SingingTechniqueNotSupported { .. }
+            | Self::SpatialAudioError { .. }
+            | Self::HrtfProcessingError { .. }
+            | Self::Position3DInvalid { .. }
+            | Self::RoomAcousticsConfigurationInvalid { .. }
+            | Self::BinauralRenderingError { .. } => ErrorSeverity::Error,
 
             // Warnings
             Self::SynthesisQualityDegraded { .. }
             | Self::PerformanceDegradation { .. }
             | Self::VoiceUnavailable { .. }
-            | Self::DeprecatedFunctionality { .. } => ErrorSeverity::Warning,
+            | Self::DeprecatedFunctionality { .. }
+            | Self::EmotionIntensityOutOfRange { .. }
+            | Self::VoiceCloningQualityTooLow { .. }
+            | Self::TempoOutOfRange { .. } => ErrorSeverity::Warning,
 
             // Info
             Self::NotImplemented { .. } => ErrorSeverity::Info,
@@ -754,9 +1169,9 @@ impl VoirsError {
             | Self::PerformanceDegradation { .. }
             | Self::RealTimeConstraintViolation { .. } => "performance",
 
-            Self::OutOfMemory { .. }
-            | Self::ResourceExhausted { .. }
-            | Self::MemoryLeak { .. } => "memory",
+            Self::OutOfMemory { .. } | Self::ResourceExhausted { .. } | Self::MemoryLeak { .. } => {
+                "memory"
+            }
 
             Self::SerializationError { .. }
             | Self::DataValidationFailed { .. }
@@ -764,6 +1179,36 @@ impl VoirsError {
 
             Self::InternalError { component, .. } => component,
             Self::NotImplemented { .. } | Self::DeprecatedFunctionality { .. } => "system",
+
+            // Advanced feature components
+            Self::EmotionError { .. }
+            | Self::EmotionNotSupported { .. }
+            | Self::EmotionIntensityOutOfRange { .. }
+            | Self::EmotionConfigurationInvalid { .. } => "emotion",
+
+            Self::VoiceCloningError { .. }
+            | Self::VoiceCloningSourceInvalid { .. }
+            | Self::VoiceCloningQualityTooLow { .. }
+            | Self::VoiceCloningMethodNotSupported { .. } => "voice_cloning",
+
+            Self::VoiceConversionError { .. }
+            | Self::VoiceConversionTargetInvalid { .. }
+            | Self::VoiceConversionNotSupported { .. }
+            | Self::RealTimeConversionBufferOverflow { .. } => "voice_conversion",
+
+            Self::SingingError { .. }
+            | Self::MusicalScoreParsingError { .. }
+            | Self::MusicalNoteInvalid { .. }
+            | Self::SingingTechniqueNotSupported { .. }
+            | Self::TempoOutOfRange { .. } => "singing",
+
+            Self::SpatialAudioError { .. }
+            | Self::HrtfProcessingError { .. }
+            | Self::Position3DInvalid { .. }
+            | Self::RoomAcousticsConfigurationInvalid { .. }
+            | Self::BinauralRenderingError { .. } => "spatial_audio",
+
+            Self::FeatureUnavailable { .. } => "feature",
         }
     }
 
@@ -804,16 +1249,26 @@ impl VoirsError {
             Self::DeviceNotAvailable { alternatives, .. } => {
                 let mut suggestions = vec!["Check device availability".to_string()];
                 for alt in alternatives {
-                    suggestions.push(format!("Try using device: {}", alt));
+                    suggestions.push(format!("Try using device: {alt}"));
                 }
                 suggestions
             }
 
-            Self::NetworkError { retry_count, max_retries, .. } => {
+            Self::NetworkError {
+                retry_count,
+                max_retries,
+                ..
+            } => {
                 if retry_count < max_retries {
-                    vec!["Retry the operation".to_string(), "Check network connection".to_string()]
+                    vec![
+                        "Retry the operation".to_string(),
+                        "Check network connection".to_string(),
+                    ]
                 } else {
-                    vec!["Check network connection".to_string(), "Try again later".to_string()]
+                    vec![
+                        "Check network connection".to_string(),
+                        "Try again later".to_string(),
+                    ]
                 }
             }
 
@@ -846,7 +1301,11 @@ impl VoirsError {
     }
 
     /// Convert error to context with additional metadata
-    pub fn with_context(self, component: impl Into<String>, operation: impl Into<String>) -> ErrorWithContext {
+    pub fn with_context(
+        self,
+        component: impl Into<String>,
+        operation: impl Into<String>,
+    ) -> ErrorWithContext {
         let mut context = ErrorContext {
             severity: self.severity(),
             component: component.into(),
@@ -866,19 +1325,30 @@ impl VoirsError {
                 context.context.insert("voice".to_string(), voice.clone());
             }
             Self::SynthesisFailed { text_length, .. } => {
-                context.context.insert("text_length".to_string(), text_length.to_string());
+                context
+                    .context
+                    .insert("text_length".to_string(), text_length.to_string());
             }
             Self::DeviceError { device, .. } => {
                 context.context.insert("device".to_string(), device.clone());
             }
-            Self::IoError { path, operation, .. } => {
-                context.context.insert("path".to_string(), path.display().to_string());
-                context.context.insert("io_operation".to_string(), operation.to_string());
+            Self::IoError {
+                path, operation, ..
+            } => {
+                context
+                    .context
+                    .insert("path".to_string(), path.display().to_string());
+                context
+                    .context
+                    .insert("io_operation".to_string(), operation.to_string());
             }
             _ => {}
         }
 
-        ErrorWithContext { error: self, context }
+        ErrorWithContext {
+            error: self,
+            context,
+        }
     }
 }
 
@@ -908,5 +1378,162 @@ impl std::error::Error for ErrorWithContext {
 /// Result type alias for VoiRS operations
 pub type Result<T> = std::result::Result<T, VoirsError>;
 
+impl From<ErrorWithContext> for VoirsError {
+    fn from(val: ErrorWithContext) -> Self {
+        val.error
+    }
+}
+
 /// Result type with context
 pub type ContextResult<T> = std::result::Result<T, ErrorWithContext>;
+
+impl VoirsError {
+    // Convenience methods for creating feature-specific errors
+
+    /// Create an emotion error
+    pub fn emotion_error(message: impl Into<String>) -> Self {
+        Self::EmotionError {
+            message: message.into(),
+            emotion_type: None,
+            intensity: None,
+        }
+    }
+
+    /// Create an emotion not supported error
+    pub fn emotion_not_supported(emotion: impl Into<String>, available: Vec<String>) -> Self {
+        Self::EmotionNotSupported {
+            emotion: emotion.into(),
+            available,
+        }
+    }
+
+    /// Create an emotion intensity out of range error
+    pub fn emotion_intensity_out_of_range(intensity: f32) -> Self {
+        Self::EmotionIntensityOutOfRange { intensity }
+    }
+
+    /// Create a voice cloning error
+    pub fn voice_cloning_error(message: impl Into<String>) -> Self {
+        Self::VoiceCloningError {
+            message: message.into(),
+            cloning_method: None,
+        }
+    }
+
+    /// Create a voice cloning source invalid error
+    pub fn voice_cloning_source_invalid(reason: impl Into<String>) -> Self {
+        Self::VoiceCloningSourceInvalid {
+            reason: reason.into(),
+            audio_duration: None,
+            required_duration: None,
+        }
+    }
+
+    /// Create a voice cloning quality too low error
+    pub fn voice_cloning_quality_too_low(quality: f32, threshold: f32) -> Self {
+        Self::VoiceCloningQualityTooLow { quality, threshold }
+    }
+
+    /// Create a voice conversion error
+    pub fn voice_conversion_error(message: impl Into<String>) -> Self {
+        Self::VoiceConversionError {
+            message: message.into(),
+            conversion_type: None,
+        }
+    }
+
+    /// Create a voice conversion target invalid error
+    pub fn voice_conversion_target_invalid(
+        reason: impl Into<String>,
+        target: impl Into<String>,
+    ) -> Self {
+        Self::VoiceConversionTargetInvalid {
+            reason: reason.into(),
+            target: target.into(),
+        }
+    }
+
+    /// Create a voice conversion not supported error
+    pub fn voice_conversion_not_supported(from: impl Into<String>, to: impl Into<String>) -> Self {
+        Self::VoiceConversionNotSupported {
+            from: from.into(),
+            to: to.into(),
+        }
+    }
+
+    /// Create a singing error
+    pub fn singing_error(message: impl Into<String>) -> Self {
+        Self::SingingError {
+            message: message.into(),
+            voice_type: None,
+        }
+    }
+
+    /// Create a musical score parsing error
+    pub fn musical_score_parsing_error(message: impl Into<String>) -> Self {
+        Self::MusicalScoreParsingError {
+            message: message.into(),
+            line: None,
+            column: None,
+        }
+    }
+
+    /// Create a musical note invalid error
+    pub fn musical_note_invalid(note: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self::MusicalNoteInvalid {
+            note: note.into(),
+            reason: reason.into(),
+        }
+    }
+
+    /// Create a tempo out of range error
+    pub fn tempo_out_of_range(tempo: f32, min_tempo: f32, max_tempo: f32) -> Self {
+        Self::TempoOutOfRange {
+            tempo,
+            min_tempo,
+            max_tempo,
+        }
+    }
+
+    /// Create a spatial audio error
+    pub fn spatial_audio_error(message: impl Into<String>) -> Self {
+        Self::SpatialAudioError {
+            message: message.into(),
+            position: None,
+        }
+    }
+
+    /// Create an HRTF processing error
+    pub fn hrtf_processing_error(message: impl Into<String>) -> Self {
+        Self::HrtfProcessingError {
+            message: message.into(),
+            sample_rate: None,
+        }
+    }
+
+    /// Create a 3D position invalid error
+    pub fn position_3d_invalid(x: f32, y: f32, z: f32, reason: impl Into<String>) -> Self {
+        Self::Position3DInvalid {
+            x,
+            y,
+            z,
+            reason: reason.into(),
+        }
+    }
+
+    /// Create a room acoustics configuration invalid error
+    pub fn room_acoustics_configuration_invalid(reason: impl Into<String>) -> Self {
+        Self::RoomAcousticsConfigurationInvalid {
+            reason: reason.into(),
+            room_size: None,
+        }
+    }
+
+    /// Create a binaural rendering error
+    pub fn binaural_rendering_error(message: impl Into<String>) -> Self {
+        Self::BinauralRenderingError {
+            message: message.into(),
+            channel_count: None,
+        }
+    }
+}

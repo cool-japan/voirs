@@ -1,7 +1,7 @@
 //! Statistical language detection using n-gram models.
 
+use crate::detection::{DetectionMethod, DetectionResult};
 use crate::{LanguageCode, Result};
-use crate::detection::{DetectionResult, DetectionMethod};
 use std::collections::HashMap;
 
 /// Statistical language detector using n-gram models
@@ -18,7 +18,7 @@ struct TrigramModel {
     /// Trigram frequencies
     trigrams: HashMap<String, f32>,
     /// Total trigram count
-    total_count: f32,
+    _total_count: f32,
 }
 
 /// Character-based model for a language
@@ -27,7 +27,7 @@ struct CharModel {
     /// Character frequencies
     chars: HashMap<char, f32>,
     /// Total character count
-    total_count: f32,
+    _total_count: f32,
 }
 
 impl StatisticalDetector {
@@ -40,7 +40,7 @@ impl StatisticalDetector {
         detector.load_models();
         detector
     }
-    
+
     /// Load statistical models for languages
     fn load_models(&mut self) {
         // Load simplified models (in a real implementation, these would be trained on large corpora)
@@ -52,11 +52,11 @@ impl StatisticalDetector {
         self.load_chinese_model();
         self.load_korean_model();
     }
-    
+
     /// Load English trigram model
     fn load_english_model(&mut self) {
         let mut trigrams = HashMap::new();
-        
+
         // Common English trigrams with approximate frequencies
         trigrams.insert("the".to_string(), 0.065);
         trigrams.insert("and".to_string(), 0.041);
@@ -78,19 +78,22 @@ impl StatisticalDetector {
         trigrams.insert("ver".to_string(), 0.016);
         trigrams.insert("all".to_string(), 0.015);
         trigrams.insert("ons".to_string(), 0.015);
-        
+
         let total_count = trigrams.values().sum();
-        
-        self.trigram_models.insert(LanguageCode::EnUs, TrigramModel {
-            trigrams,
-            total_count,
-        });
+
+        self.trigram_models.insert(
+            LanguageCode::EnUs,
+            TrigramModel {
+                trigrams,
+                _total_count: total_count,
+            },
+        );
     }
-    
+
     /// Load German trigram model
     fn load_german_model(&mut self) {
         let mut trigrams = HashMap::new();
-        
+
         // Common German trigrams
         trigrams.insert("der".to_string(), 0.055);
         trigrams.insert("und".to_string(), 0.045);
@@ -112,19 +115,22 @@ impl StatisticalDetector {
         trigrams.insert("ent".to_string(), 0.016);
         trigrams.insert("ter".to_string(), 0.015);
         trigrams.insert("ger".to_string(), 0.014);
-        
+
         let total_count = trigrams.values().sum();
-        
-        self.trigram_models.insert(LanguageCode::De, TrigramModel {
-            trigrams,
-            total_count,
-        });
+
+        self.trigram_models.insert(
+            LanguageCode::De,
+            TrigramModel {
+                trigrams,
+                _total_count: total_count,
+            },
+        );
     }
-    
+
     /// Load French trigram model
     fn load_french_model(&mut self) {
         let mut trigrams = HashMap::new();
-        
+
         // Common French trigrams
         trigrams.insert("les".to_string(), 0.048);
         trigrams.insert("des".to_string(), 0.042);
@@ -146,19 +152,22 @@ impl StatisticalDetector {
         trigrams.insert("ait".to_string(), 0.015);
         trigrams.insert("par".to_string(), 0.014);
         trigrams.insert("ter".to_string(), 0.013);
-        
+
         let total_count = trigrams.values().sum();
-        
-        self.trigram_models.insert(LanguageCode::Fr, TrigramModel {
-            trigrams,
-            total_count,
-        });
+
+        self.trigram_models.insert(
+            LanguageCode::Fr,
+            TrigramModel {
+                trigrams,
+                _total_count: total_count,
+            },
+        );
     }
-    
+
     /// Load Spanish trigram model
     fn load_spanish_model(&mut self) {
         let mut trigrams = HashMap::new();
-        
+
         // Common Spanish trigrams
         trigrams.insert("que".to_string(), 0.052);
         trigrams.insert("ent".to_string(), 0.045);
@@ -180,19 +189,22 @@ impl StatisticalDetector {
         trigrams.insert("ado".to_string(), 0.016);
         trigrams.insert("res".to_string(), 0.015);
         trigrams.insert("ter".to_string(), 0.014);
-        
+
         let total_count = trigrams.values().sum();
-        
-        self.trigram_models.insert(LanguageCode::Es, TrigramModel {
-            trigrams,
-            total_count,
-        });
+
+        self.trigram_models.insert(
+            LanguageCode::Es,
+            TrigramModel {
+                trigrams,
+                _total_count: total_count,
+            },
+        );
     }
-    
+
     /// Load Japanese character model (using hiragana frequencies)
     fn load_japanese_model(&mut self) {
         let mut chars = HashMap::new();
-        
+
         // Common Japanese hiragana characters with frequencies
         chars.insert('の', 0.065);
         chars.insert('に', 0.055);
@@ -214,19 +226,22 @@ impl StatisticalDetector {
         chars.insert('こ', 0.014);
         chars.insert('そ', 0.013);
         chars.insert('け', 0.012);
-        
+
         let total_count = chars.values().sum();
-        
-        self.char_models.insert(LanguageCode::Ja, CharModel {
-            chars,
-            total_count,
-        });
+
+        self.char_models.insert(
+            LanguageCode::Ja,
+            CharModel {
+                chars,
+                _total_count: total_count,
+            },
+        );
     }
-    
+
     /// Load Chinese character model
     fn load_chinese_model(&mut self) {
         let mut chars = HashMap::new();
-        
+
         // Common Chinese characters with frequencies
         chars.insert('的', 0.075);
         chars.insert('一', 0.065);
@@ -248,19 +263,22 @@ impl StatisticalDetector {
         chars.insert('以', 0.016);
         chars.insert('要', 0.015);
         chars.insert('他', 0.014);
-        
+
         let total_count = chars.values().sum();
-        
-        self.char_models.insert(LanguageCode::ZhCn, CharModel {
-            chars,
-            total_count,
-        });
+
+        self.char_models.insert(
+            LanguageCode::ZhCn,
+            CharModel {
+                chars,
+                _total_count: total_count,
+            },
+        );
     }
-    
+
     /// Load Korean character model
     fn load_korean_model(&mut self) {
         let mut chars = HashMap::new();
-        
+
         // Common Korean syllables (simplified - real Korean would need proper syllable analysis)
         chars.insert('이', 0.065);
         chars.insert('의', 0.055);
@@ -282,43 +300,47 @@ impl StatisticalDetector {
         chars.insert('께', 0.014);
         chars.insert('게', 0.013);
         chars.insert('어', 0.012);
-        
+
         let total_count = chars.values().sum();
-        
-        self.char_models.insert(LanguageCode::Ko, CharModel {
-            chars,
-            total_count,
-        });
+
+        self.char_models.insert(
+            LanguageCode::Ko,
+            CharModel {
+                chars,
+                _total_count: total_count,
+            },
+        );
     }
-    
+
     /// Detect language using statistical models
     pub fn detect(&self, text: &str) -> Result<Option<DetectionResult>> {
         if text.trim().is_empty() {
             return Ok(None);
         }
-        
+
         let mut scores = HashMap::new();
-        
+
         // Try trigram-based detection for Latin scripts
         for (&language, model) in &self.trigram_models {
             let score = self.calculate_trigram_score(text, model);
             scores.insert(language, score);
         }
-        
+
         // Try character-based detection for non-Latin scripts
         for (&language, model) in &self.char_models {
             let score = self.calculate_char_score(text, model);
             scores.insert(language, score);
         }
-        
+
         // Find best match
         let best_match = scores
             .iter()
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
             .map(|(lang, score)| (*lang, *score));
-        
+
         if let Some((language, confidence)) = best_match {
-            if confidence > 0.2 { // Minimum threshold for statistical detection
+            if confidence > 0.2 {
+                // Minimum threshold for statistical detection
                 // Prepare alternatives
                 let mut alternatives: Vec<(LanguageCode, f32)> = scores
                     .into_iter()
@@ -326,7 +348,7 @@ impl StatisticalDetector {
                     .collect();
                 alternatives.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
                 alternatives.truncate(3);
-                
+
                 return Ok(Some(DetectionResult {
                     language,
                     confidence,
@@ -335,54 +357,54 @@ impl StatisticalDetector {
                 }));
             }
         }
-        
+
         Ok(None)
     }
-    
+
     /// Calculate trigram-based score
     fn calculate_trigram_score(&self, text: &str, model: &TrigramModel) -> f32 {
         let text_lower = text.to_lowercase();
         let mut score = 0.0;
         let mut total_trigrams = 0;
-        
+
         // Extract trigrams from text
         let chars: Vec<char> = text_lower.chars().filter(|c| c.is_alphabetic()).collect();
-        
+
         if chars.len() < 3 {
             return 0.0;
         }
-        
+
         for i in 0..=(chars.len() - 3) {
-            let trigram: String = chars[i..i+3].iter().collect();
+            let trigram: String = chars[i..i + 3].iter().collect();
             total_trigrams += 1;
-            
+
             if let Some(&frequency) = model.trigrams.get(&trigram) {
                 score += frequency;
             }
         }
-        
+
         if total_trigrams > 0 {
             score / total_trigrams as f32
         } else {
             0.0
         }
     }
-    
+
     /// Calculate character-based score
     fn calculate_char_score(&self, text: &str, model: &CharModel) -> f32 {
         let mut score = 0.0;
         let mut total_chars = 0;
-        
+
         for ch in text.chars() {
             if !ch.is_whitespace() && !ch.is_ascii_punctuation() {
                 total_chars += 1;
-                
+
                 if let Some(&frequency) = model.chars.get(&ch) {
                     score += frequency;
                 }
             }
         }
-        
+
         if total_chars > 0 {
             score / total_chars as f32
         } else {
@@ -411,8 +433,10 @@ mod tests {
     #[test]
     fn test_english_statistical_detection() {
         let detector = StatisticalDetector::new();
-        
-        let result = detector.detect("The quick brown fox jumps over the lazy dog and runs through the forest").unwrap();
+
+        let result = detector
+            .detect("The quick brown fox jumps over the lazy dog and runs through the forest")
+            .unwrap();
         if let Some(result) = result {
             assert!(result.confidence > 0.0);
             assert_eq!(result.method, DetectionMethod::Statistical);
@@ -422,7 +446,7 @@ mod tests {
     #[test]
     fn test_trigram_score_calculation() {
         let detector = StatisticalDetector::new();
-        
+
         if let Some(model) = detector.trigram_models.get(&LanguageCode::EnUs) {
             let score = detector.calculate_trigram_score("the quick brown", model);
             assert!((0.0..=1.0).contains(&score));
@@ -433,7 +457,7 @@ mod tests {
     #[test]
     fn test_character_score_calculation() {
         let detector = StatisticalDetector::new();
-        
+
         if let Some(model) = detector.char_models.get(&LanguageCode::Ja) {
             let score = detector.calculate_char_score("こんにちは", model);
             assert!((0.0..=1.0).contains(&score));
@@ -443,7 +467,7 @@ mod tests {
     #[test]
     fn test_empty_text() {
         let detector = StatisticalDetector::new();
-        
+
         let result = detector.detect("").unwrap();
         assert!(result.is_none());
     }
@@ -451,7 +475,7 @@ mod tests {
     #[test]
     fn test_short_text() {
         let detector = StatisticalDetector::new();
-        
+
         let result = detector.detect("hi").unwrap();
         // Short text might not produce reliable results
         if let Some(result) = result {
@@ -462,7 +486,7 @@ mod tests {
     #[test]
     fn test_japanese_text() {
         let detector = StatisticalDetector::new();
-        
+
         let result = detector.detect("こんにちは、元気ですか").unwrap();
         if let Some(result) = result {
             assert!(result.confidence > 0.0);
@@ -473,7 +497,7 @@ mod tests {
     #[test]
     fn test_mixed_script_text() {
         let detector = StatisticalDetector::new();
-        
+
         let result = detector.detect("Hello こんにちは world").unwrap();
         if let Some(result) = result {
             assert!(result.confidence >= 0.0);

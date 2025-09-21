@@ -1,0 +1,33 @@
+# VoiRS Evaluation Python Dependencies
+# Core scientific computing
+numpy>=1.20.0
+scipy>=1.7.0
+pandas>=1.3.0
+
+# Audio processing
+librosa>=0.8.0
+soundfile>=0.10.0
+
+# Visualization
+matplotlib>=3.3.0
+seaborn>=0.11.0
+
+# Optional: Advanced visualization
+plotly>=5.0.0
+
+# Optional: Interactive applications
+streamlit>=1.0.0
+jupyter>=1.0.0
+ipykernel>=6.0.0
+
+# Development tools (optional)
+pytest>=6.0
+pytest-benchmark>=3.4.0
+black>=21.0.0
+flake8>=3.9.0
+mypy>=0.910
+
+# Build dependencies for from-source installation
+setuptools>=45.0.0
+setuptools-rust>=1.0.0
+wheel>=0.36.0

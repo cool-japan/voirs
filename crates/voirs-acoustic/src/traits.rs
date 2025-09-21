@@ -4,16 +4,17 @@
 //! for acoustic models in the VoiRS system.
 
 use async_trait::async_trait;
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
-use crate::{Result, AcousticError, LanguageCode, Phoneme, MelSpectrogram, SynthesisConfig};
+use crate::{LanguageCode, MelSpectrogram, Phoneme, Result, SynthesisConfig};
 
 /// Features supported by acoustic models
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AcousticModelFeature {
     /// Multi-speaker support
     MultiSpeaker,
+    /// Emotion control support
+    EmotionControl,
     /// Real-time streaming inference
     StreamingInference,
     /// Streaming synthesis (alias for StreamingInference)
@@ -69,7 +70,7 @@ pub trait AcousticModel: Send + Sync {
         phonemes: &[Phoneme],
         config: Option<&SynthesisConfig>,
     ) -> Result<MelSpectrogram>;
-    
+
     /// Batch synthesis for multiple phoneme sequences
     ///
     /// # Arguments
@@ -83,13 +84,13 @@ pub trait AcousticModel: Send + Sync {
         inputs: &[&[Phoneme]],
         configs: Option<&[SynthesisConfig]>,
     ) -> Result<Vec<MelSpectrogram>>;
-    
+
     /// Get model metadata
     fn metadata(&self) -> AcousticModelMetadata;
-    
+
     /// Check if model supports a feature
     fn supports(&self, feature: AcousticModelFeature) -> bool;
-    
+
     /// Set speaker for multi-speaker models
     ///
     /// # Arguments
@@ -101,28 +102,30 @@ pub trait AcousticModel: Send + Sync {
 }
 
 /// Trait for loading and managing acoustic models
+#[allow(async_fn_in_trait)]
 pub trait ModelLoader: Send + Sync {
     /// Load model from a file path
     async fn load_from_file(&self, path: &str) -> Result<Box<dyn AcousticModel>>;
-    
+
     /// Load model from HuggingFace Hub
     async fn load_from_hub(&self, repo_id: &str) -> Result<Box<dyn AcousticModel>>;
-    
+
     /// List available models in a directory
     fn list_models(&self, directory: &str) -> Result<Vec<String>>;
 }
 
 /// Trait for backend implementations (Candle, ONNX, etc.)
+#[allow(async_fn_in_trait)]
 pub trait Backend: Send + Sync {
     /// Get backend name
     fn name(&self) -> &'static str;
-    
+
     /// Check if GPU acceleration is available
     fn supports_gpu(&self) -> bool;
-    
+
     /// Get available devices
     fn available_devices(&self) -> Vec<String>;
-    
+
     /// Create model instance
     async fn create_model(&self, model_path: &str) -> Result<Box<dyn AcousticModel>>;
 }
@@ -131,7 +134,7 @@ pub trait Backend: Send + Sync {
 pub trait MelComputation: Send + Sync {
     /// Compute mel spectrogram from audio
     fn compute_mel(&self, audio: &[f32], sample_rate: u32) -> Result<MelSpectrogram>;
-    
+
     /// Compute mel spectrogram with custom parameters
     fn compute_mel_with_params(
         &self,
@@ -141,7 +144,7 @@ pub trait MelComputation: Send + Sync {
         hop_length: u32,
         win_length: u32,
     ) -> Result<MelSpectrogram>;
-    
+
     /// Convert mel spectrogram back to audio (vocoder)
     fn mel_to_audio(&self, mel: &MelSpectrogram) -> Result<Vec<f32>>;
 }
@@ -150,19 +153,15 @@ pub trait MelComputation: Send + Sync {
 pub trait ProsodyController: Send + Sync {
     /// Apply pitch modification
     fn modify_pitch(&self, mel: &mut MelSpectrogram, pitch_shift: f32) -> Result<()>;
-    
+
     /// Apply duration modification
     fn modify_duration(&self, mel: &mut MelSpectrogram, speed_factor: f32) -> Result<()>;
-    
+
     /// Apply energy modification
     fn modify_energy(&self, mel: &mut MelSpectrogram, energy_factor: f32) -> Result<()>;
-    
+
     /// Apply comprehensive prosody control
-    fn apply_prosody(
-        &self,
-        mel: &mut MelSpectrogram,
-        config: &SynthesisConfig,
-    ) -> Result<()>;
+    fn apply_prosody(&self, mel: &mut MelSpectrogram, config: &SynthesisConfig) -> Result<()>;
 }
 
 #[cfg(test)]
@@ -193,7 +192,7 @@ mod tests {
             is_multi_speaker: false,
             speaker_count: None,
         };
-        
+
         assert_eq!(metadata.name, "Test Model");
         assert_eq!(metadata.sample_rate, 22050);
         assert!(!metadata.is_multi_speaker);

@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::{Result, AcousticError};
+use crate::{AcousticError, Result};
 
 /// Synthesis configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,14 +37,14 @@ impl SynthesisConfig {
             device: None,
         }
     }
-    
+
     /// Create configuration for specific speaker
     pub fn with_speaker(speaker_id: u32) -> Self {
         let mut config = Self::new();
         config.speaker.speaker_id = Some(speaker_id);
         config
     }
-    
+
     /// Create configuration with prosody control
     pub fn with_prosody(speed: f32, pitch_shift: f32, energy: f32) -> Self {
         let mut config = Self::new();
@@ -53,28 +53,30 @@ impl SynthesisConfig {
         config.prosody.energy = energy;
         config
     }
-    
+
     /// Validate synthesis configuration
     pub fn validate(&self) -> Result<()> {
         self.speaker.validate()?;
         self.prosody.validate()?;
         self.quality.validate()?;
-        
+
         if let Some(batch_size) = self.batch_size {
             if batch_size == 0 {
-                return Err(AcousticError::ConfigError("Batch size must be > 0".to_string()));
+                return Err(AcousticError::ConfigError(
+                    "Batch size must be > 0".to_string(),
+                ));
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Merge with another synthesis configuration
     pub fn merge(&mut self, other: &SynthesisConfig) {
         self.speaker.merge(&other.speaker);
         self.prosody.merge(&other.prosody);
         self.quality.merge(&other.quality);
-        
+
         if other.seed.is_some() {
             self.seed = other.seed;
         }
@@ -119,38 +121,40 @@ impl SpeakerConfig {
             voice_characteristics: VoiceCharacteristics::default(),
         }
     }
-    
+
     /// Create configuration for specific speaker
     pub fn with_speaker_id(speaker_id: u32) -> Self {
         let mut config = Self::new();
         config.speaker_id = Some(speaker_id);
         config
     }
-    
+
     /// Create configuration with speaker embedding
     pub fn with_embedding(embedding: Vec<f32>) -> Self {
         let mut config = Self::new();
         config.speaker_embedding = Some(embedding);
         config
     }
-    
+
     /// Validate speaker configuration
     pub fn validate(&self) -> Result<()> {
         if let Some(speaker_mix) = &self.speaker_mix {
             let total_weight: f32 = speaker_mix.values().sum();
             if (total_weight - 1.0).abs() > 1e-6 {
-                return Err(AcousticError::ConfigError("Speaker mix weights must sum to 1.0".to_string()));
+                return Err(AcousticError::ConfigError(
+                    "Speaker mix weights must sum to 1.0".to_string(),
+                ));
             }
         }
-        
+
         if let Some(emotion) = &self.emotion {
             emotion.validate()?;
         }
-        
+
         self.voice_characteristics.validate()?;
         Ok(())
     }
-    
+
     /// Merge with another speaker configuration
     pub fn merge(&mut self, other: &SpeakerConfig) {
         if other.speaker_id.is_some() {
@@ -165,7 +169,8 @@ impl SpeakerConfig {
         if other.emotion.is_some() {
             self.emotion = other.emotion.clone();
         }
-        self.voice_characteristics.merge(&other.voice_characteristics);
+        self.voice_characteristics
+            .merge(&other.voice_characteristics);
     }
 }
 
@@ -195,7 +200,7 @@ impl EmotionConfig {
             emotion_vector: None,
         }
     }
-    
+
     /// Create configuration with emotion vector
     pub fn with_vector(emotion_vector: Vec<f32>) -> Self {
         Self {
@@ -204,11 +209,13 @@ impl EmotionConfig {
             emotion_vector: Some(emotion_vector),
         }
     }
-    
+
     /// Validate emotion configuration
     pub fn validate(&self) -> Result<()> {
         if self.intensity < 0.0 || self.intensity > 1.0 {
-            return Err(AcousticError::ConfigError("Emotion intensity must be between 0.0 and 1.0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Emotion intensity must be between 0.0 and 1.0".to_string(),
+            ));
         }
         Ok(())
     }
@@ -272,13 +279,13 @@ impl VoiceCharacteristics {
             quality: VoiceQuality::default(),
         }
     }
-    
+
     /// Validate voice characteristics
     pub fn validate(&self) -> Result<()> {
         self.quality.validate()?;
         Ok(())
     }
-    
+
     /// Merge with another voice characteristics
     pub fn merge(&mut self, other: &VoiceCharacteristics) {
         if other.age.is_some() {
@@ -365,25 +372,32 @@ impl VoiceQuality {
             creakiness: 0.0,
         }
     }
-    
+
     /// Validate voice quality
     pub fn validate(&self) -> Result<()> {
-        let qualities = [self.breathiness, self.roughness, self.tenseness, self.creakiness];
+        let qualities = [
+            self.breathiness,
+            self.roughness,
+            self.tenseness,
+            self.creakiness,
+        ];
         for (i, &quality) in qualities.iter().enumerate() {
-            if quality < 0.0 || quality > 1.0 {
+            if !(0.0..=1.0).contains(&quality) {
                 let name = match i {
                     0 => "breathiness",
                     1 => "roughness",
                     2 => "tenseness",
                     3 => "creakiness",
-                    _ => unreachable!(),
+                    _ => "unknown_quality",
                 };
-                return Err(AcousticError::ConfigError(format!("{} must be between 0.0 and 1.0", name)));
+                return Err(AcousticError::ConfigError(format!(
+                    "{name} must be between 0.0 and 1.0"
+                )));
             }
         }
         Ok(())
     }
-    
+
     /// Merge with another voice quality
     pub fn merge(&mut self, other: &VoiceQuality) {
         self.breathiness = other.breathiness;
@@ -428,7 +442,7 @@ impl ProsodyConfig {
             rhythm: RhythmControl::default(),
         }
     }
-    
+
     /// Create configuration with basic parameters
     pub fn with_basic(speed: f32, pitch_shift: f32, energy: f32) -> Self {
         let mut config = Self::new();
@@ -437,23 +451,27 @@ impl ProsodyConfig {
         config.energy = energy;
         config
     }
-    
+
     /// Validate prosody configuration
     pub fn validate(&self) -> Result<()> {
         if self.speed <= 0.0 {
-            return Err(AcousticError::ConfigError("Speed must be > 0.0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Speed must be > 0.0".to_string(),
+            ));
         }
         if self.energy <= 0.0 {
-            return Err(AcousticError::ConfigError("Energy must be > 0.0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Energy must be > 0.0".to_string(),
+            ));
         }
-        
+
         self.duration.validate()?;
         self.pitch.validate()?;
         self.rhythm.validate()?;
-        
+
         Ok(())
     }
-    
+
     /// Merge with another prosody configuration
     pub fn merge(&mut self, other: &ProsodyConfig) {
         self.speed = other.speed;
@@ -494,24 +512,32 @@ impl DurationControl {
             max_phoneme_duration: 500.0,
         }
     }
-    
+
     /// Validate duration control
     pub fn validate(&self) -> Result<()> {
         if self.phoneme_duration_scale <= 0.0 {
-            return Err(AcousticError::ConfigError("Phoneme duration scale must be > 0.0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Phoneme duration scale must be > 0.0".to_string(),
+            ));
         }
         if self.pause_duration_scale <= 0.0 {
-            return Err(AcousticError::ConfigError("Pause duration scale must be > 0.0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Pause duration scale must be > 0.0".to_string(),
+            ));
         }
         if self.min_phoneme_duration <= 0.0 {
-            return Err(AcousticError::ConfigError("Minimum phoneme duration must be > 0.0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Minimum phoneme duration must be > 0.0".to_string(),
+            ));
         }
         if self.max_phoneme_duration <= self.min_phoneme_duration {
-            return Err(AcousticError::ConfigError("Maximum phoneme duration must be > minimum".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Maximum phoneme duration must be > minimum".to_string(),
+            ));
         }
         Ok(())
     }
-    
+
     /// Merge with another duration control
     pub fn merge(&mut self, other: &DurationControl) {
         self.phoneme_duration_scale = other.phoneme_duration_scale;
@@ -550,26 +576,34 @@ impl PitchControl {
             stress_emphasis: 1.0,
         }
     }
-    
+
     /// Validate pitch control
     pub fn validate(&self) -> Result<()> {
         if let Some(base_pitch) = self.base_pitch_hz {
             if base_pitch <= 0.0 {
-                return Err(AcousticError::ConfigError("Base pitch must be > 0.0".to_string()));
+                return Err(AcousticError::ConfigError(
+                    "Base pitch must be > 0.0".to_string(),
+                ));
             }
         }
         if self.pitch_range_scale <= 0.0 {
-            return Err(AcousticError::ConfigError("Pitch range scale must be > 0.0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Pitch range scale must be > 0.0".to_string(),
+            ));
         }
         if self.intonation_strength < 0.0 {
-            return Err(AcousticError::ConfigError("Intonation strength must be >= 0.0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Intonation strength must be >= 0.0".to_string(),
+            ));
         }
         if self.stress_emphasis < 0.0 {
-            return Err(AcousticError::ConfigError("Stress emphasis must be >= 0.0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Stress emphasis must be >= 0.0".to_string(),
+            ));
         }
         Ok(())
     }
-    
+
     /// Merge with another pitch control
     pub fn merge(&mut self, other: &PitchControl) {
         if other.base_pitch_hz.is_some() {
@@ -610,24 +644,32 @@ impl RhythmControl {
             sentence_boundary_emphasis: 1.0,
         }
     }
-    
+
     /// Validate rhythm control
     pub fn validate(&self) -> Result<()> {
         if self.rhythm_strength < 0.0 {
-            return Err(AcousticError::ConfigError("Rhythm strength must be >= 0.0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Rhythm strength must be >= 0.0".to_string(),
+            ));
         }
         if self.syllable_timing_variation < 0.0 {
-            return Err(AcousticError::ConfigError("Syllable timing variation must be >= 0.0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Syllable timing variation must be >= 0.0".to_string(),
+            ));
         }
         if self.word_boundary_emphasis < 0.0 {
-            return Err(AcousticError::ConfigError("Word boundary emphasis must be >= 0.0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Word boundary emphasis must be >= 0.0".to_string(),
+            ));
         }
         if self.sentence_boundary_emphasis < 0.0 {
-            return Err(AcousticError::ConfigError("Sentence boundary emphasis must be >= 0.0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Sentence boundary emphasis must be >= 0.0".to_string(),
+            ));
         }
         Ok(())
     }
-    
+
     /// Merge with another rhythm control
     pub fn merge(&mut self, other: &RhythmControl) {
         self.rhythm_strength = other.rhythm_strength;
@@ -666,7 +708,7 @@ impl QualityConfig {
             max_inference_time: None,
         }
     }
-    
+
     /// Create configuration for fast inference
     pub fn fast() -> Self {
         Self {
@@ -676,7 +718,7 @@ impl QualityConfig {
             max_inference_time: Some(1000),
         }
     }
-    
+
     /// Create configuration for high quality
     pub fn high_quality() -> Self {
         Self {
@@ -686,17 +728,19 @@ impl QualityConfig {
             max_inference_time: None,
         }
     }
-    
+
     /// Validate quality configuration
     pub fn validate(&self) -> Result<()> {
         if let Some(max_time) = self.max_inference_time {
             if max_time == 0 {
-                return Err(AcousticError::ConfigError("Max inference time must be > 0".to_string()));
+                return Err(AcousticError::ConfigError(
+                    "Max inference time must be > 0".to_string(),
+                ));
             }
         }
         Ok(())
     }
-    
+
     /// Merge with another quality configuration
     pub fn merge(&mut self, other: &QualityConfig) {
         self.quality_level = other.quality_level;
@@ -762,11 +806,11 @@ mod tests {
     fn test_synthesis_config_validation() {
         let config = SynthesisConfig::new();
         assert!(config.validate().is_ok());
-        
+
         let mut config = SynthesisConfig::new();
         config.batch_size = Some(0);
         assert!(config.validate().is_err());
-        
+
         config.batch_size = Some(32);
         assert!(config.validate().is_ok());
     }
@@ -775,14 +819,14 @@ mod tests {
     fn test_speaker_config_validation() {
         let config = SpeakerConfig::new();
         assert!(config.validate().is_ok());
-        
+
         let mut config = SpeakerConfig::new();
         let mut speaker_mix = HashMap::new();
         speaker_mix.insert(0, 0.5);
         speaker_mix.insert(1, 0.3); // Sum = 0.8, should fail
         config.speaker_mix = Some(speaker_mix);
         assert!(config.validate().is_err());
-        
+
         let mut speaker_mix = HashMap::new();
         speaker_mix.insert(0, 0.6);
         speaker_mix.insert(1, 0.4); // Sum = 1.0, should pass
@@ -794,15 +838,15 @@ mod tests {
     fn test_prosody_config_validation() {
         let config = ProsodyConfig::new();
         assert!(config.validate().is_ok());
-        
+
         let mut config = ProsodyConfig::new();
         config.speed = 0.0;
         assert!(config.validate().is_err());
-        
+
         config.speed = 1.0;
         config.energy = -1.0;
         assert!(config.validate().is_err());
-        
+
         config.energy = 1.0;
         assert!(config.validate().is_ok());
     }
@@ -811,10 +855,10 @@ mod tests {
     fn test_emotion_config_validation() {
         let config = EmotionConfig::new(EmotionType::Happy, 0.5);
         assert!(config.validate().is_ok());
-        
+
         let mut config = EmotionConfig::new(EmotionType::Happy, 1.5);
         assert!(config.validate().is_err());
-        
+
         config.intensity = 0.8;
         assert!(config.validate().is_ok());
     }
@@ -823,11 +867,11 @@ mod tests {
     fn test_voice_quality_validation() {
         let config = VoiceQuality::new();
         assert!(config.validate().is_ok());
-        
+
         let mut config = VoiceQuality::new();
         config.breathiness = 1.5;
         assert!(config.validate().is_err());
-        
+
         config.breathiness = 0.5;
         assert!(config.validate().is_ok());
     }
@@ -836,12 +880,12 @@ mod tests {
     fn test_duration_control_validation() {
         let config = DurationControl::new();
         assert!(config.validate().is_ok());
-        
+
         let mut config = DurationControl::new();
         config.max_phoneme_duration = 10.0;
         config.min_phoneme_duration = 20.0;
         assert!(config.validate().is_err());
-        
+
         config.max_phoneme_duration = 500.0;
         assert!(config.validate().is_ok());
     }
@@ -852,7 +896,7 @@ mod tests {
         assert_eq!(fast_config.quality_level, QualityLevel::Medium);
         assert!(fast_config.fast_inference);
         assert_eq!(fast_config.precision, PrecisionMode::FP16);
-        
+
         let high_config = QualityConfig::high_quality();
         assert_eq!(high_config.quality_level, QualityLevel::VeryHigh);
         assert!(!high_config.fast_inference);

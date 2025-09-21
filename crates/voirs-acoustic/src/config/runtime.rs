@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::{Result, AcousticError};
-use super::{DeviceConfig, CacheConfig, DeviceType};
+use super::{CacheConfig, DeviceConfig};
+use crate::{AcousticError, Result};
 
 /// Runtime configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,16 +42,20 @@ impl RuntimeConfig {
             debug: DebugConfig::default(),
         }
     }
-    
+
     /// Create configuration for CPU execution
     pub fn cpu() -> Self {
         let mut config = Self::new();
         config.backend.preferred_backend = BackendType::Candle;
         config.device = DeviceConfig::cpu();
-        config.performance.num_threads = Some(std::thread::available_parallelism().map(|p| p.get() as u32).unwrap_or(4));
+        config.performance.num_threads = Some(
+            std::thread::available_parallelism()
+                .map(|p| p.get() as u32)
+                .unwrap_or(4),
+        );
         config
     }
-    
+
     /// Create configuration for GPU execution
     pub fn gpu() -> Self {
         let mut config = Self::new();
@@ -61,7 +65,7 @@ impl RuntimeConfig {
         config.performance.use_optimized_kernels = true;
         config
     }
-    
+
     /// Create configuration for fast inference
     pub fn fast() -> Self {
         let mut config = Self::new();
@@ -71,7 +75,7 @@ impl RuntimeConfig {
         config.cache.enabled = true;
         config
     }
-    
+
     /// Validate runtime configuration
     pub fn validate(&self) -> Result<()> {
         self.backend.validate()?;
@@ -82,7 +86,7 @@ impl RuntimeConfig {
         self.debug.validate()?;
         Ok(())
     }
-    
+
     /// Merge with another runtime configuration
     pub fn merge(&mut self, other: &RuntimeConfig) {
         self.backend.merge(&other.backend);
@@ -120,25 +124,25 @@ impl BackendConfig {
             backend_options: HashMap::new(),
         }
     }
-    
+
     /// Set preferred backend
     pub fn with_backend(mut self, backend: BackendType) -> Self {
         self.preferred_backend = backend;
         self
     }
-    
+
     /// Add fallback backend
     pub fn with_fallback(mut self, backend: BackendType) -> Self {
         self.fallback_backends.push(backend);
         self
     }
-    
+
     /// Set backend options
     pub fn with_options(mut self, backend: BackendType, options: BackendOptions) -> Self {
         self.backend_options.insert(backend, options);
         self
     }
-    
+
     /// Validate backend configuration
     pub fn validate(&self) -> Result<()> {
         for options in self.backend_options.values() {
@@ -146,7 +150,7 @@ impl BackendConfig {
         }
         Ok(())
     }
-    
+
     /// Merge with another backend configuration
     pub fn merge(&mut self, other: &BackendConfig) {
         self.preferred_backend = other.preferred_backend;
@@ -203,7 +207,7 @@ impl BackendOptions {
             custom: None,
         }
     }
-    
+
     /// Create Candle options
     pub fn candle(options: CandleOptions) -> Self {
         Self {
@@ -212,7 +216,7 @@ impl BackendOptions {
             custom: None,
         }
     }
-    
+
     /// Create ONNX options
     pub fn onnx(options: OnnxOptions) -> Self {
         Self {
@@ -221,7 +225,7 @@ impl BackendOptions {
             custom: None,
         }
     }
-    
+
     /// Validate backend options
     pub fn validate(&self) -> Result<()> {
         if let Some(candle) = &self.candle {
@@ -263,7 +267,7 @@ impl CandleOptions {
             use_optimized_attention: true,
         }
     }
-    
+
     /// Enable CUDA optimizations
     pub fn cuda_optimized() -> Self {
         Self {
@@ -273,7 +277,7 @@ impl CandleOptions {
             use_optimized_attention: true,
         }
     }
-    
+
     /// Enable Metal optimizations
     pub fn metal_optimized() -> Self {
         Self {
@@ -283,12 +287,14 @@ impl CandleOptions {
             use_optimized_attention: true,
         }
     }
-    
+
     /// Validate Candle options
     pub fn validate(&self) -> Result<()> {
         if let Some(pool_size) = self.cuda_memory_pool_mb {
             if pool_size == 0 {
-                return Err(AcousticError::ConfigError("CUDA memory pool size must be > 0".to_string()));
+                return Err(AcousticError::ConfigError(
+                    "CUDA memory pool size must be > 0".to_string(),
+                ));
             }
         }
         Ok(())
@@ -321,7 +327,7 @@ impl OnnxOptions {
             graph_optimization_level: OnnxOptimizationLevel::Basic,
         }
     }
-    
+
     /// Create CUDA-optimized options
     pub fn cuda() -> Self {
         Self {
@@ -333,7 +339,7 @@ impl OnnxOptions {
             graph_optimization_level: OnnxOptimizationLevel::All,
         }
     }
-    
+
     /// Create TensorRT-optimized options
     pub fn tensorrt() -> Self {
         Self {
@@ -346,11 +352,13 @@ impl OnnxOptions {
             graph_optimization_level: OnnxOptimizationLevel::All,
         }
     }
-    
+
     /// Validate ONNX options
     pub fn validate(&self) -> Result<()> {
         if self.execution_providers.is_empty() {
-            return Err(AcousticError::ConfigError("At least one execution provider must be specified".to_string()));
+            return Err(AcousticError::ConfigError(
+                "At least one execution provider must be specified".to_string(),
+            ));
         }
         self.session_options.validate()?;
         Ok(())
@@ -389,22 +397,28 @@ impl OnnxSessionOptions {
             memory_arena_size_mb: None,
         }
     }
-    
+
     /// Validate ONNX session options
     pub fn validate(&self) -> Result<()> {
         if let Some(threads) = self.intra_op_num_threads {
             if threads == 0 {
-                return Err(AcousticError::ConfigError("Intra-op threads must be > 0".to_string()));
+                return Err(AcousticError::ConfigError(
+                    "Intra-op threads must be > 0".to_string(),
+                ));
             }
         }
         if let Some(threads) = self.inter_op_num_threads {
             if threads == 0 {
-                return Err(AcousticError::ConfigError("Inter-op threads must be > 0".to_string()));
+                return Err(AcousticError::ConfigError(
+                    "Inter-op threads must be > 0".to_string(),
+                ));
             }
         }
         if let Some(arena_size) = self.memory_arena_size_mb {
             if arena_size == 0 {
-                return Err(AcousticError::ConfigError("Memory arena size must be > 0".to_string()));
+                return Err(AcousticError::ConfigError(
+                    "Memory arena size must be > 0".to_string(),
+                ));
             }
         }
         Ok(())
@@ -471,7 +485,7 @@ impl MemoryConfig {
             enable_gc: true,
         }
     }
-    
+
     /// Create memory-optimized configuration
     pub fn optimized() -> Self {
         Self {
@@ -483,23 +497,29 @@ impl MemoryConfig {
             enable_gc: true,
         }
     }
-    
+
     /// Validate memory configuration
     pub fn validate(&self) -> Result<()> {
         if let Some(pool_size) = self.memory_pool_size_mb {
             if pool_size == 0 {
-                return Err(AcousticError::ConfigError("Memory pool size must be > 0".to_string()));
+                return Err(AcousticError::ConfigError(
+                    "Memory pool size must be > 0".to_string(),
+                ));
             }
         }
         if self.cleanup_interval_seconds == 0 {
-            return Err(AcousticError::ConfigError("Cleanup interval must be > 0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Cleanup interval must be > 0".to_string(),
+            ));
         }
         if self.pressure_threshold < 0.0 || self.pressure_threshold > 1.0 {
-            return Err(AcousticError::ConfigError("Pressure threshold must be between 0.0 and 1.0".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Pressure threshold must be between 0.0 and 1.0".to_string(),
+            ));
         }
         Ok(())
     }
-    
+
     /// Merge with another memory configuration
     pub fn merge(&mut self, other: &MemoryConfig) {
         self.enable_memory_pool = other.enable_memory_pool;
@@ -551,12 +571,16 @@ impl PerformanceConfig {
             inference_timeout_ms: None,
         }
     }
-    
+
     /// Create performance-optimized configuration
     pub fn optimized() -> Self {
         Self {
             optimization_level: OptimizationLevel::Fast,
-            num_threads: Some(std::thread::available_parallelism().map(|p| p.get() as u32).unwrap_or(4)),
+            num_threads: Some(
+                std::thread::available_parallelism()
+                    .map(|p| p.get() as u32)
+                    .unwrap_or(4),
+            ),
             use_optimized_kernels: true,
             enable_kernel_fusion: true,
             batch_size: Some(32),
@@ -564,27 +588,33 @@ impl PerformanceConfig {
             inference_timeout_ms: Some(5000),
         }
     }
-    
+
     /// Validate performance configuration
     pub fn validate(&self) -> Result<()> {
         if let Some(threads) = self.num_threads {
             if threads == 0 {
-                return Err(AcousticError::ConfigError("Number of threads must be > 0".to_string()));
+                return Err(AcousticError::ConfigError(
+                    "Number of threads must be > 0".to_string(),
+                ));
             }
         }
         if let Some(batch_size) = self.batch_size {
             if batch_size == 0 {
-                return Err(AcousticError::ConfigError("Batch size must be > 0".to_string()));
+                return Err(AcousticError::ConfigError(
+                    "Batch size must be > 0".to_string(),
+                ));
             }
         }
         if let Some(timeout) = self.inference_timeout_ms {
             if timeout == 0 {
-                return Err(AcousticError::ConfigError("Inference timeout must be > 0".to_string()));
+                return Err(AcousticError::ConfigError(
+                    "Inference timeout must be > 0".to_string(),
+                ));
             }
         }
         Ok(())
     }
-    
+
     /// Merge with another performance configuration
     pub fn merge(&mut self, other: &PerformanceConfig) {
         self.optimization_level = other.optimization_level;
@@ -666,7 +696,7 @@ impl LoggingConfig {
             log_performance: false,
         }
     }
-    
+
     /// Create debug logging configuration
     pub fn debug() -> Self {
         Self {
@@ -679,15 +709,17 @@ impl LoggingConfig {
             log_performance: true,
         }
     }
-    
+
     /// Validate logging configuration
     pub fn validate(&self) -> Result<()> {
         if self.log_to_file && self.log_file_path.is_none() {
-            return Err(AcousticError::ConfigError("Log file path must be specified when logging to file".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Log file path must be specified when logging to file".to_string(),
+            ));
         }
         Ok(())
     }
-    
+
     /// Merge with another logging configuration
     pub fn merge(&mut self, other: &LoggingConfig) {
         self.enabled = other.enabled;
@@ -763,7 +795,7 @@ impl DebugConfig {
             check_for_nan: false,
         }
     }
-    
+
     /// Create full debug configuration
     pub fn full_debug() -> Self {
         Self {
@@ -776,18 +808,22 @@ impl DebugConfig {
             check_for_nan: true,
         }
     }
-    
+
     /// Validate debug configuration
     pub fn validate(&self) -> Result<()> {
         if self.save_intermediate_results && self.intermediate_results_dir.is_none() {
-            return Err(AcousticError::ConfigError("Intermediate results directory must be specified".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Intermediate results directory must be specified".to_string(),
+            ));
         }
         if self.enable_profiling && self.profile_output_dir.is_none() {
-            return Err(AcousticError::ConfigError("Profile output directory must be specified".to_string()));
+            return Err(AcousticError::ConfigError(
+                "Profile output directory must be specified".to_string(),
+            ));
         }
         Ok(())
     }
-    
+
     /// Merge with another debug configuration
     pub fn merge(&mut self, other: &DebugConfig) {
         self.enabled = other.enabled;
@@ -816,12 +852,14 @@ impl DeviceConfig {
     pub fn validate(&self) -> Result<()> {
         if let Some(max_memory) = self.max_memory_mb {
             if max_memory == 0 {
-                return Err(AcousticError::ConfigError("Max memory must be > 0".to_string()));
+                return Err(AcousticError::ConfigError(
+                    "Max memory must be > 0".to_string(),
+                ));
             }
         }
         Ok(())
     }
-    
+
     /// Merge with another device configuration
     pub fn merge(&mut self, other: &DeviceConfig) {
         self.device_type = other.device_type;
@@ -838,20 +876,21 @@ impl DeviceConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::DeviceType;
 
     #[test]
     fn test_runtime_config_validation() {
         let config = RuntimeConfig::new();
         assert!(config.validate().is_ok());
-        
+
         let cpu_config = RuntimeConfig::cpu();
         assert!(cpu_config.validate().is_ok());
         assert_eq!(cpu_config.device.device_type, DeviceType::Cpu);
-        
+
         let gpu_config = RuntimeConfig::gpu();
         assert!(gpu_config.validate().is_ok());
         assert_eq!(gpu_config.device.device_type, DeviceType::Cuda);
-        
+
         let fast_config = RuntimeConfig::fast();
         assert!(fast_config.validate().is_ok());
         assert_eq!(fast_config.backend.preferred_backend, BackendType::Onnx);
@@ -862,7 +901,7 @@ mod tests {
         let config = BackendConfig::new()
             .with_backend(BackendType::Onnx)
             .with_fallback(BackendType::Candle);
-        
+
         assert_eq!(config.preferred_backend, BackendType::Onnx);
         assert!(config.fallback_backends.contains(&BackendType::Candle));
     }
@@ -871,15 +910,15 @@ mod tests {
     fn test_memory_config_validation() {
         let config = MemoryConfig::new();
         assert!(config.validate().is_ok());
-        
+
         let mut config = MemoryConfig::new();
         config.memory_pool_size_mb = Some(0);
         assert!(config.validate().is_err());
-        
+
         config.memory_pool_size_mb = Some(1024);
         config.pressure_threshold = 1.5;
         assert!(config.validate().is_err());
-        
+
         config.pressure_threshold = 0.8;
         assert!(config.validate().is_ok());
     }
@@ -888,15 +927,15 @@ mod tests {
     fn test_performance_config_validation() {
         let config = PerformanceConfig::new();
         assert!(config.validate().is_ok());
-        
+
         let mut config = PerformanceConfig::new();
         config.num_threads = Some(0);
         assert!(config.validate().is_err());
-        
+
         config.num_threads = Some(4);
         config.batch_size = Some(0);
         assert!(config.validate().is_err());
-        
+
         config.batch_size = Some(32);
         assert!(config.validate().is_ok());
     }
@@ -905,12 +944,12 @@ mod tests {
     fn test_logging_config_validation() {
         let config = LoggingConfig::new();
         assert!(config.validate().is_ok());
-        
+
         let mut config = LoggingConfig::new();
         config.log_to_file = true;
         config.log_file_path = None;
         assert!(config.validate().is_err());
-        
+
         config.log_file_path = Some(PathBuf::from("test.log"));
         assert!(config.validate().is_ok());
     }
@@ -919,12 +958,12 @@ mod tests {
     fn test_debug_config_validation() {
         let config = DebugConfig::new();
         assert!(config.validate().is_ok());
-        
+
         let mut config = DebugConfig::new();
         config.save_intermediate_results = true;
         config.intermediate_results_dir = None;
         assert!(config.validate().is_err());
-        
+
         config.intermediate_results_dir = Some(PathBuf::from("debug"));
         assert!(config.validate().is_ok());
     }
@@ -934,7 +973,7 @@ mod tests {
         let cuda_opts = CandleOptions::cuda_optimized();
         assert!(cuda_opts.enable_cuda_graphs);
         assert!(cuda_opts.cuda_memory_pool_mb.is_some());
-        
+
         let metal_opts = CandleOptions::metal_optimized();
         assert!(metal_opts.use_metal_performance_shaders);
         assert!(!metal_opts.enable_cuda_graphs);
@@ -943,11 +982,18 @@ mod tests {
     #[test]
     fn test_onnx_options() {
         let cuda_opts = OnnxOptions::cuda();
-        assert!(cuda_opts.execution_providers.contains(&"CUDAExecutionProvider".to_string()));
-        assert_eq!(cuda_opts.graph_optimization_level, OnnxOptimizationLevel::All);
-        
+        assert!(cuda_opts
+            .execution_providers
+            .contains(&"CUDAExecutionProvider".to_string()));
+        assert_eq!(
+            cuda_opts.graph_optimization_level,
+            OnnxOptimizationLevel::All
+        );
+
         let tensorrt_opts = OnnxOptions::tensorrt();
-        assert!(tensorrt_opts.execution_providers.contains(&"TensorrtExecutionProvider".to_string()));
+        assert!(tensorrt_opts
+            .execution_providers
+            .contains(&"TensorrtExecutionProvider".to_string()));
     }
 
     #[test]

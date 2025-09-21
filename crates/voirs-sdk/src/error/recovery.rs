@@ -6,7 +6,7 @@
 //! - Fallback strategies for voice and model selection
 //! - Recovery state management and metrics
 
-use super::types::{VoirsError, ErrorSeverity, ErrorWithContext, Result};
+use super::types::{Result, VoirsError};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -20,10 +20,7 @@ pub enum RecoveryStrategy {
     /// No recovery - fail immediately
     FailFast,
     /// Retry with linear backoff
-    RetryLinear {
-        max_attempts: u32,
-        delay: Duration,
-    },
+    RetryLinear { max_attempts: u32, delay: Duration },
     /// Retry with exponential backoff
     RetryExponential {
         max_attempts: u32,
@@ -38,13 +35,9 @@ pub enum RecoveryStrategy {
         half_open_max_calls: u32,
     },
     /// Fallback to alternative
-    Fallback {
-        alternatives: Vec<String>,
-    },
+    Fallback { alternatives: Vec<String> },
     /// Custom recovery function
-    Custom {
-        name: String,
-    },
+    Custom { name: String },
 }
 
 impl Default for RecoveryStrategy {
@@ -140,7 +133,10 @@ impl CircuitBreaker {
     }
 
     /// Execute operation with circuit breaker protection
-    pub async fn call<F, T, E>(&self, operation: F) -> std::result::Result<T, CircuitBreakerError<E>>
+    pub async fn call<F, T, E>(
+        &self,
+        operation: F,
+    ) -> std::result::Result<T, CircuitBreakerError<E>>
     where
         F: std::future::Future<Output = std::result::Result<T, E>>,
         E: std::error::Error + Send + Sync + 'static,
@@ -259,28 +255,26 @@ impl ErrorRecoveryManager {
         config: CircuitBreakerConfig,
     ) {
         let circuit_breaker = Arc::new(CircuitBreaker::new(config));
-        self.circuit_breakers.insert(component.into(), circuit_breaker);
+        self.circuit_breakers
+            .insert(component.into(), circuit_breaker);
     }
 
     /// Execute operation with recovery strategy
-    pub async fn execute_with_recovery<F, T>(
-        &self,
-        component: &str,
-        operation: F,
-    ) -> Result<T>
+    pub async fn execute_with_recovery<F, T>(&self, component: &str, operation: F) -> Result<T>
     where
-        F: Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T>> + Send>> + Send + Sync,
+        F: Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T>> + Send>>
+            + Send
+            + Sync,
     {
-        let strategy = self
-            .strategies
-            .get(component)
-            .cloned()
-            .unwrap_or_default();
+        let strategy = self.strategies.get(component).cloned().unwrap_or_default();
 
         let mut context = RecoveryContext::default();
-        context.metadata.insert("component".to_string(), component.to_string());
+        context
+            .metadata
+            .insert("component".to_string(), component.to_string());
 
-        self.execute_with_strategy(operation, strategy, &mut context).await
+        self.execute_with_strategy(operation, strategy, &mut context)
+            .await
     }
 
     /// Execute operation with specific recovery strategy
@@ -291,13 +285,19 @@ impl ErrorRecoveryManager {
         context: &mut RecoveryContext,
     ) -> Result<T>
     where
-        F: Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T>> + Send>> + Send + Sync,
+        F: Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T>> + Send>>
+            + Send
+            + Sync,
     {
         match strategy {
             RecoveryStrategy::FailFast => operation().await,
 
-            RecoveryStrategy::RetryLinear { max_attempts, delay } => {
-                self.retry_linear(operation, max_attempts, delay, context).await
+            RecoveryStrategy::RetryLinear {
+                max_attempts,
+                delay,
+            } => {
+                self.retry_linear(operation, max_attempts, delay, context)
+                    .await
             }
 
             RecoveryStrategy::RetryExponential {
@@ -306,8 +306,15 @@ impl ErrorRecoveryManager {
                 max_delay,
                 multiplier,
             } => {
-                self.retry_exponential(operation, max_attempts, initial_delay, max_delay, multiplier, context)
-                    .await
+                self.retry_exponential(
+                    operation,
+                    max_attempts,
+                    initial_delay,
+                    max_delay,
+                    multiplier,
+                    context,
+                )
+                .await
             }
 
             RecoveryStrategy::CircuitBreaker { .. } => {
@@ -316,12 +323,16 @@ impl ErrorRecoveryManager {
             }
 
             RecoveryStrategy::Fallback { alternatives } => {
-                self.execute_with_fallback(operation, alternatives, context).await
+                self.execute_with_fallback(operation, alternatives, context)
+                    .await
             }
 
             RecoveryStrategy::Custom { name } => {
                 // Custom strategies would be implemented by extending this method
-                tracing::warn!("Custom recovery strategy '{}' not implemented, using default", name);
+                tracing::warn!(
+                    "Custom recovery strategy '{}' not implemented, using default",
+                    name
+                );
                 operation().await
             }
         }
@@ -336,7 +347,9 @@ impl ErrorRecoveryManager {
         context: &mut RecoveryContext,
     ) -> Result<T>
     where
-        F: Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T>> + Send>> + Send + Sync,
+        F: Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T>> + Send>>
+            + Send
+            + Sync,
     {
         for attempt in 1..=max_attempts {
             context.attempt = attempt;
@@ -358,7 +371,10 @@ impl ErrorRecoveryManager {
                     if error.is_recoverable() {
                         tracing::warn!(
                             "Operation failed (attempt {}/{}), retrying in {:?}: {}",
-                            attempt, max_attempts, delay, error
+                            attempt,
+                            max_attempts,
+                            delay,
+                            error
                         );
                         sleep(delay).await;
                     } else {
@@ -369,7 +385,16 @@ impl ErrorRecoveryManager {
             }
         }
 
-        unreachable!()
+        // This should never be reached due to the loop logic, but handle it gracefully
+        self.record_failed_recovery();
+        Err(context
+            .previous_errors
+            .last()
+            .cloned()
+            .unwrap_or_else(|| VoirsError::InternalError {
+                component: "recovery".to_string(),
+                message: "Linear retry operation failed without recording errors".to_string(),
+            }))
     }
 
     /// Retry with exponential backoff
@@ -383,7 +408,9 @@ impl ErrorRecoveryManager {
         context: &mut RecoveryContext,
     ) -> Result<T>
     where
-        F: Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T>> + Send>> + Send + Sync,
+        F: Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T>> + Send>>
+            + Send
+            + Sync,
     {
         let mut current_delay = initial_delay;
 
@@ -407,14 +434,18 @@ impl ErrorRecoveryManager {
                     if error.is_recoverable() {
                         tracing::warn!(
                             "Operation failed (attempt {}/{}), retrying in {:?}: {}",
-                            attempt, max_attempts, current_delay, error
+                            attempt,
+                            max_attempts,
+                            current_delay,
+                            error
                         );
                         sleep(current_delay).await;
 
                         // Calculate next delay with exponential backoff
                         current_delay = Duration::from_millis(
-                            ((current_delay.as_millis() as f64) * multiplier) as u64
-                        ).min(max_delay);
+                            ((current_delay.as_millis() as f64) * multiplier) as u64,
+                        )
+                        .min(max_delay);
                     } else {
                         self.record_failed_recovery();
                         return Err(error);
@@ -423,7 +454,16 @@ impl ErrorRecoveryManager {
             }
         }
 
-        unreachable!()
+        // This should never be reached due to the loop logic, but handle it gracefully
+        self.record_failed_recovery();
+        Err(context
+            .previous_errors
+            .last()
+            .cloned()
+            .unwrap_or_else(|| VoirsError::InternalError {
+                component: "recovery".to_string(),
+                message: "Exponential retry operation failed without recording errors".to_string(),
+            }))
     }
 
     /// Execute with fallback alternatives
@@ -434,14 +474,16 @@ impl ErrorRecoveryManager {
         context: &mut RecoveryContext,
     ) -> Result<T>
     where
-        F: Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T>> + Send>> + Send + Sync,
+        F: Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T>> + Send>>
+            + Send
+            + Sync,
     {
         // Try primary operation first
         match operation().await {
             Ok(result) => return Ok(result),
             Err(error) => {
                 context.previous_errors.push(error.clone());
-                
+
                 if !error.is_recoverable() {
                     return Err(error);
                 }
@@ -451,7 +493,9 @@ impl ErrorRecoveryManager {
         // Try alternatives
         for (index, alternative) in alternatives.iter().enumerate() {
             context.attempt = index as u32 + 2; // +2 because we already tried primary
-            context.metadata.insert("fallback_alternative".to_string(), alternative.clone());
+            context
+                .metadata
+                .insert("fallback_alternative".to_string(), alternative.clone());
 
             tracing::info!("Trying fallback alternative: {}", alternative);
 
@@ -463,7 +507,11 @@ impl ErrorRecoveryManager {
                 }
                 Err(error) => {
                     context.previous_errors.push(error.clone());
-                    tracing::warn!("Fallback failed with alternative '{}': {}", alternative, error);
+                    tracing::warn!(
+                        "Fallback failed with alternative '{}': {}",
+                        alternative,
+                        error
+                    );
                 }
             }
         }
@@ -510,11 +558,13 @@ impl ErrorRecoveryManager {
         if let Ok(mut metrics) = self.recovery_metrics.lock() {
             metrics.total_attempts += 1;
             metrics.successful_recoveries += 1;
-            
+
             // Update average recovery time
-            let total_time = metrics.average_recovery_time.as_nanos() as f64 * (metrics.successful_recoveries - 1) as f64
+            let total_time = metrics.average_recovery_time.as_nanos() as f64
+                * (metrics.successful_recoveries - 1) as f64
                 + recovery_time.as_nanos() as f64;
-            metrics.average_recovery_time = Duration::from_nanos((total_time / metrics.successful_recoveries as f64) as u64);
+            metrics.average_recovery_time =
+                Duration::from_nanos((total_time / metrics.successful_recoveries as f64) as u64);
         }
     }
 
@@ -544,30 +594,42 @@ impl Default for ErrorRecoveryManager {
         let mut manager = Self::new();
 
         // Register default strategies for common components
-        manager.register_strategy("synthesis", RecoveryStrategy::RetryExponential {
-            max_attempts: 3,
-            initial_delay: Duration::from_millis(100),
-            max_delay: Duration::from_secs(5),
-            multiplier: 2.0,
-        });
+        manager.register_strategy(
+            "synthesis",
+            RecoveryStrategy::RetryExponential {
+                max_attempts: 3,
+                initial_delay: Duration::from_millis(100),
+                max_delay: Duration::from_secs(5),
+                multiplier: 2.0,
+            },
+        );
 
-        manager.register_strategy("model_loading", RecoveryStrategy::RetryLinear {
-            max_attempts: 5,
-            delay: Duration::from_secs(1),
-        });
+        manager.register_strategy(
+            "model_loading",
+            RecoveryStrategy::RetryLinear {
+                max_attempts: 5,
+                delay: Duration::from_secs(1),
+            },
+        );
 
-        manager.register_strategy("network", RecoveryStrategy::RetryExponential {
-            max_attempts: 5,
-            initial_delay: Duration::from_millis(500),
-            max_delay: Duration::from_secs(30),
-            multiplier: 2.0,
-        });
+        manager.register_strategy(
+            "network",
+            RecoveryStrategy::RetryExponential {
+                max_attempts: 5,
+                initial_delay: Duration::from_millis(500),
+                max_delay: Duration::from_secs(30),
+                multiplier: 2.0,
+            },
+        );
 
-        manager.register_circuit_breaker("device", CircuitBreakerConfig {
-            failure_threshold: 3,
-            timeout: Duration::from_secs(30),
-            half_open_max_calls: 2,
-        });
+        manager.register_circuit_breaker(
+            "device",
+            CircuitBreakerConfig {
+                failure_threshold: 3,
+                timeout: Duration::from_secs(30),
+                half_open_max_calls: 2,
+            },
+        );
 
         manager
     }
@@ -578,9 +640,15 @@ pub mod utils {
     use super::*;
 
     /// Create a retry operation closure
-    pub fn retry_operation<F, T>(operation: F) -> impl Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T>> + Send>>
+    pub fn retry_operation<F, T>(
+        operation: F,
+    ) -> impl Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T>> + Send>>
     where
-        F: Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T>> + Send>> + Clone + Send + Sync + 'static,
+        F: Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T>> + Send>>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
         T: Send + 'static,
     {
         move || {
@@ -591,15 +659,15 @@ pub mod utils {
 
     /// Determine if error should trigger circuit breaker
     pub fn should_trip_circuit_breaker(error: &VoirsError) -> bool {
-        match error {
+        matches!(
+            error,
             VoirsError::DeviceNotAvailable { .. }
-            | VoirsError::UnsupportedDevice { .. }
-            | VoirsError::OutOfMemory { .. }
-            | VoirsError::GpuOutOfMemory { .. }
-            | VoirsError::ModelNotFound { .. }
-            | VoirsError::NetworkError { .. } => true,
-            _ => false,
-        }
+                | VoirsError::UnsupportedDevice { .. }
+                | VoirsError::OutOfMemory { .. }
+                | VoirsError::GpuOutOfMemory { .. }
+                | VoirsError::ModelNotFound { .. }
+                | VoirsError::NetworkError { .. }
+        )
     }
 
     /// Get recommended retry delay based on error type
@@ -643,31 +711,35 @@ mod tests {
         assert_eq!(circuit_breaker.state(), CircuitState::Closed);
 
         // First failure
-        let result = circuit_breaker.call(async { 
-            std::result::Result::<(), VoirsError>::Err(VoirsError::InternalError {
-                component: "test".to_string(),
-                message: "test error".to_string(),
+        let result = circuit_breaker
+            .call(async {
+                std::result::Result::<(), VoirsError>::Err(VoirsError::InternalError {
+                    component: "test".to_string(),
+                    message: "test error".to_string(),
+                })
             })
-        }).await;
+            .await;
         assert!(result.is_err());
         assert_eq!(circuit_breaker.state(), CircuitState::Closed);
 
         // Second failure should open circuit
-        let result = circuit_breaker.call(async { 
-            std::result::Result::<(), VoirsError>::Err(VoirsError::InternalError {
-                component: "test".to_string(),
-                message: "test error".to_string(),
+        let result = circuit_breaker
+            .call(async {
+                std::result::Result::<(), VoirsError>::Err(VoirsError::InternalError {
+                    component: "test".to_string(),
+                    message: "test error".to_string(),
+                })
             })
-        }).await;
+            .await;
         assert!(result.is_err());
         assert_eq!(circuit_breaker.state(), CircuitState::Open);
 
         // Next call should be rejected immediately
-        let result = circuit_breaker.call(async { 
-            Ok::<(), VoirsError>(())
-        }).await;
+        let result = circuit_breaker
+            .call(async { Ok::<(), VoirsError>(()) })
+            .await;
         match result {
-            Err(CircuitBreakerError::CircuitOpen) => {},
+            Err(CircuitBreakerError::CircuitOpen) => {}
             _ => panic!("Expected CircuitOpen error"),
         }
 
@@ -675,9 +747,9 @@ mod tests {
         sleep(Duration::from_millis(150)).await;
 
         // Should transition to half-open and allow one call
-        let result = circuit_breaker.call(async { 
-            Ok::<(), VoirsError>(())
-        }).await;
+        let result = circuit_breaker
+            .call(async { Ok::<(), VoirsError>(()) })
+            .await;
         assert!(result.is_ok());
         assert_eq!(circuit_breaker.state(), CircuitState::Closed);
     }
@@ -709,12 +781,9 @@ mod tests {
         };
 
         let mut context = RecoveryContext::default();
-        let result = manager.retry_linear(
-            operation,
-            5,
-            Duration::from_millis(10),
-            &mut context,
-        ).await;
+        let result = manager
+            .retry_linear(operation, 5, Duration::from_millis(10), &mut context)
+            .await;
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 42);
@@ -725,9 +794,12 @@ mod tests {
     #[tokio::test]
     async fn test_fallback_strategy() {
         let mut manager = ErrorRecoveryManager::new();
-        manager.register_strategy("test", RecoveryStrategy::Fallback {
-            alternatives: vec!["alt1".to_string(), "alt2".to_string()],
-        });
+        manager.register_strategy(
+            "test",
+            RecoveryStrategy::Fallback {
+                alternatives: vec!["alt1".to_string(), "alt2".to_string()],
+            },
+        );
 
         let attempt_count = std::sync::Arc::new(std::sync::Mutex::new(0));
         let operation = {

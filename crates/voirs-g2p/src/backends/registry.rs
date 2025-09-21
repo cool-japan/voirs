@@ -58,38 +58,48 @@ impl BackendRegistry {
         F: Fn() -> Result<Box<dyn G2p>> + Send + Sync + 'static,
     {
         let backend_id = info.id.clone();
-        
+
         // Validate backend info
         if backend_id.is_empty() {
-            return Err(G2pError::ConfigError("Backend ID cannot be empty".to_string()));
+            return Err(G2pError::ConfigError(
+                "Backend ID cannot be empty".to_string(),
+            ));
         }
-        
+
         if self.backends.contains_key(&backend_id) {
-            return Err(G2pError::ConfigError(format!("Backend '{}' already registered", backend_id)));
+            return Err(G2pError::ConfigError(format!(
+                "Backend '{backend_id}' already registered"
+            )));
         }
 
         // Register the factory
         self.backends.insert(backend_id.clone(), Arc::new(factory));
-        
+
         // Store backend info first
         self.backend_info.insert(backend_id.clone(), info.clone());
-        
+
         // Update language mappings
         for language in &info.supported_languages {
-            let backends = self.language_backends.entry(*language).or_insert_with(Vec::new);
+            let backends = self.language_backends.entry(*language).or_default();
             backends.push(backend_id.clone());
             backends.sort_by(|a, b| {
-                let priority_a = self.backend_info.get(a).map(|info| info.priority).unwrap_or(0);
-                let priority_b = self.backend_info.get(b).map(|info| info.priority).unwrap_or(0);
+                let priority_a = self
+                    .backend_info
+                    .get(a)
+                    .map(|info| info.priority)
+                    .unwrap_or(0);
+                let priority_b = self
+                    .backend_info
+                    .get(b)
+                    .map(|info| info.priority)
+                    .unwrap_or(0);
                 priority_b.cmp(&priority_a) // Higher priority first
             });
         }
 
         // Initialize load balancing counter
-        self.load_balance_counters.insert(
-            backend_id.clone(),
-            std::sync::atomic::AtomicUsize::new(0),
-        );
+        self.load_balance_counters
+            .insert(backend_id.clone(), std::sync::atomic::AtomicUsize::new(0));
 
         debug!("Registered backend: {}", backend_id);
         Ok(())
@@ -98,7 +108,9 @@ impl BackendRegistry {
     /// Unregister a backend
     pub fn unregister_backend(&mut self, backend_id: &str) -> Result<()> {
         if !self.backends.contains_key(backend_id) {
-            return Err(G2pError::ConfigError(format!("Backend '{}' not found", backend_id)));
+            return Err(G2pError::ConfigError(format!(
+                "Backend '{backend_id}' not found"
+            )));
         }
 
         // Remove from backends
@@ -123,7 +135,9 @@ impl BackendRegistry {
         // Validate all backend IDs exist
         for backend_id in &backend_ids {
             if !self.backends.contains_key(backend_id) {
-                return Err(G2pError::ConfigError(format!("Backend '{}' not found", backend_id)));
+                return Err(G2pError::ConfigError(format!(
+                    "Backend '{backend_id}' not found"
+                )));
             }
         }
 
@@ -142,7 +156,10 @@ impl BackendRegistry {
                         if let Some(factory) = self.backends.get(backend_id) {
                             match factory() {
                                 Ok(backend) => {
-                                    debug!("Using backend '{}' for language {:?}", backend_id, language);
+                                    debug!(
+                                        "Using backend '{}' for language {:?}",
+                                        backend_id, language
+                                    );
                                     return Ok(backend);
                                 }
                                 Err(e) => {
@@ -163,7 +180,10 @@ impl BackendRegistry {
                     if let Some(factory) = self.backends.get(backend_id) {
                         match factory() {
                             Ok(backend) => {
-                                debug!("Using default backend '{}' for language {:?}", backend_id, language);
+                                debug!(
+                                    "Using default backend '{}' for language {:?}",
+                                    backend_id, language
+                                );
                                 return Ok(backend);
                             }
                             Err(e) => {
@@ -176,7 +196,9 @@ impl BackendRegistry {
             }
         }
 
-        Err(G2pError::ConfigError(format!("No available backend for language {:?}", language)))
+        Err(G2pError::ConfigError(format!(
+            "No available backend for language {language:?}"
+        )))
     }
 
     /// Get backend with load balancing
@@ -188,19 +210,26 @@ impl BackendRegistry {
         };
 
         if backend_ids.is_empty() {
-            return Err(G2pError::ConfigError(format!("No backends available for language {:?}", language)));
+            return Err(G2pError::ConfigError(format!(
+                "No backends available for language {language:?}"
+            )));
         }
 
         // Round-robin load balancing
         let enabled_backends: Vec<String> = backend_ids
             .into_iter()
             .filter(|id| {
-                self.backend_info.get(id).map(|info| info.enabled).unwrap_or(false)
+                self.backend_info
+                    .get(id)
+                    .map(|info| info.enabled)
+                    .unwrap_or(false)
             })
             .collect();
 
         if enabled_backends.is_empty() {
-            return Err(G2pError::ConfigError(format!("No enabled backends for language {:?}", language)));
+            return Err(G2pError::ConfigError(format!(
+                "No enabled backends for language {language:?}"
+            )));
         }
 
         // Get next backend in round-robin fashion
@@ -215,17 +244,25 @@ impl BackendRegistry {
         if let Some(factory) = self.backends.get(backend_id) {
             match factory() {
                 Ok(backend) => {
-                    debug!("Load balanced backend '{}' for language {:?}", backend_id, language);
+                    debug!(
+                        "Load balanced backend '{}' for language {:?}",
+                        backend_id, language
+                    );
                     Ok(backend)
                 }
                 Err(e) => {
-                    warn!("Failed to create load balanced backend '{}': {}", backend_id, e);
+                    warn!(
+                        "Failed to create load balanced backend '{}': {}",
+                        backend_id, e
+                    );
                     // Fall back to first available backend
                     self.get_backend_for_language(language)
                 }
             }
         } else {
-            Err(G2pError::ConfigError(format!("Backend factory '{}' not found", backend_id)))
+            Err(G2pError::ConfigError(format!(
+                "Backend factory '{backend_id}' not found"
+            )))
         }
     }
 
@@ -246,7 +283,9 @@ impl BackendRegistry {
             debug!("Backend '{}' enabled: {}", backend_id, enabled);
             Ok(())
         } else {
-            Err(G2pError::ConfigError(format!("Backend '{}' not found", backend_id)))
+            Err(G2pError::ConfigError(format!(
+                "Backend '{backend_id}' not found"
+            )))
         }
     }
 
@@ -332,9 +371,13 @@ impl Default for RegistryG2p {
 
 #[async_trait]
 impl G2p for RegistryG2p {
-    async fn to_phonemes(&self, text: &str, lang: Option<LanguageCode>) -> Result<Vec<crate::Phoneme>> {
+    async fn to_phonemes(
+        &self,
+        text: &str,
+        lang: Option<LanguageCode>,
+    ) -> Result<Vec<crate::Phoneme>> {
         let language = lang.unwrap_or(LanguageCode::EnUs);
-        
+
         let backend = {
             let registry = self.registry.read().unwrap();
             if self.use_load_balancing {
@@ -356,7 +399,7 @@ impl G2p for RegistryG2p {
     }
 
     fn metadata(&self) -> crate::G2pMetadata {
-        let registry = self.registry.read().unwrap();
+        let _registry = self.registry.read().unwrap();
         crate::G2pMetadata {
             name: "Registry G2P".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -382,7 +425,7 @@ mod tests {
     #[test]
     fn test_register_backend() {
         let mut registry = BackendRegistry::new();
-        
+
         let info = BackendInfo {
             id: "dummy".to_string(),
             name: "Dummy Backend".to_string(),
@@ -394,7 +437,7 @@ mod tests {
 
         let result = registry.register_backend(info, || Ok(Box::new(DummyG2p::new())));
         assert!(result.is_ok());
-        
+
         assert!(registry.backends.contains_key("dummy"));
         assert!(registry.backend_info.contains_key("dummy"));
     }
@@ -402,7 +445,7 @@ mod tests {
     #[test]
     fn test_duplicate_backend_registration() {
         let mut registry = BackendRegistry::new();
-        
+
         let info = BackendInfo {
             id: "dummy".to_string(),
             name: "Dummy Backend".to_string(),
@@ -415,7 +458,7 @@ mod tests {
         // First registration should succeed
         let result1 = registry.register_backend(info.clone(), || Ok(Box::new(DummyG2p::new())));
         assert!(result1.is_ok());
-        
+
         // Second registration should fail
         let result2 = registry.register_backend(info, || Ok(Box::new(DummyG2p::new())));
         assert!(result2.is_err());
@@ -424,7 +467,7 @@ mod tests {
     #[test]
     fn test_backend_unregistration() {
         let mut registry = BackendRegistry::new();
-        
+
         let info = BackendInfo {
             id: "dummy".to_string(),
             name: "Dummy Backend".to_string(),
@@ -434,11 +477,13 @@ mod tests {
             enabled: true,
         };
 
-        registry.register_backend(info, || Ok(Box::new(DummyG2p::new()))).unwrap();
-        
+        registry
+            .register_backend(info, || Ok(Box::new(DummyG2p::new())))
+            .unwrap();
+
         let result = registry.unregister_backend("dummy");
         assert!(result.is_ok());
-        
+
         assert!(!registry.backends.contains_key("dummy"));
         assert!(!registry.backend_info.contains_key("dummy"));
     }
@@ -446,7 +491,7 @@ mod tests {
     #[test]
     fn test_get_backend_for_language() {
         let mut registry = BackendRegistry::new();
-        
+
         let info = BackendInfo {
             id: "dummy".to_string(),
             name: "Dummy Backend".to_string(),
@@ -456,8 +501,10 @@ mod tests {
             enabled: true,
         };
 
-        registry.register_backend(info, || Ok(Box::new(DummyG2p::new()))).unwrap();
-        
+        registry
+            .register_backend(info, || Ok(Box::new(DummyG2p::new())))
+            .unwrap();
+
         let backend = registry.get_backend_for_language(LanguageCode::EnUs);
         assert!(backend.is_ok());
     }
@@ -465,7 +512,7 @@ mod tests {
     #[test]
     fn test_backend_priority_ordering() {
         let mut registry = BackendRegistry::new();
-        
+
         let info1 = BackendInfo {
             id: "low_priority".to_string(),
             name: "Low Priority Backend".to_string(),
@@ -484,9 +531,13 @@ mod tests {
             enabled: true,
         };
 
-        registry.register_backend(info1, || Ok(Box::new(DummyG2p::new()))).unwrap();
-        registry.register_backend(info2, || Ok(Box::new(DummyG2p::new()))).unwrap();
-        
+        registry
+            .register_backend(info1, || Ok(Box::new(DummyG2p::new())))
+            .unwrap();
+        registry
+            .register_backend(info2, || Ok(Box::new(DummyG2p::new())))
+            .unwrap();
+
         // Higher priority backend should be first
         let backends = registry.get_backends_for_language(LanguageCode::EnUs);
         assert_eq!(backends.len(), 2);
@@ -497,7 +548,7 @@ mod tests {
     #[tokio::test]
     async fn test_registry_g2p() {
         let registry_g2p = RegistryG2p::new();
-        
+
         let info = BackendInfo {
             id: "dummy".to_string(),
             name: "Dummy Backend".to_string(),
@@ -507,10 +558,17 @@ mod tests {
             enabled: true,
         };
 
-        registry_g2p.register_backend(info, || Ok(Box::new(DummyG2p::new()))).unwrap();
-        registry_g2p.set_default_backends(vec!["dummy".to_string()]).unwrap();
-        
-        let phonemes = registry_g2p.to_phonemes("test", Some(LanguageCode::EnUs)).await.unwrap();
+        registry_g2p
+            .register_backend(info, || Ok(Box::new(DummyG2p::new())))
+            .unwrap();
+        registry_g2p
+            .set_default_backends(vec!["dummy".to_string()])
+            .unwrap();
+
+        let phonemes = registry_g2p
+            .to_phonemes("test", Some(LanguageCode::EnUs))
+            .await
+            .unwrap();
         assert_eq!(phonemes.len(), 4);
     }
 }

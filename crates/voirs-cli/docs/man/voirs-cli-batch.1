@@ -1,0 +1,311 @@
+.TH VOIRS-CLI-BATCH 1 "2025-07-05" "voirs-cli" "VoiRS CLI Manual"
+
+.SH NAME
+voirs-cli-batch \- Process multiple text files with parallel synthesis
+
+.SH SYNOPSIS
+.B voirs-cli batch
+[\fIOPTIONS\fR]
+.I INPUT_FILE
+[\fB\-o\fR|\fB\-\-output-dir\fR \fIDIR\fR]
+
+.SH DESCRIPTION
+The batch command processes multiple text files simultaneously using parallel synthesis workers. It supports various input formats (TXT, CSV, JSON, JSONL), provides progress tracking, and includes resume capability for interrupted operations.
+
+.SH OPTIONS
+.TP
+.B \-o, \-\-output-dir \fIDIR\fR
+Directory for output audio files (default: current directory).
+
+.TP
+.B \-w, \-\-workers \fIN\fR
+Number of parallel synthesis workers (default: CPU cores).
+
+.TP
+.B \-v, \-\-voice \fIVOICE\fR
+Default voice for synthesis operations.
+
+.TP
+.B \-q, \-\-quality \fILEVEL\fR
+Synthesis quality level: low, medium, high, ultra (default: medium).
+
+.TP
+.B \-f, \-\-format \fIFORMAT\fR
+Output audio format: wav, mp3, flac, opus, ogg (default: wav).
+
+.TP
+.B \-\-resume
+Resume interrupted batch processing using saved state.
+
+.TP
+.B \-\-no-resume
+Disable resume functionality and start fresh.
+
+.TP
+.B \-\-state-file \fIFILE\fR
+Custom state file location for resume functionality.
+
+.TP
+.B \-\-retry-failed
+Retry previously failed items from the last batch run.
+
+.TP
+.B \-\-max-retries \fIN\fR
+Maximum number of retry attempts per item (default: 3).
+
+.TP
+.B \-\-chunk-size \fISIZE\fR
+Text chunk size for streaming synthesis (default: 1000).
+
+.TP
+.B \-\-timeout \fISECONDS\fR
+Timeout for individual synthesis operations (default: 300).
+
+.TP
+.B \-\-dry-run
+Show what would be processed without performing synthesis.
+
+.TP
+.B \-\-metadata
+Include synthesis metadata in output files.
+
+.TP
+.B \-\-progress
+Show detailed progress information (default: enabled).
+
+.TP
+.B \-\-no-progress
+Disable progress indicators.
+
+.TP
+.B \-\-stats
+Show processing statistics after completion.
+
+.SH INPUT FORMATS
+.SS TXT FORMAT
+Plain text files with one sentence per line:
+.nf
+Hello, world!
+Welcome to VoiRS batch processing.
+This is the third sentence.
+.fi
+
+.SS CSV FORMAT
+CSV files with text and optional metadata columns:
+.nf
+text,voice,quality,output_filename
+"Hello world",en-US-female-1,high,greeting.wav
+"Goodbye",en-GB-male-1,medium,farewell.wav
+.fi
+
+.SS JSON FORMAT
+JSON files with array of synthesis requests:
+.nf
+[
+  {
+    "text": "Hello world",
+    "voice": "en-US-female-1",
+    "quality": "high",
+    "output": "greeting.wav"
+  },
+  {
+    "text": "Goodbye",
+    "voice": "en-GB-male-1",
+    "quality": "medium",
+    "output": "farewell.wav"
+  }
+]
+.fi
+
+.SS JSONL FORMAT
+JSON Lines format with one JSON object per line:
+.nf
+{"text": "Hello world", "voice": "en-US-female-1", "quality": "high"}
+{"text": "Goodbye", "voice": "en-GB-male-1", "quality": "medium"}
+.fi
+
+.SH PARALLEL PROCESSING
+The batch command uses advanced parallel processing:
+
+.TP
+.B Worker Management
+- Configurable number of parallel workers
+- Semaphore-controlled resource allocation
+- Load balancing across workers
+- Memory usage optimization
+
+.TP
+.B Progress Tracking
+- Real-time progress bars
+- ETA calculation
+- Throughput monitoring
+- Error tracking and reporting
+
+.TP
+.B Resource Optimization
+- Memory-efficient processing
+- CPU and GPU utilization
+- Thermal throttling awareness
+- Graceful degradation
+
+.SH RESUME FUNCTIONALITY
+Batch processing supports resume capability:
+
+.TP
+.B State Persistence
+- JSON state files track progress
+- Completed items are skipped
+- Failed items can be retried
+- Configuration change detection
+
+.TP
+.B Resume Options
+- Automatic resume on restart
+- Manual resume with --resume flag
+- Retry failed items only
+- Fresh start with --no-resume
+
+.SH EXAMPLES
+.TP
+.B Basic batch processing
+voirs-cli batch sentences.txt --output-dir audio/
+
+.TP
+.B Parallel processing
+voirs-cli batch large-dataset.csv --workers 8 --quality high
+
+.TP
+.B Resume interrupted batch
+voirs-cli batch sentences.txt --resume --output-dir audio/
+
+.TP
+.B Custom voice and format
+voirs-cli batch stories.json --voice en-US-female-1 --format mp3
+
+.TP
+.B Retry failed items
+voirs-cli batch dataset.jsonl --retry-failed --max-retries 5
+
+.TP
+.B Dry run preview
+voirs-cli batch input.txt --dry-run --stats
+
+.TP
+.B JSONL processing
+voirs-cli batch requests.jsonl --workers 4 --timeout 600
+
+.TP
+.B CSV with metadata
+voirs-cli batch data.csv --metadata --progress
+
+.SH CSV COLUMN MAPPING
+CSV files support flexible column mapping:
+
+.TP
+.B Standard columns
+text, voice, quality, format, output, speed, pitch, volume
+
+.TP
+.B Custom mapping
+Use first row as header to define column names
+
+.TP
+.B Required columns
+At minimum, a 'text' column is required
+
+.TP
+.B Optional columns
+All other columns provide default values if not specified
+
+.SH OUTPUT NAMING
+Output files are named automatically based on input:
+
+.TP
+.B TXT files
+Sequential numbering: 001.wav, 002.wav, etc.
+
+.TP
+.B CSV files
+Based on output column or auto-generated names
+
+.TP
+.B JSON/JSONL files
+Based on output field or auto-generated names
+
+.TP
+.B Custom naming
+Use output column/field to specify custom names
+
+.SH PERFORMANCE OPTIMIZATION
+.TP
+.B Worker tuning
+Start with CPU core count, adjust based on memory usage
+
+.TP
+.B Memory management
+Monitor RAM usage, reduce workers if memory pressure occurs
+
+.TP
+.B Chunk size optimization
+Larger chunks for better quality, smaller for lower memory usage
+
+.TP
+.B Format selection
+WAV for quality, MP3 for storage efficiency
+
+.SH ERROR HANDLING
+.TP
+.B Retry logic
+Automatic retry with exponential backoff
+
+.TP
+.B Error reporting
+Detailed error logs with context information
+
+.TP
+.B Graceful degradation
+Continue processing other items if some fail
+
+.TP
+.B State preservation
+Save progress even when errors occur
+
+.SH EXIT STATUS
+.TP
+.B 0
+All items processed successfully.
+
+.TP
+.B 1
+Some items failed but others succeeded.
+
+.TP
+.B 2
+Configuration or input file error.
+
+.TP
+.B 3
+All items failed.
+
+.TP
+.B 4
+Interrupted by user or system.
+
+.SH FILES
+.TP
+.B .voirs-batch-state.json
+Default state file for resume functionality.
+
+.TP
+.B batch-errors.log
+Error log file for failed operations.
+
+.TP
+.B batch-stats.json
+Processing statistics and performance metrics.
+
+.SH SEE ALSO
+.BR voirs-cli (1),
+.BR voirs-cli-synthesize (1),
+.BR voirs-cli-interactive (1),
+.BR voirs-cli-server (1)

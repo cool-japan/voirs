@@ -1,0 +1,89 @@
+version: '3.8'
+
+# Development overrides for docker-compose.yml
+services:
+  voirs-feedback:
+    build:
+      context: ../../
+      dockerfile: crates/voirs-feedback/Dockerfile
+      target: builder  # Use builder stage for development
+    environment:
+      - RUST_LOG=debug
+      - RUST_BACKTRACE=1
+      - VOIRS_ENV=development
+      - VOIRS_DEV_MODE=true
+    volumes:
+      - ../../target:/usr/src/app/target  # Mount target for incremental builds
+      - ./src:/app/src  # Mount source for hot reload (if implemented)
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+      - "8082:8082"
+      - "5005:5005"  # Debug port
+
+  postgres:
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=voirs_dev
+      - POSTGRES_PASSWORD=dev123
+      - POSTGRES_DB=voirs_feedback_dev
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+      - ./config/init.dev.sql:/docker-entrypoint-initdb.d/init.sql
+
+  redis:
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "no"]  # Disable persistence for dev
+
+  prometheus:
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.dev.yml:/etc/prometheus/prometheus.yml
+
+  grafana:
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=dev123
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-clock-panel
+    volumes:
+      - grafana_dev_data:/var/lib/grafana
+
+  nginx:
+    ports:
+      - "80:80"
+    volumes:
+      - ./config/nginx.dev.conf:/etc/nginx/nginx.conf
+
+  # Additional development services
+  postgres-admin:
+    image: dpage/pgadmin4:latest
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@voirs.dev
+      - PGADMIN_DEFAULT_PASSWORD=dev123
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - voirs-network
+
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    networks:
+      - voirs-network
+
+volumes:
+  postgres_dev_data:
+    driver: local
+  grafana_dev_data:
+    driver: local

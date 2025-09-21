@@ -1,0 +1,327 @@
+.TH VOIRS-CLI-COMPLETION 1 "2025-07-05" "voirs-cli" "VoiRS CLI Manual"
+
+.SH NAME
+voirs-cli-completion \- Generate and install shell completion scripts
+
+.SH SYNOPSIS
+.B voirs-cli generate-completion
+.I SHELL
+[\fIOPTIONS\fR]
+
+.SH DESCRIPTION
+The completion command generates shell completion scripts for VoiRS CLI, enabling tab completion for commands, options, and arguments. Completion scripts enhance the command-line experience by providing intelligent suggestions and reducing typing.
+
+VoiRS CLI supports completion for all major shells including bash, zsh, fish, PowerShell, and Elvish. The generated scripts provide context-aware completions for commands, voice names, model IDs, file paths, and configuration options.
+
+.SH OPTIONS
+.TP
+.I SHELL
+Target shell for completion script generation. Supported shells:
+- bash: Bash shell completion
+- zsh: Z shell completion with advanced features
+- fish: Fish shell completion with descriptions
+- powershell: PowerShell completion for Windows
+- elvish: Elvish shell completion
+
+.TP
+.B \-o, \-\-output \fIFILE\fR
+Write completion script to specified file instead of stdout.
+
+.TP
+.B \-\-install-help
+Display installation instructions for the specified shell.
+
+.TP
+.B \-\-install-script
+Generate an automated installation script for the completion.
+
+.TP
+.B \-\-status
+Show completion installation status for all supported shells.
+
+.TP
+.B \-\-uninstall
+Generate script to remove completion for the specified shell.
+
+.TP
+.B \-\-test
+Test completion functionality with sample commands.
+
+.SH SHELL-SPECIFIC FEATURES
+
+.SS Bash Completion
+.TP
+.B Basic completion
+Command names, options, and file paths.
+
+.TP
+.B Dynamic completion
+Voice names, model IDs, and configuration keys.
+
+.TP
+.B Context-aware
+Completion suggestions based on command context.
+
+.SS Zsh Completion
+.TP
+.B Advanced completion
+Rich completion with descriptions and grouping.
+
+.TP
+.B Correction suggestions
+Typo correction and alternative suggestions.
+
+.TP
+.B Menu completion
+Interactive menu for multiple options.
+
+.SS Fish Completion
+.TP
+.B Intelligent completion
+Context-aware suggestions with descriptions.
+
+.TP
+.B Real-time validation
+Immediate feedback on command validity.
+
+.TP
+.B History integration
+Completion based on command history.
+
+.SS PowerShell Completion
+.TP
+.B Full tab completion
+Complete support for PowerShell tab completion.
+
+.TP
+.B Parameter completion
+Intelligent completion for all parameter types.
+
+.TP
+.B Help integration
+Integrated help system with completion.
+
+.SH COMPLETION TYPES
+
+.SS Command Completion
+Completion for all VoiRS CLI commands:
+- synthesize, voices, models, batch
+- interactive, server, config, guide
+- test, completion
+
+.SS Option Completion
+Intelligent completion for command options:
+- Long and short option names
+- Option values and choices
+- File and directory paths
+
+.SS Dynamic Completion
+Context-aware completion for:
+- Available voice names
+- Installed model IDs
+- Configuration profile names
+- Audio format options
+- Quality level choices
+
+.SS File Path Completion
+Smart file completion for:
+- Input text files
+- Output directories
+- Configuration files
+- Model file paths
+
+.SH INSTALLATION
+
+.SS Bash Installation
+.nf
+# Generate and install completion
+voirs-cli generate-completion bash | sudo tee /etc/bash_completion.d/voirs-cli
+
+# Or user-specific installation
+voirs-cli generate-completion bash > ~/.bash_completion.d/voirs-cli
+echo 'source ~/.bash_completion.d/voirs-cli' >> ~/.bashrc
+.fi
+
+.SS Zsh Installation
+.nf
+# Create completion directory if needed
+mkdir -p ~/.zsh/completions
+
+# Generate and install completion
+voirs-cli generate-completion zsh > ~/.zsh/completions/_voirs-cli
+
+# Add to .zshrc if not already present
+echo 'fpath=(~/.zsh/completions $fpath)' >> ~/.zshrc
+echo 'autoload -U compinit && compinit' >> ~/.zshrc
+.fi
+
+.SS Fish Installation
+.nf
+# Generate and install completion
+voirs-cli generate-completion fish > ~/.config/fish/completions/voirs-cli.fish
+.fi
+
+.SS PowerShell Installation
+.nf
+# Generate completion script
+voirs-cli generate-completion powershell > VoiRS-CLI-Completion.ps1
+
+# Add to PowerShell profile
+echo '. ./VoiRS-CLI-Completion.ps1' >> $PROFILE
+.fi
+
+.SH EXAMPLES
+
+.TP
+.B Generate bash completion to stdout
+voirs-cli generate-completion bash
+
+.TP
+.B Save zsh completion to file
+voirs-cli generate-completion zsh --output voirs-cli.zsh
+
+.TP
+.B Show installation instructions
+voirs-cli generate-completion fish --install-help
+
+.TP
+.B Generate automated installation script
+voirs-cli generate-completion bash --install-script
+
+.TP
+.B Check completion status
+voirs-cli generate-completion --status
+
+.TP
+.B Test completion functionality
+voirs-cli generate-completion bash --test
+
+.SH USING COMPLETIONS
+
+Once installed, completions work automatically:
+
+.TP
+.B Basic command completion
+Type 'voirs-cli sy<TAB>' → 'voirs-cli synthesize'
+
+.TP
+.B Option completion
+Type 'voirs-cli synthesize --qu<TAB>' → 'voirs-cli synthesize --quality'
+
+.TP
+.B Value completion
+Type 'voirs-cli synthesize --quality <TAB>' → 'low medium high ultra'
+
+.TP
+.B Voice completion
+Type 'voirs-cli synthesize --voice en<TAB>' → lists English voices
+
+.TP
+.B File completion
+Type 'voirs-cli synthesize input<TAB>' → completes file paths
+
+.SH TROUBLESHOOTING
+
+.SS Completion Not Working
+.TP
+.B Check installation
+Ensure completion script is in the correct location for your shell.
+
+.TP
+.B Reload shell
+Restart your terminal or source the appropriate configuration file.
+
+.TP
+.B Verify permissions
+Ensure completion files have correct read permissions.
+
+.SS Outdated Completions
+.TP
+.B Regenerate scripts
+Run the completion command again to update with new features.
+
+.TP
+.B Clear cache
+Some shells cache completions; clear the cache after updates.
+
+.SS Performance Issues
+.TP
+.B Reduce dynamic completion
+Disable expensive dynamic completions if performance is poor.
+
+.TP
+.B Optimize configuration
+Tune shell completion settings for better performance.
+
+.SH FILES
+.TP
+.B /etc/bash_completion.d/voirs-cli
+System-wide bash completion script.
+
+.TP
+.B ~/.bash_completion.d/voirs-cli
+User-specific bash completion script.
+
+.TP
+.B ~/.zsh/completions/_voirs-cli
+Zsh completion function.
+
+.TP
+.B ~/.config/fish/completions/voirs-cli.fish
+Fish shell completion script.
+
+.TP
+.B $PROFILE/VoiRS-CLI-Completion.ps1
+PowerShell completion script.
+
+.SH ENVIRONMENT VARIABLES
+.TP
+.B VOIRS_COMPLETION_TIMEOUT
+Timeout for dynamic completion queries (default: 2 seconds).
+
+.TP
+.B VOIRS_COMPLETION_CACHE
+Enable/disable completion result caching.
+
+.TP
+.B VOIRS_COMPLETION_DEBUG
+Enable debug output for completion troubleshooting.
+
+.SH ADVANCED FEATURES
+
+.SS Custom Completion
+Users can extend completions by:
+- Adding custom voice aliases
+- Defining project-specific model sets
+- Creating workflow-specific shortcuts
+
+.SS Integration with Shell Features
+- History-based completion suggestions
+- Fuzzy matching for approximate completions
+- Integration with shell correction systems
+
+.SH EXIT STATUS
+.TP
+.B 0
+Completion script generated successfully.
+
+.TP
+.B 1
+Invalid shell specified or generation error.
+
+.TP
+.B 2
+Installation/uninstallation error.
+
+.SH SEE ALSO
+.BR voirs-cli (1),
+.BR bash (1),
+.BR zsh (1),
+.BR fish (1),
+.BR powershell (1)
+
+.SH AUTHOR
+VoiRS Development Team
+
+.SH REPORTING BUGS
+Report bugs at: https://github.com/voirs-project/voirs/issues

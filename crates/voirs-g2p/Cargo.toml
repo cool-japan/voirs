@@ -6,9 +6,9 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-documentation.workspace = true
+documentation = "https://docs.rs/voirs-g2p"
 keywords.workspace = true
-categories.workspace = true
+categories = ["text-processing", "algorithms", "science"]
 rust-version.workspace = true
 description = "Grapheme-to-Phoneme conversion for VoiRS speech synthesis"
 
@@ -24,7 +24,7 @@ unicode-segmentation.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
-regex = "1.10"
+regex.workspace = true
 
 # Error handling
 anyhow.workspace = true
@@ -37,33 +37,46 @@ tracing.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
 
+# Date/time for metadata
+chrono.workspace = true
+
+# Random number generation for accent probability
+rand.workspace = true
+
 # FST support for Phonetisaurus
-fst = "0.4"
-memmap2 = "0.9"
-tempfile = "3.10"
+fst.workspace = true
+memmap2.workspace = true
+tempfile.workspace = true
 
 # HTTP client for model downloading
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest.workspace = true
 
 # Compression support
-flate2 = "1.0"
-tar = "0.4"
+flate2.workspace = true
+tar.workspace = true
 
 # FFI for OpenJTalk
-libc = "0.2"
+libc.workspace = true
 
 # Neural network support
-candle-core = "0.8"
-candle-nn = "0.8"
-candle-transformers = "0.8"
+candle-core.workspace = true
+candle-nn.workspace = true
+candle-transformers.workspace = true
+
+# Model serialization
+bincode.workspace = true
+safetensors.workspace = true
+md5.workspace = true
 
 # CLI dependencies
-clap = { version = "4.5", features = ["derive"] }
-tracing-subscriber = "0.3"
+clap.workspace = true
+tracing-subscriber.workspace = true
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
-tempfile = "3.10"
+criterion.workspace = true
+tempfile.workspace = true
+proptest.workspace = true
+chrono.workspace = true
 
 [features]
 default = []
@@ -71,3 +84,9 @@ default = []
 [[bench]]
 name = "g2p_benchmarks"
 harness = false
+
+[[bench]]
+name = "memory_profiling"
+harness = false
+[lints]
+workspace = true

@@ -6,9 +6,9 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-documentation.workspace = true
+documentation = "https://docs.rs/voirs-vocoder"
 keywords.workspace = true
-categories.workspace = true
+categories = ["multimedia::audio", "science", "algorithms"]
 rust-version.workspace = true
 description = "Neural vocoder inference for VoiRS (HiFi-GAN/DiffWave)"
 
@@ -28,9 +28,15 @@ hf-hub.workspace = true
 ndarray.workspace = true
 realfft.workspace = true
 rustfft.workspace = true
+half.workspace = true
 
 # Audio
 hound.workspace = true
+symphonia.workspace = true
+opus.workspace = true
+flac-bound.workspace = true
+mp3lame-encoder.workspace = true
+mp4.workspace = true
 
 # Serialization
 serde.workspace = true
@@ -48,6 +54,7 @@ tracing.workspace = true
 # Async support
 async-trait.workspace = true
 tokio.workspace = true
+tokio-stream.workspace = true
 futures.workspace = true
 async-stream.workspace = true
 chrono.workspace = true
@@ -55,11 +62,45 @@ chrono.workspace = true
 # Random number generation
 fastrand.workspace = true
 
+# System info
+num_cpus.workspace = true
+
+# Lock-free data structures
+crossbeam-utils.workspace = true
+parking_lot.workspace = true
+
+# Parallel processing
+rayon.workspace = true
+
+# Static initialization
+once_cell.workspace = true
+
+# Real-time audio drivers
+cpal.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true
+criterion.workspace = true
 
 [features]
 default = ["candle"]
 candle = ["dep:candle-core", "dep:candle-nn"]
 onnx = ["dep:ort"]
-gpu = ["candle-core?/cuda", "ort?/cuda"]
+gpu = []
+cuda = ["candle-core?/cuda", "ort?/cuda"]
+metal = ["candle-core?/metal"]
+coreml = ["ort?/coreml"]
+
+[[bench]]
+name = "rtf_benchmark"
+harness = false
+
+[[bench]]
+name = "latency_benchmark" 
+harness = false
+
+[[bench]]
+name = "memory_benchmark"
+harness = false
+[lints]
+workspace = true

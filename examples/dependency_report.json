@@ -1,0 +1,425 @@
+{
+  "timestamp": "2025-07-25 14:02:08",
+  "workspace_crates": 17,
+  "total_dependencies": 636,
+  "unique_dependencies": 149,
+  "version_conflicts": [
+    {
+      "dependency_name": "statrs",
+      "conflicting_versions": [
+        [
+          "0.16",
+          "voirs-feedback"
+        ],
+        [
+          "0.17",
+          "voirs-evaluation"
+        ]
+      ],
+      "recommended_version": "0.18.0",
+      "severity": "warning"
+    },
+    {
+      "dependency_name": "base64",
+      "conflicting_versions": [
+        [
+          "0.21",
+          "voirs-feedback"
+        ],
+        [
+          "0.22",
+          "voirs-cloning"
+        ]
+      ],
+      "recommended_version": "0.22.1",
+      "severity": "warning"
+    }
+  ],
+  "security_vulnerabilities": [],
+  "unused_dependencies": [],
+  "outdated_dependencies": [
+    {
+      "name": "musicxml",
+      "current": "1.1",
+      "latest": "1.1.2",
+      "crate": "voirs-singing"
+    },
+    {
+      "name": "midly",
+      "current": "0.5",
+      "latest": "0.5.3",
+      "crate": "voirs-singing"
+    },
+    {
+      "name": "tokio",
+      "current": "1.0",
+      "latest": "1.46.1",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "async-trait",
+      "current": "0.1",
+      "latest": "0.1.88",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "serde",
+      "current": "1.0",
+      "latest": "1.0.219",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "serde_json",
+      "current": "1.0",
+      "latest": "1.0.141",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "thiserror",
+      "current": "1.0",
+      "latest": "2.0.12",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "anyhow",
+      "current": "1.0",
+      "latest": "1.0.98",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "chrono",
+      "current": "0.4",
+      "latest": "0.4.41",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "nalgebra",
+      "current": "0.32",
+      "latest": "0.33.2",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "statrs",
+      "current": "0.16",
+      "latest": "0.18.0",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "crossbeam",
+      "current": "0.8",
+      "latest": "0.8.4",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "futures",
+      "current": "0.3",
+      "latest": "0.3.31",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "futures-util",
+      "current": "0.3",
+      "latest": "0.3.31",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "reqwest",
+      "current": "0.11",
+      "latest": "0.12.22",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "lettre",
+      "current": "0.11",
+      "latest": "0.11.17",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "async-graphql",
+      "current": "7.0",
+      "latest": "7.0.17",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "egui",
+      "current": "0.24",
+      "latest": "0.32.0",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "eframe",
+      "current": "0.24",
+      "latest": "0.32.0",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "plotters",
+      "current": "0.3",
+      "latest": "0.3.7",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "rustfft",
+      "current": "6.1",
+      "latest": "6.4.0",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "hound",
+      "current": "3.5",
+      "latest": "3.5.1",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "config",
+      "current": "0.13",
+      "latest": "0.15.13",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "log",
+      "current": "0.4",
+      "latest": "0.4.27",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "env_logger",
+      "current": "0.10",
+      "latest": "0.11.8",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "indexmap",
+      "current": "2.0",
+      "latest": "2.10.0",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "uuid",
+      "current": "1.0",
+      "latest": "1.17.0",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "rand",
+      "current": "0.8",
+      "latest": "0.9.2",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "base64",
+      "current": "0.21",
+      "latest": "0.22.1",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "libc",
+      "current": "0.2",
+      "latest": "1.0.0-alpha.1",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "num_cpus",
+      "current": "1.16",
+      "latest": "1.17.0",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "regex",
+      "current": "1.10",
+      "latest": "1.11.1",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "sqlx",
+      "current": "0.8.1",
+      "latest": "0.8.6",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "sea-orm",
+      "current": "1.0",
+      "latest": "2.0.0-rc.1",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "flate2",
+      "current": "1.0",
+      "latest": "1.1.2",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "aes-gcm",
+      "current": "0.10",
+      "latest": "0.11.0-rc.0",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "argon2",
+      "current": "0.5",
+      "latest": "0.6.0-rc.0",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "ring",
+      "current": "0.17",
+      "latest": "0.17.14",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "sha2",
+      "current": "0.10",
+      "latest": "0.11.0-rc.0",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "hex",
+      "current": "0.4",
+      "latest": "0.4.3",
+      "crate": "voirs-feedback"
+    },
+    {
+      "name": "async-stream",
+      "current": "0.3",
+      "latest": "0.3.6",
+      "crate": "voirs-sdk"
+    },
+    {
+      "name": "serde_yaml",
+      "current": "0.9",
+      "latest": "0.9.34+deprecated",
+      "crate": "voirs-ffi"
+    },
+    {
+      "name": "chrono",
+      "current": "0.4",
+      "latest": "0.4.41",
+      "crate": "voirs-ffi"
+    },
+    {
+      "name": "thread_local",
+      "current": "1.1",
+      "latest": "1.1.9",
+      "crate": "voirs-ffi"
+    },
+    {
+      "name": "tempfile",
+      "current": "3.8",
+      "latest": "3.20.0",
+      "crate": "voirs-ffi"
+    },
+    {
+      "name": "winreg",
+      "current": "0.52",
+      "latest": "0.55.0",
+      "crate": "voirs-ffi"
+    },
+    {
+      "name": "ring",
+      "current": "0.17",
+      "latest": "0.17.14",
+      "crate": "voirs-cloning"
+    },
+    {
+      "name": "ed25519-dalek",
+      "current": "2.1",
+      "latest": "3.0.0-pre.0",
+      "crate": "voirs-cloning"
+    },
+    {
+      "name": "x25519-dalek",
+      "current": "2.0",
+      "latest": "3.0.0-pre.0",
+      "crate": "voirs-cloning"
+    },
+    {
+      "name": "aes-gcm",
+      "current": "0.10",
+      "latest": "0.11.0-rc.0",
+      "crate": "voirs-cloning"
+    },
+    {
+      "name": "sha2",
+      "current": "0.10",
+      "latest": "0.11.0-rc.0",
+      "crate": "voirs-cloning"
+    },
+    {
+      "name": "base64",
+      "current": "0.22",
+      "latest": "0.22.1",
+      "crate": "voirs-cloning"
+    },
+    {
+      "name": "symphonia",
+      "current": "0.5",
+      "latest": "0.5.4",
+      "crate": "voirs-evaluation"
+    },
+    {
+      "name": "ogg",
+      "current": "0.8",
+      "latest": "0.9.2",
+      "crate": "voirs-evaluation"
+    },
+    {
+      "name": "lewton",
+      "current": "0.10",
+      "latest": "0.10.2",
+      "crate": "voirs-evaluation"
+    },
+    {
+      "name": "statrs",
+      "current": "0.17",
+      "latest": "0.18.0",
+      "crate": "voirs-evaluation"
+    },
+    {
+      "name": "uuid",
+      "current": "1.0",
+      "latest": "1.17.0",
+      "crate": "voirs-evaluation"
+    },
+    {
+      "name": "url",
+      "current": "2.5",
+      "latest": "2.5.4",
+      "crate": "voirs-recognizer"
+    },
+    {
+      "name": "sysinfo",
+      "current": "0.30",
+      "latest": "0.36.1",
+      "crate": "voirs-examples"
+    },
+    {
+      "name": "thiserror",
+      "current": "1.0",
+      "latest": "2.0.12",
+      "crate": "voirs-examples"
+    },
+    {
+      "name": "num_cpus",
+      "current": "1.16",
+      "latest": "1.17.0",
+      "crate": "voirs-examples"
+    },
+    {
+      "name": "md5",
+      "current": "0.7",
+      "latest": "0.8.0",
+      "crate": "voirs-examples"
+    },
+    {
+      "name": "regex",
+      "current": "1.10",
+      "latest": "1.11.1",
+      "crate": "voirs-examples"
+    }
+  ],
+  "license_issues": [],
+  "recommendations": [
+    "Resolve 2 version conflicts",
+    "Update 63 outdated dependencies"
+  ]
+}

@@ -8,30 +8,109 @@ members = [
     "crates/voirs-cli",
     "crates/voirs-ffi",
     "crates/voirs-sdk",
+    "crates/voirs-recognizer",
+    "crates/voirs-evaluation",
+    "crates/voirs-feedback",
+    "crates/voirs-emotion",
+    "crates/voirs-cloning",
+    "crates/voirs-conversion",
+    "crates/voirs-singing",
+    "crates/voirs-spatial",
+    "examples",
 ]
 
 [package]
 name = "voirs"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 edition = "2021"
 authors = ["Tetsuya Kitahata <tetsuya@cool-japan.co.jp>"]
 license = "MIT OR Apache-2.0"
+description = "Advanced voice synthesis and speech processing library for Rust"
+repository = "https://github.com/cool-japan/voirs"
+homepage = "https://github.com/cool-japan/voirs"
+documentation = "https://docs.rs/voirs"
+keywords = ["tts", "speech", "synthesis", "neural", "rust"]
+categories = ["multimedia::audio", "science", "algorithms"]
+autoexamples = false
 
 [dependencies]
-voirs-g2p = { path = "crates/voirs-g2p" }
-voirs-acoustic = { path = "crates/voirs-acoustic" }
-voirs-vocoder = { path = "crates/voirs-vocoder" }
-voirs-sdk = { path = "crates/voirs-sdk" }
+voirs-g2p = { version = "0.1.0-alpha.1", path = "crates/voirs-g2p" }
+voirs-acoustic = { version = "0.1.0-alpha.1", path = "crates/voirs-acoustic" }
+voirs-vocoder = { version = "0.1.0-alpha.1", path = "crates/voirs-vocoder" }
+voirs-dataset = { version = "0.1.0-alpha.1", path = "crates/voirs-dataset" }
+voirs-sdk = { version = "0.1.0-alpha.1", path = "crates/voirs-sdk" }
+voirs-recognizer = { version = "0.1.0-alpha.1", path = "crates/voirs-recognizer" }
+voirs-evaluation = { version = "0.1.0-alpha.1", path = "crates/voirs-evaluation" }
+voirs-feedback = { version = "0.1.0-alpha.1", path = "crates/voirs-feedback" }
+voirs-emotion = { version = "0.1.0-alpha.1", path = "crates/voirs-emotion" }
+voirs-cloning = { version = "0.1.0-alpha.1", path = "crates/voirs-cloning" }
+voirs-conversion = { version = "0.1.0-alpha.1", path = "crates/voirs-conversion" }
+voirs-singing = { version = "0.1.0-alpha.1", path = "crates/voirs-singing" }
+voirs-spatial = { version = "0.1.0-alpha.1", path = "crates/voirs-spatial" }
+async-trait = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+futures = { workspace = true }
+uuid = { workspace = true }
+serde = { workspace = true }
+chrono = { workspace = true }
+cpal = { workspace = true }
+fastrand = { workspace = true }
+
+[dev-dependencies]
+anyhow = { workspace = true }
+futures = { workspace = true }
+candle-core = { workspace = true }
+candle-nn = { workspace = true }
+proptest = { workspace = true }
+
+[features]
+default = []
+onnx = ["voirs-sdk/onnx"]
+gpu = ["voirs-sdk/gpu"]
+
+# Recognition features
+whisper = ["voirs-recognizer/whisper"]
+whisper-pure = ["voirs-recognizer/whisper-pure"]
+deepspeech = ["voirs-recognizer/deepspeech"]
+wav2vec2 = ["voirs-recognizer/wav2vec2"]
+forced-align = ["voirs-recognizer/forced-align"]
+mfa = ["voirs-recognizer/mfa"]
+all-asr-models = ["voirs-recognizer/all-models"]
+
+# Evaluation features
+quality-eval = ["voirs-evaluation/quality"]
+pronunciation-eval = ["voirs-evaluation/pronunciation"]
+comparison-eval = ["voirs-evaluation/comparison"]
+perceptual-eval = ["voirs-evaluation/perceptual"]
+all-eval-metrics = ["voirs-evaluation/all-metrics"]
+
+# Feedback features
+realtime-feedback = ["voirs-feedback/realtime"]
+adaptive-feedback = ["voirs-feedback/adaptive"]
+progress-tracking = ["voirs-feedback/progress-tracking"]
+gamification = ["voirs-feedback/gamification"]
+feedback-ui = ["voirs-feedback/ui"]
+audio-export = ["voirs-feedback/audio-export"]
+all-feedback = ["voirs-feedback/all-features"]
+
+# Combined feature sets
+recognition = ["whisper", "whisper-pure", "deepspeech", "wav2vec2", "forced-align", "mfa"]
+evaluation = ["quality-eval", "pronunciation-eval", "comparison-eval"]
+feedback = ["realtime-feedback", "adaptive-feedback", "progress-tracking", "gamification"]
+full = ["recognition", "evaluation", "feedback", "gpu", "onnx"]
 
 [[test]]
 name = "end_to_end_pipeline_test"
 path = "tests/end_to_end_pipeline_test.rs"
 
+[[test]]
+name = "cross_platform_compatibility_tests"
+path = "tests/cross_platform_compatibility_tests.rs"
+
 [workspace.package]
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 edition = "2021"
 authors = ["Tetsuya Kitahata <tetsuya@cool-japan.co.jp>"]
 license = "MIT OR Apache-2.0"
@@ -39,51 +118,60 @@ repository = "https://github.com/cool-japan/voirs"
 homepage = "https://github.com/cool-japan/voirs"
 documentation = "https://docs.rs/voirs"
 keywords = ["tts", "speech", "synthesis", "neural", "rust"]
-categories = ["multimedia::audio", "science"]
+categories = ["multimedia::audio", "science", "algorithms"]
 rust-version = "1.70"
 
 [workspace.dependencies]
 # Core tensor/ML libraries
-candle-core = "0.9"
-candle-nn = "0.9"
-candle-transformers = "0.9"
+candle-core = "0.9.1"
+candle-nn = "0.9.1"
+candle-transformers = "0.9.1"
 ort = "2.0.0-rc.10"
-safetensors = "0.4"
-hf-hub = "0.3"
+safetensors = "0.4.5"
+hf-hub = "0.4.0"
 
 # Audio processing
-hound = "3.5"
-cpal = "0.15"
+hound = "3.5.1"
+cpal = "0.15.3"
 dasp = "0.11"
 claxon = "0.4"  # FLAC decoding
+flac-bound = "0.1"  # FLAC encoding/decoding
+symphonia = "0.5.4"  # Comprehensive audio codec support
+opus = "0.3"  # Opus audio codec
 lewton = "0.10"  # OGG Vorbis decoding
 minimp3 = "0.5"  # MP3 decoding
 mp3lame-encoder = "0.1"  # MP3 encoding
+mp4 = "0.14"  # MP4 container support
 
 # DSP and math
-ndarray = "0.15"
+ndarray = "0.16.1"
 realfft = "3.3"
 rustfft = "6.2"
+num-complex = "0.4"
+wide = "0.7"  # SIMD processing
+simba = "0.9"  # SIMD abstractions
 
 # Text processing
 unicode-normalization = "0.1"
-unicode-segmentation = "1.10"
+unicode-segmentation = "1.12"
 
 # Async/concurrency
-tokio = { version = "1.35", features = ["full"] }
+tokio = { version = "1.47.1", features = ["full"] }
 tokio-stream = "0.1"
 async-stream = "0.3"
 rayon = "1.8"
 
 # Serialization
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0"
 bincode = "1.3"
+ordered-float = "4.2"
 
 # CLI and utilities
-clap = { version = "4.4", features = ["derive"] }
-anyhow = "1.0"
-thiserror = "1.0"
+clap = { version = "4.5.45", features = ["derive"] }
+anyhow = "1.0.99"
+thiserror = "1.0.69"
+log = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
@@ -91,37 +179,99 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 toml = "0.8"
 fastrand = "2.0"
 futures = "0.3"
+futures-util = "0.3"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
-rand = "0.8"
+rand = "0.9.2"
+uuid = { version = "1.0", features = ["v4", "serde"] }
 
 # Additional CLI dependencies
 indicatif = "0.17"
 console = "0.15"
 dialoguer = "0.11"
-clap_complete = "4.4"
-reqwest = { version = "0.11", features = ["json", "stream"] }
+clap_complete = "4.5"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 tokio-util = { version = "0.7", features = ["io"] }
-axum = { version = "0.7", features = ["json", "query"] }
+axum = { version = "0.7", features = ["json", "query", "ws"] }
 tower = "0.4"
-tower-http = { version = "0.5", features = ["cors", "trace"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "compression-br", "compression-gzip", "limit", "request-id"] }
 hyper = { version = "1.0", features = ["full"] }
 flate2 = "1.0"
+zstd = "0.13"
 tar = "0.4"
-zip = "0.6"
+zip = "2.1"
 bzip2 = "0.4"
 csv = "1.3"
 walkdir = "2.4"
 tempfile = "3.8"
 libc = "0.2"
 once_cell = "1.19"
-num_cpus = "1.16"
+num_cpus = "1.17"
 sha2 = "0.10"
+aes-gcm = "0.10"
+regex = "1.10"
+memmap2 = "0.9"
+thread_local = "1.1"
+pin-project = "1.1"
+criterion = { version = "0.6", features = ["html_reports", "async_tokio"] }
+fst = "0.4"
+
+# WebAssembly dependencies
+wasm-bindgen = { version = "0.2.100", features = ["serde-serialize"] }
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["console", "AudioContext", "AudioBuffer", "AudioBufferOptions", "AudioBufferSourceNode", "AudioDestinationNode"] }
+js-sys = "0.3"
+console_error_panic_hook = "0.1"
+wasm-logger = "0.2"
 
 # FFI dependencies
-pyo3 = "0.21"
-numpy = "0.21"
+pyo3 = "0.26.0"
+numpy = "0.26.0"
+pyo3-async-runtimes = { version = "0.26", features = ["tokio-runtime"] }  # Using maintained fork for pyo3 0.26 compatibility
 parking_lot = "0.12"
+flume = "0.11"
+backtrace = "0.3"
+md5 = "0.7"
+
+# Lock-free data structures
+crossbeam-utils = "0.8"
+semver = "1.0"
+serde_yaml = "0.9"
+base64 = "0.22"
+dirs = "5.0"
+
+# Test dependencies
+tokio-test = "0.4"
+wasm-bindgen-test = "0.3"
+
+# File system watching
+notify = "8.2.0"
+
+# Dynamic loading and plugin support
+libloading = "0.8"
+wasmtime = "36.0.2"
+
+# Data format support
+parquet = "56.0.0"
+arrow = "56.0.0"
+half = "2.4"  # F16 support for Whisper
+bytemuck = "1.14"  # Safe byte casting for SafeTensors
+nalgebra = "0.33"
+proptest = "1.0"
+
+# Music processing
+musicxml = "1.1.2"
+midly = "0.5.3"
+
+# Platform-specific dependencies
+winapi = { version = "0.3", features = ["processthreadsapi", "psapi", "winnt", "handleapi"] }
+
+# GPU/OpenCL support
+opencl3 = "0.12.0"
+
+# HTTP/Web dependencies
+mime = "0.3"
+tokio-tungstenite = "0.24"
 
 
 [profile.dev]
@@ -143,3 +293,19 @@ lto = "fat"
 inherits = "release"
 lto = "fat"
 codegen-units = 1
+
+[workspace.lints.rust]
+unused_imports = "allow"
+dead_code = "allow"
+unused_variables = "allow"
+unused_mut = "allow"
+deprecated = "allow"
+
+[workspace.lints.clippy]
+missing_docs_in_private_items = "allow"
+derivable_impls = "allow"
+field_reassign_with_default = "allow"
+len_zero = "allow"
+manual_range_contains = "allow"
+useless_vec = "allow"
+absurd_extreme_comparisons = "allow"

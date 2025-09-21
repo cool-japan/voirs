@@ -3,8 +3,8 @@
 //! This module provides configuration options for streaming audio processing,
 //! latency optimization, and real-time constraints.
 
-use serde::{Deserialize, Serialize};
 use super::{PerformanceProfile, ValidationResult};
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 /// Buffer strategy for streaming
@@ -289,7 +289,9 @@ impl StreamingConfig {
         match self.realtime_mode {
             RealtimeMode::Hard => {
                 if self.target_latency_ms > 50.0 {
-                    warnings.push("High target latency may not be suitable for hard real-time".to_string());
+                    warnings.push(
+                        "High target latency may not be suitable for hard real-time".to_string(),
+                    );
                 }
                 if self.enable_lookahead {
                     warnings.push("Lookahead may add latency in hard real-time mode".to_string());
@@ -321,7 +323,7 @@ impl StreamingConfig {
         } else {
             0.0
         };
-        
+
         (buffer_memory + lookahead_memory) / (1024.0 * 1024.0)
     }
 
@@ -334,7 +336,7 @@ impl StreamingConfig {
         } else {
             0.0
         };
-        
+
         chunk_latency + buffer_latency + lookahead_latency
     }
 
@@ -375,7 +377,7 @@ mod tests {
     #[test]
     fn test_config_validation() {
         let mut config = StreamingConfig::default();
-        
+
         // Valid configuration
         let result = config.validate();
         assert!(result.is_valid);

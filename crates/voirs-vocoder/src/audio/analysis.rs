@@ -43,7 +43,7 @@ impl AudioAnalyzer {
     pub fn new(sample_rate: u32, fft_size: usize) -> Result<Self> {
         let mut planner = RealFftPlanner::<f32>::new();
         let fft_planner = planner.plan_fft_forward(fft_size);
-        
+
         Ok(Self {
             sample_rate,
             fft_planner,
@@ -53,7 +53,7 @@ impl AudioAnalyzer {
     /// Analyze audio buffer and return metrics
     pub fn analyze(&self, audio: &AudioBuffer) -> Result<AudioMetrics> {
         let samples = audio.samples();
-        
+
         let peak_db = self.calculate_peak_db(samples);
         let rms_db = self.calculate_rms_db(samples);
         let dynamic_range_db = self.calculate_dynamic_range_db(samples);
@@ -107,7 +107,7 @@ impl AudioAnalyzer {
 
         let peak = samples.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
         let noise_floor = self.estimate_noise_floor(samples);
-        
+
         if peak > 0.0 && noise_floor > 0.0 {
             20.0 * (peak / noise_floor).log10()
         } else {
@@ -124,7 +124,7 @@ impl AudioAnalyzer {
         // Use bottom 10% of samples as noise floor estimate
         let mut sorted_samples: Vec<f32> = samples.iter().map(|&x| x.abs()).collect();
         sorted_samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        
+
         let percentile_10 = sorted_samples.len() / 10;
         if percentile_10 > 0 {
             sorted_samples[percentile_10]
@@ -133,17 +133,83 @@ impl AudioAnalyzer {
         }
     }
 
-    /// Calculate THD+N (simplified calculation)
+    /// Calculate THD+N (Total Harmonic Distortion + Noise)
     pub fn calculate_thd_n(&self, samples: &[f32]) -> f32 {
-        // This is a simplified THD+N calculation
-        // In practice, you would need to perform FFT analysis and identify harmonics
-        let fundamental_freq = self.estimate_fundamental_frequency(samples);
-        if fundamental_freq > 0.0 {
-            // Placeholder: return a simplified THD+N estimate
-            0.01 // 1% THD+N as placeholder
-        } else {
-            0.0
+        if samples.is_empty() {
+            return 0.0;
         }
+
+        // Estimate fundamental frequency first
+        let fundamental_freq = self.estimate_fundamental_frequency(samples);
+        if fundamental_freq <= 0.0 {
+            return 0.0;
+        }
+
+        // Perform FFT analysis to identify harmonics
+        let fft_size = self.fft_planner.get_scratch_len();
+        let mut fft_input = vec![0.0; fft_size];
+        let mut fft_output = vec![Complex::default(); fft_size / 2 + 1];
+
+        // Copy samples to FFT input (with padding/truncation)
+        let copy_len = fft_size.min(samples.len());
+        fft_input[..copy_len].copy_from_slice(&samples[..copy_len]);
+
+        // Apply Hann window
+        for (i, sample) in fft_input.iter_mut().enumerate() {
+            let window =
+                0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / fft_size as f32).cos());
+            *sample *= window;
+        }
+
+        // Perform FFT
+        let mut scratch = vec![Complex::default(); fft_size];
+        if self
+            .fft_planner
+            .process_with_scratch(&mut fft_input, &mut fft_output, &mut scratch)
+            .is_err()
+        {
+            return 0.0;
+        }
+
+        // Find fundamental frequency bin
+        let bin_freq = self.sample_rate as f32 / fft_size as f32;
+        let fundamental_bin = (fundamental_freq / bin_freq).round() as usize;
+        if fundamental_bin >= fft_output.len() {
+            return 0.0;
+        }
+
+        // Calculate power spectrum
+        let power_spectrum: Vec<f32> = fft_output
+            .iter()
+            .map(|complex| complex.norm_sqr())
+            .collect();
+
+        // Find fundamental power
+        let fundamental_power = power_spectrum[fundamental_bin];
+        if fundamental_power <= 0.0 {
+            return 0.0;
+        }
+
+        // Calculate harmonic powers (2nd, 3rd, 4th, 5th harmonics)
+        let mut harmonic_power = 0.0;
+        for harmonic in 2..=5 {
+            let harmonic_bin = fundamental_bin * harmonic;
+            if harmonic_bin < power_spectrum.len() {
+                harmonic_power += power_spectrum[harmonic_bin];
+            }
+        }
+
+        // Calculate total power (excluding DC component)
+        let total_power: f32 = power_spectrum.iter().skip(1).sum();
+
+        // Calculate noise power (total power minus fundamental and harmonics)
+        let noise_power = total_power - fundamental_power - harmonic_power;
+
+        // THD+N = sqrt((harmonic_power + noise_power) / fundamental_power)
+        let thd_n = ((harmonic_power + noise_power) / fundamental_power).sqrt();
+
+        // Clamp to reasonable range (0-1)
+        thd_n.clamp(0.0, 1.0)
     }
 
     /// Estimate fundamental frequency
@@ -151,24 +217,24 @@ impl AudioAnalyzer {
         // Simple autocorrelation-based pitch detection
         let mut max_correlation = 0.0;
         let mut best_period = 0;
-        
+
         let min_period = self.sample_rate / 800; // 800 Hz max
-        let max_period = self.sample_rate / 80;  // 80 Hz min
-        
+        let max_period = self.sample_rate / 80; // 80 Hz min
+
         for period in min_period..max_period.min(samples.len() as u32 / 2) {
             let mut correlation = 0.0;
             let period = period as usize;
-            
+
             for i in 0..(samples.len() - period) {
                 correlation += samples[i] * samples[i + period];
             }
-            
+
             if correlation > max_correlation {
                 max_correlation = correlation;
                 best_period = period;
             }
         }
-        
+
         if best_period > 0 {
             self.sample_rate as f32 / best_period as f32
         } else {
@@ -180,7 +246,7 @@ impl AudioAnalyzer {
     pub fn calculate_snr_db(&self, samples: &[f32]) -> f32 {
         let signal_power = samples.iter().map(|&x| x * x).sum::<f32>() / samples.len() as f32;
         let noise_power = self.estimate_noise_power(samples);
-        
+
         if signal_power > 0.0 && noise_power > 0.0 {
             10.0 * (signal_power / noise_power).log10()
         } else {
@@ -198,7 +264,7 @@ impl AudioAnalyzer {
     pub fn calculate_crest_factor(&self, samples: &[f32]) -> f32 {
         let peak = samples.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
         let rms = (samples.iter().map(|&x| x * x).sum::<f32>() / samples.len() as f32).sqrt();
-        
+
         if rms > 0.0 {
             peak / rms
         } else {
@@ -231,29 +297,32 @@ impl AudioAnalyzer {
         let fft_size = self.fft_planner.get_scratch_len();
         let mut fft_input = vec![0.0; fft_size];
         let mut fft_output = vec![Complex::default(); fft_size / 2 + 1];
-        
+
         // Copy samples to FFT input (with padding/truncation)
         let copy_len = fft_size.min(samples.len());
         fft_input[..copy_len].copy_from_slice(&samples[..copy_len]);
-        
+
         // Apply window function (Hann window)
         for (i, sample) in fft_input.iter_mut().enumerate() {
-            let window = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / fft_size as f32).cos());
+            let window =
+                0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / fft_size as f32).cos());
             *sample *= window;
         }
 
         // Perform FFT
         let mut scratch = vec![Complex::default(); fft_size];
-        let _ = self.fft_planner.process_with_scratch(&mut fft_input, &mut fft_output, &mut scratch);
+        let _ =
+            self.fft_planner
+                .process_with_scratch(&mut fft_input, &mut fft_output, &mut scratch);
 
         // Calculate spectral centroid
         let mut weighted_sum = 0.0;
         let mut magnitude_sum = 0.0;
-        
+
         for (i, complex) in fft_output.iter().enumerate() {
             let magnitude = (complex.re * complex.re + complex.im * complex.im).sqrt();
             let frequency = i as f32 * self.sample_rate as f32 / fft_size as f32;
-            
+
             weighted_sum += frequency * magnitude;
             magnitude_sum += magnitude;
         }
@@ -290,14 +359,14 @@ pub fn analyze_spectrum(audio: &AudioBuffer, fft_size: usize) -> Result<Spectral
 
     let mut planner = RealFftPlanner::<f32>::new();
     let fft_planner = planner.plan_fft_forward(fft_size);
-    
+
     let mut fft_input = vec![0.0; fft_size];
     let mut fft_output = vec![Complex::default(); fft_size / 2 + 1];
-    
+
     // Copy samples to FFT input
     let copy_len = fft_size.min(samples.len());
     fft_input[..copy_len].copy_from_slice(&samples[..copy_len]);
-    
+
     // Apply Hann window
     for (i, sample) in fft_input.iter_mut().enumerate() {
         let window = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / fft_size as f32).cos());
@@ -343,13 +412,13 @@ pub mod quality {
     pub fn calculate_pesq_score(reference: &AudioBuffer, degraded: &AudioBuffer) -> f32 {
         // This is a simplified PESQ calculation
         // In practice, you would use the ITU-T P.862 standard
-        let ref_metrics = calculate_simple_metrics(reference);
+        let _ref_metrics = calculate_simple_metrics(reference);
         let deg_metrics = calculate_simple_metrics(degraded);
-        
+
         // Simple quality score based on SNR and spectral similarity
         let snr_score = (deg_metrics.snr_db / 30.0).clamp(0.0, 1.0);
         let spectral_score = calculate_spectral_similarity(reference, degraded);
-        
+
         // Combine scores (PESQ-like range: 1.0 to 4.5)
         1.0 + 3.5 * (snr_score + spectral_score) / 2.0
     }
@@ -364,18 +433,18 @@ pub mod quality {
     fn calculate_spectral_similarity(audio1: &AudioBuffer, audio2: &AudioBuffer) -> f32 {
         let spec1 = analyze_spectrum(audio1, 1024).unwrap();
         let spec2 = analyze_spectrum(audio2, 1024).unwrap();
-        
+
         if spec1.magnitudes_db.is_empty() || spec2.magnitudes_db.is_empty() {
             return 0.0;
         }
 
         let min_len = spec1.magnitudes_db.len().min(spec2.magnitudes_db.len());
         let mut correlation = 0.0;
-        
+
         for i in 0..min_len {
             correlation += spec1.magnitudes_db[i] * spec2.magnitudes_db[i];
         }
-        
+
         correlation / min_len as f32
     }
 }
@@ -388,10 +457,10 @@ mod tests {
     fn test_audio_analyzer() {
         let samples = vec![0.5, -0.3, 0.8, -0.2, 0.1];
         let audio = AudioBuffer::new(samples, 22050, 1);
-        
+
         let analyzer = AudioAnalyzer::new(22050, 1024).unwrap();
         let metrics = analyzer.analyze(&audio).unwrap();
-        
+
         assert!(metrics.peak_db > -20.0);
         assert!(metrics.rms_db > -20.0);
         assert!(metrics.crest_factor > 0.0);
@@ -402,10 +471,10 @@ mod tests {
     fn test_peak_calculation() {
         let samples = vec![0.5, -0.8, 0.3, -0.2];
         let audio = AudioBuffer::new(samples, 22050, 1);
-        
+
         let analyzer = AudioAnalyzer::new(22050, 1024).unwrap();
         let peak_db = analyzer.calculate_peak_db(audio.samples());
-        
+
         // Peak should be around 20*log10(0.8) ≈ -1.94 dB
         assert!((peak_db - (-1.94)).abs() < 0.1);
     }
@@ -414,10 +483,10 @@ mod tests {
     fn test_rms_calculation() {
         let samples = vec![0.5, -0.5, 0.5, -0.5];
         let audio = AudioBuffer::new(samples, 22050, 1);
-        
+
         let analyzer = AudioAnalyzer::new(22050, 1024).unwrap();
         let rms_db = analyzer.calculate_rms_db(audio.samples());
-        
+
         // RMS should be around 20*log10(0.5) ≈ -6.02 dB
         assert!((rms_db - (-6.02)).abs() < 0.1);
     }
@@ -426,10 +495,10 @@ mod tests {
     fn test_zero_crossing_rate() {
         let samples = vec![0.1, -0.1, 0.1, -0.1, 0.1];
         let audio = AudioBuffer::new(samples, 22050, 1);
-        
+
         let analyzer = AudioAnalyzer::new(22050, 1024).unwrap();
         let zcr = analyzer.calculate_zero_crossing_rate(audio.samples());
-        
+
         // Should have 4 zero crossings in 5 samples
         assert!((zcr - 0.8).abs() < 0.01);
     }
@@ -438,9 +507,9 @@ mod tests {
     fn test_spectral_analysis() {
         let samples = vec![0.5, -0.3, 0.8, -0.2, 0.1, 0.0, -0.1, 0.2];
         let audio = AudioBuffer::new(samples, 22050, 1);
-        
+
         let spectrum = analyze_spectrum(&audio, 8).unwrap();
-        
+
         assert!(!spectrum.frequencies.is_empty());
         assert!(!spectrum.magnitudes_db.is_empty());
         assert!(!spectrum.phases.is_empty());
@@ -453,9 +522,9 @@ mod tests {
         let samples = vec![0.5, -0.3, 0.8, -0.2];
         let reference = AudioBuffer::new(samples.clone(), 22050, 1);
         let degraded = AudioBuffer::new(samples, 22050, 1);
-        
+
         let score = quality::calculate_pesq_score(&reference, &degraded);
-        
+
         // Same audio should have high quality score
         assert!(score > 3.0);
     }

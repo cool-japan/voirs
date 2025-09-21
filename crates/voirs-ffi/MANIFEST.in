@@ -1,0 +1,41 @@
+# Package manifest for VoiRS FFI Python distribution
+
+# Include essential project files
+include README.md
+include LICENSE
+include Cargo.toml
+include pyproject.toml
+include setup.py
+
+# Include type stub files
+include voirs_ffi.pyi
+include index.d.ts
+
+# Include all Rust source files
+recursive-include src *.rs
+recursive-include python *.py
+
+# Include C examples and headers
+recursive-include examples *.c *.h
+include examples/*.js
+
+# Include test files
+recursive-include tests *.py *.rs *.sh
+include tests/*/README.md
+
+# Include build and configuration files
+include Cargo.lock
+include package.json
+
+# Exclude development and build artifacts
+global-exclude __pycache__
+global-exclude *.py[co]
+global-exclude .DS_Store
+global-exclude *.so
+global-exclude *.dll
+global-exclude *.dylib
+global-exclude target/
+global-exclude .git*
+global-exclude *.tmp
+global-exclude *.swp
+global-exclude *~

@@ -2,12 +2,13 @@
 
 pub mod profiles;
 
-use std::path::{Path, PathBuf};
+use crate::error::{CliError, Result};
+use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
-use serde::{Deserialize, Serialize};
-use voirs::config::AppConfig;
-use crate::error::{CliError, CliResult};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+use voirs_sdk::config::AppConfig;
 
 /// CLI-specific configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,7 +16,7 @@ pub struct CliConfig {
     /// Core VoiRS configuration
     #[serde(flatten)]
     pub core: AppConfig,
-    
+
     /// CLI-specific settings
     pub cli: CliSettings,
 }
@@ -28,31 +29,31 @@ pub type Config = CliConfig;
 pub struct CliSettings {
     /// Default output format
     pub default_output_format: String,
-    
+
     /// Default voice
     pub default_voice: Option<String>,
-    
+
     /// Default quality level
     pub default_quality: String,
-    
+
     /// Enable colored output
     pub colored_output: bool,
-    
+
     /// Show progress bars
     pub show_progress: bool,
-    
+
     /// Auto-play synthesized audio
     pub auto_play: bool,
-    
+
     /// Preferred output directory
     pub output_directory: Option<PathBuf>,
-    
+
     /// SSML validation level
     pub ssml_validation: SsmlValidationLevel,
-    
+
     /// Recent files history size
     pub history_size: usize,
-    
+
     /// Voice download preferences
     pub download: DownloadSettings,
 }
@@ -73,13 +74,13 @@ pub enum SsmlValidationLevel {
 pub struct DownloadSettings {
     /// Parallel downloads
     pub parallel_downloads: usize,
-    
+
     /// Retry attempts
     pub retry_attempts: usize,
-    
+
     /// Auto-verify checksums
     pub verify_checksums: bool,
-    
+
     /// Preferred download mirrors
     pub preferred_mirrors: Vec<String>,
 }
@@ -132,106 +133,121 @@ pub struct ConfigManager {
 
 impl ConfigManager {
     /// Create a new configuration manager
-    pub fn new() -> CliResult<Self> {
-        let config_path = Self::find_config_file()
-            .unwrap_or_else(|| Self::default_config_path());
-        
+    pub fn new() -> Result<Self> {
+        let config_path = Self::find_config_file().unwrap_or_else(|| Self::default_config_path());
+
         let config = if config_path.exists() {
             Self::load_from_file(&config_path)?
         } else {
             CliConfig::default()
         };
-        
-        Ok(Self { config_path, config })
+
+        Ok(Self {
+            config_path,
+            config,
+        })
     }
-    
+
     /// Create configuration manager with specific path
-    pub fn with_path<P: AsRef<Path>>(path: P) -> CliResult<Self> {
+    pub fn with_path<P: AsRef<Path>>(path: P) -> Result<Self> {
         let config_path = path.as_ref().to_path_buf();
-        
+
         let config = if config_path.exists() {
             Self::load_from_file(&config_path)?
         } else {
             CliConfig::default()
         };
-        
-        Ok(Self { config_path, config })
+
+        Ok(Self {
+            config_path,
+            config,
+        })
     }
-    
+
     /// Get the current configuration
     pub fn config(&self) -> &CliConfig {
         &self.config
     }
-    
+
     /// Get mutable reference to configuration
     pub fn config_mut(&mut self) -> &mut CliConfig {
         &mut self.config
     }
-    
+
     /// Save configuration to file
-    pub fn save(&self) -> CliResult<()> {
+    pub fn save(&self) -> Result<()> {
         // Create parent directory if it doesn't exist
         if let Some(parent) = self.config_path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| CliError::file_operation("create directory", &parent.display().to_string(), e))?;
+            fs::create_dir_all(parent).map_err(|e| {
+                CliError::file_operation("create directory", &parent.display().to_string(), e)
+            })?;
         }
-        
-        let content = toml::to_string_pretty(&self.config)
-            .map_err(CliError::from)?;
-        
-        fs::write(&self.config_path, content)
-            .map_err(|e| CliError::file_operation("write", &self.config_path.display().to_string(), e))?;
-        
+
+        let content = toml::to_string_pretty(&self.config).map_err(CliError::from)?;
+
+        fs::write(&self.config_path, content).map_err(|e| {
+            CliError::file_operation("write", &self.config_path.display().to_string(), e)
+        })?;
+
         Ok(())
     }
-    
+
     /// Update configuration value
-    pub fn set_value(&mut self, key: &str, value: &str) -> CliResult<()> {
+    pub fn set_value(&mut self, key: &str, value: &str) -> Result<()> {
         match key {
             "default_output_format" => {
                 self.config.cli.default_output_format = value.to_string();
             }
             "default_voice" => {
-                self.config.cli.default_voice = if value.is_empty() { 
-                    None 
-                } else { 
-                    Some(value.to_string()) 
+                self.config.cli.default_voice = if value.is_empty() {
+                    None
+                } else {
+                    Some(value.to_string())
                 };
             }
             "default_quality" => {
                 if ["low", "medium", "high", "ultra"].contains(&value) {
                     self.config.cli.default_quality = value.to_string();
                 } else {
-                    return Err(CliError::invalid_parameter(key, "must be one of: low, medium, high, ultra"));
+                    return Err(CliError::invalid_parameter(
+                        key,
+                        "must be one of: low, medium, high, ultra",
+                    ));
                 }
             }
             "colored_output" => {
-                self.config.cli.colored_output = value.parse()
+                self.config.cli.colored_output = value
+                    .parse()
                     .map_err(|_| CliError::invalid_parameter(key, "must be true or false"))?;
             }
             "show_progress" => {
-                self.config.cli.show_progress = value.parse()
+                self.config.cli.show_progress = value
+                    .parse()
                     .map_err(|_| CliError::invalid_parameter(key, "must be true or false"))?;
             }
             "auto_play" => {
-                self.config.cli.auto_play = value.parse()
+                self.config.cli.auto_play = value
+                    .parse()
                     .map_err(|_| CliError::invalid_parameter(key, "must be true or false"))?;
             }
             "output_directory" => {
-                self.config.cli.output_directory = if value.is_empty() { 
-                    None 
-                } else { 
-                    Some(PathBuf::from(value)) 
+                self.config.cli.output_directory = if value.is_empty() {
+                    None
+                } else {
+                    Some(PathBuf::from(value))
                 };
             }
             _ => {
-                return Err(CliError::invalid_parameter(key, "unknown configuration key"));
+                return Err(CliError::invalid_parameter(
+                    key,
+                    "unknown configuration key",
+                ));
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Get configuration value as string
     pub fn get_value(&self, key: &str) -> Option<String> {
         match key {
@@ -241,85 +257,99 @@ impl ConfigManager {
             "colored_output" => Some(self.config.cli.colored_output.to_string()),
             "show_progress" => Some(self.config.cli.show_progress.to_string()),
             "auto_play" => Some(self.config.cli.auto_play.to_string()),
-            "output_directory" => self.config.cli.output_directory.as_ref().map(|p| p.display().to_string()),
+            "output_directory" => self
+                .config
+                .cli
+                .output_directory
+                .as_ref()
+                .map(|p| p.display().to_string()),
             _ => None,
         }
     }
-    
+
     /// Apply environment variable overrides
     pub fn apply_env_overrides(&mut self) {
         if let Ok(format) = env::var("VOIRS_OUTPUT_FORMAT") {
             self.config.cli.default_output_format = format;
         }
-        
+
         if let Ok(voice) = env::var("VOIRS_DEFAULT_VOICE") {
             self.config.cli.default_voice = Some(voice);
         }
-        
+
         if let Ok(quality) = env::var("VOIRS_QUALITY") {
             if ["low", "medium", "high", "ultra"].contains(&quality.as_str()) {
                 self.config.cli.default_quality = quality;
             }
         }
-        
+
         if let Ok(colored) = env::var("VOIRS_COLORED_OUTPUT") {
             if let Ok(value) = colored.parse() {
                 self.config.cli.colored_output = value;
             }
         }
-        
+
         if let Ok(progress) = env::var("VOIRS_SHOW_PROGRESS") {
             if let Ok(value) = progress.parse() {
                 self.config.cli.show_progress = value;
             }
         }
-        
+
         if let Ok(output_dir) = env::var("VOIRS_OUTPUT_DIR") {
             self.config.cli.output_directory = Some(PathBuf::from(output_dir));
         }
     }
-    
+
     /// Validate configuration
-    pub fn validate(&self) -> CliResult<Vec<String>> {
+    pub fn validate(&self) -> Result<Vec<String>> {
         let mut warnings = Vec::new();
-        
+
         // Check if default voice exists
         if let Some(ref voice) = self.config.cli.default_voice {
             // This would require voice list lookup, skip for now
             warnings.push(format!("Default voice '{}' existence not verified", voice));
         }
-        
+
         // Check output directory
         if let Some(ref output_dir) = self.config.cli.output_directory {
             if !output_dir.exists() {
-                warnings.push(format!("Output directory '{}' does not exist", output_dir.display()));
+                warnings.push(format!(
+                    "Output directory '{}' does not exist",
+                    output_dir.display()
+                ));
             } else if !output_dir.is_dir() {
-                return Err(CliError::config(format!("Output directory '{}' is not a directory", output_dir.display())));
+                return Err(CliError::config(format!(
+                    "Output directory '{}' is not a directory",
+                    output_dir.display()
+                )));
             }
         }
-        
+
         // Validate download settings
         if self.config.cli.download.parallel_downloads == 0 {
-            return Err(CliError::config("parallel_downloads must be greater than 0"));
+            return Err(CliError::config(
+                "parallel_downloads must be greater than 0",
+            ));
         }
-        
+
         if self.config.cli.download.parallel_downloads > 10 {
             warnings.push("parallel_downloads > 10 may cause server rate limiting".to_string());
         }
-        
+
         Ok(warnings)
     }
-    
+
     /// Get configuration path
     pub fn config_path(&self) -> &Path {
         &self.config_path
     }
-    
+
     /// Load configuration from file
-    fn load_from_file<P: AsRef<Path>>(path: P) -> CliResult<CliConfig> {
-        let content = fs::read_to_string(path.as_ref())
-            .map_err(|e| CliError::file_operation("read", &path.as_ref().display().to_string(), e))?;
-        
+    fn load_from_file<P: AsRef<Path>>(path: P) -> Result<CliConfig> {
+        let content = fs::read_to_string(path.as_ref()).map_err(|e| {
+            CliError::file_operation("read", &path.as_ref().display().to_string(), e)
+        })?;
+
         // Try TOML first, then JSON for backward compatibility
         if let Ok(config) = toml::from_str::<CliConfig>(&content) {
             Ok(config)
@@ -328,7 +358,7 @@ impl ConfigManager {
                 .map_err(|e| CliError::config(format!("Invalid configuration format: {}", e)))
         }
     }
-    
+
     /// Find configuration file in standard locations
     fn find_config_file() -> Option<PathBuf> {
         let possible_paths = [
@@ -338,23 +368,23 @@ impl ConfigManager {
             Self::config_dir().map(|d| d.join("voirs.json")),
             env::var("VOIRS_CONFIG").ok().map(PathBuf::from),
         ];
-        
+
         for path in possible_paths.into_iter().flatten() {
             if path.exists() {
                 return Some(path);
             }
         }
-        
+
         None
     }
-    
+
     /// Get default configuration path
     fn default_config_path() -> PathBuf {
         Self::config_dir()
             .unwrap_or_else(|| env::current_dir().unwrap())
             .join("voirs.toml")
     }
-    
+
     /// Get configuration directory
     fn config_dir() -> Option<PathBuf> {
         if let Some(config_dir) = env::var_os("XDG_CONFIG_HOME") {
@@ -372,66 +402,362 @@ impl ConfigManager {
 /// Configuration utilities
 pub mod utils {
     use super::*;
-    
+
     /// Create a default configuration file
-    pub fn create_default_config<P: AsRef<Path>>(path: P) -> CliResult<()> {
+    pub fn create_default_config<P: AsRef<Path>>(path: P) -> Result<()> {
         let config = CliConfig::default();
-        let content = toml::to_string_pretty(&config)
-            .map_err(CliError::from)?;
-        
+        let content = toml::to_string_pretty(&config).map_err(CliError::from)?;
+
         if let Some(parent) = path.as_ref().parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| CliError::file_operation("create directory", &parent.display().to_string(), e))?;
+            fs::create_dir_all(parent).map_err(|e| {
+                CliError::file_operation("create directory", &parent.display().to_string(), e)
+            })?;
         }
-        
-        fs::write(path.as_ref(), content)
-            .map_err(|e| CliError::file_operation("write", &path.as_ref().display().to_string(), e))?;
-        
+
+        fs::write(path.as_ref(), content).map_err(|e| {
+            CliError::file_operation("write", &path.as_ref().display().to_string(), e)
+        })?;
+
         Ok(())
     }
-    
+
     /// Migrate old configuration format to new format
-    pub fn migrate_config<P: AsRef<Path>>(old_path: P, new_path: P) -> CliResult<()> {
-        let old_content = fs::read_to_string(old_path.as_ref())
-            .map_err(|e| CliError::file_operation("read", &old_path.as_ref().display().to_string(), e))?;
-        
+    pub fn migrate_config<P: AsRef<Path>>(old_path: P, new_path: P) -> Result<()> {
+        let old_content = fs::read_to_string(old_path.as_ref()).map_err(|e| {
+            CliError::file_operation("read", &old_path.as_ref().display().to_string(), e)
+        })?;
+
         // Try to parse as old format (assuming it was JSON)
         let old_config: serde_json::Value = serde_json::from_str(&old_content)
             .map_err(|e| CliError::config(format!("Cannot parse old config: {}", e)))?;
-        
+
         // Create new config with migrated values
         let mut new_config = CliConfig::default();
-        
+
         // Migrate known fields (this is a simplified example)
         if let Some(output_format) = old_config.get("output_format") {
             if let Some(format_str) = output_format.as_str() {
                 new_config.cli.default_output_format = format_str.to_string();
             }
         }
-        
+
         // Save migrated config
-        let content = toml::to_string_pretty(&new_config)
-            .map_err(CliError::from)?;
-        
-        fs::write(new_path.as_ref(), content)
-            .map_err(|e| CliError::file_operation("write", &new_path.as_ref().display().to_string(), e))?;
-        
+        let content = toml::to_string_pretty(&new_config).map_err(CliError::from)?;
+
+        fs::write(new_path.as_ref(), content).map_err(|e| {
+            CliError::file_operation("write", &new_path.as_ref().display().to_string(), e)
+        })?;
+
         Ok(())
     }
-    
+
     /// Export configuration for sharing
-    pub fn export_config<P: AsRef<Path>>(config: &CliConfig, path: P, format: ConfigFormat) -> CliResult<()> {
+    pub fn export_config<P: AsRef<Path>>(
+        config: &CliConfig,
+        path: P,
+        format: ConfigFormat,
+    ) -> Result<()> {
         let content = match format {
             ConfigFormat::Toml => toml::to_string_pretty(config)?,
             ConfigFormat::Json => serde_json::to_string_pretty(config)?,
             ConfigFormat::Yaml => serde_yaml::to_string(config)
                 .map_err(|e| CliError::config(format!("YAML serialization error: {}", e)))?,
         };
-        
-        fs::write(path.as_ref(), content)
-            .map_err(|e| CliError::file_operation("write", &path.as_ref().display().to_string(), e))?;
-        
+
+        fs::write(path.as_ref(), content).map_err(|e| {
+            CliError::file_operation("write", &path.as_ref().display().to_string(), e)
+        })?;
+
         Ok(())
+    }
+}
+
+/// Enhanced configuration loader with performance optimizations
+pub struct EnhancedConfigLoader {
+    cache: Option<(PathBuf, std::time::SystemTime, CliConfig)>,
+}
+
+impl EnhancedConfigLoader {
+    /// Create a new enhanced configuration loader
+    pub fn new() -> Self {
+        Self { cache: None }
+    }
+
+    /// Load configuration with caching and smart format detection
+    pub fn load_config<P: AsRef<Path>>(&mut self, path: P) -> Result<CliConfig> {
+        let path = path.as_ref();
+        let start_time = Instant::now();
+
+        // Check cache validity
+        if let Some((cached_path, cached_time, ref cached_config)) = &self.cache {
+            if cached_path == path {
+                if let Ok(metadata) = fs::metadata(path) {
+                    if let Ok(modified) = metadata.modified() {
+                        if modified <= *cached_time {
+                            // Cache hit - return cached config
+                            return Ok(cached_config.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Cache miss - load from file
+        let content = fs::read_to_string(path)
+            .map_err(|e| CliError::file_operation("read", &path.display().to_string(), e))?;
+
+        let config = self.parse_config_content(&content, path)?;
+
+        // Update cache
+        if let Ok(metadata) = fs::metadata(path) {
+            if let Ok(modified) = metadata.modified() {
+                self.cache = Some((path.to_path_buf(), modified, config.clone()));
+            }
+        }
+
+        let load_time = start_time.elapsed();
+        if load_time > Duration::from_millis(100) {
+            eprintln!("Warning: Configuration loading took {:?}", load_time);
+        }
+
+        Ok(config)
+    }
+
+    /// Parse configuration content with smart format detection
+    fn parse_config_content<P: AsRef<Path>>(&self, content: &str, path: P) -> Result<CliConfig> {
+        let extension = path.as_ref().extension().and_then(|ext| ext.to_str());
+
+        // Try format detection based on file extension first
+        match extension {
+            Some("toml") => {
+                match toml::from_str::<CliConfig>(content) {
+                    Ok(config) => return Ok(config),
+                    Err(e) => {
+                        // If TOML parsing fails, try fallback formats
+                        eprintln!("TOML parsing failed: {}, trying fallback formats", e);
+                    }
+                }
+            }
+            Some("json") => match serde_json::from_str::<CliConfig>(content) {
+                Ok(config) => return Ok(config),
+                Err(e) => {
+                    eprintln!("JSON parsing failed: {}, trying fallback formats", e);
+                }
+            },
+            Some("yaml") | Some("yml") => match serde_yaml::from_str::<CliConfig>(content) {
+                Ok(config) => return Ok(config),
+                Err(e) => {
+                    eprintln!("YAML parsing failed: {}, trying fallback formats", e);
+                }
+            },
+            _ => {
+                // No extension or unknown extension - try content-based detection
+            }
+        }
+
+        // Content-based format detection with smart heuristics
+        let trimmed = content.trim();
+
+        // Try TOML first (most common format)
+        if !trimmed.starts_with('{') && !trimmed.starts_with('[') {
+            if let Ok(config) = toml::from_str::<CliConfig>(content) {
+                return Ok(config);
+            }
+        }
+
+        // Try JSON if content looks like JSON
+        if trimmed.starts_with('{') && trimmed.ends_with('}') {
+            if let Ok(config) = serde_json::from_str::<CliConfig>(content) {
+                return Ok(config);
+            }
+        }
+
+        // Try YAML as last resort
+        if let Ok(config) = serde_yaml::from_str::<CliConfig>(content) {
+            return Ok(config);
+        }
+
+        Err(CliError::config(format!(
+            "Unable to parse configuration file '{}' - tried TOML, JSON, and YAML formats",
+            path.as_ref().display()
+        )))
+    }
+
+    /// Clear the configuration cache
+    pub fn clear_cache(&mut self) {
+        self.cache = None;
+    }
+
+    /// Check if configuration is cached
+    pub fn is_cached<P: AsRef<Path>>(&self, path: P) -> bool {
+        if let Some((cached_path, _, _)) = &self.cache {
+            cached_path == path.as_ref()
+        } else {
+            false
+        }
+    }
+
+    /// Get cache statistics
+    pub fn cache_stats(&self) -> Option<(PathBuf, std::time::SystemTime)> {
+        self.cache
+            .as_ref()
+            .map(|(path, time, _)| (path.clone(), *time))
+    }
+}
+
+impl Default for EnhancedConfigLoader {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Configuration validation utilities
+pub mod validation {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// Validate configuration with detailed reporting
+    pub fn validate_config_detailed(config: &CliConfig) -> Result<ValidationReport> {
+        let mut report = ValidationReport::new();
+        let start_time = Instant::now();
+
+        // Validate CLI settings
+        validate_cli_settings(&config.cli, &mut report)?;
+
+        // Validate core configuration
+        validate_core_config(&config.core, &mut report)?;
+
+        // Performance check
+        let validation_time = start_time.elapsed();
+        if validation_time > Duration::from_millis(50) {
+            report.add_warning(format!(
+                "Configuration validation took {:?} - consider optimizing",
+                validation_time
+            ));
+        }
+
+        Ok(report)
+    }
+
+    /// Validate CLI-specific settings
+    fn validate_cli_settings(settings: &CliSettings, report: &mut ValidationReport) -> Result<()> {
+        // Validate output format
+        let valid_formats = ["wav", "mp3", "flac", "ogg", "m4a"];
+        if !valid_formats.contains(&settings.default_output_format.as_str()) {
+            report.add_error(format!(
+                "Invalid default output format '{}'. Valid formats: {}",
+                settings.default_output_format,
+                valid_formats.join(", ")
+            ));
+        }
+
+        // Validate quality level
+        let valid_qualities = ["low", "medium", "high", "ultra"];
+        if !valid_qualities.contains(&settings.default_quality.as_str()) {
+            report.add_error(format!(
+                "Invalid default quality '{}'. Valid qualities: {}",
+                settings.default_quality,
+                valid_qualities.join(", ")
+            ));
+        }
+
+        // Validate output directory
+        if let Some(ref output_dir) = settings.output_directory {
+            if !output_dir.exists() {
+                report.add_warning(format!(
+                    "Output directory '{}' does not exist",
+                    output_dir.display()
+                ));
+            } else if !output_dir.is_dir() {
+                report.add_error(format!(
+                    "Output directory '{}' is not a directory",
+                    output_dir.display()
+                ));
+            }
+        }
+
+        // Validate download settings
+        if settings.download.parallel_downloads == 0 {
+            report.add_error("parallel_downloads must be greater than 0".to_string());
+        } else if settings.download.parallel_downloads > 20 {
+            report.add_warning(format!(
+                "parallel_downloads ({}) is very high and may cause issues",
+                settings.download.parallel_downloads
+            ));
+        }
+
+        if settings.download.retry_attempts > 10 {
+            report.add_warning(format!(
+                "retry_attempts ({}) is very high and may cause long delays",
+                settings.download.retry_attempts
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Validate core configuration
+    fn validate_core_config(config: &AppConfig, report: &mut ValidationReport) -> Result<()> {
+        // Add core configuration validation here
+        // This is a placeholder for future core config validation
+        if config.pipeline.device == "gpu" {
+            report.add_info("GPU acceleration enabled - ensure CUDA/ROCm is available".to_string());
+        }
+
+        Ok(())
+    }
+
+    /// Configuration validation report
+    #[derive(Debug, Clone)]
+    pub struct ValidationReport {
+        pub errors: Vec<String>,
+        pub warnings: Vec<String>,
+        pub info: Vec<String>,
+    }
+
+    impl ValidationReport {
+        pub fn new() -> Self {
+            Self {
+                errors: Vec::new(),
+                warnings: Vec::new(),
+                info: Vec::new(),
+            }
+        }
+
+        pub fn add_error(&mut self, error: String) {
+            self.errors.push(error);
+        }
+
+        pub fn add_warning(&mut self, warning: String) {
+            self.warnings.push(warning);
+        }
+
+        pub fn add_info(&mut self, info: String) {
+            self.info.push(info);
+        }
+
+        pub fn is_valid(&self) -> bool {
+            self.errors.is_empty()
+        }
+
+        pub fn has_warnings(&self) -> bool {
+            !self.warnings.is_empty()
+        }
+
+        pub fn summary(&self) -> String {
+            format!(
+                "Validation complete: {} errors, {} warnings, {} info messages",
+                self.errors.len(),
+                self.warnings.len(),
+                self.info.len()
+            )
+        }
+    }
+
+    impl Default for ValidationReport {
+        fn default() -> Self {
+            Self::new()
+        }
     }
 }
 

@@ -1,0 +1,358 @@
+version: '3.8'
+
+# VoiRS Recognizer Docker Compose Configuration
+# Provides multiple deployment profiles for different use cases
+
+services:
+  # ============================================================================
+  # Core VoiRS Recognizer Service
+  # ============================================================================
+  voirs-recognizer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+      args:
+        BUILD_DATE: ${BUILD_DATE:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}
+        VCS_REF: ${VCS_REF:-$(git rev-parse HEAD)}
+        VERSION: ${VERSION:-0.1.0-alpha.1}
+    image: voirs/recognizer:${VERSION:-latest}
+    container_name: voirs-recognizer-core
+    restart: unless-stopped
+    volumes:
+      - models:/app/models
+      - audio_data:/app/data
+      - recognition_output:/app/output
+      - ./config:/app/config:ro
+    environment:
+      - RUST_LOG=${RUST_LOG:-info}
+      - VOIRS_MODEL_PATH=/app/models
+      - VOIRS_DATA_PATH=/app/data
+      - VOIRS_OUTPUT_PATH=/app/output
+      - VOIRS_CONFIG_PATH=/app/config
+    healthcheck:
+      test: ["/app/healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    profiles:
+      - core
+      - production
+      - full
+
+  # ============================================================================
+  # REST API Service
+  # ============================================================================
+  voirs-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: rest-api
+    image: voirs/recognizer-api:${VERSION:-latest}
+    container_name: voirs-recognizer-api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-8080}:8080"
+    volumes:
+      - models:/app/models:ro
+      - audio_data:/app/data
+      - recognition_output:/app/output
+      - ./config:/app/config:ro
+      - api_logs:/app/logs
+    environment:
+      - RUST_LOG=${RUST_LOG:-info}
+      - VOIRS_BIND_ADDRESS=0.0.0.0:8080
+      - VOIRS_MODEL_PATH=/app/models
+      - VOIRS_DATA_PATH=/app/data
+      - VOIRS_OUTPUT_PATH=/app/output
+      - VOIRS_CONFIG_PATH=/app/config
+      - VOIRS_LOG_PATH=/app/logs
+      - VOIRS_MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE:-100MB}
+      - VOIRS_CORS_ORIGIN=${CORS_ORIGIN:-*}
+    depends_on:
+      - voirs-recognizer
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    profiles:
+      - api
+      - production
+      - full
+
+  # ============================================================================
+  # WASM Development Server
+  # ============================================================================
+  voirs-wasm-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: wasm-dev
+    image: voirs/recognizer-wasm:${VERSION:-latest}
+    container_name: voirs-recognizer-wasm
+    restart: unless-stopped
+    ports:
+      - "${WASM_PORT:-8081}:8080"
+    volumes:
+      - ./examples/wasm:/app/examples:ro
+    environment:
+      - NODE_ENV=development
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    profiles:
+      - wasm
+      - development
+      - full
+
+  # ============================================================================
+  # Development Environment
+  # ============================================================================
+  voirs-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    image: voirs/recognizer-dev:${VERSION:-latest}
+    container_name: voirs-recognizer-dev
+    restart: unless-stopped
+    ports:
+      - "${DEV_PORT:-3000}:3000"
+      - "${DEV_API_PORT:-8000}:8000"
+    volumes:
+      - .:/app
+      - cargo_cache:/usr/local/cargo/registry
+      - target_cache:/app/target
+    environment:
+      - RUST_LOG=debug
+      - CARGO_WATCH_ARGS=--why
+    working_dir: /app
+    command: cargo watch -x "test --all-features"
+    profiles:
+      - development
+      - dev
+
+  # ============================================================================
+  # Redis Cache (for API performance)
+  # ============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: voirs-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+      - ./config/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    profiles:
+      - cache
+      - production
+      - full
+
+  # ============================================================================
+  # PostgreSQL Database (for metadata and analytics)
+  # ============================================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: voirs-postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-voirs}
+      - POSTGRES_USER=${POSTGRES_USER:-voirs}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-voirs123}
+      - POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-voirs}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - database
+      - production
+      - full
+
+  # ============================================================================
+  # Nginx Reverse Proxy
+  # ============================================================================
+  nginx:
+    image: nginx:alpine
+    container_name: voirs-nginx
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./config/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./config/ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - voirs-api
+      - voirs-wasm-dev
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    profiles:
+      - proxy
+      - production
+      - full
+
+  # ============================================================================
+  # Monitoring Stack
+  # ============================================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: voirs-prometheus
+    restart: unless-stopped
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    profiles:
+      - monitoring
+      - full
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: voirs-grafana
+    restart: unless-stopped
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana:/etc/grafana/provisioning:ro
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    depends_on:
+      - prometheus
+    profiles:
+      - monitoring
+      - full
+
+  # ============================================================================
+  # Log Aggregation
+  # ============================================================================
+  loki:
+    image: grafana/loki:latest
+    container_name: voirs-loki
+    restart: unless-stopped
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+    volumes:
+      - loki_data:/loki
+      - ./config/loki.yml:/etc/loki/local-config.yaml:ro
+    command: -config.file=/etc/loki/local-config.yaml
+    profiles:
+      - logging
+      - monitoring
+      - full
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: voirs-promtail
+    restart: unless-stopped
+    volumes:
+      - ./config/promtail.yml:/etc/promtail/config.yml:ro
+      - /var/log:/var/log:ro
+      - api_logs:/app/logs:ro
+      - nginx_logs:/var/log/nginx:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    profiles:
+      - logging
+      - monitoring
+      - full
+
+# ============================================================================
+# Named Volumes
+# ============================================================================
+volumes:
+  # Application data
+  models:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${MODELS_PATH:-./models}
+  
+  audio_data:
+    driver: local
+  
+  recognition_output:
+    driver: local
+  
+  # Cache volumes
+  cargo_cache:
+    driver: local
+  
+  target_cache:
+    driver: local
+  
+  redis_data:
+    driver: local
+  
+  postgres_data:
+    driver: local
+  
+  # Log volumes
+  api_logs:
+    driver: local
+  
+  nginx_logs:
+    driver: local
+  
+  # Monitoring data
+  prometheus_data:
+    driver: local
+  
+  grafana_data:
+    driver: local
+  
+  loki_data:
+    driver: local
+
+# ============================================================================
+# Networks
+# ============================================================================
+networks:
+  default:
+    name: voirs-network
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ============================================================================
+# Development Overrides
+# ============================================================================
+# Use: docker-compose -f docker-compose.yml -f docker-compose.override.yml
+# The override file can contain development-specific configurations

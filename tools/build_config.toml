@@ -1,0 +1,284 @@
+# VoiRS Examples Build Configuration
+# ===================================
+#
+# This configuration file defines settings for the VoiRS examples build system.
+# It allows customization of build behavior, test parameters, and validation rules.
+
+[build]
+# Build configuration
+parallel_jobs = 0  # 0 = auto-detect CPU count
+target_profile = "release"  # "dev" | "release" | "custom"
+clean_before_build = false
+use_native_cpu_features = true  # Optimize for current CPU
+enable_lto = false  # Link-time optimization (slower builds, faster runtime)
+
+# Rust compilation flags
+[build.rustflags]
+codegen_units = 1  # Better optimization, slower builds
+debug_assertions = false
+overflow_checks = false
+panic = "abort"  # Smaller binaries
+
+# Platform-specific settings
+[build.platforms]
+windows = { toolchain = "stable-x86_64-pc-windows-msvc" }
+linux = { toolchain = "stable-x86_64-unknown-linux-gnu" }
+macos = { toolchain = "stable-x86_64-apple-darwin" }
+
+[testing]
+# Test execution configuration
+default_timeout = 60  # seconds
+parallel_test_jobs = 4  # Limit to avoid resource contention
+enable_output_validation = true
+capture_performance_metrics = true
+generate_test_reports = true
+
+# Test categories with specific settings
+[testing.categories.performance]
+timeout = 120
+memory_limit_mb = 4096
+cpu_affinity = true  # Pin to specific CPU cores
+require_baseline = true  # Compare against performance baselines
+
+[testing.categories.realtime]
+timeout = 30
+latency_threshold = 100  # milliseconds
+rtf_threshold = 1.0  # Real-time factor must be < 1.0
+jitter_tolerance = 10  # milliseconds
+
+[testing.categories.spatial]
+timeout = 90
+require_gpu = false  # Optional GPU acceleration
+memory_limit_mb = 2048
+audio_quality_threshold = 0.8
+
+[testing.categories.voice]
+timeout = 180  # Voice cloning takes longer
+memory_limit_mb = 8192
+similarity_threshold = 0.85
+quality_threshold = 0.9
+
+[testing.categories.production]
+timeout = 300
+stress_test_duration = 60  # seconds
+concurrent_sessions = 10
+memory_leak_detection = true
+
+[validation]
+# Output validation settings
+check_audio_files = true
+check_report_files = true
+check_metrics_files = true
+
+# Audio file validation
+[validation.audio]
+min_duration = 0.1  # seconds
+max_duration = 300.0  # seconds
+min_file_size_kb = 1
+max_file_size_kb = 51200  # 50MB
+sample_rates = [8000, 16000, 22050, 44100, 48000]
+check_corruption = true
+loudness_range_lufs = [-50.0, -10.0]  # Loudness Units relative to Full Scale
+
+# Performance validation
+[validation.performance]
+max_rtf = 2.0  # Real-Time Factor
+max_memory_mb = 16384
+max_cpu_percent = 90
+min_quality_score = 0.7
+
+# Report validation
+[validation.reports]
+required_fields = ["timestamp", "duration", "rtf", "success"]
+schema_validation = true
+json_format_check = true
+
+[examples]
+# Example-specific configuration
+
+# Examples that require special handling
+[examples.overrides]
+"comprehensive_benchmark_suite" = { timeout = 300, memory_limit_mb = 8192 }
+"memory_profiling_analysis" = { timeout = 180, enable_valgrind = true }
+"production_monitoring_example" = { timeout = 240, require_network = true }
+"spatial_audio_example" = { require_audio_device = true }
+"voice_cloning_example" = { timeout = 600, memory_limit_mb = 16384 }
+
+# Examples to skip in different modes
+[examples.skip]
+quick_mode = [
+    "comprehensive_benchmark_suite",
+    "memory_profiling_analysis", 
+    "voice_cloning_example"
+]
+ci_mode = [
+    "interactive_examples",
+    "gpu_intensive_examples"
+]
+minimal_mode = [
+    "comprehensive_benchmark_suite",
+    "memory_profiling_analysis",
+    "production_monitoring_example",
+    "voice_cloning_example",
+    "spatial_audio_example"
+]
+
+# Example categories for filtering
+[examples.categories]
+beginner = [
+    "hello_world",
+    "simple_synthesis", 
+    "basic_configuration"
+]
+intermediate = [
+    "streaming_synthesis",
+    "ssml_synthesis",
+    "batch_synthesis",
+    "emotion_control_example"
+]
+advanced = [
+    "voice_cloning_example",
+    "spatial_audio_example", 
+    "performance_benchmarking",
+    "multimodal_integration_example"
+]
+production = [
+    "production_pipeline_example",
+    "production_monitoring_example",
+    "robust_error_handling_patterns"
+]
+testing = [
+    "testing_framework_example",
+    "ab_testing_quality_comparison",
+    "comprehensive_benchmark_suite"
+]
+
+[reporting]
+# Report generation configuration
+generate_html_report = true
+generate_json_report = true
+generate_junit_xml = true  # For CI/CD integration
+include_build_logs = false
+include_test_outputs = false
+include_performance_charts = true
+
+# Report retention
+[reporting.retention]
+keep_reports_days = 30
+max_reports_count = 100
+archive_old_reports = true
+
+[ci_cd]
+# Continuous Integration/Deployment settings
+fail_fast = true  # Stop on first failure
+upload_artifacts = true
+notification_webhooks = []
+cache_dependencies = true
+matrix_builds = ["linux", "windows", "macos"]
+
+# Performance regression detection
+[ci_cd.regression]
+enable_regression_detection = true
+performance_threshold_percent = 10  # Fail if performance degrades by more than 10%
+quality_threshold = 0.05  # Fail if quality drops by more than 5%
+compare_against = "main"  # Branch to compare against
+
+[dependencies]
+# Dependency management
+check_updates = false
+allow_dev_dependencies = true
+security_audit = false  # Run cargo audit
+
+# Version pinning for stable builds
+[dependencies.pins]
+# "specific-crate" = "1.0.0"
+
+[resources]
+# Resource usage limits
+max_build_time_minutes = 30
+max_test_time_minutes = 60
+max_disk_usage_gb = 10
+max_memory_usage_gb = 16
+
+# Cleanup configuration
+[resources.cleanup]
+auto_cleanup = true
+keep_successful_artifacts = false
+keep_failed_artifacts = true
+cleanup_after_days = 7
+
+[logging]
+# Logging configuration
+level = "info"  # "debug" | "info" | "warn" | "error"
+format = "pretty"  # "pretty" | "json" | "compact"
+log_to_file = true
+log_file_path = "build_logs/build.log"
+rotate_logs = true
+max_log_files = 10
+
+[notifications]
+# Notification settings (for CI/CD)
+slack_webhook = ""
+discord_webhook = ""
+email_recipients = []
+
+# Notification triggers
+[notifications.triggers]
+build_failure = true
+test_failure = true
+performance_regression = true
+new_warnings = false
+successful_build = false
+
+[experimental]
+# Experimental features (use at your own risk)
+enable_parallel_linking = false
+use_mold_linker = false  # Faster linking on Linux
+enable_build_cache = false
+cross_compilation = false
+
+[profiles]
+# Predefined configuration profiles
+
+[profiles.development]
+# Fast builds for development
+build.parallel_jobs = 0
+build.target_profile = "dev"
+testing.default_timeout = 30
+validation.audio.check_corruption = false
+logging.level = "debug"
+
+[profiles.ci]
+# Optimized for CI/CD pipelines
+build.clean_before_build = true
+build.use_native_cpu_features = false  # Portable builds
+testing.generate_test_reports = true
+reporting.generate_junit_xml = true
+ci_cd.fail_fast = true
+logging.level = "info"
+
+[profiles.production]
+# Full validation for production releases
+build.target_profile = "release"
+build.enable_lto = true
+testing.enable_output_validation = true
+validation.audio.check_corruption = true
+validation.performance.max_rtf = 1.0
+dependencies.security_audit = true
+
+[profiles.quick]
+# Quick testing for development
+examples.skip = "quick_mode"
+testing.default_timeout = 15
+testing.parallel_test_jobs = 8
+validation.audio.check_corruption = false
+reporting.include_performance_charts = false
+
+[profiles.full]
+# Comprehensive testing
+testing.default_timeout = 300
+testing.capture_performance_metrics = true
+validation.audio.check_corruption = true
+validation.performance.max_rtf = 2.0
+reporting.include_build_logs = true
+ci_cd.regression.enable_regression_detection = true

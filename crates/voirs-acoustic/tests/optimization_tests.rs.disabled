@@ -1,0 +1,528 @@
+//! Comprehensive tests for model optimization features
+
+use voirs_acoustic::{
+    OptimizationConfig, PruningConfig, DistillationConfig,
+    HardwareOptimization, OptimizationTargets, PruningStrategy, PruningType, HardwareTarget,
+    ModelOptimizer, OptimizationReport, OptimizationMetrics,
+    Result,
+};
+use voirs_acoustic::optimization::{QuantizationConfig, QuantizationPrecision, QuantizationMethod, DistillationMethod};
+use std::collections::HashMap;
+
+/// Test optimization configuration defaults
+#[tokio::test]
+async fn test_optimization_config_defaults() -> Result<()> {
+    let config = OptimizationConfig::default();
+    
+    // Verify quantization defaults
+    assert!(config.quantization.enabled); // Default from optimization.rs is true
+    assert!(matches!(config.quantization.precision, QuantizationPrecision::Float16));
+    assert!(config.quantization.calibration_samples > 0);
+    assert!(matches!(config.quantization.quantization_method, QuantizationMethod::PostTraining));
+    
+    // Verify pruning defaults
+    assert!(config.pruning.enabled); // Default from optimization.rs is true
+    assert!(matches!(config.pruning.strategy, PruningStrategy::Magnitude));
+    assert!(config.pruning.target_sparsity >= 0.0 && config.pruning.target_sparsity <= 1.0);
+    
+    // Verify distillation defaults
+    assert!(!config.distillation.enabled); // Default from optimization.rs is false
+    assert!(matches!(config.distillation.method, DistillationMethod::Standard));
+    
+    Ok(())
+}
+
+/// Test quantization configuration options
+#[tokio::test]
+async fn test_quantization_config_options() -> Result<()> {
+    // Test INT8 quantization
+    let int8_config = QuantizationConfig {
+        enabled: true,
+        precision: QuantizationPrecision::Int8,
+        calibration_samples: 1000,
+        excluded_layers: vec!["attention".to_string(), "output".to_string()],
+        quantization_method: QuantizationMethod::QuantizationAware,
+        dynamic_quantization: false,
+    };
+    
+    assert!(int8_config.enabled);
+    assert!(matches!(int8_config.precision, QuantizationPrecision::Int8));
+    assert_eq!(int8_config.calibration_samples, 1000);
+    assert_eq!(int8_config.excluded_layers.len(), 2);
+    assert!(matches!(int8_config.quantization_method, QuantizationMethod::QuantizationAware));
+    
+    // Test Float16 quantization
+    let fp16_config = QuantizationConfig {
+        enabled: true,
+        precision: QuantizationPrecision::Float16,
+        calibration_samples: 500,
+        excluded_layers: vec![],
+        quantization_method: QuantizationMethod::PostTraining,
+        dynamic_quantization: true,
+    };
+    
+    assert!(matches!(fp16_config.precision, QuantizationPrecision::Float16));
+    assert!(fp16_config.dynamic_quantization);
+    assert!(fp16_config.excluded_layers.is_empty());
+    
+    // Test Mixed precision
+    let mixed_config = QuantizationConfig {
+        enabled: true,
+        precision: QuantizationPrecision::Mixed,
+        calibration_samples: 2000,
+        excluded_layers: vec!["encoder".to_string()],
+        quantization_method: QuantizationMethod::Gradual,
+        dynamic_quantization: false,
+    };
+    
+    assert!(matches!(mixed_config.precision, QuantizationPrecision::Mixed));
+    assert!(matches!(mixed_config.quantization_method, QuantizationMethod::Gradual));
+    
+    Ok(())
+}
+
+/// Test pruning configuration options
+#[tokio::test]
+async fn test_pruning_config_options() -> Result<()> {
+    // Test magnitude-based pruning
+    let magnitude_config = PruningConfig {
+        enabled: true,
+        strategy: PruningStrategy::Magnitude,
+        target_sparsity: 0.5,
+        gradual_pruning: true,
+        pruning_type: PruningType::Unstructured,
+        excluded_layers: vec!["final_layer".to_string()],
+    };
+    
+    assert!(magnitude_config.enabled);
+    assert!(matches!(magnitude_config.strategy, PruningStrategy::Magnitude));
+    assert_eq!(magnitude_config.target_sparsity, 0.5);
+    assert!(magnitude_config.gradual_pruning);
+    assert!(matches!(magnitude_config.pruning_type, PruningType::Unstructured));
+    
+    // Test gradient-based pruning
+    let gradient_config = PruningConfig {
+        enabled: true,
+        strategy: PruningStrategy::Gradient,
+        target_sparsity: 0.3,
+        gradual_pruning: false,
+        pruning_type: PruningType::Structured,
+        excluded_layers: vec![],
+    };
+    
+    assert!(matches!(gradient_config.strategy, PruningStrategy::Gradient));
+    assert_eq!(gradient_config.target_sparsity, 0.3);
+    assert!(!gradient_config.gradual_pruning);
+    assert!(matches!(gradient_config.pruning_type, PruningType::Structured));
+    
+    // Test Fisher information pruning
+    let fisher_config = PruningConfig {
+        enabled: true,
+        strategy: PruningStrategy::Fisher,
+        target_sparsity: 0.7,
+        gradual_pruning: true,
+        pruning_type: PruningType::Unstructured,
+        excluded_layers: vec!["attention".to_string(), "norm".to_string()],
+    };
+    
+    assert!(matches!(fisher_config.strategy, PruningStrategy::Fisher));
+    assert_eq!(fisher_config.target_sparsity, 0.7);
+    assert_eq!(fisher_config.excluded_layers.len(), 2);
+    
+    Ok(())
+}
+
+/// Test distillation configuration options
+#[tokio::test]
+async fn test_distillation_config_options() -> Result<()> {
+    let distillation_config = DistillationConfig {
+        enabled: true,
+        strategy: DistillationStrategy::Knowledge,
+        teacher_model_path: Some("teacher_model.ckpt".to_string()),
+        student_model_config: HashMap::new(),
+        temperature: 4.0,
+        alpha: 0.7,
+        distillation_loss_weight: 0.5,
+        feature_matching: true,
+        attention_transfer: true,
+    };
+    
+    assert!(distillation_config.enabled);
+    assert!(matches!(distillation_config.strategy, DistillationStrategy::Knowledge));
+    assert_eq!(distillation_config.teacher_model_path, Some("teacher_model.ckpt".to_string()));
+    assert_eq!(distillation_config.temperature, 4.0);
+    assert_eq!(distillation_config.alpha, 0.7);
+    assert!(distillation_config.feature_matching);
+    assert!(distillation_config.attention_transfer);
+    
+    Ok(())
+}
+
+/// Test hardware optimization options
+#[tokio::test]
+async fn test_hardware_optimization_options() -> Result<()> {
+    // Test CPU optimization
+    let cpu_optimization = HardwareOptimization {
+        target_hardware: HardwareTarget::CPU,
+        enable_simd: true,
+        enable_vectorization: true,
+        optimize_for_inference: true,
+        memory_constraints: Some(2048), // 2GB
+        compute_constraints: None,
+        optimization_level: 2,
+    };
+    
+    assert!(matches!(cpu_optimization.target_hardware, HardwareTarget::CPU));
+    assert!(cpu_optimization.enable_simd);
+    assert!(cpu_optimization.enable_vectorization);
+    assert_eq!(cpu_optimization.memory_constraints, Some(2048));
+    assert_eq!(cpu_optimization.optimization_level, 2);
+    
+    // Test GPU optimization
+    let gpu_optimization = HardwareOptimization {
+        target_hardware: HardwareTarget::GPU,
+        enable_simd: false, // Not relevant for GPU
+        enable_vectorization: true,
+        optimize_for_inference: true,
+        memory_constraints: Some(8192), // 8GB
+        compute_constraints: Some(10000), // GFLOPS
+        optimization_level: 3,
+    };
+    
+    assert!(matches!(gpu_optimization.target_hardware, HardwareTarget::GPU));
+    assert!(!gpu_optimization.enable_simd);
+    assert_eq!(gpu_optimization.memory_constraints, Some(8192));
+    assert_eq!(gpu_optimization.compute_constraints, Some(10000));
+    
+    // Test mobile optimization
+    let mobile_optimization = HardwareOptimization {
+        target_hardware: HardwareTarget::Mobile,
+        enable_simd: true,
+        enable_vectorization: false,
+        optimize_for_inference: true,
+        memory_constraints: Some(512), // 512MB
+        compute_constraints: Some(100), // Limited compute
+        optimization_level: 1, // Conservative for mobile
+    };
+    
+    assert!(matches!(mobile_optimization.target_hardware, HardwareTarget::Mobile));
+    assert_eq!(mobile_optimization.memory_constraints, Some(512));
+    assert_eq!(mobile_optimization.optimization_level, 1);
+    
+    Ok(())
+}
+
+/// Test optimization targets configuration
+#[tokio::test]
+async fn test_optimization_targets() -> Result<()> {
+    let targets = OptimizationTargets {
+        target_latency_ms: Some(100.0),
+        target_memory_mb: Some(1024.0),
+        target_model_size_mb: Some(256.0),
+        target_accuracy_threshold: Some(0.95),
+        target_inference_speed: Some(2.0), // 2x faster
+        priority_weights: {
+            let mut weights = HashMap::new();
+            weights.insert("latency".to_string(), 0.4);
+            weights.insert("memory".to_string(), 0.3);
+            weights.insert("accuracy".to_string(), 0.3);
+            weights
+        },
+    };
+    
+    assert_eq!(targets.target_latency_ms, Some(100.0));
+    assert_eq!(targets.target_memory_mb, Some(1024.0));
+    assert_eq!(targets.target_model_size_mb, Some(256.0));
+    assert_eq!(targets.target_accuracy_threshold, Some(0.95));
+    assert_eq!(targets.priority_weights.len(), 3);
+    
+    // Verify weights sum to 1.0 (or close to it)
+    let weight_sum: f32 = targets.priority_weights.values().sum();
+    assert!((weight_sum - 1.0).abs() < 0.01);
+    
+    Ok(())
+}
+
+/// Test quantization precision variants
+#[tokio::test]
+async fn test_quantization_precision_variants() -> Result<()> {
+    let precisions = vec![
+        QuantizationPrecision::Int8,
+        QuantizationPrecision::Float16,
+        QuantizationPrecision::Mixed,
+        QuantizationPrecision::Dynamic,
+    ];
+    
+    for precision in precisions {
+        let config = QuantizationConfig {
+            enabled: true,
+            precision: precision.clone(),
+            calibration_samples: 1000,
+            excluded_layers: vec![],
+            quantization_method: QuantizationMethod::PostTraining,
+            dynamic_quantization: false,
+        };
+        
+        // Verify precision is set correctly
+        match precision {
+            QuantizationPrecision::Int8 => {
+                assert!(matches!(config.precision, QuantizationPrecision::Int8));
+            }
+            QuantizationPrecision::Float16 => {
+                assert!(matches!(config.precision, QuantizationPrecision::Float16));
+            }
+            QuantizationPrecision::Mixed => {
+                assert!(matches!(config.precision, QuantizationPrecision::Mixed));
+            }
+            QuantizationPrecision::Dynamic => {
+                assert!(matches!(config.precision, QuantizationPrecision::Dynamic));
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// Test pruning strategy variants
+#[tokio::test]
+async fn test_pruning_strategy_variants() -> Result<()> {
+    let strategies = vec![
+        PruningStrategy::Magnitude,
+        PruningStrategy::Gradient,
+        PruningStrategy::Fisher,
+        PruningStrategy::Random,
+        PruningStrategy::Structured,
+    ];
+    
+    for strategy in strategies {
+        let config = PruningConfig {
+            enabled: true,
+            strategy: strategy.clone(),
+            target_sparsity: 0.5,
+            gradual_pruning: false,
+            pruning_type: PruningType::Unstructured,
+            excluded_layers: vec![],
+        };
+        
+        // Verify strategy is set correctly
+        match strategy {
+            PruningStrategy::Magnitude => {
+                assert!(matches!(config.strategy, PruningStrategy::Magnitude));
+            }
+            PruningStrategy::Gradient => {
+                assert!(matches!(config.strategy, PruningStrategy::Gradient));
+            }
+            PruningStrategy::Fisher => {
+                assert!(matches!(config.strategy, PruningStrategy::Fisher));
+            }
+            PruningStrategy::Random => {
+                assert!(matches!(config.strategy, PruningStrategy::Random));
+            }
+            PruningStrategy::Structured => {
+                assert!(matches!(config.strategy, PruningStrategy::Structured));
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// Test optimization configuration validation
+#[tokio::test]
+async fn test_optimization_config_validation() -> Result<()> {
+    // Test valid configuration
+    let valid_config = OptimizationConfig {
+        quantization: QuantizationConfig {
+            enabled: true,
+            precision: QuantizationPrecision::Int8,
+            calibration_samples: 1000,
+            excluded_layers: vec!["sensitive_layer".to_string()],
+            quantization_method: QuantizationMethod::PostTraining,
+            dynamic_quantization: false,
+        },
+        pruning: PruningConfig {
+            enabled: true,
+            strategy: PruningStrategy::Magnitude,
+            target_sparsity: 0.3,
+            gradual_pruning: true,
+            pruning_type: PruningType::Unstructured,
+            excluded_layers: vec![],
+        },
+        distillation: DistillationConfig {
+            enabled: false,
+            strategy: DistillationStrategy::Knowledge,
+            teacher_model_path: None,
+            student_model_config: HashMap::new(),
+            temperature: 3.0,
+            alpha: 0.7,
+            distillation_loss_weight: 0.5,
+            feature_matching: false,
+            attention_transfer: false,
+        },
+        hardware_optimization: HardwareOptimization {
+            target_hardware: HardwareTarget::CPU,
+            enable_simd: true,
+            enable_vectorization: true,
+            optimize_for_inference: true,
+            memory_constraints: Some(2048),
+            compute_constraints: None,
+            optimization_level: 2,
+        },
+        optimization_targets: OptimizationTargets {
+            target_latency_ms: Some(50.0),
+            target_memory_mb: Some(1024.0),
+            target_model_size_mb: Some(128.0),
+            target_accuracy_threshold: Some(0.98),
+            target_inference_speed: Some(1.5),
+            priority_weights: HashMap::new(),
+        },
+    };
+    
+    // Verify configuration constraints
+    assert!(valid_config.pruning.target_sparsity >= 0.0 && valid_config.pruning.target_sparsity <= 1.0);
+    assert!(valid_config.quantization.calibration_samples > 0);
+    assert!(valid_config.distillation.temperature > 0.0);
+    assert!(valid_config.distillation.alpha >= 0.0 && valid_config.distillation.alpha <= 1.0);
+    assert!(valid_config.hardware_optimization.optimization_level >= 0);
+    
+    if let Some(latency) = valid_config.optimization_targets.target_latency_ms {
+        assert!(latency > 0.0);
+    }
+    
+    if let Some(memory) = valid_config.optimization_targets.target_memory_mb {
+        assert!(memory > 0.0);
+    }
+    
+    Ok(())
+}
+
+/// Test hardware target enumeration
+#[tokio::test]
+async fn test_hardware_target_enumeration() -> Result<()> {
+    let targets = vec![
+        HardwareTarget::CPU,
+        HardwareTarget::GPU,
+        HardwareTarget::Mobile,
+        HardwareTarget::Edge,
+        HardwareTarget::Cloud,
+    ];
+    
+    for target in targets {
+        let optimization = HardwareOptimization {
+            target_hardware: target.clone(),
+            enable_simd: true,
+            enable_vectorization: true,
+            optimize_for_inference: true,
+            memory_constraints: Some(1024),
+            compute_constraints: None,
+            optimization_level: 1,
+        };
+        
+        // Verify target is set correctly
+        match target {
+            HardwareTarget::CPU => {
+                assert!(matches!(optimization.target_hardware, HardwareTarget::CPU));
+            }
+            HardwareTarget::GPU => {
+                assert!(matches!(optimization.target_hardware, HardwareTarget::GPU));
+            }
+            HardwareTarget::Mobile => {
+                assert!(matches!(optimization.target_hardware, HardwareTarget::Mobile));
+            }
+            HardwareTarget::Edge => {
+                assert!(matches!(optimization.target_hardware, HardwareTarget::Edge));
+            }
+            HardwareTarget::Cloud => {
+                assert!(matches!(optimization.target_hardware, HardwareTarget::Cloud));
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// Test distillation strategy enumeration
+#[tokio::test]
+async fn test_distillation_strategy_enumeration() -> Result<()> {
+    let strategies = vec![
+        DistillationStrategy::Knowledge,
+        DistillationStrategy::Feature,
+        DistillationStrategy::Attention,
+        DistillationStrategy::Progressive,
+    ];
+    
+    for strategy in strategies {
+        let config = DistillationConfig {
+            enabled: true,
+            strategy: strategy.clone(),
+            teacher_model_path: Some("teacher.model".to_string()),
+            student_model_config: HashMap::new(),
+            temperature: 3.0,
+            alpha: 0.5,
+            distillation_loss_weight: 0.3,
+            feature_matching: true,
+            attention_transfer: true,
+        };
+        
+        // Verify strategy is set correctly
+        match strategy {
+            DistillationStrategy::Knowledge => {
+                assert!(matches!(config.strategy, DistillationStrategy::Knowledge));
+            }
+            DistillationStrategy::Feature => {
+                assert!(matches!(config.strategy, DistillationStrategy::Feature));
+            }
+            DistillationStrategy::Attention => {
+                assert!(matches!(config.strategy, DistillationStrategy::Attention));
+            }
+            DistillationStrategy::Progressive => {
+                assert!(matches!(config.strategy, DistillationStrategy::Progressive));
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// Test optimization configuration serialization
+#[tokio::test]
+async fn test_optimization_config_serialization() -> Result<()> {
+    let config = OptimizationConfig {
+        quantization: QuantizationConfig {
+            enabled: true,
+            precision: QuantizationPrecision::Mixed,
+            calibration_samples: 2000,
+            excluded_layers: vec!["layer1".to_string(), "layer2".to_string()],
+            quantization_method: QuantizationMethod::QuantizationAware,
+            dynamic_quantization: true,
+        },
+        pruning: PruningConfig {
+            enabled: false,
+            strategy: PruningStrategy::Fisher,
+            target_sparsity: 0.6,
+            gradual_pruning: true,
+            pruning_type: PruningType::Structured,
+            excluded_layers: vec!["critical_layer".to_string()],
+        },
+        distillation: DistillationConfig::default(),
+        hardware_optimization: HardwareOptimization::default(),
+        optimization_targets: OptimizationTargets::default(),
+    };
+    
+    // Test serialization
+    let serialized = serde_json::to_string(&config).expect("Should serialize");
+    assert!(!serialized.is_empty());
+    
+    // Test deserialization
+    let deserialized: OptimizationConfig = serde_json::from_str(&serialized)
+        .expect("Should deserialize");
+    
+    // Verify deserialized config matches original
+    assert_eq!(config.quantization.enabled, deserialized.quantization.enabled);
+    assert_eq!(config.quantization.calibration_samples, deserialized.quantization.calibration_samples);
+    assert_eq!(config.quantization.excluded_layers, deserialized.quantization.excluded_layers);
+    assert_eq!(config.pruning.enabled, deserialized.pruning.enabled);
+    assert_eq!(config.pruning.target_sparsity, deserialized.pruning.target_sparsity);
+    
+    Ok(())
+}

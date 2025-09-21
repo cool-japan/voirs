@@ -1,0 +1,17 @@
+{
+    "version": "{{VERSION}}",
+    "description": "{{DESCRIPTION}}",
+    "homepage": "{{HOMEPAGE}}",
+    "license": "{{LICENSE}}",
+    "url": "{{REPOSITORY}}/releases/download/v{{VERSION}}/voirs-windows.zip",
+    "hash": "{{SHA256}}",
+    "extract_dir": "voirs-{{VERSION}}",
+    "bin": "voirs.exe",
+    "checkver": {
+        "github": "{{REPOSITORY}}"
+    },
+    "autoupdate": {
+        "url": "{{REPOSITORY}}/releases/download/v$version/voirs-windows.zip",
+        "extract_dir": "voirs-$version"
+    }
+}

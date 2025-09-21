@@ -1,0 +1,64 @@
+{
+  "name": "@voirs/recognizer",
+  "version": "0.1.0",
+  "description": "WebAssembly bindings for VoiRS speech recognition",
+  "main": "pkg/nodejs/voirs_recognizer.js",
+  "module": "pkg/bundler/voirs_recognizer.js",
+  "browser": "pkg/web/voirs_recognizer.js",
+  "types": "pkg/nodejs/voirs_recognizer.d.ts",
+  "files": [
+    "pkg/web/*",
+    "pkg/nodejs/*",
+    "pkg/bundler/*",
+    "pkg/no-modules/*",
+    "examples/*",
+    "README_WASM.md"
+  ],
+  "scripts": {
+    "build": "./build-wasm.sh",
+    "test": "node test/node-test.js",
+    "test:browser": "serve test/browser-test.html",
+    "demo": "node examples/nodejs-demo.js",
+    "serve": "http-server -p 8080 -c-1"
+  },
+  "keywords": [
+    "speech-recognition",
+    "asr",
+    "whisper",
+    "voice",
+    "audio",
+    "wasm",
+    "webassembly",
+    "rust",
+    "voirs"
+  ],
+  "author": "VoiRS Team",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cool-japan/voirs.git",
+    "directory": "crates/voirs-recognizer"
+  },
+  "devDependencies": {
+    "http-server": "^14.1.1",
+    "serve": "^14.2.1"
+  },
+  "peerDependencies": {
+    "node": ">=16.0.0"
+  },
+  "exports": {
+    ".": {
+      "node": "./pkg/nodejs/voirs_recognizer.js",
+      "browser": "./pkg/web/voirs_recognizer.js",
+      "import": "./pkg/bundler/voirs_recognizer.js",
+      "require": "./pkg/nodejs/voirs_recognizer.js"
+    },
+    "./web": "./pkg/web/voirs_recognizer.js",
+    "./nodejs": "./pkg/nodejs/voirs_recognizer.js",
+    "./bundler": "./pkg/bundler/voirs_recognizer.js",
+    "./no-modules": "./pkg/no-modules/voirs_recognizer.js"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

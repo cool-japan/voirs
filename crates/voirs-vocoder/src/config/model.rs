@@ -3,8 +3,8 @@
 //! This module provides configuration options for model architecture,
 //! backend selection, and optimization settings.
 
-use serde::{Deserialize, Serialize};
 use super::{DeviceType, PerformanceProfile, ValidationResult};
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// Vocoder model architecture types
@@ -120,7 +120,7 @@ impl Default for CacheConfig {
     fn default() -> Self {
         Self {
             enable_caching: true,
-            cache_dir: None, // Will use system default
+            cache_dir: None,         // Will use system default
             max_cache_size_mb: 1024, // 1GB
             cache_expiry_hours: 168, // 1 week
             enable_preloading: false,
@@ -322,14 +322,17 @@ impl ModelConfig {
         // Validate model path
         if let Some(ref path) = self.model_path {
             if !path.exists() {
-                errors.push(format!("Model file does not exist: {}", path.display()));
+                errors.push(format!(
+                    "Model file does not exist: {path}",
+                    path = path.display()
+                ));
             }
         }
 
         // Validate quantization settings
         if self.optimization.enable_quantization {
             match self.optimization.quantization_bits {
-                8 | 16 | 32 => {},
+                8 | 16 | 32 => {}
                 _ => errors.push("Quantization bits must be 8, 16, or 32".to_string()),
             }
         }
@@ -366,7 +369,8 @@ impl ModelConfig {
             }
             ModelArchitecture::DiffWave => {
                 // DiffWave specific validations
-                if self.optimization.enable_quantization && self.optimization.quantization_bits < 16 {
+                if self.optimization.enable_quantization && self.optimization.quantization_bits < 16
+                {
                     warnings.push("Low quantization may affect DiffWave quality".to_string());
                 }
             }
@@ -382,7 +386,9 @@ impl ModelConfig {
             }
             BackendType::Candle => {
                 if self.optimization.quantization_bits == 8 {
-                    warnings.push("8-bit quantization may not be fully supported in Candle".to_string());
+                    warnings.push(
+                        "8-bit quantization may not be fully supported in Candle".to_string(),
+                    );
                 }
             }
             _ => {}
@@ -428,16 +434,17 @@ impl ModelConfig {
 
     /// Check if GPU acceleration is available
     pub fn is_gpu_available(&self) -> bool {
-        matches!(self.device, DeviceType::Cuda | DeviceType::Metal | DeviceType::Auto)
+        matches!(
+            self.device,
+            DeviceType::Cuda | DeviceType::Metal | DeviceType::Auto
+        )
     }
 
     /// Get model identifier string
     pub fn model_identifier(&self) -> String {
         format!(
             "{:?}-{:?}-{:?}",
-            self.architecture,
-            self.hifigan_variant,
-            self.backend
+            self.architecture, self.hifigan_variant, self.backend
         )
     }
 }
@@ -481,7 +488,7 @@ mod tests {
     #[test]
     fn test_config_validation() {
         let mut config = ModelConfig::default();
-        
+
         // Valid configuration
         let result = config.validate();
         assert!(result.is_valid);
@@ -503,11 +510,12 @@ mod tests {
 
     #[test]
     fn test_gpu_availability() {
-        let mut config = ModelConfig::default();
-        
-        config.device = DeviceType::Cpu;
+        let mut config = ModelConfig {
+            device: DeviceType::Cpu,
+            ..Default::default()
+        };
         assert!(!config.is_gpu_available());
-        
+
         config.device = DeviceType::Cuda;
         assert!(config.is_gpu_available());
     }

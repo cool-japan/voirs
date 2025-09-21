@@ -1,0 +1,72 @@
+# VoiRS Feedback Docker ignore file
+
+# Target directories
+target/
+*/target/
+
+# Development files
+.env
+.env.local
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Runtime data
+*.pid
+*.seed
+
+# Temporary files
+*.tmp
+*.temp
+
+# Editor backups
+*~
+*.backup
+
+# Docker related
+.dockerignore
+Dockerfile*
+docker-compose*
+
+# Git
+.git/
+.gitignore
+
+# Documentation (included separately)
+README.md
+TODO.md
+docs/
+
+# Test files (not needed in production)
+tests/
+test_*
+*_test.rs
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Local secrets (examples are included)
+secrets/*.txt
+!secrets/*.example
+
+# Local data directories
+data/
+postgres_data/
+redis_data/
+grafana_data/
+prometheus_data/

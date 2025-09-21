@@ -1,0 +1,110 @@
+version: '3.8'
+
+services:
+  voirs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: voirs:latest
+    container_name: voirs
+    ports:
+      - "8080:8080"  # For server mode
+    volumes:
+      - ./models:/app/models:ro
+      - ./data:/app/data
+      - ./config:/app/config:ro
+    environment:
+      - RUST_LOG=info
+      - VOIRS_CONFIG_PATH=/app/config
+      - VOIRS_MODELS_PATH=/app/models
+      - VOIRS_DATA_PATH=/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "voirs-cli", "--version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - voirs-network
+
+  # Development service with hot reloading
+  voirs-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: voirs:dev
+    container_name: voirs-dev
+    ports:
+      - "8081:8080"
+    volumes:
+      - .:/app:rw
+      - cargo-cache:/usr/local/cargo/registry
+      - target-cache:/app/target
+    environment:
+      - RUST_LOG=debug
+      - CARGO_TERM_COLOR=always
+    profiles:
+      - dev
+    networks:
+      - voirs-network
+
+  # Redis for caching (optional)
+  redis:
+    image: redis:7-alpine
+    container_name: voirs-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    profiles:
+      - cache
+    networks:
+      - voirs-network
+
+  # PostgreSQL for advanced features (optional)
+  postgres:
+    image: postgres:15-alpine
+    container_name: voirs-postgres
+    environment:
+      - POSTGRES_DB=voirs
+      - POSTGRES_USER=voirs
+      - POSTGRES_PASSWORD=voirs_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    profiles:
+      - database
+    networks:
+      - voirs-network
+
+  # Nginx reverse proxy (optional)
+  nginx:
+    image: nginx:alpine
+    container_name: voirs-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - voirs
+    restart: unless-stopped
+    profiles:
+      - proxy
+    networks:
+      - voirs-network
+
+volumes:
+  cargo-cache:
+  target-cache:
+  redis-data:
+  postgres-data:
+
+networks:
+  voirs-network:
+    driver: bridge

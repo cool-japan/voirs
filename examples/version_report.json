@@ -1,0 +1,37 @@
+{
+  "timestamp": "2025-07-25 14:07:47",
+  "workspace_version": "0.1.0-alpha.1",
+  "total_crates": 17,
+  "workspace_members": 16,
+  "examples": 1,
+  "version_conflicts": [
+    {
+      "crate_name": "voirs-examples",
+      "expected_version": "0.1.0-alpha.1",
+      "actual_version": "0.1.0",
+      "source_path": "../examples",
+      "conflict_type": "workspace"
+    }
+  ],
+  "compatibility_issues": [],
+  "outdated_examples": [],
+  "release_readiness": {
+    "ready": false,
+    "issues": [
+      "Found 1 version conflicts",
+      "Git repository has uncommitted changes",
+      "Tests are failing"
+    ],
+    "warnings": [],
+    "checks": {
+      "version_consistency": false,
+      "clean_git": false,
+      "tests_pass": false,
+      "no_pre_release": true
+    }
+  },
+  "recommendations": [
+    "Resolve 1 version conflicts",
+    "Address release readiness issues before releasing"
+  ]
+}
