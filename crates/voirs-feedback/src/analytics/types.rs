@@ -10,16 +10,32 @@ use std::time::Instant;
 #[derive(Debug, thiserror::Error)]
 pub enum AnalyticsError {
     #[error("Data collection failed: {message}")]
-    DataCollectionError { message: String },
+    /// Raised when analytics data collection cannot complete successfully.
+    DataCollectionError {
+        /// Human-readable reason for the data collection failure.
+        message: String,
+    },
 
     #[error("Report generation failed: {message}")]
-    ReportGenerationError { message: String },
+    /// Raised when analytics report generation encounters an unrecoverable error.
+    ReportGenerationError {
+        /// Human-readable reason for the report generation failure.
+        message: String,
+    },
 
     #[error("Invalid query parameters: {message}")]
-    InvalidQueryError { message: String },
+    /// Returned when a consumer provides invalid query parameters.
+    InvalidQueryError {
+        /// Details about why the query parameters were rejected.
+        message: String,
+    },
 
     #[error("Insufficient data for analysis: {message}")]
-    InsufficientDataError { message: String },
+    /// Indicates that analytics could not proceed due to missing or insufficient data.
+    InsufficientDataError {
+        /// Explanation of the missing data condition.
+        message: String,
+    },
 }
 
 /// Result type for analytics operations

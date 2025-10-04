@@ -9,6 +9,10 @@ use crate::types::{NoteEvent, VoiceCharacteristics};
 use crate::Result;
 
 /// Main perceptual quality testing framework
+///
+/// Coordinates comprehensive perceptual quality evaluation for singing synthesis,
+/// including naturalness testing, expression validation, voice quality assessment,
+/// and performance evaluation.
 pub struct PerceptualQualityTester {
     naturalness_tester: NaturalnessTester,
     expression_validator: ExpressionValidator,
@@ -92,13 +96,36 @@ impl Default for PerceptualQualityTester {
 }
 
 /// Expression validator for musical expression assessment
+///
+/// Evaluates the quality of musical expression in synthesized singing,
+/// including dynamic range, pitch expression, timing, and emotional content.
 pub struct ExpressionValidator;
 
 impl ExpressionValidator {
+    /// Create a new expression validator
+    ///
+    /// # Returns
+    ///
+    /// * A new `ExpressionValidator` instance
     pub fn new() -> Self {
         Self
     }
 
+    /// Validate musical expression quality in audio
+    ///
+    /// # Arguments
+    ///
+    /// * `audio_samples` - Audio sample buffer to analyze
+    /// * `sample_rate` - Sample rate in Hz
+    /// * `original_request` - Original note events requested for synthesis
+    ///
+    /// # Returns
+    ///
+    /// * `ExpressionReport` - Detailed expression quality report
+    ///
+    /// # Errors
+    ///
+    /// * Returns error if analysis fails
     pub fn validate_musical_expression(
         &self,
         _audio_samples: &[f32],
@@ -117,13 +144,36 @@ impl Default for ExpressionValidator {
 }
 
 /// Voice quality assessor
+///
+/// Evaluates the quality of synthesized voice characteristics including timbre,
+/// pitch stability, harmonic richness, vocal clarity, and resonance.
 pub struct VoiceQualityAssessor;
 
 impl VoiceQualityAssessor {
+    /// Create a new voice quality assessor
+    ///
+    /// # Returns
+    ///
+    /// * A new `VoiceQualityAssessor` instance
     pub fn new() -> Self {
         Self
     }
 
+    /// Assess voice quality characteristics
+    ///
+    /// # Arguments
+    ///
+    /// * `audio_samples` - Audio sample buffer to analyze
+    /// * `sample_rate` - Sample rate in Hz
+    /// * `voice_characteristics` - Target voice characteristics for comparison
+    ///
+    /// # Returns
+    ///
+    /// * `VoiceQualityReport` - Detailed voice quality assessment report
+    ///
+    /// # Errors
+    ///
+    /// * Returns error if analysis fails
     pub fn assess_voice_quality(
         &self,
         _audio_samples: &[f32],
@@ -151,13 +201,35 @@ impl Default for VoiceQualityAssessor {
 }
 
 /// Performance evaluator
+///
+/// Evaluates system performance characteristics including latency, stability,
+/// consistency, and resource efficiency during synthesis.
 pub struct PerformanceEvaluator;
 
 impl PerformanceEvaluator {
+    /// Create a new performance evaluator
+    ///
+    /// # Returns
+    ///
+    /// * A new `PerformanceEvaluator` instance
     pub fn new() -> Self {
         Self
     }
 
+    /// Evaluate synthesis performance quality
+    ///
+    /// # Arguments
+    ///
+    /// * `audio_samples` - Audio sample buffer to analyze
+    /// * `sample_rate` - Sample rate in Hz
+    ///
+    /// # Returns
+    ///
+    /// * `PerformanceReport` - Detailed performance evaluation report
+    ///
+    /// # Errors
+    ///
+    /// * Returns error if analysis fails
     pub fn evaluate_performance_quality(
         &self,
         _audio_samples: &[f32],

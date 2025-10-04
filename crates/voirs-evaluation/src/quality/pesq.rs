@@ -4,8 +4,8 @@
 //! This module provides both narrow-band (8 kHz) and wide-band (16 kHz) PESQ calculation.
 
 use crate::EvaluationError;
-use ndarray::{Array1, Array2};
-use realfft::{RealFftPlanner, RealToComplex};
+use scirs2_core::ndarray::{Array1, Array2};
+use scirs2_fft::{RealFftPlanner, RealToComplex};
 use std::f32::consts::PI;
 use std::sync::Mutex;
 use voirs_sdk::AudioBuffer;
@@ -41,7 +41,7 @@ impl PESQEvaluator {
             });
         }
 
-        let fft_planner = Mutex::new(RealFftPlanner::new());
+        let fft_planner = Mutex::new(RealFftPlanner::<f32>::new());
         let bark_mapping = Self::create_bark_mapping(sample_rate);
         let perceptual_weights = Self::create_perceptual_weights(&bark_mapping);
 
@@ -291,10 +291,14 @@ impl PESQEvaluator {
             let actual_length = (ref_end - start_ref).min(deg_end - start_deg);
 
             let ref_slice = reference
-                .slice(ndarray::s![start_ref..start_ref + actual_length])
+                .slice(scirs2_core::ndarray::s![
+                    start_ref..start_ref + actual_length
+                ])
                 .to_owned();
             let deg_slice = degraded
-                .slice(ndarray::s![start_deg..start_deg + actual_length])
+                .slice(scirs2_core::ndarray::s![
+                    start_deg..start_deg + actual_length
+                ])
                 .to_owned();
             (ref_slice, deg_slice)
         } else {
@@ -316,10 +320,14 @@ impl PESQEvaluator {
             let actual_length = (ref_end - start_ref).min(deg_end - start_deg);
 
             let ref_slice = reference
-                .slice(ndarray::s![start_ref..start_ref + actual_length])
+                .slice(scirs2_core::ndarray::s![
+                    start_ref..start_ref + actual_length
+                ])
                 .to_owned();
             let deg_slice = degraded
-                .slice(ndarray::s![start_deg..start_deg + actual_length])
+                .slice(scirs2_core::ndarray::s![
+                    start_deg..start_deg + actual_length
+                ])
                 .to_owned();
             (ref_slice, deg_slice)
         };
@@ -352,8 +360,8 @@ impl PESQEvaluator {
                     continue;
                 } // At least 1 second
 
-                let ref_segment = reference.slice(ndarray::s![0..length]);
-                let deg_segment = degraded.slice(ndarray::s![delay..delay + length]);
+                let ref_segment = reference.slice(scirs2_core::ndarray::s![0..length]);
+                let deg_segment = degraded.slice(scirs2_core::ndarray::s![delay..delay + length]);
                 self.calculate_correlation(&ref_segment, &deg_segment)
             } else {
                 let delay = (-delay) as usize;
@@ -365,8 +373,8 @@ impl PESQEvaluator {
                     continue;
                 } // At least 1 second
 
-                let ref_segment = reference.slice(ndarray::s![delay..delay + length]);
-                let deg_segment = degraded.slice(ndarray::s![0..length]);
+                let ref_segment = reference.slice(scirs2_core::ndarray::s![delay..delay + length]);
+                let deg_segment = degraded.slice(scirs2_core::ndarray::s![0..length]);
                 self.calculate_correlation(&ref_segment, &deg_segment)
             };
 
@@ -382,8 +390,8 @@ impl PESQEvaluator {
     /// Calculate normalized cross-correlation
     fn calculate_correlation(
         &self,
-        signal1: &ndarray::ArrayView1<f32>,
-        signal2: &ndarray::ArrayView1<f32>,
+        signal1: &scirs2_core::ndarray::ArrayView1<f32>,
+        signal2: &scirs2_core::ndarray::ArrayView1<f32>,
     ) -> f32 {
         let mean1 = signal1.mean().unwrap_or(0.0);
         let mean2 = signal2.mean().unwrap_or(0.0);
@@ -418,7 +426,7 @@ impl PESQEvaluator {
         let mut bark_spectrum = Array2::zeros((num_frames, num_bark_bands));
         let mut fft_planner = self.fft_planner.lock().unwrap();
         let fft = fft_planner.plan_fft_forward(frame_size);
-        let mut spectrum = fft.make_output_vec();
+        let mut spectrum = vec![scirs2_core::Complex::new(0.0, 0.0); fft.output_len()];
 
         for (frame_idx, frame_start) in (0..signal.len() - frame_size + 1)
             .step_by(hop_size)
@@ -440,16 +448,19 @@ impl PESQEvaluator {
             }
 
             // Compute FFT
-            fft.process(frame.as_slice_mut().unwrap(), &mut spectrum)
-                .map_err(|e| EvaluationError::AudioProcessingError {
-                    message: format!("FFT processing failed: {e}"),
-                    source: None,
-                })?;
+            let frame_slice =
+                frame
+                    .as_slice()
+                    .ok_or_else(|| EvaluationError::AudioProcessingError {
+                        message: "Failed to get frame slice".to_string(),
+                        source: None,
+                    })?;
+            fft.process(frame_slice, &mut spectrum);
 
             // Convert to power spectrum
             let power_spectrum: Vec<f32> = spectrum
                 .iter()
-                .map(num_complex::Complex::norm_sqr)
+                .map(scirs2_core::Complex::norm_sqr)
                 .collect();
 
             // Map to Bark scale

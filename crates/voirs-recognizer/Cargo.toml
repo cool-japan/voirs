@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation = "https://docs.rs/voirs-recognizer"
-keywords.workspace = true
+keywords = ["voirs", "asr", "whisper", "recognition", "speech"]
 categories = ["multimedia::audio", "science", "algorithms"]
 rust-version.workspace = true
 description = "Voice recognition and analysis capabilities for VoiRS"
@@ -17,8 +17,12 @@ name = "voirs_recognizer"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+# SciRS2 - Scientific computing abstractions
+scirs2-core.workspace = true
+scirs2-fft.workspace = true
+
 # Core VoiRS dependencies
-voirs-sdk = { version = "0.1.0-alpha.1", path = "../voirs-sdk" }
+voirs-sdk.workspace = true
 
 # Async and traits
 async-trait.workspace = true
@@ -31,19 +35,12 @@ async-stream.workspace = true
 hound.workspace = true
 cpal.workspace = true
 dasp.workspace = true
-realfft.workspace = true
-rustfft.workspace = true
-
-# Math and arrays
-ndarray.workspace = true
-num-complex.workspace = true
 
 # Serialization
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 hex = "0.4"
-rand.workspace = true
 
 # Error handling
 anyhow.workspace = true
@@ -78,7 +75,6 @@ minimp3.workspace = true
 symphonia.workspace = true
 
 # Performance
-rayon.workspace = true
 crossbeam-utils.workspace = true
 
 # Additional dependencies for Pure Rust Whisper

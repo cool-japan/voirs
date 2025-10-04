@@ -8,10 +8,10 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_uint};
 use std::ptr;
 
-/// Voice information structure for C API
+/// Detailed voice information structure for C API (includes gender)
 #[repr(C)]
 #[derive(Debug, Clone)]
-pub struct VoirsVoiceInfo {
+pub struct VoirsVoiceInfoDetailed {
     /// Voice ID (null-terminated string)
     pub id: *mut c_char,
     /// Voice name (null-terminated string)
@@ -24,7 +24,7 @@ pub struct VoirsVoiceInfo {
     pub quality: c_int,
 }
 
-impl Default for VoirsVoiceInfo {
+impl Default for VoirsVoiceInfoDetailed {
     fn default() -> Self {
         Self {
             id: ptr::null_mut(),
@@ -36,17 +36,17 @@ impl Default for VoirsVoiceInfo {
     }
 }
 
-/// Voice list structure for C API
+/// Detailed voice list structure for C API
 #[repr(C)]
 #[derive(Debug)]
-pub struct VoirsVoiceList {
+pub struct VoirsVoiceListDetailed {
     /// Array of voice information
-    pub voices: *mut VoirsVoiceInfo,
+    pub voices: *mut VoirsVoiceInfoDetailed,
     /// Number of voices in the array
     pub count: c_uint,
 }
 
-impl Default for VoirsVoiceList {
+impl Default for VoirsVoiceListDetailed {
     fn default() -> Self {
         Self {
             voices: ptr::null_mut(),
@@ -103,10 +103,10 @@ pub extern "C" fn voirs_get_voice(pipeline_id: c_uint) -> *mut c_char {
 
 /// List all available voices
 ///
-/// Returns a pointer to a VoirsVoiceList structure on success, or null on failure.
+/// Returns a pointer to a VoirsVoiceListDetailed structure on success, or null on failure.
 /// The returned list must be freed with `voirs_free_voice_list()`.
 #[no_mangle]
-pub extern "C" fn voirs_list_voices() -> *mut VoirsVoiceList {
+pub extern "C" fn voirs_list_voices() -> *mut VoirsVoiceListDetailed {
     match list_voices_impl() {
         Ok(voice_list) => Box::into_raw(Box::new(voice_list)),
         Err(code) => {
@@ -125,7 +125,7 @@ pub extern "C" fn voirs_list_voices() -> *mut VoirsVoiceList {
 /// This function is unsafe because it deallocates raw memory.
 /// The caller must ensure the voice list was allocated by this library.
 #[no_mangle]
-pub unsafe extern "C" fn voirs_free_voice_list(voice_list: *mut VoirsVoiceList) {
+pub unsafe extern "C" fn voirs_free_voice_list(voice_list: *mut VoirsVoiceListDetailed) {
     if voice_list.is_null() {
         return;
     }
@@ -149,7 +149,7 @@ pub unsafe extern "C" fn voirs_free_voice_list(voice_list: *mut VoirsVoiceList) 
 ///
 /// # Safety
 /// This function is unsafe because it deallocates raw memory.
-unsafe fn free_voice_info(voice: &mut VoirsVoiceInfo) {
+unsafe fn free_voice_info(voice: &mut VoirsVoiceInfoDetailed) {
     if !voice.id.is_null() {
         let _ = CString::from_raw(voice.id);
         voice.id = ptr::null_mut();
@@ -169,10 +169,10 @@ unsafe fn free_voice_info(voice: &mut VoirsVoiceInfo) {
 /// # Arguments
 /// * `voice_id` - Voice ID (null-terminated string)
 ///
-/// Returns a pointer to a VoirsVoiceInfo structure on success, or null on failure.
+/// Returns a pointer to a VoirsVoiceInfoDetailed structure on success, or null on failure.
 /// The returned info must be freed with `voirs_free_voice_info()`.
 #[no_mangle]
-pub extern "C" fn voirs_get_voice_info(voice_id: *const c_char) -> *mut VoirsVoiceInfo {
+pub extern "C" fn voirs_get_voice_info(voice_id: *const c_char) -> *mut VoirsVoiceInfoDetailed {
     match get_voice_info_impl(voice_id) {
         Ok(voice_info) => Box::into_raw(Box::new(voice_info)),
         Err(code) => {
@@ -190,7 +190,7 @@ pub extern "C" fn voirs_get_voice_info(voice_id: *const c_char) -> *mut VoirsVoi
 /// # Safety
 /// This function is unsafe because it deallocates raw memory.
 #[no_mangle]
-pub unsafe extern "C" fn voirs_free_voice_info(voice_info: *mut VoirsVoiceInfo) {
+pub unsafe extern "C" fn voirs_free_voice_info(voice_info: *mut VoirsVoiceInfoDetailed) {
     if voice_info.is_null() {
         return;
     }
@@ -326,7 +326,7 @@ fn get_voice_impl(pipeline_id: c_uint) -> Result<String, VoirsErrorCode> {
     }
 }
 
-fn list_voices_impl() -> Result<VoirsVoiceList, VoirsErrorCode> {
+fn list_voices_impl() -> Result<VoirsVoiceListDetailed, VoirsErrorCode> {
     let runtime = get_runtime()?;
 
     let voices = runtime.block_on(async {
@@ -342,7 +342,7 @@ fn list_voices_impl() -> Result<VoirsVoiceList, VoirsErrorCode> {
     let mut voice_infos = Vec::with_capacity(voices.len());
 
     for (id, name, lang, gender, quality) in voices {
-        let voice_info = VoirsVoiceInfo {
+        let voice_info = VoirsVoiceInfoDetailed {
             id: CString::new(id).unwrap().into_raw(),
             name: CString::new(name).unwrap().into_raw(),
             language: CString::new(lang).unwrap().into_raw(),
@@ -352,7 +352,7 @@ fn list_voices_impl() -> Result<VoirsVoiceList, VoirsErrorCode> {
         voice_infos.push(voice_info);
     }
 
-    let voice_list = VoirsVoiceList {
+    let voice_list = VoirsVoiceListDetailed {
         voices: voice_infos.as_mut_ptr(),
         count: voice_infos.len() as c_uint,
     };
@@ -363,7 +363,7 @@ fn list_voices_impl() -> Result<VoirsVoiceList, VoirsErrorCode> {
     Ok(voice_list)
 }
 
-fn get_voice_info_impl(voice_id: *const c_char) -> Result<VoirsVoiceInfo, VoirsErrorCode> {
+fn get_voice_info_impl(voice_id: *const c_char) -> Result<VoirsVoiceInfoDetailed, VoirsErrorCode> {
     if voice_id.is_null() {
         return Err(VoirsErrorCode::InvalidParameter);
     }
@@ -387,7 +387,7 @@ fn get_voice_info_impl(voice_id: *const c_char) -> Result<VoirsVoiceInfo, VoirsE
         _ => return Err(VoirsErrorCode::VoiceNotFound),
     };
 
-    Ok(VoirsVoiceInfo {
+    Ok(VoirsVoiceInfoDetailed {
         id: CString::new(voice_str).unwrap().into_raw(),
         name: CString::new(name).unwrap().into_raw(),
         language: CString::new(lang).unwrap().into_raw(),

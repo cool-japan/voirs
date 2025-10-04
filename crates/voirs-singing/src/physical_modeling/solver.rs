@@ -9,25 +9,32 @@ use super::tissue_molecular::{MolecularDynamicsModel, TissueMechanicsModel};
 /// Multi-scale physics solver for enhanced accuracy
 #[derive(Debug, Clone)]
 pub struct MultiScalePhysicsSolver {
-    /// Microscale: molecular dynamics effects
+    /// Microscale molecular dynamics effects model
     pub molecular_effects: MolecularDynamicsModel,
-    /// Mesoscale: tissue mechanics
+    /// Mesoscale tissue mechanics model
     pub tissue_mechanics: TissueMechanicsModel,
-    /// Macroscale: acoustic wave propagation
+    /// Macroscale acoustic wave propagation model
     pub acoustic_propagation: AcousticPropagationModel,
-    /// Time stepping parameters
+    /// Current time step size in seconds
     pub time_step: f32,
-    /// Adaptive time stepping
+    /// Adaptive time stepping enabled flag
     pub adaptive_stepping: bool,
-    /// Error tolerance for adaptive methods
+    /// Error tolerance for adaptive time stepping
     pub error_tolerance: f32,
-    /// Maximum time step size
+    /// Maximum allowed time step size in seconds
     pub max_time_step: f32,
-    /// Minimum time step size
+    /// Minimum allowed time step size in seconds
     pub min_time_step: f32,
 }
 
 impl MultiScalePhysicsSolver {
+    /// Create new multi-scale physics solver
+    ///
+    /// # Arguments
+    /// * `num_sections` - Number of vocal tract sections
+    ///
+    /// # Returns
+    /// New solver with molecular, tissue, and acoustic models
     pub fn new(num_sections: usize) -> crate::Result<Self> {
         Ok(Self {
             molecular_effects: MolecularDynamicsModel::new(num_sections)?,
@@ -41,6 +48,16 @@ impl MultiScalePhysicsSolver {
         })
     }
 
+    /// Solve coupled multi-scale physics equations
+    ///
+    /// # Arguments
+    /// * `pressures` - Acoustic pressures (Pa) - modified in-place
+    /// * `velocities` - Flow velocities (m/s) - modified in-place
+    /// * `temperatures` - Temperature distribution (°C)
+    /// * `areas` - Cross-sectional areas (m²)
+    ///
+    /// # Returns
+    /// Ok on success, error if solver fails
     pub fn solve_coupled_physics(
         &mut self,
         pressures: &mut [f32],
@@ -151,14 +168,14 @@ impl MultiScalePhysicsSolver {
         dt: f32,
     ) -> crate::Result<()> {
         // Apply molecular corrections to velocities
-        for i in 0..velocities.len() {
+        for (i, velocity) in velocities.iter_mut().enumerate() {
             let molecular_correction = self.molecular_effects.get_viscosity_correction(i);
-            velocities[i] *= molecular_correction;
+            *velocity *= molecular_correction;
 
             // Apply rarefaction effects
-            velocities[i] = self
+            *velocity = self
                 .molecular_effects
-                .apply_rarefaction_effects(velocities[i], i);
+                .apply_rarefaction_effects(*velocity, i);
         }
 
         // Apply tissue mechanics effects to pressures
@@ -206,7 +223,7 @@ impl MultiScalePhysicsSolver {
         // Simplified FFT - in practice would use proper FFT library
         let mut spectrum = vec![0.0; signal.len()];
 
-        for k in 0..signal.len() {
+        for (k, spec_val) in spectrum.iter_mut().enumerate() {
             let mut real_sum = 0.0;
             let mut imag_sum = 0.0;
 
@@ -216,12 +233,20 @@ impl MultiScalePhysicsSolver {
                 imag_sum += signal[n] * angle.sin();
             }
 
-            spectrum[k] = (real_sum * real_sum + imag_sum * imag_sum).sqrt();
+            *spec_val = (real_sum * real_sum + imag_sum * imag_sum).sqrt();
         }
 
         spectrum
     }
 
+    /// Estimate total computational cost for simulation
+    ///
+    /// # Arguments
+    /// * `num_sections` - Number of vocal tract sections
+    /// * `time_duration` - Simulation duration in seconds
+    ///
+    /// # Returns
+    /// Estimated cost in relative units
     pub fn estimate_computational_cost(&self, num_sections: usize, time_duration: f32) -> f32 {
         let num_time_steps = time_duration / self.time_step;
 
@@ -234,6 +259,10 @@ impl MultiScalePhysicsSolver {
         total_cost_per_step * num_time_steps
     }
 
+    /// Optimize solver performance for target real-time factor
+    ///
+    /// # Arguments
+    /// * `target_real_time_factor` - Target RTF (1.0 = real-time)
     pub fn optimize_performance(&mut self, target_real_time_factor: f32) {
         // Adjust time step for performance
         if target_real_time_factor < 1.0 {
@@ -252,6 +281,10 @@ impl MultiScalePhysicsSolver {
         }
     }
 
+    /// Get current solver status and stability information
+    ///
+    /// # Returns
+    /// Solver status with time step and stability information
     pub fn get_solver_status(&self) -> SolverStatus {
         SolverStatus {
             current_time_step: self.time_step,
@@ -273,17 +306,29 @@ impl MultiScalePhysicsSolver {
 /// Solver status information
 #[derive(Debug, Clone)]
 pub struct SolverStatus {
+    /// Current time step size in seconds
     pub current_time_step: f32,
+    /// Adaptive time stepping enabled flag
     pub adaptive_stepping_enabled: bool,
+    /// Current error tolerance
     pub error_tolerance: f32,
+    /// Stability margin (>1.0 = stable)
     pub stability_margin: f32,
 }
 
 impl SolverStatus {
+    /// Check if solver is numerically stable
+    ///
+    /// # Returns
+    /// True if stability margin > 1.0
     pub fn is_stable(&self) -> bool {
         self.stability_margin > 1.0
     }
 
+    /// Get current performance level based on time step size
+    ///
+    /// # Returns
+    /// Performance level (Fast/Balanced/HighAccuracy)
     pub fn performance_level(&self) -> PerformanceLevel {
         if self.current_time_step >= 1e-4 {
             PerformanceLevel::Fast
@@ -298,7 +343,10 @@ impl SolverStatus {
 /// Performance level indicators
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PerformanceLevel {
+    /// Fast mode with larger time steps
     Fast,
+    /// Balanced mode with moderate time steps
     Balanced,
+    /// High accuracy mode with small time steps
     HighAccuracy,
 }

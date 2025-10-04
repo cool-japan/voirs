@@ -640,24 +640,53 @@ impl PlatformManager {
     /// Get operating system name
     fn get_os_name() -> String {
         #[cfg(target_os = "windows")]
-        return "Windows".to_string();
+        {
+            "Windows".to_string()
+        }
 
         #[cfg(target_os = "macos")]
-        return "macOS".to_string();
+        {
+            "macOS".to_string()
+        }
 
         #[cfg(target_os = "linux")]
-        return "Linux".to_string();
+        {
+            "Linux".to_string()
+        }
 
         #[cfg(target_os = "ios")]
-        return "iOS".to_string();
+        {
+            "iOS".to_string()
+        }
 
         #[cfg(target_os = "android")]
-        return "Android".to_string();
+        {
+            "Android".to_string()
+        }
 
-        #[cfg(target_arch = "wasm32")]
-        return "Web".to_string();
+        #[cfg(all(
+            not(target_os = "windows"),
+            not(target_os = "macos"),
+            not(target_os = "linux"),
+            not(target_os = "ios"),
+            not(target_os = "android"),
+            target_arch = "wasm32"
+        ))]
+        {
+            "Web".to_string()
+        }
 
-        "Unknown".to_string()
+        #[cfg(not(any(
+            target_os = "windows",
+            target_os = "macos",
+            target_os = "linux",
+            target_os = "ios",
+            target_os = "android",
+            target_arch = "wasm32"
+        )))]
+        {
+            "Unknown".to_string()
+        }
     }
 
     /// Get operating system version
@@ -669,21 +698,40 @@ impl PlatformManager {
     /// Get system architecture
     fn get_architecture() -> String {
         #[cfg(target_arch = "x86_64")]
-        return "x86_64".to_string();
+        {
+            "x86_64".to_string()
+        }
 
         #[cfg(target_arch = "x86")]
-        return "x86".to_string();
+        {
+            "x86".to_string()
+        }
 
         #[cfg(target_arch = "aarch64")]
-        return "aarch64".to_string();
+        {
+            "aarch64".to_string()
+        }
 
         #[cfg(target_arch = "arm")]
-        return "arm".to_string();
+        {
+            "arm".to_string()
+        }
 
         #[cfg(target_arch = "wasm32")]
-        return "wasm32".to_string();
+        {
+            "wasm32".to_string()
+        }
 
-        "Unknown".to_string()
+        #[cfg(not(any(
+            target_arch = "x86_64",
+            target_arch = "x86",
+            target_arch = "aarch64",
+            target_arch = "arm",
+            target_arch = "wasm32"
+        )))]
+        {
+            "Unknown".to_string()
+        }
     }
 
     /// Get total system memory in bytes
@@ -1137,41 +1185,93 @@ impl Default for AudioDeviceInfo {
 /// Platform-specific error types
 #[derive(Debug, thiserror::Error)]
 pub enum PlatformError {
+    /// Platform not supported error
     #[error("Platform not supported: {platform:?}")]
-    UnsupportedPlatform { platform: Platform },
+    UnsupportedPlatform {
+        /// The unsupported platform
+        platform: Platform
+    },
 
+    /// Feature not available error
     #[error("Feature not available: {feature}")]
-    FeatureNotAvailable { feature: String },
+    FeatureNotAvailable {
+        /// The feature name
+        feature: String
+    },
 
+    /// Storage error
     #[error("Storage error: {message}")]
-    StorageError { message: String },
+    StorageError {
+        /// Error message
+        message: String
+    },
 
+    /// Audio device error
     #[error("Audio device error: {message}")]
-    AudioDeviceError { message: String },
+    AudioDeviceError {
+        /// Error message
+        message: String
+    },
 
+    /// Network error
     #[error("Network error: {message}")]
-    NetworkError { message: String },
+    NetworkError {
+        /// Error message
+        message: String
+    },
 
+    /// Configuration error
     #[error("Configuration error: {message}")]
-    ConfigurationError { message: String },
+    ConfigurationError {
+        /// Error message
+        message: String
+    },
 
+    /// Initialization error
     #[error("Initialization error: {message}")]
-    InitializationError { message: String },
+    InitializationError {
+        /// Error message
+        message: String
+    },
 
+    /// Capacity exceeded error
     #[error("Capacity exceeded: current {current}, max {max}")]
-    CapacityExceeded { current: usize, max: usize },
+    CapacityExceeded {
+        /// Current size
+        current: usize,
+        /// Maximum size
+        max: usize
+    },
 
+    /// Operation timed out error
     #[error("Operation timed out")]
-    Timeout { message: String },
+    Timeout {
+        /// Timeout message
+        message: String
+    },
 
+    /// Rate limited error
     #[error("Rate limited: {reason}")]
-    RateLimited { reason: String },
+    RateLimited {
+        /// Rate limit reason
+        reason: String
+    },
 
+    /// Permission denied error
     #[error("Permission denied: {permission}")]
-    PermissionDenied { permission: String },
+    PermissionDenied {
+        /// Permission name
+        permission: String
+    },
 
+    /// Resource limit exceeded error
     #[error("Resource limit exceeded: {resource} limit {limit}")]
-    ResourceLimitExceeded { resource: String, limit: usize },
+    ResourceLimitExceeded {
+        /// Resource name
+        resource: String,
+        /// Resource limit
+        limit: usize
+    },
 }
 
 /// Platform-specific result type

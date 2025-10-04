@@ -18,6 +18,7 @@ use voirs_sdk::{AudioBuffer, LanguageCode, VoirsError};
 
 /// Configuration for intelligent fallback
 #[derive(Debug, Clone)]
+/// Fallback Config
 pub struct FallbackConfig {
     /// Primary ASR backend
     pub primary_backend: ASRBackend,
@@ -60,6 +61,7 @@ impl Default for FallbackConfig {
 
 /// Model performance metrics for adaptive selection
 #[derive(Debug, Clone)]
+/// Model Metrics
 pub struct ModelMetrics {
     /// Average confidence score
     pub average_confidence: f32,
@@ -91,41 +93,65 @@ pub struct ModelMetrics {
 
 /// Audio quality level classification
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Audio Quality Level
 pub enum AudioQualityLevel {
+    /// Very low
     VeryLow,  // < 30 dB SNR
+    /// Low
     Low,      // 30-40 dB SNR
+    /// Medium
     Medium,   // 40-50 dB SNR
+    /// High
     High,     // 50-60 dB SNR
+    /// Very high
     VeryHigh, // > 60 dB SNR
 }
 
 /// Quality-specific performance metrics
 #[derive(Debug, Clone, Default)]
+/// Quality Metrics
 pub struct QualityMetrics {
+    /// confidence
     pub confidence: f32,
+    /// processing time
     pub processing_time: f32,
+    /// success rate
     pub success_rate: f32,
+    /// sample count
     pub sample_count: usize,
 }
 
 /// Language-specific performance metrics
 #[derive(Debug, Clone, Default)]
+/// Language Metrics
 pub struct LanguageMetrics {
+    /// confidence
     pub confidence: f32,
+    /// processing time
     pub processing_time: f32,
+    /// success rate
     pub success_rate: f32,
+    /// sample count
     pub sample_count: usize,
+    /// wer
     pub wer: f32, // Word Error Rate
 }
 
 /// Performance snapshot for trend analysis
 #[derive(Debug, Clone)]
+/// Performance Snapshot
 pub struct PerformanceSnapshot {
+    /// timestamp
     pub timestamp: Instant,
+    /// confidence
     pub confidence: f32,
+    /// processing time
     pub processing_time: f32,
+    /// rtf
     pub rtf: f32,
+    /// memory usage mb
     pub memory_usage_mb: f32,
+    /// success
     pub success: bool,
 }
 
@@ -151,17 +177,25 @@ impl Default for ModelMetrics {
 
 /// Fallback reason enumeration
 #[derive(Debug, Clone)]
+/// Fallback Reason
 pub enum FallbackReason {
+    /// Low confidence
     LowConfidence(f32),
+    /// Timeout
     Timeout(Duration),
+    /// Model error
     ModelError(String),
+    /// Memory pressure
     MemoryPressure(f32),
+    /// Adaptive selection
     AdaptiveSelection,
+    /// Explicit fallback
     ExplicitFallback,
 }
 
 /// Fallback result with metadata
 #[derive(Debug, Clone)]
+/// Fallback Result
 pub struct FallbackResult {
     /// Final transcript
     pub transcript: Transcript,
@@ -193,6 +227,7 @@ pub struct IntelligentASRFallback {
 
 /// Overall fallback statistics
 #[derive(Debug, Clone, Default)]
+/// Fallback Stats
 pub struct FallbackStats {
     /// Total requests processed
     pub total_requests: usize,
@@ -208,6 +243,7 @@ pub struct FallbackStats {
 
 /// Circuit breaker state for reliability
 #[derive(Debug, Clone, PartialEq)]
+/// Circuit Breaker State
 pub enum CircuitBreakerState {
     /// Circuit is closed (normal operation)
     Closed,
@@ -219,6 +255,7 @@ pub enum CircuitBreakerState {
 
 /// Circuit breaker for ASR models to prevent cascading failures
 #[derive(Debug, Clone)]
+/// Circuit Breaker
 pub struct CircuitBreaker {
     /// Current state
     pub state: CircuitBreakerState,
@@ -262,6 +299,7 @@ impl Default for CircuitBreaker {
 impl CircuitBreaker {
     /// Create a new circuit breaker with custom parameters
     #[must_use]
+    /// new
     pub fn new(
         failure_threshold: usize,
         success_threshold: usize,
@@ -373,6 +411,7 @@ impl CircuitBreaker {
 
     /// Get current failure rate in the window
     #[must_use]
+    /// get failure rate
     pub fn get_failure_rate(&self) -> f32 {
         let total = self.failure_count + self.success_count;
         if total == 0 {

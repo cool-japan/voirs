@@ -12,34 +12,44 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::traits::{FeedbackContext, FocusArea, SessionScores};
-use crate::UserModel;
+use crate::adaptive::models::UserModel;
 
 /// Virtual coach personality types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CoachPersonality {
     /// Encouraging and supportive coach
     Supportive {
+        /// Level of encouragement (0.0-1.0)
         encouragement_level: f32,
+        /// Patience level (0.0-1.0)
         patience_level: f32,
     },
     /// Direct and analytical coach
     Analytical {
+        /// Level of detail (0.0-1.0)
         detail_level: f32,
+        /// Precision focus level (0.0-1.0)
         precision_focus: f32,
     },
     /// Motivational and energetic coach
     Motivational {
+        /// Energy level (0.0-1.0)
         energy_level: f32,
+        /// Goal orientation level (0.0-1.0)
         goal_orientation: f32,
     },
     /// Gentle and understanding coach
     Nurturing {
+        /// Empathy level (0.0-1.0)
         empathy_level: f32,
+        /// Reassurance frequency (0.0-1.0)
         reassurance_frequency: f32,
     },
     /// Professional and structured coach
     Professional {
+        /// Formality level (0.0-1.0)
         formality_level: f32,
+        /// Structure emphasis level (0.0-1.0)
         structure_emphasis: f32,
     },
 }
@@ -47,373 +57,605 @@ pub enum CoachPersonality {
 /// Coach communication style
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommunicationStyle {
+    /// Tone of communication
     pub tone: CoachTone,
+    /// Level of verbosity
     pub verbosity: VerbosityLevel,
+    /// Frequency of feedback delivery
     pub feedback_frequency: FeedbackFrequency,
+    /// Style of encouragement
     pub encouragement_style: EncouragementStyle,
+    /// Approach to corrections
     pub correction_approach: CorrectionApproach,
 }
 
+/// Coach tone options
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CoachTone {
+    /// Formal tone
     Formal,
+    /// Casual tone
     Casual,
+    /// Friendly tone
     Friendly,
+    /// Professional tone
     Professional,
+    /// Encouraging tone
     Encouraging,
+    /// Neutral tone
     Neutral,
 }
 
+/// Verbosity level for coach feedback
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum VerbosityLevel {
+    /// Concise feedback
     Concise,
+    /// Moderate detail
     Moderate,
+    /// Detailed feedback
     Detailed,
+    /// Comprehensive feedback
     Comprehensive,
 }
 
+/// Frequency of feedback delivery
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum FeedbackFrequency {
+    /// Continuous real-time feedback
     Continuous,
+    /// Feedback after each word
     AfterEachWord,
+    /// Feedback after sentences
     AfterSentences,
+    /// Feedback after sessions
     AfterSessions,
+    /// Feedback only on request
     OnRequest,
 }
 
+/// Encouragement delivery style
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EncouragementStyle {
+    /// Frequent encouragement
     Frequent,
+    /// Encouragement at milestones
     Milestone,
+    /// Encouragement for achievements
     Achievement,
+    /// Encouragement for improvements
     Improvement,
+    /// Minimal encouragement
     Minimal,
 }
 
+/// Approach to delivering corrections
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CorrectionApproach {
+    /// Immediate correction
     Immediate,
+    /// Gentle correction
     Gentle,
+    /// Constructive correction
     Constructive,
+    /// Detailed correction
     Detailed,
+    /// Summary correction
     Summary,
 }
 
 /// Virtual pronunciation coach
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VirtualCoach {
+    /// Unique coach identifier
     pub coach_id: Uuid,
+    /// Coach display name
     pub name: String,
+    /// Coach personality type
     pub personality: CoachPersonality,
+    /// Communication style preferences
     pub communication_style: CommunicationStyle,
+    /// Areas of specialization
     pub specializations: Vec<CoachSpecialization>,
+    /// Experience level
     pub experience_level: ExperienceLevel,
+    /// Supported languages
     pub languages: Vec<String>,
+    /// Average user rating
     pub user_ratings: f32,
+    /// Number of coaching interactions
     pub interaction_count: u32,
+    /// Creation timestamp
     pub created_at: SystemTime,
 }
 
 /// Coach areas of specialization
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CoachSpecialization {
+    /// Pronunciation accuracy
     PronunciationAccuracy,
+    /// Accent reduction
     AccentReduction,
+    /// Fluency improvement
     FluencyImprovement,
+    /// Conversational skills
     ConversationalSkills,
+    /// Business communication
     BusinessCommunication,
+    /// Public speaking
     PublicSpeaking,
+    /// Language learning
     LanguageLearning,
+    /// Children education
     ChildrenEducation,
+    /// Special needs support
     SpecialNeeds,
+    /// Cultural adaptation
     CulturalAdaptation,
 }
 
 /// Coach experience level
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ExperienceLevel {
+    /// Novice level
     Novice,
+    /// Intermediate level
     Intermediate,
+    /// Experienced level
     Experienced,
+    /// Expert level
     Expert,
+    /// Master level
     Master,
 }
 
 /// Coaching session context
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoachingSession {
+    /// Unique session identifier
     pub session_id: Uuid,
+    /// User identifier
     pub user_id: Uuid,
+    /// Coach identifier
     pub coach_id: Uuid,
+    /// Type of session
     pub session_type: SessionType,
+    /// Learning objectives for the session
     pub learning_objectives: Vec<LearningObjective>,
+    /// Current area of focus
     pub current_focus: FocusArea,
+    /// Current session state
     pub session_state: SessionState,
+    /// Session start time
     pub start_time: SystemTime,
+    /// Session duration
     pub duration: Duration,
+    /// History of interventions
     pub intervention_history: Vec<CoachIntervention>,
 }
 
+/// Type of coaching session
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SessionType {
+    /// Assessment session
     AssessmentSession,
+    /// Practice session
     PracticeSession,
+    /// Targeted improvement session
     TargetedImprovement,
+    /// Conversation practice session
     ConversationPractice,
+    /// Skill building session
     SkillBuilding,
+    /// Progress review session
     ProgressReview,
 }
 
 /// Learning objectives for the session
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LearningObjective {
+    /// Unique objective identifier
     pub objective_id: Uuid,
+    /// Objective description
     pub description: String,
+    /// Target metric name
     pub target_metric: String,
+    /// Target value to achieve
     pub target_value: f32,
+    /// Current progress toward target
     pub progress: f32,
+    /// Whether objective is completed
     pub completed: bool,
 }
 
 /// Current state of the coaching session
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SessionState {
+    /// Initializing session
     Initializing,
+    /// Warm-up phase
     WarmUp,
+    /// Main practice phase
     MainPractice,
+    /// Targeted work phase
     TargetedWork,
+    /// Review phase
     Review,
+    /// Cool-down phase
     CoolDown,
+    /// Session completed
     Completed,
 }
 
 /// Coach intervention during session
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoachIntervention {
+    /// Unique intervention identifier
     pub intervention_id: Uuid,
+    /// Intervention timestamp
     pub timestamp: SystemTime,
+    /// Type of intervention
     pub intervention_type: InterventionType,
+    /// Reason that triggered the intervention
     pub trigger_reason: TriggerReason,
+    /// Intervention message
     pub message: String,
+    /// Optional guidance
     pub guidance: Option<String>,
+    /// Optional emotional support
     pub emotional_support: Option<EmotionalSupport>,
+    /// Effectiveness rating
     pub effectiveness: Option<f32>,
 }
 
+/// Type of coach intervention
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum InterventionType {
+    /// Encouragement intervention
     Encouragement,
+    /// Correction intervention
     Correction,
+    /// Guidance intervention
     Guidance,
+    /// Technique intervention
     Technique,
+    /// Motivation intervention
     Motivation,
+    /// Break suggestion
     BreakSuggestion,
+    /// Progress update
     ProgressUpdate,
+    /// Skill reminder
     SkillReminder,
+    /// Emotional support
     EmotionalSupport,
 }
 
+/// Reason that triggered an intervention
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TriggerReason {
+    /// Low performance detected
     LowPerformance,
+    /// Frustration detected
     Frustration,
+    /// Performance plateau
     Plateau,
+    /// Confusion detected
     Confusion,
+    /// Drop in motivation
     MotivationDrop,
+    /// Technical difficulty
     TechnicalDifficulty,
+    /// Improvement opportunity
     ImprovementOpportunity,
+    /// Milestone reached
     MilestoneReached,
+    /// Session progression
     SessionProgression,
 }
 
 /// Emotional support provided by the coach
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmotionalSupport {
+    /// Type of support
     pub support_type: SupportType,
+    /// Intensity level
     pub intensity: SupportIntensity,
+    /// Personalized message
     pub personalized_message: String,
+    /// Coping strategies
     pub coping_strategies: Vec<CopingStrategy>,
 }
 
+/// Type of emotional support
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SupportType {
+    /// Encouragement support
     Encouragement,
+    /// Reassurance support
     Reassurance,
+    /// Motivation support
     Motivation,
+    /// Comfort zone support
     ComfortZone,
+    /// Confidence building
     ConfidenceBuilding,
+    /// Stress reduction
     StressReduction,
 }
 
+/// Intensity level of support
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SupportIntensity {
+    /// Gentle support
     Gentle,
+    /// Moderate support
     Moderate,
+    /// Strong support
     Strong,
+    /// Intensive support
     Intensive,
 }
 
 /// Coping strategies for learning challenges
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CopingStrategy {
+    /// Strategy name
     pub strategy_name: String,
+    /// Strategy description
     pub description: String,
+    /// Implementation steps
     pub implementation_steps: Vec<String>,
+    /// Effectiveness rating
     pub effectiveness_rating: f32,
 }
 
 /// User's coaching preferences
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoachingPreferences {
+    /// User identifier
     pub user_id: Uuid,
+    /// Preferred coach personality
     pub preferred_coach_personality: CoachPersonality,
+    /// Communication style preferences
     pub communication_preferences: CommunicationStyle,
+    /// Intervention tolerance level
     pub intervention_tolerance: InterventionTolerance,
+    /// Desired emotional support level
     pub emotional_support_level: EmotionalSupportLevel,
+    /// Feedback detail preference
     pub feedback_detail_preference: FeedbackDetailLevel,
+    /// Session structure preference
     pub session_structure_preference: SessionStructure,
 }
 
+/// Tolerance level for interventions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum InterventionTolerance {
+    /// Minimal interventions
     Minimal,
+    /// Low intervention frequency
     Low,
+    /// Moderate intervention frequency
     Moderate,
+    /// High intervention frequency
     High,
+    /// Maximum interventions
     Maximum,
 }
 
+/// Level of emotional support desired
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EmotionalSupportLevel {
+    /// No emotional support
     None,
+    /// Light emotional support
     Light,
+    /// Moderate emotional support
     Moderate,
+    /// Comprehensive emotional support
     Comprehensive,
+    /// Intensive emotional support
     Intensive,
 }
 
+/// Detail level for feedback
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FeedbackDetailLevel {
+    /// Summary feedback only
     Summary,
+    /// Standard detail level
     Standard,
+    /// Detailed feedback
     Detailed,
+    /// Comprehensive feedback
     Comprehensive,
+    /// Technical feedback
     Technical,
 }
 
+/// Session structure preference
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SessionStructure {
+    /// Flexible structure
     Flexible,
+    /// Loose structure
     LooseStructure,
+    /// Structured sessions
     Structured,
+    /// Highly structured sessions
     HighlyStructured,
+    /// Adaptive structure
     Adaptive,
 }
 
 /// Automated skill assessment results
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillAssessment {
+    /// Unique assessment identifier
     pub assessment_id: Uuid,
+    /// User identifier
     pub user_id: Uuid,
+    /// Assessment date
     pub assessment_date: SystemTime,
+    /// Overall assessment score
     pub overall_score: f32,
+    /// Skill breakdown by focus area
     pub skill_breakdown: HashMap<FocusArea, SkillMetrics>,
+    /// Identified improvement areas
     pub improvement_areas: Vec<ImprovementArea>,
+    /// Identified strengths
     pub strengths: Vec<SkillStrength>,
+    /// Recommended focus area
     pub recommended_focus: FocusArea,
+    /// Confidence interval for assessment
     pub confidence_interval: f32,
 }
 
 /// Detailed metrics for specific skills
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillMetrics {
+    /// Accuracy score
     pub accuracy: f32,
+    /// Consistency score
     pub consistency: f32,
+    /// Improvement rate
     pub improvement_rate: f32,
+    /// Confidence level
     pub confidence_level: f32,
+    /// Practice frequency
     pub practice_frequency: f32,
+    /// Last assessment timestamp
     pub last_assessment: SystemTime,
 }
 
 /// Areas identified for improvement
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImprovementArea {
+    /// Focus area for improvement
     pub area: FocusArea,
+    /// Current skill level
     pub current_level: f32,
+    /// Target skill level
     pub target_level: f32,
+    /// Improvement priority
     pub priority: ImprovementPriority,
+    /// Estimated time to improve
     pub estimated_time_to_improve: Duration,
+    /// Recommended exercises
     pub recommended_exercises: Vec<String>,
 }
 
+/// Priority level for improvement
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ImprovementPriority {
+    /// Critical priority
     Critical,
+    /// High priority
     High,
+    /// Medium priority
     Medium,
+    /// Low priority
     Low,
+    /// Optional improvement
     Optional,
 }
 
 /// User strengths identified in assessment
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillStrength {
+    /// Focus area of strength
     pub area: FocusArea,
+    /// Strength level
     pub strength_level: f32,
+    /// Consistency of strength
     pub consistency: f32,
+    /// Whether user has mentoring potential
     pub potential_for_mentoring: bool,
 }
 
 /// AI-powered coaching system
 pub struct AICoachingSystem {
+    /// Available virtual coaches
     coaches: RwLock<HashMap<Uuid, VirtualCoach>>,
+    /// Active coaching sessions
     active_sessions: RwLock<HashMap<Uuid, CoachingSession>>,
+    /// User coaching preferences
     user_preferences: RwLock<HashMap<Uuid, CoachingPreferences>>,
+    /// Historical skill assessments
     assessment_history: RwLock<HashMap<Uuid, Vec<SkillAssessment>>>,
+    /// Intervention strategies by trigger reason
     intervention_strategies: RwLock<HashMap<TriggerReason, Vec<InterventionStrategy>>>,
 }
 
 /// Strategy for coach interventions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InterventionStrategy {
+    /// Unique strategy identifier
     pub strategy_id: Uuid,
+    /// Strategy name
     pub name: String,
+    /// Strategy description
     pub description: String,
+    /// Trigger conditions for this strategy
     pub trigger_conditions: Vec<TriggerCondition>,
+    /// Intervention template
     pub intervention_template: InterventionTemplate,
+    /// Strategy effectiveness score
     pub effectiveness_score: f32,
+    /// Number of times used
     pub usage_count: u32,
 }
 
+/// Condition that triggers an intervention
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TriggerCondition {
+    /// Metric to monitor
     pub metric: String,
+    /// Threshold value
     pub threshold: f32,
+    /// Comparison operator
     pub comparison: ComparisonOperator,
+    /// Optional duration constraint
     pub duration: Option<Duration>,
 }
 
+/// Comparison operator for trigger conditions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ComparisonOperator {
+    /// Less than threshold
     LessThan,
+    /// Greater than threshold
     GreaterThan,
+    /// Equals threshold
     Equals,
+    /// Between two values (inclusive)
     BetweenInclusive(f32, f32),
+    /// Between two values (exclusive)
     BetweenExclusive(f32, f32),
 }
 
+/// Template for intervention messages
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InterventionTemplate {
+    /// Message template
     pub message_template: String,
+    /// Optional guidance template
     pub guidance_template: Option<String>,
+    /// Optional emotional support template
     pub emotional_support_template: Option<EmotionalSupportTemplate>,
+    /// Variables for personalization
     pub personalization_variables: Vec<String>,
 }
 
+/// Template for emotional support messages
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmotionalSupportTemplate {
+    /// Type of support
     pub support_type: SupportType,
+    /// Message template
     pub message_template: String,
+    /// Coping strategies to suggest
     pub coping_strategies: Vec<CopingStrategy>,
 }
 
@@ -871,10 +1113,10 @@ impl AICoachingSystem {
             FocusArea::Fluency,
         ] {
             let metrics = SkillMetrics {
-                accuracy: 0.75 + (rand::random::<f32>() * 0.2), // Mock data
-                consistency: 0.70 + (rand::random::<f32>() * 0.25),
-                improvement_rate: 0.05 + (rand::random::<f32>() * 0.1),
-                confidence_level: 0.68 + (rand::random::<f32>() * 0.3),
+                accuracy: 0.75 + (scirs2_core::random::random::<f32>() * 0.2), // Mock data
+                consistency: 0.70 + (scirs2_core::random::random::<f32>() * 0.25),
+                improvement_rate: 0.05 + (scirs2_core::random::random::<f32>() * 0.1),
+                confidence_level: 0.68 + (scirs2_core::random::random::<f32>() * 0.3),
                 practice_frequency: 0.8,
                 last_assessment: SystemTime::now(),
             };
@@ -982,21 +1224,27 @@ impl AICoachingSystem {
 /// Errors that can occur in AI coaching operations
 #[derive(Debug, thiserror::Error)]
 pub enum CoachingError {
+    /// Coach with given ID not found
     #[error("Coach not found: {0}")]
     CoachNotFound(Uuid),
 
+    /// Session with given ID not found
     #[error("Session not found: {0}")]
     SessionNotFound(Uuid),
 
+    /// No suitable coach available
     #[error("No coach available")]
     NoCoachAvailable,
 
+    /// Assessment operation failed
     #[error("Assessment failed: {0}")]
     AssessmentFailed(String),
 
+    /// Invalid user preferences
     #[error("Invalid preferences: {0}")]
     InvalidPreferences(String),
 
+    /// System-level error
     #[error("System error: {0}")]
     SystemError(String),
 }

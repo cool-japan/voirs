@@ -6,7 +6,7 @@ use cpal::{
 };
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use voirs::{Result, VoirsError};
+use voirs_sdk::{Result, VoirsError};
 
 use super::AudioData;
 

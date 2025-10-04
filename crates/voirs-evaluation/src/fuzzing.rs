@@ -9,9 +9,9 @@ use crate::traits::{
     QualityEvaluationConfig, QualityEvaluator as QualityEvaluatorTrait,
 };
 use crate::EvaluationError;
-use rand::prelude::*;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
+use scirs2_core::random::prelude::*;
+use scirs2_core::random::rngs::StdRng;
+use scirs2_core::random::SeedableRng;
 use std::time::{Duration, Instant};
 use voirs_sdk::{AudioBuffer, LanguageCode, Phoneme};
 

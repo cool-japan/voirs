@@ -8,8 +8,7 @@
 //! - Traditional metrics (SNR, THD+N, spectral distortion)
 
 use crate::{AudioBuffer, Result, VocoderError};
-use ndarray::{s, Array1, Array2};
-use realfft::RealFftPlanner;
+use scirs2_core::ndarray::{s, Array1, Array2};
 use std::f32::consts::PI;
 
 pub mod mos;
@@ -57,9 +56,6 @@ pub struct QualityMetrics {
 
 /// Quality metrics calculator
 pub struct QualityCalculator {
-    /// FFT planner for spectral analysis
-    fft_planner: RealFftPlanner<f32>,
-
     /// Configuration options
     config: QualityConfig,
 }
@@ -102,10 +98,7 @@ impl Default for QualityConfig {
 impl QualityCalculator {
     /// Create new quality calculator
     pub fn new(config: QualityConfig) -> Self {
-        Self {
-            fft_planner: RealFftPlanner::new(),
-            config,
-        }
+        Self { config }
     }
 
     /// Calculate comprehensive quality metrics between reference and degraded audio
@@ -270,7 +263,7 @@ impl QualityCalculator {
     }
 
     /// Calculate total harmonic distortion plus noise
-    fn calculate_thd_n(&mut self, audio: &Array1<f32>) -> f32 {
+    fn calculate_thd_n(&self, audio: &Array1<f32>) -> f32 {
         // Simplified THD+N calculation
         // In practice, this would require more sophisticated harmonic analysis
 
@@ -283,27 +276,29 @@ impl QualityCalculator {
             return 0.0;
         }
 
-        let fft = self.fft_planner.plan_fft_forward(fft_size);
-        let mut input = vec![0.0; fft_size];
-        let mut output = fft.make_output_vec();
-
         // Use first frame for analysis
         let audio_slice = audio.slice(s![..fft_size]);
-        for (i, &sample) in audio_slice.iter().enumerate() {
-            input[i] = sample;
-        }
-        fft.process(&mut input, &mut output).unwrap();
+        let input: Vec<f64> = audio_slice.iter().map(|&x| x as f64).collect();
+
+        // Compute FFT using scirs2_fft
+        let output = match scirs2_fft::rfft(&input, None) {
+            Ok(spectrum) => spectrum,
+            Err(_) => return 0.0,
+        };
 
         // Calculate energy in high frequencies (rough distortion estimate)
         let nyquist_bin = fft_size / 2;
         let high_freq_start = nyquist_bin / 2; // Above 1/4 Nyquist
 
-        let high_freq_energy: f32 = output[high_freq_start..nyquist_bin]
+        let high_freq_energy: f32 = output[high_freq_start..nyquist_bin.min(output.len())]
             .iter()
-            .map(|c| c.norm_sqr())
+            .map(|c| (c.re * c.re + c.im * c.im) as f32)
             .sum();
 
-        let total_energy: f32 = output[1..nyquist_bin].iter().map(|c| c.norm_sqr()).sum();
+        let total_energy: f32 = output[1..nyquist_bin.min(output.len())]
+            .iter()
+            .map(|c| (c.re * c.re + c.im * c.im) as f32)
+            .sum();
 
         if total_energy > 0.0 {
             (high_freq_energy / total_energy * 100.0).min(100.0)
@@ -387,39 +382,39 @@ impl QualityCalculator {
     }
 
     /// Compute power spectrum
-    fn compute_spectrum(&mut self, audio: &Array1<f32>) -> Result<Array2<f32>> {
+    fn compute_spectrum(&self, audio: &Array1<f32>) -> Result<Array2<f32>> {
         let frame_size = self.config.frame_size;
         let hop_length = self.config.hop_length;
         let n_frames = (audio.len().saturating_sub(frame_size)) / hop_length + 1;
 
         let mut spectrum = Array2::zeros((n_frames, frame_size / 2 + 1));
-        let fft = self.fft_planner.plan_fft_forward(frame_size);
-        let mut input = vec![0.0; frame_size];
-        let mut output = fft.make_output_vec();
 
         // Apply window function
         let window: Vec<f32> = (0..frame_size)
-            .map(|i| 0.5 * (1.0 - (2.0 * PI * i as f32 / (frame_size - 1) as f32).cos()))
+            .map(|i| {
+                0.5 * (1.0
+                    - (2.0 * std::f32::consts::PI * i as f32 / (frame_size - 1) as f32).cos())
+            })
             .collect();
 
         for frame in 0..n_frames {
             let start = frame * hop_length;
             let end = (start + frame_size).min(audio.len());
 
-            // Clear input buffer
-            input.fill(0.0);
-
             // Copy audio data with windowing
+            let mut input = vec![0.0f64; frame_size];
             for (i, &sample) in audio.slice(s![start..end]).iter().enumerate() {
-                input[i] = sample * window[i];
+                input[i] = sample as f64 * window[i] as f64;
             }
 
-            // Compute FFT
-            fft.process(&mut input, &mut output).unwrap();
+            // Compute FFT using scirs2_fft
+            let output = scirs2_fft::rfft(&input, None)
+                .map_err(|e| VocoderError::ProcessingError(format!("FFT error: {:?}", e)))?;
 
             // Convert to power spectrum
             for (i, complex_val) in output.iter().enumerate() {
-                spectrum[[frame, i]] = complex_val.norm_sqr();
+                spectrum[[frame, i]] =
+                    (complex_val.re * complex_val.re + complex_val.im * complex_val.im) as f32;
             }
         }
 

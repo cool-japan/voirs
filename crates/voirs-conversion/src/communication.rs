@@ -422,23 +422,23 @@ pub enum CommunicationMode {
 /// VoIP processor for real-time voice conversion in communication apps
 #[derive(Debug)]
 pub struct VoipProcessor {
-    /// Target communication app
+    /// Target communication application being processed
     app: CommunicationApp,
-    /// VoIP configuration
+    /// VoIP-specific configuration settings
     config: VoipConfig,
-    /// Real-time voice converter
+    /// Real-time voice converter engine
     realtime_converter: RealtimeConverter,
-    /// Voice converter for complex transformations
+    /// Voice converter for complex transformations and effects
     voice_converter: Arc<VoiceConverter>,
-    /// App constraints
+    /// Application-specific communication constraints
     constraints: CommunicationConstraints,
-    /// Voice profiles for different communication modes
+    /// Voice profiles mapped by name for different communication modes
     voice_profiles: Arc<RwLock<HashMap<String, VoiceCharacteristics>>>,
-    /// Active call sessions
+    /// Active call sessions tracked by call ID
     active_calls: Arc<RwLock<HashMap<String, CallSession>>>,
-    /// Call performance monitor
+    /// Performance monitor for tracking call quality metrics
     performance_monitor: CallPerformanceMonitor,
-    /// Network adaptation state
+    /// Network adaptation state for quality adjustments
     network_adaptation: NetworkAdaptationState,
 }
 
@@ -849,21 +849,32 @@ impl VoipProcessor {
 /// Call session for tracking communication state
 #[derive(Debug, Clone)]
 pub struct CallSession {
+    /// Unique identifier for this call session
     pub call_id: String,
+    /// List of participant identifiers in the call
     pub participants: Vec<String>,
+    /// Communication mode being used for this call
     pub mode: CommunicationMode,
+    /// Timestamp when the call session started
     pub start_time: std::time::Instant,
+    /// Communication application used for this call
     pub app: CommunicationApp,
+    /// Number of audio packets processed in this session
     pub processed_packets: u64,
+    /// Total accumulated latency in milliseconds
     pub total_latency_ms: f32,
+    /// Number of quality issues detected during the call
     pub quality_issues: u32,
 }
 
-/// Network adaptation state for VoIP
+/// Network adaptation state for VoIP quality management
 #[derive(Debug, Clone)]
 pub struct NetworkAdaptationState {
+    /// Current bitrate in kbps for audio transmission
     pub current_bitrate: u32,
+    /// Target latency in milliseconds for optimal performance
     pub target_latency_ms: f32,
+    /// History of network adaptation events
     pub adaptation_history: Vec<NetworkAdaptationEvent>,
 }
 
@@ -902,14 +913,20 @@ impl NetworkAdaptationState {
 /// Event triggered when network adaptation occurs
 #[derive(Debug, Clone)]
 pub struct NetworkAdaptationEvent {
+    /// Timestamp when the adaptation event occurred
     pub timestamp: std::time::Instant,
+    /// Direction of quality adaptation (increase or decrease)
     pub direction: NetworkAdaptationDirection,
+    /// New bitrate after adaptation in kbps
     pub new_bitrate: u32,
 }
 
+/// Direction of network quality adaptation
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetworkAdaptationDirection {
+    /// Increase quality/bitrate due to improved network conditions
     Increase,
+    /// Decrease quality/bitrate due to degraded network conditions
     Decrease,
 }
 
@@ -990,125 +1007,200 @@ impl CallPerformanceMonitor {
     }
 }
 
-/// Call performance metrics
+/// Call performance metrics for quality monitoring
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CallPerformanceMetrics {
+    /// Average processing latency in milliseconds
     pub average_latency_ms: f32,
+    /// Network jitter measurement in milliseconds
     pub jitter_ms: f32,
+    /// Packet loss percentage (0-100)
     pub packet_loss_percent: f32,
+    /// Total number of quality issues encountered
     pub quality_issues: u32,
+    /// Duration of the call in seconds
     pub call_duration_seconds: u64,
 }
 
 /// App-specific integration information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AppIntegration {
+    /// Zoom video conferencing integration details
     Zoom(ZoomIntegration),
+    /// Microsoft Teams integration details
     Teams(TeamsIntegration),
+    /// Skype integration details
     Skype(SkypeIntegration),
+    /// Discord voice chat integration details
     Discord(DiscordIntegration),
+    /// Slack workspace integration details
     Slack(SlackIntegration),
+    /// WhatsApp messaging integration details
     WhatsApp(WhatsAppIntegration),
+    /// Telegram bot integration details
     Telegram(TelegramIntegration),
+    /// Signal privacy-focused integration details
     Signal(SignalIntegration),
+    /// Generic WebRTC integration details
     WebRTC(WebRTCIntegration),
+    /// Google Meet integration details
     GoogleMeet(GoogleMeetIntegration),
+    /// Cisco Webex enterprise integration details
     CiscoWebex(WebexIntegration),
 }
 
 /// Zoom video conferencing integration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ZoomIntegration {
+    /// Version of Zoom SDK used for integration
     pub sdk_version: String,
+    /// Whether meeting integration is enabled
     pub meeting_integration: bool,
+    /// Whether recording features are supported
     pub recording_support: bool,
+    /// Whether breakout room features are enabled
     pub breakout_rooms: bool,
+    /// Whether webhook notifications are supported
     pub webhook_support: bool,
 }
 
 /// Microsoft Teams integration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TeamsIntegration {
+    /// Version of Microsoft Graph API used
     pub graph_api_version: String,
+    /// Whether tenant-level integration is enabled
     pub tenant_integration: bool,
+    /// Whether Bot Framework is supported
     pub bot_framework_support: bool,
+    /// Whether meeting apps are supported
     pub meeting_apps: bool,
+    /// Whether compliance recording features are enabled
     pub compliance_recording: bool,
 }
 
+/// Skype voice and video calling integration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkypeIntegration {
+    /// Version of Skype API used
     pub api_version: String,
+    /// Whether bot integration is enabled
     pub bot_integration: bool,
+    /// Whether calling features are supported
     pub calling_support: bool,
+    /// Whether messaging extensions are enabled
     pub messaging_extension: bool,
 }
 
+/// Discord voice chat and gaming integration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiscordIntegration {
+    /// Version of Discord API used
     pub api_version: String,
+    /// Whether voice channel integration is enabled
     pub voice_channel_integration: bool,
+    /// Whether bot integration is supported
     pub bot_integration: bool,
+    /// Whether stage channel features are supported
     pub stage_channel_support: bool,
+    /// Whether permission system integration is enabled
     pub permission_system: bool,
 }
 
+/// Slack team communication integration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlackIntegration {
+    /// Version of Slack API used
     pub api_version: String,
+    /// Whether workspace-level integration is enabled
     pub workspace_integration: bool,
+    /// Whether App Home features are supported
     pub app_home: bool,
+    /// Whether slash commands are enabled
     pub slash_commands: bool,
+    /// Whether interactive components are supported
     pub interactive_components: bool,
 }
 
+/// WhatsApp Business messaging integration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WhatsAppIntegration {
+    /// Version of WhatsApp Business API used
     pub business_api_version: String,
+    /// Whether webhook notifications are supported
     pub webhook_support: bool,
+    /// Whether template messages are enabled
     pub template_messages: bool,
+    /// Whether media file support is enabled
     pub media_support: bool,
 }
 
+/// Telegram bot and messaging integration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelegramIntegration {
+    /// Version of Telegram Bot API used
     pub bot_api_version: String,
+    /// Whether bot integration is enabled
     pub bot_integration: bool,
+    /// Whether inline queries are supported
     pub inline_queries: bool,
+    /// Whether webhook notifications are enabled
     pub webhook_support: bool,
+    /// Whether payment features are supported
     pub payments_support: bool,
 }
 
+/// Signal privacy-focused messaging integration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignalIntegration {
+    /// Version of Signal protocol used
     pub protocol_version: String,
+    /// Whether privacy-focused features are enabled
     pub privacy_focused: bool,
+    /// Whether end-to-end encryption is supported
     pub end_to_end_encryption: bool,
+    /// Whether disappearing messages are supported
     pub disappearing_messages: bool,
 }
 
+/// Generic WebRTC real-time communication integration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebRTCIntegration {
+    /// Version of WebRTC specification used
     pub specification_version: String,
+    /// Whether peer connection API is supported
     pub peer_connection_support: bool,
+    /// Whether data channel features are supported
     pub data_channel_support: bool,
+    /// Whether media stream capture is supported
     pub media_stream_support: bool,
 }
 
+/// Google Meet video conferencing integration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GoogleMeetIntegration {
+    /// Version of Google Meet API used
     pub api_version: String,
+    /// Whether Google Calendar integration is enabled
     pub calendar_integration: bool,
+    /// Whether Google Workspace integration is enabled
     pub workspace_integration: bool,
+    /// Whether recording features are supported
     pub recording_support: bool,
 }
 
+/// Cisco Webex enterprise communication integration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebexIntegration {
+    /// Version of Webex API used
     pub api_version: String,
+    /// Whether enterprise-level integration is enabled
     pub enterprise_integration: bool,
+    /// Whether meeting control features are supported
     pub meeting_controls: bool,
+    /// Whether recording capabilities are supported
     pub recording_support: bool,
+    /// Whether compliance and security features are enabled
     pub compliance_features: bool,
 }
 

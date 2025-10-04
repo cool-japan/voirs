@@ -131,7 +131,7 @@ impl PerformanceMonitor {
     }
 
     /// Start monitoring an adaptation operation
-    pub async fn start_adaptation_monitoring(&self) -> AdaptationMonitor {
+    pub async fn start_adaptation_monitoring(&self) -> AdaptationMonitor<'_> {
         let mut active = self.active_adaptations.write().await;
         *active += 1;
         let concurrent_count = *active;

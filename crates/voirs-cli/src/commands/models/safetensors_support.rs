@@ -10,7 +10,7 @@ use safetensors::SafeTensors;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use voirs::{Result, VoirsError};
+use voirs_sdk::{Result, VoirsError};
 
 /// SafeTensors model information
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -195,7 +195,7 @@ impl SafeTensorsLoader {
             .map_err(|e| VoirsError::config_error(format!("Failed to parse SafeTensors: {}", e)))?;
 
         let metadata = HashMap::new(); // SafeTensors doesn't expose metadata directly
-        let tensor_names: Vec<_> = safetensors.names().into_iter().cloned().collect();
+        let tensor_names: Vec<_> = safetensors.names().iter().map(|s| s.to_string()).collect();
 
         let mut tensor_shapes = HashMap::new();
         let mut tensor_dtypes = HashMap::new();
@@ -206,8 +206,8 @@ impl SafeTensorsLoader {
                 let shape = tensor_view.shape().to_vec();
                 let dtype = format!("{:?}", tensor_view.dtype());
 
-                tensor_shapes.insert(name.clone(), shape.clone());
-                tensor_dtypes.insert(name.clone(), dtype.clone());
+                tensor_shapes.insert(name.to_string(), shape.clone());
+                tensor_dtypes.insert(name.to_string(), dtype.clone());
 
                 total_params += shape.iter().product::<usize>() as u64;
             }

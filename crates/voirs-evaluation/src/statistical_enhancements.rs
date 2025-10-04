@@ -22,10 +22,10 @@ pub struct TTestResult {
     pub significant: bool,
 }
 use crate::EvaluationError;
-use ndarray::{Array1, Array2};
-use rand::seq::SliceRandom;
-use rand::{rngs::StdRng, thread_rng, SeedableRng};
-use rayon::prelude::*;
+use scirs2_core::ndarray::{Array1, Array2};
+use scirs2_core::parallel_ops::*;
+use scirs2_core::random::seq::SliceRandom;
+use scirs2_core::random::{rngs::StdRng, thread_rng, Random, SeedableRng};
 use statrs::distribution::{ChiSquared, ContinuousCDF, Normal, StudentsT};
 use statrs::statistics::{OrderStatistics, Statistics};
 use std::collections::HashMap;
@@ -380,23 +380,29 @@ impl EnhancedStatisticalAnalyzer {
         group1: &[f64],
         group2: &[f64],
     ) -> Result<(f64, f64), EvaluationError> {
-        use rand::prelude::*;
-        use rand::seq::SliceRandom;
+        use scirs2_core::random::prelude::*;
+        use scirs2_core::random::seq::SliceRandom;
 
         let mut rng = if let Some(seed) = self.seed {
-            StdRng::seed_from_u64(seed)
+            Random::seed(seed)
         } else {
-            StdRng::from_rng(&mut thread_rng())
+            Random::seed(0)
         };
 
         let mut differences = Vec::with_capacity(self.bootstrap_samples);
 
         for _ in 0..self.bootstrap_samples {
             let sample1: Vec<f64> = (0..group1.len())
-                .map(|_| *group1.choose(&mut rng).unwrap())
+                .map(|_| {
+                    let idx = rng.gen_range(0..group1.len());
+                    group1[idx]
+                })
                 .collect();
             let sample2: Vec<f64> = (0..group2.len())
-                .map(|_| *group2.choose(&mut rng).unwrap())
+                .map(|_| {
+                    let idx = rng.gen_range(0..group2.len());
+                    group2[idx]
+                })
                 .collect();
 
             let mean1 = sample1.iter().sum::<f64>() / sample1.len() as f64;
@@ -517,19 +523,24 @@ impl EnhancedStatisticalAnalyzer {
         x: &[f64],
         y: &[f64],
     ) -> Result<(f64, f64), EvaluationError> {
-        use rand::prelude::*;
+        use scirs2_core::random::prelude::*;
 
         let mut rng = if let Some(seed) = self.seed {
-            StdRng::seed_from_u64(seed)
+            Random::seed(seed)
         } else {
-            StdRng::from_rng(&mut thread_rng())
+            Random::seed(0)
         };
 
         let mut correlations = Vec::with_capacity(self.bootstrap_samples);
         let n = x.len();
 
         for _ in 0..self.bootstrap_samples {
-            let indices: Vec<usize> = (0..n).choose_multiple(&mut rng, n).into_iter().collect();
+            // Fisher-Yates shuffle for sampling without replacement
+            let mut indices: Vec<usize> = (0..n).collect();
+            for i in (1..n).rev() {
+                let j = rng.gen_range(0..=i);
+                indices.swap(i, j);
+            }
             let sample_x: Vec<f64> = indices.iter().map(|&i| x[i]).collect();
             let sample_y: Vec<f64> = indices.iter().map(|&i| y[i]).collect();
 

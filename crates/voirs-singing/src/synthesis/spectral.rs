@@ -1,37 +1,44 @@
 //! Spectral processing for synthesis
 
-use ndarray::Array1;
-use rustfft::{num_complex::Complex, FftPlanner};
+use scirs2_core::ndarray::Array1;
+use scirs2_core::Complex;
 
-/// Spectral processor
+/// Spectral processor for frequency-domain operations
+///
+/// Performs FFT-based spectral shaping and formant filtering.
 pub struct SpectralProcessor {
-    /// FFT planner
-    fft_planner: FftPlanner<f32>,
-    /// Frame size
+    /// FFT frame size in samples
     frame_size: usize,
-    /// Spectral envelope
+    /// Spectral envelope for shaping (amplitude per frequency bin)
     envelope: Array1<f32>,
-    /// Formant frequencies
+    /// Formant center frequencies in Hz
     formant_freqs: Vec<f32>,
-    /// Formant bandwidths
+    /// Formant bandwidths in Hz
     formant_bws: Vec<f32>,
-    /// Formant gains
+    /// Formant gains in dB
     formant_gains: Vec<f32>,
-    /// FFT buffer
+    /// FFT buffer for forward transform
     fft_buffer: Vec<Complex<f32>>,
-    /// IFFT buffer
+    /// IFFT buffer for inverse transform
     ifft_buffer: Vec<Complex<f32>>,
 }
 
 impl SpectralProcessor {
     /// Create a new spectral processor
+    ///
+    /// # Arguments
+    ///
+    /// * `frame_size` - FFT frame size in samples
+    ///
+    /// # Returns
+    ///
+    /// New SpectralProcessor with default formants
     pub fn new(frame_size: usize) -> Self {
         let envelope = Array1::ones(frame_size / 2 + 1);
         let fft_buffer = vec![Complex::new(0.0, 0.0); frame_size];
         let ifft_buffer = vec![Complex::new(0.0, 0.0); frame_size];
 
         Self {
-            fft_planner: FftPlanner::new(),
             frame_size,
             envelope,
             formant_freqs: vec![700.0, 1220.0, 2600.0], // Default vowel formants
@@ -43,6 +50,19 @@ impl SpectralProcessor {
     }
 
     /// Process audio through spectral analysis and synthesis
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Input audio frame (must match frame_size)
+    /// * `sample_rate` - Sample rate in Hz
+    ///
+    /// # Returns
+    ///
+    /// Processed audio with spectral envelope and formant filtering applied
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if frame size doesn't match or FFT/IFFT fails
     pub fn process(&mut self, input: &Array1<f32>, sample_rate: f32) -> crate::Result<Array1<f32>> {
         if input.len() != self.frame_size {
             return Err(crate::Error::Processing(
@@ -50,14 +70,20 @@ impl SpectralProcessor {
             ));
         }
 
-        // Copy input to FFT buffer
-        for (i, &sample) in input.iter().enumerate() {
-            self.fft_buffer[i] = Complex::new(sample, 0.0);
-        }
+        // Convert input to f64 complex for FFT
+        let input_f64: Vec<scirs2_core::Complex<f64>> = input
+            .iter()
+            .map(|&x| scirs2_core::Complex::new(x as f64, 0.0))
+            .collect();
 
         // Forward FFT
-        let fft = self.fft_planner.plan_fft_forward(self.frame_size);
-        fft.process(&mut self.fft_buffer);
+        let fft_result = scirs2_fft::fft(&input_f64, None)
+            .map_err(|e| crate::Error::Processing(format!("FFT error: {e}")))?;
+
+        // Copy to fft_buffer as Complex<f32>
+        for (i, c) in fft_result.iter().enumerate() {
+            self.fft_buffer[i] = Complex::new(c.re as f32, c.im as f32);
+        }
 
         // Apply spectral envelope
         self.apply_spectral_envelope(sample_rate)?;
@@ -68,15 +94,21 @@ impl SpectralProcessor {
         // Copy to IFFT buffer
         self.ifft_buffer.copy_from_slice(&self.fft_buffer);
 
-        // Inverse FFT
-        let ifft = self.fft_planner.plan_fft_inverse(self.frame_size);
-        ifft.process(&mut self.ifft_buffer);
+        // Convert to f64 complex for IFFT
+        let input_ifft: Vec<scirs2_core::Complex<f64>> = self
+            .ifft_buffer
+            .iter()
+            .map(|c| scirs2_core::Complex::new(c.re as f64, c.im as f64))
+            .collect();
 
-        // Extract real part and normalize
+        // Inverse FFT
+        let ifft_result = scirs2_fft::ifft(&input_ifft, None)
+            .map_err(|e| crate::Error::Processing(format!("IFFT error: {e}")))?;
+
+        // Extract real part
         let mut output = Array1::zeros(self.frame_size);
-        let scale = 1.0 / self.frame_size as f32;
-        for (i, &complex_sample) in self.ifft_buffer.iter().enumerate() {
-            output[i] = complex_sample.re * scale;
+        for (i, c) in ifft_result.iter().enumerate() {
+            output[i] = c.re as f32;
         }
 
         Ok(output)

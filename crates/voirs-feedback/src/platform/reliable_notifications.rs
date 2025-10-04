@@ -29,7 +29,12 @@ pub enum DeliveryStatus {
     /// Notification was delivered successfully
     Delivered,
     /// Notification delivery failed
-    Failed { reason: String, retry_count: u32 },
+    Failed {
+        /// Explanation of why delivery failed.
+        reason: String,
+        /// Number of retry attempts already made.
+        retry_count: u32,
+    },
     /// Notification was cancelled
     Cancelled,
     /// Notification expired before delivery
@@ -47,10 +52,13 @@ pub struct NotificationDelivery {
     pub status: DeliveryStatus,
     /// Timestamps for tracking
     pub created_at: SystemTime,
+    /// Description
     pub scheduled_for: Option<SystemTime>,
+    /// Description
     pub delivered_at: Option<SystemTime>,
     /// Retry configuration
     pub max_retries: u32,
+    /// Description
     pub retry_interval: Duration,
     /// Priority for queue ordering
     pub priority_score: u32,
@@ -231,10 +239,15 @@ impl NotificationRateLimiter {
 /// Rate limiting status
 #[derive(Debug, Clone)]
 pub struct RateLimitStatus {
+    /// Description
     pub recent_count: u32,
+    /// Description
     pub hourly_count: u32,
+    /// Description
     pub max_per_minute: u32,
+    /// Description
     pub max_per_hour: u32,
+    /// Description
     pub can_send_more: bool,
 }
 
@@ -644,7 +657,7 @@ impl ReliableNotificationManager {
                 );
 
                 // Simulate occasional failure
-                if rand::random::<f32>() < 0.05 {
+                if scirs2_core::random::random::<f32>() < 0.05 {
                     return Err(PlatformError::NetworkError {
                         message: "Simulated delivery failure".to_string(),
                     });
@@ -659,7 +672,7 @@ impl ReliableNotificationManager {
                 );
 
                 // Simulate permission checking
-                if rand::random::<f32>() < 0.02 {
+                if scirs2_core::random::random::<f32>() < 0.02 {
                     return Err(PlatformError::ConfigurationError {
                         message: "Notification permission denied".to_string(),
                     });
@@ -674,7 +687,7 @@ impl ReliableNotificationManager {
                 );
 
                 // Simulate network issues
-                if rand::random::<f32>() < 0.03 {
+                if scirs2_core::random::random::<f32>() < 0.03 {
                     return Err(PlatformError::NetworkError {
                         message: "Push notification service unavailable".to_string(),
                     });
@@ -769,15 +782,25 @@ impl Drop for ReliableNotificationManager {
 /// Comprehensive notification statistics
 #[derive(Debug, Clone)]
 pub struct ReliableNotificationStats {
+    /// Description
     pub total_notifications: usize,
+    /// Description
     pub queued: usize,
+    /// Description
     pub delivered: usize,
+    /// Description
     pub failed: usize,
+    /// Description
     pub cancelled: usize,
+    /// Description
     pub expired: usize,
+    /// Description
     pub queue_size: usize,
+    /// Description
     pub rate_limit_status: RateLimitStatus,
+    /// Description
     pub health_status: HealthStatus,
+    /// Description
     pub average_delivery_time: Duration,
 }
 

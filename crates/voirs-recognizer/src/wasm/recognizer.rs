@@ -32,48 +32,79 @@ macro_rules! console_warn {
     ($($t:tt)*) => (warn(&format_args!($($t)*).to_string()))
 }
 
+/// WASM recognition configuration
 #[derive(Serialize, Deserialize, Clone)]
 pub struct WasmRecognitionConfig {
+    /// Model name to use for recognition
     pub model_name: Option<String>,
+    /// Language code for recognition
     pub language: Option<String>,
+    /// Sample rate of audio input
     pub sample_rate: Option<u32>,
+    /// Size of audio chunks for processing
     pub chunk_size: Option<usize>,
+    /// Enable voice activity detection
     pub enable_vad: Option<bool>,
+    /// Confidence threshold for results
     pub confidence_threshold: Option<f32>,
+    /// Beam search size
     pub beam_size: Option<usize>,
+    /// Temperature for sampling
     pub temperature: Option<f32>,
+    /// Suppress blank outputs
     pub suppress_blank: Option<bool>,
+    /// Token IDs to suppress
     pub suppress_tokens: Option<Vec<u32>>,
 }
 
+/// WASM recognition result
 #[derive(Serialize, Deserialize)]
 pub struct WasmRecognitionResult {
+    /// Recognized text
     pub text: String,
+    /// Confidence score
     pub confidence: f32,
+    /// Detected language
     pub language: Option<String>,
+    /// Recognition segments
     pub segments: Vec<WasmSegment>,
+    /// Processing time in milliseconds
     pub processing_time: f64,
+    /// Additional metadata
     pub metadata: HashMap<String, String>,
 }
 
+/// WASM recognition segment
 #[derive(Serialize, Deserialize)]
 pub struct WasmSegment {
+    /// Segment start time in seconds
     pub start_time: f64,
+    /// Segment end time in seconds
     pub end_time: f64,
+    /// Segment text
     pub text: String,
+    /// Segment confidence score
     pub confidence: f32,
+    /// No speech probability
     pub no_speech_prob: f32,
 }
 
+/// WASM streaming configuration
 #[derive(Serialize, Deserialize)]
 pub struct WasmStreamingConfig {
+    /// Duration of each audio chunk in seconds
     pub chunk_duration: Option<f32>,
+    /// Overlap duration between chunks in seconds
     pub overlap_duration: Option<f32>,
+    /// Voice activity detection threshold
     pub vad_threshold: Option<f32>,
+    /// Silence duration threshold in seconds
     pub silence_duration: Option<f32>,
+    /// Maximum chunk size in bytes
     pub max_chunk_size: Option<usize>,
 }
 
+/// WASM speech recognizer
 #[wasm_bindgen]
 pub struct WasmVoirsRecognizer {
     pipeline: Option<UnifiedVoirsPipeline>,
@@ -84,6 +115,7 @@ pub struct WasmVoirsRecognizer {
 
 #[wasm_bindgen]
 impl WasmVoirsRecognizer {
+    /// Create a new WASM recognizer
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
         console_log!("Creating new WasmVoirsRecognizer");
@@ -97,6 +129,7 @@ impl WasmVoirsRecognizer {
         }
     }
 
+    /// Initialize the recognizer with configuration
     #[wasm_bindgen]
     pub async fn initialize(&mut self, config: JsValue) -> Result<(), JsValue> {
         console_log!("Initializing WasmVoirsRecognizer");
@@ -183,6 +216,7 @@ impl WasmVoirsRecognizer {
         }
     }
 
+    /// Recognize audio from raw bytes
     #[wasm_bindgen]
     pub async fn recognize_audio(&self, audio_data: &[u8]) -> Result<JsValue, JsValue> {
         console_log!("Recognizing audio data ({} bytes)", audio_data.len());
@@ -258,6 +292,7 @@ impl WasmVoirsRecognizer {
         }
     }
 
+    /// Recognize audio from microphone
     #[wasm_bindgen]
     pub async fn recognize_from_microphone(&self) -> Result<JsValue, JsValue> {
         console_log!("Starting microphone recognition");
@@ -269,6 +304,7 @@ impl WasmVoirsRecognizer {
         ))
     }
 
+    /// Start streaming recognition
     #[wasm_bindgen]
     pub async fn start_streaming(&mut self, config: JsValue) -> Result<(), JsValue> {
         console_log!("Starting streaming recognition");
@@ -283,6 +319,7 @@ impl WasmVoirsRecognizer {
         Ok(())
     }
 
+    /// Stream audio chunk for recognition
     #[wasm_bindgen]
     pub async fn stream_audio(&self, audio_chunk: &[u8]) -> Result<JsValue, JsValue> {
         if !self.streaming_active {
@@ -341,12 +378,14 @@ impl WasmVoirsRecognizer {
         }
     }
 
+    /// Stop streaming recognition
     #[wasm_bindgen]
     pub fn stop_streaming(&mut self) {
         console_log!("Stopping streaming recognition");
         self.streaming_active = false;
     }
 
+    /// Get list of supported models
     #[wasm_bindgen]
     pub async fn get_supported_models(&self) -> Result<JsValue, JsValue> {
         console_log!("Getting supported models");
@@ -363,6 +402,7 @@ impl WasmVoirsRecognizer {
             .map_err(|e| JsValue::from_str(&format!("Serialization error: {e}")))
     }
 
+    /// Get list of supported languages
     #[wasm_bindgen]
     pub async fn get_supported_languages(&self) -> Result<JsValue, JsValue> {
         console_log!("Getting supported languages");
@@ -376,11 +416,13 @@ impl WasmVoirsRecognizer {
             .map_err(|e| JsValue::from_str(&format!("Serialization error: {e}")))
     }
 
+    /// Get library version
     #[wasm_bindgen]
     pub fn get_version(&self) -> String {
         env!("CARGO_PKG_VERSION").to_string()
     }
 
+    /// Get recognizer capabilities
     #[wasm_bindgen]
     pub fn get_capabilities(&self) -> JsValue {
         let capabilities = serde_json::json!({
@@ -398,11 +440,13 @@ impl WasmVoirsRecognizer {
         JsValue::from_serde(&capabilities).unwrap_or(JsValue::NULL)
     }
 
+    /// Check if streaming is active
     #[wasm_bindgen]
     pub fn is_streaming_active(&self) -> bool {
         self.streaming_active
     }
 
+    /// Get current configuration
     #[wasm_bindgen]
     pub fn get_current_config(&self) -> JsValue {
         match &self.current_config {
@@ -411,6 +455,7 @@ impl WasmVoirsRecognizer {
         }
     }
 
+    /// Switch to a different model
     #[wasm_bindgen]
     pub async fn switch_model(&mut self, model_name: &str) -> Result<(), JsValue> {
         console_log!("Switching to model: {}", model_name);

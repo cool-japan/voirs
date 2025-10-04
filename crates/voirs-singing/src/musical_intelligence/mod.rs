@@ -26,29 +26,37 @@ pub use types::{
     ScaleResult,
 };
 
-/// Create a default musical intelligence system
+/// Create a default musical intelligence system with all analysis capabilities enabled
+///
+/// # Returns
+///
+/// Fully configured musical intelligence system ready for analysis
 pub fn create_default_system() -> MusicalIntelligence {
     MusicalIntelligence::default()
 }
 
-/// Musical analysis capabilities
+/// Musical analysis capabilities available in the musical intelligence system
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnalysisCapability {
-    /// Chord recognition from note events
+    /// Chord recognition from note events using pattern matching
     ChordRecognition,
-    /// Key signature detection
+    /// Key signature detection using Krumhansl-Schmuckler algorithm
     KeyDetection,
-    /// Musical scale analysis
+    /// Musical scale analysis and pattern matching
     ScaleAnalysis,
-    /// Rhythm and tempo analysis
+    /// Rhythm and tempo analysis from note timing
     RhythmAnalysis,
-    /// Audio onset detection
+    /// Audio onset detection from waveform energy
     OnsetDetection,
-    /// Groove analysis
+    /// Groove analysis including microtiming and syncopation
     GrooveAnalysis,
 }
 
 /// Get available analysis capabilities
+///
+/// # Returns
+///
+/// Vector of all supported analysis capabilities
 pub fn get_analysis_capabilities() -> Vec<AnalysisCapability> {
     vec![
         AnalysisCapability::ChordRecognition,
@@ -60,28 +68,40 @@ pub fn get_analysis_capabilities() -> Vec<AnalysisCapability> {
     ]
 }
 
-/// Check if a capability is available
+/// Check if a specific capability is available
+///
+/// # Arguments
+///
+/// * `capability` - The capability to check
+///
+/// # Returns
+///
+/// True if the capability is supported, false otherwise
 pub fn has_capability(capability: AnalysisCapability) -> bool {
     get_analysis_capabilities().contains(&capability)
 }
 
-/// Analysis configuration
+/// Configuration for musical analysis operations
 #[derive(Debug, Clone)]
 pub struct AnalysisConfig {
-    /// Enable chord recognition
+    /// Enable chord recognition in analysis pipeline
     pub enable_chord_recognition: bool,
-    /// Enable key detection
+    /// Enable key detection in analysis pipeline
     pub enable_key_detection: bool,
-    /// Enable scale analysis
+    /// Enable scale analysis in analysis pipeline
     pub enable_scale_analysis: bool,
-    /// Enable rhythm analysis
+    /// Enable rhythm analysis in analysis pipeline
     pub enable_rhythm_analysis: bool,
-    /// Minimum confidence threshold
+    /// Minimum confidence threshold (0.0-1.0) for accepting analysis results
     pub min_confidence: f32,
 }
 
 impl AnalysisConfig {
-    /// Full analysis configuration
+    /// Full analysis configuration with all features enabled
+    ///
+    /// # Returns
+    ///
+    /// Configuration with all analysis capabilities enabled and moderate confidence threshold (0.6)
     pub fn full() -> Self {
         Self {
             enable_chord_recognition: true,
@@ -92,7 +112,11 @@ impl AnalysisConfig {
         }
     }
 
-    /// Harmonic analysis only
+    /// Harmonic analysis only (chord, key, and scale detection)
+    ///
+    /// # Returns
+    ///
+    /// Configuration with harmonic analysis enabled, rhythm disabled, higher confidence threshold (0.7)
     pub fn harmonic_only() -> Self {
         Self {
             enable_chord_recognition: true,
@@ -103,7 +127,11 @@ impl AnalysisConfig {
         }
     }
 
-    /// Rhythm analysis only
+    /// Rhythm analysis only (tempo, groove, and timing detection)
+    ///
+    /// # Returns
+    ///
+    /// Configuration with rhythm analysis enabled, harmonic analysis disabled, lower confidence threshold (0.5)
     pub fn rhythm_only() -> Self {
         Self {
             enable_chord_recognition: false,
@@ -114,7 +142,11 @@ impl AnalysisConfig {
         }
     }
 
-    /// Fast analysis with relaxed thresholds
+    /// Fast analysis with relaxed thresholds (chord and key only)
+    ///
+    /// # Returns
+    ///
+    /// Configuration optimized for speed with chord and key detection only, low confidence threshold (0.5)
     pub fn fast() -> Self {
         Self {
             enable_chord_recognition: true,
@@ -137,6 +169,14 @@ pub mod utils {
     use super::*;
 
     /// Convert MIDI note number to note name
+    ///
+    /// # Arguments
+    ///
+    /// * `midi_note` - MIDI note number (0-127)
+    ///
+    /// # Returns
+    ///
+    /// Note name without octave (C, C#, D, etc.)
     pub fn midi_to_note_name(midi_note: u8) -> String {
         let note_names = [
             "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
@@ -145,7 +185,15 @@ pub mod utils {
         note_names[note_index].to_string()
     }
 
-    /// Convert note name to MIDI note number (middle octave)
+    /// Convert note name to MIDI note number in middle octave (C4=60)
+    ///
+    /// # Arguments
+    ///
+    /// * `note_name` - Note name (C, C#, D, etc.)
+    ///
+    /// # Returns
+    ///
+    /// MIDI note number in octave 4, or None if note name is invalid
     pub fn note_name_to_midi(note_name: &str) -> Option<u8> {
         let note_names = [
             "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
@@ -157,6 +205,14 @@ pub mod utils {
     }
 
     /// Convert frequency to MIDI note number
+    ///
+    /// # Arguments
+    ///
+    /// * `frequency` - Frequency in Hz
+    ///
+    /// # Returns
+    ///
+    /// Closest MIDI note number (0-127)
     pub fn frequency_to_midi(frequency: f32) -> u8 {
         let a4_freq = 440.0;
         let midi_a4 = 69;
@@ -164,7 +220,15 @@ pub mod utils {
         (midi_a4 as f32 + semitones).round().clamp(0.0, 127.0) as u8
     }
 
-    /// Convert MIDI note number to frequency
+    /// Convert MIDI note number to frequency in Hz
+    ///
+    /// # Arguments
+    ///
+    /// * `midi_note` - MIDI note number (0-127)
+    ///
+    /// # Returns
+    ///
+    /// Frequency in Hz (A4=440Hz)
     pub fn midi_to_frequency(midi_note: u8) -> f32 {
         let a4_freq = 440.0;
         let midi_a4 = 69;
@@ -172,16 +236,41 @@ pub mod utils {
     }
 
     /// Calculate interval between two notes in semitones
+    ///
+    /// # Arguments
+    ///
+    /// * `note1` - First MIDI note number
+    /// * `note2` - Second MIDI note number
+    ///
+    /// # Returns
+    ///
+    /// Interval in semitones (modulo 12)
     pub fn calculate_interval(note1: u8, note2: u8) -> i8 {
         (note2 as i8 - note1 as i8) % 12
     }
 
-    /// Check if two notes form a consonant interval
+    /// Check if an interval is consonant (pleasant-sounding)
+    ///
+    /// # Arguments
+    ///
+    /// * `interval` - Interval in semitones
+    ///
+    /// # Returns
+    ///
+    /// True if interval is consonant (unison, 3rds, 5th, 6ths), false otherwise
     pub fn is_consonant_interval(interval: u8) -> bool {
         matches!(interval % 12, 0 | 3 | 4 | 7 | 8 | 9) // Unison, minor/major 3rd, 5th, minor/major 6th
     }
 
-    /// Get chord quality from intervals
+    /// Get chord quality from interval pattern
+    ///
+    /// # Arguments
+    ///
+    /// * `intervals` - Semitone intervals from root (e.g., [0, 4, 7] for major triad)
+    ///
+    /// # Returns
+    ///
+    /// Chord quality if pattern matches a known chord type, None otherwise
     pub fn intervals_to_chord_quality(intervals: &[u8]) -> Option<ChordQuality> {
         match intervals {
             [0, 4, 7] => Some(ChordQuality::Major),
@@ -197,8 +286,16 @@ pub mod utils {
         }
     }
 
-    /// Normalize pitch class to 0-11 range
+    /// Normalize pitch class to 0-11 range using modulo arithmetic
+    ///
+    /// # Arguments
+    ///
+    /// * `pitch_class` - Pitch class (can be negative or > 11)
+    ///
+    /// # Returns
+    ///
+    /// Normalized pitch class (0-11)
     pub fn normalize_pitch_class(pitch_class: i32) -> u8 {
-        ((pitch_class % 12 + 12) % 12) as u8
+        pitch_class.rem_euclid(12) as u8
     }
 }

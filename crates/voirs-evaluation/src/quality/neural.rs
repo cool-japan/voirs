@@ -809,8 +809,8 @@ impl NeuralEvaluator {
         let positive_features = self.extract_neural_features(&positive_audio)?;
 
         // Create negative example (random noise)
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
+        use scirs2_core::random::Rng;
+        let mut rng = scirs2_core::random::thread_rng();
         let negative_samples: Vec<f32> = (0..samples.len())
             .map(|_| rng.r#gen::<f32>() * 0.1 - 0.05)
             .collect();
@@ -860,8 +860,8 @@ impl NeuralEvaluator {
 
         for &noise_level in &noise_levels {
             // Add adversarial noise
-            use rand::Rng;
-            let mut rng = rand::thread_rng();
+            use scirs2_core::random::Rng;
+            let mut rng = scirs2_core::random::thread_rng();
             let adversarial_samples: Vec<f32> = samples
                 .iter()
                 .map(|&x| {

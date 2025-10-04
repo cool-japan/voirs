@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation = "https://docs.rs/voirs-ffi"
-keywords.workspace = true
+keywords = ["voirs", "ffi", "python", "bindings", "c-api"]
 categories = ["external-ffi-bindings", "multimedia::audio"]
 rust-version.workspace = true
 description = "C/Python FFI bindings for VoiRS speech synthesis"
@@ -18,12 +18,11 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
 # Core VoiRS crates
-voirs = { version = "0.1.0-alpha.1", path = "../.." }
-voirs-sdk = { version = "0.1.0-alpha.1", path = "../voirs-sdk" }
-voirs-g2p = { version = "0.1.0-alpha.1", path = "../voirs-g2p" }
-voirs-acoustic = { version = "0.1.0-alpha.1", path = "../voirs-acoustic" }
-voirs-vocoder = { version = "0.1.0-alpha.1", path = "../voirs-vocoder" }
-voirs-recognizer = { version = "0.1.0-alpha.1", path = "../voirs-recognizer", optional = true }
+voirs-sdk.workspace = true
+voirs-g2p.workspace = true
+voirs-acoustic.workspace = true
+voirs-vocoder.workspace = true
+voirs-recognizer = { workspace = true, optional = true }
 
 # FFI utilities
 libc.workspace = true
@@ -54,8 +53,8 @@ flume.workspace = true
 thread_local = "1.1"
 
 # Additional dependencies for new modules
-tempfile = "3.8"
-winreg = { version = "0.52", optional = true }
+tempfile = "3.23"
+winreg = { version = "0.55", optional = true }
 
 # Logging
 log.workspace = true
@@ -63,19 +62,19 @@ pyo3 = { workspace = true, features = ["extension-module"], optional = true }
 
 # Platform-specific dependencies for memory detection
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.16", optional = true }
-alsa = { version = "0.9", optional = true }
+procfs = { version = "0.18", optional = true }
+alsa = { version = "0.10", optional = true }
 pulse = { version = "0.5", optional = true }
 dbus = { version = "0.9", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-core-foundation = { version = "0.9", optional = true }
-cpal = { version = "0.15", optional = true }
+core-foundation = { version = "0.10", optional = true }
+cpal = { version = "0.16", optional = true }
 objc = { version = "0.2", optional = true }
 objc-foundation = { version = "0.1", optional = true }
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.52", optional = true, features = [
+windows = { version = "0.58", optional = true, features = [
     "Win32_System_ProcessStatus", 
     "Win32_Foundation",
     "Win32_System_Com",
@@ -105,8 +104,8 @@ tracing-subscriber = { workspace = true, optional = true }
 numpy = { workspace = true, optional = true }
 
 # Node.js bindings
-napi = { version = "2.0", optional = true, features = ["async"] }
-napi-derive = { version = "2.0", optional = true }
+napi = { version = "2.16", optional = true, features = ["async"] }
+napi-derive = { version = "2.16", optional = true }
 
 # WebAssembly bindings
 wasm-bindgen = { version = "0.2", optional = true }

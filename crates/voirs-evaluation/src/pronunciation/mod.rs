@@ -14,7 +14,7 @@ use crate::traits::{
 };
 use crate::EvaluationError;
 use async_trait::async_trait;
-use rayon::prelude::*;
+use scirs2_core::parallel_ops::*;
 use std::collections::HashMap;
 use std::time::Instant;
 use voirs_g2p::{backends::rule_based::RuleBasedG2p, G2p, G2pConverter};
@@ -2725,15 +2725,15 @@ impl PronunciationEvaluatorImpl {
             high_energy,
             low_energy,
         ) {
+            // Angry: High F0, high energy, fast speech, irregular rhythm (must come before Happy)
+            (true, _, true, _, true, _) if irregular_rhythm => EmotionalState::Angry,
+
             // Happy/Excited: High F0, high variation, fast speech, high energy
             (true, true, true, _, true, _) => EmotionalState::Excited,
             (true, _, _, _, true, _) => EmotionalState::Happy,
 
             // Sad: Low F0, slow speech, low energy, long pauses
             (false, _, _, true, _, true) if long_pauses => EmotionalState::Sad,
-
-            // Angry: High F0, high energy, fast speech, irregular rhythm
-            (true, _, true, _, true, _) if irregular_rhythm => EmotionalState::Angry,
 
             // Anxious: High F0 variation, irregular rhythm, frequent pauses
             (_, true, _, _, _, _) if frequent_pauses && irregular_rhythm => EmotionalState::Anxious,

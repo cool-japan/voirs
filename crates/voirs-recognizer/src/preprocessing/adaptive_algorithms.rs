@@ -13,16 +13,23 @@ use voirs_sdk::AudioBuffer;
 
 /// Audio content type detected by the adaptive system
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Audio Content Type
 pub enum AudioContentType {
+    /// Speech
     Speech,
+    /// Music
     Music,
+    /// Noise
     Noise,
+    /// Mixed
     Mixed,
+    /// Silence
     Silence,
 }
 
 /// Adaptive algorithm configuration
 #[derive(Debug, Clone)]
+/// Adaptive Config
 pub struct AdaptiveConfig {
     /// Window size for analysis (samples)
     pub analysis_window_size: usize,
@@ -59,6 +66,7 @@ impl Default for AdaptiveConfig {
 
 /// Audio analysis features used for adaptive processing
 #[derive(Debug, Clone)]
+/// Audio Features
 pub struct AudioFeatures {
     /// Signal-to-noise ratio (dB)
     pub snr_db: f32,
@@ -84,6 +92,7 @@ pub struct AudioFeatures {
 
 /// Adaptive processing parameters determined by the algorithm
 #[derive(Debug, Clone)]
+/// Adaptive Parameters
 pub struct AdaptiveParameters {
     /// Noise suppression strength (0.0 - 1.0)
     pub noise_suppression_strength: f32,
@@ -123,6 +132,7 @@ impl Default for AdaptiveParameters {
 
 /// Adaptive processing statistics
 #[derive(Debug, Clone)]
+/// Adaptive Stats
 pub struct AdaptiveStats {
     /// Number of adaptations performed
     pub adaptations_count: u32,
@@ -138,6 +148,7 @@ pub struct AdaptiveStats {
 
 /// Result of adaptive processing
 #[derive(Debug, Clone)]
+/// Adaptive Result
 pub struct AdaptiveResult {
     /// Adaptive parameters
     pub parameters: AdaptiveParameters,
@@ -149,6 +160,7 @@ pub struct AdaptiveResult {
 
 /// Adaptive algorithm processor
 #[derive(Debug)]
+/// Adaptive Processor
 pub struct AdaptiveProcessor {
     config: AdaptiveConfig,
     features_history: VecDeque<AudioFeatures>,

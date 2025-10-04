@@ -18,14 +18,12 @@ pub mod points;
 pub mod social;
 pub mod types;
 
-// Re-export for backwards compatibility
-pub use achievements::*;
-pub use challenges::*;
+// Re-export leaderboards explicitly (no conflicts)
 pub use leaderboards::{
     Leaderboard, LeaderboardConfig, LeaderboardEntry, LeaderboardSummary, LeaderboardSystem,
     LeaderboardView,
 };
-pub use motivation::*;
-pub use points::*;
-pub use social::*;
-pub use types::*;
+
+// Note: achievements::*, challenges::*, motivation::*, points::*, social::* are not glob re-exported
+// to avoid ambiguity due to duplicate type names (e.g., ChallengeStatus in both challenges and social).
+// Import from specific modules: gamification::achievements::*, gamification::social::*, etc.

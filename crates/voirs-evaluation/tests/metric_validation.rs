@@ -32,7 +32,7 @@ fn add_noise(audio: &AudioBuffer, snr_db: f32) -> AudioBuffer {
     let noisy_data: Vec<f32> = data
         .iter()
         .map(|&sample| {
-            let noise = noise_amplitude * (rand::random::<f32>() - 0.5) * 2.0;
+            let noise = noise_amplitude * (scirs2_core::random::random::<f32>() - 0.5) * 2.0;
             sample + noise
         })
         .collect();

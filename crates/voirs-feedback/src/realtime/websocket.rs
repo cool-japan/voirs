@@ -19,46 +19,71 @@ use uuid::Uuid;
 pub enum WebSocketMessage {
     /// Initial connection handshake
     Connect {
+        /// Device identifier
         device_id: String,
+        /// Platform name
         platform: String,
+        /// Device capabilities
         capabilities: Vec<String>,
     },
     /// Acknowledge connection
     ConnectAck {
+        /// Session identifier
         session_id: String,
+        /// Server timestamp
         server_time: DateTime<Utc>,
     },
     /// Session state update
     SessionUpdate {
+        /// Session identifier
         session_id: String,
+        /// Session state
         state: SessionState,
+        /// Update timestamp
         timestamp: DateTime<Utc>,
     },
     /// User progress synchronization
     ProgressSync {
+        /// User identifier
         user_id: String,
+        /// User progress data
         progress: UserProgress,
+        /// Sync timestamp
         timestamp: DateTime<Utc>,
     },
     /// Real-time feedback delivery
     FeedbackDelivery {
+        /// Session identifier
         session_id: String,
+        /// Feedback response
         feedback: FeedbackResponse,
+        /// Delivery timestamp
         timestamp: DateTime<Utc>,
     },
     /// Ping for connection keep-alive
-    Ping { timestamp: DateTime<Utc> },
+    Ping {
+        /// Ping timestamp
+        timestamp: DateTime<Utc>
+    },
     /// Pong response to ping
-    Pong { timestamp: DateTime<Utc> },
+    Pong {
+        /// Pong timestamp
+        timestamp: DateTime<Utc>
+    },
     /// Error message
     Error {
+        /// Error code
         code: u32,
+        /// Error message
         message: String,
+        /// Error timestamp
         timestamp: DateTime<Utc>,
     },
     /// Disconnect notification
     Disconnect {
+        /// Disconnect reason
         reason: String,
+        /// Disconnect timestamp
         timestamp: DateTime<Utc>,
     },
 }
@@ -455,9 +480,15 @@ pub enum ConnectionState {
     /// Currently connecting
     Connecting,
     /// Connected with session ID
-    Connected { session_id: String },
+    Connected {
+        /// Session identifier
+        session_id: String
+    },
     /// Connection error
-    Error { message: String },
+    Error {
+        /// Error message
+        message: String
+    },
 }
 
 /// Connection statistics
@@ -481,9 +512,11 @@ pub struct ConnectionStats {
     pub last_connect_time: Option<DateTime<Utc>>,
     /// Last disconnect time
     pub last_disconnect_time: Option<DateTime<Utc>>,
-    /// Background task counts
+    /// Ping tasks started count
     pub ping_tasks_started: u32,
+    /// Message processing tasks started count
     pub message_tasks_started: u32,
+    /// Queue processing tasks started count
     pub queue_tasks_started: u32,
 }
 
@@ -525,35 +558,63 @@ pub struct SubscriptionHandler {
 /// WebSocket error types
 #[derive(Debug, thiserror::Error)]
 pub enum WebSocketError {
+    /// Connection timeout error
     #[error("Connection timeout")]
     ConnectionTimeout,
 
+    /// Not connected error
     #[error("Not connected")]
     NotConnected,
 
+    /// Connection failed error
     #[error("Connection failed: {message}")]
-    ConnectionFailed { message: String },
+    ConnectionFailed {
+        /// Error message
+        message: String
+    },
 
+    /// Message serialization error
     #[error("Message serialization error: {message}")]
-    SerializationError { message: String },
+    SerializationError {
+        /// Error message
+        message: String
+    },
 
+    /// Protocol error
     #[error("Protocol error: {message}")]
-    ProtocolError { message: String },
+    ProtocolError {
+        /// Error message
+        message: String
+    },
 
+    /// Authentication error
     #[error("Authentication error: {message}")]
-    AuthError { message: String },
+    AuthError {
+        /// Error message
+        message: String
+    },
 
+    /// Queue full error
     #[error("Queue full")]
     QueueFull,
 
+    /// Lock error
     #[error("Lock error")]
     LockError,
 
+    /// Subscription error
     #[error("Subscription error: {message}")]
-    SubscriptionError { message: String },
+    SubscriptionError {
+        /// Error message
+        message: String
+    },
 
+    /// Invalid message type error
     #[error("Invalid message type: {message_type}")]
-    InvalidMessageType { message_type: String },
+    InvalidMessageType {
+        /// Message type
+        message_type: String
+    },
 }
 
 /// Real-time communication manager

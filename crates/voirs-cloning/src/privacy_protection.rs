@@ -547,20 +547,20 @@ pub struct FederatedLearningData {
 /// Differential privacy engine
 pub struct DifferentialPrivacyEngine {
     epsilon: f64,
-    rng: rand::rngs::ThreadRng,
+    rng: scirs2_core::random::CoreRandom,
 }
 
 impl DifferentialPrivacyEngine {
     fn new(epsilon: f64) -> Self {
         Self {
             epsilon,
-            rng: rand::thread_rng(),
+            rng: scirs2_core::random::thread_rng(),
         }
     }
 
     /// Add Laplace noise for differential privacy
     fn add_noise(&self, features: &mut Vec<f32>) -> Result<()> {
-        use rand::{thread_rng, Rng};
+        use scirs2_core::random::{thread_rng, Rng};
 
         let sensitivity = 1.0; // Assume L1 sensitivity of 1
         let scale = sensitivity / self.epsilon;
@@ -572,9 +572,9 @@ impl DifferentialPrivacyEngine {
             let _u2: f64 = rng.gen_range(-0.5..0.5);
 
             let noise = if u1 >= 0.0 {
-                -scale * (1.0 - 2.0 * u1).ln()
+                -scale * (1.0_f64 - 2.0 * u1).ln()
             } else {
-                scale * (1.0 + 2.0 * u1).ln()
+                scale * (1.0_f64 + 2.0 * u1).ln()
             };
 
             *feature += noise as f32;

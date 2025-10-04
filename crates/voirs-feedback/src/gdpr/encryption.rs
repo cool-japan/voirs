@@ -4,7 +4,7 @@
 //! functionality for GDPR compliance.
 
 use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit};
-use rand::{thread_rng, Rng};
+use scirs2_core::random::{thread_rng, Rng};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;

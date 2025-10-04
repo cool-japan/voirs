@@ -7,8 +7,8 @@
 //! - Quality metrics computation
 
 use crate::{AudioBuffer, Result};
-use realfft::{RealFftPlanner, RealToComplex};
-use rustfft::num_complex::Complex;
+use scirs2_core::Complex;
+use scirs2_fft::{RealFftPlanner, RealToComplex};
 use std::sync::Arc;
 
 /// Audio analysis metrics
@@ -35,18 +35,15 @@ pub struct AudioMetrics {
 /// Audio analyzer
 pub struct AudioAnalyzer {
     sample_rate: u32,
-    fft_planner: Arc<dyn RealToComplex<f32>>,
+    fft_size: usize,
 }
 
 impl AudioAnalyzer {
     /// Create new audio analyzer
     pub fn new(sample_rate: u32, fft_size: usize) -> Result<Self> {
-        let mut planner = RealFftPlanner::<f32>::new();
-        let fft_planner = planner.plan_fft_forward(fft_size);
-
         Ok(Self {
             sample_rate,
-            fft_planner,
+            fft_size,
         })
     }
 
@@ -146,9 +143,8 @@ impl AudioAnalyzer {
         }
 
         // Perform FFT analysis to identify harmonics
-        let fft_size = self.fft_planner.get_scratch_len();
+        let fft_size = self.fft_size;
         let mut fft_input = vec![0.0; fft_size];
-        let mut fft_output = vec![Complex::default(); fft_size / 2 + 1];
 
         // Copy samples to FFT input (with padding/truncation)
         let copy_len = fft_size.min(samples.len());
@@ -162,14 +158,10 @@ impl AudioAnalyzer {
         }
 
         // Perform FFT
-        let mut scratch = vec![Complex::default(); fft_size];
-        if self
-            .fft_planner
-            .process_with_scratch(&mut fft_input, &mut fft_output, &mut scratch)
-            .is_err()
-        {
-            return 0.0;
-        }
+        let fft_output = match scirs2_fft::rfft(&fft_input, None) {
+            Ok(o) => o,
+            Err(_) => return 0.0,
+        };
 
         // Find fundamental frequency bin
         let bin_freq = self.sample_rate as f32 / fft_size as f32;
@@ -181,7 +173,7 @@ impl AudioAnalyzer {
         // Calculate power spectrum
         let power_spectrum: Vec<f32> = fft_output
             .iter()
-            .map(|complex| complex.norm_sqr())
+            .map(|complex| complex.norm_sqr() as f32)
             .collect();
 
         // Find fundamental power
@@ -294,9 +286,8 @@ impl AudioAnalyzer {
             return 0.0;
         }
 
-        let fft_size = self.fft_planner.get_scratch_len();
+        let fft_size = self.fft_size;
         let mut fft_input = vec![0.0; fft_size];
-        let mut fft_output = vec![Complex::default(); fft_size / 2 + 1];
 
         // Copy samples to FFT input (with padding/truncation)
         let copy_len = fft_size.min(samples.len());
@@ -310,17 +301,17 @@ impl AudioAnalyzer {
         }
 
         // Perform FFT
-        let mut scratch = vec![Complex::default(); fft_size];
-        let _ =
-            self.fft_planner
-                .process_with_scratch(&mut fft_input, &mut fft_output, &mut scratch);
+        let fft_output = match scirs2_fft::rfft(&fft_input, None) {
+            Ok(o) => o,
+            Err(_) => return 0.0,
+        };
 
         // Calculate spectral centroid
-        let mut weighted_sum = 0.0;
-        let mut magnitude_sum = 0.0;
+        let mut weighted_sum = 0.0f32;
+        let mut magnitude_sum = 0.0f32;
 
         for (i, complex) in fft_output.iter().enumerate() {
-            let magnitude = (complex.re * complex.re + complex.im * complex.im).sqrt();
+            let magnitude = (complex.re * complex.re + complex.im * complex.im).sqrt() as f32;
             let frequency = i as f32 * self.sample_rate as f32 / fft_size as f32;
 
             weighted_sum += frequency * magnitude;
@@ -357,11 +348,7 @@ pub fn analyze_spectrum(audio: &AudioBuffer, fft_size: usize) -> Result<Spectral
         });
     }
 
-    let mut planner = RealFftPlanner::<f32>::new();
-    let fft_planner = planner.plan_fft_forward(fft_size);
-
     let mut fft_input = vec![0.0; fft_size];
-    let mut fft_output = vec![Complex::default(); fft_size / 2 + 1];
 
     // Copy samples to FFT input
     let copy_len = fft_size.min(samples.len());
@@ -374,8 +361,7 @@ pub fn analyze_spectrum(audio: &AudioBuffer, fft_size: usize) -> Result<Spectral
     }
 
     // Perform FFT
-    let mut scratch = vec![Complex::default(); fft_size];
-    let _ = fft_planner.process_with_scratch(&mut fft_input, &mut fft_output, &mut scratch);
+    let fft_output = scirs2_fft::rfft(&fft_input, None)?;
 
     // Convert to frequency domain representation
     let mut frequencies = Vec::new();
@@ -386,11 +372,11 @@ pub fn analyze_spectrum(audio: &AudioBuffer, fft_size: usize) -> Result<Spectral
         let frequency = i as f32 * audio.sample_rate() as f32 / fft_size as f32;
         let magnitude = (complex.re * complex.re + complex.im * complex.im).sqrt();
         let magnitude_db = if magnitude > 0.0 {
-            20.0 * magnitude.log10()
+            (20.0 * magnitude.log10()) as f32
         } else {
             -120.0 // -120 dB floor
         };
-        let phase = complex.im.atan2(complex.re);
+        let phase = complex.im.atan2(complex.re) as f32;
 
         frequencies.push(frequency);
         magnitudes_db.push(magnitude_db);

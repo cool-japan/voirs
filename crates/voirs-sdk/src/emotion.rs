@@ -1,6 +1,6 @@
 //! Emotion control integration for VoiRS SDK
 
-use crate::{Result, VoirsError};
+use crate::VoirsError;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -31,7 +31,7 @@ pub struct EmotionControllerConfig {
 
 impl EmotionController {
     /// Create new emotion controller
-    pub async fn new() -> Result<Self> {
+    pub async fn new() -> crate::Result<Self> {
         let processor = voirs_emotion::EmotionProcessor::new()
             .map_err(|e| VoirsError::model_error(format!("Emotion processor: {}", e)))?;
 
@@ -42,7 +42,7 @@ impl EmotionController {
     }
 
     /// Create with custom configuration
-    pub async fn with_config(emotion_config: EmotionConfig) -> Result<Self> {
+    pub async fn with_config(emotion_config: EmotionConfig) -> crate::Result<Self> {
         let processor = voirs_emotion::EmotionProcessor::with_config(emotion_config)
             .map_err(|e| VoirsError::model_error(format!("Emotion processor: {}", e)))?;
 
@@ -53,7 +53,7 @@ impl EmotionController {
     }
 
     /// Set emotion for synthesis
-    pub async fn set_emotion(&self, emotion: Emotion, intensity: Option<f32>) -> Result<()> {
+    pub async fn set_emotion(&self, emotion: Emotion, intensity: Option<f32>) -> crate::Result<()> {
         let config = self.config.read().await;
         if !config.enabled {
             return Ok(());
@@ -70,7 +70,7 @@ impl EmotionController {
     pub async fn set_emotion_mix(
         &self,
         emotions: std::collections::HashMap<Emotion, f32>,
-    ) -> Result<()> {
+    ) -> crate::Result<()> {
         let config = self.config.read().await;
         if !config.enabled {
             return Ok(());
@@ -83,7 +83,7 @@ impl EmotionController {
     }
 
     /// Apply emotion from preset
-    pub async fn apply_preset(&self, preset_name: &str, intensity: Option<f32>) -> Result<()> {
+    pub async fn apply_preset(&self, preset_name: &str, intensity: Option<f32>) -> crate::Result<()> {
         let config = self.config.read().await;
         if !config.enabled {
             return Ok(());
@@ -105,12 +105,12 @@ impl EmotionController {
     }
 
     /// Get current emotion parameters
-    pub async fn get_current_parameters(&self) -> Result<EmotionParameters> {
+    pub async fn get_current_parameters(&self) -> crate::Result<EmotionParameters> {
         Ok(self.processor.get_current_parameters().await)
     }
 
     /// Reset to neutral emotion
-    pub async fn reset_to_neutral(&self) -> Result<()> {
+    pub async fn reset_to_neutral(&self) -> crate::Result<()> {
         self.processor
             .reset_to_neutral()
             .await
@@ -118,7 +118,7 @@ impl EmotionController {
     }
 
     /// Update emotion transition (call regularly for smooth transitions)
-    pub async fn update(&self, delta_time_ms: f64) -> Result<()> {
+    pub async fn update(&self, delta_time_ms: f64) -> crate::Result<()> {
         self.processor
             .update_transition(delta_time_ms)
             .await
@@ -126,7 +126,7 @@ impl EmotionController {
     }
 
     /// Enable or disable emotion processing
-    pub async fn set_enabled(&self, enabled: bool) -> Result<()> {
+    pub async fn set_enabled(&self, enabled: bool) -> crate::Result<()> {
         let mut config = self.config.write().await;
         config.enabled = enabled;
         Ok(())
@@ -155,7 +155,7 @@ impl EmotionController {
     }
 
     /// Auto-detect emotion from text sentiment (placeholder)
-    pub async fn auto_detect_emotion(&self, text: &str) -> Result<Option<(Emotion, f32)>> {
+    pub async fn auto_detect_emotion(&self, text: &str) -> crate::Result<Option<(Emotion, f32)>> {
         let config = self.config.read().await;
         if !config.auto_sentiment_detection {
             return Ok(None);
@@ -178,7 +178,7 @@ impl EmotionController {
     }
 
     /// Get emotion processing statistics
-    pub async fn get_statistics(&self) -> Result<EmotionStatistics> {
+    pub async fn get_statistics(&self) -> crate::Result<EmotionStatistics> {
         let history = self.processor.get_history().await;
         Ok(EmotionStatistics {
             total_emotions_applied: history.len(),
@@ -256,7 +256,7 @@ impl EmotionControllerBuilder {
     }
 
     /// Build the emotion controller
-    pub async fn build(self) -> Result<EmotionController> {
+    pub async fn build(self) -> crate::Result<EmotionController> {
         let controller = if let Some(emotion_config) = self.emotion_config {
             EmotionController::with_config(emotion_config).await?
         } else {

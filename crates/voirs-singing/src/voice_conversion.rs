@@ -110,15 +110,20 @@ pub struct ConversionRequest {
 pub enum ConversionSource {
     /// Audio samples with metadata
     Audio {
+        /// Audio samples to convert
         samples: Vec<f32>,
+        /// Sample rate of the audio in Hz
         sample_rate: u32,
+        /// Optional speaker ID for the source audio
         speaker_id: Option<String>,
     },
     /// Singing request to be converted
-    SingingRequest(SingingRequest),
+    SingingRequest(Box<SingingRequest>),
     /// Musical score with source speaker
     Score {
-        score: MusicalScore,
+        /// Musical score to synthesize and convert
+        score: Box<MusicalScore>,
+        /// Source speaker ID for initial synthesis
         source_speaker: String,
     },
 }
@@ -154,7 +159,18 @@ pub struct ConversionQualityMetrics {
 }
 
 impl VoiceConverter {
-    /// Create a new voice converter
+    /// Creates a new voice converter with default CPU device.
+    ///
+    /// Initializes a voice converter with an empty speaker embedding database
+    /// and default conversion quality settings.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` containing the new `VoiceConverter` instance on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the style transfer engine fails to initialize.
     pub fn new() -> Result<Self, Error> {
         let device = Device::Cpu;
         let style_transfer = StyleTransfer::new(device)?;
@@ -166,7 +182,22 @@ impl VoiceConverter {
         })
     }
 
-    /// Create a new voice converter with specified device
+    /// Creates a new voice converter with a specified compute device.
+    ///
+    /// Allows explicit control over the compute device (CPU/GPU) used for
+    /// neural network operations in the style transfer engine.
+    ///
+    /// # Arguments
+    ///
+    /// * `device` - The compute device to use (CPU or GPU)
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` containing the new `VoiceConverter` instance on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the style transfer engine fails to initialize on the specified device.
     pub fn new_with_device(device: Device) -> Result<Self, Error> {
         let style_transfer = StyleTransfer::new(device)?;
 
@@ -177,7 +208,22 @@ impl VoiceConverter {
         })
     }
 
-    /// Add a speaker embedding to the converter
+    /// Adds a speaker embedding to the converter's database.
+    ///
+    /// Registers a new speaker that can be used as a target for voice conversion.
+    /// The embedding must contain a 512-dimensional vector for compatibility.
+    ///
+    /// # Arguments
+    ///
+    /// * `embedding` - The speaker embedding to add, containing voice characteristics and neural features
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the speaker was successfully added.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the embedding vector is not exactly 512 dimensions.
     pub fn add_speaker(&mut self, embedding: SpeakerEmbedding) -> Result<(), Error> {
         if embedding.embedding_vector.len() != 512 {
             return Err(Error::Voice(
@@ -190,22 +236,67 @@ impl VoiceConverter {
         Ok(())
     }
 
-    /// Remove a speaker from the converter
+    /// Removes a speaker from the converter's database.
+    ///
+    /// # Arguments
+    ///
+    /// * `speaker_id` - The unique identifier of the speaker to remove
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(SpeakerEmbedding)` if the speaker was found and removed,
+    /// or `None` if no speaker with the given ID exists.
     pub fn remove_speaker(&mut self, speaker_id: &str) -> Option<SpeakerEmbedding> {
         self.speaker_embeddings.remove(speaker_id)
     }
 
-    /// List available speakers
+    /// Lists all available speaker IDs in the converter's database.
+    ///
+    /// # Returns
+    ///
+    /// Returns a vector of string slices containing all registered speaker IDs.
     pub fn list_speakers(&self) -> Vec<&str> {
         self.speaker_embeddings.keys().map(|s| s.as_str()).collect()
     }
 
-    /// Get speaker embedding by ID
+    /// Retrieves a speaker embedding by its unique identifier.
+    ///
+    /// # Arguments
+    ///
+    /// * `speaker_id` - The unique identifier of the speaker to retrieve
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(&SpeakerEmbedding)` if the speaker exists,
+    /// or `None` if no speaker with the given ID is registered.
     pub fn get_speaker(&self, speaker_id: &str) -> Option<&SpeakerEmbedding> {
         self.speaker_embeddings.get(speaker_id)
     }
 
-    /// Convert voice using the specified request
+    /// Converts voice from source to target speaker using the specified request parameters.
+    ///
+    /// Performs voice conversion by extracting source audio, applying the selected
+    /// conversion method, and calculating quality metrics. The conversion preserves
+    /// musical content and timing while adapting voice characteristics to match
+    /// the target speaker.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - The conversion request containing source audio, target speaker,
+    ///   quality settings, and additional parameters
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` containing the `ConversionResult` with converted audio,
+    /// quality metrics, and applied parameters on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The target speaker ID is not found in the database
+    /// - Source audio extraction fails
+    /// - The conversion method encounters processing errors
+    /// - Quality metric calculation fails
     pub async fn convert_voice(
         &self,
         request: ConversionRequest,
@@ -273,7 +364,22 @@ impl VoiceConverter {
         })
     }
 
-    /// Extract source audio from conversion source
+    /// Extracts audio samples and metadata from a conversion source.
+    ///
+    /// Handles different source types: raw audio, singing requests, and musical scores.
+    /// Retrieves voice characteristics from speaker embeddings when available.
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - The conversion source containing audio or synthesis parameters
+    ///
+    /// # Returns
+    ///
+    /// Returns a tuple of (audio samples, sample rate, voice characteristics).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if audio extraction or synthesis fails.
     async fn extract_source_audio(
         &self,
         source: ConversionSource,
@@ -294,10 +400,10 @@ impl VoiceConverter {
                 };
                 Ok((samples, sample_rate, characteristics))
             }
-            ConversionSource::SingingRequest(request) => {
+            ConversionSource::SingingRequest(boxed_request) => {
                 // This would need access to a SingingEngine to synthesize
                 // For now, return empty audio as placeholder
-                Ok((vec![0.0; 44100], 44100, request.voice))
+                Ok((vec![0.0; 44100], 44100, boxed_request.voice))
             }
             ConversionSource::Score {
                 score,
@@ -316,7 +422,26 @@ impl VoiceConverter {
         }
     }
 
-    /// Neural transfer-based voice conversion
+    /// Performs neural transfer-based voice conversion.
+    ///
+    /// Uses neural network style transfer to map source voice characteristics
+    /// to target speaker characteristics. Currently implements a placeholder
+    /// with basic pitch shifting.
+    ///
+    /// # Arguments
+    ///
+    /// * `source_audio` - Input audio samples to convert
+    /// * `source_characteristics` - Voice characteristics of the source speaker
+    /// * `target_speaker` - Target speaker embedding with desired characteristics
+    /// * `quality` - Conversion quality settings
+    ///
+    /// # Returns
+    ///
+    /// Returns converted audio samples as a `Vec<f32>`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if neural network processing fails.
     fn neural_transfer_conversion(
         &self,
         source_audio: &[f32],
@@ -343,7 +468,26 @@ impl VoiceConverter {
         Ok(converted)
     }
 
-    /// Spectral envelope-based voice conversion
+    /// Performs spectral envelope-based voice conversion.
+    ///
+    /// Modifies the spectral envelope of the source audio to match target speaker
+    /// formant characteristics. Currently implements a placeholder with basic
+    /// formant scaling.
+    ///
+    /// # Arguments
+    ///
+    /// * `source_audio` - Input audio samples to convert
+    /// * `sample_rate` - Sample rate of the audio in Hz
+    /// * `target_speaker` - Target speaker embedding with formant information
+    /// * `quality` - Conversion quality settings
+    ///
+    /// # Returns
+    ///
+    /// Returns converted audio samples as a `Vec<f32>`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if spectral processing fails.
     fn spectral_conversion(
         &self,
         source_audio: &[f32],
@@ -357,7 +501,7 @@ impl VoiceConverter {
         let mut converted = source_audio.to_vec();
 
         // Apply formant shifting based on target speaker
-        let formant_scale = target_speaker.formants.get(0).unwrap_or(&1000.0) / 1000.0;
+        let formant_scale = target_speaker.formants.first().unwrap_or(&1000.0) / 1000.0;
 
         // Simple formant scaling (placeholder)
         for sample in &mut converted {
@@ -367,7 +511,26 @@ impl VoiceConverter {
         Ok(converted)
     }
 
-    /// Formant-based voice conversion
+    /// Performs formant-based voice conversion.
+    ///
+    /// Extracts and modifies formant frequencies to match target speaker
+    /// vocal tract characteristics. Currently implements a placeholder with
+    /// brightness adjustment.
+    ///
+    /// # Arguments
+    ///
+    /// * `source_audio` - Input audio samples to convert
+    /// * `sample_rate` - Sample rate of the audio in Hz
+    /// * `target_speaker` - Target speaker embedding with formant and quality metrics
+    /// * `quality` - Conversion quality settings
+    ///
+    /// # Returns
+    ///
+    /// Returns converted audio samples as a `Vec<f32>`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if formant processing fails.
     fn formant_conversion(
         &self,
         source_audio: &[f32],
@@ -390,7 +553,27 @@ impl VoiceConverter {
         Ok(converted)
     }
 
-    /// Hybrid voice conversion combining multiple methods
+    /// Performs hybrid voice conversion combining multiple methods.
+    ///
+    /// Blends neural transfer and spectral conversion results for improved
+    /// voice conversion quality. The blend factor is controlled by the
+    /// conversion strength parameter.
+    ///
+    /// # Arguments
+    ///
+    /// * `source_audio` - Input audio samples to convert
+    /// * `sample_rate` - Sample rate of the audio in Hz
+    /// * `source_characteristics` - Voice characteristics of the source speaker
+    /// * `target_speaker` - Target speaker embedding
+    /// * `quality` - Conversion quality settings including blend strength
+    ///
+    /// # Returns
+    ///
+    /// Returns converted audio samples as a `Vec<f32>`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any conversion method fails.
     fn hybrid_conversion(
         &self,
         source_audio: &[f32],
@@ -425,7 +608,19 @@ impl VoiceConverter {
         Ok(hybrid_result)
     }
 
-    /// Calculate pitch shift factor between voice characteristics
+    /// Calculates the pitch shift factor between source and target voice characteristics.
+    ///
+    /// Computes the ratio of average fundamental frequencies based on voice types
+    /// to determine the appropriate pitch shift for conversion.
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - Voice characteristics of the source speaker
+    /// * `target` - Voice characteristics of the target speaker
+    ///
+    /// # Returns
+    ///
+    /// Returns the pitch shift factor as a ratio (1.0 = no shift, >1.0 = shift up, <1.0 = shift down).
     fn calculate_pitch_shift(
         &self,
         source: &VoiceCharacteristics,
@@ -438,7 +633,19 @@ impl VoiceConverter {
         target_f0 / source_f0
     }
 
-    /// Get average F0 for voice type
+    /// Retrieves the typical average fundamental frequency for a voice type.
+    ///
+    /// Returns standard F0 values in Hz for different vocal classifications.
+    ///
+    /// # Arguments
+    ///
+    /// * `voice_type` - The vocal classification (Soprano, Alto, Tenor, etc.)
+    ///
+    /// # Returns
+    ///
+    /// Returns the average F0 in Hz for the given voice type:
+    /// - Soprano: 220 Hz, MezzoSoprano: 196 Hz, Alto: 175 Hz
+    /// - Tenor: 147 Hz, Baritone: 123 Hz, Bass: 98 Hz
     fn get_average_f0_for_voice_type(&self, voice_type: VoiceType) -> f32 {
         match voice_type {
             VoiceType::Soprano => 220.0,
@@ -450,7 +657,25 @@ impl VoiceConverter {
         }
     }
 
-    /// Calculate quality metrics for conversion result
+    /// Calculates comprehensive quality metrics for the conversion result.
+    ///
+    /// Evaluates speaker similarity, content preservation, audio quality,
+    /// and naturalness of the converted output.
+    ///
+    /// # Arguments
+    ///
+    /// * `source_audio` - Original input audio samples
+    /// * `converted_audio` - Converted output audio samples
+    /// * `target_speaker` - Target speaker embedding used for conversion
+    /// * `processing_time_ms` - Time taken for conversion in milliseconds
+    ///
+    /// # Returns
+    ///
+    /// Returns quality metrics including similarity, preservation, quality, and naturalness scores.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if metric calculation fails.
     fn calculate_quality_metrics(
         &self,
         source_audio: &[f32],
@@ -477,7 +702,23 @@ impl VoiceConverter {
         })
     }
 
-    /// Calculate speaker similarity metric
+    /// Calculates how similar the converted audio is to the target speaker.
+    ///
+    /// Compares audio features with the target speaker embedding to measure
+    /// conversion accuracy. Currently returns a placeholder value.
+    ///
+    /// # Arguments
+    ///
+    /// * `audio` - Converted audio samples
+    /// * `target` - Target speaker embedding for comparison
+    ///
+    /// # Returns
+    ///
+    /// Returns a similarity score between 0.0 (no similarity) and 1.0 (identical).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if feature extraction or comparison fails.
     fn calculate_speaker_similarity(
         &self,
         audio: &[f32],
@@ -487,7 +728,23 @@ impl VoiceConverter {
         Ok(0.85) // Assume good similarity
     }
 
-    /// Calculate content preservation metric
+    /// Calculates how well musical content was preserved during conversion.
+    ///
+    /// Compares energy and spectral features between source and converted audio
+    /// to ensure timing, rhythm, and melody remain intact.
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - Original source audio samples
+    /// * `converted` - Converted audio samples
+    ///
+    /// # Returns
+    ///
+    /// Returns a preservation score between 0.0 (no preservation) and 1.0 (perfect preservation).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if feature comparison fails.
     fn calculate_content_preservation(
         &self,
         source: &[f32],
@@ -506,7 +763,22 @@ impl VoiceConverter {
         Ok(energy_ratio)
     }
 
-    /// Calculate audio quality metric
+    /// Calculates overall audio quality of the converted output.
+    ///
+    /// Checks for clipping, distortion, and other quality issues in the
+    /// converted audio signal.
+    ///
+    /// # Arguments
+    ///
+    /// * `audio` - Converted audio samples to evaluate
+    ///
+    /// # Returns
+    ///
+    /// Returns a quality score between 0.0 (poor quality) and 1.0 (excellent quality).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if quality analysis fails.
     fn calculate_audio_quality(&self, audio: &[f32]) -> Result<f32, Error> {
         // Placeholder: Check for clipping and basic quality issues
         let max_amplitude = audio.iter().map(|x| x.abs()).fold(0.0, f32::max);
@@ -515,7 +787,22 @@ impl VoiceConverter {
         Ok(0.9 * clipping_penalty)
     }
 
-    /// Calculate naturalness metric
+    /// Calculates the naturalness of the converted singing voice.
+    ///
+    /// Evaluates how natural and human-like the converted output sounds
+    /// using signal characteristics like zero-crossing rate.
+    ///
+    /// # Arguments
+    ///
+    /// * `audio` - Converted audio samples to evaluate
+    ///
+    /// # Returns
+    ///
+    /// Returns a naturalness score between 0.0 (artificial) and 1.0 (highly natural).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if naturalness analysis fails.
     fn calculate_naturalness(&self, audio: &[f32]) -> Result<f32, Error> {
         // Placeholder: Basic naturalness heuristics
         let zero_crossings = audio.windows(2).filter(|w| w[0] * w[1] < 0.0).count();
@@ -524,7 +811,26 @@ impl VoiceConverter {
         Ok(naturalness_score)
     }
 
-    /// Create speaker embedding from voice samples
+    /// Creates a speaker embedding from voice samples.
+    ///
+    /// Analyzes voice samples to extract speaker-specific features including
+    /// neural embeddings, fundamental frequency, formants, and quality metrics.
+    /// This is a static method that doesn't require a VoiceConverter instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `speaker_id` - Unique identifier for the speaker
+    /// * `speaker_name` - Human-readable name or label for the speaker
+    /// * `voice_samples` - Audio samples of the speaker's voice
+    /// * `voice_characteristics` - Known voice characteristics and metadata
+    ///
+    /// # Returns
+    ///
+    /// Returns a complete `SpeakerEmbedding` with extracted features and metrics.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if feature extraction fails or samples are insufficient.
     pub fn create_speaker_embedding(
         speaker_id: String,
         speaker_name: String,
@@ -551,7 +857,23 @@ impl VoiceConverter {
         })
     }
 
-    /// Extract speaker features from voice samples
+    /// Extracts a 512-dimensional neural feature vector from voice samples.
+    ///
+    /// Analyzes audio samples to create a speaker-specific embedding vector
+    /// that captures unique vocal characteristics. Currently implements a
+    /// placeholder with basic statistical features.
+    ///
+    /// # Arguments
+    ///
+    /// * `samples` - Audio samples of the speaker's voice
+    ///
+    /// # Returns
+    ///
+    /// Returns a 512-dimensional feature vector as `Vec<f32>`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if feature extraction fails or samples are invalid.
     fn extract_speaker_features(samples: &[f32]) -> Result<Vec<f32>, Error> {
         // Placeholder: Create a 512-dimensional feature vector
         // In reality, this would use neural networks or signal processing
@@ -566,28 +888,75 @@ impl VoiceConverter {
         features[1] = variance;
 
         // Fill remaining features with noise (placeholder)
-        for i in 2..512 {
-            features[i] = (i as f32 * 0.001) % 1.0;
+        for (i, feature) in features.iter_mut().enumerate().skip(2) {
+            *feature = (i as f32 * 0.001) % 1.0;
         }
 
         Ok(features)
     }
 
-    /// Estimate average fundamental frequency
+    /// Estimates the average fundamental frequency (F0) from voice samples.
+    ///
+    /// Analyzes pitch across the audio samples to determine the speaker's
+    /// typical fundamental frequency. Currently returns a placeholder value.
+    ///
+    /// # Arguments
+    ///
+    /// * `samples` - Audio samples of the speaker's voice
+    ///
+    /// # Returns
+    ///
+    /// Returns the average F0 in Hz.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if F0 estimation fails or samples are too short.
     fn estimate_average_f0(samples: &[f32]) -> Result<f32, Error> {
         // Placeholder: Simple autocorrelation-based F0 estimation
         // In reality, this would use more sophisticated pitch detection
         Ok(220.0) // Default to A3
     }
 
-    /// Extract formant frequencies
+    /// Extracts formant frequencies (F1, F2, F3) from voice samples.
+    ///
+    /// Analyzes the spectral envelope to identify resonant frequencies
+    /// that characterize the speaker's vocal tract. Currently returns
+    /// typical formant values as a placeholder.
+    ///
+    /// # Arguments
+    ///
+    /// * `samples` - Audio samples of the speaker's voice
+    ///
+    /// # Returns
+    ///
+    /// Returns a vector of formant frequencies in Hz (typically [F1, F2, F3]).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if formant extraction fails or samples are insufficient.
     fn extract_formants(samples: &[f32]) -> Result<Vec<f32>, Error> {
         // Placeholder: Return typical formant frequencies
         // In reality, this would use LPC analysis or similar methods
         Ok(vec![800.0, 1200.0, 2600.0]) // F1, F2, F3
     }
 
-    /// Analyze voice quality metrics
+    /// Analyzes voice quality characteristics from samples.
+    ///
+    /// Extracts metrics including vocal range, vibrato characteristics,
+    /// breathiness, roughness, and brightness. Currently returns typical
+    /// values as a placeholder.
+    ///
+    /// # Arguments
+    ///
+    /// * `samples` - Audio samples of the speaker's voice
+    ///
+    /// # Returns
+    ///
+    /// Returns comprehensive `VoiceQualityMetrics` for the speaker.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if quality analysis fails or samples are invalid.
     fn analyze_voice_quality(samples: &[f32]) -> Result<VoiceQualityMetrics, Error> {
         // Placeholder: Estimate voice quality from samples
         // In reality, this would use advanced signal processing
@@ -603,12 +972,26 @@ impl VoiceConverter {
 }
 
 impl Default for VoiceConverter {
+    /// Creates a default voice converter instance.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the voice converter initialization fails.
     fn default() -> Self {
         Self::new().expect("Failed to create default VoiceConverter")
     }
 }
 
 impl Default for ConversionQuality {
+    /// Creates default conversion quality settings.
+    ///
+    /// Uses hybrid conversion method with high quality preservation:
+    /// - Method: Hybrid (neural + spectral)
+    /// - Timing preservation: enabled
+    /// - Pitch contour preservation: enabled
+    /// - Conversion strength: 0.8 (80%)
+    /// - Formant preservation: enabled
+    /// - Expression preservation: enabled
     fn default() -> Self {
         Self {
             method: ConversionMethod::Hybrid,
@@ -622,6 +1005,15 @@ impl Default for ConversionQuality {
 }
 
 impl Default for VoiceQualityMetrics {
+    /// Creates default voice quality metrics.
+    ///
+    /// Represents typical values for a trained singer:
+    /// - Vocal range: 24 semitones (2 octaves)
+    /// - Vibrato rate: 5.0 Hz
+    /// - Vibrato depth: 20.0 cents
+    /// - Breathiness: 0.3 (30%)
+    /// - Roughness: 0.2 (20%)
+    /// - Brightness: 0.7 (70%)
     fn default() -> Self {
         Self {
             vocal_range: 24.0,

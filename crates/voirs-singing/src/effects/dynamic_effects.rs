@@ -4,17 +4,39 @@ use super::core::SingingEffect;
 use super::helpers::EnvelopeFollower;
 use std::collections::HashMap;
 
-/// Compressor effect
+/// Dynamic range compressor effect for controlling vocal dynamics.
+///
+/// Reduces the dynamic range of audio by attenuating signals above a threshold,
+/// making quiet parts louder and loud parts quieter relative to each other.
 #[derive(Debug, Clone)]
 pub struct CompressorEffect {
+    /// Effect identifier name
     name: String,
+    /// Effect parameters (threshold, ratio, attack, release, makeup_gain)
     parameters: HashMap<String, f32>,
+    /// Envelope follower for tracking signal level
     envelope_follower: EnvelopeFollower,
+    /// Current gain reduction amount in dB
     gain_reduction: f32,
+    /// Current sample rate in Hz
     sample_rate: f32,
 }
 
 impl CompressorEffect {
+    /// Creates a new compressor effect with specified parameters.
+    ///
+    /// # Arguments
+    ///
+    /// * `parameters` - Optional parameter overrides:
+    ///   - `threshold`: Compression threshold in dB (default: -20.0)
+    ///   - `ratio`: Compression ratio (default: 4.0)
+    ///   - `attack`: Attack time in seconds (default: 0.003)
+    ///   - `release`: Release time in seconds (default: 0.1)
+    ///   - `makeup_gain`: Output gain compensation in dB (default: 0.0)
+    ///
+    /// # Returns
+    ///
+    /// A new `CompressorEffect` instance with default or custom parameters.
     pub fn new(mut parameters: HashMap<String, f32>) -> Self {
         let mut effect = Self {
             name: "compressor".to_string(),
@@ -39,10 +61,28 @@ impl CompressorEffect {
         effect
     }
 
+    /// Converts decibels to linear amplitude.
+    ///
+    /// # Arguments
+    ///
+    /// * `db` - Decibel value
+    ///
+    /// # Returns
+    ///
+    /// Linear amplitude value
     fn db_to_linear(db: f32) -> f32 {
         10.0_f32.powf(db / 20.0)
     }
 
+    /// Converts linear amplitude to decibels.
+    ///
+    /// # Arguments
+    ///
+    /// * `linear` - Linear amplitude value
+    ///
+    /// # Returns
+    ///
+    /// Decibel value
     fn linear_to_db(linear: f32) -> f32 {
         20.0 * linear.max(1e-10).log10()
     }
@@ -117,17 +157,38 @@ impl SingingEffect for CompressorEffect {
     }
 }
 
-/// Gate effect for noise reduction
+/// Gate effect for noise reduction by attenuating signals below a threshold.
+///
+/// A noise gate that only allows audio above a certain threshold to pass,
+/// effectively silencing background noise during quiet passages.
 #[derive(Debug, Clone)]
 pub struct GateEffect {
+    /// Effect identifier name
     name: String,
+    /// Effect parameters (threshold, ratio, attack, release)
     parameters: HashMap<String, f32>,
+    /// Envelope follower for tracking signal level
     envelope_follower: EnvelopeFollower,
+    /// Current gate state (true = open/passing signal)
     is_open: bool,
+    /// Current sample rate in Hz
     sample_rate: f32,
 }
 
 impl GateEffect {
+    /// Creates a new gate effect with specified parameters.
+    ///
+    /// # Arguments
+    ///
+    /// * `parameters` - Optional parameter overrides:
+    ///   - `threshold`: Gate threshold in dB (default: -40.0)
+    ///   - `ratio`: Attenuation ratio when gate is closed (default: 10.0)
+    ///   - `attack`: Gate opening time in seconds (default: 0.001)
+    ///   - `release`: Gate closing time in seconds (default: 0.05)
+    ///
+    /// # Returns
+    ///
+    /// A new `GateEffect` instance with default or custom parameters.
     pub fn new(mut parameters: HashMap<String, f32>) -> Self {
         let mut effect = Self {
             name: "gate".to_string(),
@@ -221,16 +282,34 @@ impl SingingEffect for GateEffect {
     }
 }
 
-/// Limiter effect to prevent clipping
+/// Limiter effect to prevent clipping by hard-limiting peaks.
+///
+/// A specialized compressor with a very high ratio that prevents audio
+/// from exceeding a maximum threshold, protecting against distortion.
 #[derive(Debug, Clone)]
 pub struct LimiterEffect {
+    /// Effect identifier name
     name: String,
+    /// Effect parameters (threshold, release)
     parameters: HashMap<String, f32>,
+    /// Envelope follower for fast peak detection
     envelope_follower: EnvelopeFollower,
+    /// Current sample rate in Hz
     sample_rate: f32,
 }
 
 impl LimiterEffect {
+    /// Creates a new limiter effect with specified parameters.
+    ///
+    /// # Arguments
+    ///
+    /// * `parameters` - Optional parameter overrides:
+    ///   - `threshold`: Limiting threshold in dB (default: -3.0)
+    ///   - `release`: Release time in seconds (default: 0.01)
+    ///
+    /// # Returns
+    ///
+    /// A new `LimiterEffect` instance with default or custom parameters.
     pub fn new(mut parameters: HashMap<String, f32>) -> Self {
         let mut effect = Self {
             name: "limiter".to_string(),
@@ -278,11 +357,8 @@ impl SingingEffect for LimiterEffect {
     fn set_parameter(&mut self, name: &str, value: f32) -> crate::Result<()> {
         self.parameters.insert(name.to_string(), value);
 
-        match name {
-            "release" => {
-                self.envelope_follower.set_release(value);
-            }
-            _ => {}
+        if name == "release" {
+            self.envelope_follower.set_release(value);
         }
 
         Ok(())

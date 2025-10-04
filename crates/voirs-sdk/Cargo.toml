@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation = "https://docs.rs/voirs-sdk"
-keywords.workspace = true
+keywords = ["voirs", "sdk", "tts", "speech-synthesis", "api"]
 categories = ["api-bindings", "multimedia::audio", "science"]
 rust-version.workspace = true
 description = "Unified SDK and public API for VoiRS speech synthesis"
@@ -17,17 +17,21 @@ name = "voirs_sdk"
 path = "src/lib.rs"
 
 [dependencies]
+# SciRS2 - Scientific computing abstractions
+scirs2-core.workspace = true
+scirs2-fft.workspace = true
+
 # Re-export all core crates
-voirs-g2p = { version = "0.1.0-alpha.1", path = "../voirs-g2p" }
-voirs-acoustic = { version = "0.1.0-alpha.1", path = "../voirs-acoustic" }
-voirs-vocoder = { version = "0.1.0-alpha.1", path = "../voirs-vocoder" }
-voirs-dataset = { version = "0.1.0-alpha.1", path = "../voirs-dataset" }
+voirs-g2p.workspace = true
+voirs-acoustic.workspace = true
+voirs-vocoder.workspace = true
+voirs-dataset.workspace = true
 
 # New advanced features
-voirs-emotion = { version = "0.1.0-alpha.1", path = "../voirs-emotion", optional = true }
-voirs-cloning = { version = "0.1.0-alpha.1", path = "../voirs-cloning", optional = true }
-voirs-conversion = { version = "0.1.0-alpha.1", path = "../voirs-conversion", optional = true }
-voirs-spatial = { version = "0.1.0-alpha.1", path = "../voirs-spatial", optional = true }
+voirs-emotion = { workspace = true, optional = true }
+voirs-cloning = { workspace = true, optional = true }
+voirs-conversion = { workspace = true, optional = true }
+voirs-spatial = { workspace = true, optional = true }
 
 # Common dependencies for the unified API
 tokio.workspace = true
@@ -56,9 +60,6 @@ cpal.workspace = true
 backtrace.workspace = true
 notify.workspace = true
 libc.workspace = true
-rustfft.workspace = true
-realfft.workspace = true
-num-complex.workspace = true
 
 # Audio codec dependencies
 claxon.workspace = true
@@ -97,7 +98,7 @@ wasmtime = { workspace = true, optional = true }
 [dev-dependencies]
 tempfile.workspace = true
 wasm-bindgen-test = "0.3"
-tokio-tungstenite = "0.24"
+tokio-tungstenite = "0.28"
 
 [features]
 default = []

@@ -208,7 +208,7 @@ pub struct MemoryPool {
     /// Reusable FFT buffers
     pub fft_buffers: Vec<Vec<f32>>,
     /// Reusable complex buffers
-    pub complex_buffers: Vec<Vec<num_complex::Complex<f32>>>,
+    pub complex_buffers: Vec<Vec<scirs2_core::Complex<f32>>>,
     /// Reusable analysis windows
     pub analysis_windows: Vec<Vec<f32>>,
     /// Buffer pool size
@@ -900,7 +900,7 @@ impl ArtifactDetector {
             let variance = self
                 .adaptive_state
                 .variance_estimates
-                .entry(artifact_type.clone())
+                .entry(artifact_type)
                 .or_insert(0.1);
             let diff = score - *running_avg;
             *variance = *variance * (1.0 - learning_rate) + diff * diff * learning_rate;
@@ -1444,14 +1444,9 @@ impl ArtifactDetector {
 
     fn calculate_high_frequency_energy(&self, audio: &[f32]) -> f32 {
         // Estimate high frequency energy (simplified)
-        let mut hf_energy = 0.0;
         let cutoff = audio.len() / 4; // Rough high frequency cutoff
 
-        for i in cutoff..audio.len() {
-            hf_energy += audio[i] * audio[i];
-        }
-
-        hf_energy
+        audio[cutoff..].iter().map(|&x| x * x).sum()
     }
 
     fn calculate_phase_irregularity(&self, audio: &[f32]) -> f32 {
@@ -1874,23 +1869,20 @@ impl QualityMetricsSystem {
     }
 
     fn calculate_mel_band_energies(&self, spectrum: &[f32], num_bands: usize) -> Vec<f32> {
-        let mut band_energies = vec![0.0; num_bands];
         let band_size = spectrum.len() / num_bands;
 
-        for band in 0..num_bands {
-            let start = band * band_size;
-            let end = ((band + 1) * band_size).min(spectrum.len());
+        (0..num_bands)
+            .map(|band| {
+                let start = band * band_size;
+                let end = ((band + 1) * band_size).min(spectrum.len());
 
-            for i in start..end {
-                band_energies[band] += spectrum[i];
-            }
-
-            if end > start {
-                band_energies[band] /= (end - start) as f32;
-            }
-        }
-
-        band_energies
+                if end > start {
+                    spectrum[start..end].iter().sum::<f32>() / (end - start) as f32
+                } else {
+                    0.0
+                }
+            })
+            .collect()
     }
 
     fn calculate_zero_crossing_rate(&self, audio: &[f32]) -> f32 {
@@ -2320,99 +2312,97 @@ pub struct QualityStrategyAdjustment {
 impl AdaptiveQualityController {
     /// Create new adaptive quality controller
     pub fn new(quality_target: f32) -> Self {
-        let mut strategies = Vec::new();
-
         // Add default quality improvement strategies
-        strategies.push(QualityStrategy {
-            name: "reduce_conversion_strength".to_string(),
-            trigger: QualityTrigger::OverallQualityBelow(0.6),
-            adjustment: QualityStrategyAdjustment {
-                adjustment_type: AdjustmentType::ReduceConversion,
-                parameter_changes: [("conversion_strength".to_string(), -0.2)].into(),
-                processing_mode_change: None,
-                preferred_model: None,
+        let strategies = vec![
+            QualityStrategy {
+                name: "reduce_conversion_strength".to_string(),
+                trigger: QualityTrigger::OverallQualityBelow(0.6),
+                adjustment: QualityStrategyAdjustment {
+                    adjustment_type: AdjustmentType::ReduceConversion,
+                    parameter_changes: [("conversion_strength".to_string(), -0.2)].into(),
+                    processing_mode_change: None,
+                    preferred_model: None,
+                },
+                effectiveness: 0.7,
+                usage_count: 0,
+                success_rate: 0.7,
             },
-            effectiveness: 0.7,
-            usage_count: 0,
-            success_rate: 0.7,
-        });
-
-        strategies.push(QualityStrategy {
-            name: "enable_noise_reduction".to_string(),
-            trigger: QualityTrigger::SpecificArtifact(ArtifactType::Buzzing, 0.2),
-            adjustment: QualityStrategyAdjustment {
-                adjustment_type: AdjustmentType::NoiseReduction,
-                parameter_changes: [("noise_reduction_strength".to_string(), 0.8)].into(),
-                processing_mode_change: Some("high_quality".to_string()),
-                preferred_model: None,
+            QualityStrategy {
+                name: "enable_noise_reduction".to_string(),
+                trigger: QualityTrigger::SpecificArtifact(ArtifactType::Buzzing, 0.2),
+                adjustment: QualityStrategyAdjustment {
+                    adjustment_type: AdjustmentType::NoiseReduction,
+                    parameter_changes: [("noise_reduction_strength".to_string(), 0.8)].into(),
+                    processing_mode_change: Some("high_quality".to_string()),
+                    preferred_model: None,
+                },
+                effectiveness: 0.8,
+                usage_count: 0,
+                success_rate: 0.75,
             },
-            effectiveness: 0.8,
-            usage_count: 0,
-            success_rate: 0.75,
-        });
-
-        strategies.push(QualityStrategy {
-            name: "spectral_smoothing".to_string(),
-            trigger: QualityTrigger::SpecificArtifact(ArtifactType::SpectralDiscontinuity, 0.15),
-            adjustment: QualityStrategyAdjustment {
-                adjustment_type: AdjustmentType::SpectralSmoothing,
-                parameter_changes: [("smoothing_factor".to_string(), 0.6)].into(),
-                processing_mode_change: None,
-                preferred_model: None,
+            QualityStrategy {
+                name: "spectral_smoothing".to_string(),
+                trigger: QualityTrigger::SpecificArtifact(
+                    ArtifactType::SpectralDiscontinuity,
+                    0.15,
+                ),
+                adjustment: QualityStrategyAdjustment {
+                    adjustment_type: AdjustmentType::SpectralSmoothing,
+                    parameter_changes: [("smoothing_factor".to_string(), 0.6)].into(),
+                    processing_mode_change: None,
+                    preferred_model: None,
+                },
+                effectiveness: 0.6,
+                usage_count: 0,
+                success_rate: 0.65,
             },
-            effectiveness: 0.6,
-            usage_count: 0,
-            success_rate: 0.65,
-        });
-
-        strategies.push(QualityStrategy {
-            name: "pitch_stabilization".to_string(),
-            trigger: QualityTrigger::SpecificArtifact(ArtifactType::PitchVariation, 0.25),
-            adjustment: QualityStrategyAdjustment {
-                adjustment_type: AdjustmentType::PitchStabilization,
-                parameter_changes: [("pitch_smoothing".to_string(), 0.7)].into(),
-                processing_mode_change: None,
-                preferred_model: None,
+            QualityStrategy {
+                name: "pitch_stabilization".to_string(),
+                trigger: QualityTrigger::SpecificArtifact(ArtifactType::PitchVariation, 0.25),
+                adjustment: QualityStrategyAdjustment {
+                    adjustment_type: AdjustmentType::PitchStabilization,
+                    parameter_changes: [("pitch_smoothing".to_string(), 0.7)].into(),
+                    processing_mode_change: None,
+                    preferred_model: None,
+                },
+                effectiveness: 0.75,
+                usage_count: 0,
+                success_rate: 0.8,
             },
-            effectiveness: 0.75,
-            usage_count: 0,
-            success_rate: 0.8,
-        });
-
-        strategies.push(QualityStrategy {
-            name: "formant_preservation".to_string(),
-            trigger: QualityTrigger::SpecificArtifact(ArtifactType::Metallic, 0.2),
-            adjustment: QualityStrategyAdjustment {
-                adjustment_type: AdjustmentType::FormantPreservation,
-                parameter_changes: [("formant_preservation".to_string(), 0.9)].into(),
-                processing_mode_change: None,
-                preferred_model: None,
+            QualityStrategy {
+                name: "formant_preservation".to_string(),
+                trigger: QualityTrigger::SpecificArtifact(ArtifactType::Metallic, 0.2),
+                adjustment: QualityStrategyAdjustment {
+                    adjustment_type: AdjustmentType::FormantPreservation,
+                    parameter_changes: [("formant_preservation".to_string(), 0.9)].into(),
+                    processing_mode_change: None,
+                    preferred_model: None,
+                },
+                effectiveness: 0.65,
+                usage_count: 0,
+                success_rate: 0.7,
             },
-            effectiveness: 0.65,
-            usage_count: 0,
-            success_rate: 0.7,
-        });
-
-        strategies.push(QualityStrategy {
-            name: "low_latency_fallback".to_string(),
-            trigger: QualityTrigger::Combined(vec![
-                QualityTrigger::OverallQualityBelow(0.4),
-                QualityTrigger::ArtifactScoreAbove(0.8),
-            ]),
-            adjustment: QualityStrategyAdjustment {
-                adjustment_type: AdjustmentType::ReduceConversion,
-                parameter_changes: [
-                    ("conversion_strength".to_string(), -0.4),
-                    ("processing_quality".to_string(), -0.3),
-                ]
-                .into(),
-                processing_mode_change: Some("low_latency".to_string()),
-                preferred_model: Some("lightweight".to_string()),
+            QualityStrategy {
+                name: "low_latency_fallback".to_string(),
+                trigger: QualityTrigger::Combined(vec![
+                    QualityTrigger::OverallQualityBelow(0.4),
+                    QualityTrigger::ArtifactScoreAbove(0.8),
+                ]),
+                adjustment: QualityStrategyAdjustment {
+                    adjustment_type: AdjustmentType::ReduceConversion,
+                    parameter_changes: [
+                        ("conversion_strength".to_string(), -0.4),
+                        ("processing_quality".to_string(), -0.3),
+                    ]
+                    .into(),
+                    processing_mode_change: Some("low_latency".to_string()),
+                    preferred_model: Some("lightweight".to_string()),
+                },
+                effectiveness: 0.5,
+                usage_count: 0,
+                success_rate: 0.6,
             },
-            effectiveness: 0.5,
-            usage_count: 0,
-            success_rate: 0.6,
-        });
+        ];
 
         Self {
             quality_target: quality_target.clamp(0.0, 1.0),
@@ -2501,14 +2491,13 @@ impl AdaptiveQualityController {
         self.strategies
             .iter()
             .filter(|strategy| {
-                self.evaluate_trigger(&strategy.trigger, artifacts, objective_quality)
+                Self::evaluate_trigger(&strategy.trigger, artifacts, objective_quality)
             })
             .collect()
     }
 
     /// Evaluate if a trigger condition is met
     fn evaluate_trigger(
-        &self,
         trigger: &QualityTrigger,
         artifacts: &DetectedArtifacts,
         objective_quality: &ObjectiveQualityMetrics,
@@ -2531,7 +2520,7 @@ impl AdaptiveQualityController {
             QualityTrigger::SnrBelow(threshold) => objective_quality.snr_estimate < *threshold,
             QualityTrigger::Combined(triggers) => triggers
                 .iter()
-                .all(|t| self.evaluate_trigger(t, artifacts, objective_quality)),
+                .all(|t| Self::evaluate_trigger(t, artifacts, objective_quality)),
         }
     }
 
@@ -3811,9 +3800,8 @@ impl QualityTargetsSystem {
         total_weight += 0.25;
 
         // Artifact level (weight: 15%, inverted since lower is better)
-        let artifact_achievement = (1.0 - (artifact / self.config.artifact_level_threshold))
-            .max(0.0)
-            .min(1.0);
+        let artifact_achievement =
+            (1.0 - (artifact / self.config.artifact_level_threshold)).clamp(0.0, 1.0);
         score += artifact_achievement * 0.15;
         total_weight += 0.15;
 
@@ -5115,7 +5103,7 @@ mod tests {
             (
                 "noise",
                 (0..1000)
-                    .map(|_| (rand::random::<f32>() - 0.5) * 0.2)
+                    .map(|_| (scirs2_core::random::random::<f32>() - 0.5) * 0.2)
                     .collect::<Vec<f32>>(),
             ),
             (

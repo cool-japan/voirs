@@ -16,6 +16,7 @@ use voirs_sdk::{AudioBuffer, LanguageCode};
 
 /// Benchmarking configuration
 #[derive(Debug, Clone)]
+/// Benchmarking Config
 pub struct BenchmarkingConfig {
     /// Test datasets to use
     pub datasets: Vec<Dataset>,
@@ -52,15 +53,21 @@ impl Default for BenchmarkingConfig {
 
 /// Test dataset enumeration
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Dataset
 pub enum Dataset {
+    /// Libri speech
     LibriSpeech,
+    /// Common voice
     CommonVoice,
+    /// V c t k
     VCTK,
+    /// Custom
     Custom(String),
 }
 
 /// Test sample for benchmarking
 #[derive(Debug, Clone)]
+/// Test Sample
 pub struct TestSample {
     /// Audio buffer
     pub audio: AudioBuffer,
@@ -78,6 +85,7 @@ pub struct TestSample {
 
 /// Word Error Rate calculation result
 #[derive(Debug, Clone)]
+/// W E R Result
 pub struct WERResult {
     /// Word Error Rate (0.0 to 1.0+)
     pub wer: f32,
@@ -99,6 +107,7 @@ pub struct WERResult {
 
 /// Alignment result for detailed analysis
 #[derive(Debug, Clone)]
+/// Alignment Result
 pub struct AlignmentResult {
     /// Aligned reference words
     pub reference_aligned: Vec<String>,
@@ -110,6 +119,7 @@ pub struct AlignmentResult {
 
 /// Performance benchmark result
 #[derive(Debug, Clone)]
+/// Performance Benchmark
 pub struct PerformanceBenchmark {
     /// Model identifier
     pub model_id: String,
@@ -137,6 +147,7 @@ pub struct PerformanceBenchmark {
 
 /// Individual sample benchmark result
 #[derive(Debug, Clone)]
+/// Sample Result
 pub struct SampleResult {
     /// Sample ID
     pub sample_id: String,
@@ -478,6 +489,7 @@ impl ASRBenchmarkingSuite {
 
     /// Calculate Word Error Rate and Character Error Rate
     #[must_use]
+    /// calculate wer
     pub fn calculate_wer(&self, reference: &str, hypothesis: &str) -> WERResult {
         let ref_words: Vec<&str> = reference.split_whitespace().collect();
         let hyp_words: Vec<&str> = hypothesis.split_whitespace().collect();
@@ -728,6 +740,7 @@ impl ASRBenchmarkingSuite {
 
 /// Model performance summary
 #[derive(Debug, Clone)]
+/// Model Summary
 pub struct ModelSummary {
     /// Model identifier
     pub model_id: String,
@@ -745,6 +758,7 @@ pub struct ModelSummary {
 
 /// Comprehensive benchmark report
 #[derive(Debug, Clone)]
+/// Benchmark Report
 pub struct BenchmarkReport {
     /// Total number of benchmarks run
     pub total_benchmarks: usize,
@@ -758,6 +772,7 @@ pub struct BenchmarkReport {
 
 /// Accuracy validation framework for formal benchmarking
 #[derive(Debug, Clone)]
+/// Accuracy Validator
 pub struct AccuracyValidator {
     /// Accuracy requirements
     pub requirements: Vec<AccuracyRequirement>,
@@ -765,6 +780,7 @@ pub struct AccuracyValidator {
 
 /// Accuracy requirement specification
 #[derive(Debug, Clone)]
+/// Accuracy Requirement
 pub struct AccuracyRequirement {
     /// Requirement identifier
     pub id: String,
@@ -786,6 +802,7 @@ pub struct AccuracyRequirement {
 
 /// Accuracy validation result
 #[derive(Debug, Clone)]
+/// Accuracy Validation Result
 pub struct AccuracyValidationResult {
     /// Requirement that was tested
     pub requirement: AccuracyRequirement,
@@ -805,6 +822,7 @@ pub struct AccuracyValidationResult {
 
 /// Comprehensive accuracy validation report
 #[derive(Debug, Clone)]
+/// Accuracy Validation Report
 pub struct AccuracyValidationReport {
     /// All validation results
     pub results: Vec<AccuracyValidationResult>,

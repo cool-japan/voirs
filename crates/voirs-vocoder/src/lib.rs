@@ -78,6 +78,9 @@ pub enum VocoderError {
 
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
+
+    #[error("FFT error: {0}")]
+    FFTError(#[from] scirs2_fft::FFTError),
 }
 
 /// Language codes supported by VoiRS

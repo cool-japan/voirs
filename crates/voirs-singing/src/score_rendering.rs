@@ -80,7 +80,7 @@ impl ScoreRenderer {
     }
 
     /// Create with default configuration
-    pub fn default() -> Self {
+    pub fn with_default_config() -> Self {
         Self {
             config: RenderConfig::default(),
         }
@@ -273,7 +273,7 @@ impl ScoreRenderer {
             // Stem
             let stem_height = self.config.staff_spacing * 3.0;
             let stem_up = position > 4.0; // Stem direction based on position
-            let stem_y1 = if stem_up { note_y } else { note_y };
+            let stem_y1 = note_y;
             let stem_y2 = if stem_up {
                 note_y - stem_height
             } else {
@@ -450,7 +450,7 @@ impl ScoreRenderer {
         // Notes
         output.push_str("Musical Notes:\n");
         output.push_str(&"─".repeat(60));
-        output.push_str("\n");
+        output.push('\n');
 
         for (i, note) in score.notes.iter().enumerate() {
             output.push_str(&format!(

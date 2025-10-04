@@ -13,9 +13,13 @@ use std::collections::VecDeque;
 /// Voice part types for choir arrangement
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VoicePartType {
+    /// Highest female/child voice (typically C4-C6)
     Soprano,
+    /// Lower female/countertenor voice (typically G3-F5)
     Alto,
+    /// High male voice (typically C3-C5)
     Tenor,
+    /// Lowest male voice (typically G2-F4)
     Bass,
 }
 
@@ -105,18 +109,28 @@ pub struct ChoirEffect {
 
 // === Supporting Types ===
 
+/// Musical scale types for pitch correction
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ScaleType {
+    /// All 12 semitones (no pitch restriction)
     Chromatic,
+    /// Major scale (Ionian mode)
     Major,
+    /// Natural minor scale (Aeolian mode)
     Minor,
+    /// Dorian mode (minor with raised 6th)
     Dorian,
+    /// Mixolydian mode (major with lowered 7th)
     Mixolydian,
+    /// Five-note pentatonic scale
     Pentatonic,
+    /// Blues scale with blue notes
     Blues,
-    Custom(u8), // Custom scale ID
+    /// Custom scale defined by ID
+    Custom(u8),
 }
 
+/// Configuration for a single harmony voice arrangement
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceArrangement {
     /// Voice part (Soprano, Alto, etc.)
@@ -125,17 +139,18 @@ pub struct VoiceArrangement {
     pub interval: f32,
     /// Voice characteristics
     pub characteristics: VoiceCharacteristics,
-    /// Dynamic level relative to lead
+    /// Dynamic level relative to lead (0.0-1.0)
     pub dynamic_level: f32,
     /// Timbre adjustment
     pub timbre_adjustment: TimbreAdjustment,
 }
 
+/// Rules for automatic voice arrangement and harmony voicing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoicingRules {
-    /// Minimum interval between voices
+    /// Minimum interval between voices (in semitones)
     pub min_interval: f32,
-    /// Maximum interval between voices
+    /// Maximum interval between voices (in semitones)
     pub max_interval: f32,
     /// Prefer close or open voicing
     pub voicing_preference: VoicingPreference,
@@ -145,234 +160,282 @@ pub struct VoicingRules {
     pub inversion_rules: InversionRules,
 }
 
+/// Preference for voice spacing in harmony arrangements
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VoicingPreference {
+    /// Close voicing (voices within an octave)
     Close,
+    /// Open voicing (voices spread beyond an octave)
     Open,
+    /// Mixed voicing (combination of close and open)
     Mixed,
+    /// Wide spread voicing (maximum spacing)
     Spread,
 }
 
+/// Rules for smooth voice leading between chords
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceLeadingRules {
     /// Maximum leap size in semitones
     pub max_leap: f32,
-    /// Prefer stepwise motion
+    /// Prefer stepwise motion (2nd intervals)
     pub prefer_stepwise: bool,
-    /// Avoid parallel fifths/octaves
+    /// Avoid parallel fifths/octaves (classical rule)
     pub avoid_parallels: bool,
-    /// Voice independence level
+    /// Voice independence level (0.0=homophonic, 1.0=polyphonic)
     pub independence_level: f32,
 }
 
+/// Preferences for chord inversion selection
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InversionRules {
-    /// Root position preference
+    /// Root position preference (0.0-1.0)
     pub root_preference: f32,
-    /// First inversion preference
+    /// First inversion preference (0.0-1.0)
     pub first_inversion_preference: f32,
-    /// Second inversion preference  
+    /// Second inversion preference (0.0-1.0)
     pub second_inversion_preference: f32,
-    /// Higher inversion preference
+    /// Higher inversion preference (0.0-1.0)
     pub higher_inversion_preference: f32,
 }
 
+/// Carrier signal types for vocoder synthesis
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CarrierType {
+    /// Sawtooth wave (bright, harmonically rich)
     Sawtooth,
+    /// Square wave (hollow, vintage sound)
     Square,
+    /// Sine wave (pure, smooth tone)
     Sine,
+    /// White noise (textured, breathy)
     Noise,
+    /// Pulse wave (variable duty cycle)
     Pulse,
+    /// Custom carrier signal
     Custom,
 }
 
+/// Configuration for choir voice arrangement and distribution
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChoirArrangement {
-    /// SATB distribution
-    pub satb_distribution: (u8, u8, u8, u8), // S, A, T, B counts
-    /// Voice ranges for each section
-    pub voice_ranges: Vec<(f32, f32)>, // (min_freq, max_freq)
+    /// SATB distribution (Soprano, Alto, Tenor, Bass counts)
+    pub satb_distribution: (u8, u8, u8, u8),
+    /// Voice ranges for each section (min_freq, max_freq) in Hz
+    pub voice_ranges: Vec<(f32, f32)>,
     /// Section leaders (more prominent voices)
     pub section_leaders: Vec<bool>,
     /// Divisi sections (split parts)
     pub divisi_sections: Vec<DivisiSection>,
 }
 
+/// Configuration for divisi (split voice parts) in choir arrangement
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DivisiSection {
     /// Which voice part is split
     pub voice_part: VoicePartType,
-    /// Number of divisions
+    /// Number of divisions (e.g., 2 for Soprano I and II)
     pub divisions: u8,
-    /// Split type
+    /// Split type (unison, harmony, or counterpoint)
     pub split_type: SplitType,
 }
 
+/// Type of voice splitting in divisi sections
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SplitType {
+    /// Same pitch, different timbres (reinforcement)
     Unison,
+    /// Harmonic intervals (thirds, sixths, etc.)
     Harmony,
+    /// Independent melodic lines
     Counterpoint,
 }
 
+/// Statistical distribution of voice characteristics in choir
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceDistribution {
     /// Age distribution (affects timbre)
     pub age_distribution: AgeDistribution,
-    /// Gender balance
-    pub gender_balance: f32, // 0.0 = all female, 1.0 = all male
+    /// Gender balance (0.0 = all female, 1.0 = all male)
+    pub gender_balance: f32,
     /// Experience level distribution
     pub experience_distribution: ExperienceDistribution,
-    /// Voice quality variation
+    /// Voice quality variation (0.0-1.0)
     pub quality_variation: f32,
 }
 
+/// Age distribution of choir members (affects timbre and vibrato characteristics)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgeDistribution {
-    /// Percentage of young voices (18-30)
+    /// Percentage of young voices (18-30, 0.0-1.0)
     pub young: f32,
-    /// Percentage of middle-aged voices (30-50)  
+    /// Percentage of middle-aged voices (30-50, 0.0-1.0)
     pub middle: f32,
-    /// Percentage of mature voices (50+)
+    /// Percentage of mature voices (50+, 0.0-1.0)
     pub mature: f32,
 }
 
+/// Experience level distribution of choir members (affects accuracy and quality)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExperienceDistribution {
-    /// Professional singers percentage
+    /// Professional singers percentage (0.0-1.0)
     pub professional: f32,
-    /// Amateur singers percentage
+    /// Amateur singers percentage (0.0-1.0)
     pub amateur: f32,
-    /// Beginner singers percentage
+    /// Beginner singers percentage (0.0-1.0)
     pub beginner: f32,
 }
 
+/// Spatial positioning and acoustic configuration for choir simulation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpatialConfiguration {
     /// Stage width in meters
     pub stage_width: f32,
     /// Stage depth in meters
     pub stage_depth: f32,
-    /// Formation type
+    /// Formation type (block, semicircle, etc.)
     pub formation: ChoirFormation,
-    /// Height variation
+    /// Height variation in meters (risers/platforms)
     pub height_variation: f32,
     /// Acoustic space simulation
     pub acoustic_space: AcousticSpace,
 }
 
+/// Physical formation patterns for choir positioning
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChoirFormation {
-    Block,      // Traditional SATB blocks
-    Mixed,      // Singers mixed together
-    Semicircle, // Curved arrangement
-    Antiphonal, // Two opposing groups
-    Cathedral,  // Cathedral-style arrangement
+    /// Traditional SATB blocks (sections grouped)
+    Block,
+    /// Singers mixed together (heterogeneous)
+    Mixed,
+    /// Curved semicircle arrangement
+    Semicircle,
+    /// Two opposing groups (call-and-response)
+    Antiphonal,
+    /// Cathedral-style arrangement (elevated/tiered)
+    Cathedral,
 }
 
+/// Acoustic environment simulation parameters
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AcousticSpace {
-    /// Reverberation time
+    /// Reverberation time in seconds (RT60)
     pub reverb_time: f32,
-    /// Room size
+    /// Room size category
     pub room_size: RoomSize,
-    /// Surface materials (affects reflection)
+    /// Surface materials (affects reflection characteristics)
     pub surface_materials: SurfaceMaterials,
-    /// Distance from listener
+    /// Distance from listener in meters
     pub listener_distance: f32,
 }
 
+/// Room size categories for acoustic simulation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RoomSize {
-    Intimate,  // Small room
-    Chamber,   // Medium room
-    Concert,   // Concert hall
-    Cathedral, // Large cathedral
-    Outdoor,   // Open space
+    /// Small intimate room (living room, practice room)
+    Intimate,
+    /// Medium chamber (recital hall, small theater)
+    Chamber,
+    /// Large concert hall
+    Concert,
+    /// Very large cathedral space
+    Cathedral,
+    /// Open outdoor space
+    Outdoor,
 }
 
+/// Surface material composition for acoustic reflection simulation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SurfaceMaterials {
-    /// Wood percentage (warm reflection)
+    /// Wood percentage (warm reflection, 0.0-1.0)
     pub wood: f32,
-    /// Stone percentage (bright reflection)
+    /// Stone percentage (bright reflection, 0.0-1.0)
     pub stone: f32,
-    /// Fabric percentage (soft absorption)
+    /// Fabric percentage (soft absorption, 0.0-1.0)
     pub fabric: f32,
-    /// Glass percentage (bright reflection)
+    /// Glass percentage (bright reflection, 0.0-1.0)
     pub glass: f32,
 }
 
+/// Humanization parameters for natural choir simulation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HumanizationConfig {
-    /// Timing variation (seconds)
+    /// Timing variation in seconds (attack/onset randomness)
     pub timing_variation: f32,
-    /// Pitch variation (cents)
+    /// Pitch variation in cents (intonation accuracy)
     pub pitch_variation: f32,
-    /// Volume variation (0.0-1.0)
+    /// Volume variation (0.0-1.0, dynamic variation)
     pub volume_variation: f32,
-    /// Vibrato variation
+    /// Vibrato variation parameters
     pub vibrato_variation: VibratoVariation,
-    /// Breath variation
+    /// Breath variation (0.0-1.0, breath noise intensity)
     pub breath_variation: f32,
-    /// Formant variation
+    /// Formant variation (0.0-1.0, vowel color variation)
     pub formant_variation: f32,
 }
 
+/// Vibrato variation parameters for individual voice characterization
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VibratoVariation {
-    /// Rate variation range
+    /// Rate variation range in Hz (min, max)
     pub rate_range: (f32, f32),
-    /// Depth variation range
+    /// Depth variation range in cents (min, max)
     pub depth_range: (f32, f32),
-    /// Onset time variation
+    /// Onset time variation in seconds (vibrato attack time)
     pub onset_variation: f32,
-    /// Individual vibrato styles
+    /// Individual vibrato styles (unique per voice)
     pub individual_styles: bool,
 }
 
+/// Configuration for choir blend quality and balance
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChoirBlendConfig {
-    /// Section blend quality
+    /// Section blend quality (0.0-1.0, within-section cohesion)
     pub section_blend: f32,
-    /// Inter-section blend quality
+    /// Inter-section blend quality (0.0-1.0, between-section cohesion)
     pub inter_section_blend: f32,
-    /// Unison accuracy
+    /// Unison accuracy (0.0-1.0, pitch/timing alignment)
     pub unison_accuracy: f32,
-    /// Harmonic balance
+    /// Harmonic balance across voice parts
     pub harmonic_balance: HarmonicBalance,
 }
 
+/// Relative volume balance across SATB voice parts
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HarmonicBalance {
-    /// Bass prominence
+    /// Bass prominence (relative volume multiplier)
     pub bass_prominence: f32,
-    /// Tenor prominence
+    /// Tenor prominence (relative volume multiplier)
     pub tenor_prominence: f32,
-    /// Alto prominence
+    /// Alto prominence (relative volume multiplier)
     pub alto_prominence: f32,
-    /// Soprano prominence
+    /// Soprano prominence (relative volume multiplier)
     pub soprano_prominence: f32,
 }
 
+/// Breath synchronization patterns for choir
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BreathSynchronization {
-    Synchronized, // All breathe together
-    Staggered,    // Breathes are staggered
-    Natural,      // Individual breath timing
-    Sectional,    // Sections breathe together
+    /// All choir members breathe together (perfect sync)
+    Synchronized,
+    /// Breathes are staggered (continuous sound)
+    Staggered,
+    /// Individual breath timing (natural/realistic)
+    Natural,
+    /// Sections breathe together (sectional coordination)
+    Sectional,
 }
 
+/// Timbre adjustment parameters for voice color modification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimbreAdjustment {
-    /// Brightness adjustment
+    /// Brightness adjustment (-1.0 to 1.0, high-frequency emphasis)
     pub brightness: f32,
-    /// Warmth adjustment
+    /// Warmth adjustment (-1.0 to 1.0, low-frequency emphasis)
     pub warmth: f32,
-    /// Edge/roughness adjustment
+    /// Edge/roughness adjustment (0.0-1.0, vocal cord tension)
     pub edge: f32,
-    /// Breathiness adjustment
+    /// Breathiness adjustment (0.0-1.0, breath noise level)
     pub breathiness: f32,
 }
 
@@ -426,7 +489,8 @@ impl AutoTuneEffect {
 
         // Add natural variation
         if self.natural_variation > 0.0 {
-            let variation = (rand::random::<f32>() - 0.5) * self.natural_variation * 10.0; // cents
+            let variation =
+                (scirs2_core::random::random::<f32>() - 0.5) * self.natural_variation * 10.0; // cents
             note.frequency *= 1.0 + (variation / 1200.0); // Convert cents to ratio
         }
 
@@ -644,10 +708,11 @@ impl HarmonyGenerator {
             harmony_note.velocity *= arrangement.dynamic_level;
 
             // Apply timing offset for humanization
-            harmony_note.timing_offset += self.timing_offset * rand::random::<f32>();
+            harmony_note.timing_offset += self.timing_offset * scirs2_core::random::random::<f32>();
 
             // Apply pitch variation
-            let pitch_variation_cents = (rand::random::<f32>() - 0.5) * self.pitch_variation;
+            let pitch_variation_cents =
+                (scirs2_core::random::random::<f32>() - 0.5) * self.pitch_variation;
             harmony_note.frequency *= 1.0 + (pitch_variation_cents / 1200.0);
 
             // Apply voice characteristics
@@ -929,24 +994,27 @@ impl ChoirEffect {
         let humanization = &self.humanization;
 
         // Timing variation
-        voice.timing_offset += (rand::random::<f32>() - 0.5) * humanization.timing_variation;
+        voice.timing_offset +=
+            (scirs2_core::random::random::<f32>() - 0.5) * humanization.timing_variation;
 
         // Pitch variation
-        let pitch_variation_cents = (rand::random::<f32>() - 0.5) * humanization.pitch_variation;
+        let pitch_variation_cents =
+            (scirs2_core::random::random::<f32>() - 0.5) * humanization.pitch_variation;
         voice.frequency *= 1.0 + (pitch_variation_cents / 1200.0);
 
         // Volume variation
-        voice.velocity *= 1.0 + (rand::random::<f32>() - 0.5) * humanization.volume_variation;
+        voice.velocity *=
+            1.0 + (scirs2_core::random::random::<f32>() - 0.5) * humanization.volume_variation;
         voice.velocity = voice.velocity.clamp(0.1, 1.0);
 
         // Vibrato variation
         if humanization.vibrato_variation.individual_styles {
             let vibrato_rate = humanization.vibrato_variation.rate_range.0
-                + rand::random::<f32>()
+                + scirs2_core::random::random::<f32>()
                     * (humanization.vibrato_variation.rate_range.1
                         - humanization.vibrato_variation.rate_range.0);
             let vibrato_depth = humanization.vibrato_variation.depth_range.0
-                + rand::random::<f32>()
+                + scirs2_core::random::random::<f32>()
                     * (humanization.vibrato_variation.depth_range.1
                         - humanization.vibrato_variation.depth_range.0);
 

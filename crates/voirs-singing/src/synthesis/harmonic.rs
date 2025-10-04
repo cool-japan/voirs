@@ -1,27 +1,37 @@
 //! Harmonic processing for synthesis
 
-use ndarray::Array1;
+use scirs2_core::ndarray::Array1;
 
-/// Harmonic processor
+/// Harmonic processor for additive synthesis
+///
+/// Generates audio by summing sinusoidal harmonics with individual amplitude and phase control.
 pub struct HarmonicProcessor {
-    /// Harmonic amplitudes
+    /// Amplitude for each harmonic (0.0-1.0)
     harmonic_amps: Vec<f32>,
-    /// Harmonic phases
+    /// Phase offset for each harmonic in radians
     harmonic_phases: Vec<f32>,
-    /// Harmonic frequencies
+    /// Frequency of each harmonic in Hz
     harmonic_freqs: Vec<f32>,
-    /// Fundamental frequency
+    /// Fundamental frequency in Hz
     f0: f32,
-    /// Number of harmonics
+    /// Number of harmonics to generate
     num_harmonics: usize,
-    /// Sample rate
+    /// Sample rate in Hz
     sample_rate: f32,
-    /// Phase accumulator for each harmonic
+    /// Phase accumulator for each harmonic (0.0-1.0)
     phase_accumulators: Vec<f32>,
 }
 
 impl HarmonicProcessor {
     /// Create a new harmonic processor
+    ///
+    /// # Arguments
+    ///
+    /// * `sample_rate` - Audio sample rate in Hz
+    ///
+    /// # Returns
+    ///
+    /// New HarmonicProcessor with 32 harmonics and 1/n amplitude decay
     pub fn new(sample_rate: f32) -> Self {
         let num_harmonics = 32; // Default number of harmonics
         let mut harmonic_amps = vec![0.0; num_harmonics];
@@ -30,8 +40,8 @@ impl HarmonicProcessor {
         let phase_accumulators = vec![0.0; num_harmonics];
 
         // Initialize with typical harmonic amplitude decay
-        for i in 0..num_harmonics {
-            harmonic_amps[i] = 1.0 / (i + 1) as f32; // 1/n decay
+        for (i, amp) in harmonic_amps.iter_mut().enumerate() {
+            *amp = 1.0 / (i + 1) as f32; // 1/n decay
         }
 
         Self {
@@ -46,6 +56,19 @@ impl HarmonicProcessor {
     }
 
     /// Process audio through harmonic synthesis
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Input audio array (used as reference, harmonics are added)
+    /// * `sample_rate` - Sample rate in Hz
+    ///
+    /// # Returns
+    ///
+    /// Processed audio with added harmonics
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if processing fails
     pub fn process(&mut self, input: &Array1<f32>, sample_rate: f32) -> crate::Result<Array1<f32>> {
         self.sample_rate = sample_rate;
 
@@ -102,18 +125,29 @@ impl HarmonicProcessor {
     /// Set harmonic amplitudes
     pub fn set_amplitudes(&mut self, amplitudes: &[f32]) {
         let count = amplitudes.len().min(self.num_harmonics);
-        for i in 0..count {
-            self.harmonic_amps[i] = amplitudes[i].max(0.0).min(1.0); // Clamp to 0-1
+        for (amp_dest, &amp_src) in self
+            .harmonic_amps
+            .iter_mut()
+            .zip(amplitudes.iter())
+            .take(count)
+        {
+            *amp_dest = amp_src.clamp(0.0, 1.0); // Clamp to 0-1
         }
     }
 
     /// Set harmonic phases
     pub fn set_phases(&mut self, phases: &[f32]) {
         let count = phases.len().min(self.num_harmonics);
-        for i in 0..count {
-            self.harmonic_phases[i] = phases[i];
+        for ((phase_dest, acc_dest), &phase_src) in self
+            .harmonic_phases
+            .iter_mut()
+            .zip(self.phase_accumulators.iter_mut())
+            .zip(phases.iter())
+            .take(count)
+        {
+            *phase_dest = phase_src;
             // Update phase accumulator
-            self.phase_accumulators[i] = phases[i] / (2.0 * std::f32::consts::PI);
+            *acc_dest = phase_src / (2.0 * std::f32::consts::PI);
         }
     }
 
@@ -176,8 +210,13 @@ impl HarmonicProcessor {
     /// Apply harmonic envelope
     pub fn set_harmonic_envelope(&mut self, envelope: &[f32]) {
         let count = envelope.len().min(self.num_harmonics);
-        for i in 0..count {
-            self.harmonic_amps[i] *= envelope[i].max(0.0).min(1.0);
+        for (amp, &env) in self
+            .harmonic_amps
+            .iter_mut()
+            .zip(envelope.iter())
+            .take(count)
+        {
+            *amp *= env.clamp(0.0, 1.0);
         }
     }
 

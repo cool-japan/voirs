@@ -7,27 +7,28 @@ license = { workspace = true }
 repository = { workspace = true }
 homepage = { workspace = true }
 documentation = "https://docs.rs/voirs-cloning"
-keywords = { workspace = true }
+keywords = ["voirs", "cloning", "voice-cloning", "speaker", "adaptation"]
 categories = ["multimedia::audio", "science", "algorithms"]
 rust-version = { workspace = true }
 description = "Voice cloning and speaker adaptation system for VoiRS"
 
 [dependencies]
+# SciRS2 - Scientific computing abstractions
+scirs2-core = { workspace = true }
+scirs2-fft = { workspace = true }
+
 # Core ML and tensor operations
-ndarray = { workspace = true }
 candle-core = { workspace = true }
 candle-nn = { workspace = true }
 
 # Audio processing
 hound = { workspace = true }
 dasp = { workspace = true }
-realfft = { workspace = true }
 
 # Async and concurrency
 tokio = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
-rayon = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
@@ -41,9 +42,7 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 
 # Math and random
-rand = { workspace = true }
 fastrand = { workspace = true }
-num-complex = { workspace = true }
 
 # Cryptography and security
 ring = "0.17"
@@ -58,8 +57,8 @@ tempfile = { workspace = true }
 walkdir = { workspace = true }
 
 # VoiRS dependencies
-voirs-acoustic = { version = "0.1.0-alpha.1", path = "../voirs-acoustic", optional = true }
-voirs-g2p = { version = "0.1.0-alpha.1", path = "../voirs-g2p", optional = true }
+voirs-acoustic = { workspace = true, optional = true }
+voirs-g2p = { workspace = true, optional = true }
 
 # WebAssembly dependencies (optional)
 wasm-bindgen = { workspace = true, optional = true }
@@ -89,6 +88,7 @@ winapi = { workspace = true }
 default = ["acoustic-integration"]
 acoustic-integration = ["voirs-acoustic"]
 g2p-integration = ["voirs-g2p"]
+vocoder-integration = []  # Marker feature for vocoder integration code paths
 gpu = []
 cuda = ["candle-core/cuda"]
 metal = ["candle-core/metal"]

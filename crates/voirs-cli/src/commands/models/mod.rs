@@ -4,8 +4,8 @@
 //! listing, downloading, benchmarking, and optimizing models.
 
 use crate::GlobalOptions;
-use voirs::Result;
 use voirs_sdk::config::AppConfig;
+use voirs_sdk::Result;
 
 pub mod benchmark;
 pub mod download;

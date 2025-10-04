@@ -125,14 +125,46 @@ path = "audio_quality_assessment.rs"
 name = "emotion_control_example_fixed"
 path = "emotion_control_example_fixed.rs"
 
+[[example]]
+name = "test_audio_demo"
+path = "test_audio_demo.rs"
+
+[[example]]
+name = "hello_world_tts"
+path = "hello_world_tts.rs"
+
+[[example]]
+name = "hello_world_real_tts"
+path = "hello_world_real_tts.rs"
+
+[[example]]
+name = "chinese_tts_demo"
+path = "chinese_tts_demo.rs"
+
+[[example]]
+name = "kokoro_chinese_demo"
+path = "kokoro_chinese_demo.rs"
+
+[[example]]
+name = "kokoro_japanese_demo"
+path = "kokoro_japanese_demo.rs"
+
+[[example]]
+name = "kokoro_multilingual_demo"
+path = "kokoro_multilingual_demo.rs"
+
+[[example]]
+name = "kokoro_espeak_auto_demo"
+path = "kokoro_espeak_auto_demo.rs"
+
 [dependencies]
-voirs = { version = "0.1.0-alpha.1", path = ".." }
-voirs-g2p = { version = "0.1.0-alpha.1", path = "../crates/voirs-g2p" }
-voirs-acoustic = { version = "0.1.0-alpha.1", path = "../crates/voirs-acoustic" }
-voirs-vocoder = { version = "0.1.0-alpha.1", path = "../crates/voirs-vocoder" }
-voirs-sdk = { version = "0.1.0-alpha.1", path = "../crates/voirs-sdk", features = ["emotion", "cloning", "conversion", "singing", "spatial"] }
-voirs-recognizer = { version = "0.1.0-alpha.1", path = "../crates/voirs-recognizer", features = ["whisper-pure"] }
-voirs-evaluation = { version = "0.1.0-alpha.1", path = "../crates/voirs-evaluation" }
+voirs = { version = "0.1.0-alpha.2", path = ".." }
+voirs-g2p = { version = "0.1.0-alpha.2", path = "../crates/voirs-g2p" }
+voirs-acoustic = { version = "0.1.0-alpha.2", path = "../crates/voirs-acoustic", features = ["onnx"] }
+voirs-vocoder = { version = "0.1.0-alpha.2", path = "../crates/voirs-vocoder" }
+voirs-sdk = { version = "0.1.0-alpha.2", path = "../crates/voirs-sdk", features = ["emotion", "cloning", "conversion", "singing", "spatial"] }
+voirs-recognizer = { version = "0.1.0-alpha.2", path = "../crates/voirs-recognizer", features = ["whisper-pure"] }
+voirs-evaluation = { version = "0.1.0-alpha.2", path = "../crates/voirs-evaluation" }
 tokio = { workspace = true }
 futures = { workspace = true }
 anyhow = { workspace = true }
@@ -140,17 +172,20 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 candle-core = { workspace = true }
 candle-nn = { workspace = true }
-sysinfo = "0.30"
+sysinfo = "0.37"
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
-rand = { workspace = true }
-thiserror = "1.0"
-num_cpus = "1.16"
-md5 = "0.7"
-regex = "1.10"
+scirs2-core = { workspace = true }  # For random number generation (replaced rand)
+thiserror = "2.0"
+num_cpus = "1.17"
+md5 = "0.8"
+regex = "1.11"
 crossbeam = "0.8"
+
+[features]
+onnx = ["voirs-acoustic/onnx"]
 
 # WebAssembly dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -164,5 +199,5 @@ web-sys = { version = "0.3", features = [
   "Document"
 ] }
 js-sys = "0.3"
-serde-wasm-bindgen = "0.4"
+serde-wasm-bindgen = "0.6"
 console_error_panic_hook = "0.1"

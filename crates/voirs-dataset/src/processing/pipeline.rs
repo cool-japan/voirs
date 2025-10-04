@@ -18,7 +18,7 @@ use crate::processing::features::{
 };
 use crate::processing::validation::{AudioQualityThresholds, TextValidationConfig};
 use crate::{DatasetError, DatasetSample, Result};
-use rayon::prelude::*;
+use scirs2_core::parallel_ops::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -307,7 +307,7 @@ impl ProcessingPipeline {
         // Set up parallel processing
         let num_workers = self.config.num_workers.unwrap_or_else(|| {
             std::thread::available_parallelism()
-                .map(std::num::NonZero::get)
+                .map(|n| n.get())
                 .unwrap_or(4)
         });
 

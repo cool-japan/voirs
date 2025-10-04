@@ -659,12 +659,10 @@ impl<T> ZeroCopyRingBuffer<T> {
             return 0;
         }
 
-        unsafe {
-            let buffer_slice = self.buffer.as_full_slice();
-            for i in 0..to_read {
-                let idx = (read_pos + i) & self.mask;
-                output[i] = buffer_slice[idx];
-            }
+        let buffer_slice = self.buffer.as_full_slice();
+        for i in 0..to_read {
+            let idx = (read_pos + i) & self.mask;
+            output[i] = buffer_slice[idx];
         }
 
         self.read_pos.store(read_pos + to_read, Ordering::Release);

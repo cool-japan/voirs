@@ -362,50 +362,75 @@ impl MemoryMonitorConfig {
 /// Memory sample
 #[derive(Debug, Clone)]
 pub struct MemorySample {
+    /// Description
     pub timestamp: Instant,
+    /// Description
     pub memory_usage: u64,
 }
 
 /// Session memory information
 #[derive(Debug, Clone)]
 pub struct SessionMemoryInfo {
+    /// Description
     pub session_id: String,
+    /// Description
     pub start_time: Instant,
+    /// Description
     pub last_activity: Instant,
+    /// Description
     pub initial_memory: u64,
+    /// Description
     pub peak_memory: u64,
+    /// Description
     pub allocations: u64,
+    /// Description
     pub deallocations: u64,
 }
 
 /// Memory statistics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryStatistics {
+    /// Description
     pub current_memory: u64,
+    /// Description
     pub peak_memory: u64,
+    /// Description
     pub average_memory: u64,
+    /// Description
     pub active_sessions: usize,
+    /// Description
     pub total_session_memory: u64,
+    /// Description
     pub sample_count: usize,
+    /// Description
     pub leak_detected: bool,
 }
 
 /// Memory leak information
 #[derive(Debug, Clone)]
 pub struct MemoryLeakInfo {
+    /// Description
     pub detected_at: Instant,
+    /// Description
     pub growth_rate: f64,
+    /// Description
     pub severity: LeakSeverity,
+    /// Description
     pub current_memory: u64,
+    /// Description
     pub baseline_memory: u64,
 }
 
 /// Memory leak severity levels
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum LeakSeverity {
+    /// Description
     Low,
+    /// Description
     Medium,
+    /// Description
     High,
+    /// Description
     Critical,
 }
 

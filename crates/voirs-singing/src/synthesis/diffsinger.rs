@@ -7,7 +7,7 @@
 use super::core::{SynthesisModel, SynthesisParams};
 use crate::types::core_types::Articulation;
 use crate::{Expression, MusicalNote, NoteEvent, Result, VoiceType};
-use ndarray::Array2;
+use scirs2_core::ndarray::Array2;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -20,7 +20,7 @@ fn midi_to_note_event(midi_number: u8, duration: f32, velocity: f32) -> NoteEven
     let note_names = [
         "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
     ];
-    let octave = (midi_number / 12) as u8;
+    let octave = midi_number / 12;
     let note_index = (midi_number % 12) as usize;
     let note = note_names[note_index].to_string();
 
@@ -553,7 +553,8 @@ impl DiffSingerModel {
                     let frame_end = (frame_start + self.config.frame_size).min(audio_length);
 
                     // Generate audio frame from mel features
-                    for sample_idx in frame_start..frame_end {
+                    for (offset, sample) in audio[frame_start..frame_end].iter_mut().enumerate() {
+                        let sample_idx = frame_start + offset;
                         let mut sample_value = 0.0;
                         for mel_idx in 0..n_mel {
                             let mel_value = mel_spec[[mel_idx, frame]];
@@ -563,14 +564,14 @@ impl DiffSingerModel {
                                 / self.config.sample_rate;
                             sample_value += mel_value * phase.sin() / n_mel as f32;
                         }
-                        audio[sample_idx] += sample_value * 0.1; // Scale down
+                        *sample += sample_value * 0.1; // Scale down
                     }
                 }
             }
             _ => {
                 // Fallback to simple synthesis
-                for i in 0..audio_length {
-                    audio[i] = (i as f32 / audio_length as f32).sin() * 0.1;
+                for (i, sample) in audio.iter_mut().enumerate().take(audio_length) {
+                    *sample = (i as f32 / audio_length as f32).sin() * 0.1;
                 }
             }
         }
@@ -829,13 +830,13 @@ mod tests {
 
         // Just verify the enum variants compile and can be matched
         match linear_schedule {
-            NoiseSchedule::Linear => assert!(true),
-            _ => assert!(false),
+            NoiseSchedule::Linear => {}
+            _ => panic!("Expected Linear schedule"),
         }
 
         match custom_schedule {
             NoiseSchedule::Custom(ref values) => assert_eq!(values.len(), 3),
-            _ => assert!(false),
+            _ => panic!("Expected Custom schedule"),
         }
     }
 }

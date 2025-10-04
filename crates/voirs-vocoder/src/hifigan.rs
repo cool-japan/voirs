@@ -527,8 +527,7 @@ impl HiFiGanVocoder {
             return; // No meaningful shift
         }
 
-        use realfft::RealFftPlanner;
-        use rustfft::num_complex::Complex;
+        use scirs2_core::Complex;
 
         let samples = audio.samples_mut();
         let frame_size = 1024;
@@ -539,12 +538,6 @@ impl HiFiGanVocoder {
             return; // Audio too short for processing
         }
 
-        let mut planner = RealFftPlanner::<f32>::new();
-        let fft = planner.plan_fft_forward(frame_size);
-        let ifft = planner.plan_fft_inverse(frame_size);
-
-        let mut input_buffer = vec![0.0f32; frame_size];
-        let mut output_buffer = vec![Complex::new(0.0, 0.0); frame_size / 2 + 1];
         let mut output_samples = vec![0.0f32; samples.len()];
         let mut window = vec![0.0f32; frame_size];
 
@@ -560,18 +553,21 @@ impl HiFiGanVocoder {
         let mut pos = 0;
         while pos + frame_size <= samples.len() {
             // Copy windowed frame to input buffer
+            let mut input_buffer = vec![0.0f32; frame_size];
             for i in 0..frame_size {
                 input_buffer[i] = samples[pos + i] * window[i];
             }
 
             // Forward FFT
-            fft.process(&mut input_buffer, &mut output_buffer)
-                .unwrap_or(());
+            let spectrum = match scirs2_fft::rfft(&input_buffer, None) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
 
             // Apply formant shifting in frequency domain
-            let mut shifted_spectrum = vec![Complex::new(0.0, 0.0); frame_size / 2 + 1];
+            let mut shifted_spectrum = vec![Complex::new(0.0, 0.0); spectrum.len()];
 
-            for (i, &value) in output_buffer.iter().enumerate() {
+            for (i, &value) in spectrum.iter().enumerate() {
                 let shifted_bin = ((i as f32) * shift_factor) as usize;
                 if shifted_bin < shifted_spectrum.len() {
                     shifted_spectrum[shifted_bin] = value;
@@ -589,18 +585,17 @@ impl HiFiGanVocoder {
                 }
             }
 
-            // Copy back for inverse FFT
-            output_buffer.copy_from_slice(&shifted_spectrum);
-
             // Inverse FFT
-            let mut time_output = vec![0.0f32; frame_size];
-            ifft.process(&mut output_buffer, &mut time_output)
-                .unwrap_or(());
+            let time_output = match scirs2_fft::irfft(&shifted_spectrum, Some(frame_size)) {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
 
             // Overlap-add with windowing
             for i in 0..frame_size {
-                if pos + i < output_samples.len() {
-                    output_samples[pos + i] += time_output[i] * window[i] / frame_size as f32;
+                if pos + i < output_samples.len() && i < time_output.len() {
+                    output_samples[pos + i] +=
+                        (time_output[i] as f32) * window[i] / frame_size as f32;
                 }
             }
 

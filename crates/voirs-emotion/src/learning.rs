@@ -9,7 +9,7 @@ use crate::{
     Error, Result,
 };
 
-use ndarray::{Array1, Array2, ArrayView1, Axis};
+use scirs2_core::ndarray::{Array1, Array2, ArrayView1, Axis};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;

@@ -423,7 +423,7 @@ impl QualityMetricsCalculator {
     /// Calculate enhanced PESQ-like score with improved perceptual modeling
     /// Enhanced implementation with better frequency analysis and perceptual weighting
     fn calculate_pesq_simplified(&self, samples: &[f32], sample_rate: u32) -> Result<f32> {
-        use rustfft::{num_complex::Complex, FftPlanner};
+        use scirs2_core::Complex;
 
         // Resample to PESQ standard rate if necessary
         let target_rate = self.config.pesq_sample_rate;
@@ -436,8 +436,6 @@ impl QualityMetricsCalculator {
         // Use 20ms frames for better temporal resolution
         let frame_size = (target_rate as f32 * 0.020) as usize; // 20ms frames
         let hop_size = frame_size / 2; // 50% overlap
-        let mut planner = FftPlanner::new();
-        let fft = planner.plan_fft_forward(frame_size);
 
         let mut perceptual_scores = Vec::new();
 
@@ -462,10 +460,17 @@ impl QualityMetricsCalculator {
                 .collect();
 
             // Compute FFT for frequency analysis
-            let mut buffer: Vec<Complex<f32>> =
-                windowed.iter().map(|&x| Complex::new(x, 0.0)).collect();
+            let input_f64: Vec<scirs2_core::Complex<f64>> = windowed
+                .iter()
+                .map(|&x| scirs2_core::Complex::new(x as f64, 0.0))
+                .collect();
 
-            fft.process(&mut buffer);
+            let fft_result = scirs2_fft::fft(&input_f64, None)
+                .unwrap_or_else(|_| vec![scirs2_core::Complex::new(0.0, 0.0); frame_size]);
+            let buffer: Vec<Complex<f32>> = fft_result
+                .iter()
+                .map(|c| Complex::new(c.re as f32, c.im as f32))
+                .collect();
 
             // Calculate power spectrum
             let power_spectrum: Vec<f32> = buffer
@@ -1090,7 +1095,7 @@ mod tests {
         for i in 0..num_samples {
             let t = i as f32 / sample_rate as f32;
             let signal = (2.0 * std::f32::consts::PI * 440.0 * t).sin() * 0.5;
-            let noise = (rand::random::<f32>() - 0.5) * 2.0 * noise_std;
+            let noise = (scirs2_core::random::random::<f32>() - 0.5) * 2.0 * noise_std;
             samples.push(signal + noise);
         }
 

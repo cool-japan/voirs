@@ -14,30 +14,45 @@ use tokio::time::{sleep, timeout};
 /// Pending notification with tracking information
 #[derive(Debug, Clone)]
 pub struct PendingNotification {
+    /// Description
     pub notification: Notification,
+    /// Description
     pub created_at: Instant,
+    /// Description
     pub attempts: u32,
+    /// Description
     pub last_attempt: Option<Instant>,
+    /// Description
     pub status: NotificationStatus,
 }
 
 /// Retry notification for failed delivery attempts
 #[derive(Debug, Clone)]
 pub struct RetryNotification {
+    /// Description
     pub id: String,
+    /// Description
     pub notification: Notification,
+    /// Description
     pub retry_count: u32,
+    /// Description
     pub next_retry: Instant,
+    /// Description
     pub max_retries: u32,
 }
 
 /// Notification delivery status
 #[derive(Debug, Clone, PartialEq)]
 pub enum NotificationStatus {
+    /// Description
     Pending,
+    /// Description
     Delivering,
+    /// Description
     Delivered,
+    /// Description
     Failed,
+    /// Description
     Expired,
 }
 
@@ -51,6 +66,7 @@ pub struct RateLimiter {
 }
 
 impl RateLimiter {
+    /// Description
     pub fn new(max_notifications_per_minute: u32) -> Self {
         Self {
             tokens: max_notifications_per_minute,
@@ -60,6 +76,7 @@ impl RateLimiter {
         }
     }
 
+    /// Description
     pub fn can_send(&mut self) -> bool {
         self.refill_tokens();
         if self.tokens > 0 {
@@ -86,13 +103,21 @@ impl RateLimiter {
 /// Enhanced notification statistics
 #[derive(Debug, Clone, Default)]
 pub struct NotificationStats {
+    /// Description
     pub pending_count: usize,
+    /// Description
     pub total_sent: u64,
+    /// Description
     pub total_delivered: u64,
+    /// Description
     pub total_failed: u64,
+    /// Description
     pub total_retries: u64,
+    /// Description
     pub permission_status: NotificationPermission,
+    /// Description
     pub average_delivery_time: Duration,
+    /// Description
     pub last_cleanup: Option<Instant>,
 }
 
@@ -698,45 +723,64 @@ pub struct Notification {
 /// Notification priority levels
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NotificationPriority {
+    /// Description
     Low,
+    /// Description
     Normal,
+    /// Description
     High,
+    /// Description
     Critical,
 }
 
 /// Notification categories
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NotificationCategory {
+    /// Description
     Feedback,
+    /// Description
     Achievement,
+    /// Description
     Reminder,
+    /// Description
     System,
+    /// Description
     Social,
 }
 
 /// Notification action
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationAction {
+    /// Description
     pub id: String,
+    /// Description
     pub title: String,
+    /// Description
     pub icon: Option<String>,
 }
 
 /// Notification permission status
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum NotificationPermission {
+    /// Description
     Granted,
+    /// Description
     Denied,
     #[default]
+    /// Description
     Default,
 }
 
 /// Feedback notification types
 #[derive(Debug, Clone)]
 pub enum FeedbackType {
+    /// Description
     Achievement,
+    /// Description
     Improvement,
+    /// Description
     Reminder,
+    /// Description
     Error,
 }
 

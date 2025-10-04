@@ -18,6 +18,15 @@ pub struct EQEffect {
 }
 
 impl EQEffect {
+    /// Creates a new EQ effect with configurable bands.
+    ///
+    /// # Arguments
+    ///
+    /// * `parameters` - Effect parameters including band count, shelf frequencies, and gains
+    ///
+    /// # Returns
+    ///
+    /// A new `EQEffect` instance with initialized parametric EQ bands.
     pub fn new(mut parameters: HashMap<String, f32>) -> Self {
         let mut effect = Self {
             name: "eq".to_string(),
@@ -160,6 +169,15 @@ pub struct FormantControlEffect {
 }
 
 impl FormantControlEffect {
+    /// Creates a new formant control effect for vowel manipulation.
+    ///
+    /// # Arguments
+    ///
+    /// * `parameters` - Formant parameters including F1, F2, F3 frequencies, gains, and bandwidths
+    ///
+    /// # Returns
+    ///
+    /// A new `FormantControlEffect` instance with initialized formant filters.
     pub fn new(mut parameters: HashMap<String, f32>) -> Self {
         let mut effect = Self {
             name: "formant".to_string(),
@@ -337,6 +355,15 @@ pub struct SpectralMorphingEffect {
 }
 
 impl SpectralMorphingEffect {
+    /// Creates a new spectral morphing effect for voice transformation.
+    ///
+    /// # Arguments
+    ///
+    /// * `parameters` - Morphing parameters including morph amount, type, interpolation, and phase alignment
+    ///
+    /// # Returns
+    ///
+    /// A new `SpectralMorphingEffect` instance configured for spectral manipulation.
     pub fn new(mut parameters: HashMap<String, f32>) -> Self {
         let mut effect = Self {
             name: "spectral_morph".to_string(),

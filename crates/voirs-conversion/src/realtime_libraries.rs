@@ -547,11 +547,12 @@ impl RealtimeLibraryManager {
         {
             // Prefer CoreAudio on macOS
             match capabilities {
-                caps if caps as *const _
-                    == self
-                        .backend_capabilities
+                caps if std::ptr::eq(
+                    caps,
+                    self.backend_capabilities
                         .get(&AudioBackend::CoreAudio)
-                        .unwrap() as *const _ =>
+                        .unwrap(),
+                ) =>
                 {
                     score += 10.0
                 }

@@ -50,170 +50,255 @@ impl Default for UxAnalyticsConfig {
 /// Trend direction enumeration
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TrendDirection {
+    /// Strongly increasing trend
     StronglyIncreasing,
+    /// Increasing trend
     Increasing,
+    /// Stable trend
     Stable,
+    /// Decreasing trend
     Decreasing,
+    /// Strongly decreasing trend
     StronglyDecreasing,
+    /// Volatile trend
     Volatile,
 }
 
 /// Session completion status
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SessionCompletionStatus {
+    /// Session completed successfully
     Completed,
+    /// Session partially completed
     PartiallyCompleted,
+    /// Session abandoned by user
     Abandoned,
+    /// Session interrupted
     Interrupted,
+    /// Session failed
     Failed,
 }
 
 /// Activity type enumeration
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ActivityType {
+    /// Voice synthesis activity
     VoiceSynthesis,
+    /// Feedback review activity
     FeedbackReview,
+    /// Exercise completion activity
     ExerciseCompletion,
+    /// Progress review activity
     ProgressReview,
+    /// Settings configuration activity
     SettingsConfiguration,
+    /// Tutorial viewing activity
     TutorialViewing,
+    /// Achievement viewing activity
     AchievementViewing,
+    /// Social interaction activity
     SocialInteraction,
+    /// Other activity type
     Other(String),
 }
 
 /// User experience level
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ExperienceLevel {
+    /// Beginner level
     Beginner,
+    /// Intermediate level
     Intermediate,
+    /// Advanced level
     Advanced,
+    /// Expert level
     Expert,
 }
 
 /// Implementation difficulty levels
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ImplementationDifficulty {
+    /// Easy implementation
     Easy,
+    /// Medium difficulty
     Medium,
+    /// Hard implementation
     Hard,
+    /// Requires research
     RequiresResearch,
 }
 
 /// Bottleneck severity levels
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum BottleneckSeverity {
+    /// Minor severity
     Minor,
+    /// Moderate severity
     Moderate,
+    /// Major severity
     Major,
+    /// Critical severity
     Critical,
 }
 
 /// Issue severity levels
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum IssueSeverity {
+    /// Low severity
     Low,
+    /// Medium severity
     Medium,
+    /// High severity
     High,
+    /// Critical severity
     Critical,
 }
 
 /// Churn risk levels
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ChurnRiskLevel {
+    /// Low churn risk
     Low,
+    /// Medium churn risk
     Medium,
+    /// High churn risk
     High,
+    /// Critical churn risk
     Critical,
 }
 
 /// Implementation cost levels
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ImplementationCost {
+    /// Low cost
     Low,
+    /// Medium cost
     Medium,
+    /// High cost
     High,
+    /// Very high cost
     VeryHigh,
 }
 
 /// Engagement level categorization
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EngagementLevel {
+    /// Low engagement
     Low,
+    /// Medium engagement
     Medium,
+    /// High engagement
     High,
+    /// Very high engagement
     VeryHigh,
 }
 
 /// Learning pace preferences
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum LearningPace {
+    /// Slow learning pace
     Slow,
+    /// Moderate learning pace
     Moderate,
+    /// Fast learning pace
     Fast,
+    /// Variable learning pace
     Variable,
 }
 
 /// Feedback style preferences
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum FeedbackStyle {
+    /// Detailed feedback
     Detailed,
+    /// Concise feedback
     Concise,
+    /// Visual feedback
     Visual,
+    /// Audio feedback
     Audio,
+    /// Mixed feedback styles
     Mixed,
 }
 
 /// Difficulty progression preferences
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DifficultyProgression {
+    /// Gradual progression
     Gradual,
+    /// Moderate progression
     Moderate,
+    /// Aggressive progression
     Aggressive,
+    /// Adaptive progression
     Adaptive,
 }
 
 /// Insight priority levels
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum InsightPriority {
+    /// Low priority
     Low,
+    /// Medium priority
     Medium,
+    /// High priority
     High,
+    /// Critical priority
     Critical,
 }
 
 /// Insight categories
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum InsightCategory {
+    /// Engagement insights
     Engagement,
+    /// Retention insights
     Retention,
+    /// Satisfaction insights
     Satisfaction,
+    /// Learning effectiveness insights
     LearningEffectiveness,
+    /// User behavior insights
     UserBehavior,
+    /// Performance insights
     Performance,
+    /// Opportunity insights
     Opportunity,
+    /// Risk insights
     Risk,
 }
 
 /// Recommendation types
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum RecommendationType {
+    /// Feature improvement recommendation
     FeatureImprovement,
+    /// New feature recommendation
     NewFeature,
+    /// User flow optimization
     UserFlowOptimization,
+    /// Personalization enhancement
     PersonalizationEnhancement,
+    /// Performance optimization
     PerformanceOptimization,
+    /// Engagement strategy
     EngagementStrategy,
+    /// Retention strategy
     RetentionStrategy,
+    /// Content optimization
     ContentOptimization,
 }
 
 /// Recommendation priority levels
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum RecommendationPriority {
+    /// Low priority
     Low,
+    /// Medium priority
     Medium,
+    /// High priority
     High,
+    /// Urgent priority
     Urgent,
 }
 
@@ -319,16 +404,23 @@ pub struct ResourceRequirements {
 /// Critical Success Factor compliance status
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CsfComplianceStatus {
+    /// Session completion rate metric
     pub session_completion_rate: CsfMetric,
+    /// User satisfaction score metric
     pub user_satisfaction_score: CsfMetric,
+    /// Daily retention rate metric
     pub daily_retention_rate: CsfMetric,
+    /// Progress satisfaction metric
     pub progress_satisfaction: CsfMetric,
 }
 
 /// Individual CSF metric status
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CsfMetric {
+    /// Current metric value
     pub current: f32,
+    /// Target metric value
     pub target: f32,
+    /// Whether metric meets target
     pub is_compliant: bool,
 }

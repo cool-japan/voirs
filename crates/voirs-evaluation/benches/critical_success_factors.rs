@@ -44,7 +44,7 @@ fn generate_test_audio_with_quality(length: usize, sample_rate: u32, quality: f3
 
         for (i, sample) in samples.iter_mut().enumerate() {
             // White noise
-            *sample += noise_level * (rand::random::<f32>() - 0.5);
+            *sample += noise_level * (scirs2_core::random::random::<f32>() - 0.5);
 
             // Spectral distortion (high-frequency attenuation)
             let t = i as f32 / sample_rate as f32;
@@ -65,7 +65,7 @@ fn generate_human_ratings(audio_count: usize) -> Vec<f32> {
     (0..audio_count)
         .map(|i| {
             let base_quality = 2.5 + 1.5 * (i as f32 / audio_count as f32);
-            let noise = 0.3 * (rand::random::<f32>() - 0.5);
+            let noise = 0.3 * (scirs2_core::random::random::<f32>() - 0.5);
             (base_quality + noise).clamp(1.0, 5.0)
         })
         .collect()
@@ -95,7 +95,7 @@ fn bench_pesq_human_correlation(c: &mut Criterion) {
                             // Convert human rating [1.0-5.0] to PESQ range [1.0-4.5] with high correlation
                             let normalized_rating = (rating - 1.0) / 4.0; // Normalize to [0, 1]
                             let base_pesq = 1.0 + 3.5 * normalized_rating; // Scale to PESQ range
-                            let noise = 0.1 * (rand::random::<f32>() - 0.5); // Small amount of noise
+                            let noise = 0.1 * (scirs2_core::random::random::<f32>() - 0.5); // Small amount of noise
                             let pesq_score = (base_pesq + noise).clamp(1.0, 4.5);
                             pesq_scores.push(pesq_score);
                         }
@@ -155,7 +155,7 @@ fn bench_stoi_prediction_accuracy(c: &mut Criterion) {
                             let clean_audio = generate_test_audio_with_quality(56000, 16000, 1.0);
 
                             // Generate degraded audio with known intelligibility
-                            let degraded_quality = rand::random::<f32>();
+                            let degraded_quality = scirs2_core::random::random::<f32>();
                             let degraded_audio =
                                 generate_test_audio_with_quality(56000, 16000, degraded_quality);
 
@@ -272,10 +272,12 @@ fn bench_statistical_test_type_i_error(c: &mut Criterion) {
                     // Perform paired t-tests on identical distributions (null hypothesis true)
                     for _ in 0..count {
                         let sample_size = 50;
-                        let data_a: Vec<f32> =
-                            (0..sample_size).map(|_| rand::random::<f32>()).collect();
-                        let data_b: Vec<f32> =
-                            (0..sample_size).map(|_| rand::random::<f32>()).collect();
+                        let data_a: Vec<f32> = (0..sample_size)
+                            .map(|_| scirs2_core::random::random::<f32>())
+                            .collect();
+                        let data_b: Vec<f32> = (0..sample_size)
+                            .map(|_| scirs2_core::random::random::<f32>())
+                            .collect();
 
                         let result = analyzer.paired_t_test(&data_a, &data_b, None).unwrap();
 

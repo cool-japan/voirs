@@ -3,32 +3,44 @@
 use super::harmonic::HarmonicProcessor;
 use super::noise::NoiseProcessor;
 use super::spectral::SpectralProcessor;
-use ndarray::Array1;
+use scirs2_core::ndarray::Array1;
 
-/// Synthesis processor for real-time processing
+/// Synthesis processor for real-time audio processing
+///
+/// Implements overlap-add processing with windowing for smooth synthesis.
 pub struct SynthesisProcessor {
-    /// Frame size
+    /// Frame size in samples
     frame_size: usize,
-    /// Hop size
+    /// Hop size in samples for overlap-add
     hop_size: usize,
-    /// Sample rate
+    /// Sample rate in Hz
     sample_rate: f32,
-    /// Processing buffer
+    /// Main processing buffer for current frame
     buffer: Array1<f32>,
-    /// Overlap buffer
+    /// Overlap buffer for previous frame tail
     overlap_buffer: Array1<f32>,
-    /// Window function
+    /// Window function (Hann) for smooth overlap
     window: Array1<f32>,
-    /// Spectral processing
+    /// Spectral processor for frequency domain operations
     spectral_processor: SpectralProcessor,
-    /// Harmonic processor
+    /// Harmonic processor for harmonic synthesis
     harmonic_processor: HarmonicProcessor,
-    /// Noise processor
+    /// Noise processor for breath and noise synthesis
     noise_processor: NoiseProcessor,
 }
 
 impl SynthesisProcessor {
     /// Create a new synthesis processor
+    ///
+    /// # Arguments
+    ///
+    /// * `frame_size` - Size of processing frame in samples
+    /// * `hop_size` - Hop size for overlap-add in samples
+    /// * `sample_rate` - Audio sample rate in Hz
+    ///
+    /// # Returns
+    ///
+    /// New SynthesisProcessor with initialized buffers and processors
     pub fn new(frame_size: usize, hop_size: usize, sample_rate: f32) -> Self {
         let buffer = Array1::zeros(frame_size);
         let overlap_buffer = Array1::zeros(frame_size);
@@ -47,7 +59,16 @@ impl SynthesisProcessor {
         }
     }
 
-    /// Process a frame of audio
+    /// Process a frame of audio with overlap-add synthesis
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Input audio frame (length must equal hop_size)
+    /// * `output` - Output buffer for processed audio (length must equal hop_size)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if input/output sizes don't match hop_size
     pub fn process_frame(&mut self, input: &[f32], output: &mut [f32]) -> crate::Result<()> {
         if input.len() != self.hop_size || output.len() != self.hop_size {
             return Err(crate::Error::Processing(
@@ -123,22 +144,34 @@ impl SynthesisProcessor {
         window
     }
 
-    /// Get frame size
+    /// Get the frame size in samples
+    ///
+    /// # Returns
+    ///
+    /// Frame size used for processing
     pub fn frame_size(&self) -> usize {
         self.frame_size
     }
 
-    /// Get hop size
+    /// Get the hop size in samples
+    ///
+    /// # Returns
+    ///
+    /// Hop size used for overlap-add
     pub fn hop_size(&self) -> usize {
         self.hop_size
     }
 
-    /// Get sample rate
+    /// Get the sample rate in Hz
+    ///
+    /// # Returns
+    ///
+    /// Audio sample rate
     pub fn sample_rate(&self) -> f32 {
         self.sample_rate
     }
 
-    /// Reset processor state
+    /// Reset all processor state to initial values
     pub fn reset(&mut self) {
         self.buffer.fill(0.0);
         self.overlap_buffer.fill(0.0);
@@ -147,37 +180,75 @@ impl SynthesisProcessor {
         self.noise_processor.reset();
     }
 
-    /// Set spectral envelope
+    /// Set spectral envelope for filtering
+    ///
+    /// # Arguments
+    ///
+    /// * `envelope` - Spectral envelope values (must match spectral processor size)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if envelope size doesn't match processor requirements
     pub fn set_spectral_envelope(&mut self, envelope: &[f32]) -> crate::Result<()> {
         self.spectral_processor.set_envelope(envelope)
     }
 
-    /// Set formant parameters
+    /// Set formant parameters for vocal tract simulation
+    ///
+    /// # Arguments
+    ///
+    /// * `freqs` - Formant center frequencies in Hz
+    /// * `bws` - Formant bandwidths in Hz
+    /// * `gains` - Formant gains in dB
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if parameter arrays have mismatched lengths
     pub fn set_formants(&mut self, freqs: &[f32], bws: &[f32], gains: &[f32]) -> crate::Result<()> {
         self.spectral_processor.set_formants(freqs, bws, gains)
     }
 
-    /// Set fundamental frequency
+    /// Set fundamental frequency for harmonic synthesis
+    ///
+    /// # Arguments
+    ///
+    /// * `f0` - Fundamental frequency in Hz
     pub fn set_fundamental(&mut self, f0: f32) {
         self.harmonic_processor.set_fundamental(f0);
     }
 
-    /// Set harmonic amplitudes
+    /// Set harmonic amplitude coefficients
+    ///
+    /// # Arguments
+    ///
+    /// * `amplitudes` - Amplitude values for each harmonic (0.0-1.0)
     pub fn set_harmonic_amplitudes(&mut self, amplitudes: &[f32]) {
         self.harmonic_processor.set_amplitudes(amplitudes);
     }
 
-    /// Set noise level
+    /// Set noise level for breath and aspiration
+    ///
+    /// # Arguments
+    ///
+    /// * `level` - Noise level (0.0-1.0)
     pub fn set_noise_level(&mut self, level: f32) {
         self.noise_processor.set_level(level);
     }
 
     /// Get processing latency in samples
+    ///
+    /// # Returns
+    ///
+    /// Latency in samples (equal to frame size)
     pub fn latency_samples(&self) -> usize {
         self.frame_size
     }
 
     /// Get processing latency in seconds
+    ///
+    /// # Returns
+    ///
+    /// Latency in seconds
     pub fn latency_seconds(&self) -> f32 {
         self.frame_size as f32 / self.sample_rate
     }

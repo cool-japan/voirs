@@ -199,12 +199,19 @@ pub struct AttentionConfig {
 /// Activation function types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ActivationType {
+    /// Rectified Linear Unit activation
     ReLU,
+    /// Leaky ReLU with small negative slope
     LeakyReLU,
+    /// Swish activation (x * sigmoid(x))
     Swish,
+    /// Gaussian Error Linear Unit activation
     GELU,
+    /// Hyperbolic tangent activation
     Tanh,
+    /// Sigmoid activation function
     Sigmoid,
+    /// Mish activation (x * tanh(softplus(x)))
     Mish,
 }
 
@@ -743,7 +750,7 @@ impl NeuralVocoder {
     }
 }
 
-/// Neural vocoding model trait
+/// Neural vocoding model trait defining common interface for all vocoders
 #[async_trait::async_trait]
 pub trait NeuralVocodingModel: Send + Sync {
     /// Generate audio from mel-spectrogram
@@ -769,18 +776,20 @@ pub struct ModelInfo {
     pub supported_sample_rates: Vec<u32>,
 }
 
-/// Neural audio processor
+/// Neural audio processor for mel-spectrogram conversion
 pub struct NeuralAudioProcessor {
     audio_params: AudioProcessingParams,
 }
 
 impl NeuralAudioProcessor {
+    /// Create a new neural audio processor with the given parameters
     fn new(params: &AudioProcessingParams) -> Result<Self> {
         Ok(Self {
             audio_params: params.clone(),
         })
     }
 
+    /// Convert audio samples to mel-spectrogram representation
     fn audio_to_mel_spectrogram(&self, audio: &[f32]) -> Result<Vec<Vec<f32>>> {
         // Convert audio to mel-spectrogram
         let mut mel_spec = Vec::new();
@@ -804,6 +813,7 @@ impl NeuralAudioProcessor {
         Ok(mel_spec)
     }
 
+    /// Preprocess mel-spectrogram by normalizing values
     fn preprocess_mel_spectrogram(&self, mel: &[Vec<f32>]) -> Result<Vec<Vec<f32>>> {
         // Apply preprocessing (normalization, etc.)
         let mut processed = mel.to_vec();
@@ -821,6 +831,7 @@ impl NeuralAudioProcessor {
         Ok(processed)
     }
 
+    /// Post-process generated audio by normalizing and clipping
     fn postprocess_audio(&self, audio: &[f32]) -> Result<Vec<f32>> {
         // Apply post-processing (normalization, clipping, etc.)
         let mut processed = audio.to_vec();
@@ -942,7 +953,7 @@ pub struct AlgorithmPerformance {
 // Stub implementations for different neural models
 // In a real implementation, these would contain actual neural network code
 
-/// WaveNet model implementation
+/// WaveNet model implementation for autoregressive neural vocoding
 pub struct WaveNetModel {
     config: NeuralVocodingConfig,
 }
@@ -984,7 +995,7 @@ impl NeuralVocodingModel for WaveNetModel {
     }
 }
 
-/// HiFi-GAN model implementation  
+/// HiFi-GAN model implementation for high-fidelity vocoding
 pub struct HiFiGANModel {
     config: NeuralVocodingConfig,
 }
@@ -1027,18 +1038,23 @@ impl NeuralVocodingModel for HiFiGANModel {
 }
 
 // Additional model stubs (similar pattern)
+/// WaveGAN model implementation for GAN-based vocoding
 pub struct WaveGANModel {
     config: NeuralVocodingConfig,
 }
+/// MelGAN model implementation for efficient mel-spectrogram vocoding
 pub struct MelGANModel {
     config: NeuralVocodingConfig,
 }
+/// Neural source-filter model implementation
 pub struct NeuralSourceFilterModel {
     config: NeuralVocodingConfig,
 }
+/// Flow vocoder model implementation using normalizing flows
 pub struct FlowVocoderModel {
     config: NeuralVocodingConfig,
 }
+/// Hybrid vocoder model combining neural and classical techniques
 pub struct HybridVocoderModel {
     config: NeuralVocodingConfig,
 }

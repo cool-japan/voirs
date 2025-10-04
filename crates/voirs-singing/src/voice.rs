@@ -22,69 +22,108 @@ pub struct VoiceController {
 /// Voice bank metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceBankMetadata {
+    /// Name of the voice bank
     pub name: String,
+    /// Version identifier (e.g., "1.0.0")
     pub version: String,
+    /// Author or creator of the voice bank
     pub author: String,
+    /// Textual description of the voice bank contents and purpose
     pub description: String,
+    /// Primary language code (e.g., "en", "ja", "es")
     pub language: String,
+    /// Musical genre or category (e.g., "classical", "pop", "mixed")
     pub genre: String,
+    /// Timestamp when the voice bank was created
     pub created_at: chrono::DateTime<chrono::Utc>,
+    /// Timestamp of the last modification
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    /// Total number of voices in the bank
     pub voice_count: usize,
+    /// Searchable tags for categorization and filtering
     pub tags: Vec<String>,
 }
 
 /// Individual voice metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceMetadata {
+    /// Internal identifier for the voice
     pub name: String,
+    /// Human-friendly display name for the voice
     pub display_name: String,
+    /// Textual description of voice characteristics and intended use
     pub description: String,
+    /// Primary singing style category
     pub style: SingingStyle,
+    /// Technical difficulty level for singers
     pub difficulty_level: DifficultyLevel,
-    pub recommended_tempo_range: (f32, f32), // Min, Max BPM
-    pub vocal_range_notes: (String, String), // Lowest, Highest note
+    /// Recommended tempo range in BPM (min, max)
+    pub recommended_tempo_range: (f32, f32),
+    /// Vocal range as note names (lowest, highest)
+    pub vocal_range_notes: (String, String),
+    /// Supported language codes for this voice
     pub languages: Vec<String>,
+    /// Searchable tags for categorization and filtering
     pub tags: Vec<String>,
+    /// Timestamp when the voice metadata was created
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// Singing style categories
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SingingStyle {
+    /// Classical art song style with traditional technique and phrasing
     Classical,
+    /// Contemporary popular music style with minimal vibrato and commercial appeal
     Pop,
+    /// Jazz style with swing phrasing, improvisation, and expressive vibrato
     Jazz,
+    /// Operatic style with powerful projection, dramatic expression, and extensive vibrato
     Opera,
+    /// Traditional folk music style with natural, unadorned vocal quality
     Folk,
+    /// Gospel music style with emotional intensity, melisma, and spiritual expression
     Gospel,
+    /// Rock music style with raw power, edge, and aggressive vocal techniques
     Rock,
+    /// Country music style with twang, storytelling phrasing, and emotional authenticity
     Country,
+    /// Musical theatre style with clear diction, character portrayal, and theatrical expression
     Musical,
+    /// Experimental and avant-garde vocal techniques exploring extended vocal possibilities
     Experimental,
 }
 
 /// Voice difficulty level for singers
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DifficultyLevel {
+    /// Suitable for novice singers with limited technique and range
     Beginner,
+    /// Suitable for developing singers with moderate technical skills
     Intermediate,
+    /// Suitable for skilled singers with strong technique and extended range
     Advanced,
+    /// Suitable for expert singers with professional-level control and artistry
     Professional,
+    /// Suitable for virtuoso singers with exceptional mastery and vocal command
     Master,
 }
 
 /// Voice bank for storing voice collections
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceBank {
+    /// Metadata describing the voice bank
     pub metadata: VoiceBankMetadata,
+    /// Collection of voice entries indexed by voice name
     pub voices: HashMap<String, VoiceEntry>,
 }
 
 /// Voice entry in a voice bank
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceEntry {
+    /// Metadata describing the voice properties and usage
     pub metadata: VoiceMetadata,
+    /// Acoustic and synthesis characteristics of the voice
     pub characteristics: VoiceCharacteristics,
 }
 
@@ -138,7 +177,7 @@ impl VoiceManager {
 
     /// Load a voice from the specified path
     pub async fn load_voice(&self, path: &str) -> crate::Result<VoiceCharacteristics> {
-        let content = fs::read_to_string(path).map_err(|e| crate::Error::Io(e))?;
+        let content = fs::read_to_string(path).map_err(crate::Error::Io)?;
         let voice: VoiceCharacteristics = serde_json::from_str(&content)
             .map_err(|e| crate::Error::Format(format!("Failed to deserialize voice: {e}")))?;
         Ok(voice)
@@ -148,13 +187,13 @@ impl VoiceManager {
     pub async fn save_voice(&self, voice: &VoiceCharacteristics, path: &str) -> crate::Result<()> {
         let content = serde_json::to_string_pretty(voice)
             .map_err(|e| crate::Error::Format(format!("Failed to serialize voice: {e}")))?;
-        fs::write(path, content).map_err(|e| crate::Error::Io(e))?;
+        fs::write(path, content).map_err(crate::Error::Io)?;
         Ok(())
     }
 
     /// Load a voice bank from file
     pub async fn load_voice_bank(&mut self, path: &str) -> crate::Result<()> {
-        let content = fs::read_to_string(path).map_err(|e| crate::Error::Io(e))?;
+        let content = fs::read_to_string(path).map_err(crate::Error::Io)?;
         let voice_bank: VoiceBank = serde_json::from_str(&content)
             .map_err(|e| crate::Error::Format(format!("Failed to deserialize voice bank: {e}")))?;
 
@@ -205,7 +244,7 @@ impl VoiceManager {
 
         let content = serde_json::to_string_pretty(&voice_bank)
             .map_err(|e| crate::Error::Format(format!("Failed to serialize voice bank: {e}")))?;
-        fs::write(path, content).map_err(|e| crate::Error::Io(e))?;
+        fs::write(path, content).map_err(crate::Error::Io)?;
 
         Ok(())
     }
@@ -594,10 +633,15 @@ impl VoiceBank {
 /// Voice bank statistics
 #[derive(Debug, Clone)]
 pub struct VoiceBankStatistics {
+    /// Total number of voices in the bank
     pub total_voices: usize,
+    /// Count of voices per singing style
     pub style_distribution: HashMap<SingingStyle, usize>,
+    /// Count of voices per voice type
     pub voice_type_distribution: HashMap<VoiceType, usize>,
+    /// Count of voices per difficulty level
     pub difficulty_distribution: HashMap<DifficultyLevel, usize>,
+    /// Overall frequency range covering all voices in Hz (min, max), None if bank is empty
     pub frequency_range: Option<(f32, f32)>,
 }
 

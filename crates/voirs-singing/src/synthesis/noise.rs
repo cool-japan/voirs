@@ -1,73 +1,102 @@
 //! Noise processing for synthesis
 
-use ndarray::Array1;
+use scirs2_core::ndarray::Array1;
 
-/// Noise types
+/// Noise types for synthesis
+///
+/// Different noise colors and vocal noise characteristics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NoiseType {
     /// White noise - equal energy at all frequencies
     White,
-    /// Pink noise - 1/f power spectrum
+    /// Pink noise - 1/f power spectrum (equal energy per octave)
     Pink,
-    /// Brown noise - 1/f² power spectrum
+    /// Brown noise - 1/f² power spectrum (deep rumble)
     Brown,
-    /// Breath noise - filtered noise for breathing sounds
+    /// Breath noise - filtered noise for natural breathing sounds
     Breath,
     /// Aspiration noise - high-frequency noise for vocal aspiration
     Aspiration,
 }
 
-/// Noise processor
+/// Noise processor for adding various noise types to audio
+///
+/// Supports white, pink, brown, breath, and aspiration noise.
 pub struct NoiseProcessor {
-    /// Noise level
+    /// Noise level (0.0-1.0)
     noise_level: f32,
-    /// Noise type
+    /// Type of noise to generate
     noise_type: NoiseType,
-    /// Noise buffer
+    /// Internal buffer for noise samples
     noise_buffer: Array1<f32>,
-    /// Random state
+    /// Random number generator state
     rng_state: u64,
     /// Pink noise filter state
     pink_state: PinkNoiseState,
     /// Brown noise filter state
     brown_state: BrownNoiseState,
-    /// Breath filter
+    /// Breath filter for breath noise
     breath_filter: BreathFilter,
 }
 
-/// Pink noise generator state
+/// Pink noise generator state using Paul Kellet's algorithm
+///
+/// Implements 1/f power spectrum through cascaded filters.
 struct PinkNoiseState {
+    /// First filter state
     b0: f32,
+    /// Second filter state
     b1: f32,
+    /// Third filter state
     b2: f32,
+    /// Fourth filter state
     b3: f32,
+    /// Fifth filter state
     b4: f32,
+    /// Sixth filter state
     b5: f32,
+    /// Seventh filter state
     b6: f32,
 }
 
 /// Brown noise generator state
+///
+/// Implements 1/f² power spectrum through integration.
 struct BrownNoiseState {
+    /// Last output sample for integration
     last_output: f32,
 }
 
 /// Breath filter for breath noise generation
+///
+/// Butterworth low-pass filter for natural breath sounds.
 struct BreathFilter {
-    /// Low-pass filter coefficients
+    /// IIR filter coefficient a1
     a1: f32,
+    /// IIR filter coefficient a2
     a2: f32,
+    /// IIR filter coefficient b0
     b0: f32,
+    /// IIR filter coefficient b1
     b1: f32,
+    /// IIR filter coefficient b2
     b2: f32,
-    /// Filter state
+    /// Previous input sample x[n-1]
     x1: f32,
+    /// Previous input sample x[n-2]
     x2: f32,
+    /// Previous output sample y[n-1]
     y1: f32,
+    /// Previous output sample y[n-2]
     y2: f32,
 }
 
 impl NoiseProcessor {
-    /// Create a new noise processor
+    /// Create a new noise processor with default settings
+    ///
+    /// # Returns
+    ///
+    /// New NoiseProcessor with white noise at 0.1 level
     pub fn new() -> Self {
         Self {
             noise_level: 0.1,
@@ -81,6 +110,18 @@ impl NoiseProcessor {
     }
 
     /// Process audio by adding noise
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Input audio array to add noise to
+    ///
+    /// # Returns
+    ///
+    /// Audio array with added noise
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if processing fails
     pub fn process(&mut self, input: &Array1<f32>) -> crate::Result<Array1<f32>> {
         let mut output = input.clone();
 
@@ -119,7 +160,7 @@ impl NoiseProcessor {
         // Paul Kellet's implementation
         self.pink_state.b0 = 0.99886 * self.pink_state.b0 + white * 0.0555179;
         self.pink_state.b1 = 0.99332 * self.pink_state.b1 + white * 0.0750759;
-        self.pink_state.b2 = 0.96900 * self.pink_state.b2 + white * 0.1538520;
+        self.pink_state.b2 = 0.96900 * self.pink_state.b2 + white * 0.153852;
         self.pink_state.b3 = 0.86650 * self.pink_state.b3 + white * 0.3104856;
         self.pink_state.b4 = 0.55000 * self.pink_state.b4 + white * 0.5329522;
         self.pink_state.b5 = -0.7616 * self.pink_state.b5 - white * 0.0168980;
@@ -299,4 +340,4 @@ impl Default for NoiseProcessor {
     }
 }
 
-use ndarray::s;
+use scirs2_core::ndarray::s;

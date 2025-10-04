@@ -372,8 +372,10 @@ impl G2pModel {
         let file_content = std::fs::read(path.as_ref())
             .map_err(|e| G2pError::ModelError(format!("Failed to read model file: {e}")))?;
 
-        let model: G2pModel = bincode::deserialize(&file_content)
-            .map_err(|e| G2pError::ModelError(format!("Failed to deserialize model: {e}")))?;
+        // bincode 2: use serde integration module
+        let (model, _len): (G2pModel, usize) =
+            bincode::serde::decode_from_slice(&file_content, bincode::config::standard())
+                .map_err(|e| G2pError::ModelError(format!("Failed to deserialize model: {e}")))?;
 
         Ok(model)
     }
@@ -382,7 +384,7 @@ impl G2pModel {
     pub fn save_to_file<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
         self.model_path = Some(path.as_ref().to_path_buf());
 
-        let serialized = bincode::serialize(self)
+        let serialized = bincode::serde::encode_to_vec(self, bincode::config::standard())
             .map_err(|e| G2pError::ModelError(format!("Failed to serialize model: {e}")))?;
 
         std::fs::write(path.as_ref(), serialized)
@@ -443,6 +445,118 @@ impl G2pModel {
         }
 
         summary
+    }
+}
+
+#[cfg(test)]
+mod bincode_migration_tests {
+    use super::*;
+    use std::time::SystemTime;
+
+    #[test]
+    fn serialize_deserialize_roundtrip() {
+        let config = ModelConfig {
+            model_type: ModelType::Neural,
+            architecture: ArchitectureConfig {
+                vocab_size: 100,
+                hidden_dims: vec![64, 64],
+                num_layers: 2,
+                dropout: 0.1,
+                use_attention: true,
+                bidirectional: false,
+                activation: "relu".into(),
+            },
+            training: TrainingConfig {
+                learning_rate: 1e-3,
+                batch_size: 4,
+                epochs: 1,
+                validation_split: 0.1,
+                early_stopping_patience: 2,
+                optimizer: "adam".into(),
+                lr_schedule: None,
+                regularization: RegularizationConfig {
+                    l1: 0.0,
+                    l2: 0.0,
+                    dropout: 0.1,
+                    gradient_clip: Some(1.0),
+                },
+            },
+            metadata: ModelMetadata {
+                name: "test-model".into(),
+                version: "0.1.0".into(),
+                description: "test".into(),
+                language: LanguageCode::EnUs,
+                created_at: SystemTime::now(),
+                training_duration: None,
+                dataset_info: None,
+                performance_metrics: HashMap::new(),
+                model_size: None,
+            },
+        };
+        let mut model = G2pModel::new(config);
+        model.parameters.weights = vec![1, 2, 3];
+        model.parameters.vocabulary.insert("hello".into(), 42);
+
+        let bytes =
+            bincode::serde::encode_to_vec(&model, bincode::config::standard()).expect("encode");
+        assert!(!bytes.is_empty());
+
+        let (decoded, _len): (G2pModel, usize) =
+            bincode::serde::decode_from_slice(&bytes, bincode::config::standard()).expect("decode");
+        assert_eq!(decoded.parameters.weights.len(), 3);
+        assert_eq!(decoded.parameters.vocabulary.get("hello"), Some(&42));
+    }
+
+    #[test]
+    fn deserialize_failure_on_truncated_bytes() {
+        let config = ModelConfig {
+            model_type: ModelType::Neural,
+            architecture: ArchitectureConfig {
+                vocab_size: 10,
+                hidden_dims: vec![8],
+                num_layers: 1,
+                dropout: 0.0,
+                use_attention: false,
+                bidirectional: false,
+                activation: "relu".into(),
+            },
+            training: TrainingConfig {
+                learning_rate: 1e-3,
+                batch_size: 2,
+                epochs: 1,
+                validation_split: 0.0,
+                early_stopping_patience: 1,
+                optimizer: "adam".into(),
+                lr_schedule: None,
+                regularization: RegularizationConfig {
+                    l1: 0.0,
+                    l2: 0.0,
+                    dropout: 0.0,
+                    gradient_clip: None,
+                },
+            },
+            metadata: ModelMetadata {
+                name: "truncated".into(),
+                version: "0.0.1".into(),
+                description: "truncate test".into(),
+                language: LanguageCode::Ja,
+                created_at: SystemTime::now(),
+                training_duration: None,
+                dataset_info: None,
+                performance_metrics: HashMap::new(),
+                model_size: None,
+            },
+        };
+        let mut model = G2pModel::new(config);
+        model.parameters.weights = vec![7, 8];
+
+        let bytes = bincode::serde::encode_to_vec(&model, bincode::config::standard()).unwrap();
+        let truncated = &bytes[0..bytes.len() / 3];
+        let result = bincode::serde::decode_from_slice::<G2pModel, _>(
+            truncated,
+            bincode::config::standard(),
+        );
+        assert!(result.is_err(), "Expected error on truncated input");
     }
 }
 

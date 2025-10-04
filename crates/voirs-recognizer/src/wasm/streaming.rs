@@ -7,26 +7,41 @@ use wasm_bindgen::prelude::*;
 use web_sys::{console, AudioContext, AudioWorkletNode};
 
 #[derive(Serialize, Deserialize)]
+/// Streaming State
 pub struct StreamingState {
+    /// is active
     pub is_active: bool,
+    /// chunk count
     pub chunk_count: usize,
+    /// total audio duration
     pub total_audio_duration: f64,
+    /// buffer size
     pub buffer_size: usize,
+    /// processing latency
     pub processing_latency: f64,
 }
 
 #[derive(Serialize, Deserialize)]
+/// Streaming Metrics
 pub struct StreamingMetrics {
+    /// chunks processed
     pub chunks_processed: usize,
+    /// average latency
     pub average_latency: f64,
+    /// peak latency
     pub peak_latency: f64,
+    /// buffer underruns
     pub buffer_underruns: usize,
+    /// processing errors
     pub processing_errors: usize,
+    /// total audio time
     pub total_audio_time: f64,
+    /// real time factor
     pub real_time_factor: f64,
 }
 
 #[wasm_bindgen]
+/// Wasm Streaming Processor
 pub struct WasmStreamingProcessor {
     audio_context: Option<AudioContext>,
     audio_buffer: VecDeque<f32>,
@@ -41,6 +56,7 @@ pub struct WasmStreamingProcessor {
 #[wasm_bindgen]
 impl WasmStreamingProcessor {
     #[wasm_bindgen(constructor)]
+    /// new
     pub fn new(config: JsValue) -> Result<WasmStreamingProcessor, JsValue> {
         let config: WasmStreamingConfig = config
             .into_serde()
@@ -80,6 +96,7 @@ impl WasmStreamingProcessor {
     }
 
     #[wasm_bindgen]
+    /// initialize audio context
     pub async fn initialize_audio_context(&mut self) -> Result<(), JsValue> {
         match AudioContext::new() {
             Ok(ctx) => {
@@ -95,6 +112,7 @@ impl WasmStreamingProcessor {
     }
 
     #[wasm_bindgen]
+    /// start streaming
     pub fn start_streaming(&mut self) {
         self.state.is_active = true;
         self.state.chunk_count = 0;
@@ -103,12 +121,14 @@ impl WasmStreamingProcessor {
     }
 
     #[wasm_bindgen]
+    /// stop streaming
     pub fn stop_streaming(&mut self) {
         self.state.is_active = false;
         console_log!("Streaming processor stopped");
     }
 
     #[wasm_bindgen]
+    /// add audio data
     pub fn add_audio_data(&mut self, audio_data: &[f32]) -> bool {
         if !self.state.is_active {
             return false;
@@ -130,6 +150,7 @@ impl WasmStreamingProcessor {
     }
 
     #[wasm_bindgen]
+    /// get next chunk
     pub fn get_next_chunk(&mut self) -> Option<Array> {
         if !self.state.is_active {
             return None;
@@ -180,6 +201,7 @@ impl WasmStreamingProcessor {
     }
 
     #[wasm_bindgen]
+    /// update processing metrics
     pub fn update_processing_metrics(&mut self, latency_ms: f64) {
         self.state.processing_latency = latency_ms;
         self.metrics.chunks_processed += 1;
@@ -200,26 +222,31 @@ impl WasmStreamingProcessor {
     }
 
     #[wasm_bindgen]
+    /// report error
     pub fn report_error(&mut self) {
         self.metrics.processing_errors += 1;
     }
 
     #[wasm_bindgen]
+    /// report buffer underrun
     pub fn report_buffer_underrun(&mut self) {
         self.metrics.buffer_underruns += 1;
     }
 
     #[wasm_bindgen]
+    /// get state
     pub fn get_state(&self) -> JsValue {
         JsValue::from_serde(&self.state).unwrap_or(JsValue::NULL)
     }
 
     #[wasm_bindgen]
+    /// get metrics
     pub fn get_metrics(&self) -> JsValue {
         JsValue::from_serde(&self.metrics).unwrap_or(JsValue::NULL)
     }
 
     #[wasm_bindgen]
+    /// get buffer info
     pub fn get_buffer_info(&self) -> JsValue {
         let info = serde_json::json!({
             "buffer_size": self.audio_buffer.len(),
@@ -234,6 +261,7 @@ impl WasmStreamingProcessor {
     }
 
     #[wasm_bindgen]
+    /// reset metrics
     pub fn reset_metrics(&mut self) {
         self.metrics = StreamingMetrics {
             chunks_processed: 0,
@@ -247,6 +275,7 @@ impl WasmStreamingProcessor {
     }
 
     #[wasm_bindgen]
+    /// configure adaptive quality
     pub fn configure_adaptive_quality(&mut self, enable: bool) {
         if let Some(ref mut config) = self.config.quality_adaptive {
             *config = enable;
@@ -261,6 +290,7 @@ impl WasmStreamingProcessor {
     }
 
     #[wasm_bindgen]
+    /// adjust chunk size
     pub fn adjust_chunk_size(&mut self, new_duration_ms: f32) {
         let new_chunk_size = ((new_duration_ms / 1000.0) * self.sample_rate) as usize;
 
@@ -275,11 +305,13 @@ impl WasmStreamingProcessor {
     }
 
     #[wasm_bindgen]
+    /// is ready for processing
     pub fn is_ready_for_processing(&self) -> bool {
         self.state.is_active && self.audio_buffer.len() >= self.chunk_size
     }
 
     #[wasm_bindgen]
+    /// get processing recommendations
     pub fn get_processing_recommendations(&self) -> JsValue {
         let mut recommendations = Vec::new();
 
@@ -306,6 +338,7 @@ impl WasmStreamingProcessor {
 // Helper functions for streaming audio processing
 
 #[wasm_bindgen]
+/// create audio worklet processor
 pub fn create_audio_worklet_processor() -> String {
     r#"
 class VoirsAudioProcessor extends AudioWorkletProcessor {
@@ -368,6 +401,7 @@ registerProcessor('voirs-audio-processor', VoirsAudioProcessor);
 }
 
 #[wasm_bindgen]
+/// get streaming capabilities
 pub fn get_streaming_capabilities() -> JsValue {
     let capabilities = serde_json::json!({
         "real_time_processing": true,

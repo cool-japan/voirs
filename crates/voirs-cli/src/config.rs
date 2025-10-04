@@ -306,8 +306,26 @@ impl ConfigManager {
 
         // Check if default voice exists
         if let Some(ref voice) = self.config.cli.default_voice {
-            // This would require voice list lookup, skip for now
-            warnings.push(format!("Default voice '{}' existence not verified", voice));
+            // Validate voice existence by checking if it can be resolved
+            match self.validate_voice_exists(voice) {
+                Ok(true) => {
+                    // Voice exists, no warning needed
+                }
+                Ok(false) => {
+                    warnings.push(format!(
+                        "Default voice '{}' does not exist. Use 'voirs voices list' to see available voices.",
+                        voice
+                    ));
+                }
+                Err(_) => {
+                    // Could not validate (e.g., voice system not initialized)
+                    // This is not critical, just note it as a warning
+                    warnings.push(format!(
+                        "Could not verify existence of default voice '{}'. Voice system may not be initialized.",
+                        voice
+                    ));
+                }
+            }
         }
 
         // Check output directory
@@ -337,6 +355,67 @@ impl ConfigManager {
         }
 
         Ok(warnings)
+    }
+
+    /// Validate if a voice exists in the system
+    fn validate_voice_exists(&self, voice_id: &str) -> Result<bool> {
+        // Try to check if voice exists by looking in standard voice directories
+        // This is a lightweight check that doesn't require initializing the full pipeline
+
+        // Get potential voice directories
+        let voice_dirs = self.get_voice_directories();
+
+        for voice_dir in voice_dirs {
+            let voice_config_path = voice_dir.join(voice_id).join("voice.json");
+            if voice_config_path.exists() {
+                // Found the voice config file
+                return Ok(true);
+            }
+        }
+
+        // Voice not found in standard directories
+        Ok(false)
+    }
+
+    /// Get list of directories where voices might be stored
+    fn get_voice_directories(&self) -> Vec<PathBuf> {
+        let mut dirs = Vec::new();
+
+        // 1. Check default data directory (~/.voirs/voices)
+        if let Some(home) = dirs::home_dir() {
+            dirs.push(home.join(".voirs").join("voices"));
+        }
+
+        // 3. Check XDG data directory on Linux
+        #[cfg(target_os = "linux")]
+        {
+            if let Ok(xdg_data_home) = std::env::var("XDG_DATA_HOME") {
+                dirs.push(PathBuf::from(xdg_data_home).join("voirs").join("voices"));
+            } else if let Some(home) = dirs::home_dir() {
+                dirs.push(home.join(".local").join("share").join("voirs").join("voices"));
+            }
+        }
+
+        // 4. Check Library directory on macOS
+        #[cfg(target_os = "macos")]
+        {
+            if let Some(home) = dirs::home_dir() {
+                dirs.push(home.join("Library").join("Application Support").join("voirs").join("voices"));
+            }
+        }
+
+        // 5. Check AppData on Windows
+        #[cfg(target_os = "windows")]
+        {
+            if let Ok(appdata) = std::env::var("APPDATA") {
+                dirs.push(PathBuf::from(appdata).join("voirs").join("voices"));
+            }
+        }
+
+        // 6. Check current directory (for development/testing)
+        dirs.push(PathBuf::from("./voices"));
+
+        dirs
     }
 
     /// Get configuration path

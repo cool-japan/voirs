@@ -84,9 +84,13 @@ pub struct CachePolicy {
 /// Priority levels for cache items
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CachePriority {
+    /// Low priority items are evicted first when space is needed
     Low = 1,
+    /// Medium priority items have moderate eviction resistance
     Medium = 2,
+    /// High priority items are kept in cache longer
     High = 3,
+    /// Critical priority items should remain cached as long as possible
     Critical = 4,
 }
 
@@ -227,7 +231,7 @@ pub struct PerformanceMetrics {
     pub compression_ratio: f64,
 }
 
-/// LRU (Least Recently Used) cache implementation
+/// LRU (Least Recently Used) cache implementation with size-based eviction
 #[derive(Debug)]
 pub struct LruCache<K, V> {
     /// Maximum capacity in number of items
@@ -243,7 +247,7 @@ pub struct LruCache<K, V> {
 }
 
 impl<K: Clone + Eq + Hash, V> LruCache<K, V> {
-    /// Create a new LRU cache
+    /// Create a new LRU cache with specified capacity limits
     pub fn new(max_items: usize, max_size: usize) -> Self {
         Self {
             max_items,
@@ -324,11 +328,13 @@ impl<K: Clone + Eq + Hash, V> LruCache<K, V> {
         self.current_size = 0;
     }
 
+    /// Move an item to the front of the access order
     fn move_to_front(&mut self, key: K) {
         self.access_order.retain(|k| k != &key);
         self.access_order.push_front(key);
     }
 
+    /// Evict the least recently used item from the cache
     fn evict_lru(&mut self) {
         if let Some(key) = self.access_order.pop_back() {
             self.entries.remove(&key);

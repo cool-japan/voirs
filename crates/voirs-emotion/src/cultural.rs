@@ -92,13 +92,21 @@ pub struct CulturalProsodyAdjustment {
 /// Social context for appropriateness evaluation
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SocialContext {
+    /// Formal settings requiring proper etiquette and reserved emotional expression
     Formal,
+    /// Casual, relaxed settings with fewer social constraints
     Informal,
+    /// Work or business-related contexts with professional conduct expectations
     Professional,
+    /// Personal, intimate settings with close relationships
     Personal,
+    /// Open, public spaces with many observers
     Public,
+    /// Private settings with limited audience
     Private,
+    /// Family gatherings or interactions with relatives
     Family,
+    /// Interactions with unfamiliar people or strangers
     Strangers,
 }
 

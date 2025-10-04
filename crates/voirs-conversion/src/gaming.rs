@@ -124,9 +124,13 @@ impl GameEngine {
 /// Thread priority levels for gaming engines
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ThreadPriority {
+    /// Low priority for background tasks
     Low,
+    /// Normal priority for standard processing
     Normal,
+    /// High priority for time-sensitive operations
     High,
+    /// Real-time priority for critical audio processing
     RealTime,
 }
 
@@ -590,11 +594,17 @@ impl GameVoiceProcessor {
 /// Game voice session for tracking processing state
 #[derive(Debug, Clone)]
 pub struct GameVoiceSession {
+    /// Unique identifier for this voice session
     pub session_id: String,
+    /// Character or voice preset being used
     pub character_id: String,
+    /// Voice processing mode for this session
     pub mode: GameVoiceMode,
+    /// Timestamp when the session started
     pub start_time: std::time::Instant,
+    /// Total number of audio samples processed in this session
     pub processed_samples: usize,
+    /// Historical latency measurements in milliseconds
     pub latency_samples: Vec<f32>,
 }
 
@@ -678,61 +688,97 @@ impl GamePerformanceMonitor {
 /// Game performance metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GamePerformanceMetrics {
+    /// Average processing latency in milliseconds
     pub average_latency_ms: f32,
+    /// CPU usage as a percentage (0.0-100.0)
     pub cpu_usage_percent: f32,
+    /// Memory usage in megabytes
     pub memory_usage_mb: u32,
+    /// Number of frames dropped due to performance issues
     pub frame_drops: u32,
+    /// Total uptime of the processor in seconds
     pub uptime_seconds: u64,
 }
 
 /// Engine-specific integration information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GameEngineIntegration {
+    /// Unity 3D engine integration details
     Unity(UnityIntegration),
+    /// Unreal Engine 4/5 integration details
     Unreal(UnrealIntegration),
+    /// Godot engine integration details
     Godot(GodotIntegration),
+    /// Bevy engine integration details
     Bevy(BevyIntegration),
+    /// Custom engine integration details
     Custom(CustomIntegration),
 }
 
+/// Unity 3D engine integration configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnityIntegration {
+    /// Version of the Unity plugin
     pub plugin_version: String,
+    /// Compatible Unity versions
     pub unity_version_compatibility: String,
+    /// Whether AudioClip integration is supported
     pub audio_clip_support: bool,
+    /// Whether Audio Mixer integration is available
     pub mixer_integration: bool,
+    /// Whether Blueprint support is enabled (always false for Unity)
     pub blueprint_support: bool,
 }
 
+/// Unreal Engine 4/5 integration configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnrealIntegration {
+    /// Version of the Unreal Engine plugin
     pub plugin_version: String,
+    /// Compatible Unreal Engine versions
     pub unreal_version_compatibility: String,
+    /// Whether Blueprint visual scripting is supported
     pub blueprint_support: bool,
+    /// Whether MetaSound audio system is supported
     pub metasound_support: bool,
+    /// Whether Audio Component integration is available
     pub audio_component_integration: bool,
 }
 
+/// Godot engine integration configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GodotIntegration {
+    /// Version of the Godot plugin
     pub plugin_version: String,
+    /// Compatible Godot versions
     pub godot_version_compatibility: String,
+    /// Whether GDScript bindings are available
     pub gdscript_bindings: bool,
+    /// Whether AudioStream integration is supported
     pub audio_stream_support: bool,
 }
 
+/// Bevy engine integration configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BevyIntegration {
+    /// Version of the Bevy plugin
     pub plugin_version: String,
+    /// Compatible Bevy versions
     pub bevy_version_compatibility: String,
+    /// Whether ECS system integration is available
     pub ecs_integration: bool,
+    /// Whether Audio resource integration is supported
     pub audio_resource_support: bool,
 }
 
+/// Custom engine integration configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomIntegration {
+    /// Version of the C API
     pub c_api_version: String,
+    /// List of supported platforms
     pub supported_platforms: Vec<String>,
+    /// Whether callback-based integration is supported
     pub callback_support: bool,
 }
 

@@ -266,23 +266,17 @@ impl OutputFormatter {
 }
 
 /// Global formatter instance
-static mut FORMATTER: Option<OutputFormatter> = None;
+use std::sync::OnceLock;
+static FORMATTER: OnceLock<OutputFormatter> = OnceLock::new();
 
 /// Initialize global formatter
 pub fn init_formatter(colored: bool, json_mode: bool) {
-    unsafe {
-        FORMATTER = Some(OutputFormatter::new(colored, json_mode));
-    }
+    let _ = FORMATTER.set(OutputFormatter::new(colored, json_mode));
 }
 
 /// Get global formatter
 pub fn get_formatter() -> &'static OutputFormatter {
-    unsafe {
-        FORMATTER.as_ref().unwrap_or_else(|| {
-            FORMATTER = Some(OutputFormatter::new(true, false));
-            FORMATTER.as_ref().unwrap()
-        })
-    }
+    FORMATTER.get_or_init(|| OutputFormatter::new(true, false))
 }
 
 /// Convenience macros for formatted output

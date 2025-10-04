@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation = "https://docs.rs/voirs-vocoder"
-keywords.workspace = true
+keywords = ["voirs", "vocoder", "hifi-gan", "neural-audio", "waveform"]
 categories = ["multimedia::audio", "science", "algorithms"]
 rust-version.workspace = true
 description = "Neural vocoder inference for VoiRS (HiFi-GAN/DiffWave)"
@@ -24,10 +24,11 @@ ort = { workspace = true, optional = true }
 safetensors.workspace = true
 hf-hub.workspace = true
 
+# SciRS2 - Optimized DSP and signal processing
+scirs2-core.workspace = true
+scirs2-fft.workspace = true
+
 # Math and DSP
-ndarray.workspace = true
-realfft.workspace = true
-rustfft.workspace = true
 half.workspace = true
 
 # Audio
@@ -69,9 +70,6 @@ num_cpus.workspace = true
 crossbeam-utils.workspace = true
 parking_lot.workspace = true
 
-# Parallel processing
-rayon.workspace = true
-
 # Static initialization
 once_cell.workspace = true
 
@@ -86,7 +84,7 @@ criterion.workspace = true
 default = ["candle"]
 candle = ["dep:candle-core", "dep:candle-nn"]
 onnx = ["dep:ort"]
-gpu = []
+gpu = ["metal"]  # On macOS, use Metal; on Linux/Windows would use cuda
 cuda = ["candle-core?/cuda", "ort?/cuda"]
 metal = ["candle-core?/metal"]
 coreml = ["ort?/coreml"]

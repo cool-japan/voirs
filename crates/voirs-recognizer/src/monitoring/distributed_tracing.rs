@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 /// Trace context for distributed tracing
 #[derive(Debug, Clone)]
+/// Trace Context
 pub struct TraceContext {
     /// Trace ID - identifies the entire request across services
     pub trace_id: TraceId,
@@ -28,14 +29,17 @@ pub struct TraceContext {
 
 /// Unique trace identifier
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Trace Id
 pub struct TraceId(pub [u8; 16]);
 
 /// Unique span identifier  
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Span Id
 pub struct SpanId(pub [u8; 8]);
 
 /// Trace flags for controlling tracing behavior
 #[derive(Debug, Clone)]
+/// Trace Flags
 pub struct TraceFlags {
     /// Whether this trace is sampled
     pub sampled: bool,
@@ -47,6 +51,7 @@ pub struct TraceFlags {
 
 /// Vendor-specific trace state
 #[derive(Debug, Clone)]
+/// Trace State
 pub struct TraceState {
     /// Key-value pairs for vendor state
     pub entries: HashMap<String, String>,
@@ -140,7 +145,7 @@ impl TraceId {
 impl SpanId {
     /// Generate a new random span ID
     pub fn new() -> Self {
-        let bytes = rand::random::<u64>().to_be_bytes();
+        let bytes = scirs2_core::random::random::<u64>().to_be_bytes();
         Self(bytes)
     }
 }
@@ -177,6 +182,7 @@ impl fmt::Display for SpanId {
 
 /// Span represents a single operation within a trace
 #[derive(Debug, Clone)]
+/// Span
 pub struct Span {
     /// Trace context
     pub context: TraceContext,
@@ -200,6 +206,7 @@ pub struct Span {
 
 /// Type of span operation
 #[derive(Debug, Clone, PartialEq)]
+/// Span Kind
 pub enum SpanKind {
     /// Internal operation
     Internal,
@@ -215,6 +222,7 @@ pub enum SpanKind {
 
 /// Status of a span
 #[derive(Debug, Clone, PartialEq)]
+/// Span Status
 pub enum SpanStatus {
     /// Span completed successfully
     Ok,
@@ -226,19 +234,29 @@ pub enum SpanStatus {
 
 /// Attribute value types
 #[derive(Debug, Clone)]
+/// Attribute Value
 pub enum AttributeValue {
+    /// String( string)
     String(String),
+    /// Int(i64)
     Int(i64),
+    /// Float(f64)
     Float(f64),
+    /// Bool(bool)
     Bool(bool),
+    /// String array( vec< string>)
     StringArray(Vec<String>),
+    /// Int array( vec<i64>)
     IntArray(Vec<i64>),
+    /// Float array( vec<f64>)
     FloatArray(Vec<f64>),
+    /// Bool array( vec<bool>)
     BoolArray(Vec<bool>),
 }
 
 /// Span event for timestamped annotations
 #[derive(Debug, Clone)]
+/// Span Event
 pub struct SpanEvent {
     /// Event name
     pub name: String,
@@ -250,6 +268,7 @@ pub struct SpanEvent {
 
 /// Link to another span
 #[derive(Debug, Clone)]
+/// Span Link
 pub struct SpanLink {
     /// Linked span context
     pub context: TraceContext,
@@ -321,6 +340,7 @@ impl Span {
 
 /// Tracer for creating and managing spans
 #[derive(Debug)]
+/// Tracer
 pub struct Tracer {
     /// Service name
     service_name: String,
@@ -354,6 +374,7 @@ pub trait Sampler: Send + Sync + fmt::Debug {
 
 /// Result of sampling decision
 #[derive(Debug, Clone)]
+/// Sampling Result
 pub struct SamplingResult {
     /// Whether to sample
     pub decision: SamplingDecision,
@@ -362,6 +383,7 @@ pub struct SamplingResult {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// Sampling Decision
 pub enum SamplingDecision {
     /// Record and sample
     RecordAndSample,
@@ -469,6 +491,7 @@ impl Tracer {
 
 /// Simple span processor that logs spans
 #[derive(Debug)]
+/// Logging Span Processor
 pub struct LoggingSpanProcessor;
 
 impl SpanProcessor for LoggingSpanProcessor {
@@ -494,6 +517,7 @@ impl SpanProcessor for LoggingSpanProcessor {
 
 /// Batch span processor for efficient export
 #[derive(Debug)]
+/// Batch Span Processor
 pub struct BatchSpanProcessor {
     /// Batch of spans waiting to be exported
     batch: Arc<Mutex<Vec<Span>>>,
@@ -565,6 +589,7 @@ impl SpanProcessor for BatchSpanProcessor {
 
 /// Console span exporter for development
 #[derive(Debug)]
+/// Console Span Exporter
 pub struct ConsoleSpanExporter;
 
 impl SpanExporter for ConsoleSpanExporter {
@@ -684,6 +709,7 @@ fn attribute_to_json(attr: AttributeValue) -> serde_json::Value {
 
 /// Always sample strategy
 #[derive(Debug)]
+/// Always Sampler
 pub struct AlwaysSampler;
 
 impl Sampler for AlwaysSampler {
@@ -702,6 +728,7 @@ impl Sampler for AlwaysSampler {
 
 /// Never sample strategy
 #[derive(Debug)]
+/// Never Sampler
 pub struct NeverSampler;
 
 impl Sampler for NeverSampler {
@@ -720,6 +747,7 @@ impl Sampler for NeverSampler {
 
 /// Probability-based sampler
 #[derive(Debug)]
+/// Probability Sampler
 pub struct ProbabilitySampler {
     /// Sampling probability (0.0 - 1.0)
     probability: f64,
@@ -741,7 +769,7 @@ impl Sampler for ProbabilitySampler {
         _name: &str,
         _kind: SpanKind,
     ) -> SamplingResult {
-        let random_value: f64 = rand::random();
+        let random_value: f64 = scirs2_core::random::random();
         let decision = if random_value < self.probability {
             SamplingDecision::RecordAndSample
         } else {
@@ -763,6 +791,7 @@ impl Sampler for ProbabilitySampler {
 
 /// Rate limiting sampler
 #[derive(Debug)]
+/// Rate Limiting Sampler
 pub struct RateLimitingSampler {
     /// Maximum spans per second
     max_spans_per_second: f64,
@@ -918,29 +947,43 @@ impl SpeechRecognitionInstrumentation {
 
 /// Tracing errors
 #[derive(Debug, thiserror::Error)]
+/// Tracing Error
 pub enum TracingError {
     #[error("Invalid trace parent format")]
+    /// Invalid trace parent
     InvalidTraceParent,
     #[error("Unsupported trace version")]
+    /// Unsupported version
     UnsupportedVersion,
     #[error("Invalid trace ID")]
+    /// Invalid trace id
     InvalidTraceId,
     #[error("Invalid span ID")]
+    /// Invalid span id
     InvalidSpanId,
     #[error("Invalid flags")]
+    /// Invalid flags
     InvalidFlags,
     #[error("Invalid length")]
+    /// Invalid length
     InvalidLength,
 }
 
 /// Export errors
 #[derive(Debug, thiserror::Error)]
+/// Export Error
 pub enum ExportError {
     #[error("Export failed: {message}")]
-    ExportFailed { message: String },
+    /// Export failed
+    ExportFailed {
+        /// Error message
+        message: String,
+    },
     #[error("Serialization failed")]
+    /// Serialization failed
     SerializationFailed,
     #[error("Network error")]
+    /// Network error
     NetworkError,
 }
 

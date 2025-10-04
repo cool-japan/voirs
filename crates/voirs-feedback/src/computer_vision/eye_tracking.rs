@@ -2,6 +2,7 @@ use super::types::*;
 use anyhow::Result;
 use std::time::{Duration, SystemTime};
 
+/// Description
 pub struct GazeTracker {
     gaze_history: Vec<GazePoint>,
     calibration_data: Option<CalibrationData>,
@@ -18,18 +19,28 @@ struct CalibrationData {
     camera_position: Point2D,
 }
 
+/// Description
 pub struct GazeData {
+    /// Description
     pub direction: Point2D,
+    /// Description
     pub target: GazeTarget,
+    /// Description
     pub attention_focus: f32,
+    /// Description
     pub blink_rate: f32,
+    /// Description
     pub eye_contact_duration: Duration,
+    /// Description
     pub pupil_dilation: f32,
+    /// Description
     pub stability: f32,
+    /// Description
     pub quality: f32,
 }
 
 impl GazeTracker {
+    /// Description
     pub fn new() -> Self {
         Self {
             gaze_history: Vec::new(),
@@ -37,6 +48,7 @@ impl GazeTracker {
         }
     }
 
+    /// Description
     pub async fn track_gaze(&mut self, eye_landmarks: &[Point2D]) -> GazeData {
         if eye_landmarks.len() < 12 {
             return GazeData {
@@ -186,17 +198,20 @@ impl GazeTracker {
     }
 }
 
+/// Description
 pub struct EyeTrackingAnalyzer {
     gaze_tracker: GazeTracker,
 }
 
 impl EyeTrackingAnalyzer {
+    /// Description
     pub fn new() -> Self {
         Self {
             gaze_tracker: GazeTracker::new(),
         }
     }
 
+    /// Description
     pub async fn track_eye_gaze(
         &mut self,
         _frame: &VideoFrame,

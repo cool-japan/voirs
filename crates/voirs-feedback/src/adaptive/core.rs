@@ -14,7 +14,6 @@ use crate::traits::{
 use crate::FeedbackError;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use nalgebra::{DMatrix, DVector};
 use serde::{Deserialize, Serialize};
 use statrs::statistics::Statistics;
 use std::collections::{HashMap, VecDeque};

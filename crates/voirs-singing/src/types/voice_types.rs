@@ -30,6 +30,12 @@ pub struct VoiceCharacteristics {
 }
 
 impl Default for VoiceCharacteristics {
+    /// Create default voice characteristics
+    ///
+    /// # Returns
+    ///
+    /// Alto voice with range G3-G5 (196-784 Hz), F0 mean 440 Hz, 6 Hz vibrato at 0.3 depth,
+    /// 8 second breath capacity, and 0.8 vocal power
     fn default() -> Self {
         Self {
             voice_type: VoiceType::Alto,

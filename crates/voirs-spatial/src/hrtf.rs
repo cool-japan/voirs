@@ -8,8 +8,7 @@ pub use database::{
     DatabaseConfig, DatabaseStatistics, HrtfDatabaseManager, HrtfMeasurement as DbHrtfMeasurement,
     HrtfPosition, InterpolationMethod as DbInterpolationMethod, PersonalizedHrtf, StorageFormat,
 };
-use ndarray::Array1;
-use realfft::RealFftPlanner;
+use scirs2_core::ndarray::Array1;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -19,9 +18,6 @@ use std::sync::Arc;
 pub struct HrtfProcessor {
     /// HRTF database
     database: Arc<HrtfDatabase>,
-    /// FFT planner for convolution
-    #[allow(dead_code)]
-    fft_planner: RealFftPlanner<f32>,
     /// Convolution buffer size
     #[allow(dead_code)]
     buffer_size: usize,
@@ -166,7 +162,6 @@ impl HrtfProcessor {
 
         Ok(Self {
             database: Arc::new(database),
-            fft_planner: RealFftPlanner::new(),
             buffer_size,
             overlap_left: Array1::zeros(buffer_size),
             overlap_right: Array1::zeros(buffer_size),
@@ -194,7 +189,6 @@ impl HrtfProcessor {
 
         Ok(Self {
             database: Arc::new(database),
-            fft_planner: RealFftPlanner::new(),
             buffer_size,
             overlap_left: Array1::zeros(buffer_size),
             overlap_right: Array1::zeros(buffer_size),
@@ -615,62 +609,64 @@ impl HrtfProcessor {
         // Find next power of 2 for FFT
         let fft_len = conv_len.next_power_of_two();
 
-        // Prepare padded signals
-        let mut input_padded = vec![0.0; fft_len];
-        let mut left_hrir_padded = vec![0.0; fft_len];
-        let mut right_hrir_padded = vec![0.0; fft_len];
+        // Convert to f64 and create complex input for FFT
+        let input_complex: Vec<scirs2_core::Complex<f64>> = input
+            .iter()
+            .map(|&x| scirs2_core::Complex::new(x as f64, 0.0))
+            .chain(std::iter::repeat(scirs2_core::Complex::new(0.0, 0.0)))
+            .take(fft_len)
+            .collect();
 
-        input_padded[..input_len].copy_from_slice(input.as_slice().unwrap());
-        left_hrir_padded[..hrir_len].copy_from_slice(left_hrir.as_slice().unwrap());
-        right_hrir_padded[..hrir_len].copy_from_slice(right_hrir.as_slice().unwrap());
+        let left_hrir_complex: Vec<scirs2_core::Complex<f64>> = left_hrir
+            .iter()
+            .map(|&x| scirs2_core::Complex::new(x as f64, 0.0))
+            .chain(std::iter::repeat(scirs2_core::Complex::new(0.0, 0.0)))
+            .take(fft_len)
+            .collect();
 
-        // Create FFT planner
-        let mut planner = realfft::RealFftPlanner::new();
-        let fft = planner.plan_fft_forward(fft_len);
-        let ifft = planner.plan_fft_inverse(fft_len);
+        let right_hrir_complex: Vec<scirs2_core::Complex<f64>> = right_hrir
+            .iter()
+            .map(|&x| scirs2_core::Complex::new(x as f64, 0.0))
+            .chain(std::iter::repeat(scirs2_core::Complex::new(0.0, 0.0)))
+            .take(fft_len)
+            .collect();
 
-        // FFT of input and HRIRs
-        let mut input_spectrum = fft.make_output_vec();
-        let mut left_hrir_spectrum = fft.make_output_vec();
-        let mut right_hrir_spectrum = fft.make_output_vec();
-
-        fft.process(&mut input_padded, &mut input_spectrum)
+        // Perform FFT
+        let input_spectrum = scirs2_fft::fft(&input_complex, None)
             .map_err(|e| crate::Error::LegacyProcessing(format!("FFT error: {e}")))?;
 
-        fft.process(&mut left_hrir_padded, &mut left_hrir_spectrum)
+        let left_hrir_spectrum = scirs2_fft::fft(&left_hrir_complex, None)
             .map_err(|e| crate::Error::LegacyProcessing(format!("FFT error: {e}")))?;
 
-        fft.process(&mut right_hrir_padded, &mut right_hrir_spectrum)
+        let right_hrir_spectrum = scirs2_fft::fft(&right_hrir_complex, None)
             .map_err(|e| crate::Error::LegacyProcessing(format!("FFT error: {e}")))?;
 
         // Complex multiplication in frequency domain
-        let mut left_result_spectrum =
-            vec![num_complex::Complex::new(0.0, 0.0); input_spectrum.len()];
-        let mut right_result_spectrum =
-            vec![num_complex::Complex::new(0.0, 0.0); input_spectrum.len()];
+        let left_result_spectrum: Vec<scirs2_core::Complex<f64>> = input_spectrum
+            .iter()
+            .zip(left_hrir_spectrum.iter())
+            .map(|(a, b)| a * b)
+            .collect();
 
-        for i in 0..input_spectrum.len() {
-            left_result_spectrum[i] = input_spectrum[i] * left_hrir_spectrum[i];
-            right_result_spectrum[i] = input_spectrum[i] * right_hrir_spectrum[i];
-        }
+        let right_result_spectrum: Vec<scirs2_core::Complex<f64>> = input_spectrum
+            .iter()
+            .zip(right_hrir_spectrum.iter())
+            .map(|(a, b)| a * b)
+            .collect();
 
         // IFFT back to time domain
-        let mut left_result_time = ifft.make_output_vec();
-        let mut right_result_time = ifft.make_output_vec();
-
-        ifft.process(&mut left_result_spectrum, &mut left_result_time)
+        let left_result_time = scirs2_fft::ifft(&left_result_spectrum, None)
             .map_err(|e| crate::Error::LegacyProcessing(format!("IFFT error: {e}")))?;
 
-        ifft.process(&mut right_result_spectrum, &mut right_result_time)
+        let right_result_time = scirs2_fft::ifft(&right_result_spectrum, None)
             .map_err(|e| crate::Error::LegacyProcessing(format!("IFFT error: {e}")))?;
 
-        // Normalize and copy to output (FFT scaling)
-        let scale = 1.0 / fft_len as f32;
+        // Copy to output (no additional scaling needed as scirs2_fft handles it)
         let output_len = left_output.len().min(conv_len);
 
         for i in 0..output_len {
-            left_output[i] = left_result_time[i] * scale;
-            right_output[i] = right_result_time[i] * scale;
+            left_output[i] = left_result_time[i].re as f32;
+            right_output[i] = right_result_time[i].re as f32;
         }
 
         Ok(())

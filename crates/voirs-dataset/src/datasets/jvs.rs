@@ -563,8 +563,8 @@ impl JvsDataset {
 
     /// Create splits with speaker-aware stratification
     pub fn create_speaker_aware_splits(&self, config: SplitConfig) -> Result<DatasetSplits> {
-        use rand::seq::SliceRandom;
-        use rand::SeedableRng;
+        use scirs2_core::random::seq::SliceRandom;
+        use scirs2_core::random::SeedableRng;
         use std::collections::BTreeMap;
 
         // Group samples by speaker
@@ -590,10 +590,10 @@ impl JvsDataset {
 
         // Shuffle speakers based on seed
         if let Some(seed) = config.seed {
-            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut rng = scirs2_core::random::Random::seed(seed);
             speakers.shuffle(&mut rng);
         } else {
-            let mut rng = rand::thread_rng();
+            let mut rng = scirs2_core::random::thread_rng();
             speakers.shuffle(&mut rng);
         }
 

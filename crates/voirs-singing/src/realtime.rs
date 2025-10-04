@@ -411,6 +411,17 @@ impl RealtimeEngine {
     }
 
     /// Get audio samples from buffer
+    ///
+    /// Retrieves the specified number of audio samples from the internal buffer,
+    /// padding with silence if insufficient samples are available.
+    ///
+    /// # Arguments
+    ///
+    /// * `num_samples` - Number of audio samples to retrieve
+    ///
+    /// # Returns
+    ///
+    /// Vector of audio samples, padded with zeros if fewer samples are available
     pub async fn get_audio(&self, num_samples: usize) -> Vec<f32> {
         let mut buffer = self.audio_buffer.write().await;
         let available = buffer.len().min(num_samples);
@@ -433,6 +444,21 @@ impl RealtimeEngine {
     }
 
     /// Set voice for real-time synthesis
+    ///
+    /// Updates the voice characteristics used for real-time synthesis.
+    /// The change takes effect for subsequently queued notes.
+    ///
+    /// # Arguments
+    ///
+    /// * `voice` - Voice characteristics to apply
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns error if voice characteristics cannot be applied to the core engine
     pub async fn set_realtime_voice(&self, voice: VoiceCharacteristics) -> crate::Result<()> {
         let mut state = self.state.write().await;
         state.current_voice = voice.clone();
@@ -442,6 +468,21 @@ impl RealtimeEngine {
     }
 
     /// Set technique for real-time synthesis
+    ///
+    /// Updates the singing technique used for real-time synthesis.
+    /// The change takes effect for subsequently queued notes.
+    ///
+    /// # Arguments
+    ///
+    /// * `technique` - Singing technique to apply
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns error if singing technique cannot be applied to the core engine
     pub async fn set_realtime_technique(&self, technique: SingingTechnique) -> crate::Result<()> {
         let mut state = self.state.write().await;
         state.current_technique = technique.clone();
@@ -451,6 +492,13 @@ impl RealtimeEngine {
     }
 
     /// Get performance metrics
+    ///
+    /// Retrieves current performance metrics including latency, CPU usage,
+    /// buffer underruns, and real-time factor.
+    ///
+    /// # Returns
+    ///
+    /// Current performance metrics snapshot
     pub async fn get_metrics(&self) -> PerformanceMetrics {
         self.metrics.read().await.clone()
     }
@@ -605,6 +653,17 @@ impl RealtimeEngine {
     }
 
     /// Create live session
+    ///
+    /// Creates a new live performance session without advanced features.
+    /// For sessions with MIDI controllers and loop station, use `create_live_performance_session`.
+    ///
+    /// # Arguments
+    ///
+    /// * `session_id` - Unique identifier for the session
+    ///
+    /// # Returns
+    ///
+    /// New live session instance
     pub fn create_session(&self, session_id: String) -> LiveSession {
         LiveSession {
             id: session_id,
@@ -625,6 +684,17 @@ impl RealtimeEngine {
     }
 
     /// Create live session with performance features
+    ///
+    /// Creates a new live performance session with MIDI controller support and loop station
+    /// if enabled in the configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `session_id` - Unique identifier for the session
+    ///
+    /// # Returns
+    ///
+    /// New live session instance with performance features enabled
     pub fn create_live_performance_session(&self, session_id: String) -> LiveSession {
         let controller =
             if self.config.midi_controller_support || self.config.expression_pedal_support {
@@ -658,6 +728,17 @@ impl RealtimeEngine {
     }
 
     /// Enable ultra-low latency mode
+    ///
+    /// Reconfigures the engine for ultra-low latency (<15ms target).
+    /// This reduces buffer sizes and quality settings for minimal latency.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success
+    ///
+    /// # Errors
+    ///
+    /// Currently always succeeds
     pub async fn enable_ultra_low_latency(&mut self) -> crate::Result<()> {
         let mut config = self.config.clone();
         config.ultra_low_latency_mode = true;
@@ -673,6 +754,17 @@ impl RealtimeEngine {
 
 impl LiveSession {
     /// Start live performance session
+    ///
+    /// Initializes and starts the real-time engine for the session.
+    /// Updates session state to Performing.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns error if engine fails to start or is already running
     pub async fn start_session(&mut self) -> crate::Result<()> {
         self.session_state = SessionState::Preparing;
         self.engine.start().await?;
@@ -682,6 +774,16 @@ impl LiveSession {
     }
 
     /// Stop live performance session
+    ///
+    /// Stops the real-time engine and marks the session as finished.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns error if engine fails to stop
     pub async fn stop_session(&mut self) -> crate::Result<()> {
         self.engine.stop().await?;
         self.session_state = SessionState::Finished;
@@ -689,11 +791,31 @@ impl LiveSession {
     }
 
     /// Set score for performance
+    ///
+    /// Sets the musical score to be performed during the session.
+    ///
+    /// # Arguments
+    ///
+    /// * `score` - Musical score containing notes and timing information
     pub fn set_score(&mut self, score: MusicalScore) {
         self.current_score = Some(score);
     }
 
     /// Queue note for immediate performance
+    ///
+    /// Queues a note event for immediate synthesis and playback with default priority.
+    ///
+    /// # Arguments
+    ///
+    /// * `note` - Note event to perform
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns error if note cannot be queued in the engine
     pub async fn perform_note(&self, note: NoteEvent) -> crate::Result<()> {
         let realtime_note = RealtimeNote {
             event: note,
@@ -706,16 +828,42 @@ impl LiveSession {
     }
 
     /// Get session status
+    ///
+    /// Returns the current state of the session.
+    ///
+    /// # Returns
+    ///
+    /// Current session state (Idle, Preparing, Performing, Paused, Finished, or Error)
     pub fn get_status(&self) -> SessionState {
         self.session_state.clone()
     }
 
     /// Get session duration
+    ///
+    /// Returns the elapsed time since the session was started.
+    ///
+    /// # Returns
+    ///
+    /// Duration since session start time
     pub fn get_duration(&self) -> Duration {
         self.start_time.elapsed()
     }
 
     /// Add MIDI controller mapping
+    ///
+    /// Adds a new MIDI control change mapping to the session's controller.
+    ///
+    /// # Arguments
+    ///
+    /// * `mapping` - MIDI control mapping configuration
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns error if no controller is configured for this session
     pub fn add_midi_mapping(&mut self, mapping: MidiControlMapping) -> crate::Result<()> {
         if let Some(controller) = &mut self.controller {
             controller.midi_mappings.push(mapping);
@@ -726,6 +874,21 @@ impl LiveSession {
     }
 
     /// Handle MIDI control change
+    ///
+    /// Processes incoming MIDI control change messages and updates mapped parameters.
+    ///
+    /// # Arguments
+    ///
+    /// * `cc_number` - MIDI CC number (0-127)
+    /// * `value` - MIDI CC value (0-127)
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns error if parameter update fails
     pub async fn handle_midi_cc(&mut self, cc_number: u8, value: u8) -> crate::Result<()> {
         if let Some(controller) = &mut self.controller {
             let mapping = controller
@@ -745,6 +908,21 @@ impl LiveSession {
     }
 
     /// Handle expression pedal input
+    ///
+    /// Processes incoming expression pedal values and updates mapped parameters.
+    ///
+    /// # Arguments
+    ///
+    /// * `pedal_id` - Identifier of the expression pedal
+    /// * `value` - Pedal value (0.0-1.0)
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns error if parameter update fails
     pub async fn handle_expression_pedal(
         &mut self,
         pedal_id: &str,
@@ -767,6 +945,20 @@ impl LiveSession {
     }
 
     /// Start loop recording
+    ///
+    /// Begins recording a new audio loop with the specified ID.
+    ///
+    /// # Arguments
+    ///
+    /// * `loop_id` - Unique identifier for the new loop
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns error if no loop station is configured or recording is already in progress
     pub fn start_loop_recording(&mut self, loop_id: String) -> crate::Result<()> {
         if let Some(loop_station) = &mut self.loop_station {
             loop_station.start_recording(loop_id)
@@ -778,6 +970,16 @@ impl LiveSession {
     }
 
     /// Stop loop recording
+    ///
+    /// Stops the current loop recording and returns the created audio loop.
+    ///
+    /// # Returns
+    ///
+    /// The newly created audio loop
+    ///
+    /// # Errors
+    ///
+    /// Returns error if no loop station is configured or no recording is in progress
     pub fn stop_loop_recording(&mut self) -> crate::Result<AudioLoop> {
         if let Some(loop_station) = &mut self.loop_station {
             loop_station.stop_recording()
@@ -789,6 +991,20 @@ impl LiveSession {
     }
 
     /// Play loop
+    ///
+    /// Starts playback of a previously recorded loop.
+    ///
+    /// # Arguments
+    ///
+    /// * `loop_id` - Identifier of the loop to play
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns error if no loop station is configured or loop ID is not found
     pub fn play_loop(&mut self, loop_id: &str) -> crate::Result<()> {
         if let Some(loop_station) = &mut self.loop_station {
             loop_station.play_loop(loop_id)
@@ -800,6 +1016,20 @@ impl LiveSession {
     }
 
     /// Stop loop
+    ///
+    /// Stops playback of a currently playing loop.
+    ///
+    /// # Arguments
+    ///
+    /// * `loop_id` - Identifier of the loop to stop
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns error if no loop station is configured or loop ID is not found
     pub fn stop_loop(&mut self, loop_id: &str) -> crate::Result<()> {
         if let Some(loop_station) = &mut self.loop_station {
             loop_station.stop_loop(loop_id)
@@ -808,6 +1038,12 @@ impl LiveSession {
                 "No loop station configured".to_string(),
             ))
         }
+    }
+}
+
+impl Default for LivePerformanceController {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -823,6 +1059,21 @@ impl LivePerformanceController {
     }
 
     /// Update parameter value
+    ///
+    /// Updates a control parameter to a new target value with smoothing.
+    ///
+    /// # Arguments
+    ///
+    /// * `parameter` - Parameter to update
+    /// * `value` - New target value for the parameter
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success
+    ///
+    /// # Errors
+    ///
+    /// Currently always succeeds
     pub async fn update_parameter(
         &mut self,
         parameter: &ControlParameter,
@@ -850,6 +1101,16 @@ impl LivePerformanceController {
     }
 
     /// Get current parameter value
+    ///
+    /// Retrieves the current smoothed value of a control parameter.
+    ///
+    /// # Arguments
+    ///
+    /// * `parameter` - Parameter to query
+    ///
+    /// # Returns
+    ///
+    /// Current parameter value, or 0.0 if parameter is not found
     pub fn get_parameter_value(&self, parameter: &ControlParameter) -> f32 {
         let param_id = parameter.to_string();
         self.parameter_controls
@@ -860,6 +1121,9 @@ impl LivePerformanceController {
     }
 
     /// Update all parameter smoothing
+    ///
+    /// Updates all parameter controls by applying exponential smoothing
+    /// towards their target values based on elapsed time.
     pub fn update_smoothing(&mut self) {
         let now = Instant::now();
         for control in &mut self.parameter_controls {
@@ -871,6 +1135,20 @@ impl LivePerformanceController {
     }
 
     /// Load preset
+    ///
+    /// Loads a performance preset by name.
+    ///
+    /// # Arguments
+    ///
+    /// * `preset_name` - Name of the preset to load
+    ///
+    /// # Returns
+    ///
+    /// Reference to the loaded preset
+    ///
+    /// # Errors
+    ///
+    /// Returns error if preset name is not found
     pub fn load_preset(&mut self, preset_name: &str) -> crate::Result<&PerformancePreset> {
         self.presets
             .iter()
@@ -928,6 +1206,20 @@ impl LoopStation {
     }
 
     /// Start recording new loop
+    ///
+    /// Begins recording a new audio loop.
+    ///
+    /// # Arguments
+    ///
+    /// * `loop_id` - Unique identifier for the new loop
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns error if already recording
     pub fn start_recording(&mut self, loop_id: String) -> crate::Result<()> {
         if self.recording_state != RecordingState::Idle {
             return Err(crate::Error::Processing("Already recording".to_string()));
@@ -938,6 +1230,16 @@ impl LoopStation {
     }
 
     /// Stop recording and create loop
+    ///
+    /// Stops the current recording session and returns the created audio loop.
+    ///
+    /// # Returns
+    ///
+    /// The newly created audio loop
+    ///
+    /// # Errors
+    ///
+    /// Returns error if not currently recording
     pub fn stop_recording(&mut self) -> crate::Result<AudioLoop> {
         match &self.recording_state {
             RecordingState::Recording(loop_id) => {
@@ -959,6 +1261,20 @@ impl LoopStation {
     }
 
     /// Play loop by ID
+    ///
+    /// Starts playback of a previously recorded loop.
+    ///
+    /// # Arguments
+    ///
+    /// * `loop_id` - Identifier of the loop to play
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns error if loop ID is not found
     pub fn play_loop(&mut self, loop_id: &str) -> crate::Result<()> {
         if let Some(audio_loop) = self.loops.iter_mut().find(|l| l.id == loop_id) {
             audio_loop.is_playing = true;
@@ -974,6 +1290,20 @@ impl LoopStation {
     }
 
     /// Stop loop by ID
+    ///
+    /// Stops playback of a currently playing loop.
+    ///
+    /// # Arguments
+    ///
+    /// * `loop_id` - Identifier of the loop to stop
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns error if loop ID is not found
     pub fn stop_loop(&mut self, loop_id: &str) -> crate::Result<()> {
         if let Some(audio_loop) = self.loops.iter_mut().find(|l| l.id == loop_id) {
             audio_loop.is_playing = false;
@@ -993,11 +1323,23 @@ impl LoopStation {
     }
 
     /// Set BPM for loop synchronization
+    ///
+    /// Sets the beats per minute for loop timing synchronization.
+    ///
+    /// # Arguments
+    ///
+    /// * `bpm` - Beats per minute value
     pub fn set_bpm(&mut self, bpm: f32) {
         self.timing.bpm = bpm;
     }
 
     /// Set sync mode
+    ///
+    /// Sets the synchronization mode for loop playback.
+    ///
+    /// # Arguments
+    ///
+    /// * `mode` - Synchronization mode (Free, BeatSync, BarSync, or Custom)
     pub fn set_sync_mode(&mut self, mode: SyncMode) {
         self.timing.sync_mode = mode;
     }
@@ -1005,6 +1347,17 @@ impl LoopStation {
 
 impl MidiControlMapping {
     /// Map MIDI value to parameter range
+    ///
+    /// Maps a normalized MIDI value (0.0-1.0) to the configured parameter range
+    /// using the specified mapping curve.
+    ///
+    /// # Arguments
+    ///
+    /// * `midi_value` - Normalized MIDI value (0.0-1.0)
+    ///
+    /// # Returns
+    ///
+    /// Mapped value in the parameter's min-max range
     pub fn map_value(&self, midi_value: f32) -> f32 {
         let normalized = midi_value.clamp(0.0, 1.0);
         match self.curve {
@@ -1044,6 +1397,17 @@ impl MidiControlMapping {
 
 impl ExpressionMapping {
     /// Map expression pedal value to parameter range
+    ///
+    /// Maps an expression pedal value (0.0-1.0) to a parameter value
+    /// using the configured curve and sensitivity.
+    ///
+    /// # Arguments
+    ///
+    /// * `pedal_value` - Expression pedal value (0.0-1.0)
+    ///
+    /// # Returns
+    ///
+    /// Mapped value (0.0-1.0) after applying curve and sensitivity
     pub fn map_value(&self, pedal_value: f32) -> f32 {
         let scaled_value = (pedal_value * self.sensitivity).clamp(0.0, 1.0);
 
@@ -1195,18 +1559,48 @@ impl RealtimeNote {
     }
 
     /// Set priority
+    ///
+    /// Sets the priority level for this note (0-255, higher = more important).
+    ///
+    /// # Arguments
+    ///
+    /// * `priority` - Priority level (0-255)
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining
     pub fn with_priority(mut self, priority: u8) -> Self {
         self.priority = priority;
         self
     }
 
     /// Set latency tolerance
+    ///
+    /// Sets the maximum acceptable latency for this note.
+    ///
+    /// # Arguments
+    ///
+    /// * `tolerance` - Maximum acceptable latency duration
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining
     pub fn with_latency_tolerance(mut self, tolerance: Duration) -> Self {
         self.latency_tolerance = tolerance;
         self
     }
 
     /// Schedule for specific time
+    ///
+    /// Schedules this note to be performed at a specific time instant.
+    ///
+    /// # Arguments
+    ///
+    /// * `time` - Target time instant for synthesis
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining
     pub fn schedule_at(mut self, time: Instant) -> Self {
         self.scheduled_time = time;
         self

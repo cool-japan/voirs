@@ -7,15 +7,22 @@ use uuid::Uuid;
 
 /// Standard API response wrapper
 #[derive(Debug, Serialize, Deserialize)]
+/// Api Response
 pub struct ApiResponse<T> {
+    /// success
     pub success: bool,
+    /// data
     pub data: Option<T>,
+    /// error
     pub error: Option<String>,
+    /// request id
     pub request_id: String,
+    /// timestamp
     pub timestamp: chrono::DateTime<chrono::Utc>,
 }
 
 impl<T> ApiResponse<T> {
+    /// success
     pub fn success(data: T) -> Self {
         Self {
             success: true,
@@ -26,6 +33,7 @@ impl<T> ApiResponse<T> {
         }
     }
 
+    /// error
     pub fn error(error: String) -> Self {
         Self {
             success: false,
@@ -39,6 +47,7 @@ impl<T> ApiResponse<T> {
 
 /// Speech recognition request
 #[derive(Debug, Clone, Deserialize)]
+/// Recognition Request
 pub struct RecognitionRequest {
     /// Audio data (base64 encoded)
     pub audio_data: Option<String>,
@@ -58,6 +67,7 @@ pub struct RecognitionRequest {
 
 /// Audio format specification
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Audio Format Request
 pub struct AudioFormatRequest {
     /// Sample rate (Hz)
     pub sample_rate: Option<u32>,
@@ -71,6 +81,7 @@ pub struct AudioFormatRequest {
 
 /// Recognition configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Recognition Config Request
 pub struct RecognitionConfigRequest {
     /// Model name to use
     pub model: Option<String>,
@@ -107,6 +118,7 @@ impl Default for RecognitionConfigRequest {
 
 /// Speech recognition response
 #[derive(Debug, Serialize)]
+/// Recognition Response
 pub struct RecognitionResponse {
     /// Recognized text
     pub text: String,
@@ -130,6 +142,7 @@ pub struct RecognitionResponse {
 
 /// Individual speech segment
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Segment Response
 pub struct SegmentResponse {
     /// Segment start time in seconds
     pub start_time: f64,
@@ -147,6 +160,7 @@ pub struct SegmentResponse {
 
 /// Token-level information
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Token Response
 pub struct TokenResponse {
     /// Token ID
     pub id: u32,
@@ -162,6 +176,7 @@ pub struct TokenResponse {
 
 /// Audio metadata
 #[derive(Debug, Serialize)]
+/// Audio Metadata Response
 pub struct AudioMetadataResponse {
     /// Sample rate in Hz
     pub sample_rate: u32,
@@ -179,6 +194,7 @@ pub struct AudioMetadataResponse {
 
 /// Recognition metadata
 #[derive(Debug, Serialize)]
+/// Recognition Metadata Response
 pub struct RecognitionMetadataResponse {
     /// Model used for recognition
     pub model: String,
@@ -196,6 +212,7 @@ pub struct RecognitionMetadataResponse {
 
 /// Processing statistics
 #[derive(Debug, Serialize)]
+/// Processing Stats Response
 pub struct ProcessingStatsResponse {
     /// Real-time factor
     pub real_time_factor: f32,
@@ -209,6 +226,7 @@ pub struct ProcessingStatsResponse {
 
 /// Streaming recognition request
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Streaming Recognition Request
 pub struct StreamingRecognitionRequest {
     /// Streaming configuration
     pub config: Option<StreamingConfigRequest>,
@@ -220,6 +238,7 @@ pub struct StreamingRecognitionRequest {
 
 /// Streaming configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Streaming Config Request
 pub struct StreamingConfigRequest {
     /// Chunk duration in seconds
     pub chunk_duration: Option<f32>,
@@ -237,6 +256,7 @@ pub struct StreamingConfigRequest {
 
 /// Streaming recognition response
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Streaming Recognition Response
 pub struct StreamingRecognitionResponse {
     /// Session ID
     pub session_id: String,
@@ -258,6 +278,7 @@ pub struct StreamingRecognitionResponse {
 
 /// Health check response
 #[derive(Debug, Serialize)]
+/// Health Response
 pub struct HealthResponse {
     /// Service status
     pub status: String,
@@ -275,6 +296,7 @@ pub struct HealthResponse {
 
 /// Memory usage information
 #[derive(Debug, Serialize)]
+/// Memory Usage Response
 pub struct MemoryUsageResponse {
     /// Used memory in MB
     pub used_mb: f64,
@@ -288,6 +310,7 @@ pub struct MemoryUsageResponse {
 
 /// Model status information
 #[derive(Debug, Serialize)]
+/// Model Status Response
 pub struct ModelStatusResponse {
     /// Currently loaded models
     pub loaded_models: Vec<ModelInfoResponse>,
@@ -303,6 +326,7 @@ pub struct ModelStatusResponse {
 
 /// Individual model information
 #[derive(Debug, Serialize)]
+/// Model Info Response
 pub struct ModelInfoResponse {
     /// Model name
     pub name: String,
@@ -320,6 +344,7 @@ pub struct ModelInfoResponse {
 
 /// Performance metrics
 #[derive(Debug, Serialize)]
+/// Performance Metrics Response
 pub struct PerformanceMetricsResponse {
     /// Total recognitions performed
     pub total_recognitions: u64,
@@ -339,6 +364,7 @@ pub struct PerformanceMetricsResponse {
 
 /// Model management request
 #[derive(Debug, Deserialize)]
+/// Model Management Request
 pub struct ModelManagementRequest {
     /// Action to perform ("load", "unload", "switch")
     pub action: String,
@@ -350,6 +376,7 @@ pub struct ModelManagementRequest {
 
 /// Model management response
 #[derive(Debug, Serialize)]
+/// Model Management Response
 pub struct ModelManagementResponse {
     /// Action performed
     pub action: String,
@@ -365,6 +392,7 @@ pub struct ModelManagementResponse {
 
 /// Batch recognition request
 #[derive(Debug, Deserialize)]
+/// Batch Recognition Request
 pub struct BatchRecognitionRequest {
     /// List of audio files or data
     pub inputs: Vec<RecognitionRequest>,
@@ -378,6 +406,7 @@ pub struct BatchRecognitionRequest {
 
 /// Batch configuration
 #[derive(Debug, Deserialize)]
+/// Batch Config Request
 pub struct BatchConfigRequest {
     /// Default recognition config for all inputs
     pub default_config: Option<RecognitionConfigRequest>,
@@ -391,6 +420,7 @@ pub struct BatchConfigRequest {
 
 /// Batch recognition response
 #[derive(Debug, Serialize)]
+/// Batch Recognition Response
 pub struct BatchRecognitionResponse {
     /// Batch job ID
     pub batch_id: String,
@@ -404,6 +434,7 @@ pub struct BatchRecognitionResponse {
 
 /// Individual batch result
 #[derive(Debug, Serialize)]
+/// Batch Result Response
 pub struct BatchResultResponse {
     /// Input index
     pub index: usize,
@@ -419,6 +450,7 @@ pub struct BatchResultResponse {
 
 /// Batch processing statistics
 #[derive(Debug, Serialize)]
+/// Batch Statistics Response
 pub struct BatchStatisticsResponse {
     /// Total inputs
     pub total_inputs: usize,
@@ -438,6 +470,7 @@ pub struct BatchStatisticsResponse {
 
 /// Error response
 #[derive(Debug, Serialize, Deserialize)]
+/// Error Response
 pub struct ErrorResponse {
     /// Error code
     pub code: String,
@@ -454,34 +487,50 @@ pub struct ErrorResponse {
 /// WebSocket message types
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
+/// Web Socket Message
 pub enum WebSocketMessage {
     /// Start streaming session
     StartStreaming {
+        /// String
         session_id: String,
+        /// Streaming recognition request
         config: StreamingRecognitionRequest,
     },
     /// Audio chunk data
     AudioChunk {
+        /// String
         session_id: String,
+        /// Chunk data
         chunk_data: String, // base64 encoded
+        /// U64
         sequence_number: u64,
     },
     /// Stop streaming session
-    StopStreaming { session_id: String },
+    StopStreaming {
+        /// Session identifier
+        session_id: String,
+    },
     /// Recognition result
     RecognitionResult {
+        /// String
         session_id: String,
+        /// Streaming recognition response
         result: StreamingRecognitionResponse,
     },
     /// Error message
     Error {
+        /// Session id
         session_id: Option<String>,
+        /// Error response
         error: ErrorResponse,
     },
     /// Session status
     SessionStatus {
+        /// String
         session_id: String,
+        /// String
         status: String,
+        /// Message
         message: Option<String>,
     },
 }

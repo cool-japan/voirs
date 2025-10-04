@@ -9,9 +9,9 @@ use crate::perceptual::cross_cultural::{
 };
 use crate::traits::{EvaluationResult, QualityScore};
 use crate::EvaluationError;
-use rand::prelude::*;
-use rand::rngs::StdRng;
-use rand::thread_rng;
+use scirs2_core::random::prelude::*;
+use scirs2_core::random::rngs::StdRng;
+use scirs2_core::random::thread_rng;
 use std::collections::HashMap;
 use std::time::Instant;
 use voirs_sdk::AudioBuffer;
@@ -299,9 +299,9 @@ impl EnhancedMultiListenerSimulator {
     /// Create a new enhanced multi-listener simulator
     pub fn new(config: MultiListenerConfig) -> Self {
         let mut rng: Box<dyn RngCore + Send> = if let Some(seed) = config.random_seed {
-            Box::new(StdRng::seed_from_u64(seed))
+            Box::new(Random::seed(seed))
         } else {
-            Box::new(StdRng::from_rng(&mut thread_rng()))
+            Box::new(Random::seed(0))
         };
 
         // Initialize cross-cultural model if enabled

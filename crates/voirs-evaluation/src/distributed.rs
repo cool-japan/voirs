@@ -5,7 +5,7 @@
 
 use crate::traits::{EvaluationResult, QualityScore};
 use crate::EvaluationError;
-use rand::prelude::*;
+use scirs2_core::random::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -520,9 +520,13 @@ impl DistributedEvaluator {
             }
             LoadBalancingStrategy::Random => {
                 // Random selection
-                available_workers
-                    .choose(&mut rand::thread_rng())
-                    .map(|w| w.id)
+                if available_workers.is_empty() {
+                    None
+                } else {
+                    let mut rng = scirs2_core::random::Random::seed(0);
+                    let idx = rng.gen_range(0..available_workers.len());
+                    Some(available_workers[idx].id)
+                }
             }
             LoadBalancingStrategy::Weighted => {
                 // Weighted by capabilities (simplified)
@@ -536,12 +540,12 @@ impl DistributedEvaluator {
 
     /// Execute task on a worker (simulated)
     async fn execute_task_on_worker(task: EvaluationTask, worker_id: WorkerId) -> TaskResult {
-        use rand::{rngs::StdRng, Rng, SeedableRng};
+        use scirs2_core::random::{rngs::StdRng, Rng, SeedableRng};
         let seed = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos() as u64;
-        let mut rng = StdRng::seed_from_u64(seed);
+        let mut rng = Random::seed(seed);
         let start_time = std::time::SystemTime::now();
 
         // Simulate task execution time
@@ -645,13 +649,15 @@ pub fn create_evaluation_task(
 
 /// Serialize audio buffer for transmission
 fn serialize_audio_buffer(audio: &AudioBuffer) -> Vec<u8> {
-    // Simplified serialization - in real implementation would use proper serialization
-    bincode::serialize(audio).unwrap_or_default()
+    // bincode 2 serde integration
+    bincode::serde::encode_to_vec(audio, bincode::config::standard()).unwrap_or_default()
 }
 
 /// Deserialize audio buffer from transmission
 pub fn deserialize_audio_buffer(data: &[u8]) -> Option<AudioBuffer> {
-    bincode::deserialize(data).ok()
+    bincode::serde::decode_from_slice(data, bincode::config::standard())
+        .ok()
+        .map(|(v, _)| v)
 }
 
 #[cfg(test)]

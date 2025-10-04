@@ -100,8 +100,8 @@ impl Default for ThreadConfig {
     }
 }
 
-/// Callback function type for synthesis progress
-pub type VoirsSynthesisProgressCallback =
+/// Callback function type for pipeline-specific synthesis progress
+pub type VoirsPipelineProgressCallback =
     unsafe extern "C" fn(pipeline_id: c_uint, progress: f32, user_data: *mut c_void);
 
 /// Callback function type for synthesis completion
@@ -117,7 +117,7 @@ pub type VoirsSynthesisCompleteCallback = unsafe extern "C" fn(
 /// Structure to hold callback information
 #[derive(Debug, Clone)]
 struct CallbackInfo {
-    progress_callback: Option<VoirsSynthesisProgressCallback>,
+    progress_callback: Option<VoirsPipelineProgressCallback>,
     complete_callback: Option<VoirsSynthesisCompleteCallback>,
     error_callback: Option<VoirsErrorCallback>,
     user_data: *mut c_void,
@@ -192,7 +192,7 @@ pub extern "C" fn voirs_is_thread_pool_enabled() -> c_int {
 #[no_mangle]
 pub unsafe extern "C" fn voirs_register_callbacks(
     pipeline_id: c_uint,
-    progress_callback: Option<VoirsSynthesisProgressCallback>,
+    progress_callback: Option<VoirsPipelineProgressCallback>,
     complete_callback: Option<VoirsSynthesisCompleteCallback>,
     error_callback: Option<VoirsErrorCallback>,
     user_data: *mut c_void,
@@ -359,20 +359,18 @@ pub unsafe extern "C" fn voirs_synthesize_async(
                 // Operation was cancelled before it could start
                 if let Some(ref callbacks) = callback_info {
                     if let Some(error_cb) = callbacks.error_callback {
-                        unsafe {
-                            let msg = std::ffi::CString::new("Operation cancelled").unwrap_or_else(
-                                |_| {
-                                    std::ffi::CString::new("Operation cancelled (encoding error)")
-                                        .unwrap()
-                                },
-                            );
-                            error_cb(
-                                pipeline_id,
-                                VoirsErrorCode::OperationCancelled,
-                                msg.as_ptr(),
-                                callbacks.user_data,
-                            );
-                        }
+                        let msg = std::ffi::CString::new("Operation cancelled").unwrap_or_else(
+                            |_| {
+                                std::ffi::CString::new("Operation cancelled (encoding error)")
+                                    .unwrap()
+                            },
+                        );
+                        error_cb(
+                            pipeline_id,
+                            VoirsErrorCode::OperationCancelled,
+                            msg.as_ptr(),
+                            callbacks.user_data,
+                        );
                     }
                 }
 
@@ -472,14 +470,12 @@ pub unsafe extern "C" fn voirs_synthesize_async(
                                         std::ffi::CString::new("Error").unwrap()
                                     })
                                 });
-                            unsafe {
-                                error_cb(
-                                    pipeline_id,
-                                    VoirsErrorCode::SynthesisFailed,
-                                    error_msg.as_ptr(),
-                                    callbacks.user_data,
-                                );
-                            }
+                            error_cb(
+                                pipeline_id,
+                                VoirsErrorCode::SynthesisFailed,
+                                error_msg.as_ptr(),
+                                callbacks.user_data,
+                            );
                         }
                     }
 

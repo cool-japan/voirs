@@ -2,16 +2,15 @@
 
 use crate::models::singing::config::HarmonicEnhancementConfig;
 use anyhow::Result;
-use ndarray::Array2;
-use rustfft::{num_complex::Complex, FftPlanner};
+use scirs2_core::ndarray::{Array2, ArrayView1};
+use scirs2_core::Complex;
+use scirs2_fft::{FftPlanner, RealFftPlanner};
 use std::collections::HashMap;
 
 /// Processor for harmonic enhancement in singing voices
 pub struct HarmonicProcessor {
     /// Configuration
     config: HarmonicEnhancementConfig,
-    /// FFT planner for harmonic analysis
-    fft_planner: FftPlanner<f32>,
     /// Window size for analysis
     window_size: usize,
     /// Hop size for analysis
@@ -58,7 +57,6 @@ impl HarmonicProcessor {
     pub fn new(config: &HarmonicEnhancementConfig) -> Result<Self> {
         let mut processor = Self {
             config: config.clone(),
-            fft_planner: FftPlanner::new(),
             window_size: 4096,
             hop_size: 1024,
             sample_rate: 22050,
@@ -126,7 +124,7 @@ impl HarmonicProcessor {
     }
 
     /// Analyze harmonic content in a frame
-    fn analyze_harmonics(&mut self, frame: &ndarray::ArrayView1<f32>) -> Result<HarmonicAnalysis> {
+    fn analyze_harmonics(&mut self, frame: &ArrayView1<f32>) -> Result<HarmonicAnalysis> {
         // Convert mel frame to linear spectrum
         let spectrum = self.mel_to_linear_spectrum(frame)?;
 
@@ -134,20 +132,25 @@ impl HarmonicProcessor {
         let windowed_spectrum = self.apply_hann_window(&spectrum);
 
         // Perform FFT
-        let mut fft_input: Vec<Complex<f32>> = windowed_spectrum
+        let fft_input: Vec<Complex<f32>> = windowed_spectrum
             .iter()
             .map(|&x| Complex::new(x, 0.0))
             .collect();
 
-        let fft = self.fft_planner.plan_fft_forward(fft_input.len());
-        fft.process(&mut fft_input);
+        let fft_output_f64 = scirs2_fft::fft(&fft_input, None)?;
+
+        // Convert f64 output to f32 for processing
+        let fft_output: Vec<Complex<f32>> = fft_output_f64
+            .into_iter()
+            .map(|c| Complex::new(c.re as f32, c.im as f32))
+            .collect();
 
         // Detect fundamental frequency
-        let fundamental_freq = self.detect_fundamental_frequency(&fft_input)?;
+        let fundamental_freq = self.detect_fundamental_frequency(&fft_output)?;
 
         // Extract harmonic information
         let (harmonic_freqs, harmonic_magnitudes, harmonic_phases) =
-            self.extract_harmonics(&fft_input, fundamental_freq)?;
+            self.extract_harmonics(&fft_output, fundamental_freq)?;
 
         // Detect voice type
         let voice_type = self.detect_voice_type(fundamental_freq, &harmonic_magnitudes)?;
@@ -350,7 +353,7 @@ impl HarmonicProcessor {
     }
 
     /// Convert mel frame to linear spectrum
-    fn mel_to_linear_spectrum(&mut self, frame: &ndarray::ArrayView1<f32>) -> Result<Vec<f32>> {
+    fn mel_to_linear_spectrum(&mut self, frame: &ArrayView1<f32>) -> Result<Vec<f32>> {
         let mel_bins = frame.len();
         let mut spectrum = vec![0.0; self.window_size / 2 + 1];
 
@@ -459,7 +462,7 @@ pub struct HarmonicStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::Array1;
+    use scirs2_core::ndarray::Array1;
 
     #[test]
     fn test_harmonic_processor_creation() {

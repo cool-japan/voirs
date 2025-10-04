@@ -34,7 +34,7 @@ pub struct StreamingConverter {
     state: StreamState,
 }
 
-/// Stream processing state
+/// Stream processing state tracking current operation status
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamState {
     /// Stream is idle
@@ -187,11 +187,11 @@ impl StreamingConverter {
                 let mut converter = realtime_converter.lock().await;
                 match converter.process_chunk(&chunk).await {
                     Ok(processed_chunk) => {
-                        if !processed_chunk.is_empty() {
-                            if tx.send(Ok(processed_chunk)).await.is_err() {
-                                warn!("Receiver dropped, stopping processing");
-                                break;
-                            }
+                        if !processed_chunk.is_empty()
+                            && tx.send(Ok(processed_chunk)).await.is_err()
+                        {
+                            warn!("Receiver dropped, stopping processing");
+                            break;
                         }
                     }
                     Err(e) => {
@@ -344,11 +344,10 @@ impl StreamingConverter {
                     let mut converter = converter_clone.lock().await;
                     match converter.process_chunk(&chunk).await {
                         Ok(processed) => {
-                            if !processed.is_empty() {
-                                if tx_clone.send(Ok(processed)).await.is_err() {
-                                    debug!("Stream {} receiver dropped", stream_id);
-                                    break;
-                                }
+                            if !processed.is_empty() && tx_clone.send(Ok(processed)).await.is_err()
+                            {
+                                debug!("Stream {} receiver dropped", stream_id);
+                                break;
                             }
                         }
                         Err(e) => {
@@ -377,7 +376,7 @@ pub struct StreamProcessor {
     load_balancer: LoadBalancer,
 }
 
-/// Load balancer for distributing processing load
+/// Load balancer for distributing processing load across converters
 #[derive(Debug, Clone)]
 pub struct LoadBalancer {
     /// Load balancing strategy
@@ -386,7 +385,7 @@ pub struct LoadBalancer {
     round_robin_index: usize,
 }
 
-/// Load balancing strategies
+/// Load balancing strategies for distributing stream processing
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoadBalancingStrategy {
     /// Round-robin distribution
@@ -397,7 +396,7 @@ pub enum LoadBalancingStrategy {
     Random,
 }
 
-/// Configuration for stream processing
+/// Configuration for stream processing with buffering and latency settings
 #[derive(Debug, Clone)]
 pub struct StreamConfig {
     /// Chunk size for processing
@@ -587,7 +586,7 @@ impl LoadBalancer {
     }
 }
 
-/// Audio stream wrapper
+/// Audio stream wrapper providing buffered audio playback
 #[derive(Debug)]
 pub struct AudioStream {
     /// Audio data
@@ -600,7 +599,7 @@ pub struct AudioStream {
     format: AudioFormat,
 }
 
-/// Stream metadata
+/// Stream metadata containing identification and source information
 #[derive(Debug, Clone)]
 pub struct StreamMetadata {
     /// Stream identifier
@@ -613,7 +612,7 @@ pub struct StreamMetadata {
     pub created_at: std::time::SystemTime,
 }
 
-/// Audio format specification
+/// Audio format specification defining sample rate and encoding
 #[derive(Debug, Clone)]
 pub struct AudioFormat {
     /// Sample rate in Hz
@@ -626,7 +625,7 @@ pub struct AudioFormat {
     pub encoding: AudioEncoding,
 }
 
-/// Audio encoding types
+/// Audio encoding types supported for streaming
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AudioEncoding {
     /// Linear PCM
@@ -635,7 +634,9 @@ pub enum AudioEncoding {
     Float32,
     /// Compressed formats
     MP3,
+    /// Advanced Audio Coding
     AAC,
+    /// Opus audio codec
     Opus,
 }
 
@@ -725,7 +726,7 @@ impl Default for AudioFormat {
     }
 }
 
-/// Processed audio stream
+/// Processed audio stream with conversion applied
 #[derive(Debug)]
 pub struct ProcessedAudioStream {
     /// Source stream
@@ -740,7 +741,7 @@ pub struct ProcessedAudioStream {
     error_recovery: ErrorRecoveryState,
 }
 
-/// Error recovery state
+/// Error recovery state tracking failures and recovery strategy
 #[derive(Debug, Clone)]
 pub struct ErrorRecoveryState {
     /// Number of consecutive errors
@@ -751,7 +752,7 @@ pub struct ErrorRecoveryState {
     strategy: ErrorRecoveryStrategy,
 }
 
-/// Error recovery strategies
+/// Error recovery strategies for handling stream errors
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorRecoveryStrategy {
     /// Skip problematic chunks
@@ -902,7 +903,7 @@ impl Default for StreamConfig {
     }
 }
 
-/// Streaming statistics
+/// Streaming statistics for performance monitoring
 #[derive(Debug, Clone, Default)]
 pub struct StreamingStats {
     /// Total chunks processed
@@ -966,7 +967,7 @@ impl StreamingStats {
     }
 }
 
-/// Processor statistics
+/// Processor statistics aggregating metrics across converters
 #[derive(Debug, Clone)]
 pub struct ProcessorStats {
     /// Total number of converters

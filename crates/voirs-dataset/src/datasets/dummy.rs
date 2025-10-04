@@ -9,8 +9,7 @@ use crate::{
     Result, SpeakerInfo, ValidationReport,
 };
 use async_trait::async_trait;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use scirs2_core::random::{Random, Rng, SeedableRng};
 use std::collections::HashMap;
 
 /// Configuration for dummy dataset generation
@@ -99,10 +98,14 @@ impl DummyDataset {
     /// Create dummy dataset with specific configuration
     pub fn with_config(config: DummyConfig) -> Self {
         let mut rng = if let Some(seed) = config.seed {
-            StdRng::seed_from_u64(seed)
+            Random::seed(seed)
         } else {
-            use rand::thread_rng;
-            StdRng::from_rng(&mut thread_rng())
+            Random::seed(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            )
         };
 
         let mut samples = Vec::with_capacity(config.num_samples);
@@ -203,7 +206,11 @@ impl DummyDataset {
     }
 
     /// Generate synthetic audio based on configuration
-    fn generate_audio(config: &DummyConfig, duration: f32, rng: &mut StdRng) -> AudioData {
+    fn generate_audio<R: scirs2_core::random::Rng>(
+        config: &DummyConfig,
+        duration: f32,
+        rng: &mut R,
+    ) -> AudioData {
         let num_samples = (duration * config.sample_rate as f32 * config.channels as f32) as usize;
         let mut samples = Vec::with_capacity(num_samples);
 
@@ -282,7 +289,11 @@ impl DummyDataset {
     }
 
     /// Generate synthetic text based on configuration
-    fn generate_text(config: &DummyConfig, index: usize, rng: &mut StdRng) -> String {
+    fn generate_text<R: scirs2_core::random::Rng>(
+        config: &DummyConfig,
+        index: usize,
+        rng: &mut R,
+    ) -> String {
         match config.text_type {
             TextType::Lorem => {
                 let lorem_words = vec![

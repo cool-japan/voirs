@@ -8,6 +8,7 @@ use voirs_sdk::Phoneme;
 
 /// An aligned phoneme with timing information
 #[derive(Debug, Clone, PartialEq)]
+/// Aligned Phoneme
 pub struct AlignedPhoneme {
     /// The phoneme data
     pub phoneme: Phoneme,
@@ -22,6 +23,7 @@ pub struct AlignedPhoneme {
 impl AlignedPhoneme {
     /// Create a new aligned phoneme
     #[must_use]
+    /// new
     pub fn new(phoneme: Phoneme, start_time: f32, end_time: f32, confidence: f32) -> Self {
         Self {
             phoneme,
@@ -33,12 +35,14 @@ impl AlignedPhoneme {
 
     /// Get the duration of the phoneme in seconds
     #[must_use]
+    /// duration
     pub fn duration(&self) -> f32 {
         self.end_time - self.start_time
     }
 
     /// Check if this phoneme overlaps with another in time
     #[must_use]
+    /// overlaps with
     pub fn overlaps_with(&self, other: &AlignedPhoneme) -> bool {
         !(self.end_time <= other.start_time || other.end_time <= self.start_time)
     }
@@ -46,6 +50,7 @@ impl AlignedPhoneme {
 
 /// Word alignment with associated phonemes
 #[derive(Debug, Clone, PartialEq)]
+/// Word Alignment
 pub struct WordAlignment {
     /// The word text
     pub word: String,
@@ -62,6 +67,7 @@ pub struct WordAlignment {
 impl WordAlignment {
     /// Create a new word alignment
     #[must_use]
+    /// new
     pub fn new(
         word: String,
         start_time: f32,
@@ -80,12 +86,14 @@ impl WordAlignment {
 
     /// Get the duration of the word in seconds
     #[must_use]
+    /// duration
     pub fn duration(&self) -> f32 {
         self.end_time - self.start_time
     }
 
     /// Get the average phoneme confidence
     #[must_use]
+    /// average phoneme confidence
     pub fn average_phoneme_confidence(&self) -> f32 {
         if self.phonemes.is_empty() {
             0.0
@@ -97,6 +105,7 @@ impl WordAlignment {
 
 /// Complete phoneme alignment result
 #[derive(Debug, Clone, PartialEq)]
+/// Phoneme Alignment
 pub struct PhonemeAlignment {
     /// All aligned phonemes
     pub phonemes: Vec<AlignedPhoneme>,
@@ -113,6 +122,7 @@ pub struct PhonemeAlignment {
 impl PhonemeAlignment {
     /// Create a new phoneme alignment
     #[must_use]
+    /// new
     pub fn new(
         phonemes: Vec<AlignedPhoneme>,
         word_alignments: Vec<WordAlignment>,
@@ -136,6 +146,7 @@ impl PhonemeAlignment {
 
     /// Get phonemes within a time range
     #[must_use]
+    /// phonemes in range
     pub fn phonemes_in_range(&self, start_time: f32, end_time: f32) -> Vec<&AlignedPhoneme> {
         self.phonemes
             .iter()
@@ -145,6 +156,7 @@ impl PhonemeAlignment {
 
     /// Get words within a time range
     #[must_use]
+    /// words in range
     pub fn words_in_range(&self, start_time: f32, end_time: f32) -> Vec<&WordAlignment> {
         self.word_alignments
             .iter()
@@ -154,6 +166,7 @@ impl PhonemeAlignment {
 
     /// Calculate speech rate (phonemes per second)
     #[must_use]
+    /// speech rate
     pub fn speech_rate(&self) -> f32 {
         if self.total_duration > 0.0 {
             self.phonemes.len() as f32 / self.total_duration
@@ -164,6 +177,7 @@ impl PhonemeAlignment {
 
     /// Calculate average phoneme duration
     #[must_use]
+    /// average phoneme duration
     pub fn average_phoneme_duration(&self) -> f32 {
         if self.phonemes.is_empty() {
             0.0
@@ -178,6 +192,7 @@ impl PhonemeAlignment {
 
     /// Get alignment statistics
     #[must_use]
+    /// statistics
     pub fn statistics(&self) -> AlignmentStatistics {
         AlignmentStatistics {
             total_phonemes: self.phonemes.len(),
@@ -192,6 +207,7 @@ impl PhonemeAlignment {
 
 /// Alignment statistics
 #[derive(Debug, Clone, PartialEq)]
+/// Alignment Statistics
 pub struct AlignmentStatistics {
     /// Total number of phonemes
     pub total_phonemes: usize,
@@ -209,6 +225,7 @@ pub struct AlignmentStatistics {
 
 /// Phoneme analysis configuration
 #[derive(Debug, Clone, PartialEq)]
+/// Analysis Config
 pub struct AnalysisConfig {
     /// Minimum confidence threshold for accepting alignments
     pub confidence_threshold: f32,
@@ -236,6 +253,7 @@ impl Default for AnalysisConfig {
 
 /// Syllable boundary detection result
 #[derive(Debug, Clone, PartialEq)]
+/// Syllable Boundary
 pub struct SyllableBoundary {
     /// Position in phoneme sequence
     pub position: usize,
@@ -247,6 +265,7 @@ pub struct SyllableBoundary {
 
 /// Type of syllable boundary
 #[derive(Debug, Clone, PartialEq)]
+/// Boundary Type
 pub enum BoundaryType {
     /// Strong boundary (clear syllable break)
     Strong,
@@ -258,6 +277,7 @@ pub enum BoundaryType {
 
 /// Stress pattern detection result
 #[derive(Debug, Clone, PartialEq)]
+/// Stress Pattern
 pub struct StressPattern {
     /// Stress level (0 = unstressed, 1 = primary, 2 = secondary)
     pub stress_level: u8,
@@ -269,6 +289,7 @@ pub struct StressPattern {
 
 /// Acoustic features indicating stress
 #[derive(Debug, Clone, PartialEq)]
+/// Stress Features
 pub struct StressFeatures {
     /// Relative duration (compared to unstressed syllables)
     pub duration_ratio: f32,
@@ -282,6 +303,7 @@ pub struct StressFeatures {
 
 /// Phoneme-to-text mapping result
 #[derive(Debug, Clone, PartialEq)]
+/// Phoneme Text Mapping
 pub struct PhonemeTextMapping {
     /// Original text
     pub text: String,
@@ -295,6 +317,7 @@ pub struct PhonemeTextMapping {
 
 /// Word boundary information
 #[derive(Debug, Clone, PartialEq)]
+/// Word Boundary
 pub struct WordBoundary {
     /// Start character index in text
     pub text_start: usize,
@@ -310,6 +333,7 @@ pub struct WordBoundary {
 
 /// Phonological feature analysis
 #[derive(Debug, Clone, PartialEq)]
+/// Phonological Analysis
 pub struct PhonologicalAnalysis {
     /// Phoneme being analyzed
     pub phoneme: String,
@@ -325,60 +349,99 @@ pub struct PhonologicalAnalysis {
 
 /// Place of articulation features
 #[derive(Debug, Clone, PartialEq)]
+/// Place Features
 pub struct PlaceFeatures {
+    /// Bilabial articulation (both lips)
     pub bilabial: bool,
+    /// Labiodental articulation (lip and teeth)
     pub labiodental: bool,
+    /// Dental articulation (tongue and teeth)
     pub dental: bool,
+    /// Alveolar articulation (tongue and alveolar ridge)
     pub alveolar: bool,
+    /// Postalveolar articulation (behind alveolar ridge)
     pub postalveolar: bool,
+    /// Retroflex articulation (tongue curled back)
     pub retroflex: bool,
+    /// Palatal articulation (tongue and hard palate)
     pub palatal: bool,
+    /// Velar articulation (tongue and soft palate)
     pub velar: bool,
+    /// Uvular articulation (tongue and uvula)
     pub uvular: bool,
+    /// Pharyngeal articulation (root of tongue and pharynx)
     pub pharyngeal: bool,
+    /// Glottal articulation (vocal folds)
     pub glottal: bool,
 }
 
 /// Manner of articulation features
 #[derive(Debug, Clone, PartialEq)]
+/// Manner Features
 pub struct MannerFeatures {
+    /// Stop/plosive articulation (complete closure)
     pub stop: bool,
+    /// Fricative articulation (narrow constriction)
     pub fricative: bool,
+    /// Affricate articulation (stop + fricative)
     pub affricate: bool,
+    /// Nasal articulation (air through nose)
     pub nasal: bool,
+    /// Lateral articulation (air around tongue sides)
     pub lateral: bool,
+    /// Approximant articulation (slight constriction)
     pub approximant: bool,
+    /// Trill articulation (rapid vibration)
     pub trill: bool,
+    /// Tap/flap articulation (brief contact)
     pub tap: bool,
 }
 
 /// Binary phonological features
 #[derive(Debug, Clone, PartialEq)]
+/// Binary Features
 pub struct BinaryFeatures {
+    /// Voiced articulation (vocal fold vibration)
     pub voiced: bool,
+    /// Aspirated articulation (puff of air)
     pub aspirated: bool,
+    /// Syllabic (forms syllable nucleus)
     pub syllabic: bool,
+    /// Consonantal (significant vocal tract constriction)
     pub consonantal: bool,
+    /// Sonorant (relatively open vocal tract)
     pub sonorant: bool,
+    /// Continuant (allows air to flow continuously)
     pub continuant: bool,
+    /// Delayed release (gradual air release)
     pub delayed_release: bool,
+    /// Approximant (minimal constriction)
     pub approximant: bool,
 }
 
 /// Prosodic features
 #[derive(Debug, Clone, PartialEq)]
+/// Prosodic Features
 pub struct ProsodicFeatures {
-    pub stress: u8,           // 0=unstressed, 1=primary, 2=secondary
-    pub tone: Option<String>, // For tonal languages
+    /// Stress level (0=unstressed, 1=primary, 2=secondary)
+    pub stress: u8,
+    /// Tone for tonal languages
+    pub tone: Option<String>,
+    /// Phoneme length classification
     pub length: LengthType,
 }
 
 /// Phoneme length classification
 #[derive(Debug, Clone, PartialEq)]
+/// Length Type
 pub enum LengthType {
+    /// Short
     Short,
+    /// Normal
     Normal,
+    /// Long
     Long,
+    /// Overlong
     Overlong,
 }
 
@@ -392,6 +455,7 @@ pub mod utils {
 
     /// Validate alignment temporal consistency
     #[must_use]
+    /// validate temporal consistency
     pub fn validate_temporal_consistency(alignment: &PhonemeAlignment) -> Vec<String> {
         let mut issues = Vec::new();
 
@@ -469,6 +533,7 @@ pub mod utils {
 
     /// Filter alignment by confidence threshold
     #[must_use]
+    /// filter by confidence
     pub fn filter_by_confidence(alignment: &PhonemeAlignment, threshold: f32) -> PhonemeAlignment {
         let filtered_phonemes: Vec<AlignedPhoneme> = alignment
             .phonemes
@@ -526,6 +591,7 @@ pub mod utils {
 
     /// Detect syllable boundaries in phoneme sequence
     #[must_use]
+    /// detect syllable boundaries
     pub fn detect_syllable_boundaries(phonemes: &[AlignedPhoneme]) -> Vec<SyllableBoundary> {
         let mut boundaries = Vec::new();
 
@@ -559,6 +625,7 @@ pub mod utils {
 
     /// Calculate syllable boundary strength between two phonemes
     #[must_use]
+    /// calculate syllable boundary strength
     pub fn calculate_syllable_boundary_strength(
         current: &AlignedPhoneme,
         next: &AlignedPhoneme,
@@ -594,6 +661,7 @@ pub mod utils {
 
     /// Detect stress patterns in phoneme sequence
     #[must_use]
+    /// detect stress patterns
     pub fn detect_stress_patterns(
         phonemes: &[AlignedPhoneme],
         syllable_boundaries: &[SyllableBoundary],
@@ -617,6 +685,7 @@ pub mod utils {
 
     /// Extract syllables from phoneme sequence using boundaries
     #[must_use]
+    /// extract syllables
     pub fn extract_syllables(
         phonemes: &[AlignedPhoneme],
         boundaries: &[SyllableBoundary],
@@ -641,6 +710,7 @@ pub mod utils {
 
     /// Calculate acoustic stress features for a syllable
     #[must_use]
+    /// calculate stress features
     pub fn calculate_stress_features(
         syllable: &[AlignedPhoneme],
         all_syllables: &[Vec<AlignedPhoneme>],
@@ -696,6 +766,7 @@ pub mod utils {
 
     /// Create phoneme-to-text mapping
     #[must_use]
+    /// create phoneme text mapping
     pub fn create_phoneme_text_mapping(
         text: &str,
         phonemes: Vec<AlignedPhoneme>,
@@ -760,6 +831,7 @@ pub mod utils {
 
     /// Extract phonological features for a phoneme
     #[must_use]
+    /// extract phonological features
     pub fn extract_phonological_features(phoneme: &str) -> PhonologicalAnalysis {
         PhonologicalAnalysis {
             phoneme: phoneme.to_string(),
@@ -873,6 +945,7 @@ pub mod utils {
 
     /// Simple vowel detection
     #[must_use]
+    /// is vowel
     pub fn is_vowel(phoneme: &str) -> bool {
         matches!(
             phoneme,

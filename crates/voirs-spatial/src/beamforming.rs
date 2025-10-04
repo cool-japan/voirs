@@ -7,9 +7,9 @@
 
 use crate::types::Position3D;
 use crate::{Error, Result};
-use ndarray::{Array1, Array2, Array3, Axis};
-use num_complex::Complex32;
-use realfft::{RealFftPlanner, RealToComplex};
+use scirs2_core::ndarray::{s, Array1, Array2, Array3, Axis};
+use scirs2_core::Complex32;
+use scirs2_fft::{irfft, rfft, FftPlanner, RealFftPlanner, RealToComplex};
 use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
 use std::sync::Arc;
@@ -130,7 +130,7 @@ pub struct BeamformingProcessor {
     /// Forward FFT
     forward_fft: Arc<dyn RealToComplex<f32>>,
     /// Inverse FFT
-    inverse_fft: Arc<dyn realfft::ComplexToReal<f32>>,
+    inverse_fft: Arc<dyn scirs2_fft::ComplexToReal<f32>>,
     /// Covariance matrix for adaptive algorithms
     covariance_matrix: Array3<Complex32>, // [frequency x array x array]
     /// Input buffer for processing
@@ -276,9 +276,9 @@ impl BeamformingProcessor {
             let mut block = Array2::zeros((self.config.array_size, block_size));
             for (ch_idx, mut block_row) in block.rows_mut().into_iter().enumerate() {
                 let input_row = input.row(ch_idx);
-                let input_slice = input_row.slice(ndarray::s![block_start..block_end]);
+                let input_slice = input_row.slice(s![block_start..block_end]);
                 block_row
-                    .slice_mut(ndarray::s![..current_block_size])
+                    .slice_mut(s![..current_block_size])
                     .assign(&input_slice);
             }
 
@@ -290,11 +290,7 @@ impl BeamformingProcessor {
             let output_end = (output_start + block_output.len()).min(frame_size);
             let copy_length = output_end - output_start;
 
-            for (i, &value) in block_output
-                .slice(ndarray::s![..copy_length])
-                .iter()
-                .enumerate()
-            {
+            for (i, &value) in block_output.slice(s![..copy_length]).iter().enumerate() {
                 if output_start + i < output.len() {
                     output[output_start + i] += value;
                 }
@@ -332,9 +328,7 @@ impl BeamformingProcessor {
             padded_input.resize(frequency_bins * 2 - 2, 0.0);
 
             let mut spectrum = vec![Complex32::new(0.0, 0.0); frequency_bins];
-            self.forward_fft
-                .process(&mut padded_input, &mut spectrum)
-                .map_err(|e| Error::LegacyProcessing(format!("FFT error: {e:?}")))?;
+            self.forward_fft.process(&padded_input, &mut spectrum);
 
             for (freq_idx, &spectrum_value) in spectrum.iter().enumerate() {
                 self.input_buffer[[ch_idx, freq_idx]] = spectrum_value;
@@ -369,9 +363,7 @@ impl BeamformingProcessor {
         let mut spectrum = self.output_buffer.to_vec();
         let mut output = vec![0.0; buffer_size];
 
-        self.inverse_fft
-            .process(&mut spectrum, &mut output)
-            .map_err(|e| Error::LegacyProcessing(format!("IFFT error: {e:?}")))?;
+        self.inverse_fft.process(&spectrum, &mut output);
 
         Ok(Array1::from_vec(output))
     }
@@ -577,7 +569,7 @@ impl BeamformingProcessor {
         let mut directions = Vec::new();
         let mut confidence = Vec::new();
 
-        for (az_idx, el_idx) in ndarray::indices_of(&spectrum) {
+        for (az_idx, el_idx) in scirs2_core::ndarray::indices_of(&spectrum) {
             if spectrum[[az_idx, el_idx]] > threshold {
                 let azimuth = angles[az_idx];
                 let elevation = elevation_range.start + el_idx as f32 * elevation_resolution;
@@ -711,10 +703,10 @@ impl BeamformingProcessor {
         let quarter = response.len() / 4;
 
         let left_side_max = response
-            .slice(ndarray::s![..center - quarter])
+            .slice(s![..center - quarter])
             .fold(f32::NEG_INFINITY, |a, &b| a.max(b));
         let right_side_max = response
-            .slice(ndarray::s![center + quarter..])
+            .slice(s![center + quarter..])
             .fold(f32::NEG_INFINITY, |a, &b| a.max(b));
 
         left_side_max.max(right_side_max) - max_response

@@ -413,14 +413,23 @@ pub struct RetentionPredictions {
 /// Comprehensive UX analytics report
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UxAnalyticsReport {
+    /// Description
     pub engagement_analytics: EngagementAnalytics,
+    /// Description
     pub session_analytics: SessionAnalytics,
+    /// Description
     pub satisfaction_analytics: SatisfactionAnalytics,
+    /// Description
     pub retention_analytics: RetentionAnalytics,
+    /// Description
     pub progress_analytics: ProgressAnalytics,
+    /// Description
     pub behavior_analytics: BehaviorAnalytics,
+    /// Description
     pub insights: UxInsightsEngine,
+    /// Description
     pub csf_compliance: CsfComplianceStatus,
+    /// Description
     pub generated_at: DateTime<Utc>,
 }
 

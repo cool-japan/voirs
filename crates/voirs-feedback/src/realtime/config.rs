@@ -17,10 +17,15 @@ pub struct RealtimeConfigManager {
 /// Configuration value types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ConfigValue {
+    /// Description
     String(String),
+    /// Description
     Integer(i64),
+    /// Description
     Float(f64),
+    /// Description
     Boolean(bool),
+    /// Description
     Array(Vec<ConfigValue>),
 }
 

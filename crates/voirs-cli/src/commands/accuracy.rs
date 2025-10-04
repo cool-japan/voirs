@@ -9,6 +9,9 @@ use std::path::PathBuf;
 use tokio::time::Instant;
 
 #[cfg(not(doctest))]
+use async_trait::async_trait;
+
+#[cfg(not(doctest))]
 use voirs_evaluation::accuracy_benchmarks::{
     AccuracyBenchmarkConfig, AccuracyBenchmarkRunner, DatasetConfig, DatasetType, LanguageCode,
 };
@@ -804,6 +807,7 @@ fn generate_html_report(
 #[cfg(not(doctest))]
 struct DummyG2pSystem;
 #[cfg(not(doctest))]
+#[async_trait]
 impl voirs_evaluation::accuracy_benchmarks::G2pSystem for DummyG2pSystem {
     async fn convert_to_phonemes(
         &self,
@@ -817,6 +821,7 @@ impl voirs_evaluation::accuracy_benchmarks::G2pSystem for DummyG2pSystem {
 #[cfg(not(doctest))]
 struct DummyTtsSystem;
 #[cfg(not(doctest))]
+#[async_trait]
 impl voirs_evaluation::accuracy_benchmarks::TtsSystem for DummyTtsSystem {
     async fn synthesize(
         &self,
@@ -830,6 +835,7 @@ impl voirs_evaluation::accuracy_benchmarks::TtsSystem for DummyTtsSystem {
 #[cfg(not(doctest))]
 struct DummyAsrSystem;
 #[cfg(not(doctest))]
+#[async_trait]
 impl voirs_evaluation::accuracy_benchmarks::AsrSystem for DummyAsrSystem {
     async fn transcribe(
         &self,

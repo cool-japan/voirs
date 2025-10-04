@@ -94,13 +94,35 @@ pub struct VariationPattern {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum VariationEnvelope {
     /// Linear envelope
-    Linear { attack: f32, decay: f32 },
+    Linear {
+        /// Attack time in seconds
+        attack: f32,
+        /// Decay time in seconds
+        decay: f32,
+    },
     /// Exponential envelope
-    Exponential { attack: f32, decay: f32, curve: f32 },
+    Exponential {
+        /// Attack time in seconds
+        attack: f32,
+        /// Decay time in seconds
+        decay: f32,
+        /// Exponential curve factor
+        curve: f32,
+    },
     /// Sinusoidal envelope
-    Sinusoidal { frequency: f32, amplitude: f32 },
+    Sinusoidal {
+        /// Oscillation frequency in Hz
+        frequency: f32,
+        /// Oscillation amplitude (0.0 to 1.0)
+        amplitude: f32,
+    },
     /// Random walk envelope
-    RandomWalk { step_size: f32, bounds: (f32, f32) },
+    RandomWalk {
+        /// Step size for random walk
+        step_size: f32,
+        /// Minimum and maximum bounds (min, max)
+        bounds: (f32, f32),
+    },
 }
 
 /// Applied variation instance
@@ -135,21 +157,31 @@ pub struct SpeakerCharacteristics {
     pub quirks: Vec<SpeakingQuirk>,
 }
 
+/// Age group classification for speaker characteristics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgeGroup {
+    /// Child speaker (under 18 years)
     Child,
+    /// Young adult speaker (18-35 years)
     YoungAdult,
+    /// Middle-aged speaker (36-60 years)
     MiddleAged,
+    /// Senior speaker (over 60 years)
     Senior,
 }
 
+/// Gender classification for speaker characteristics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Gender {
+    /// Male gender voice characteristics
     Male,
+    /// Female gender voice characteristics
     Female,
+    /// Non-binary gender voice characteristics
     NonBinary,
 }
 
+/// Breathing pattern characteristics for natural speech variation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BreathingPattern {
     /// Breathing rate (breaths per minute)
@@ -160,6 +192,7 @@ pub struct BreathingPattern {
     pub emotion_influence: f32,
 }
 
+/// Speaking quirk representing individual speech patterns and habits
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpeakingQuirk {
     /// Quirk name

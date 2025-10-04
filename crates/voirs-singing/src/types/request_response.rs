@@ -88,6 +88,11 @@ pub struct SingingStats {
 }
 
 impl Default for QualitySettings {
+    /// Create default quality settings
+    ///
+    /// # Returns
+    ///
+    /// Quality settings with level 7, all advanced features enabled, FFT size 2048, hop size 512
     fn default() -> Self {
         Self {
             quality_level: 7,
@@ -102,6 +107,11 @@ impl Default for QualitySettings {
 }
 
 impl Default for SingingStats {
+    /// Create default singing statistics with all metrics set to zero
+    ///
+    /// # Returns
+    ///
+    /// Statistics instance with zero values for all quality metrics
     fn default() -> Self {
         Self {
             total_notes: 0,

@@ -963,7 +963,7 @@ impl AccuracyBenchmarkRunner {
             LanguageCode::EnUs => {
                 // Simulate common English G2P errors
                 {
-                    use rand::{thread_rng, Rng};
+                    use scirs2_core::random::{thread_rng, Rng};
                     let mut rng = thread_rng();
                     if rng.r#gen::<f64>() < 0.05 {
                         // 5% chance of error
@@ -977,7 +977,7 @@ impl AccuracyBenchmarkRunner {
             LanguageCode::Ja => {
                 // Simulate common Japanese errors
                 {
-                    use rand::{thread_rng, Rng};
+                    use scirs2_core::random::{thread_rng, Rng};
                     let mut rng = thread_rng();
                     if rng.r#gen::<f64>() < 0.08 {
                         // 8% chance of error
@@ -990,7 +990,7 @@ impl AccuracyBenchmarkRunner {
             _ => {
                 // Default simulation
                 {
-                    use rand::{thread_rng, Rng};
+                    use scirs2_core::random::{thread_rng, Rng};
                     let mut rng = thread_rng();
                     if rng.r#gen::<f64>() < 0.10 {
                         if !result.is_empty() {
@@ -1334,6 +1334,7 @@ impl AccuracyBenchmarkRunner {
 // Helper traits for system interfaces
 
 /// Trait for grapheme-to-phoneme conversion systems
+#[async_trait::async_trait]
 pub trait G2pSystem {
     /// Convert text to phonemes for a given language
     async fn convert_to_phonemes(
@@ -1344,6 +1345,7 @@ pub trait G2pSystem {
 }
 
 /// Trait for text-to-speech synthesis systems
+#[async_trait::async_trait]
 pub trait TtsSystem {
     /// Synthesize audio from text for a given language
     async fn synthesize(
@@ -1354,6 +1356,7 @@ pub trait TtsSystem {
 }
 
 /// Trait for automatic speech recognition systems
+#[async_trait::async_trait]
 pub trait AsrSystem {
     /// Transcribe audio to text for a given language
     async fn transcribe(

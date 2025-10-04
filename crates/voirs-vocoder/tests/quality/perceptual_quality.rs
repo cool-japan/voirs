@@ -119,7 +119,8 @@ impl QualityAssessor {
     
     /// Calculate spectral centroid
     fn calculate_spectral_centroid(&self, samples: &[f32]) -> f32 {
-        use rustfft::{FftPlanner, num_complex::Complex};
+        use scirs2_fft::FftPlanner;
+        use scirs2_core::Complex;
         
         let mut planner = FftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(self.frame_size);
@@ -177,7 +178,8 @@ impl QualityAssessor {
     
     /// Calculate spectral rolloff
     fn calculate_spectral_rolloff(&self, samples: &[f32]) -> f32 {
-        use rustfft::{FftPlanner, num_complex::Complex};
+        use scirs2_fft::FftPlanner;
+        use scirs2_core::Complex;
         
         let mut planner = FftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(self.frame_size);

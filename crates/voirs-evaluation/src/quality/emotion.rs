@@ -7,7 +7,7 @@
 use crate::traits::{EvaluationResult, QualityEvaluationConfig, QualityMetric};
 use crate::EvaluationError;
 use async_trait::async_trait;
-use rayon::prelude::*;
+use scirs2_core::parallel_ops::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Instant;
@@ -738,7 +738,7 @@ impl EmotionalSpeechEvaluator {
                     start_time: i as f32 * 0.025, // Assuming 25ms frames
                     duration: 0.025,
                     emotion: predicted_emotion,
-                    confidence: confidence * 0.9 + rand::random::<f32>() * 0.2, // Add some variation
+                    confidence: confidence * 0.9 + scirs2_core::random::random::<f32>() * 0.2, // Add some variation
                     prosodic_features: feature.clone(),
                 }
             })

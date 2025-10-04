@@ -4,7 +4,7 @@
 //! of cloned voices through acoustic parameter manipulation and voice characteristic transformation.
 
 use crate::{types::VoiceSample, Error, Result};
-use ndarray::{Array1, Array2};
+use scirs2_core::ndarray::{Array1, Array2};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

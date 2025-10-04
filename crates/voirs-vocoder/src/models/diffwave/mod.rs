@@ -6,9 +6,11 @@
 //! - DDPM/DDIM sampling algorithms
 //! - Forward and reverse diffusion processes
 
+pub mod diffusion;
 pub mod legacy;
 pub mod sampling;
 pub mod schedule;
+// pub mod trainer;  // Has Candle API compatibility issues, implementing simplified training directly
 pub mod unet;
 
 use async_trait::async_trait;
@@ -32,6 +34,9 @@ pub use unet::{EnhancedUNet, EnhancedUNetConfig};
 pub use legacy::{
     DiffWaveSampler as LegacyDiffWaveSampler, UNet as LegacyUNet, UNetConfig as LegacyUNetConfig,
 };
+
+// Re-export diffusion model types
+pub use diffusion::{DiffWave, DiffWaveConfig as DiffusionDiffWaveConfig, SamplingMethod};
 
 /// Enhanced DiffWave configuration using new modules
 #[derive(Debug, Clone, Serialize, Deserialize)]

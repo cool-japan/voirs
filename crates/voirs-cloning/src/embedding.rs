@@ -3,8 +3,7 @@
 use crate::{types::VoiceSample, Error, Result};
 use candle_core::{DType, Device, Tensor};
 use candle_nn::{conv2d, linear, Conv2d, Linear, Module, VarBuilder};
-use ndarray::Array2;
-use realfft::RealFftPlanner;
+use scirs2_core::ndarray::Array2;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -355,7 +354,6 @@ pub struct SpeakerMatch {
 /// Feature extractor for audio preprocessing
 pub struct FeatureExtractor {
     config: EmbeddingConfig,
-    fft_planner: RealFftPlanner<f32>,
     mel_filterbank: Option<Array2<f32>>,
     dct_matrix: Option<Array2<f32>>,
 }
@@ -1038,13 +1036,15 @@ impl SpeakerEmbeddingExtractor {
 
         // Speed perturbation
         if let Some((min_speed, max_speed)) = config.speed_range {
-            let speed_factor = min_speed + rand::random::<f32>() * (max_speed - min_speed);
+            let speed_factor =
+                min_speed + scirs2_core::random::random::<f32>() * (max_speed - min_speed);
             augmented = self.change_speed(&augmented, speed_factor)?;
         }
 
         // Volume perturbation
         if let Some((min_vol, max_vol)) = config.volume_range {
-            let volume_factor = min_vol + rand::random::<f32>() * (max_vol - min_vol);
+            let volume_factor =
+                min_vol + scirs2_core::random::random::<f32>() * (max_vol - min_vol);
             for sample in &mut augmented {
                 *sample *= volume_factor;
             }
@@ -1681,8 +1681,6 @@ impl std::fmt::Debug for FeatureExtractor {
 impl FeatureExtractor {
     /// Create new feature extractor
     pub fn new(config: EmbeddingConfig) -> Result<Self> {
-        let mut fft_planner = RealFftPlanner::new();
-
         let mel_filterbank = if matches!(
             config.feature_method,
             FeatureExtractionMethod::MelSpectrogram
@@ -1709,7 +1707,6 @@ impl FeatureExtractor {
 
         Ok(Self {
             config,
-            fft_planner,
             mel_filterbank,
             dct_matrix,
         })
@@ -1822,14 +1819,16 @@ impl FeatureExtractor {
                 }
             }
 
-            // Compute FFT using realfft
-            let fft = self.fft_planner.plan_fft_forward(fft_size);
-            let mut spectrum = fft.make_output_vec();
-            fft.process(&mut frame, &mut spectrum).unwrap_or_default();
+            // Compute FFT using rfft
+            let frame_f64: Vec<f64> = frame.iter().map(|&x| x as f64).collect();
+            let spectrum = scirs2_fft::rfft(&frame_f64, None)
+                .unwrap_or_else(|_| vec![scirs2_core::Complex::new(0.0, 0.0); num_bins]);
 
             // Compute magnitude spectrum
             for (j, complex_val) in spectrum.iter().take(num_bins).enumerate() {
-                spectrogram[[frame_idx, j]] = complex_val.norm();
+                spectrogram[[frame_idx, j]] = (complex_val.re * complex_val.re
+                    + complex_val.im * complex_val.im)
+                    .sqrt() as f32;
             }
         }
 

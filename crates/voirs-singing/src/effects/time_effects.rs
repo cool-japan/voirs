@@ -17,6 +17,15 @@ pub struct ReverbEffect {
 }
 
 impl ReverbEffect {
+    /// Creates a new reverb effect for simulating acoustic spaces.
+    ///
+    /// # Arguments
+    ///
+    /// * `parameters` - Effect parameters including room size, damping, wet/dry mix, and width
+    ///
+    /// # Returns
+    ///
+    /// A new `ReverbEffect` instance with Schroeder reverb topology using delay lines and all-pass filters.
     pub fn new(mut parameters: HashMap<String, f32>) -> Self {
         let mut effect = Self {
             name: "reverb".to_string(),
@@ -103,12 +112,9 @@ impl SingingEffect for ReverbEffect {
         self.parameters.insert(name.to_string(), value);
 
         // Update filter parameters if needed
-        match name {
-            "damping" => {
-                let freq = 20000.0 * (1.0 - value);
-                self.low_pass_filter.set_cutoff(freq);
-            }
-            _ => {}
+        if name == "damping" {
+            let freq = 20000.0 * (1.0 - value);
+            self.low_pass_filter.set_cutoff(freq);
         }
 
         Ok(())
@@ -149,6 +155,15 @@ pub struct ChorusEffect {
 }
 
 impl ChorusEffect {
+    /// Creates a new chorus effect for thickening vocal texture.
+    ///
+    /// # Arguments
+    ///
+    /// * `parameters` - Effect parameters including rate, depth, mix, and feedback
+    ///
+    /// # Returns
+    ///
+    /// A new `ChorusEffect` instance with modulated delay line and LFO.
     pub fn new(mut parameters: HashMap<String, f32>) -> Self {
         let mut effect = Self {
             name: "chorus".to_string(),
@@ -243,6 +258,15 @@ pub struct VibratoEffect {
 }
 
 impl VibratoEffect {
+    /// Creates a new vibrato effect for pitch modulation.
+    ///
+    /// # Arguments
+    ///
+    /// * `parameters` - Effect parameters including rate, depth, and intensity
+    ///
+    /// # Returns
+    ///
+    /// A new `VibratoEffect` instance with LFO-controlled delay line for pitch variation.
     pub fn new(mut parameters: HashMap<String, f32>) -> Self {
         let mut effect = Self {
             name: "vibrato".to_string(),

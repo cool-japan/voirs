@@ -34,13 +34,17 @@ where
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EnhancedDeliveryStatus {
     /// Queued for delivery
-    Queued { priority_score: u32 },
+    Queued {
+        /// Priority score used to determine delivery order.
+        priority_score: u32,
+    },
     /// Currently being processed
     Processing {
         #[serde(
             serialize_with = "serialize_instant",
             deserialize_with = "deserialize_instant"
         )]
+        /// Description
         started_at: Instant,
     },
     /// Successfully delivered
@@ -49,27 +53,38 @@ pub enum EnhancedDeliveryStatus {
             serialize_with = "serialize_instant",
             deserialize_with = "deserialize_instant"
         )]
+        /// Description
         delivered_at: Instant,
+        /// Description
         attempts: u32,
     },
     /// Failed delivery with retry schedule
     Failed {
+        /// Description
         reason: String,
         #[serde(
             serialize_with = "serialize_option_instant",
             deserialize_with = "deserialize_option_instant"
         )]
+        /// Description
         next_retry: Option<Instant>,
+        /// Description
         attempt: u32,
     },
     /// Permanently failed (max retries exceeded)
-    Abandoned { reason: String, final_attempt: u32 },
+    Abandoned {
+        /// Explanation of why the notification was abandoned.
+        reason: String,
+        /// Attempt count at which retries stopped.
+        final_attempt: u32,
+    },
     /// Cancelled by user or system
     Cancelled {
         #[serde(
             serialize_with = "serialize_instant",
             deserialize_with = "deserialize_instant"
         )]
+        /// Description
         cancelled_at: Instant,
     },
     /// Expired before delivery
@@ -78,6 +93,7 @@ pub enum EnhancedDeliveryStatus {
             serialize_with = "serialize_instant",
             deserialize_with = "deserialize_instant"
         )]
+        /// Description
         expired_at: Instant,
     },
 }
@@ -127,6 +143,7 @@ pub struct ReliableNotification {
     pub scheduled_for: Option<Instant>,
     /// Retry configuration
     pub max_retries: u32,
+    /// Description
     pub retry_backoff: Duration,
     /// Priority score for queue ordering
     pub priority_score: u32,
@@ -316,18 +333,26 @@ impl Default for HealthStatus {
 /// System health levels
 #[derive(Debug, Clone, PartialEq)]
 pub enum SystemHealth {
+    /// Description
     Healthy,
+    /// Description
     Degraded,
+    /// Description
     Critical,
+    /// Description
     Failed,
 }
 
 /// Component health information
 #[derive(Debug, Clone)]
 pub struct ComponentHealth {
+    /// Description
     pub status: SystemHealth,
+    /// Description
     pub last_success: Option<Instant>,
+    /// Description
     pub consecutive_failures: u32,
+    /// Description
     pub response_time: Option<Duration>,
 }
 

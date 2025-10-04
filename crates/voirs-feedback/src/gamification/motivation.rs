@@ -512,8 +512,11 @@ impl Default for MotivationSystem {
 /// Personality profile based on Big Five model
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersonalityProfile {
+    /// Big Five personality traits
     pub personality_traits: PersonalityTraits,
+    /// Communication preferences
     pub communication_preference: CommunicationPreference,
+    /// Motivation factors
     pub motivation_factors: MotivationFactors,
 }
 
@@ -535,80 +538,115 @@ pub struct PersonalityTraits {
 /// Communication preferences
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommunicationPreference {
+    /// Preferred communication style
     pub preferred_style: CommunicationStyle,
+    /// Desired feedback frequency
     pub feedback_frequency: FeedbackFrequency,
+    /// Preferred message tone
     pub message_tone: MessageTone,
 }
 
 /// Communication styles
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CommunicationStyle {
+    /// Direct, concise communication
     Direct,
+    /// Supportive, empathetic communication
     Supportive,
+    /// Analytical, data-driven communication
     Analytical,
+    /// Casual, informal communication
     Casual,
+    /// Motivational, inspiring communication
     Motivational,
 }
 
 /// Feedback frequencies
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FeedbackFrequency {
+    /// Immediate real-time feedback
     Immediate,
+    /// Feedback after each session
     AfterSession,
+    /// Daily summary feedback
     Daily,
+    /// Weekly summary feedback
     Weekly,
 }
 
 /// Message tones
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MessageTone {
+    /// Professional tone
     Professional,
+    /// Friendly tone
     Friendly,
+    /// Encouraging tone
     Encouraging,
+    /// Humorous tone
     Humorous,
 }
 
 /// Motivation factors
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MotivationFactors {
+    /// Response to challenges
     pub challenge_response: ChallengeResponse,
+    /// Social learning preference
     pub social_preference: SocialPreference,
+    /// Achievement motivation type
     pub achievement_orientation: AchievementOrientation,
 }
 
 /// Challenge response types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ChallengeResponse {
+    /// Thrives on difficult challenges
     ThriveOnChallenge,
+    /// Prefers gradual progression
     PreferGradualProgress,
+    /// Avoids difficulty
     AvoidDifficulty,
 }
 
 /// Social preferences
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SocialPreference {
+    /// Prefers collaborative learning
     Collaborative,
+    /// Prefers competitive environments
     Competitive,
+    /// Prefers independent learning
     Independent,
 }
 
 /// Achievement orientations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AchievementOrientation {
+    /// Motivated by skill mastery
     MasteryOriented,
+    /// Motivated by performance outcomes
     PerformanceOriented,
+    /// Motivated by social recognition
     SocialRecognition,
 }
 
 /// Motivation tracking data
 #[derive(Debug, Clone)]
 pub struct MotivationTracker {
+    /// Current engagement score (0.0 - 1.0)
     pub engagement_score: f32,
+    /// Current frustration level (0.0 - 1.0)
     pub frustration_level: f32,
+    /// User satisfaction rating (0.0 - 1.0)
     pub satisfaction_rating: f32,
+    /// Session completion rate (0.0 - 1.0)
     pub session_completion_rate: f32,
+    /// Historical engagement scores
     pub engagement_history: Vec<f32>,
+    /// Historical frustration levels
     pub frustration_history: Vec<f32>,
+    /// Last update timestamp
     pub last_updated: DateTime<Utc>,
 }
 
@@ -629,153 +667,226 @@ impl MotivationTracker {
 /// Session motivation data
 #[derive(Debug, Clone)]
 pub struct SessionMotivationData {
+    /// Session engagement score
     pub engagement_score: f32,
+    /// Session frustration level
     pub frustration_level: f32,
+    /// Session satisfaction rating
     pub satisfaction_rating: f32,
+    /// Session completion rate
     pub completion_rate: f32,
 }
 
 /// Motivation assessment result
 #[derive(Debug, Clone)]
 pub struct MotivationAssessment {
+    /// Current motivation state
     pub current_state: MotivationState,
+    /// Engagement trend direction
     pub engagement_trend: Trend,
+    /// Frustration trend direction
     pub frustration_trend: Trend,
+    /// Burnout risk level
     pub risk_level: RiskLevel,
+    /// Recommended interventions
     pub recommended_actions: Vec<String>,
 }
 
 /// Motivation states
 #[derive(Debug, Clone, PartialEq)]
 pub enum MotivationState {
+    /// Highly motivated
     Highly,
+    /// Moderately motivated
     Moderately,
+    /// Somewhat motivated
     Somewhat,
+    /// Low motivation
     Low,
 }
 
 /// Trend directions
 #[derive(Debug, Clone, PartialEq)]
 pub enum Trend {
+    /// Improving trend
     Improving,
+    /// Stable trend
     Stable,
+    /// Declining trend
     Declining,
 }
 
 /// Risk levels
 #[derive(Debug, Clone, PartialEq)]
 pub enum RiskLevel {
+    /// Low risk
     Low,
+    /// Medium risk
     Medium,
+    /// High risk
     High,
 }
 
 /// Message template
 #[derive(Debug, Clone)]
 pub struct MessageTemplate {
+    /// Type of message
     pub message_type: MessageType,
+    /// Message content template
     pub content: String,
+    /// Personality factors that affect effectiveness
     pub effectiveness_factors: Vec<PersonalityFactor>,
 }
 
 /// Message types
 #[derive(Debug, Clone, PartialEq)]
 pub enum MessageType {
+    /// Encouragement message
     Encouragement,
+    /// Challenge message
     Challenge,
+    /// Comfort message
     Comfort,
+    /// Progress update message
     Progress,
+    /// Insight message
     Insight,
+    /// Celebration message
     Celebration,
+    /// Inspiration message
     Inspiration,
 }
 
 /// Personality factors for message effectiveness
 #[derive(Debug, Clone)]
 pub enum PersonalityFactor {
+    /// Extroversion factor
     Extroversion,
+    /// Agreeableness factor
     Agreeableness,
+    /// Conscientiousness factor
     Conscientiousness,
+    /// Neuroticism factor
     Neuroticism,
+    /// Openness factor
     Openness,
 }
 
 /// Message context for personalization
 #[derive(Debug, Clone)]
 pub struct MessageContext {
+    /// Type of message
     pub message_type: MessageType,
+    /// Message urgency
     pub urgency: MessageUrgency,
+    /// Improvement percentage for template
     pub improvement_percentage: Option<f32>,
+    /// Metric name for template
     pub metric_name: Option<String>,
+    /// Percentage value for template
     pub percentage_value: Option<f32>,
+    /// Timeframe for template
     pub timeframe: Option<String>,
+    /// Focus area for template
     pub focus_area: Option<String>,
+    /// Prediction value for template
     pub prediction_value: Option<f32>,
 }
 
 /// Message urgency levels
 #[derive(Debug, Clone)]
 pub enum MessageUrgency {
+    /// Low urgency
     Low,
+    /// Medium urgency
     Medium,
+    /// High urgency
     High,
 }
 
 /// Personalized message
 #[derive(Debug, Clone)]
 pub struct PersonalizedMessage {
+    /// Message content
     pub content: String,
+    /// Communication style used
     pub communication_style: CommunicationStyle,
+    /// Message type
     pub message_type: MessageType,
+    /// Predicted effectiveness score
     pub effectiveness_score: f32,
+    /// Message timestamp
     pub timestamp: DateTime<Utc>,
 }
 
 /// Intervention types
 #[derive(Debug, Clone, PartialEq)]
 pub enum InterventionType {
+    /// Burnout prevention intervention
     BurnoutPrevention,
+    /// Re-engagement intervention
     ReEngagement,
+    /// Frustration reduction intervention
     FrustrationReduction,
+    /// Motivation boost intervention
     MotivationBoost,
 }
 
 /// Intervention priorities
 #[derive(Debug, Clone, PartialEq)]
 pub enum InterventionPriority {
+    /// Low priority
     Low,
+    /// Medium priority
     Medium,
+    /// High priority
     High,
+    /// Critical priority
     Critical,
 }
 
 /// Intervention recommendation
 #[derive(Debug, Clone)]
 pub struct InterventionRecommendation {
+    /// Type of intervention
     pub intervention_type: InterventionType,
+    /// Intervention priority
     pub priority: InterventionPriority,
+    /// Suggested actions to take
     pub suggested_actions: Vec<String>,
+    /// Optional message to user
     pub message_content: Option<String>,
+    /// Recommended intervention duration
     pub duration: Option<chrono::Duration>,
 }
 
 /// Intervention record
 #[derive(Debug, Clone)]
 pub struct Intervention {
+    /// Intervention identifier
     pub id: Uuid,
+    /// Type of intervention
     pub intervention_type: InterventionType,
+    /// Implementation timestamp
     pub implemented_at: DateTime<Utc>,
+    /// Actions that were taken
     pub actions_taken: Vec<String>,
+    /// Expected outcome description
     pub expected_outcome: String,
+    /// Optional follow-up duration
     pub follow_up_duration: Option<chrono::Duration>,
 }
 
 /// Intervention result
 #[derive(Debug, Clone)]
 pub struct InterventionResult {
+    /// Intervention identifier
     pub intervention_id: Uuid,
+    /// Implementation timestamp
     pub implemented_at: DateTime<Utc>,
+    /// Expected outcome description
     pub expected_outcome: String,
+    /// Whether follow-up is required
     pub follow_up_required: bool,
 }
 

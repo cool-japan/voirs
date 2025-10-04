@@ -113,29 +113,9 @@ pub use performance::{multi_gpu, LRUCache, PersistentCache, SlidingWindowProcess
 // Re-export all public types from traits
 pub use traits::*;
 
-// Re-export implementations
-pub use advanced_preprocessing::*;
-pub use audio::*;
-pub use benchmark_runner::*;
-pub use benchmarks::*;
-pub use comparison::*;
-pub use compliance::*;
-pub use distributed::*;
-pub use fuzzing::*;
-pub use integration::*;
-pub use perceptual::*;
-pub use performance_enhancements::*;
-pub use performance_monitor::*;
-pub use platform::*;
-pub use plugins::*;
-pub use pronunciation::*;
-pub use quality::*;
-pub use regression_detector::*;
-pub use regression_testing::*;
-pub use statistical::*;
-pub use statistical_enhancements::*;
-pub use validation::*;
-pub use websocket::*;
+// Note: Feature module types are not glob re-exported to avoid ambiguity.
+// Import from specific modules: evaluation::audio::*, evaluation::perceptual::*, etc.
+// Or use the prelude: use voirs_evaluation::prelude::*;
 
 // Re-export R integration when feature is enabled
 #[cfg(feature = "r-integration")]
@@ -394,10 +374,6 @@ impl From<VoirsError> for EvaluationError {
                 message,
                 source: None,
             },
-            VoirsError::AudioError { message, .. } => EvaluationError::ModelError {
-                message,
-                source: None,
-            },
             VoirsError::NetworkError { message, .. } => EvaluationError::ModelError {
                 message: format!("Network error: {message}"),
                 source: None,
@@ -434,6 +410,15 @@ impl From<VoirsError> for EvaluationError {
                 message: format!("Unknown error: {err}"),
                 source: None,
             },
+        }
+    }
+}
+
+impl From<scirs2_fft::error::FFTError> for EvaluationError {
+    fn from(err: scirs2_fft::error::FFTError) -> Self {
+        EvaluationError::AudioProcessingError {
+            message: format!("FFT computation error: {err}"),
+            source: Some(Box::new(err)),
         }
     }
 }

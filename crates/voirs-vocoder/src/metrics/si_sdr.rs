@@ -5,7 +5,7 @@
 //! for evaluating vocoders and audio enhancement algorithms.
 
 use crate::{Result, VocoderError};
-use ndarray::{s, Array1};
+use scirs2_core::ndarray::{s, Array1};
 
 /// Calculate SI-SDR between reference and estimated signals
 pub fn calculate_si_sdr(reference: &Array1<f32>, estimated: &Array1<f32>) -> Result<f32> {
@@ -239,7 +239,7 @@ pub fn calculate_si_sdr_improvement(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::Array1;
+    use scirs2_core::ndarray::Array1;
 
     #[test]
     fn test_perfect_reconstruction() {

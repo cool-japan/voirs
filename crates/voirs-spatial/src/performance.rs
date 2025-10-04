@@ -6,7 +6,7 @@
 use crate::{
     AmbisonicsProcessor, BinauralRenderer, Error, Position3D, Result, SpeakerConfiguration,
 };
-use ndarray::{Array1, Array2};
+use scirs2_core::ndarray::{Array1, Array2};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

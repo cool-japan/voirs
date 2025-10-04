@@ -26,7 +26,7 @@ fn generate_test_audio(
 
         // Add noise if requested
         if add_noise {
-            sample += (rand::random::<f32>() - 0.5) * 0.1;
+            sample += (scirs2_core::random::random::<f32>() - 0.5) * 0.1;
         }
 
         samples.push(sample);
@@ -44,7 +44,7 @@ fn add_distortion(audio: &AudioBuffer, distortion_type: DistortionType) -> Audio
         DistortionType::WhiteNoise => {
             // Add white noise
             for sample in &mut distorted_samples {
-                *sample += (rand::random::<f32>() - 0.5) * 0.2;
+                *sample += (scirs2_core::random::random::<f32>() - 0.5) * 0.2;
             }
         }
         DistortionType::Clipping => {
@@ -87,9 +87,10 @@ enum DistortionType {
 
 /// Create a temporary WAV file for testing
 fn create_temp_wav_file(audio: &AudioBuffer, temp_dir: &TempDir) -> std::path::PathBuf {
-    let file_path = temp_dir
-        .path()
-        .join(format!("test_audio_{}.wav", rand::random::<u32>()));
+    let file_path = temp_dir.path().join(format!(
+        "test_audio_{}.wav",
+        scirs2_core::random::random::<u32>()
+    ));
 
     // Create WAV file using hound
     let spec = hound::WavSpec {
@@ -352,11 +353,11 @@ async fn test_statistical_analysis_framework() {
 
     for _i in 0..20 {
         // System A: consistently better with some variation
-        let score_a = 0.8 + (rand::random::<f32>() - 0.5) * 0.2;
+        let score_a = 0.8 + (scirs2_core::random::random::<f32>() - 0.5) * 0.2;
         system_a_scores.push(score_a.clamp(0.0, 1.0));
 
         // System B: slightly worse with more variation
-        let score_b = 0.7 + (rand::random::<f32>() - 0.5) * 0.3;
+        let score_b = 0.7 + (scirs2_core::random::random::<f32>() - 0.5) * 0.3;
         system_b_scores.push(score_b.clamp(0.0, 1.0));
     }
 

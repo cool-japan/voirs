@@ -4,18 +4,28 @@ use super::core::{SynthesisModel, SynthesisParams};
 use super::harmonic::HarmonicProcessor;
 use super::noise::{NoiseProcessor, NoiseType};
 use super::spectral::SpectralProcessor;
-use ndarray::Array1;
+use scirs2_core::ndarray::Array1;
 
 /// Basic harmonic synthesis model
+///
+/// Implements additive synthesis using harmonic series with noise modulation.
 pub struct HarmonicSynthesisModel {
+    /// Model name identifier
     name: String,
+    /// Model version string
     version: String,
+    /// Harmonic processor for synthesis
     harmonic_processor: HarmonicProcessor,
+    /// Noise processor for breath sounds
     noise_processor: NoiseProcessor,
 }
 
 impl HarmonicSynthesisModel {
-    /// Create a new harmonic synthesis model
+    /// Create a new harmonic synthesis model with default settings
+    ///
+    /// # Returns
+    ///
+    /// New HarmonicSynthesisModel with 44.1kHz sample rate
     pub fn new() -> Self {
         Self {
             name: "HarmonicSynth".to_string(),
@@ -26,6 +36,15 @@ impl HarmonicSynthesisModel {
     }
 
     /// Create with custom parameters
+    ///
+    /// # Arguments
+    ///
+    /// * `sample_rate` - Audio sample rate in Hz
+    /// * `num_harmonics` - Number of harmonics to generate
+    ///
+    /// # Returns
+    ///
+    /// New HarmonicSynthesisModel with specified parameters
     pub fn with_params(sample_rate: f32, num_harmonics: usize) -> Self {
         let mut model = Self::new();
         model.harmonic_processor = HarmonicProcessor::new(sample_rate);
@@ -129,14 +148,23 @@ impl HarmonicProcessor {
 }
 
 /// Spectral synthesis model using FFT-based processing
+///
+/// Implements source-filter synthesis in the frequency domain.
 pub struct SpectralSynthesisModel {
+    /// Model name identifier
     name: String,
+    /// Model version string
     version: String,
+    /// FFT frame size in samples
     frame_size: usize,
 }
 
 impl SpectralSynthesisModel {
-    /// Create a new spectral synthesis model
+    /// Create a new spectral synthesis model with default settings
+    ///
+    /// # Returns
+    ///
+    /// New SpectralSynthesisModel with 1024 sample frames
     pub fn new() -> Self {
         Self {
             name: "SpectralSynth".to_string(),
@@ -146,6 +174,14 @@ impl SpectralSynthesisModel {
     }
 
     /// Create with custom frame size
+    ///
+    /// # Arguments
+    ///
+    /// * `frame_size` - FFT frame size in samples
+    ///
+    /// # Returns
+    ///
+    /// New SpectralSynthesisModel with specified frame size
     pub fn with_frame_size(frame_size: usize) -> Self {
         Self {
             name: "SpectralSynth".to_string(),
@@ -243,17 +279,29 @@ impl SynthesisModel for SpectralSynthesisModel {
 }
 
 /// Hybrid synthesis model combining multiple approaches
+///
+/// Blends harmonic and spectral synthesis for enhanced quality.
 pub struct HybridSynthesisModel {
+    /// Model name identifier
     name: String,
+    /// Model version string
     version: String,
+    /// Harmonic synthesis component
     harmonic_model: HarmonicSynthesisModel,
+    /// Spectral synthesis component
     spectral_model: SpectralSynthesisModel,
+    /// Weight for harmonic component (0.0-1.0)
     harmonic_weight: f32,
+    /// Weight for spectral component (0.0-1.0)
     spectral_weight: f32,
 }
 
 impl HybridSynthesisModel {
-    /// Create a new hybrid synthesis model
+    /// Create a new hybrid synthesis model with default blend weights
+    ///
+    /// # Returns
+    ///
+    /// New HybridSynthesisModel with 60% harmonic, 40% spectral blend
     pub fn new() -> Self {
         Self {
             name: "HybridSynth".to_string(),
@@ -266,6 +314,13 @@ impl HybridSynthesisModel {
     }
 
     /// Set the blend weights between harmonic and spectral synthesis
+    ///
+    /// Weights are automatically normalized to sum to 1.0.
+    ///
+    /// # Arguments
+    ///
+    /// * `harmonic` - Weight for harmonic component
+    /// * `spectral` - Weight for spectral component
     pub fn set_blend_weights(&mut self, harmonic: f32, spectral: f32) {
         let total = harmonic + spectral;
         if total > 0.0 {

@@ -563,22 +563,84 @@ fn parse_position(s: &str) -> Result<Position3D, String> {
 }
 
 fn load_room_config(path: &PathBuf) -> Result<RoomConfig, CliError> {
-    // Mock implementation - in reality would load JSON configuration
-    Ok(RoomConfig {
-        dimensions: (10.0, 3.0, 8.0),
-        wall_materials: Default::default(),
-        reverb_time: 0.8,
-        volume: 240.0,       // 10 * 3 * 8
-        surface_area: 296.0, // calculated surface area
-        temperature: 20.0,
-        humidity: 50.0,
-        enable_air_absorption: true,
-    })
+    // Load room configuration from JSON file
+    let file = std::fs::File::open(path)
+        .map_err(|e| CliError::IoError(format!("Failed to open room config file: {}", e)))?;
+
+    let config: RoomConfig = serde_json::from_reader(file)
+        .map_err(|e| CliError::IoError(format!("Failed to parse room config JSON: {}", e)))?;
+
+    // Validate the configuration
+    if config.dimensions.0 <= 0.0 || config.dimensions.1 <= 0.0 || config.dimensions.2 <= 0.0 {
+        return Err(CliError::ValidationError(
+            "Room dimensions must be positive values".to_string(),
+        ));
+    }
+
+    if config.reverb_time < 0.0 || config.reverb_time > 10.0 {
+        return Err(CliError::ValidationError(
+            "Reverb time must be between 0 and 10 seconds".to_string(),
+        ));
+    }
+
+    if config.temperature < -50.0 || config.temperature > 50.0 {
+        return Err(CliError::ValidationError(
+            "Temperature must be between -50°C and 50°C".to_string(),
+        ));
+    }
+
+    if config.humidity < 0.0 || config.humidity > 100.0 {
+        return Err(CliError::ValidationError(
+            "Humidity must be between 0% and 100%".to_string(),
+        ));
+    }
+
+    Ok(config)
 }
 
 fn load_mono_audio(path: &PathBuf) -> Result<Vec<f32>, CliError> {
-    // Mock implementation - in reality would load audio file
-    Ok(vec![0.0; 44100]) // 1 second of silence
+    // Load audio file using hound
+    let mut reader = hound::WavReader::open(path)
+        .map_err(|e| CliError::IoError(format!("Failed to open audio file: {}", e)))?;
+
+    let spec = reader.spec();
+
+    // Check if audio is mono or needs conversion
+    if spec.channels > 2 {
+        return Err(CliError::ValidationError(format!(
+            "Audio file has {} channels, expected mono (1) or stereo (2)",
+            spec.channels
+        )));
+    }
+
+    // Read samples based on bit depth
+    let samples: Vec<f32> = match spec.sample_format {
+        hound::SampleFormat::Int => {
+            let max_value = (1i32 << (spec.bits_per_sample - 1)) as f32;
+            reader
+                .samples::<i32>()
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| CliError::IoError(format!("Failed to read audio samples: {}", e)))?
+                .into_iter()
+                .map(|s| s as f32 / max_value)
+                .collect()
+        }
+        hound::SampleFormat::Float => reader
+            .samples::<f32>()
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| CliError::IoError(format!("Failed to read audio samples: {}", e)))?,
+    };
+
+    // Convert stereo to mono if needed by averaging channels
+    if spec.channels == 2 {
+        let mono_samples: Vec<f32> = samples
+            .chunks(2)
+            .map(|chunk| (chunk[0] + chunk.get(1).unwrap_or(&0.0)) / 2.0)
+            .collect();
+        Ok(mono_samples)
+    } else {
+        Ok(samples)
+    }
 }
 
 fn save_stereo_audio(audio: &[f32], path: &PathBuf, sample_rate: u32) -> Result<(), CliError> {

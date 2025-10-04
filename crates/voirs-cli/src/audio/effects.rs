@@ -2,7 +2,7 @@
 
 use super::AudioData;
 use std::collections::HashMap;
-use voirs::{Result, VoirsError};
+use voirs_sdk::{Result, VoirsError};
 
 /// Audio effect configuration
 #[derive(Debug, Clone)]

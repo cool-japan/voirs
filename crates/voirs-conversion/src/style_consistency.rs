@@ -57,7 +57,10 @@ pub enum PreservationMode {
     /// Selective preservation - preserve only specified elements
     Selective,
     /// Blended preservation - mix source and target styles
-    Blended { source_weight: f32 },
+    Blended {
+        /// Weight of source style (0.0-1.0, where 1.0 is full source style)
+        source_weight: f32,
+    },
 }
 
 /// Style elements that can be preserved
@@ -166,7 +169,9 @@ pub struct StyleCharacteristics {
 pub struct ProsodyFeatures {
     /// F0 contour statistics
     pub f0_mean: f32,
+    /// F0 standard deviation
     pub f0_std: f32,
+    /// F0 range (maximum - minimum)
     pub f0_range: f32,
     /// Intonation patterns
     pub intonation_contour: Vec<f32>,
@@ -316,9 +321,13 @@ pub enum RecommendationType {
 /// Recommendation priority levels
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
+    /// Low priority recommendation
     Low,
+    /// Medium priority recommendation
     Medium,
+    /// High priority recommendation
     High,
+    /// Critical priority recommendation requiring immediate attention
     Critical,
 }
 
@@ -337,7 +346,7 @@ pub struct StyleConsistencyEngine {
     statistics: Arc<RwLock<StyleConsistencyStats>>,
 }
 
-/// Style adaptation state
+/// Style adaptation state tracking adaptation weights and history
 #[derive(Debug, Clone)]
 pub struct StyleAdaptationState {
     /// Current adaptation weights
@@ -350,7 +359,7 @@ pub struct StyleAdaptationState {
     pub current_scores: HashMap<StyleElement, f32>,
 }
 
-/// Adaptation step record
+/// Adaptation step record containing timestamp and magnitude
 #[derive(Debug, Clone)]
 pub struct AdaptationStep {
     /// Timestamp
@@ -720,12 +729,11 @@ impl StyleConsistencyEngine {
             .iter()
             .enumerate()
             .map(|(i, &energy)| {
-                let smoothed = if i > 0 && i < energy_values.len() - 1 {
+                if i > 0 && i < energy_values.len() - 1 {
                     (energy_values[i - 1] + energy + energy_values[i + 1]) / 3.0
                 } else {
                     energy
-                };
-                smoothed
+                }
             })
             .collect();
 
@@ -834,12 +842,10 @@ impl StyleConsistencyEngine {
                     in_pause = false;
                 }
                 speech_frames += 1;
-            } else {
-                if !in_pause {
-                    // Start of pause
-                    pause_start = i;
-                    in_pause = true;
-                }
+            } else if !in_pause {
+                // Start of pause
+                pause_start = i;
+                in_pause = true;
             }
 
             // Calculate local rate in sliding window
@@ -933,7 +939,7 @@ impl StyleConsistencyEngine {
         } else {
             vec![(500.0, 1500.0, 2500.0); 3 - formants.len()]
                 .into_iter()
-                .chain(formants.into_iter())
+                .chain(formants)
                 .take(3)
                 .collect()
         };
@@ -1345,6 +1351,7 @@ impl StyleConsistencyEngine {
 }
 
 impl StyleAdaptationState {
+    /// Create a new style adaptation state
     fn new() -> Self {
         Self {
             adaptation_weights: HashMap::new(),

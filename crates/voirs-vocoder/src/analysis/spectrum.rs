@@ -1,9 +1,9 @@
 //! Advanced spectrum analysis tools
 
 use crate::{Result, VocoderError};
-use ndarray::Array1;
-use realfft::RealFftPlanner;
-use rustfft::num_complex::Complex;
+use scirs2_core::ndarray::Array1;
+use scirs2_fft::{FftPlanner, RealFftPlanner};
+use scirs2_core::Complex;
 use std::f32::consts::PI;
 
 /// Comprehensive spectrum analysis result
@@ -103,7 +103,7 @@ impl SpectrumAnalyzer {
     pub fn new(sample_rate: u32) -> Self {
         Self {
             sample_rate,
-            fft_planner: RealFftPlanner::new(),
+            fft_planner: RealFftPlanner::<f32>::new(),
         }
     }
     
@@ -370,7 +370,7 @@ impl SpectrumAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::Array1;
+    use scirs2_core::ndarray::Array1;
     
     #[test]
     fn test_spectrum_analyzer_creation() {

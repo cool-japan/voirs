@@ -507,9 +507,9 @@ impl VoirsDistributedProcessing {
 
         // Weighted average of different efficiency metrics
         let weights = (0.4, 0.3, 0.3); // (utilization, cost, reliability)
-        (resource_efficiency * weights.0
+        resource_efficiency * weights.0
             + cost_efficiency * weights.1
-            + reliability_factor * weights.2)
+            + reliability_factor * weights.2
     }
 
     async fn calculate_reliability_factor(&self) -> f32 {
@@ -1180,8 +1180,6 @@ impl CostOptimizer {
 
     async fn get_cost_stats(&self) -> CostStats {
         let mut hourly_cost = 0.0;
-        let mut daily_cost = 0.0;
-        let mut monthly_cost = 0.0;
 
         // Calculate costs based on pricing models and current usage
         for (provider, pricing) in &self.pricing_models {
@@ -1211,8 +1209,8 @@ impl CostOptimizer {
             }
         }
 
-        daily_cost = hourly_cost * 24.0;
-        monthly_cost = daily_cost * 30.0; // Approximate month
+        let mut daily_cost = hourly_cost * 24.0;
+        let mut monthly_cost = daily_cost * 30.0; // Approximate month
 
         // Add historical cost data
         let recent_costs: f64 = self

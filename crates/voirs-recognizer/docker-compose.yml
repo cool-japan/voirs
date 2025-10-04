@@ -15,7 +15,7 @@ services:
       args:
         BUILD_DATE: ${BUILD_DATE:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}
         VCS_REF: ${VCS_REF:-$(git rev-parse HEAD)}
-        VERSION: ${VERSION:-0.1.0-alpha.1}
+  VERSION: ${VERSION:-0.1.0-alpha.2}
     image: voirs/recognizer:${VERSION:-latest}
     container_name: voirs-recognizer-core
     restart: unless-stopped

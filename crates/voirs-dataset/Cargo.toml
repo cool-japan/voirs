@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation = "https://docs.rs/voirs-dataset"
-keywords.workspace = true
+keywords = ["voirs", "dataset", "ljspeech", "jvs", "audio-data"]
 categories = ["science", "data-structures", "multimedia::audio"]
 rust-version.workspace = true
 description = "Dataset utilities for VoiRS (LJSpeech, JVS, etc.)"
@@ -17,6 +17,13 @@ name = "voirs_dataset"
 crate-type = ["lib"]
 
 [dependencies]
+# SciRS2 - Scientific computing abstractions
+scirs2-core.workspace = true
+scirs2-fft.workspace = true
+
+# FFT (for mel spectrogram computation)
+rustfft.workspace = true
+
 # HTTP and file handling
 reqwest.workspace = true
 tokio.workspace = true
@@ -30,8 +37,6 @@ flac-bound.workspace = true
 lewton.workspace = true
 minimp3.workspace = true
 mp3lame-encoder.workspace = true
-rustfft.workspace = true
-num-complex.workspace = true
 
 # Compression and archives
 flate2.workspace = true
@@ -51,12 +56,6 @@ arrow.workspace = true
 
 # Async traits
 async-trait.workspace = true
-
-# Parallel processing
-rayon.workspace = true
-
-# Random number generation
-rand.workspace = true
 
 # Date and time handling
 chrono.workspace = true
@@ -90,7 +89,6 @@ criterion.workspace = true
 tempfile.workspace = true
 tokio-test.workspace = true
 futures.workspace = true
-rand.workspace = true
 
 [[bench]]
 name = "processing"

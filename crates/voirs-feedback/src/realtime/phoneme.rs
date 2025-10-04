@@ -16,64 +16,98 @@ pub struct PhonemeAnalyzer {
 /// Configuration for phoneme analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhonemeAnalysisConfig {
+    /// Description
     pub sample_rate: u32,
+    /// Description
     pub frame_length: usize,
+    /// Description
     pub hop_length: usize,
+    /// Description
     pub min_phoneme_duration_ms: u64,
+    /// Description
     pub max_phoneme_duration_ms: u64,
+    /// Description
     pub confidence_threshold: f32,
 }
 
 /// Reference phoneme data for comparison
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhonemeReference {
+    /// Description
     pub symbol: String,
+    /// Description
     pub features: PhonemeFeatures,
+    /// Description
     pub expected_duration_ms: f64,
+    /// Description
     pub formant_ranges: FormantRanges,
 }
 
 /// Acoustic features of a phoneme
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhonemeFeatures {
+    /// Description
     pub vowel: bool,
+    /// Description
     pub consonant: bool,
+    /// Description
     pub voiced: bool,
+    /// Description
     pub aspirated: bool,
+    /// Description
     pub nasal: bool,
+    /// Description
     pub fricative: bool,
+    /// Description
     pub stop: bool,
+    /// Description
     pub liquid: bool,
+    /// Description
     pub glide: bool,
 }
 
 /// Formant frequency ranges for phoneme classification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FormantRanges {
+    /// Description
     pub f1_range: (f32, f32), // First formant frequency range
+    /// Description
     pub f2_range: (f32, f32), // Second formant frequency range
+    /// Description
     pub f3_range: (f32, f32), // Third formant frequency range
 }
 
 /// Result of phoneme analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhonemeAnalysisResult {
+    /// Description
     pub detected_phonemes: Vec<DetectedPhoneme>,
+    /// Description
     pub overall_accuracy: f32,
+    /// Description
     pub timing_accuracy: f32,
+    /// Description
     pub pronunciation_score: f32,
+    /// Description
     pub analysis_duration: Duration,
 }
 
 /// Individual detected phoneme
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectedPhoneme {
+    /// Description
     pub symbol: String,
+    /// Description
     pub confidence: f32,
+    /// Description
     pub start_time_ms: f64,
+    /// Description
     pub duration_ms: f64,
+    /// Description
     pub formants: Vec<f32>,
+    /// Description
     pub accuracy_score: f32,
+    /// Description
     pub feedback_points: Vec<String>,
 }
 
@@ -522,22 +556,22 @@ impl PhonemeAnalyzer {
         // Simulate detection based on expected phonemes with some variation
         for (i, expected) in expected_phonemes.iter().enumerate() {
             let start_time = i as f64 * 100.0; // 100ms per phoneme simulation
-            let duration = 100.0 + (rand::random::<f64>() - 0.5) * 20.0; // ±10ms variation from base 100ms
+            let duration = 100.0 + (scirs2_core::random::random::<f64>() - 0.5) * 20.0; // ±10ms variation from base 100ms
 
             // Simulate formant detection
             let formants = if let Some(reference) = self.reference_phonemes.get(&expected.symbol) {
                 if reference.features.vowel {
                     vec![
                         reference.formant_ranges.f1_range.0
-                            + (rand::random::<f64>() as f32
+                            + (scirs2_core::random::random::<f64>() as f32
                                 * (reference.formant_ranges.f1_range.1
                                     - reference.formant_ranges.f1_range.0)),
                         reference.formant_ranges.f2_range.0
-                            + (rand::random::<f64>() as f32
+                            + (scirs2_core::random::random::<f64>() as f32
                                 * (reference.formant_ranges.f2_range.1
                                     - reference.formant_ranges.f2_range.0)),
                         reference.formant_ranges.f3_range.0
-                            + (rand::random::<f64>() as f32
+                            + (scirs2_core::random::random::<f64>() as f32
                                 * (reference.formant_ranges.f3_range.1
                                     - reference.formant_ranges.f3_range.0)),
                     ]
@@ -549,7 +583,7 @@ impl PhonemeAnalyzer {
             };
 
             // Calculate confidence and accuracy
-            let confidence = 0.7 + rand::random::<f64>() as f32 * 0.3; // 70-100% confidence
+            let confidence = 0.7 + scirs2_core::random::random::<f64>() as f32 * 0.3; // 70-100% confidence
             let accuracy_score = self.calculate_phoneme_accuracy(&expected.symbol, &formants);
 
             // Generate feedback points
@@ -581,7 +615,7 @@ impl PhonemeAnalyzer {
                 (f1_accuracy + f2_accuracy) / 2.0
             } else {
                 // For consonants, use a simulated accuracy
-                0.8 + (rand::random::<f64>() * 0.2) as f32
+                0.8 + (scirs2_core::random::random::<f64>() * 0.2) as f32
             }
         } else {
             0.5 // Unknown phoneme

@@ -7,7 +7,7 @@
 //! - Delta and delta-delta features
 
 use crate::{Result, VocoderError};
-use ndarray::{Array1, Array2, s};
+use scirs2_core::ndarray::{Array1, Array2, s};
 use std::f32::consts::PI;
 
 /// MFCC and mel-scale feature computation methods
@@ -177,12 +177,9 @@ impl MfccFeatureComputer for crate::analysis::features::FeatureExtractor {
 impl crate::analysis::features::FeatureExtractor {
     /// Compute power spectrogram (const version for internal use)
     pub(crate) fn compute_power_spectrogram_const(&self, samples: &Array1<f32>) -> Result<Array2<f32>> {
-        use realfft::RealFftPlanner;
-        use ndarray::Array1;
-        
-        let mut planner = RealFftPlanner::<f32>::new();
-        let fft = planner.plan_fft_forward(self.config.n_fft);
-        
+        use scirs2_fft::{FftPlanner, RealFftPlanner};
+    use scirs2_core::ndarray::Array1;
+
         let n_frames = (samples.len() + self.config.hop_length - 1) / self.config.hop_length;
         let mut power_spectrogram = Array2::zeros((n_frames, self.config.n_fft / 2 + 1));
         
@@ -198,11 +195,8 @@ impl crate::analysis::features::FeatureExtractor {
                 frame_data[i] = sample * window[i];
             }
             
-            // Compute FFT
-            let mut spectrum = fft.make_output_vec();
-            fft.process(&mut frame_data, &mut spectrum).map_err(|e| {
-                VocoderError::ComputationError(format!("FFT computation failed: {}", e))
-            })?;
+            // Compute FFT using functional API
+            let spectrum = scirs2_fft::rfft(&frame_data, None)?;
             
             // Compute power spectrum
             for (bin_idx, complex_val) in spectrum.iter().enumerate() {

@@ -3,7 +3,7 @@
 use crate::{types::VoiceSample, Error, Result};
 use candle_core::{Device, Tensor};
 use candle_nn::{linear, Linear, Module, VarBuilder};
-use ndarray::Array2;
+use scirs2_core::ndarray::Array2;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -331,7 +331,7 @@ impl SpeakerAdapter {
         for i in 0..transform_dim {
             for j in 0..transform_dim {
                 if i != j {
-                    transform_matrix[[i, j]] = (rand::random::<f32>() - 0.5) * 0.1;
+                    transform_matrix[[i, j]] = (scirs2_core::random::random::<f32>() - 0.5) * 0.1;
                 }
             }
         }
@@ -421,7 +421,7 @@ impl SpeakerAdapter {
 
         // Add small perturbations based on speaker characteristics
         for i in 0..feature_dim {
-            feature_transform[[i, i]] += (rand::random::<f32>() - 0.5) * 0.1;
+            feature_transform[[i, i]] += (scirs2_core::random::random::<f32>() - 0.5) * 0.1;
         }
 
         Ok(AdaptationParameters::FeatureLevel {

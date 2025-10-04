@@ -195,7 +195,7 @@ fn create_test_signals() -> Vec<(String, AudioData)> {
 
     // 4. White noise
     let white_noise: Vec<f32> = (0..n_samples)
-        .map(|_| (rand::random::<f32>() - 0.5) * 0.3)
+        .map(|_| (scirs2_core::random::random::<f32>() - 0.5) * 0.3)
         .collect();
     signals.push((
         "White Noise".to_string(),

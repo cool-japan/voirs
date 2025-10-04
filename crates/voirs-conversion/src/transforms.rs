@@ -1,12 +1,12 @@
 //! Voice transformation algorithms
 
 use crate::{Error, Result};
-use realfft::RealFftPlanner;
-use rustfft::num_complex::Complex;
+use scirs2_core::Complex;
+use scirs2_fft::RealFftPlanner;
 use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
 
-/// Generic transform trait
+/// Generic transform trait for audio transformation operations
 pub trait Transform {
     /// Apply transform to audio
     fn apply(&self, input: &[f32]) -> Result<Vec<f32>>;
@@ -197,7 +197,7 @@ impl Transform for GenderTransform {
     }
 }
 
-/// Voice morpher for blending multiple voices
+/// Voice morpher for blending multiple voices with various interpolation methods
 #[derive(Debug, Clone)]
 pub struct VoiceMorpher {
     /// Voice blend weights
@@ -210,7 +210,7 @@ pub struct VoiceMorpher {
     pub spectral_strength: f32,
 }
 
-/// Methods for voice morphing
+/// Methods for voice morphing between multiple sources
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MorphingMethod {
     /// Linear blending in time domain
@@ -323,7 +323,7 @@ impl VoiceMorpher {
             return Ok(output);
         }
 
-        let mut planner = RealFftPlanner::new();
+        let mut planner = RealFftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(window_size);
         let ifft = planner.plan_fft_inverse(window_size);
 
@@ -351,10 +351,8 @@ impl VoiceMorpher {
             let mut spectrum1 = vec![Complex::new(0.0, 0.0); window_size / 2 + 1];
             let mut spectrum2 = vec![Complex::new(0.0, 0.0); window_size / 2 + 1];
 
-            fft.process(&mut window1, &mut spectrum1)
-                .map_err(|e| Error::transform(format!("FFT error: {e:?}")))?;
-            fft.process(&mut window2, &mut spectrum2)
-                .map_err(|e| Error::transform(format!("FFT error: {e:?}")))?;
+            fft.process(&window1, &mut spectrum1);
+            fft.process(&window2, &mut spectrum2);
 
             // Interpolate in frequency domain
             let mut blended_spectrum = vec![Complex::new(0.0, 0.0); window_size / 2 + 1];
@@ -382,8 +380,7 @@ impl VoiceMorpher {
 
             // IFFT
             let mut time_domain = vec![0.0; window_size];
-            ifft.process(&mut blended_spectrum, &mut time_domain)
-                .map_err(|e| Error::transform(format!("IFFT error: {e:?}")))?;
+            ifft.process(&blended_spectrum, &mut time_domain);
 
             // Overlap-add
             for (i, &sample) in time_domain.iter().enumerate() {
@@ -514,7 +511,7 @@ impl PitchTransform {
             return self.apply_simple_pitch_shift(input);
         }
 
-        let mut planner = RealFftPlanner::new();
+        let mut planner = RealFftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(window_size);
         let ifft = planner.plan_fft_inverse(window_size);
 
@@ -535,8 +532,7 @@ impl PitchTransform {
 
             // Forward FFT
             let mut spectrum = vec![Complex::new(0.0, 0.0); window_size / 2 + 1];
-            fft.process(&mut window, &mut spectrum)
-                .map_err(|e| Error::transform(format!("FFT error: {e:?}")))?;
+            fft.process(&window, &mut spectrum);
 
             // Phase vocoder processing
             let mut modified_spectrum = vec![Complex::new(0.0, 0.0); window_size / 2 + 1];
@@ -579,8 +575,7 @@ impl PitchTransform {
 
             // Inverse FFT
             let mut time_domain = vec![0.0; window_size];
-            ifft.process(&mut modified_spectrum, &mut time_domain)
-                .map_err(|e| Error::transform(format!("IFFT error: {e:?}")))?;
+            ifft.process(&modified_spectrum, &mut time_domain);
 
             // Apply window and overlap-add
             for (i, &sample) in time_domain.iter().enumerate() {
@@ -791,7 +786,7 @@ impl GenderTransform {
     }
 }
 
-/// Multi-channel audio data structure
+/// Multi-channel audio data structure with per-channel samples
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MultiChannelAudio {
     /// Audio samples organized as [channel][sample]
@@ -882,7 +877,7 @@ impl MultiChannelAudio {
 
     /// Get number of samples per channel
     pub fn num_samples(&self) -> usize {
-        self.channels.get(0).map(|ch| ch.len()).unwrap_or(0)
+        self.channels.first().map(|ch| ch.len()).unwrap_or(0)
     }
 
     /// Convert to mono by averaging channels
@@ -901,7 +896,7 @@ impl MultiChannelAudio {
     }
 }
 
-/// Multi-channel transform trait
+/// Multi-channel transform trait for processing multi-channel audio
 pub trait MultiChannelTransform {
     /// Apply transform to multi-channel audio
     fn apply_multichannel(&self, input: &MultiChannelAudio) -> Result<MultiChannelAudio>;
@@ -910,7 +905,7 @@ pub trait MultiChannelTransform {
     fn get_parameters(&self) -> std::collections::HashMap<String, f32>;
 }
 
-/// Channel processing strategy
+/// Channel processing strategy for multi-channel transformations
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum ChannelStrategy {
     /// Process each channel independently
@@ -923,7 +918,7 @@ pub enum ChannelStrategy {
     MidSide,
 }
 
-/// Multi-channel configuration
+/// Multi-channel configuration defining processing parameters
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MultiChannelConfig {
     /// Processing strategy
@@ -947,7 +942,7 @@ impl Default for MultiChannelConfig {
     }
 }
 
-/// Multi-channel pitch transform
+/// Multi-channel pitch transform with per-channel control
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MultiChannelPitchTransform {
     /// Base pitch transform
@@ -1041,7 +1036,7 @@ impl MultiChannelTransform for MultiChannelPitchTransform {
                 // Process Mid and Side independently
                 let mid_factor = self
                     .channel_pitch_factors
-                    .get(0)
+                    .first()
                     .copied()
                     .unwrap_or(self.base_transform.pitch_factor);
                 let side_factor = self
@@ -1187,7 +1182,7 @@ impl MultiChannelPitchTransform {
         let crosstalk = self.config.crosstalk_amount;
 
         // Create a copy for crosstalk calculation
-        let original_channels: Vec<Vec<f32>> = channels.iter().cloned().collect();
+        let original_channels: Vec<Vec<f32>> = channels.to_vec();
 
         for (ch_idx, channel) in channels.iter_mut().enumerate() {
             for (sample_idx, sample) in channel.iter_mut().enumerate() {
@@ -1213,20 +1208,20 @@ impl MultiChannelPitchTransform {
     /// Calculate correlation matrix between channels
     fn calculate_channel_correlation(&self, input: &MultiChannelAudio) -> Vec<Vec<f32>> {
         let num_channels = input.num_channels();
-        let mut correlation_matrix = vec![vec![0.0; num_channels]; num_channels];
 
-        for i in 0..num_channels {
-            for j in 0..num_channels {
-                if i == j {
-                    correlation_matrix[i][j] = 1.0;
-                } else {
-                    correlation_matrix[i][j] =
-                        self.calculate_correlation(&input.channels[i], &input.channels[j]);
-                }
-            }
-        }
-
-        correlation_matrix
+        (0..num_channels)
+            .map(|i| {
+                (0..num_channels)
+                    .map(|j| {
+                        if i == j {
+                            1.0
+                        } else {
+                            self.calculate_correlation(&input.channels[i], &input.channels[j])
+                        }
+                    })
+                    .collect()
+            })
+            .collect()
     }
 
     /// Calculate correlation between two channels

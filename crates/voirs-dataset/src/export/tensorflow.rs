@@ -650,7 +650,7 @@ impl TensorFlowExporter {
             TfFeature::Bytes(data) => {
                 // bytes_list field (tag 1, wire type 2)
                 self.write_protobuf_tag(&mut buffer, 1, 2);
-                let bytes_list = self.serialize_bytes_list(&[data.clone()])?;
+                let bytes_list = self.serialize_bytes_list(std::slice::from_ref(data))?;
                 self.write_protobuf_varint(&mut buffer, bytes_list.len() as u64);
                 buffer.extend_from_slice(&bytes_list);
             }

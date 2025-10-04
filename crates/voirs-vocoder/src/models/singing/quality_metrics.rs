@@ -2,15 +2,14 @@
 
 use crate::models::singing::config::QualityMetricsConfig;
 use anyhow::Result;
-use rustfft::{num_complex::Complex, FftPlanner};
+use scirs2_core::Complex;
+use scirs2_fft::{FftPlanner, RealFftPlanner};
 use std::collections::VecDeque;
 
 /// Quality metrics calculator for singing voice
 pub struct SingingQualityMetrics {
     /// Configuration
     config: QualityMetricsConfig,
-    /// FFT planner for analysis
-    fft_planner: FftPlanner<f32>,
     /// Window size for analysis
     window_size: usize,
     /// Sample rate
@@ -58,7 +57,6 @@ impl SingingQualityMetrics {
     pub fn new() -> Self {
         Self {
             config: QualityMetricsConfig::default(),
-            fft_planner: FftPlanner::new(),
             window_size: 2048,
             sample_rate: 22050,
             pitch_history: VecDeque::with_capacity(100),
@@ -70,7 +68,6 @@ impl SingingQualityMetrics {
     pub fn with_config(config: QualityMetricsConfig) -> Self {
         Self {
             config,
-            fft_planner: FftPlanner::new(),
             window_size: 2048,
             sample_rate: 22050,
             pitch_history: VecDeque::with_capacity(100),
@@ -167,17 +164,16 @@ impl SingingQualityMetrics {
         }
 
         // Perform FFT
-        let mut fft_input: Vec<Complex<f32>> =
+        let fft_input: Vec<Complex<f32>> =
             padded_frame.iter().map(|&x| Complex::new(x, 0.0)).collect();
 
-        let fft = self.fft_planner.plan_fft_forward(fft_input.len());
-        fft.process(&mut fft_input);
+        let fft_output_f64 = scirs2_fft::fft(&fft_input, None)?;
 
         // Extract magnitude spectrum
-        let spectrum: Vec<f32> = fft_input
+        let spectrum: Vec<f32> = fft_output_f64
             .iter()
             .take(self.window_size / 2 + 1)
-            .map(|c| c.norm())
+            .map(|c| (c.norm()) as f32)
             .collect();
 
         Ok(spectrum)

@@ -127,7 +127,10 @@ pub enum TrainingStatus {
     /// Training completed successfully
     Completed,
     /// Training failed with error
-    Failed { error: String },
+    Failed {
+        /// Error message describing the failure
+        error: String,
+    },
     /// Training was cancelled by user
     Cancelled,
     /// Training is scheduled but not started
@@ -166,33 +169,46 @@ pub enum TrainingType {
     FullTraining,
     /// Transfer learning from pre-trained model
     TransferLearning {
+        /// Path to base pre-trained model
         base_model_path: PathBuf,
+        /// Layers to freeze during training
         freeze_layers: Vec<String>,
     },
     /// Fine-tuning specific layers
     FineTuning {
+        /// Target layers to fine-tune
         target_layers: Vec<String>,
+        /// Learning rate scaling factor
         learning_rate_scale: f32,
     },
     /// Domain adaptation
     DomainAdaptation {
+        /// Source domain identifier
         source_domain: String,
+        /// Target domain identifier
         target_domain: String,
+        /// Domain adaptation strategy
         adaptation_strategy: AdaptationStrategy,
     },
     /// Few-shot learning
     FewShotLearning {
+        /// Size of support set for few-shot learning
         support_set_size: usize,
+        /// Meta-learning strategy to use
         meta_learning_strategy: MetaLearningStrategy,
     },
     /// Continuous learning
     ContinuousLearning {
+        /// Frequency of model updates
         update_frequency: Duration,
+        /// Strategy for retaining previous knowledge
         retention_strategy: RetentionStrategy,
     },
     /// Federated learning
     FederatedLearning {
+        /// Federation configuration
         federation_config: FederationConfig,
+        /// Aggregation strategy for federated updates
         aggregation_strategy: AggregationStrategy,
     },
 }
@@ -329,8 +345,9 @@ pub struct DataConfiguration {
 pub struct PreprocessingConfiguration {
     /// Target sample rate
     pub target_sample_rate: u32,
-    /// Audio duration limits
+    /// Minimum audio duration in seconds
     pub min_duration_seconds: f32,
+    /// Maximum audio duration in seconds
     pub max_duration_seconds: f32,
     /// Normalization settings
     pub normalize_audio: bool,
@@ -443,33 +460,51 @@ pub struct ModelConfiguration {
 pub enum ModelArchitecture {
     /// Transformer-based architecture
     Transformer {
+        /// Number of transformer layers
         num_layers: usize,
+        /// Number of attention heads
         num_heads: usize,
+        /// Model dimension
         d_model: usize,
+        /// Feed-forward dimension
         d_ff: usize,
     },
     /// Conformer architecture
     Conformer {
+        /// Number of conformer blocks
         num_blocks: usize,
+        /// Encoder dimension
         encoder_dim: usize,
+        /// Number of attention heads
         attention_heads: usize,
+        /// Convolutional kernel size
         conv_kernel_size: usize,
     },
     /// Wav2Vec2 architecture
     Wav2Vec2 {
+        /// Number of feature extractor layers
         feature_extractor_layers: usize,
+        /// Number of transformer layers
         transformer_layers: usize,
+        /// Embedding dimension
         embedding_dim: usize,
     },
     /// Whisper architecture
     Whisper {
+        /// Number of encoder layers
         encoder_layers: usize,
+        /// Number of decoder layers
         decoder_layers: usize,
+        /// Model dimension
         d_model: usize,
+        /// Number of attention heads
         num_heads: usize,
     },
     /// Custom architecture
-    Custom { config_path: PathBuf },
+    Custom {
+        /// Path to custom configuration file
+        config_path: PathBuf,
+    },
 }
 
 /// Model size configuration
@@ -526,7 +561,10 @@ pub enum LayerType {
     /// GRU layer
     GRU,
     /// Custom layer
-    Custom { class_name: String },
+    Custom {
+        /// Custom layer class name
+        class_name: String,
+    },
 }
 
 /// Layer parameter values
@@ -560,9 +598,15 @@ pub enum ActivationFunction {
     /// Softmax activation
     Softmax,
     /// LeakyReLU activation
-    LeakyReLU { negative_slope: f32 },
+    LeakyReLU {
+        /// Negative slope coefficient
+        negative_slope: f32,
+    },
     /// ELU activation
-    ELU { alpha: f32 },
+    ELU {
+        /// Alpha parameter for ELU
+        alpha: f32,
+    },
 }
 
 /// Regularization configuration
@@ -628,31 +672,48 @@ pub struct OptimizationConfiguration {
 pub enum OptimizerType {
     /// Adam optimizer
     Adam {
+        /// Learning rate
         lr: f32,
+        /// Beta1 parameter
         beta1: f32,
+        /// Beta2 parameter
         beta2: f32,
+        /// Epsilon for numerical stability
         eps: f32,
     },
     /// AdamW optimizer
     AdamW {
+        /// Learning rate
         lr: f32,
+        /// Beta1 parameter
         beta1: f32,
+        /// Beta2 parameter
         beta2: f32,
+        /// Epsilon for numerical stability
         eps: f32,
+        /// Weight decay coefficient
         weight_decay: f32,
     },
     /// SGD optimizer
     SGD {
+        /// Learning rate
         lr: f32,
+        /// Momentum factor
         momentum: f32,
+        /// Dampening for momentum
         dampening: f32,
+        /// Weight decay coefficient
         weight_decay: f32,
     },
     /// RMSprop optimizer
     RMSprop {
+        /// Learning rate
         lr: f32,
+        /// Smoothing constant
         alpha: f32,
+        /// Epsilon for numerical stability
         eps: f32,
+        /// Weight decay coefficient
         weight_decay: f32,
     },
 }
@@ -663,19 +724,40 @@ pub enum LearningRateScheduler {
     /// Constant learning rate
     Constant,
     /// Step decay
-    StepLR { step_size: u32, gamma: f32 },
+    StepLR {
+        /// Step size for decay
+        step_size: u32,
+        /// Decay factor
+        gamma: f32,
+    },
     /// Exponential decay
-    ExponentialLR { gamma: f32 },
+    ExponentialLR {
+        /// Decay factor
+        gamma: f32,
+    },
     /// Cosine annealing
-    CosineAnnealingLR { t_max: u32, eta_min: f32 },
+    CosineAnnealingLR {
+        /// Maximum number of iterations
+        t_max: u32,
+        /// Minimum learning rate
+        eta_min: f32,
+    },
     /// Reduce on plateau
     ReduceLROnPlateau {
+        /// Learning rate reduction factor
         factor: f32,
+        /// Number of epochs with no improvement after which learning rate will be reduced
         patience: u32,
+        /// Threshold for measuring improvement
         threshold: f32,
     },
     /// Warm-up with cosine decay
-    WarmupCosine { warmup_steps: u32, total_steps: u32 },
+    WarmupCosine {
+        /// Number of warmup steps
+        warmup_steps: u32,
+        /// Total number of training steps
+        total_steps: u32,
+    },
 }
 
 /// Loss function types
@@ -688,11 +770,22 @@ pub enum LossFunction {
     /// Attention-based sequence loss
     AttentionSeq2Seq,
     /// Focal loss
-    FocalLoss { alpha: f32, gamma: f32 },
+    FocalLoss {
+        /// Weight factor for class imbalance
+        alpha: f32,
+        /// Focusing parameter
+        gamma: f32,
+    },
     /// Label smoothing cross-entropy
-    LabelSmoothingCrossEntropy { smoothing: f32 },
+    LabelSmoothingCrossEntropy {
+        /// Smoothing factor
+        smoothing: f32,
+    },
     /// Custom loss function
-    Custom { implementation_path: PathBuf },
+    Custom {
+        /// Path to custom loss implementation
+        implementation_path: PathBuf,
+    },
 }
 
 /// Model parallelism configuration
@@ -785,7 +878,10 @@ pub enum ModelExportFormat {
     /// Quantized ONNX
     QuantizedONNX,
     /// Custom format
-    Custom { format_name: String },
+    Custom {
+        /// Name of the custom export format
+        format_name: String,
+    },
 }
 
 impl TrainingManager {
@@ -1356,23 +1452,47 @@ impl TrainingManager {
 /// Error types specific to training
 #[derive(Debug, thiserror::Error)]
 pub enum TrainingError {
+    /// Configuration error occurred during training setup
     #[error("Configuration error: {message}")]
-    ConfigurationError { message: String },
+    ConfigurationError {
+        /// Error message
+        message: String,
+    },
 
+    /// Data loading error occurred during training
     #[error("Data loading error: {message}")]
-    DataLoadingError { message: String },
+    DataLoadingError {
+        /// Error message
+        message: String,
+    },
 
+    /// Model error occurred during training
     #[error("Model error: {message}")]
-    ModelError { message: String },
+    ModelError {
+        /// Error message
+        message: String,
+    },
 
+    /// Training failed
     #[error("Training failed: {message}")]
-    TrainingFailed { message: String },
+    TrainingFailed {
+        /// Error message
+        message: String,
+    },
 
+    /// Validation error occurred during training
     #[error("Validation error: {message}")]
-    ValidationError { message: String },
+    ValidationError {
+        /// Error message
+        message: String,
+    },
 
+    /// Export error occurred during model export
     #[error("Export error: {message}")]
-    ExportError { message: String },
+    ExportError {
+        /// Error message
+        message: String,
+    },
 }
 
 impl From<TrainingError> for RecognitionError {

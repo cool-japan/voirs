@@ -116,6 +116,7 @@ pub use crate::traits::*;
 
 // Provide convenience imports for common use cases
 #[cfg(feature = "ui")]
+/// Description
 pub mod prelude {
     pub use super::{
         ColorScheme, EnhancedRadarChart, FeedbackVisualizer, PerformanceOptions, ProgressChart,

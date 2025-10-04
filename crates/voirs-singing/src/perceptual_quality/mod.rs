@@ -150,8 +150,20 @@ impl Default for EvaluationConfig {
 
 /// Quality assessment utilities
 pub mod utils {
-
     /// Validate audio samples for quality assessment
+    ///
+    /// # Arguments
+    ///
+    /// * `audio_samples` - Audio sample buffer to validate
+    /// * `sample_rate` - Sample rate in Hz (must be between 8000 and 192000 Hz)
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - If audio samples are valid for quality assessment
+    ///
+    /// # Errors
+    ///
+    /// * `Error::Validation` - If samples are empty, sample rate is invalid, or audio is too short
     pub fn validate_audio_samples(audio_samples: &[f32], sample_rate: u32) -> crate::Result<()> {
         if audio_samples.is_empty() {
             return Err(crate::Error::Validation(
@@ -177,7 +189,15 @@ pub mod utils {
         Ok(())
     }
 
-    /// Calculate signal-to-noise ratio
+    /// Calculate signal-to-noise ratio (SNR) in decibels
+    ///
+    /// # Arguments
+    ///
+    /// * `audio_samples` - Audio sample buffer for SNR calculation
+    ///
+    /// # Returns
+    ///
+    /// * SNR value in decibels (dB). Returns 60 dB if no noise is detected.
     pub fn calculate_snr(audio_samples: &[f32]) -> f64 {
         let signal_power: f64 = audio_samples
             .iter()
@@ -217,7 +237,16 @@ pub mod utils {
         frame_energies[percentile_index.min(frame_energies.len() - 1)]
     }
 
-    /// Calculate total harmonic distortion
+    /// Calculate total harmonic distortion (THD)
+    ///
+    /// # Arguments
+    ///
+    /// * `audio_samples` - Audio sample buffer for THD calculation
+    /// * `sample_rate` - Sample rate in Hz for frequency analysis
+    ///
+    /// # Returns
+    ///
+    /// * THD value as a ratio (0.0-1.0). Lower values indicate less distortion.
     pub fn calculate_thd(audio_samples: &[f32], sample_rate: u32) -> f64 {
         // Simplified THD calculation
         // In practice, this would need more sophisticated spectral analysis

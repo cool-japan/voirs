@@ -41,7 +41,7 @@ use crate::traits::{
 use crate::EvaluationError;
 use async_trait::async_trait;
 use chrono;
-use rayon::prelude::*;
+use scirs2_core::parallel_ops::*;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;

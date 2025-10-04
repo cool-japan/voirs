@@ -11,14 +11,23 @@ use std::time::Instant;
 
 /// Streaming context structure
 pub struct StreamingContext {
+    /// is active
     pub is_active: bool,
+    /// config
     pub config: VoirsStreamingConfig,
+    /// audio buffer
     pub audio_buffer: VecDeque<u8>,
+    /// callback
     pub callback: Option<VoirsStreamingCallback>,
+    /// user data
     pub user_data: *mut c_void,
+    /// chunk count
     pub chunk_count: usize,
+    /// total audio duration
     pub total_audio_duration: f64,
+    /// average latency
     pub average_latency: f64,
+    /// latency measurements
     pub latency_measurements: VecDeque<f64>,
 }
 
@@ -94,6 +103,7 @@ pub extern "C" fn voirs_start_streaming(
 /// # Returns
 /// VoirsError::Success on success, or an error code on failure.
 #[no_mangle]
+/// Item
 pub extern "C" fn voirs_stop_streaming(recognizer: *mut VoirsRecognizer) -> VoirsError {
     if recognizer.is_null() {
         return VoirsError::NullPointer;
@@ -311,6 +321,7 @@ pub extern "C" fn voirs_stream_audio(
 /// # Returns
 /// true if streaming is active, false otherwise
 #[no_mangle]
+/// Item
 pub extern "C" fn voirs_is_streaming_active(recognizer: *mut VoirsRecognizer) -> bool {
     if recognizer.is_null() {
         return false;
@@ -448,6 +459,7 @@ pub extern "C" fn voirs_configure_streaming(
 /// VoirsError::Success on success, or an error code on failure.
 /// Final results are delivered via the callback function.
 #[no_mangle]
+/// Item
 pub extern "C" fn voirs_flush_streaming_buffer(recognizer: *mut VoirsRecognizer) -> VoirsError {
     if recognizer.is_null() {
         return VoirsError::NullPointer;

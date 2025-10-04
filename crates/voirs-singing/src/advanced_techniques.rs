@@ -397,141 +397,228 @@ pub enum BendPhase {
     Returning,
 }
 
+/// Automation curve for pitch bend transitions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BendCurve {
+    /// Name of the bend curve
     pub name: String,
-    pub points: Vec<(f32, f32)>, // (time, bend_amount)
+    /// Control points as (time, bend_amount) pairs
+    pub points: Vec<(f32, f32)>,
+    /// Interpolation method between points
     pub interpolation: CurveInterpolation,
 }
 
+/// Interpolation methods for curve transitions
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CurveInterpolation {
+    /// Linear interpolation between points
     Linear,
+    /// Cubic interpolation for smooth transitions
     Cubic,
+    /// Spline interpolation for complex curves
     Spline,
 }
 
+/// Current state of dynamics processing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DynamicsState {
+    /// Current dynamics level (0.0-1.0)
     pub current_level: f32,
+    /// Target dynamics level for automation
     pub target_level: f32,
+    /// Position in envelope (0.0-1.0)
     pub envelope_position: f32,
-    pub compression_state: Vec<f32>, // Per-band compression
+    /// Per-band compression amounts in dB
+    pub compression_state: Vec<f32>,
 }
 
+/// Automation control for dynamics processing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DynamicsAutomation {
+    /// Whether automation is enabled
     pub enabled: bool,
-    pub curve: Vec<(f32, f32)>, // (time, level)
+    /// Automation curve as (time, level) pairs
+    pub curve: Vec<(f32, f32)>,
+    /// Current position in automation curve in seconds
     pub position: f32,
+    /// Whether to loop the automation curve
     pub loop_enabled: bool,
 }
 
+/// Envelope follower for tracking signal dynamics over time
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnvelopeFollower {
+    /// Name identifier for this envelope follower
     pub name: String,
+    /// Attack time constant in seconds
     pub attack: f32,
+    /// Release time constant in seconds
     pub release: f32,
+    /// Current envelope level (0.0-1.0)
     pub current_level: f32,
 }
 
+/// Master dynamics processing parameters
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MasterDynamics {
+    /// Master gain multiplier
     pub gain: f32,
+    /// Hard limit ceiling (maximum amplitude)
     pub limit: f32,
+    /// Master compression ratio
     pub compression: f32,
+    /// Saturation amount for warmth/distortion
     pub saturation: f32,
 }
 
+/// Settings for automated parameter modulation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AutomationSettings {
+    /// Whether automation is enabled
     pub enabled: bool,
+    /// Automation speed (cycles per second)
     pub speed: f32,
+    /// Automation depth (modulation amount 0.0-1.0)
     pub depth: f32,
+    /// Pattern type for automation
     pub pattern: AutomationPattern,
 }
 
+/// Waveform patterns for parameter automation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AutomationPattern {
+    /// Smooth sine wave oscillation
     Sine,
+    /// Linear triangle wave oscillation
     Triangle,
+    /// Rising sawtooth wave oscillation
     Sawtooth,
+    /// Square wave on/off oscillation
     Square,
+    /// Random value changes
     Random,
+    /// Custom user-defined pattern
     Custom,
 }
 
+/// Response curve shapes for dynamics processing
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DynamicsCurve {
+    /// Linear dynamics response
     Linear,
+    /// Exponential dynamics response (rapid change)
     Exponential,
+    /// Logarithmic dynamics response (gradual change)
     Logarithmic,
+    /// S-shaped sigmoid response curve
     Sigmoid,
+    /// Musically-tuned response curve
     Musical,
 }
 
+/// Current state of articulation processing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArticulationState {
+    /// Currently active articulation type
     pub current_articulation: Articulation,
+    /// Progress through articulation transition (0.0-1.0)
     pub transition_progress: f32,
+    /// Current phase of envelope (0.0-1.0)
     pub envelope_phase: f32,
+    /// Current phase of pitch modulation (0.0-1.0)
     pub modulation_phase: f32,
 }
 
+/// Configuration for melismatic vocal processing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MelismaSettings {
+    /// Melisma complexity (0.0-1.0, higher = more ornate)
     pub complexity: f32,
+    /// Note density (notes per syllable)
     pub note_density: f32,
+    /// Pitch range for melismatic variations in semitones
     pub range_semitones: f32,
+    /// Legato smoothness factor (0.0-1.0)
     pub legato_factor: f32,
+    /// Enable automatic melisma insertion
     pub auto_enable: bool,
 }
 
+/// Current state of melismatic processing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MelismaState {
+    /// Whether melisma is currently active
     pub active: bool,
+    /// Position within current melisma pattern (0.0-1.0)
     pub position: f32,
+    /// Name of currently active melisma pattern
     pub current_pattern: Option<String>,
 }
 
+/// Predefined melismatic ornamentation pattern
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MelismaPattern {
+    /// Pattern name
     pub name: String,
+    /// Note sequence for this pattern
     pub notes: Vec<MelismaNoteData>,
+    /// Musical style (e.g., "baroque", "gospel", "r&b")
     pub style: String,
+    /// Difficulty rating (0.0-1.0)
     pub difficulty: f32,
 }
 
+/// Individual note data within a melisma pattern
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MelismaNoteData {
+    /// Pitch offset from base note in semitones
     pub pitch_offset: f32,
+    /// Note duration as fraction of beat
     pub duration: f32,
+    /// Note velocity (0.0-1.0)
     pub velocity: f32,
+    /// Articulation type for this note
     pub articulation: Articulation,
 }
 
+/// Configuration for grace note ornamentation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraceNoteSettings {
+    /// Probability of grace note insertion (0.0-1.0)
     pub probability: f32,
+    /// Time offset before main note in seconds (typically negative)
     pub timing_offset: f32,
+    /// Velocity scaling factor for grace notes
     pub velocity_scale: f32,
+    /// Duration scaling factor for grace notes
     pub duration_scale: f32,
+    /// List of enabled grace note type names
     pub types_enabled: Vec<String>,
 }
 
+/// Current state of grace note processing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraceState {
+    /// Whether a grace note is currently active
     pub active: bool,
+    /// Type name of currently active grace note
     pub grace_type: Option<String>,
+    /// Current timing offset in seconds
     pub timing: f32,
 }
 
+/// Definition of a grace note ornamentation type
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraceNoteType {
+    /// Name of grace note type (e.g., "acciaccatura", "appoggiatura")
     pub name: String,
+    /// Pitch offset from target note in semitones
     pub pitch_offset: f32,
+    /// Time offset before main note in seconds
     pub timing_offset: f32,
+    /// Duration scaling factor relative to main note
     pub duration_scale: f32,
+    /// Velocity scaling factor relative to main note
     pub velocity_scale: f32,
 }
 
@@ -621,6 +708,11 @@ impl Default for VocalRunProcessor {
 }
 
 impl VocalRunProcessor {
+    /// Creates a new vocal run processor with default settings and basic patterns
+    ///
+    /// # Returns
+    ///
+    /// A new `VocalRunProcessor` initialized with ascending scale and blues run patterns
     pub fn new() -> Self {
         let mut patterns = HashMap::new();
 
@@ -658,6 +750,16 @@ impl VocalRunProcessor {
         }
     }
 
+    /// Process a note event with vocal run effects
+    ///
+    /// # Arguments
+    ///
+    /// * `note` - The note event to process (will be modified in place)
+    /// * `delta_time` - Time elapsed since last process call in seconds
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success, or an error if processing fails
     pub fn process_note(&mut self, note: &mut NoteEvent, delta_time: f32) -> crate::Result<()> {
         if !self.settings.auto_insertion {
             return Ok(());
@@ -668,7 +770,7 @@ impl VocalRunProcessor {
         // Check if we should trigger a new run
         if self.run_state.phase == RunPhase::Idle
             && self.run_state.time >= self.run_state.next_trigger
-            && rand::random::<f32>() < self.settings.probability
+            && scirs2_core::random::random::<f32>() < self.settings.probability
         {
             self.trigger_run(note)?;
         }
@@ -681,6 +783,16 @@ impl VocalRunProcessor {
         Ok(())
     }
 
+    /// Generate a vocal run pattern based on a base note
+    ///
+    /// # Arguments
+    ///
+    /// * `base_note` - The starting note for the run
+    /// * `complexity` - Run complexity factor (0.0-1.0, higher = more notes)
+    ///
+    /// # Returns
+    ///
+    /// A vector of `NoteEvent`s representing the generated run sequence
     pub fn generate_run(
         &mut self,
         base_note: &NoteEvent,
@@ -750,7 +862,7 @@ impl VocalRunProcessor {
         // Simple pattern selection - could be made more sophisticated
         let patterns: Vec<&String> = self.patterns.keys().collect();
         {
-            use rand::{thread_rng, Rng};
+            use scirs2_core::random::{thread_rng, Rng};
             let mut rng = thread_rng();
             patterns[rng.gen_range(0..patterns.len())].clone()
         }
@@ -791,6 +903,11 @@ impl Default for PitchBendProcessor {
 }
 
 impl PitchBendProcessor {
+    /// Creates a new pitch bend processor with default settings
+    ///
+    /// # Returns
+    ///
+    /// A new `PitchBendProcessor` with default bend settings
     pub fn new() -> Self {
         Self {
             settings: PitchBendSettings::default(),
@@ -799,6 +916,16 @@ impl PitchBendProcessor {
         }
     }
 
+    /// Process a note event with pitch bend effects
+    ///
+    /// # Arguments
+    ///
+    /// * `note` - The note event to process (will be modified in place)
+    /// * `delta_time` - Time elapsed since last process call in seconds
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success, or an error if processing fails
     pub fn process_note(&mut self, note: &mut NoteEvent, delta_time: f32) -> crate::Result<()> {
         self.update_bend_state(delta_time);
 
@@ -808,7 +935,7 @@ impl PitchBendProcessor {
 
         // Auto-bend logic
         if self.settings.auto_bends
-            && rand::random::<f32>() < self.settings.probability * delta_time
+            && scirs2_core::random::random::<f32>() < self.settings.probability * delta_time
         {
             self.trigger_auto_bend(note);
         }
@@ -816,6 +943,16 @@ impl PitchBendProcessor {
         Ok(())
     }
 
+    /// Apply pitch bend to a frequency value
+    ///
+    /// # Arguments
+    ///
+    /// * `frequency` - The base frequency in Hz
+    /// * `bend_amount` - Bend amount in semitones (positive = up, negative = down)
+    ///
+    /// # Returns
+    ///
+    /// The bent frequency in Hz
     pub fn apply_bend(&self, frequency: f32, bend_amount: f32) -> f32 {
         frequency * (bend_amount / 12.0).exp2()
     }
@@ -847,9 +984,9 @@ impl PitchBendProcessor {
     fn trigger_auto_bend(&mut self, note: &NoteEvent) {
         let bend_range = self.settings.max_range;
         let bend_amount = match self.settings.direction_preference {
-            BendDirection::Up => rand::random::<f32>() * bend_range,
-            BendDirection::Down => -rand::random::<f32>() * bend_range,
-            BendDirection::Both => (rand::random::<f32>() - 0.5) * 2.0 * bend_range,
+            BendDirection::Up => scirs2_core::random::random::<f32>() * bend_range,
+            BendDirection::Down => -scirs2_core::random::random::<f32>() * bend_range,
+            BendDirection::Both => (scirs2_core::random::random::<f32>() - 0.5) * 2.0 * bend_range,
             BendDirection::Contextual => {
                 // Context-based bend direction based on note position
                 if note.frequency > 440.0 {
@@ -893,6 +1030,11 @@ impl Default for AdvancedDynamicsProcessor {
 }
 
 impl AdvancedDynamicsProcessor {
+    /// Creates a new advanced dynamics processor with default settings
+    ///
+    /// # Returns
+    ///
+    /// A new `AdvancedDynamicsProcessor` with multi-band dynamics and automation support
     pub fn new() -> Self {
         Self {
             settings: AdvancedDynamicsSettings::default(),
@@ -902,6 +1044,16 @@ impl AdvancedDynamicsProcessor {
         }
     }
 
+    /// Process a note event with advanced multi-band dynamics
+    ///
+    /// # Arguments
+    ///
+    /// * `note` - The note event to process (will be modified in place)
+    /// * `delta_time` - Time elapsed since last process call in seconds
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success, or an error if processing fails
     pub fn process_note(&mut self, note: &mut NoteEvent, delta_time: f32) -> crate::Result<()> {
         // Update automation
         if self.automation.enabled {
@@ -932,6 +1084,11 @@ impl AdvancedDynamicsProcessor {
         Ok(())
     }
 
+    /// Set the dynamics automation curve
+    ///
+    /// # Arguments
+    ///
+    /// * `curve` - Vector of (time, level) control points for automation
     pub fn set_automation_curve(&mut self, curve: Vec<(f32, f32)>) {
         self.automation.curve = curve;
         self.automation.position = 0.0;
@@ -1008,6 +1165,11 @@ impl Default for AdvancedArticulationProcessor {
 }
 
 impl AdvancedArticulationProcessor {
+    /// Creates a new advanced articulation processor with predefined templates
+    ///
+    /// # Returns
+    ///
+    /// A new `AdvancedArticulationProcessor` with staccato and legato templates
     pub fn new() -> Self {
         let mut templates = HashMap::new();
 
@@ -1045,6 +1207,16 @@ impl AdvancedArticulationProcessor {
         }
     }
 
+    /// Process a note event with advanced articulation effects
+    ///
+    /// # Arguments
+    ///
+    /// * `note` - The note event to process (will be modified in place)
+    /// * `delta_time` - Time elapsed since last process call in seconds
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success, or an error if processing fails
     pub fn process_note(&mut self, note: &mut NoteEvent, delta_time: f32) -> crate::Result<()> {
         if let Some(template) = self.templates.get(&note.articulation) {
             // Apply articulation template
@@ -1070,6 +1242,11 @@ impl Default for MelismaProcessor {
 }
 
 impl MelismaProcessor {
+    /// Creates a new melisma processor with default settings
+    ///
+    /// # Returns
+    ///
+    /// A new `MelismaProcessor` initialized with default settings
     pub fn new() -> Self {
         Self {
             settings: MelismaSettings::default(),
@@ -1078,15 +1255,26 @@ impl MelismaProcessor {
         }
     }
 
+    /// Process a note event with melismatic effects
+    ///
+    /// # Arguments
+    ///
+    /// * `note` - The note event to process (will be modified in place)
+    /// * `delta_time` - Time elapsed since last process call in seconds
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success, or an error if processing fails
     pub fn process_note(&mut self, note: &mut NoteEvent, delta_time: f32) -> crate::Result<()> {
         if !self.settings.auto_enable {
             return Ok(());
         }
 
         // Simple melisma logic - would be expanded for full implementation
-        if rand::random::<f32>() < 0.1 * delta_time {
+        if scirs2_core::random::random::<f32>() < 0.1 * delta_time {
             // Apply slight pitch variation for melismatic effect
-            let variation = (rand::random::<f32>() - 0.5) * self.settings.range_semitones;
+            let variation =
+                (scirs2_core::random::random::<f32>() - 0.5) * self.settings.range_semitones;
             note.frequency *= (variation / 12.0).exp2();
         }
 
@@ -1101,6 +1289,11 @@ impl Default for GraceNoteProcessor {
 }
 
 impl GraceNoteProcessor {
+    /// Creates a new grace note processor with predefined grace note types
+    ///
+    /// # Returns
+    ///
+    /// A new `GraceNoteProcessor` with acciaccatura and appoggiatura types
     pub fn new() -> Self {
         let mut types = HashMap::new();
 
@@ -1133,8 +1326,18 @@ impl GraceNoteProcessor {
         }
     }
 
+    /// Process a note event with grace note effects
+    ///
+    /// # Arguments
+    ///
+    /// * `note` - The note event to process (will be modified in place)
+    /// * `_delta_time` - Time elapsed since last process call in seconds (unused)
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success, or an error if processing fails
     pub fn process_note(&mut self, note: &mut NoteEvent, _delta_time: f32) -> crate::Result<()> {
-        if rand::random::<f32>() < self.settings.probability {
+        if scirs2_core::random::random::<f32>() < self.settings.probability {
             // Apply grace note effect
             note.velocity *= self.settings.velocity_scale;
             note.duration *= self.settings.duration_scale;
@@ -1372,6 +1575,12 @@ impl Default for GraceState {
 }
 
 impl EnvelopeFollower {
+    /// Update the envelope follower with new input
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Input signal level to track
+    /// * `delta_time` - Time elapsed since last update in seconds
     pub fn update(&mut self, input: f32, delta_time: f32) {
         let target = input.abs();
         let rate = if target > self.current_level {

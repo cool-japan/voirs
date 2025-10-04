@@ -2,9 +2,9 @@
 
 use crate::error::{CliError, Result};
 use std::collections::HashMap;
-use voirs::{QualityLevel, Result as VoirsResult, VoirsPipeline};
 use voirs_sdk::config::AppConfig;
 use voirs_sdk::types::VoiceConfig;
+use voirs_sdk::{QualityLevel, Result as VoirsResult, VoirsPipeline};
 
 /// Voice search functionality
 pub struct VoiceSearch {

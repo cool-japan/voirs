@@ -4,15 +4,19 @@ use web_sys::console;
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = console)]
+    /// log
     pub fn log(s: &str);
 
     #[wasm_bindgen(js_namespace = console)]
+    /// error
     pub fn error(s: &str);
 
     #[wasm_bindgen(js_namespace = console)]
+    /// warn
     pub fn warn(s: &str);
 
     #[wasm_bindgen(js_namespace = console)]
+    /// info
     pub fn info(s: &str);
 }
 
@@ -34,12 +38,14 @@ macro_rules! console_info {
 
 pub(crate) use {console_error, console_info, console_log, console_warn};
 
+/// set panic hook
 pub fn set_panic_hook() {
     #[cfg(feature = "console_error_panic_hook")]
     console_error_panic_hook::set_once();
 }
 
 #[wasm_bindgen]
+/// init wasm logger
 pub fn init_wasm_logger() {
     console_log!("Initializing WASM logger for VoiRS Recognizer");
     #[cfg(feature = "wasm-logger")]
@@ -47,6 +53,7 @@ pub fn init_wasm_logger() {
 }
 
 #[wasm_bindgen]
+/// get wasm memory usage
 pub fn get_wasm_memory_usage() -> JsValue {
     let memory = wasm_bindgen::memory()
         .dyn_into::<js_sys::WebAssembly::Memory>()
@@ -63,6 +70,7 @@ pub fn get_wasm_memory_usage() -> JsValue {
 }
 
 #[wasm_bindgen]
+/// check browser compatibility
 pub fn check_browser_compatibility() -> JsValue {
     let mut features = std::collections::HashMap::new();
 
@@ -119,6 +127,7 @@ fn get_browser_recommendations(
 }
 
 #[wasm_bindgen]
+/// get optimal chunk size
 pub fn get_optimal_chunk_size(sample_rate: u32, target_latency_ms: f32) -> u32 {
     let samples_per_ms = sample_rate as f32 / 1000.0;
     let chunk_size = (target_latency_ms * samples_per_ms) as u32;
@@ -131,6 +140,7 @@ pub fn get_optimal_chunk_size(sample_rate: u32, target_latency_ms: f32) -> u32 {
 }
 
 #[wasm_bindgen]
+/// estimate memory requirements
 pub fn estimate_memory_requirements(model_size: &str, chunk_size: u32) -> JsValue {
     let base_memory = match model_size {
         "tiny" => 100 * 1024 * 1024,      // 100MB
@@ -158,6 +168,7 @@ pub fn estimate_memory_requirements(model_size: &str, chunk_size: u32) -> JsValu
 }
 
 #[wasm_bindgen]
+/// validate audio format
 pub fn validate_audio_format(sample_rate: u32, channels: u16, bit_depth: u16) -> JsValue {
     let mut issues = Vec::new();
     let mut recommendations = Vec::new();
@@ -204,6 +215,7 @@ pub fn validate_audio_format(sample_rate: u32, channels: u16, bit_depth: u16) ->
 }
 
 #[wasm_bindgen]
+/// get performance profile
 pub fn get_performance_profile(device_type: &str) -> JsValue {
     let profile = match device_type.to_lowercase().as_str() {
         "mobile" | "phone" | "tablet" => serde_json::json!({

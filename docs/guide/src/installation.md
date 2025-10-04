@@ -25,10 +25,10 @@ Add VoiRS to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-voirs = "0.1.0-alpha.1"
+voirs = "0.1.0-alpha.2"
 
 # Or with specific features
-voirs = { version = "0.1.0-alpha.1", features = [
+voirs = { version = "0.1.0-alpha.2", features = [
     "gpu",           # GPU acceleration support
     "onnx",          # ONNX runtime support
     "recognition",   # Include speech recognition features
@@ -78,12 +78,12 @@ VoiRS provides several optional features:
 
 For **basic synthesis**:
 ```toml
-voirs = "0.1.0-alpha.1"  # Core TTS functionality included
+voirs = "0.1.0-alpha.2"  # Core TTS functionality included
 ```
 
 For **high-performance applications**:
 ```toml
-voirs = { version = "0.1.0-alpha.1", features = [
+voirs = { version = "0.1.0-alpha.2", features = [
     "gpu",           # GPU acceleration
     "onnx",          # Optimized inference
 ] }
@@ -91,14 +91,14 @@ voirs = { version = "0.1.0-alpha.1", features = [
 
 For **comprehensive speech applications**:
 ```toml
-voirs = { version = "0.1.0-alpha.1", features = [
+voirs = { version = "0.1.0-alpha.2", features = [
     "full",          # All features enabled
 ] }
 ```
 
 For **evaluation and testing**:
 ```toml
-voirs = { version = "0.1.0-alpha.1", features = [
+voirs = { version = "0.1.0-alpha.2", features = [
     "evaluation",    # Quality metrics
     "feedback",      # User feedback systems
     "recognition",   # Bidirectional speech processing

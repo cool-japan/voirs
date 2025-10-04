@@ -99,50 +99,65 @@ pub struct AllocationInfo {
 /// Type of memory allocation
 #[derive(Debug, Clone, PartialEq)]
 pub enum AllocationType {
-    /// Audio processing buffer
+    /// Audio processing buffer for holding audio samples
     AudioBuffer,
-    /// Model weights and data
+    /// Model weights and data for neural networks
     ModelData,
-    /// Conversion result cache
+    /// Conversion result cache for storing processed results
     ConversionCache,
-    /// Temporary processing buffer
+    /// Temporary processing buffer for intermediate computations
     TemporaryBuffer,
-    /// Configuration data
+    /// Configuration data for system settings
     ConfigurationData,
-    /// Performance metrics data
+    /// Performance metrics data for monitoring
     MetricsData,
-    /// Other type of allocation
+    /// Other type of allocation with custom description
     Other(String),
 }
 
 /// Pattern of memory allocation behavior
 #[derive(Debug, Clone)]
 pub struct AllocationPattern {
+    /// Name identifying this allocation pattern
     pub pattern_name: String,
+    /// Number of allocations following this pattern
     pub allocation_count: u32,
+    /// Average size of allocations in bytes
     pub average_size: u64,
+    /// Total size of all allocations in bytes
     pub total_size: u64,
-    pub frequency: f64, // Allocations per second
+    /// Frequency of allocations per second
+    pub frequency: f64,
+    /// Typical lifetime duration for allocations in this pattern
     pub typical_lifetime: Duration,
 }
 
 /// Detected memory leak information
 #[derive(Debug, Clone)]
 pub struct MemoryLeak {
+    /// Unique identifier for this leak
     pub leak_id: String,
+    /// Information about the leaked allocation
     pub allocation_info: AllocationInfo,
+    /// Timestamp when the leak was detected
     pub leak_detected_at: Instant,
+    /// Estimated duration the leak has existed
     pub estimated_leak_duration: Duration,
+    /// Severity level of the leak
     pub severity: LeakSeverity,
 }
 
 /// Severity of memory leak
 #[derive(Debug, Clone, PartialEq)]
 pub enum LeakSeverity {
-    Low,      // Small, short-lived leaks
-    Medium,   // Moderate size or duration
-    High,     // Large size or long duration
-    Critical, // Severe leaks that could cause system instability
+    /// Low severity - small, short-lived leaks with minimal impact
+    Low,
+    /// Medium severity - moderate size or duration requiring monitoring
+    Medium,
+    /// High severity - large size or long duration requiring attention
+    High,
+    /// Critical severity - severe leaks that could cause system instability
+    Critical,
 }
 
 /// Track reference cycles and ownership patterns
@@ -161,63 +176,95 @@ pub struct ReferenceTracker {
 /// Information about a reference
 #[derive(Debug, Clone)]
 pub struct ReferenceInfo {
+    /// Unique identifier for this reference
     pub reference_id: String,
+    /// Type of object being referenced
     pub object_type: String,
+    /// Timestamp when reference was created
     pub created_at: Instant,
+    /// Timestamp of last access to this reference
     pub last_accessed: Instant,
+    /// Total number of times this reference has been accessed
     pub access_count: u32,
+    /// Source code location where reference was created
     pub source_location: String,
-    pub reference_chain: Vec<String>, // Chain of references leading to this object
+    /// Chain of references leading to this object for cycle detection
+    pub reference_chain: Vec<String>,
 }
 
 /// Information about a weak reference
 #[derive(Debug, Clone)]
 pub struct WeakReferenceInfo {
+    /// Unique identifier for this weak reference
     pub reference_id: String,
+    /// Type of object being weakly referenced
     pub object_type: String,
+    /// Timestamp when weak reference was created
     pub created_at: Instant,
+    /// Whether the weak reference can still be upgraded
     pub is_valid: bool,
+    /// Number of times upgrade was attempted
     pub upgrade_attempts: u32,
+    /// Number of successful upgrades to strong reference
     pub successful_upgrades: u32,
 }
 
 /// Detected reference cycle
 #[derive(Debug, Clone)]
 pub struct ReferenceCycle {
+    /// Unique identifier for this cycle
     pub cycle_id: String,
+    /// List of object IDs participating in the cycle
     pub objects_in_cycle: Vec<String>,
+    /// Number of objects in the cycle
     pub cycle_length: usize,
+    /// Timestamp when cycle was detected
     pub detected_at: Instant,
+    /// Classification of the cycle type
     pub cycle_type: CycleType,
+    /// Estimated memory impact in bytes
     pub estimated_memory_impact: u64,
 }
 
 /// Type of reference cycle
 #[derive(Debug, Clone, PartialEq)]
 pub enum CycleType {
-    DirectCycle,   // A -> B -> A
-    IndirectCycle, // A -> B -> C -> A
-    ComplexCycle,  // Multiple interconnected cycles
+    /// Direct cycle between two objects (A -> B -> A)
+    DirectCycle,
+    /// Indirect cycle through multiple objects (A -> B -> C -> A)
+    IndirectCycle,
+    /// Complex cycle with multiple interconnected cycles
+    ComplexCycle,
 }
 
 /// Pattern of reference creation and usage
 #[derive(Debug, Clone)]
 pub struct ReferencePattern {
+    /// Name identifying this reference pattern
     pub pattern_name: String,
+    /// Frequency of reference creation per second
     pub creation_frequency: f64,
+    /// Average lifetime before reference is dropped
     pub average_lifetime: Duration,
+    /// Typical access pattern observed for these references
     pub typical_access_pattern: AccessPattern,
+    /// Common chains of references observed in this pattern
     pub common_reference_chains: Vec<Vec<String>>,
 }
 
 /// Access pattern for references
 #[derive(Debug, Clone, PartialEq)]
 pub enum AccessPattern {
-    SingleAccess,     // Used once and dropped
-    BurstAccess,      // Heavy usage in short periods
-    SteadyAccess,     // Regular consistent access
-    DecreasingAccess, // Access frequency decreases over time
-    PeriodicAccess,   // Regular periodic access pattern
+    /// Used once and then dropped immediately
+    SingleAccess,
+    /// Heavy usage concentrated in short time periods
+    BurstAccess,
+    /// Regular consistent access throughout lifetime
+    SteadyAccess,
+    /// Access frequency decreases over time
+    DecreasingAccess,
+    /// Regular periodic access with predictable intervals
+    PeriodicAccess,
 }
 
 /// Monitor buffer safety and bounds checking
@@ -236,107 +283,164 @@ pub struct BufferSafetyMonitor {
 /// Buffer bounds violation information
 #[derive(Debug, Clone)]
 pub struct BoundsViolation {
+    /// Unique identifier for this violation
     pub violation_id: String,
+    /// ID of the buffer where violation occurred
     pub buffer_id: String,
+    /// Type of bounds violation detected
     pub violation_type: ViolationType,
+    /// Index that was attempted to access
     pub attempted_index: isize,
+    /// Actual size of the buffer
     pub buffer_size: usize,
+    /// Stack trace at time of violation
     pub stack_trace: String,
+    /// Timestamp when violation was detected
     pub detected_at: Instant,
+    /// Severity level of the violation
     pub severity: ViolationSeverity,
 }
 
 /// Type of bounds violation
 #[derive(Debug, Clone, PartialEq)]
 pub enum ViolationType {
+    /// Attempted to read data beyond buffer bounds
     ReadBeyondBounds,
+    /// Attempted to write data beyond buffer bounds
     WriteBeyondBounds,
+    /// Attempted to access buffer with negative index
     NegativeIndex,
+    /// Attempted to use buffer after it was freed
     UseAfterFree,
+    /// Attempted to free the same buffer twice
     DoubleFree,
 }
 
 /// Severity of bounds violation
 #[derive(Debug, Clone, PartialEq)]
 pub enum ViolationSeverity {
-    Warning,  // Potential issue but handled safely
-    Error,    // Definite violation that was caught
-    Critical, // Violation that could cause undefined behavior
+    /// Warning - potential issue but handled safely
+    Warning,
+    /// Error - definite violation that was caught and handled
+    Error,
+    /// Critical - violation that could cause undefined behavior or crashes
+    Critical,
 }
 
 /// Statistics for buffer usage
 #[derive(Debug, Clone)]
 pub struct BufferStats {
+    /// Unique identifier for this buffer
     pub buffer_id: String,
+    /// Type classification of the buffer
     pub buffer_type: String,
+    /// Current size of the buffer in elements
     pub size: usize,
+    /// Total number of times buffer was accessed
     pub access_count: u32,
+    /// Number of read operations performed
     pub read_operations: u32,
+    /// Number of write operations performed
     pub write_operations: u32,
+    /// Number of times buffer was resized
     pub resize_operations: u32,
+    /// Timestamp of first access to buffer
     pub first_access: Instant,
+    /// Timestamp of most recent access
     pub last_access: Instant,
+    /// Average time interval between accesses
     pub average_access_interval: Duration,
 }
 
 /// Unsafe operation detected
 #[derive(Debug, Clone)]
 pub struct UnsafeOperation {
+    /// Unique identifier for this unsafe operation
     pub operation_id: String,
+    /// Type of unsafe operation detected
     pub operation_type: UnsafeOperationType,
+    /// ID of buffer involved in unsafe operation
     pub buffer_id: String,
+    /// Timestamp when operation was detected
     pub detected_at: Instant,
+    /// Risk level of the unsafe operation
     pub risk_level: RiskLevel,
+    /// Description of mitigation if automatically applied
     pub mitigation_applied: Option<String>,
 }
 
 /// Type of unsafe operation
 #[derive(Debug, Clone, PartialEq)]
 pub enum UnsafeOperationType {
+    /// Memory access not aligned to required boundaries
     UnalignedAccess,
+    /// Data race detected from concurrent unsynchronized access
     RacyAccess,
+    /// Pointer references deallocated or invalid memory
     DanglingPointer,
+    /// Write operation exceeded buffer capacity
     BufferOverflow,
+    /// Attempted to use value after it was moved
     UseAfterMove,
+    /// Multiple threads mutating shared data without synchronization
     ConcurrentMutation,
 }
 
 /// Risk level of unsafe operation
 #[derive(Debug, Clone, PartialEq)]
 pub enum RiskLevel {
+    /// Low risk with minimal impact on safety
     Low,
+    /// Medium risk requiring monitoring
     Medium,
+    /// High risk that should be addressed promptly
     High,
+    /// Critical risk requiring immediate attention
     Critical,
 }
 
 /// Buffer lifecycle tracking
 #[derive(Debug, Clone)]
 pub struct BufferLifecycle {
+    /// Unique identifier for this buffer
     pub buffer_id: String,
+    /// Timestamp when buffer was created
     pub created_at: Instant,
+    /// History of size changes with timestamps
     pub size_changes: Vec<(Instant, usize)>,
+    /// History of access operations with timestamps
     pub access_pattern: Vec<(Instant, AccessType)>,
+    /// Current state of the buffer
     pub current_state: BufferState,
+    /// Expected lifetime if known
     pub expected_lifetime: Option<Duration>,
 }
 
 /// Type of buffer access
 #[derive(Debug, Clone, PartialEq)]
 pub enum AccessType {
+    /// Read operation from buffer
     Read,
+    /// Write operation to buffer
     Write,
+    /// Buffer was resized
     Resize,
+    /// Buffer was cloned
     Clone,
+    /// Buffer ownership was moved
     Move,
 }
 
 /// Current state of buffer
 #[derive(Debug, Clone, PartialEq)]
 pub enum BufferState {
+    /// Buffer is active and available for use
     Active,
+    /// Buffer is currently borrowed
     Borrowed,
+    /// Buffer ownership has been moved
     Moved,
+    /// Buffer has been dropped and deallocated
     Dropped,
 }
 
@@ -675,7 +779,7 @@ impl MemorySafetyAuditor {
         Ok(())
     }
 
-    /// Get current memory safety status
+    /// Get current memory safety status snapshot
     pub async fn get_safety_status(&self) -> MemorySafetyStatus {
         let allocation_tracker = self.allocation_tracker.read().await;
         let reference_tracker = self.reference_tracker.read().await;
@@ -699,10 +803,15 @@ impl MemorySafetyAuditor {
 /// Complete memory safety audit report
 #[derive(Debug)]
 pub struct MemorySafetyReport {
+    /// Results from memory allocation audit
     pub allocation_audit: Option<AllocationAuditResult>,
+    /// Results from reference cycle audit
     pub reference_audit: Option<ReferenceAuditResult>,
+    /// Results from buffer safety audit
     pub buffer_audit: Option<BufferAuditResult>,
+    /// Overall safety score from 0.0 to 100.0
     pub overall_safety_score: f64,
+    /// Timestamp when audit was performed
     pub audit_timestamp: Instant,
 }
 
@@ -721,43 +830,66 @@ impl Default for MemorySafetyReport {
 /// Result of allocation audit
 #[derive(Debug, Default)]
 pub struct AllocationAuditResult {
+    /// List of detected memory leaks
     pub detected_leaks: Vec<MemoryLeak>,
+    /// Number of currently active allocations
     pub total_active_allocations: usize,
+    /// Current total memory usage in bytes
     pub current_memory_usage: u64,
+    /// Peak memory usage observed in bytes
     pub peak_memory_usage: u64,
+    /// Identified allocation patterns
     pub allocation_patterns: HashMap<String, AllocationPattern>,
+    /// Whether memory usage exceeded configured threshold
     pub memory_threshold_exceeded: bool,
 }
 
 /// Result of reference audit
 #[derive(Debug, Default)]
 pub struct ReferenceAuditResult {
+    /// List of detected reference cycles
     pub detected_cycles: Vec<ReferenceCycle>,
+    /// Number of active strong references
     pub active_strong_references: usize,
+    /// Number of active weak references
     pub active_weak_references: usize,
+    /// References that appear to be orphaned
     pub orphaned_references: Vec<ReferenceInfo>,
+    /// Identified reference usage patterns
     pub reference_patterns: HashMap<String, ReferencePattern>,
 }
 
 /// Result of buffer audit
 #[derive(Debug, Default)]
 pub struct BufferAuditResult {
+    /// List of detected bounds violations
     pub bounds_violations: Vec<BoundsViolation>,
+    /// List of detected unsafe operations
     pub unsafe_operations: Vec<UnsafeOperation>,
+    /// Statistics for all tracked buffers
     pub buffer_statistics: HashMap<String, BufferStats>,
+    /// Buffers that have existed for unusually long time
     pub long_lived_buffers: Vec<BufferLifecycle>,
 }
 
 /// Current memory safety status
 #[derive(Debug)]
 pub struct MemorySafetyStatus {
+    /// Current total memory usage in bytes
     pub current_memory_usage: u64,
+    /// Number of currently active allocations
     pub active_allocations: usize,
+    /// Number of detected memory leaks
     pub detected_leaks: usize,
+    /// Number of active references being tracked
     pub active_references: usize,
+    /// Number of detected reference cycles
     pub detected_cycles: usize,
+    /// Number of buffer bounds violations
     pub bounds_violations: usize,
+    /// Number of detected unsafe operations
     pub unsafe_operations: usize,
+    /// Timestamp of last audit performed
     pub last_audit: Instant,
 }
 
@@ -778,12 +910,19 @@ pub struct ThreadSafeModelManager {
 /// Model access statistics for monitoring
 #[derive(Debug, Clone, Default)]
 pub struct ModelAccessStats {
+    /// Number of times a model was found in cache
     pub cache_hits: u64,
+    /// Number of times a model was not found in cache
     pub cache_misses: u64,
+    /// Total number of models loaded from storage
     pub models_loaded: u64,
+    /// Number of models removed from cache
     pub models_evicted: u64,
+    /// Number of concurrent model loading operations
     pub concurrent_loads: u64,
+    /// Average time taken to load a model
     pub average_load_time: Duration,
+    /// Timestamp of last cache cleanup operation
     pub last_cleanup: Option<Instant>,
 }
 
@@ -905,7 +1044,7 @@ impl ThreadSafeModelManager {
         }
     }
 
-    /// Load model implementation (placeholder for actual model loading)
+    /// Load model implementation for given conversion type with simulated loading time
     async fn load_model_impl(&self, conversion_type: &ConversionType) -> Result<ConversionModel> {
         // This is a placeholder - in real implementation, this would load the actual model
         tokio::time::sleep(Duration::from_millis(100)).await; // Simulate loading time
@@ -922,7 +1061,7 @@ impl ThreadSafeModelManager {
         Ok(ConversionModel::new(model_type))
     }
 
-    /// Evict least used model to make space
+    /// Evict least recently used model from cache to make space for new model
     async fn evict_least_used_model(
         &self,
         models_guard: &mut HashMap<ConversionType, Arc<ConversionModel>>,
@@ -946,7 +1085,7 @@ impl ThreadSafeModelManager {
         }
     }
 
-    /// Update access statistics
+    /// Update access statistics and usage tracker after model access
     async fn update_access_stats(&self, conversion_type: &ConversionType, cache_hit: bool) {
         let mut stats_guard = self.stats.write().await;
         if cache_hit {
@@ -964,12 +1103,12 @@ impl ThreadSafeModelManager {
         }
     }
 
-    /// Get current statistics
+    /// Get current model access statistics snapshot
     pub async fn get_stats(&self) -> ModelAccessStats {
         self.stats.read().await.clone()
     }
 
-    /// Clear all cached models
+    /// Clear all cached models from memory and update statistics
     pub async fn clear_cache(&self) {
         let mut models_guard = self.models.write().await;
         let mut usage_guard = self.usage_tracker.write().await;
@@ -990,7 +1129,7 @@ impl ThreadSafeModelManager {
         );
     }
 
-    /// Perform periodic cleanup of unused models
+    /// Perform periodic cleanup of models that have been idle beyond specified duration
     pub async fn cleanup_unused_models(&self, max_idle_time: Duration) {
         let now = Instant::now();
         let mut models_guard = self.models.write().await;
@@ -1067,20 +1206,20 @@ pub struct OperationInfo {
 /// Operation status
 #[derive(Debug, Clone, PartialEq)]
 pub enum OperationStatus {
-    /// Operation is being initialized
+    /// Operation is being initialized and preparing resources
     Starting,
-    /// Operation is actively processing
+    /// Operation is actively processing data
     Processing,
-    /// Operation is in final cleanup phase
+    /// Operation is in final cleanup and finalization phase
     Finalizing,
     /// Operation completed successfully
     Completed,
-    /// Operation failed with error message
+    /// Operation failed with error message describing the failure
     Failed(String),
 }
 
 impl OperationGuard {
-    /// Create new operation guard
+    /// Create new operation guard with semaphore-based concurrency control
     pub async fn new(
         operation_state: Arc<RwLock<OperationState>>,
         semaphore: Arc<Semaphore>,
@@ -1117,7 +1256,7 @@ impl OperationGuard {
         })
     }
 
-    /// Update operation status
+    /// Update operation status in shared state for monitoring
     pub async fn update_status(&self, status: OperationStatus) {
         let mut state_guard = self.operation_state.write().await;
         if let Some(op_info) = state_guard.active_operations.get_mut(&self.operation_id) {
@@ -1125,18 +1264,18 @@ impl OperationGuard {
         }
     }
 
-    /// Mark operation as completed
+    /// Mark operation as successfully completed and update statistics
     pub async fn complete(&self) {
         self.finalize_operation(OperationStatus::Completed).await;
     }
 
-    /// Mark operation as failed
+    /// Mark operation as failed with error message and update statistics
     pub async fn fail(&self, error: String) {
         self.finalize_operation(OperationStatus::Failed(error))
             .await;
     }
 
-    /// Finalize operation and update statistics
+    /// Finalize operation with given status and update duration statistics
     async fn finalize_operation(&self, final_status: OperationStatus) {
         let duration = self.start_time.elapsed();
         let mut state_guard = self.operation_state.write().await;
@@ -1220,7 +1359,7 @@ pub struct ConcurrentConversionMetrics {
 }
 
 impl ConcurrentConversionManager {
-    /// Create new concurrent conversion manager
+    /// Create new concurrent conversion manager with specified concurrency limits
     pub fn new(
         max_concurrent_operations: usize,
         max_cached_models: usize,
@@ -1235,7 +1374,7 @@ impl ConcurrentConversionManager {
         }
     }
 
-    /// Process conversion request with thread safety guarantees
+    /// Process conversion request with thread-safe concurrency control and metrics tracking
     pub async fn convert_with_concurrency_control(
         &self,
         request: ConversionRequest,
@@ -1322,7 +1461,7 @@ impl ConcurrentConversionManager {
         conversion_result
     }
 
-    /// Perform the actual conversion with safety guarantees
+    /// Perform the actual conversion with thread safety guarantees and model management
     async fn perform_safe_conversion(
         &self,
         request: &ConversionRequest,
@@ -1378,7 +1517,7 @@ impl ConcurrentConversionManager {
         })
     }
 
-    /// Simulate conversion (placeholder for actual conversion logic)
+    /// Simulate conversion processing for testing and development purposes
     async fn simulate_conversion(&self, source_audio: &[f32]) -> Result<Vec<f32>> {
         // Simulate processing time
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -1392,19 +1531,19 @@ impl ConcurrentConversionManager {
         Ok(result)
     }
 
-    /// Get current metrics
+    /// Get current conversion metrics snapshot
     pub async fn get_metrics(&self) -> ConcurrentConversionMetrics {
         let metrics_guard = self.metrics.read().await;
         metrics_guard.clone()
     }
 
-    /// Get current operation state
+    /// Get current operation state snapshot with active operations
     pub async fn get_operation_state(&self) -> OperationState {
         let state_guard = self.operation_state.read().await;
         state_guard.clone()
     }
 
-    /// Update configuration thread-safely
+    /// Update configuration with thread-safe write lock
     pub async fn update_config(&self, new_config: ConversionConfig) -> Result<()> {
         let mut config_guard = self.config.write().await;
         *config_guard = new_config;
@@ -1412,12 +1551,12 @@ impl ConcurrentConversionManager {
         Ok(())
     }
 
-    /// Get current configuration
+    /// Get current configuration snapshot with thread-safe read lock
     pub async fn get_config(&self) -> ConversionConfig {
         self.config.read().await.clone()
     }
 
-    /// Perform health check
+    /// Perform health check and return status metrics for monitoring
     pub async fn health_check(&self) -> HashMap<String, String> {
         let mut health = HashMap::new();
 
@@ -1470,7 +1609,7 @@ impl ConcurrentConversionManager {
         health
     }
 
-    /// Graceful shutdown
+    /// Gracefully shutdown manager waiting for active operations to complete
     pub async fn shutdown(&self) -> Result<()> {
         info!("Starting graceful shutdown of concurrent conversion manager");
 

@@ -310,7 +310,7 @@ impl QualityAnalyzer {
 
     /// Compute FFT magnitude spectrum
     async fn compute_fft(&self, samples: &[f32]) -> Result<Vec<f32>, RecognitionError> {
-        use realfft::RealFftPlanner;
+        use scirs2_fft::{FftPlanner, RealFftPlanner};
 
         let mut padded_samples = samples.to_vec();
 
@@ -329,22 +329,25 @@ impl QualityAnalyzer {
             }
         }
 
-        // Create real FFT planner and plan
-        let mut planner = RealFftPlanner::<f32>::new();
-        let fft = planner.plan_fft_forward(fft_size);
+        // Convert to f64 for FFT computation
+        let padded_samples_f64: Vec<f64> = padded_samples.iter().map(|&x| x as f64).collect();
 
-        // Prepare output buffer for complex values
-        let mut spectrum_complex = fft.make_output_vec();
-
-        // Perform the real FFT
-        fft.process(&mut padded_samples, &mut spectrum_complex)
-            .map_err(|e| RecognitionError::AudioProcessingError {
+        // Perform the real FFT using scirs2_fft functional API
+        let spectrum_complex = scirs2_fft::rfft(&padded_samples_f64, None).map_err(|e| {
+            RecognitionError::AudioProcessingError {
                 message: format!("FFT computation failed: {e}"),
                 source: None,
-            })?;
+            }
+        })?;
 
         // Convert complex values to magnitude spectrum
-        let spectrum: Vec<f32> = spectrum_complex.iter().map(|c| c.norm()).collect();
+        let spectrum: Vec<f32> = spectrum_complex
+            .iter()
+            .map(|c| {
+                let magnitude = (c.re * c.re + c.im * c.im).sqrt();
+                magnitude as f32
+            })
+            .collect();
 
         Ok(spectrum)
     }

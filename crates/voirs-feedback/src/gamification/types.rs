@@ -368,10 +368,15 @@ pub struct AchievementStats {
 /// Peer comparison data structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerComparison {
+    /// Description
     pub user_id: String,
+    /// Description
     pub peer_id: String,
+    /// Description
     pub comparison_type: String,
+    /// Description
     pub score: f64,
+    /// Description
     pub timestamp: DateTime<Utc>,
 }
 
@@ -655,11 +660,17 @@ pub enum ChallengeStatus {
 /// Collaborative challenge structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollaborativeChallenge {
+    /// Description
     pub id: String,
+    /// Description
     pub name: String,
+    /// Description
     pub participants: Vec<String>,
+    /// Description
     pub target_score: f64,
+    /// Description
     pub current_score: f64,
+    /// Description
     pub deadline: DateTime<Utc>,
 }
 

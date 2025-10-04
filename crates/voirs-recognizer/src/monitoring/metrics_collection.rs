@@ -13,6 +13,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Metric value types
 #[derive(Debug, Clone, PartialEq)]
+/// Metric Value
 pub enum MetricValue {
     /// Counter - monotonically increasing value
     Counter(u64),
@@ -26,6 +27,7 @@ pub enum MetricValue {
 
 /// Histogram data with configurable buckets
 #[derive(Debug, Clone, PartialEq)]
+/// Histogram Data
 pub struct HistogramData {
     /// Bucket counts (bucket_upper_bound, count)
     pub buckets: Vec<(f64, u64)>,
@@ -37,6 +39,7 @@ pub struct HistogramData {
 
 /// Summary data with quantiles
 #[derive(Debug, Clone, PartialEq)]
+/// Summary Data
 pub struct SummaryData {
     /// Quantile values (quantile, value)
     pub quantiles: Vec<(f64, f64)>,
@@ -48,6 +51,7 @@ pub struct SummaryData {
 
 /// Metric metadata
 #[derive(Debug, Clone)]
+/// Metric Metadata
 pub struct MetricMetadata {
     /// Metric name
     pub name: String,
@@ -62,15 +66,21 @@ pub struct MetricMetadata {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// Metric Type
 pub enum MetricType {
+    /// Counter
     Counter,
+    /// Gauge
     Gauge,
+    /// Histogram
     Histogram,
+    /// Summary
     Summary,
 }
 
 /// Time-series data point
 #[derive(Debug, Clone)]
+/// Data Point
 pub struct DataPoint {
     /// Timestamp
     pub timestamp: SystemTime,
@@ -103,6 +113,7 @@ pub trait MetricsCollector: Send + Sync {
 
 /// In-memory metrics collector
 #[derive(Debug)]
+/// In Memory Metrics Collector
 pub struct InMemoryMetricsCollector {
     /// Stored metrics (metric_name -> data_points)
     metrics: Arc<RwLock<HashMap<String, Vec<DataPoint>>>>,
@@ -484,17 +495,26 @@ impl PerformanceMetrics {
 }
 
 #[derive(Debug, Clone)]
+/// Recognition Status
 pub enum RecognitionStatus {
+    /// Success
     Success,
+    /// Error( string)
     Error(String),
 }
 
 #[derive(Debug, Clone)]
+/// Performance Statistics
 pub struct PerformanceStatistics {
+    /// total requests
     pub total_requests: u64,
+    /// success rate
     pub success_rate: f64,
+    /// average real time factor
     pub average_real_time_factor: f64,
+    /// total audio hours
     pub total_audio_hours: f64,
+    /// total processing hours
     pub total_processing_hours: f64,
 }
 
@@ -586,21 +606,21 @@ impl SystemResourceMonitor {
     /// Get CPU usage percentage (placeholder implementation)
     fn get_cpu_usage() -> f64 {
         // In a real implementation, this would read from /proc/stat or use system APIs
-        rand::random::<f64>() * 100.0
+        scirs2_core::random::random::<f64>() * 100.0
     }
 
     /// Get memory usage in bytes (placeholder implementation)
     fn get_memory_usage() -> (usize, usize) {
         // In a real implementation, this would read from /proc/meminfo or use system APIs
         let total = 8 * 1024 * 1024 * 1024; // 8GB
-        let used = (rand::random::<f64>() * 0.8 * total as f64) as usize;
+        let used = (scirs2_core::random::random::<f64>() * 0.8 * total as f64) as usize;
         (used, total)
     }
 
     /// Get GPU usage percentage (placeholder implementation)
     fn get_gpu_usage() -> Option<f64> {
         // In a real implementation, this would use NVIDIA ML or similar APIs
-        Some(rand::random::<f64>() * 100.0)
+        Some(scirs2_core::random::random::<f64>() * 100.0)
     }
 
     /// Shutdown the monitor
@@ -623,6 +643,7 @@ impl Drop for SystemResourceMonitor {
 
 /// Alerting system for metrics thresholds
 #[derive(Debug)]
+/// Alert Manager
 pub struct AlertManager {
     /// Alert rules
     rules: Arc<RwLock<Vec<AlertRule>>>,
@@ -634,6 +655,7 @@ pub struct AlertManager {
 
 /// Alert rule definition
 #[derive(Debug, Clone)]
+/// Alert Rule
 pub struct AlertRule {
     /// Rule ID
     pub id: String,
@@ -652,6 +674,7 @@ pub struct AlertRule {
 }
 
 #[derive(Debug, Clone)]
+/// Alert Condition
 pub enum AlertCondition {
     /// Value greater than threshold
     GreaterThan(f64),
@@ -666,14 +689,19 @@ pub enum AlertCondition {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// Alert Severity
 pub enum AlertSeverity {
+    /// Critical
     Critical,
+    /// Warning
     Warning,
+    /// Info
     Info,
 }
 
 /// Active alert instance
 #[derive(Debug, Clone)]
+/// Active Alert
 pub struct ActiveAlert {
     /// Alert rule
     pub rule: AlertRule,
@@ -696,6 +724,7 @@ pub trait AlertHandler: Send + Sync + std::fmt::Debug {
 
 /// Console alert handler for development
 #[derive(Debug)]
+/// Console Alert Handler
 pub struct ConsoleAlertHandler;
 
 impl AlertHandler for ConsoleAlertHandler {
@@ -852,6 +881,7 @@ impl AlertManager {
 
 /// Time-series analyzer for trend analysis
 #[derive(Debug)]
+/// Time Series Analyzer
 pub struct TimeSeriesAnalyzer {
     /// Historical data storage
     data_store: Arc<RwLock<HashMap<String, VecDeque<TimeSeriesPoint>>>>,
@@ -860,13 +890,18 @@ pub struct TimeSeriesAnalyzer {
 }
 
 #[derive(Debug, Clone)]
+/// Time Series Point
 pub struct TimeSeriesPoint {
+    /// timestamp
     pub timestamp: SystemTime,
+    /// value
     pub value: f64,
+    /// labels
     pub labels: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
+/// Trend Analysis
 pub struct TrendAnalysis {
     /// Linear trend coefficient (slope)
     pub trend_coefficient: f64,
@@ -879,6 +914,7 @@ pub struct TrendAnalysis {
 }
 
 #[derive(Debug, Clone)]
+/// Seasonal Pattern
 pub struct SeasonalPattern {
     /// Period of the pattern (in seconds)
     pub period: Duration,
@@ -889,6 +925,7 @@ pub struct SeasonalPattern {
 }
 
 #[derive(Debug, Clone)]
+/// Anomaly Point
 pub struct AnomalyPoint {
     /// Timestamp of anomaly
     pub timestamp: SystemTime,
@@ -901,10 +938,15 @@ pub struct AnomalyPoint {
 }
 
 #[derive(Debug, Clone)]
+/// Anomaly Type
 pub enum AnomalyType {
+    /// Spike
     Spike,
+    /// Drop
     Drop,
+    /// Outlier
     Outlier,
+    /// Level shift
     LevelShift,
 }
 
@@ -1208,7 +1250,7 @@ mod tests {
         for i in 0..50 {
             let point = TimeSeriesPoint {
                 timestamp: base_time + Duration::from_secs(i * 60), // 1 minute intervals
-                value: i as f64 * 1.0 + 10.0 + (rand::random::<f64>() - 0.5) * 0.1, // Strong linear trend with minimal noise
+                value: i as f64 * 1.0 + 10.0 + (scirs2_core::random::random::<f64>() - 0.5) * 0.1, // Strong linear trend with minimal noise
                 labels: HashMap::new(),
             };
             analyzer.add_point("test_metric".to_string(), point);

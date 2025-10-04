@@ -2,16 +2,34 @@
 
 use std::collections::VecDeque;
 
-/// Delay line for effects
+/// Delay line for effects implementing variable delay with feedback.
+///
+/// Provides a circular buffer for delaying audio signals with support for
+/// fractional sample delays using linear interpolation and adjustable feedback.
 #[derive(Debug, Clone)]
 pub struct DelayLine {
+    /// Circular buffer storing delayed samples
     buffer: VecDeque<f32>,
+    /// Maximum delay capacity in samples
     max_delay_samples: usize,
+    /// Current delay amount in samples (supports fractional values)
     delay_samples: f32,
+    /// Feedback amount (0.0-0.99)
     feedback: f32,
 }
 
 impl DelayLine {
+    /// Creates a new delay line with specified parameters.
+    ///
+    /// # Arguments
+    ///
+    /// * `max_delay_samples` - Maximum delay capacity in samples
+    /// * `delay_samples` - Initial delay amount in samples
+    /// * `feedback` - Feedback amount (0.0-0.99)
+    ///
+    /// # Returns
+    ///
+    /// A new `DelayLine` instance initialized with zeros.
     pub fn new(max_delay_samples: usize, delay_samples: f32, feedback: f32) -> Self {
         let mut buffer = VecDeque::with_capacity(max_delay_samples);
         buffer.resize(max_delay_samples, 0.0);
@@ -24,6 +42,17 @@ impl DelayLine {
         }
     }
 
+    /// Processes a single sample through the delay line.
+    ///
+    /// Uses linear interpolation for fractional delays and applies feedback.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Input audio sample
+    ///
+    /// # Returns
+    ///
+    /// Delayed and possibly feedback-processed audio sample.
     pub fn process(&mut self, input: f32) -> f32 {
         // Simple linear interpolation for fractional delay
         let delay_int = self.delay_samples.floor() as usize;
@@ -44,27 +73,53 @@ impl DelayLine {
         delayed_sample
     }
 
+    /// Sets the delay amount in samples.
+    ///
+    /// # Arguments
+    ///
+    /// * `delay_samples` - New delay amount (clamped to 0.0 to max_delay_samples)
     pub fn set_delay(&mut self, delay_samples: f32) {
         self.delay_samples = delay_samples.clamp(0.0, self.max_delay_samples as f32);
     }
 
+    /// Sets the feedback amount.
+    ///
+    /// # Arguments
+    ///
+    /// * `feedback` - New feedback amount (clamped to 0.0-0.99 for stability)
     pub fn set_feedback(&mut self, feedback: f32) {
         self.feedback = feedback.clamp(0.0, 0.99);
     }
 
+    /// Clears the delay buffer by setting all samples to zero.
     pub fn clear(&mut self) {
         self.buffer.iter_mut().for_each(|x| *x = 0.0);
     }
 }
 
-/// All-pass filter for reverb
+/// All-pass filter for reverb and diffusion effects.
+///
+/// Passes all frequencies equally but introduces phase shifts,
+/// useful for creating diffusion in reverb algorithms.
 #[derive(Debug, Clone)]
 pub struct AllPassFilter {
+    /// Internal delay line for all-pass structure
     delay_line: DelayLine,
+    /// All-pass gain coefficient (-0.99 to 0.99)
     gain: f32,
 }
 
 impl AllPassFilter {
+    /// Creates a new all-pass filter.
+    ///
+    /// # Arguments
+    ///
+    /// * `delay_samples` - Delay length in samples
+    /// * `gain` - All-pass gain coefficient (-0.99 to 0.99)
+    ///
+    /// # Returns
+    ///
+    /// A new `AllPassFilter` instance.
     pub fn new(delay_samples: usize, gain: f32) -> Self {
         Self {
             delay_line: DelayLine::new(delay_samples, delay_samples as f32, 0.0),
@@ -72,33 +127,65 @@ impl AllPassFilter {
         }
     }
 
+    /// Processes a single sample through the all-pass filter.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Input audio sample
+    ///
+    /// # Returns
+    ///
+    /// Phase-shifted audio sample.
     pub fn process(&mut self, input: f32) -> f32 {
         let delayed = self.delay_line.process(input);
-        let output = -self.gain * input + delayed;
-        output
+        -self.gain * input + delayed
     }
 
+    /// Sets the all-pass gain coefficient.
+    ///
+    /// # Arguments
+    ///
+    /// * `gain` - New gain coefficient (clamped to -0.99 to 0.99)
     pub fn set_gain(&mut self, gain: f32) {
         self.gain = gain.clamp(-0.99, 0.99);
     }
 
+    /// Clears the internal delay buffer.
     pub fn clear(&mut self) {
         self.delay_line.clear();
     }
 }
 
-/// Low-pass filter
+/// Low-pass filter using 2-pole Butterworth design.
+///
+/// Attenuates frequencies above the cutoff frequency, allowing low frequencies to pass.
 #[derive(Debug, Clone)]
 pub struct LowPassFilter {
+    /// Cutoff frequency in Hz
     cutoff: f32,
+    /// Resonance/Q factor (0.1-10.0)
     resonance: f32,
+    /// Previous input sample (x[n-1])
     x1: f32,
+    /// Two-sample-delayed input (x[n-2])
     x2: f32,
+    /// Previous output sample (y[n-1])
     y1: f32,
+    /// Two-sample-delayed output (y[n-2])
     y2: f32,
 }
 
 impl LowPassFilter {
+    /// Creates a new low-pass filter.
+    ///
+    /// # Arguments
+    ///
+    /// * `cutoff` - Cutoff frequency in Hz (minimum 1.0)
+    /// * `resonance` - Q factor controlling resonance (0.1-10.0)
+    ///
+    /// # Returns
+    ///
+    /// A new `LowPassFilter` instance.
     pub fn new(cutoff: f32, resonance: f32) -> Self {
         Self {
             cutoff: cutoff.max(1.0),
@@ -110,6 +197,16 @@ impl LowPassFilter {
         }
     }
 
+    /// Processes a single sample through the low-pass filter.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Input audio sample
+    /// * `sample_rate` - Sample rate in Hz
+    ///
+    /// # Returns
+    ///
+    /// Filtered audio sample.
     pub fn process(&mut self, input: f32, sample_rate: f32) -> f32 {
         // Simple 2-pole Butterworth filter
         let omega = 2.0 * std::f32::consts::PI * self.cutoff / sample_rate;
@@ -136,14 +233,25 @@ impl LowPassFilter {
         output
     }
 
+    /// Sets the cutoff frequency.
+    ///
+    /// # Arguments
+    ///
+    /// * `cutoff` - Cutoff frequency in Hz (minimum 1.0)
     pub fn set_cutoff(&mut self, cutoff: f32) {
         self.cutoff = cutoff.max(1.0);
     }
 
+    /// Sets the resonance/Q factor.
+    ///
+    /// # Arguments
+    ///
+    /// * `resonance` - Q factor (clamped to 0.1-10.0)
     pub fn set_resonance(&mut self, resonance: f32) {
         self.resonance = resonance.clamp(0.1, 10.0);
     }
 
+    /// Resets the filter state by clearing all delay samples.
     pub fn reset(&mut self) {
         self.x1 = 0.0;
         self.x2 = 0.0;
@@ -152,18 +260,36 @@ impl LowPassFilter {
     }
 }
 
-/// High-pass filter
+/// High-pass filter using 2-pole Butterworth design.
+///
+/// Attenuates frequencies below the cutoff frequency, allowing high frequencies to pass.
 #[derive(Debug, Clone)]
 pub struct HighPassFilter {
+    /// Cutoff frequency in Hz
     cutoff: f32,
+    /// Resonance/Q factor (0.1-10.0)
     resonance: f32,
+    /// Previous input sample (x[n-1])
     x1: f32,
+    /// Two-sample-delayed input (x[n-2])
     x2: f32,
+    /// Previous output sample (y[n-1])
     y1: f32,
+    /// Two-sample-delayed output (y[n-2])
     y2: f32,
 }
 
 impl HighPassFilter {
+    /// Creates a new high-pass filter.
+    ///
+    /// # Arguments
+    ///
+    /// * `cutoff` - Cutoff frequency in Hz (minimum 1.0)
+    /// * `resonance` - Q factor controlling resonance (0.1-10.0)
+    ///
+    /// # Returns
+    ///
+    /// A new `HighPassFilter` instance.
     pub fn new(cutoff: f32, resonance: f32) -> Self {
         Self {
             cutoff: cutoff.max(1.0),
@@ -175,6 +301,16 @@ impl HighPassFilter {
         }
     }
 
+    /// Processes a single sample through the high-pass filter.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Input audio sample
+    /// * `sample_rate` - Sample rate in Hz
+    ///
+    /// # Returns
+    ///
+    /// Filtered audio sample.
     pub fn process(&mut self, input: f32, sample_rate: f32) -> f32 {
         // Simple 2-pole Butterworth high-pass filter
         let omega = 2.0 * std::f32::consts::PI * self.cutoff / sample_rate;
@@ -201,14 +337,25 @@ impl HighPassFilter {
         output
     }
 
+    /// Sets the cutoff frequency.
+    ///
+    /// # Arguments
+    ///
+    /// * `cutoff` - Cutoff frequency in Hz (minimum 1.0)
     pub fn set_cutoff(&mut self, cutoff: f32) {
         self.cutoff = cutoff.max(1.0);
     }
 
+    /// Sets the resonance/Q factor.
+    ///
+    /// # Arguments
+    ///
+    /// * `resonance` - Q factor (clamped to 0.1-10.0)
     pub fn set_resonance(&mut self, resonance: f32) {
         self.resonance = resonance.clamp(0.1, 10.0);
     }
 
+    /// Resets the filter state by clearing all delay samples.
     pub fn reset(&mut self) {
         self.x1 = 0.0;
         self.x2 = 0.0;
@@ -217,18 +364,36 @@ impl HighPassFilter {
     }
 }
 
-/// Band-pass filter
+/// Band-pass filter allowing a specific frequency band to pass.
+///
+/// Attenuates frequencies outside the specified band centered around a frequency.
 #[derive(Debug, Clone)]
 pub struct BandPassFilter {
+    /// Center frequency in Hz
     center_freq: f32,
+    /// Bandwidth in Hz
     bandwidth: f32,
+    /// Previous input sample (x[n-1])
     x1: f32,
+    /// Two-sample-delayed input (x[n-2])
     x2: f32,
+    /// Previous output sample (y[n-1])
     y1: f32,
+    /// Two-sample-delayed output (y[n-2])
     y2: f32,
 }
 
 impl BandPassFilter {
+    /// Creates a new band-pass filter.
+    ///
+    /// # Arguments
+    ///
+    /// * `center_freq` - Center frequency in Hz (minimum 1.0)
+    /// * `bandwidth` - Bandwidth in Hz (minimum 1.0)
+    ///
+    /// # Returns
+    ///
+    /// A new `BandPassFilter` instance.
     pub fn new(center_freq: f32, bandwidth: f32) -> Self {
         Self {
             center_freq: center_freq.max(1.0),
@@ -240,6 +405,16 @@ impl BandPassFilter {
         }
     }
 
+    /// Processes a single sample through the band-pass filter.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Input audio sample
+    /// * `sample_rate` - Sample rate in Hz
+    ///
+    /// # Returns
+    ///
+    /// Filtered audio sample.
     pub fn process(&mut self, input: f32, sample_rate: f32) -> f32 {
         let omega = 2.0 * std::f32::consts::PI * self.center_freq / sample_rate;
         let q = self.center_freq / self.bandwidth;
@@ -262,14 +437,25 @@ impl BandPassFilter {
         output
     }
 
+    /// Sets the center frequency.
+    ///
+    /// # Arguments
+    ///
+    /// * `freq` - Center frequency in Hz (minimum 1.0)
     pub fn set_center_freq(&mut self, freq: f32) {
         self.center_freq = freq.max(1.0);
     }
 
+    /// Sets the bandwidth.
+    ///
+    /// # Arguments
+    ///
+    /// * `bandwidth` - Bandwidth in Hz (minimum 1.0)
     pub fn set_bandwidth(&mut self, bandwidth: f32) {
         self.bandwidth = bandwidth.max(1.0);
     }
 
+    /// Resets the filter state by clearing all delay samples.
     pub fn reset(&mut self) {
         self.x1 = 0.0;
         self.x2 = 0.0;
@@ -278,19 +464,39 @@ impl BandPassFilter {
     }
 }
 
-/// Peaking filter for EQ
+/// Peaking filter for parametric EQ with boost or cut at a specific frequency.
+///
+/// Allows precise control over frequency-specific gain adjustments.
 #[derive(Debug, Clone)]
 pub struct PeakingFilter {
+    /// Center frequency in Hz
     freq: f32,
+    /// Gain in dB (-24.0 to 24.0)
     gain: f32,
+    /// Q factor controlling bandwidth (0.1-10.0)
     q: f32,
+    /// Previous input sample (x[n-1])
     x1: f32,
+    /// Two-sample-delayed input (x[n-2])
     x2: f32,
+    /// Previous output sample (y[n-1])
     y1: f32,
+    /// Two-sample-delayed output (y[n-2])
     y2: f32,
 }
 
 impl PeakingFilter {
+    /// Creates a new peaking filter.
+    ///
+    /// # Arguments
+    ///
+    /// * `freq` - Center frequency in Hz (minimum 1.0)
+    /// * `gain` - Gain in dB (typically -24.0 to 24.0)
+    /// * `q` - Q factor controlling bandwidth (0.1-10.0)
+    ///
+    /// # Returns
+    ///
+    /// A new `PeakingFilter` instance.
     pub fn new(freq: f32, gain: f32, q: f32) -> Self {
         Self {
             freq: freq.max(1.0),
@@ -303,6 +509,16 @@ impl PeakingFilter {
         }
     }
 
+    /// Processes a single sample through the peaking filter.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Input audio sample
+    /// * `sample_rate` - Sample rate in Hz
+    ///
+    /// # Returns
+    ///
+    /// Filtered audio sample with peak boost or cut applied.
     pub fn process(&mut self, input: f32, sample_rate: f32) -> f32 {
         let omega = 2.0 * std::f32::consts::PI * self.freq / sample_rate;
         let cos_omega = omega.cos();
@@ -327,18 +543,34 @@ impl PeakingFilter {
         output
     }
 
+    /// Sets the center frequency.
+    ///
+    /// # Arguments
+    ///
+    /// * `freq` - Center frequency in Hz (minimum 1.0)
     pub fn set_freq(&mut self, freq: f32) {
         self.freq = freq.max(1.0);
     }
 
+    /// Sets the gain.
+    ///
+    /// # Arguments
+    ///
+    /// * `gain` - Gain in dB (clamped to -24.0 to 24.0)
     pub fn set_gain(&mut self, gain: f32) {
         self.gain = gain.clamp(-24.0, 24.0);
     }
 
+    /// Sets the Q factor.
+    ///
+    /// # Arguments
+    ///
+    /// * `q` - Q factor (clamped to 0.1-10.0)
     pub fn set_q(&mut self, q: f32) {
         self.q = q.clamp(0.1, 10.0);
     }
 
+    /// Resets the filter state by clearing all delay samples.
     pub fn reset(&mut self) {
         self.x1 = 0.0;
         self.x2 = 0.0;
@@ -347,16 +579,32 @@ impl PeakingFilter {
     }
 }
 
-/// Low shelf filter
+/// Low shelf filter for boosting or cutting low frequencies.
+///
+/// Applies gain to frequencies below the shelf frequency.
 #[derive(Debug, Clone)]
 pub struct LowShelfFilter {
+    /// Shelf frequency in Hz
     freq: f32,
+    /// Gain in dB (-24.0 to 24.0)
     gain: f32,
+    /// Previous input sample (x[n-1])
     x1: f32,
+    /// Previous output sample (y[n-1])
     y1: f32,
 }
 
 impl LowShelfFilter {
+    /// Creates a new low shelf filter.
+    ///
+    /// # Arguments
+    ///
+    /// * `freq` - Shelf frequency in Hz (minimum 1.0)
+    /// * `gain` - Gain in dB (typically -24.0 to 24.0)
+    ///
+    /// # Returns
+    ///
+    /// A new `LowShelfFilter` instance.
     pub fn new(freq: f32, gain: f32) -> Self {
         Self {
             freq: freq.max(1.0),
@@ -366,6 +614,16 @@ impl LowShelfFilter {
         }
     }
 
+    /// Processes a single sample through the low shelf filter.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Input audio sample
+    /// * `sample_rate` - Sample rate in Hz
+    ///
+    /// # Returns
+    ///
+    /// Filtered audio sample with low frequency gain applied.
     pub fn process(&mut self, input: f32, sample_rate: f32) -> f32 {
         let omega = 2.0 * std::f32::consts::PI * self.freq / sample_rate;
         let s = omega.sin();
@@ -389,30 +647,57 @@ impl LowShelfFilter {
         output
     }
 
+    /// Sets the shelf frequency.
+    ///
+    /// # Arguments
+    ///
+    /// * `freq` - Shelf frequency in Hz (minimum 1.0)
     pub fn set_freq(&mut self, freq: f32) {
         self.freq = freq.max(1.0);
     }
 
+    /// Sets the gain.
+    ///
+    /// # Arguments
+    ///
+    /// * `gain` - Gain in dB (clamped to -24.0 to 24.0)
     pub fn set_gain(&mut self, gain: f32) {
         self.gain = gain.clamp(-24.0, 24.0);
     }
 
+    /// Resets the filter state by clearing all delay samples.
     pub fn reset(&mut self) {
         self.x1 = 0.0;
         self.y1 = 0.0;
     }
 }
 
-/// High shelf filter
+/// High shelf filter for boosting or cutting high frequencies.
+///
+/// Applies gain to frequencies above the shelf frequency.
 #[derive(Debug, Clone)]
 pub struct HighShelfFilter {
+    /// Shelf frequency in Hz
     freq: f32,
+    /// Gain in dB (-24.0 to 24.0)
     gain: f32,
+    /// Previous input sample (x[n-1])
     x1: f32,
+    /// Previous output sample (y[n-1])
     y1: f32,
 }
 
 impl HighShelfFilter {
+    /// Creates a new high shelf filter.
+    ///
+    /// # Arguments
+    ///
+    /// * `freq` - Shelf frequency in Hz (minimum 1.0)
+    /// * `gain` - Gain in dB (typically -24.0 to 24.0)
+    ///
+    /// # Returns
+    ///
+    /// A new `HighShelfFilter` instance.
     pub fn new(freq: f32, gain: f32) -> Self {
         Self {
             freq: freq.max(1.0),
@@ -422,6 +707,16 @@ impl HighShelfFilter {
         }
     }
 
+    /// Processes a single sample through the high shelf filter.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Input audio sample
+    /// * `sample_rate` - Sample rate in Hz
+    ///
+    /// # Returns
+    ///
+    /// Filtered audio sample with high frequency gain applied.
     pub fn process(&mut self, input: f32, sample_rate: f32) -> f32 {
         let omega = 2.0 * std::f32::consts::PI * self.freq / sample_rate;
         let s = omega.sin();
@@ -445,14 +740,25 @@ impl HighShelfFilter {
         output
     }
 
+    /// Sets the shelf frequency.
+    ///
+    /// # Arguments
+    ///
+    /// * `freq` - Shelf frequency in Hz (minimum 1.0)
     pub fn set_freq(&mut self, freq: f32) {
         self.freq = freq.max(1.0);
     }
 
+    /// Sets the gain.
+    ///
+    /// # Arguments
+    ///
+    /// * `gain` - Gain in dB (clamped to -24.0 to 24.0)
     pub fn set_gain(&mut self, gain: f32) {
         self.gain = gain.clamp(-24.0, 24.0);
     }
 
+    /// Resets the filter state by clearing all delay samples.
     pub fn reset(&mut self) {
         self.x1 = 0.0;
         self.y1 = 0.0;

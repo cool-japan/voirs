@@ -19,6 +19,7 @@ use voirs_sdk::{AudioBuffer, LanguageCode};
 
 /// Conformer model configuration
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Conformer Config
 pub struct ConformerConfig {
     /// Number of encoder blocks
     pub num_blocks: usize,
@@ -67,40 +68,59 @@ impl Default for ConformerConfig {
 
 /// Activation function types for Conformer
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Activation Type
 pub enum ActivationType {
+    /// Re l u
     ReLU,
+    /// G e l u
     GELU,
+    /// Swish
     Swish,
+    /// G l u
     GLU,
 }
 
 /// Multi-head attention configuration
 #[derive(Debug, Clone)]
+/// Multi Head Attention Config
 pub struct MultiHeadAttentionConfig {
+    /// num heads
     pub num_heads: usize,
+    /// head dim
     pub head_dim: usize,
+    /// dropout rate
     pub dropout_rate: f32,
+    /// use relative positional encoding
     pub use_relative_positional_encoding: bool,
 }
 
 /// Convolution module configuration
 #[derive(Debug, Clone)]
+/// Convolution Config
 pub struct ConvolutionConfig {
+    /// kernel size
     pub kernel_size: usize,
+    /// activation
     pub activation: ActivationType,
+    /// dropout rate
     pub dropout_rate: f32,
 }
 
 /// Feed-forward network configuration
 #[derive(Debug, Clone)]
+/// Feed Forward Config
 pub struct FeedForwardConfig {
+    /// hidden dim
     pub hidden_dim: usize,
+    /// dropout rate
     pub dropout_rate: f32,
+    /// activation
     pub activation: ActivationType,
 }
 
 /// Conformer encoder block
 #[derive(Debug, Clone)]
+/// Conformer Block
 pub struct ConformerBlock {
     /// Multi-head self-attention
     attention: MultiHeadAttention,
@@ -120,6 +140,7 @@ pub struct ConformerBlock {
 
 /// Multi-head self-attention module
 #[derive(Debug, Clone)]
+/// Multi Head Attention
 pub struct MultiHeadAttention {
     config: MultiHeadAttentionConfig,
     /// Query, Key, Value weight matrices
@@ -134,6 +155,7 @@ pub struct MultiHeadAttention {
 
 /// Convolution module for local feature extraction
 #[derive(Debug, Clone)]
+/// Convolution Module
 pub struct ConvolutionModule {
     config: ConvolutionConfig,
     /// Pointwise convolution 1
@@ -151,6 +173,7 @@ pub struct ConvolutionModule {
 
 /// Feed-forward network
 #[derive(Debug, Clone)]
+/// Feed Forward Network
 pub struct FeedForwardNetwork {
     config: FeedForwardConfig,
     /// Linear transformation weights
@@ -163,6 +186,7 @@ pub struct FeedForwardNetwork {
 
 /// Layer normalization
 #[derive(Debug, Clone)]
+/// Layer Normalization
 pub struct LayerNormalization {
     /// Learnable scale parameter
     gamma: Vec<f32>,
@@ -174,6 +198,7 @@ pub struct LayerNormalization {
 
 /// Positional encoding for Conformer
 #[derive(Debug, Clone)]
+/// Positional Encoding
 pub struct PositionalEncoding {
     /// Maximum sequence length
     max_length: usize,
@@ -203,6 +228,7 @@ pub struct ConformerModel {
 
 /// Statistics and metrics for Conformer model
 #[derive(Debug, Default, Clone)]
+/// Conformer Stats
 pub struct ConformerStats {
     /// Total inference count
     pub inference_count: u64,
@@ -220,6 +246,7 @@ pub struct ConformerStats {
 
 /// Accuracy metrics for the model
 #[derive(Debug, Default, Clone)]
+/// Accuracy Metrics
 pub struct AccuracyMetrics {
     /// Word Error Rate (WER)
     pub word_error_rate: f32,
@@ -280,7 +307,7 @@ impl ConformerModel {
             for _ in 0..config.input_dim {
                 // Xavier/Glorot initialization
                 let limit = (6.0 / (config.input_dim + config.encoder_dim) as f32).sqrt();
-                row.push(rand::random::<f32>() * 2.0 * limit - limit);
+                row.push(scirs2_core::random::random::<f32>() * 2.0 * limit - limit);
             }
             weights.push(row);
         }
@@ -361,7 +388,7 @@ impl ConformerModel {
             for _ in 0..config.encoder_dim {
                 // Xavier/Glorot initialization
                 let limit = (6.0 / (config.encoder_dim + config.vocab_size) as f32).sqrt();
-                row.push(rand::random::<f32>() * 2.0 * limit - limit);
+                row.push(scirs2_core::random::random::<f32>() * 2.0 * limit - limit);
             }
             weights.push(row);
         }
@@ -957,7 +984,7 @@ impl MultiHeadAttention {
             let mut row = Vec::new();
             for _ in 0..input_dim {
                 let limit = (6.0 / (input_dim + output_dim) as f32).sqrt();
-                row.push(rand::random::<f32>() * 2.0 * limit - limit);
+                row.push(scirs2_core::random::random::<f32>() * 2.0 * limit - limit);
             }
             weights.push(row);
         }
@@ -984,7 +1011,7 @@ impl ConvolutionModule {
             let mut row = Vec::new();
             for _ in 0..input_channels {
                 let limit = (6.0 / (input_channels + output_channels) as f32).sqrt();
-                row.push(rand::random::<f32>() * 2.0 * limit - limit);
+                row.push(scirs2_core::random::random::<f32>() * 2.0 * limit - limit);
             }
             weights.push(row);
         }
@@ -997,7 +1024,7 @@ impl ConvolutionModule {
             let mut row = Vec::new();
             for _ in 0..31 {
                 // Kernel size
-                row.push(rand::random::<f32>() * 0.1 - 0.05);
+                row.push(scirs2_core::random::random::<f32>() * 0.1 - 0.05);
             }
             weights.push(row);
         }
@@ -1023,7 +1050,7 @@ impl FeedForwardNetwork {
             let mut row = Vec::new();
             for _ in 0..input_dim {
                 let limit = (6.0 / (input_dim + output_dim) as f32).sqrt();
-                row.push(rand::random::<f32>() * 2.0 * limit - limit);
+                row.push(scirs2_core::random::random::<f32>() * 2.0 * limit - limit);
             }
             weights.push(row);
         }

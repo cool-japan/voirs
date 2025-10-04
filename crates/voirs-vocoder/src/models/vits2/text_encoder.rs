@@ -207,7 +207,7 @@ impl RelativeMultiHeadAttention {
                 let mut sum = 0.0;
                 let mut weight_sum = 0.0;
 
-                for k in 0..seq_len {
+                for (k, value_row) in value.iter().enumerate() {
                     // Simple distance-based attention weight
                     let distance = (i as i32 - k as i32).abs() as f32;
                     let weight = 1.0 / (1.0 + distance * 0.1);
@@ -219,7 +219,7 @@ impl RelativeMultiHeadAttention {
                         }
                     }
 
-                    sum += value[k][j] * weight;
+                    sum += value_row[j] * weight;
                     weight_sum += weight;
                 }
 
@@ -481,20 +481,20 @@ impl TextEncoder {
         }
 
         // Add positional encoding
-        for i in 0..seq_len {
-            for j in 0..hidden_dim {
+        for (i, row) in embedded.iter_mut().enumerate() {
+            for (j, val) in row.iter_mut().enumerate() {
                 let pos_encoding =
                     (i as f32 / 10000.0_f32.powf(2.0 * j as f32 / hidden_dim as f32)).sin();
-                embedded[i][j] += pos_encoding * 0.1;
+                *val += pos_encoding * 0.1;
             }
         }
 
         // Apply conditioning if provided
         if let Some(cond) = conditioning {
             let cond_scale = if cond.is_empty() { 1.0 } else { cond[0] };
-            for i in 0..seq_len {
-                for j in 0..hidden_dim {
-                    embedded[i][j] *= 1.0 + cond_scale * 0.1;
+            for row in embedded.iter_mut() {
+                for val in row.iter_mut() {
+                    *val *= 1.0 + cond_scale * 0.1;
                 }
             }
         }

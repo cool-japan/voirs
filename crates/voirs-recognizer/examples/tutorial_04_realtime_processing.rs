@@ -282,7 +282,7 @@ async fn simulate_chunk_processing(config: &StreamingConfig) -> Duration {
     };
 
     // Add some randomness to simulate real processing
-    let jitter = (rand::random::<f32>() * 10.0) as u64;
+    let jitter = (scirs2_core::random::random::<f32>() * 10.0) as u64;
     let processing_time = base_processing_time + jitter;
 
     sleep(Duration::from_millis(processing_time)).await;
@@ -433,10 +433,10 @@ async fn demonstrate_performance_monitoring() -> Result<(), Box<dyn Error>> {
     // Simulate performance monitoring
     let monitoring_duration = 5; // seconds
     for second in 1..=monitoring_duration {
-        let latency = 45.0 + (rand::random::<f32>() * 20.0); // 45-65ms
-        let cpu_usage = 25.0 + (rand::random::<f32>() * 15.0); // 25-40%
-        let memory_usage = 150.0 + (rand::random::<f32>() * 50.0); // 150-200MB
-        let queue_depth = (rand::random::<f32>() * 5.0) as u32; // 0-5 items
+        let latency = 45.0 + (scirs2_core::random::random::<f32>() * 20.0); // 45-65ms
+        let cpu_usage = 25.0 + (scirs2_core::random::random::<f32>() * 15.0); // 25-40%
+        let memory_usage = 150.0 + (scirs2_core::random::random::<f32>() * 50.0); // 150-200MB
+        let queue_depth = (scirs2_core::random::random::<f32>() * 5.0) as u32; // 0-5 items
 
         println!(
             "   Second {}: latency={:.1}ms, CPU={:.1}%, memory={:.0}MB, queue={}",

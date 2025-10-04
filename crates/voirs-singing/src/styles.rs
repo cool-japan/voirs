@@ -113,233 +113,378 @@ pub struct PerformanceGuidelines {
 
 // === Enums and Supporting Types ===
 
+/// Classification of singing voice types based on vocal range and timbre
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VoiceType {
+    /// Highest female voice type, typically C4-C6
     Soprano,
+    /// Medium female voice type, typically A3-A5
     MezzoSoprano,
+    /// Lower female voice type, typically F3-F5
     Alto,
+    /// Highest male voice type, typically C3-C5
     Tenor,
+    /// Medium male voice type, typically A2-A4
     Baritone,
+    /// Lowest male voice type, typically E2-E4
     Bass,
+    /// Male voice singing in female range using falsetto, typically G3-C5
     Countertenor,
+    /// Lowest female voice type, rare, typically E3-E5
     Contralto,
 }
 
+/// Musical scale definition with characteristic intervals and notes
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Scale {
+    /// Name of the scale (e.g., "Major", "Minor", "Pentatonic")
     pub name: String,
-    pub intervals: Vec<f32>, // In semitones
+    /// Intervals in semitones from the root note
+    pub intervals: Vec<f32>,
+    /// Characteristic scale degrees that define the scale's identity
     pub characteristic_notes: Vec<u8>,
 }
 
+/// Rhythmic pattern definition for style-specific timing characteristics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RhythmicPattern {
+    /// Name of the rhythmic pattern (e.g., "Swing", "Even quarters")
     pub name: String,
-    pub pattern: Vec<f32>, // Note durations
+    /// Note durations in beats
+    pub pattern: Vec<f32>,
+    /// Accent pattern indicating which notes to emphasize
     pub accent_pattern: Vec<bool>,
+    /// Swing feel amount (0.0 = straight, 0.67 = triplet swing, 1.0 = extreme swing)
     pub swing_feel: f32,
 }
 
+/// Dynamic range and volume preferences for a musical style
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DynamicPreferences {
-    pub typical_range: (f32, f32), // Min/max dynamics
+    /// Typical dynamic range (min, max) where 0.0 is silent and 1.0 is maximum volume
+    pub typical_range: (f32, f32),
+    /// Contrast level indicating how much dynamic variation is used (0.0 = minimal, 1.0 = extreme)
     pub contrast_level: f32,
+    /// Whether sudden dynamic changes (e.g., sforzando) are characteristic
     pub sudden_changes: bool,
+    /// Whether gradual dynamic changes (e.g., crescendo, diminuendo) are characteristic
     pub gradual_changes: bool,
 }
 
+/// Timbral qualities that characterize a singing style's sound
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimbreQualities {
+    /// Brightness/brilliance of the vocal tone (0.0 = dark, 1.0 = brilliant)
     pub brightness: f32,
+    /// Warmth of the vocal tone (0.0 = cold, 1.0 = warm)
     pub warmth: f32,
+    /// Edge/intensity of the vocal tone (0.0 = smooth, 1.0 = edgy)
     pub edge: f32,
+    /// Breathiness in the voice (0.0 = clear, 1.0 = very breathy)
     pub breathiness: f32,
+    /// Richness/fullness of harmonics (0.0 = thin, 1.0 = rich)
     pub richness: f32,
+    /// Vocal focus/core (0.0 = diffuse, 1.0 = laser-focused)
     pub focus: f32,
 }
 
+/// The shape of dynamic and expressive contour over a musical phrase
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PhraseArc {
+    /// Constant dynamics throughout the phrase
     Linear,
+    /// Build to a peak and then diminish (classical style)
     Arch,
+    /// Start high, dip in middle, end high
     InvertedArch,
+    /// Terraced dynamics with discrete levels
     Stepped,
+    /// Wave-like motion with multiple peaks and valleys
     Undulating,
+    /// Non-symmetrical shape with irregular contour
     Asymmetric,
 }
 
+/// Describes the dynamic shape of a musical phrase
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DynamicShape {
+    /// Starting dynamic level (0.0 = silent, 1.0 = maximum)
     pub start_dynamic: f32,
-    pub peak_position: f32, // 0.0-1.0 within phrase
+    /// Position of the dynamic peak within the phrase (0.0 = start, 1.0 = end)
+    pub peak_position: f32,
+    /// Peak dynamic level (0.0 = silent, 1.0 = maximum)
     pub peak_dynamic: f32,
+    /// Ending dynamic level (0.0 = silent, 1.0 = maximum)
     pub end_dynamic: f32,
+    /// Type of curve used for interpolation between points
     pub curve_type: CurveType,
 }
 
+/// Type of interpolation curve used for dynamic shaping
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CurveType {
+    /// Straight-line interpolation
     Linear,
+    /// Exponential curve (accelerating change)
     Exponential,
+    /// Logarithmic curve (decelerating change)
     Logarithmic,
+    /// Sinusoidal curve (smooth, natural transitions)
     Sinusoidal,
+    /// Custom user-defined curve
     Custom,
 }
 
+/// Rubato (expressive tempo flexibility) characteristics for a style
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RubatoStyle {
+    /// Overall amount of rubato (0.0 = strict tempo, 1.0 = very free)
     pub amount: f32,
+    /// Whether to apply rubato at phrase beginnings
     pub phrase_initial: bool,
+    /// Whether to apply rubato at phrase endings
     pub phrase_final: bool,
+    /// Whether to apply rubato on high notes
     pub high_notes: bool,
+    /// Whether to apply rubato at emotional peaks
     pub emotional_peaks: bool,
 }
 
+/// Strategy for breath placement during singing
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BreathPlacement {
+    /// Breaths placed according to text grammar/punctuation
     Grammatical,
+    /// Breaths placed according to musical phrase structure
     Musical,
+    /// Breaths placed for dramatic effect and expression
     Dramatic,
+    /// Breaths placed based on technical vocal needs
     Technical,
+    /// Combination of multiple strategies
     Mixed,
 }
 
+/// How notes are connected within a phrase
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LineConnection {
+    /// Smooth, connected singing with minimal separation
     Legato,
+    /// Slightly separated notes while maintaining flow
     SemiLegato,
+    /// Clear separation between notes
     Articulated,
+    /// Variable connection style based on context
     Mixed,
 }
 
 // Ornamentation styles
+/// Grace note usage characteristics for a musical style
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraceNoteStyle {
+    /// Frequency of grace note usage (0.0 = never, 1.0 = very frequent)
     pub frequency: f32,
+    /// Types of grace notes preferred in this style
     pub preferred_types: Vec<GraceNoteType>,
+    /// Rules governing where and when to place grace notes
     pub placement_rules: Vec<PlacementRule>,
 }
 
+/// Types of grace notes used in musical ornamentation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GraceNoteType {
+    /// Quick, crushed grace note played before the beat
     Acciaccatura,
+    /// Longer grace note that takes time from the main note
     Appoggiatura,
+    /// Rapid alternation with adjacent note
     Mordent,
+    /// Four-note figure turning around the main note
     Turn,
+    /// Rapid alternation between two notes
     Trill,
 }
 
+/// Rule for determining where to place ornaments
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlacementRule {
+    /// Musical context where this rule applies
     pub context: String,
+    /// Probability of applying the ornament (0.0 = never, 1.0 = always)
     pub probability: f32,
+    /// Conditions that must be met for this rule to apply
     pub conditions: Vec<String>,
 }
 
+/// Trill ornamentation characteristics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrillStyle {
+    /// Frequency of trill usage (0.0 = never, 1.0 = very frequent)
     pub frequency: f32,
+    /// Speed range for trill execution in oscillations per second
     pub speed_range: (f32, f32),
-    pub interval: f32, // Usually 1.0 (semitone) or 2.0 (whole tone)
+    /// Trill interval in semitones, usually 1.0 (semitone) or 2.0 (whole tone)
+    pub interval: f32,
+    /// How the trill ends
     pub termination: TrillTermination,
 }
 
+/// How a trill ends
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TrillTermination {
+    /// Trill ends naturally on the main note
     Natural,
+    /// Trill ends with a turn figure
     WithTurn,
+    /// Trill ends with a mordent
     WithMordent,
+    /// Trill stops suddenly without resolution
     Abrupt,
 }
 
+/// Mordent ornamentation characteristics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MordentStyle {
+    /// Frequency of mordent usage (0.0 = never, 1.0 = very frequent)
     pub frequency: f32,
+    /// Ratio of upper to lower mordents (0.0 = all lower, 1.0 = all upper)
     pub upper_lower_ratio: f32,
+    /// Execution speed in oscillations per second
     pub speed: f32,
 }
 
+/// Turn ornamentation characteristics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TurnStyle {
+    /// Frequency of turn usage (0.0 = never, 1.0 = very frequent)
     pub frequency: f32,
+    /// Preferred direction for turn figures
     pub direction_preference: TurnDirection,
+    /// Amount of speed variation in turn execution (0.0 = constant, 1.0 = highly variable)
     pub speed_variation: f32,
 }
 
+/// Direction preference for turn ornaments
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TurnDirection {
+    /// Turn starts with upper neighbor note
     Upper,
+    /// Turn starts with lower neighbor note (inverted turn)
     Lower,
+    /// Both directions used depending on context
     Both,
 }
 
+/// Appoggiatura (leaning note) ornamentation characteristics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppoggiaturaStyle {
+    /// Frequency of appoggiatura usage (0.0 = never, 1.0 = very frequent)
     pub frequency: f32,
+    /// Timing of resolution to main note (0.0 = immediate, 1.0 = delayed)
     pub resolution_timing: f32,
+    /// Emphasis level on the appoggiatura (0.0 = subtle, 1.0 = strong)
     pub emphasis_level: f32,
 }
 
+/// Glissando (pitch slide) characteristics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlissandoStyle {
+    /// Frequency of glissando usage (0.0 = never, 1.0 = very frequent)
     pub frequency: f32,
-    pub interval_threshold: f32, // Minimum interval for glissando
+    /// Minimum interval in semitones for applying glissando
+    pub interval_threshold: f32,
+    /// Speed variation in glissando execution (0.0 = constant, 1.0 = highly variable)
     pub speed_variation: f32,
 }
 
+/// Vowel coloration parameters for cultural pronunciation variations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VowelColor {
+    /// Formant frequency shift in Hz for vowel modification
     pub formant_shift: f32,
+    /// Brightness adjustment for vowel timbre (-1.0 = darker, 1.0 = brighter)
     pub brightness_adjustment: f32,
+    /// Vowel openness (0.0 = closed, 1.0 = open)
     pub openness: f32,
 }
 
+/// Region-specific ornamentation style
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegionalOrnament {
+    /// Name of the regional ornament
     pub name: String,
+    /// Frequency of usage (0.0 = never, 1.0 = very frequent)
     pub frequency: f32,
+    /// Description of execution style for this ornament
     pub execution_style: String,
+    /// Cultural context and background information
     pub cultural_context: String,
 }
 
+/// Tempo tendencies for a cultural or regional style
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TempoTendencies {
+    /// Preferred base tempo in BPM
     pub base_tempo_preference: f32,
+    /// Amount of rubato applied (0.0 = strict, 1.0 = very free)
     pub rubato_amount: f32,
+    /// Tendency to slow down (0.0 = never, 1.0 = frequently)
     pub ritardando_tendency: f32,
+    /// Tendency to speed up (0.0 = never, 1.0 = frequently)
     pub accelerando_tendency: f32,
 }
 
+/// Role of the singer within an ensemble context
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EnsembleRole {
+    /// Solo performer with full spotlight
     Soloist,
+    /// Lead role in ensemble, featured prominently
     Principal,
+    /// Part of a chorus or choir
     Chorus,
+    /// Background vocal support
     Background,
+    /// Singing as part of a duet
     Duet,
 }
 
+/// Microphone technique preferences for amplified performance
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MicrophoneTechnique {
+    /// Preferred distance from microphone (0.0 = very close, 1.0 = far)
     pub distance_preference: f32,
+    /// Whether to compensate dynamics based on distance
     pub dynamic_compensation: bool,
+    /// Emphasis on breath control for microphone work (0.0 = minimal, 1.0 = critical)
     pub breath_control_emphasis: f32,
+    /// Usage of proximity effect for bass enhancement (0.0 = avoid, 1.0 = maximize)
     pub proximity_effect_usage: f32,
 }
 
+/// Stage presence and performance characteristics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StagePresence {
+    /// Level of physical movement (0.0 = stationary, 1.0 = highly mobile)
     pub movement_level: f32,
+    /// Integration of gesture with singing (0.0 = minimal, 1.0 = highly choreographed)
     pub gesture_integration: f32,
+    /// Importance of eye contact with audience (0.0 = not important, 1.0 = critical)
     pub eye_contact_importance: f32,
+    /// Dramatic intensity of performance (0.0 = understated, 1.0 = highly dramatic)
     pub dramatic_intensity: f32,
 }
 
+/// Visual presentation elements for a performance style
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VisualElements {
+    /// Importance of costume to the style (0.0 = not important, 1.0 = critical)
     pub costume_importance: f32,
+    /// Description of lighting considerations and preferences
     pub lighting_considerations: String,
+    /// Description of makeup style appropriate for the genre
     pub makeup_style: String,
+    /// Level of prop usage (0.0 = none, 1.0 = extensive)
     pub prop_usage: f32,
 }
 
@@ -1298,7 +1443,7 @@ impl MusicalStyle {
         timbre.insert("warmth".to_string(), self.characteristics.timbre.warmth);
 
         VoiceCharacteristics {
-            voice_type: self.characteristics.voice_types[0].clone().into(),
+            voice_type: self.characteristics.voice_types[0].into(),
             range: (
                 self.characteristics.pitch_range.0 as f32,
                 self.characteristics.pitch_range.1 as f32,

@@ -7,27 +7,28 @@ license = { workspace = true }
 repository = { workspace = true }
 homepage = { workspace = true }
 documentation = "https://docs.rs/voirs-spatial"
-keywords = { workspace = true }
+keywords = ["voirs", "spatial", "3d-audio", "hrtf", "binaural"]
 categories = ["multimedia::audio", "science", "simulation"]
 rust-version = { workspace = true }
 description = "3D spatial audio and HRTF processing for VoiRS"
 
 [dependencies]
+# SciRS2 - Scientific computing abstractions
+scirs2-core = { workspace = true }
+scirs2-fft = { workspace = true }
+
 # Core ML and tensor operations
-ndarray = { workspace = true }
 candle-core = { workspace = true }
 candle-nn = { workspace = true }
 
 # Audio processing
 hound = { workspace = true }
 dasp = { workspace = true }
-realfft = { workspace = true }
 
 # Async and concurrency
 tokio = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
-rayon = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
@@ -40,9 +41,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 # Math and random
-rand = { workspace = true }
 fastrand = { workspace = true }
-num-complex = { workspace = true }
 
 # Date and time
 chrono = { workspace = true }
@@ -52,7 +51,7 @@ tempfile = { workspace = true }
 walkdir = { workspace = true }
 
 # VR/AR Platform Integration Dependencies
-openvr = { version = "0.7", optional = true }
+openvr = { version = "0.8", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 web-sys = { version = "0.3", optional = true }
 js-sys = { version = "0.3", optional = true }
@@ -62,12 +61,12 @@ js-sys = { version = "0.3", optional = true }
 winapi = { version = "0.3", features = ["d3d11", "dxgi"], optional = true }
 
 [target.'cfg(target_os = "android")'.dependencies]
-ndk = { version = "0.7", optional = true }
-ndk-sys = { version = "0.4", optional = true }
+ndk = { version = "0.9", optional = true }
+ndk-sys = { version = "0.6", optional = true }
 
 [target.'cfg(target_os = "ios")'.dependencies]
 objc = { version = "0.2", optional = true }
-cocoa = { version = "0.24", optional = true }
+cocoa = { version = "0.26", optional = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }

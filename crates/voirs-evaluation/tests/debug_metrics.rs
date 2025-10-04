@@ -43,7 +43,7 @@ async fn debug_metric_ranges() -> Result<(), Box<dyn std::error::Error>> {
         .samples()
         .iter()
         .map(|&sample| {
-            let noise = 0.3 * (rand::random::<f32>() - 0.5) * 2.0; // Increased noise level
+            let noise = 0.3 * (scirs2_core::random::random::<f32>() - 0.5) * 2.0; // Increased noise level
             sample + noise
         })
         .collect();

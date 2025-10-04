@@ -154,8 +154,8 @@ pub trait Dataset: Send + Sync {
     /// Split the dataset into train/validation/test index sets (object-safe)
     /// Returns indices for each split rather than new dataset objects
     async fn split_indices(&self, config: SplitConfig) -> Result<DatasetSplitIndices> {
-        use rand::seq::SliceRandom;
-        use rand::SeedableRng;
+        use scirs2_core::random::seq::SliceRandom;
+        use scirs2_core::random::SeedableRng;
 
         let dataset_size = self.len();
         if dataset_size == 0 {
@@ -179,10 +179,14 @@ pub trait Dataset: Send + Sync {
             crate::splits::SplitStrategy::Random => {
                 // Random shuffle
                 let mut rng = if let Some(seed) = config.seed {
-                    rand::rngs::StdRng::seed_from_u64(seed)
+                    scirs2_core::random::Random::seed(seed)
                 } else {
-                    use rand::thread_rng;
-                    rand::rngs::StdRng::from_rng(&mut thread_rng())
+                    scirs2_core::random::Random::seed(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs(),
+                    )
                 };
                 indices.shuffle(&mut rng);
             }
@@ -190,10 +194,14 @@ pub trait Dataset: Send + Sync {
                 // For stratified splitting, we need speaker information
                 // This is a simplified version - ideally we'd group by speaker first
                 let mut rng = if let Some(seed) = config.seed {
-                    rand::rngs::StdRng::seed_from_u64(seed)
+                    scirs2_core::random::Random::seed(seed)
                 } else {
-                    use rand::thread_rng;
-                    rand::rngs::StdRng::from_rng(&mut thread_rng())
+                    scirs2_core::random::Random::seed(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs(),
+                    )
                 };
                 indices.shuffle(&mut rng);
             }
@@ -201,10 +209,14 @@ pub trait Dataset: Send + Sync {
                 // For duration and text length based splitting, we would need to
                 // collect samples and sort them, but for now use random as fallback
                 let mut rng = if let Some(seed) = config.seed {
-                    rand::rngs::StdRng::seed_from_u64(seed)
+                    scirs2_core::random::Random::seed(seed)
                 } else {
-                    use rand::thread_rng;
-                    rand::rngs::StdRng::from_rng(&mut thread_rng())
+                    scirs2_core::random::Random::seed(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs(),
+                    )
                 };
                 indices.shuffle(&mut rng);
             }
@@ -253,7 +265,7 @@ pub trait Dataset: Send + Sync {
         }
         let len = self.len();
         let index = {
-            use rand::{thread_rng, Rng};
+            use scirs2_core::random::{thread_rng, Rng};
             let mut rng = thread_rng();
             rng.gen_range(0..len)
         };

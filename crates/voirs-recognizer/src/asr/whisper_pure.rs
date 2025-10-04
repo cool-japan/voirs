@@ -39,6 +39,7 @@ pub struct PureRustWhisper {
 
 /// Performance monitoring
 #[derive(Debug, Default)]
+/// Performance Monitor
 pub struct PerformanceMonitor {
     /// Number of processed chunks
     processed_chunks: usize,
@@ -120,6 +121,7 @@ impl PureRustWhisper {
         Self::new(config).await
     }
 
+    /// new
     pub async fn new(config: WhisperConfig) -> Result<Self, RecognitionError> {
         let device = Device::Cpu; // Default to CPU, could be configurable
 
@@ -342,10 +344,15 @@ impl PureRustWhisper {
 
 /// Performance statistics
 #[derive(Debug, Clone)]
+/// Performance Stats
 pub struct PerformanceStats {
+    /// processed chunks
     pub processed_chunks: usize,
+    /// total processing time
     pub total_processing_time: std::time::Duration,
+    /// average rtf
     pub average_rtf: f32,
+    /// memory usage mb
     pub memory_usage_mb: f32,
 }
 

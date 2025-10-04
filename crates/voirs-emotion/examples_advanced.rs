@@ -556,8 +556,8 @@ async fn example_7_ab_testing() -> Result<()> {
         if let Some((variant_a, variant_b)) = ab_manager.next_comparison_pair() {
             // Simulate quality scores (in real usage, these would come from 
             // perceptual evaluation or automated quality metrics)
-            let score_a = 0.6 + (i as f32 * 0.008) + (rand::random::<f32>() * 0.2);
-            let score_b = 0.7 + (i as f32 * 0.004) + (rand::random::<f32>() * 0.15);
+            let score_a = 0.6 + (i as f32 * 0.008) + (scirs2_core::random::random::<f32>() * 0.2);
+            let score_b = 0.7 + (i as f32 * 0.004) + (scirs2_core::random::random::<f32>() * 0.15);
             
             let comparison = ABComparison {
                 variant_a_id: variant_a.variant_id.clone(),
@@ -570,7 +570,7 @@ async fn example_7_ab_testing() -> Result<()> {
                     variant_b.variant_id.clone() 
                 },
                 confidence: (score_a - score_b).abs() + 0.1,
-                evaluation_time: Duration::from_millis(200 + (rand::random::<u64>() % 300)),
+                evaluation_time: Duration::from_millis(200 + (scirs2_core::random::random::<u64>() % 300)),
                 metadata: {
                     let mut meta = HashMap::new();
                     meta.insert("evaluator".to_string(), format!("evaluator_{}", i % 5));
@@ -632,12 +632,12 @@ async fn example_7_ab_testing() -> Result<()> {
             emotion: Emotion::Happy,
             intensity: EmotionIntensity::new(0.8),
             perceived_emotion: Emotion::Happy, // Would be determined by human evaluator
-            perceived_intensity: EmotionIntensity::new(0.75 + (rand::random::<f32>() * 0.2)),
-            naturalness_score: 0.7 + (rand::random::<f32>() * 0.25),
-            appropriateness_score: 0.8 + (rand::random::<f32>() * 0.15),
-            overall_quality: 0.75 + (rand::random::<f32>() * 0.2),
-            confidence: 0.8 + (rand::random::<f32>() * 0.15),
-            evaluation_time: Duration::from_millis(2000 + (rand::random::<u64>() % 3000)),
+            perceived_intensity: EmotionIntensity::new(0.75 + (scirs2_core::random::random::<f32>() * 0.2)),
+            naturalness_score: 0.7 + (scirs2_core::random::random::<f32>() * 0.25),
+            appropriateness_score: 0.8 + (scirs2_core::random::random::<f32>() * 0.15),
+            overall_quality: 0.75 + (scirs2_core::random::random::<f32>() * 0.2),
+            confidence: 0.8 + (scirs2_core::random::random::<f32>() * 0.15),
+            evaluation_time: Duration::from_millis(2000 + (scirs2_core::random::random::<u64>() % 3000)),
             comments: Some(format!("Evaluation {} - emotion seems natural", i)),
         };
         

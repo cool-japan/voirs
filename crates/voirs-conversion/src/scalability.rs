@@ -613,6 +613,12 @@ pub struct ResourceUsageMetrics {
     pub queue_depth: usize,
 }
 
+impl Default for ResourceMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ResourceMonitor {
     /// Create new resource monitor
     pub fn new() -> Self {
@@ -635,8 +641,7 @@ impl ResourceMonitor {
 
         self.cpu_usage
             .store((cpu_usage * 10000.0) as u64, Ordering::Relaxed);
-        self.memory_usage
-            .store(memory_usage as u64, Ordering::Relaxed);
+        self.memory_usage.store(memory_usage, Ordering::Relaxed);
 
         let mut last_update = self.last_update.write().await;
         *last_update = Instant::now();
@@ -675,6 +680,12 @@ impl ResourceMonitor {
         let base_memory = 1024 * 1024 * 1024; // 1GB base
         let stream_memory = self.active_streams.load(Ordering::Relaxed) as u64 * 300 * 1024 * 1024; // 300MB per stream
         base_memory + stream_memory
+    }
+}
+
+impl Default for ThroughputMetrics {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -730,6 +741,12 @@ impl ThroughputMetrics {
         let processing_hours = total_processing_ms as f64 / (1000.0 * 60.0 * 60.0);
 
         audio_hours / processing_hours
+    }
+}
+
+impl Default for MemoryTracker {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

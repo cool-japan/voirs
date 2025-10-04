@@ -4,17 +4,13 @@
 //! using various acoustic features and perceptual models.
 
 use crate::{Result, VocoderError};
-use ndarray::{s, Array1};
-use realfft::RealFftPlanner;
+use scirs2_core::ndarray::{s, Array1};
 use std::f32::consts::PI;
 
 /// MOS prediction model
 pub struct MosPredictor {
     /// Sample rate for analysis
     sample_rate: u32,
-
-    /// FFT planner for spectral analysis
-    fft_planner: RealFftPlanner<f32>,
 
     /// Frame size for analysis
     frame_size: usize,
@@ -66,14 +62,13 @@ impl MosPredictor {
 
         Self {
             sample_rate,
-            fft_planner: RealFftPlanner::new(),
             frame_size,
             hop_length,
         }
     }
 
     /// Predict MOS score for audio signal
-    pub fn predict(&mut self, audio: &Array1<f32>) -> Result<f32> {
+    pub fn predict(&self, audio: &Array1<f32>) -> Result<f32> {
         if audio.len() < self.frame_size {
             return Err(VocoderError::InputError(
                 "Audio too short for MOS prediction".to_string(),
@@ -90,7 +85,7 @@ impl MosPredictor {
     }
 
     /// Extract comprehensive acoustic features
-    fn extract_features(&mut self, audio: &Array1<f32>) -> Result<AcousticFeatures> {
+    fn extract_features(&self, audio: &Array1<f32>) -> Result<AcousticFeatures> {
         // Basic time-domain features
         let rms_energy = self.calculate_rms(audio);
         let zero_crossing_rate = self.calculate_zcr(audio);
@@ -142,34 +137,34 @@ impl MosPredictor {
     }
 
     /// Compute power spectrum
-    fn compute_spectrum(&mut self, audio: &Array1<f32>) -> Result<Array1<f32>> {
-        let fft = self.fft_planner.plan_fft_forward(self.frame_size);
-        let mut input = vec![0.0; self.frame_size];
-        let mut output = fft.make_output_vec();
-
+    fn compute_spectrum(&self, audio: &Array1<f32>) -> Result<Array1<f32>> {
         // Use middle portion of audio
         let start = (audio.len() - self.frame_size) / 2;
         let end = start + self.frame_size;
 
-        if end <= audio.len() {
-            let audio_slice = audio.slice(s![start..end]);
-            for (i, &sample) in audio_slice.iter().enumerate() {
-                input[i] = sample;
-            }
-        } else {
+        if end > audio.len() {
             return Err(VocoderError::InputError("Audio too short".to_string()));
         }
 
+        let audio_slice = audio.slice(s![start..end]);
+
         // Apply Hanning window
-        for (i, sample) in input.iter_mut().enumerate() {
-            let window = 0.5 * (1.0 - (2.0 * PI * i as f32 / (self.frame_size - 1) as f32).cos());
-            *sample *= window;
+        let mut input = vec![0.0f64; self.frame_size];
+        for (i, &sample) in audio_slice.iter().enumerate() {
+            let window =
+                0.5 * (1.0 - (2.0 * PI as f64 * i as f64 / (self.frame_size - 1) as f64).cos());
+            input[i] = sample as f64 * window;
         }
 
-        fft.process(&mut input, &mut output).unwrap();
+        // Compute FFT using scirs2_fft
+        let output = scirs2_fft::rfft(&input, None)
+            .map_err(|e| VocoderError::ProcessingError(format!("FFT error: {:?}", e)))?;
 
         // Convert to power spectrum
-        let power_spectrum: Vec<f32> = output.iter().map(|c| c.norm_sqr()).collect();
+        let power_spectrum: Vec<f32> = output
+            .iter()
+            .map(|c| (c.re * c.re + c.im * c.im) as f32)
+            .collect();
 
         Ok(Array1::from_vec(power_spectrum))
     }
@@ -383,7 +378,7 @@ impl MosPredictor {
     }
 
     /// Calculate total harmonic distortion
-    fn calculate_thd(&mut self, audio: &Array1<f32>) -> f32 {
+    fn calculate_thd(&self, audio: &Array1<f32>) -> f32 {
         let spectrum = match self.compute_spectrum(audio) {
             Ok(s) => s,
             Err(_) => return 0.0,
@@ -477,14 +472,14 @@ impl MosPredictor {
 
 /// Simplified MOS prediction function
 pub fn predict_mos(audio: &Array1<f32>, sample_rate: u32) -> Result<f32> {
-    let mut predictor = MosPredictor::new(sample_rate);
+    let predictor = MosPredictor::new(sample_rate);
     predictor.predict(audio)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::Array1;
+    use scirs2_core::ndarray::Array1;
 
     #[test]
     fn test_mos_predictor_creation() {
@@ -571,7 +566,7 @@ mod tests {
 
     #[test]
     fn test_feature_extraction() {
-        let mut predictor = MosPredictor::new(22050);
+        let predictor = MosPredictor::new(22050);
 
         // Generate longer test signal
         let samples: Vec<f32> = (0..2048)

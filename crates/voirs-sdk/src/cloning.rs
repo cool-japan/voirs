@@ -1,6 +1,6 @@
 //! Voice cloning integration for VoiRS SDK
 
-use crate::{Result, VoirsError};
+use crate::VoirsError;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -35,7 +35,7 @@ pub struct VoiceClonerConfig {
 
 impl VoiceCloner {
     /// Create new voice cloner
-    pub async fn new() -> Result<Self> {
+    pub async fn new() -> crate::Result<Self> {
         let cloner = voirs_cloning::VoiceCloner::new()
             .map_err(|e| VoirsError::model_error(format!("Voice cloner: {}", e)))?;
 
@@ -47,7 +47,7 @@ impl VoiceCloner {
     }
 
     /// Create with custom configuration
-    pub async fn with_config(cloning_config: CloningConfig) -> Result<Self> {
+    pub async fn with_config(cloning_config: CloningConfig) -> crate::Result<Self> {
         let cloner = voirs_cloning::VoiceCloner::with_config(cloning_config)
             .map_err(|e| VoirsError::model_error(format!("Voice cloner: {}", e)))?;
 
@@ -65,7 +65,7 @@ impl VoiceCloner {
         reference_samples: Vec<VoiceSample>,
         target_text: String,
         method: Option<CloningMethod>,
-    ) -> Result<VoiceCloneResult> {
+    ) -> crate::Result<VoiceCloneResult> {
         let config = self.config.read().await;
         if !config.enabled {
             return Err(VoirsError::ConfigError {
@@ -120,7 +120,7 @@ impl VoiceCloner {
         audio_data: Vec<f32>,
         sample_rate: u32,
         target_text: String,
-    ) -> Result<VoiceCloneResult> {
+    ) -> crate::Result<VoiceCloneResult> {
         let sample = VoiceSample::new("quick_clone".to_string(), audio_data, sample_rate);
 
         self.clone_voice(
@@ -137,7 +137,7 @@ impl VoiceCloner {
         &self,
         speaker_id: &str,
         target_text: String,
-    ) -> Result<VoiceCloneResult> {
+    ) -> crate::Result<VoiceCloneResult> {
         let cache = self.speaker_cache.read().await;
         let profile = cache
             .get(speaker_id)
@@ -163,7 +163,7 @@ impl VoiceCloner {
     }
 
     /// Add speaker to cache
-    pub async fn cache_speaker(&self, speaker_id: String, profile: SpeakerProfile) -> Result<()> {
+    pub async fn cache_speaker(&self, speaker_id: String, profile: SpeakerProfile) -> crate::Result<()> {
         let config = self.config.read().await;
         let mut cache = self.speaker_cache.write().await;
 
@@ -185,21 +185,21 @@ impl VoiceCloner {
     }
 
     /// Remove speaker from cache
-    pub async fn remove_cached_speaker(&self, speaker_id: &str) -> Result<()> {
+    pub async fn remove_cached_speaker(&self, speaker_id: &str) -> crate::Result<()> {
         let mut cache = self.speaker_cache.write().await;
         cache.remove(speaker_id);
         Ok(())
     }
 
     /// Clear speaker cache
-    pub async fn clear_cache(&self) -> Result<()> {
+    pub async fn clear_cache(&self) -> crate::Result<()> {
         let mut cache = self.speaker_cache.write().await;
         cache.clear();
         Ok(())
     }
 
     /// Enable or disable voice cloning
-    pub async fn set_enabled(&self, enabled: bool) -> Result<()> {
+    pub async fn set_enabled(&self, enabled: bool) -> crate::Result<()> {
         let mut config = self.config.write().await;
         config.enabled = enabled;
         Ok(())
@@ -212,7 +212,7 @@ impl VoiceCloner {
     }
 
     /// Get cloning statistics
-    pub async fn get_statistics(&self) -> Result<CloningStatistics> {
+    pub async fn get_statistics(&self) -> crate::Result<CloningStatistics> {
         let metrics = self.cloner.get_metrics().await;
         let cache_size = self.speaker_cache.read().await.len();
 
@@ -227,7 +227,7 @@ impl VoiceCloner {
     }
 
     /// Validate audio for cloning
-    pub async fn validate_audio(&self, samples: &[VoiceSample]) -> Result<ValidationResult> {
+    pub async fn validate_audio(&self, samples: &[VoiceSample]) -> crate::Result<ValidationResult> {
         let mut issues = Vec::new();
         let mut total_duration = 0.0;
 
@@ -345,7 +345,7 @@ impl VoiceClonerBuilder {
     }
 
     /// Build the voice cloner
-    pub async fn build(self) -> Result<VoiceCloner> {
+    pub async fn build(self) -> crate::Result<VoiceCloner> {
         let cloner = if let Some(cloning_config) = self.cloning_config {
             VoiceCloner::with_config(cloning_config).await?
         } else {

@@ -6,7 +6,7 @@ use crate::memory::{MemoryConfig, MemoryManager};
 use crate::position::{Listener, SoundSource};
 use crate::room::RoomSimulator;
 use crate::types::{BinauraAudio, Position3D, SpatialEffect, SpatialRequest, SpatialResult};
-use ndarray::{Array1, Array2};
+use scirs2_core::ndarray::{Array1, Array2};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};

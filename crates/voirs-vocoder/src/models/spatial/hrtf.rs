@@ -3,7 +3,7 @@
 use crate::models::spatial::config::{DistanceModel, HrtfConfig, HrtfDatabase, HrtfInterpolation};
 use crate::models::spatial::{BinauralOutput, SpatialPosition};
 use anyhow::Result;
-use ndarray::Array1;
+use scirs2_core::ndarray::Array1;
 use std::collections::HashMap;
 
 /// HRTF processor for spatial audio localization

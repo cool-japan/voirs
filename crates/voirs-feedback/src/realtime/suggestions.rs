@@ -24,180 +24,275 @@ pub struct SuggestionEngine {
 /// Configuration for suggestion engine
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SuggestionConfig {
+    /// Description
     pub max_suggestions_per_session: usize,
+    /// Description
     pub suggestion_cooldown_ms: u64,
+    /// Description
     pub personalization_enabled: bool,
+    /// Description
     pub adaptive_difficulty: bool,
+    /// Description
     pub context_window_size: usize,
+    /// Description
     pub min_pattern_observations: usize,
+    /// Description
     pub suggestion_categories: Vec<SuggestionCategory>,
 }
 
 /// Categories of suggestions
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SuggestionCategory {
+    /// Description
     Pronunciation,
+    /// Description
     Pacing,
+    /// Description
     Clarity,
+    /// Description
     Intonation,
+    /// Description
     Breathing,
+    /// Description
     Articulation,
+    /// Description
     Rhythm,
+    /// Description
     Emphasis,
+    /// Description
     Volume,
+    /// Description
     GeneralImprovement,
 }
 
 /// User learning pattern analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserLearningPattern {
+    /// Description
     pub user_id: String,
+    /// Description
     pub skill_level: SkillLevel,
+    /// Description
     pub problem_areas: Vec<ProblemArea>,
+    /// Description
     pub learning_velocity: f32,
+    /// Description
     pub preferred_feedback_style: FeedbackStyle,
+    /// Description
     pub success_patterns: Vec<SuccessPattern>,
+    /// Description
     pub difficulty_progression: DifficultyProgression,
+    /// Description
     pub session_preferences: SessionPreferences,
 }
 
 /// Skill level assessment
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum SkillLevel {
+    /// Description
     Beginner,
+    /// Description
     Intermediate,
+    /// Description
     Advanced,
+    /// Description
     Expert,
 }
 
 /// Identified problem areas
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProblemArea {
+    /// Description
     pub category: SuggestionCategory,
+    /// Description
     pub frequency: f32,
+    /// Description
     pub severity: f32,
+    /// Description
     pub improvement_rate: f32,
+    /// Description
     pub last_occurrence: SystemTime,
 }
 
 /// Feedback style preferences
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FeedbackStyle {
+    /// Description
     Detailed,
+    /// Description
     Concise,
+    /// Description
     Encouraging,
+    /// Description
     Technical,
+    /// Description
     Visual,
+    /// Description
     Auditory,
 }
 
 /// Success pattern recognition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SuccessPattern {
+    /// Description
     pub trigger_conditions: Vec<String>,
+    /// Description
     pub successful_actions: Vec<String>,
+    /// Description
     pub improvement_metrics: Vec<f32>,
+    /// Description
     pub context: String,
 }
 
 /// Difficulty progression tracking
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DifficultyProgression {
+    /// Description
     pub current_level: f32,
+    /// Description
     pub optimal_challenge_level: f32,
+    /// Description
     pub plateau_threshold: f32,
+    /// Description
     pub advancement_readiness: f32,
 }
 
 /// Session preferences
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionPreferences {
+    /// Description
     pub preferred_session_length: Duration,
+    /// Description
     pub break_frequency: Duration,
+    /// Description
     pub focus_areas: Vec<SuggestionCategory>,
+    /// Description
     pub avoid_areas: Vec<SuggestionCategory>,
 }
 
 /// Cached suggestion to avoid repetition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedSuggestion {
+    /// Description
     pub suggestion: Suggestion,
+    /// Description
     pub created_at: SystemTime,
+    /// Description
     pub usage_count: u32,
+    /// Description
     pub effectiveness_score: f32,
 }
 
 /// Generated suggestion
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Suggestion {
+    /// Description
     pub id: String,
+    /// Description
     pub category: SuggestionCategory,
+    /// Description
     pub title: String,
+    /// Description
     pub description: String,
+    /// Description
     pub action_steps: Vec<ActionStep>,
+    /// Description
     pub priority: SuggestionPriority,
+    /// Description
     pub estimated_impact: f32,
+    /// Description
     pub difficulty_level: f32,
+    /// Description
     pub personalization_score: f32,
+    /// Description
     pub context: SuggestionContext,
 }
 
 /// Action step for implementing suggestion
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionStep {
+    /// Description
     pub step_number: u32,
+    /// Description
     pub instruction: String,
+    /// Description
     pub expected_outcome: String,
+    /// Description
     pub verification_method: String,
+    /// Description
     pub estimated_time_seconds: u32,
 }
 
 /// Suggestion priority levels
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum SuggestionPriority {
+    /// Description
     Critical,
+    /// Description
     High,
+    /// Description
     Medium,
+    /// Description
     Low,
+    /// Description
     Optional,
 }
 
 /// Context for the suggestion
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SuggestionContext {
+    /// Description
     pub current_exercise: Option<String>,
+    /// Description
     pub recent_errors: Vec<String>,
+    /// Description
     pub session_progress: f32,
+    /// Description
     pub user_energy_level: f32,
+    /// Description
     pub environmental_factors: Vec<String>,
 }
 
 /// Feedback history entry for pattern analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeedbackHistoryEntry {
+    /// Description
     pub timestamp: SystemTime,
+    /// Description
     pub user_id: String,
+    /// Description
     pub feedback_type: String,
+    /// Description
     pub accuracy_score: f32,
+    /// Description
     pub areas_for_improvement: Vec<SuggestionCategory>,
+    /// Description
     pub user_response: Option<UserResponseType>,
 }
 
 /// User response to feedback
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum UserResponseType {
+    /// Description
     Positive,
+    /// Description
     Negative,
+    /// Description
     Neutral,
+    /// Description
     Ignored,
 }
 
 /// Result of suggestion generation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SuggestionResult {
+    /// Description
     pub suggestions: Vec<Suggestion>,
+    /// Description
     pub personalization_confidence: f32,
+    /// Description
     pub generation_time: Duration,
+    /// Description
     pub cache_hit_ratio: f32,
 }
 

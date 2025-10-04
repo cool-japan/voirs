@@ -5,17 +5,13 @@
 //! of the full PESQ standard.
 
 use crate::Result;
-use ndarray::{Array1, Array2};
-use realfft::RealFftPlanner;
+use scirs2_core::ndarray::{Array1, Array2};
 use std::f32::consts::PI;
 
 /// PESQ quality assessor
 pub struct PesqCalculator {
     /// Sample rate for analysis
     sample_rate: u32,
-
-    /// FFT planner
-    fft_planner: RealFftPlanner<f32>,
 
     /// Frame size for analysis
     frame_size: usize,
@@ -35,18 +31,21 @@ impl PesqCalculator {
 
         Self {
             sample_rate,
-            fft_planner: RealFftPlanner::new(),
             frame_size,
             hop_length: frame_size / 4,
         }
     }
 
     /// Calculate PESQ score between reference and degraded signals
-    pub fn calculate(&mut self, reference: &Array1<f32>, degraded: &Array1<f32>) -> Result<f32> {
+    pub fn calculate(&self, reference: &Array1<f32>, degraded: &Array1<f32>) -> Result<f32> {
         // Ensure signals are the same length
         let min_len = reference.len().min(degraded.len());
-        let ref_signal = reference.slice(ndarray::s![..min_len]).to_owned();
-        let deg_signal = degraded.slice(ndarray::s![..min_len]).to_owned();
+        let ref_signal = reference
+            .slice(scirs2_core::ndarray::s![..min_len])
+            .to_owned();
+        let deg_signal = degraded
+            .slice(scirs2_core::ndarray::s![..min_len])
+            .to_owned();
 
         // Apply pre-processing
         let ref_processed = self.preprocess(&ref_signal);
@@ -85,18 +84,17 @@ impl PesqCalculator {
     }
 
     /// Calculate loudness using simplified Bark scale model
-    fn calculate_loudness(&mut self, signal: &Array1<f32>) -> Result<Array2<f32>> {
+    fn calculate_loudness(&self, signal: &Array1<f32>) -> Result<Array2<f32>> {
         let n_frames = (signal.len().saturating_sub(self.frame_size)) / self.hop_length + 1;
         let n_bark_bands = 24; // Simplified Bark scale
 
         let mut loudness = Array2::zeros((n_frames, n_bark_bands));
-        let fft = self.fft_planner.plan_fft_forward(self.frame_size);
-        let mut input = vec![0.0; self.frame_size];
-        let mut output = fft.make_output_vec();
 
         // Hanning window
-        let window: Vec<f32> = (0..self.frame_size)
-            .map(|i| 0.5 * (1.0 - (2.0 * PI * i as f32 / (self.frame_size - 1) as f32).cos()))
+        let window: Vec<f64> = (0..self.frame_size)
+            .map(|i| {
+                0.5 * (1.0 - (2.0 * PI as f64 * i as f64 / (self.frame_size - 1) as f64).cos())
+            })
             .collect();
 
         // Bark frequency boundaries (simplified)
@@ -106,17 +104,25 @@ impl PesqCalculator {
             let start = frame * self.hop_length;
             let end = (start + self.frame_size).min(signal.len());
 
-            // Clear and fill input
-            input.fill(0.0);
-            for (i, &sample) in signal.slice(ndarray::s![start..end]).iter().enumerate() {
-                input[i] = sample * window[i];
+            // Prepare input with windowing
+            let mut input = vec![0.0f64; self.frame_size];
+            for (i, &sample) in signal
+                .slice(scirs2_core::ndarray::s![start..end])
+                .iter()
+                .enumerate()
+            {
+                input[i] = sample as f64 * window[i];
             }
 
-            // Compute FFT
-            fft.process(&mut input, &mut output).unwrap();
+            // Compute FFT using scirs2_fft
+            let output = scirs2_fft::rfft(&input, None)
+                .map_err(|e| crate::VocoderError::ProcessingError(format!("FFT error: {:?}", e)))?;
 
             // Convert to power spectrum
-            let power_spectrum: Vec<f32> = output.iter().map(|c| c.norm_sqr()).collect();
+            let power_spectrum: Vec<f32> = output
+                .iter()
+                .map(|c| (c.re * c.re + c.im * c.im) as f32)
+                .collect();
 
             // Map to Bark bands
             for (band, &(start_bin, end_bin)) in bark_boundaries.iter().enumerate() {
@@ -219,7 +225,7 @@ pub fn calculate_pesq(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::Array1;
+    use scirs2_core::ndarray::Array1;
 
     #[test]
     fn test_pesq_calculator_creation() {

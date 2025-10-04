@@ -16,23 +16,49 @@ use tokio::sync::RwLock;
 pub enum I18nError {
     /// Language not supported
     #[error("Language '{language}' is not supported")]
-    LanguageNotSupported { language: String },
+    /// Description
+    LanguageNotSupported {
+        /// ISO code or language identifier that is not supported.
+        language: String,
+    },
 
     /// Translation key not found
     #[error("Translation key '{key}' not found for language '{language}'")]
-    TranslationKeyNotFound { key: String, language: String },
+    /// Description
+    /// Description
+    TranslationKeyNotFound {
+        /// Lookup key that could not be resolved.
+        key: String,
+        /// Language in which the translation was requested.
+        language: String,
+    },
 
     /// Locale format error
     #[error("Invalid locale format: {locale}")]
-    InvalidLocaleFormat { locale: String },
+    /// Description
+    InvalidLocaleFormat {
+        /// Locale string that failed validation.
+        locale: String,
+    },
 
     /// Resource loading error
     #[error("Failed to load language resources: {message}")]
-    ResourceLoadingError { message: String },
+    /// Description
+    ResourceLoadingError {
+        /// Details about why resource loading failed.
+        message: String,
+    },
 
     /// Pluralization error
     #[error("Pluralization error for language '{language}': {message}")]
-    PluralizationError { language: String, message: String },
+    /// Description
+    /// Description
+    PluralizationError {
+        /// Language where pluralization logic failed.
+        language: String,
+        /// Details about the pluralization error.
+        message: String,
+    },
 }
 
 /// Result type for i18n operations

@@ -317,8 +317,11 @@ pub struct VadResult {
     pub frame_number: usize,
     /// Individual algorithm results
     pub energy_vad: bool,
+    /// Description
     pub zcr_vad: bool,
+    /// Description
     pub spectral_vad: bool,
+    /// Description
     pub ml_vad: bool,
 }
 

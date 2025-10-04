@@ -4,7 +4,7 @@
 //! with battery optimization and adaptive processing.
 
 use crate::RecognitionError;
-use rand::{thread_rng, Rng};
+use scirs2_core::random::{thread_rng, Rng};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};

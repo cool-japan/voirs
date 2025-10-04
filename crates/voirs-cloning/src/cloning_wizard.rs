@@ -1033,7 +1033,7 @@ impl CloningWizard {
         // Determine recommended method
         let recommended_method = if sample_count >= 10 && total_duration >= 60.0 {
             CloningMethod::FewShot
-        } else if sample_count >= 3 && total_duration >= 30.0 {
+        } else if sample_count >= 5 && total_duration >= 15.0 {
             CloningMethod::FewShot
         } else {
             CloningMethod::ZeroShot
@@ -1151,7 +1151,7 @@ mod tests {
         // Check data progress
         let session = wizard.get_session_state(&session_id).await.unwrap();
         assert_eq!(session.data_progress.collected_samples, 1);
-        assert_eq!(session.data_progress.total_duration_collected, 3.0);
+        assert_eq!(session.data_progress.total_duration_collected, 1.0);
     }
 
     #[tokio::test]

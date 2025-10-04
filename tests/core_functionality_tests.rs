@@ -3,7 +3,6 @@
 //! This test suite validates the core functionality of all major VoiRS components
 //! including G2P accuracy, acoustic model consistency, and vocoder reconstruction quality.
 
-use std::path::Path;
 use std::time::Instant;
 use voirs_acoustic::{
     AcousticModel, DummyAcousticModel, MelSpectrogram as AcousticMel, Phoneme as AcousticPhoneme,
@@ -18,17 +17,17 @@ use voirs_g2p::{
     DummyG2p, G2p, LanguageCode,
 };
 use voirs_vocoder::{
-    audio::io::convenience::write_wav, AudioBuffer, DummyVocoder, MelSpectrogram as VocoderMel,
+    AudioBuffer, DummyVocoder, MelSpectrogram as VocoderMel,
     SynthesisConfig as VocoderConfig, Vocoder,
 };
 
 /// Comprehensive core functionality test suite
 pub struct CoreFunctionalityTests {
     g2p_benchmark: AccuracyBenchmark,
-    mcd_evaluator: MCDEvaluator,
-    pesq_evaluator: PESQEvaluator,
-    si_sdr_evaluator: SISdrEvaluator,
-    stoi_evaluator: STOIEvaluator,
+    _mcd_evaluator: MCDEvaluator,
+    _pesq_evaluator: PESQEvaluator,
+    _si_sdr_evaluator: SISdrEvaluator,
+    _stoi_evaluator: STOIEvaluator,
 }
 
 impl CoreFunctionalityTests {
@@ -78,10 +77,10 @@ impl CoreFunctionalityTests {
         let sample_rate = 22050; // Standard sample rate for TTS
         Ok(Self {
             g2p_benchmark,
-            mcd_evaluator: MCDEvaluator::new(sample_rate)?,
-            pesq_evaluator: PESQEvaluator::new_wideband()?,
-            si_sdr_evaluator: SISdrEvaluator::new(sample_rate),
-            stoi_evaluator: STOIEvaluator::new(sample_rate)?,
+            _mcd_evaluator: MCDEvaluator::new(sample_rate)?,
+            _pesq_evaluator: PESQEvaluator::new_wideband()?,
+            _si_sdr_evaluator: SISdrEvaluator::new(sample_rate),
+            _stoi_evaluator: STOIEvaluator::new(sample_rate)?,
         })
     }
 

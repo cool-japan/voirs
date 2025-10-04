@@ -113,29 +113,43 @@ pub struct PerformanceImpact {
 /// Compatibility risk levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum CompatibilityRisk {
+    /// Low compatibility risk with minimal potential issues
     Low,
+    /// Medium compatibility risk requiring some attention
     Medium,
+    /// High compatibility risk with significant potential issues
     High,
+    /// Critical compatibility risk that may cause system failures
     Critical,
 }
 
 /// Migration effort levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum MigrationEffort {
+    /// Minimal effort required - quick and straightforward changes
     Minimal,
+    /// Low effort required - simple modifications needed
     Low,
+    /// Medium effort required - moderate time investment
     Medium,
+    /// High effort required - substantial work needed
     High,
+    /// Extensive effort required - major refactoring or redesign
     Extensive,
 }
 
 /// Update priority levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum UpdatePriority {
+    /// Optional update with no urgent need
     Optional,
+    /// Recommended update for improved functionality or performance
     Recommended,
+    /// Important update that should be applied soon
     Important,
+    /// Critical update required for stability or compatibility
     Critical,
+    /// Security update addressing vulnerabilities - highest priority
     Security,
 }
 
@@ -204,11 +218,17 @@ pub struct BreakingChange {
 /// Types of breaking changes
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BreakingChangeType {
+    /// API function or method was completely removed
     ApiRemoval,
+    /// API behavior or interface was modified
     ApiModification,
+    /// Function or method signature changed (parameters, return types)
     SignatureChange,
+    /// Behavior changed without API signature changes
     BehaviorChange,
+    /// Dependency was updated with breaking changes
     DependencyUpdate,
+    /// Minimum required version changed (Rust, dependencies, etc.)
     MinimumVersionChange,
 }
 
@@ -798,27 +818,30 @@ impl AudioLibrariesUpdater {
     }
 }
 
-/// Compatibility test suite
+/// Compatibility test suite for validating library updates
 pub struct CompatibilityTestSuite {
     // Test suite implementation
 }
 
 impl CompatibilityTestSuite {
+    /// Create a new compatibility test suite
     fn new() -> Self {
         Self {}
     }
 }
 
-/// Performance benchmarks
+/// Performance benchmarks for comparing library versions
 pub struct PerformanceBenchmarks {
     // Benchmark implementation
 }
 
 impl PerformanceBenchmarks {
+    /// Create a new performance benchmark suite
     fn new() -> Self {
         Self {}
     }
 
+    /// Run performance comparison between library versions
     async fn run_performance_comparison(
         &self,
         library_name: &str,
@@ -845,12 +868,13 @@ impl PerformanceBenchmarks {
     }
 }
 
-/// Migration tools
+/// Migration tools for automated library update assistance
 pub struct MigrationTools {
     // Migration tools implementation
 }
 
 impl MigrationTools {
+    /// Create a new migration tools instance
     fn new() -> Self {
         Self {}
     }
@@ -869,7 +893,7 @@ pub struct UpdateResult {
     pub update_details: Vec<SingleUpdateResult>,
 }
 
-/// Single library update result
+/// Single library update result with timing and error information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SingleUpdateResult {
     /// Library name
@@ -884,7 +908,7 @@ pub struct SingleUpdateResult {
     pub duration_ms: u64,
 }
 
-/// Migration guide
+/// Migration guide providing step-by-step upgrade instructions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MigrationGuide {
     /// Total number of migration steps
@@ -899,7 +923,7 @@ pub struct MigrationGuide {
     pub migration_steps: Vec<MigrationGuideStep>,
 }
 
-/// Migration guide step
+/// Migration guide step detailing specific changes required
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MigrationGuideStep {
     /// Library name
@@ -916,12 +940,16 @@ pub struct MigrationGuideStep {
     pub priority: MigrationPriority,
 }
 
-/// Migration priority levels
+/// Migration priority levels indicating urgency of changes
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum MigrationPriority {
+    /// Low priority migration that can be deferred
     Low,
+    /// Medium priority migration that should be planned
     Medium,
+    /// High priority migration that should be completed soon
     High,
+    /// Critical priority migration required immediately
     Critical,
 }
 

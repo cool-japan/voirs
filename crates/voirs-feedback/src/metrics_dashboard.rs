@@ -108,192 +108,289 @@ pub struct AccessibilityMetrics {
 /// Session completion tracking record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionCompletionRecord {
+    /// Record timestamp
     pub timestamp: DateTime<Utc>,
+    /// Session identifier
     pub session_id: String,
+    /// User identifier
     pub user_id: String,
+    /// Whether session was completed
     pub completed: bool,
+    /// Completion percentage (0.0-100.0)
     pub completion_percentage: f32,
+    /// Session duration in seconds
     pub duration_seconds: u32,
 }
 
 /// Response time measurement record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResponseTimeRecord {
+    /// Measurement timestamp
     pub timestamp: DateTime<Utc>,
+    /// Type of operation measured
     pub operation_type: String,
+    /// Response time in milliseconds
     pub response_time_ms: u32,
+    /// User identifier
     pub user_id: String,
 }
 
 /// User satisfaction rating record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SatisfactionRecord {
+    /// Rating timestamp
     pub timestamp: DateTime<Utc>,
+    /// User identifier
     pub user_id: String,
-    pub rating: f32, // 1.0 to 5.0 scale
+    /// Satisfaction rating (1.0 to 5.0 scale)
+    pub rating: f32,
+    /// Category of satisfaction
     pub category: String,
+    /// Optional feedback text
     pub feedback_text: Option<String>,
 }
 
 /// User retention tracking record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserRetentionRecord {
+    /// User identifier
     pub user_id: String,
+    /// First session timestamp
     pub first_session: DateTime<Utc>,
+    /// Last session timestamp
     pub last_session: DateTime<Utc>,
+    /// Total number of sessions
     pub session_count: u32,
+    /// Consecutive active days
     pub consecutive_days: u32,
+    /// Retention cohort identifier
     pub retention_cohort: String,
 }
 
 /// Improvement tracking record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImprovementRecord {
+    /// Assessment timestamp
     pub timestamp: DateTime<Utc>,
+    /// User identifier
     pub user_id: String,
+    /// Skill focus area
     pub skill_area: FocusArea,
+    /// Baseline skill score
     pub baseline_score: f32,
+    /// Current skill score
     pub current_score: f32,
+    /// Improvement percentage
     pub improvement_percentage: f32,
+    /// Type of assessment performed
     pub assessment_type: String,
 }
 
 /// Plateau detection record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlateauRecord {
+    /// User identifier
     pub user_id: String,
+    /// Skill area in plateau
     pub skill_area: FocusArea,
+    /// Plateau start timestamp
     pub plateau_start: DateTime<Utc>,
+    /// Plateau duration in days
     pub plateau_duration_days: u32,
+    /// Whether intervention was applied
     pub intervention_applied: bool,
+    /// Type of intervention if applied
     pub intervention_type: Option<String>,
+    /// Whether progress resumed
     pub progress_resumed: bool,
 }
 
 /// Skill transfer assessment record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillTransferRecord {
+    /// Assessment timestamp
     pub timestamp: DateTime<Utc>,
+    /// User identifier
     pub user_id: String,
+    /// Skill area assessed
     pub skill_area: FocusArea,
+    /// Score in training environment
     pub training_score: f32,
+    /// Score in real-world application
     pub real_world_score: f32,
+    /// Transfer effectiveness ratio
     pub transfer_effectiveness: f32,
+    /// Assessment method used
     pub assessment_method: String,
 }
 
 /// Latency measurement record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LatencyRecord {
+    /// Timestamp of measurement
     pub timestamp: DateTime<Utc>,
+    /// Operation being measured
     pub operation: String,
+    /// Latency in milliseconds
     pub latency_ms: u32,
+    /// User identifier
     pub user_id: String,
+    /// Platform where operation occurred
     pub platform: String,
 }
 
 /// System uptime tracking record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UptimeRecord {
+    /// Record timestamp
     pub timestamp: DateTime<Utc>,
+    /// Service name
     pub service_name: String,
+    /// Current service status
     pub status: ServiceStatus,
+    /// Uptime percentage
     pub uptime_percentage: f32,
+    /// Number of incidents
     pub incident_count: u32,
 }
 
 /// Error tracking record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ErrorRecord {
+    /// Error timestamp
     pub timestamp: DateTime<Utc>,
+    /// Type of error
     pub error_type: String,
+    /// Error message
     pub error_message: String,
+    /// Associated user identifier
     pub user_id: Option<String>,
+    /// Platform where error occurred
     pub platform: String,
+    /// Error severity level
     pub severity: ErrorSeverity,
 }
 
 /// Cross-platform compatibility record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompatibilityRecord {
+    /// Platform identifier
     pub platform: String,
+    /// Platform version
     pub version: String,
+    /// Compatibility score (0.0-100.0)
     pub compatibility_score: f32,
+    /// Test results by feature
     pub test_results: HashMap<String, bool>,
+    /// Last test timestamp
     pub last_tested: DateTime<Utc>,
 }
 
 /// WCAG compliance audit record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WcagAuditRecord {
+    /// Audit timestamp
     pub timestamp: DateTime<Utc>,
+    /// WCAG guideline identifier
     pub guideline: String,
+    /// Target compliance level
     pub compliance_level: WcagLevel,
+    /// Compliance status
     pub status: ComplianceStatus,
+    /// Audit notes
     pub notes: String,
 }
 
 /// Language support tracking record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanguageSupportRecord {
+    /// ISO language code
     pub language_code: String,
+    /// Display name of language
     pub language_name: String,
+    /// Level of support
     pub support_level: LanguageSupportLevel,
+    /// Coverage percentage
     pub coverage_percentage: f32,
+    /// Last update timestamp
     pub last_updated: DateTime<Utc>,
 }
 
 /// Cultural sensitivity assessment record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CulturalAssessmentRecord {
+    /// Assessment timestamp
     pub timestamp: DateTime<Utc>,
+    /// Culture/region identifier
     pub culture_region: String,
+    /// Assessment score (0.0-100.0)
     pub assessment_score: f32,
+    /// Assessment criteria used
     pub assessment_criteria: Vec<String>,
+    /// Improvement recommendations
     pub recommendations: Vec<String>,
 }
 
 /// Service status enumeration
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ServiceStatus {
+    /// Service is online
     Online,
+    /// Service is offline
     Offline,
+    /// Service is degraded
     Degraded,
+    /// Service is in maintenance
     Maintenance,
 }
 
 /// Error severity levels
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ErrorSeverity {
+    /// Low severity error
     Low,
+    /// Medium severity error
     Medium,
+    /// High severity error
     High,
+    /// Critical severity error
     Critical,
 }
 
 /// WCAG compliance levels
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum WcagLevel {
+    /// WCAG Level A
     A,
+    /// WCAG Level AA
     AA,
+    /// WCAG Level AAA
     AAA,
 }
 
 /// Compliance status enumeration
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ComplianceStatus {
+    /// Fully compliant
     Compliant,
+    /// Non-compliant
     NonCompliant,
+    /// Partially compliant
     PartiallyCompliant,
+    /// Not yet tested
     NotTested,
 }
 
 /// Language support levels
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum LanguageSupportLevel {
+    /// Full language support
     Full,
+    /// Partial language support
     Partial,
+    /// Basic language support
     Basic,
+    /// Planned language support
     Planned,
 }
 
@@ -345,37 +442,53 @@ pub struct CsfThresholds {
 /// Engagement metric alert thresholds
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngagementThresholds {
-    pub min_session_completion_rate: f32, // 0.90
-    pub max_response_time: f32,           // 5.0
-    pub min_satisfaction_score: f32,      // 4.5
-    pub min_retention_rate: f32,          // 0.70
+    /// Minimum session completion rate (target: 0.90)
+    pub min_session_completion_rate: f32,
+    /// Maximum response time in seconds (target: 5.0)
+    pub max_response_time: f32,
+    /// Minimum satisfaction score (target: 4.5)
+    pub min_satisfaction_score: f32,
+    /// Minimum retention rate (target: 0.70)
+    pub min_retention_rate: f32,
 }
 
 /// Learning effectiveness alert thresholds
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LearningThresholds {
-    pub min_improvement_rate: f32,      // 0.25
-    pub min_progress_satisfaction: f32, // 0.80
-    pub max_plateau_rate: f32,          // 0.10
-    pub min_skill_transfer: f32,        // 0.60
+    /// Minimum improvement rate (target: 0.25)
+    pub min_improvement_rate: f32,
+    /// Minimum progress satisfaction (target: 0.80)
+    pub min_progress_satisfaction: f32,
+    /// Maximum plateau rate (target: 0.10)
+    pub max_plateau_rate: f32,
+    /// Minimum skill transfer rate (target: 0.60)
+    pub min_skill_transfer: f32,
 }
 
 /// Technical performance alert thresholds
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TechnicalThresholds {
-    pub max_latency_ms: f32,          // 100.0
-    pub min_uptime_percentage: f32,   // 99.9
-    pub max_error_rate: f32,          // 0.02
-    pub min_compatibility_score: f32, // 0.95
+    /// Maximum latency in milliseconds (target: 100.0)
+    pub max_latency_ms: f32,
+    /// Minimum uptime percentage (target: 99.9)
+    pub min_uptime_percentage: f32,
+    /// Maximum error rate (target: 0.02)
+    pub max_error_rate: f32,
+    /// Minimum compatibility score (target: 0.95)
+    pub min_compatibility_score: f32,
 }
 
 /// Accessibility alert thresholds
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccessibilityThresholds {
-    pub min_wcag_compliance: f32,      // 100.0
-    pub min_language_count: u32,       // 10
-    pub min_cultural_sensitivity: f32, // 0.90
-    pub min_testing_coverage: f32,     // 0.95
+    /// Minimum WCAG compliance score (target: 100.0)
+    pub min_wcag_compliance: f32,
+    /// Minimum number of supported languages (target: 10)
+    pub min_language_count: u32,
+    /// Minimum cultural sensitivity score (target: 0.90)
+    pub min_cultural_sensitivity: f32,
+    /// Minimum testing coverage (target: 0.95)
+    pub min_testing_coverage: f32,
 }
 
 impl Default for DashboardConfig {
@@ -797,53 +910,76 @@ impl MetricsDashboard {
 /// CSF compliance report structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CsfComplianceReport {
+    /// Engagement metrics compliance
     pub engagement_compliance: EngagementCompliance,
+    /// Learning effectiveness compliance
     pub learning_compliance: LearningCompliance,
+    /// Technical performance compliance
     pub technical_compliance: TechnicalCompliance,
+    /// Accessibility compliance
     pub accessibility_compliance: AccessibilityCompliance,
 }
 
 /// Engagement compliance details
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngagementCompliance {
+    /// Session completion rate compliance
     pub session_completion_rate: ComplianceItem,
+    /// Response time compliance
     pub response_time: ComplianceItem,
+    /// Satisfaction score compliance
     pub satisfaction_score: ComplianceItem,
+    /// Retention rate compliance
     pub retention_rate: ComplianceItem,
 }
 
 /// Learning effectiveness compliance details
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LearningCompliance {
+    /// Improvement rate compliance
     pub improvement_rate: ComplianceItem,
+    /// Progress satisfaction compliance
     pub progress_satisfaction: ComplianceItem,
+    /// Plateau rate compliance
     pub plateau_rate: ComplianceItem,
+    /// Skill transfer compliance
     pub skill_transfer: ComplianceItem,
 }
 
 /// Technical performance compliance details
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TechnicalCompliance {
+    /// Latency compliance
     pub latency: ComplianceItem,
+    /// Uptime compliance
     pub uptime: ComplianceItem,
+    /// Error rate compliance
     pub error_rate: ComplianceItem,
+    /// Compatibility compliance
     pub compatibility: ComplianceItem,
 }
 
 /// Accessibility compliance details
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccessibilityCompliance {
+    /// WCAG compliance status
     pub wcag_compliance: ComplianceItem,
+    /// Language support compliance
     pub language_support: ComplianceItem,
+    /// Cultural sensitivity compliance
     pub cultural_sensitivity: ComplianceItem,
+    /// Testing coverage compliance
     pub testing_coverage: ComplianceItem,
 }
 
 /// Individual compliance item details
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComplianceItem {
+    /// Current measured value
     pub current_value: f32,
+    /// Target threshold value
     pub target_value: f32,
+    /// Whether current value meets target
     pub is_compliant: bool,
 }
 

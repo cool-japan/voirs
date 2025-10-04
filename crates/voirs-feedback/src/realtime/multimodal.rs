@@ -23,329 +23,493 @@ pub struct MultiModalFeedbackManager {
 /// Configuration for multi-modal feedback
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiModalConfig {
+    /// Whether visual feedback is enabled
     pub visual_enabled: bool,
+    /// Whether audio feedback is enabled
     pub audio_enabled: bool,
+    /// Whether haptic feedback is enabled
     pub haptic_enabled: bool,
+    /// Whether textual feedback is enabled
     pub textual_enabled: bool,
+    /// Whether gesture feedback is enabled
     pub gesture_enabled: bool,
+    /// Synchronization tolerance in milliseconds
     pub synchronization_tolerance_ms: u64,
+    /// Maximum concurrent modalities
     pub max_concurrent_modalities: usize,
+    /// Intensity levels for each modality
     pub intensity_levels: IntensityLevels,
 }
 
 /// Intensity levels for different feedback types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IntensityLevels {
-    pub visual: f32,  // 0.0 - 1.0
-    pub audio: f32,   // 0.0 - 1.0
-    pub haptic: f32,  // 0.0 - 1.0
-    pub textual: f32, // 0.0 - 1.0 (verbosity)
-    pub gesture: f32, // 0.0 - 1.0 (animation speed)
+    /// Visual intensity (0.0 - 1.0)
+    pub visual: f32,
+    /// Audio intensity (0.0 - 1.0)
+    pub audio: f32,
+    /// Haptic intensity (0.0 - 1.0)
+    pub haptic: f32,
+    /// Textual verbosity (0.0 - 1.0)
+    pub textual: f32,
+    /// Gesture animation speed (0.0 - 1.0)
+    pub gesture: f32,
 }
 
 /// Types of feedback modalities
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ModalityType {
+    /// Visual feedback
     Visual,
+    /// Audio feedback
     Audio,
+    /// Haptic feedback
     Haptic,
+    /// Textual feedback
     Textual,
+    /// Gesture feedback
     Gesture,
 }
 
 /// State of a feedback modality
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModalityState {
+    /// Whether modality is currently active
     pub active: bool,
+    /// Current intensity level
     pub intensity: f32,
+    /// Last activation timestamp
     pub last_activation: Option<DateTime<Utc>>,
+    /// Total activation count
     pub activation_count: u64,
+    /// Total error count
     pub error_count: u64,
 }
 
 /// Multi-modal feedback event
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiModalFeedbackEvent {
+    /// Event timestamp
     pub timestamp: DateTime<Utc>,
+    /// Activated modalities
     pub modalities: Vec<ModalityActivation>,
+    /// Coordination quality score
     pub coordination_score: f32,
+    /// Optional user response
     pub user_response: Option<UserResponse>,
+    /// Optional effectiveness score
     pub effectiveness_score: Option<f32>,
 }
 
 /// Individual modality activation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModalityActivation {
+    /// Type of modality
     pub modality: ModalityType,
+    /// Modality-specific content
     pub content: ModalityContent,
+    /// Timing information
     pub timing: ModalityTiming,
+    /// Intensity level
     pub intensity: f32,
+    /// Duration in milliseconds
     pub duration_ms: u64,
 }
 
 /// Content for different modalities
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ModalityContent {
+    /// Visual content
     Visual(VisualContent),
+    /// Audio content
     Audio(AudioContent),
+    /// Haptic content
     Haptic(HapticContent),
+    /// Textual content
     Textual(TextualContent),
+    /// Gesture content
     Gesture(GestureContent),
 }
 
 /// Visual feedback content
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VisualContent {
+    /// Type of visual display
     pub display_type: VisualDisplayType,
+    /// Color palette
     pub colors: Vec<String>,
+    /// Visual shapes to display
     pub shapes: Vec<VisualShape>,
+    /// Animations to apply
     pub animations: Vec<Animation>,
+    /// Screen position
     pub position: Position2D,
+    /// Display size
     pub size: Size2D,
 }
 
 /// Types of visual displays
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum VisualDisplayType {
+    /// Status indicator
     Indicator,
+    /// Progress bar
     Progress,
+    /// Audio waveform visualization
     Waveform,
+    /// Frequency spectrogram
     Spectrogram,
+    /// Animated avatar
     Avatar,
+    /// Text display
     Text,
+    /// Icon display
     Icon,
 }
 
 /// Visual shapes
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VisualShape {
+    /// Type of shape
     pub shape_type: ShapeType,
+    /// Shape color
     pub color: String,
+    /// Shape size
     pub size: f32,
+    /// Shape opacity (0.0 - 1.0)
     pub opacity: f32,
 }
 
 /// Shape types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ShapeType {
+    /// Circle shape
     Circle,
+    /// Rectangle shape
     Rectangle,
+    /// Triangle shape
     Triangle,
+    /// Line shape
     Line,
+    /// Arrow shape
     Arrow,
+    /// Star shape
     Star,
 }
 
 /// Animation data
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Animation {
+    /// Type of animation
     pub animation_type: AnimationType,
+    /// Duration in milliseconds
     pub duration_ms: u64,
+    /// Easing function
     pub easing: EasingType,
+    /// Whether to repeat
     pub repeat: bool,
 }
 
 /// Animation types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AnimationType {
+    /// Fade in animation
     FadeIn,
+    /// Fade out animation
     FadeOut,
+    /// Slide in animation
     SlideIn,
+    /// Slide out animation
     SlideOut,
+    /// Bounce animation
     Bounce,
+    /// Pulse animation
     Pulse,
+    /// Rotate animation
     Rotate,
+    /// Scale animation
     Scale,
 }
 
 /// Easing functions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EasingType {
+    /// Linear easing
     Linear,
+    /// Ease in
     EaseIn,
+    /// Ease out
     EaseOut,
+    /// Ease in and out
     EaseInOut,
+    /// Bounce easing
     Bounce,
+    /// Elastic easing
     Elastic,
 }
 
 /// Audio feedback content
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioContent {
+    /// Type of audio feedback
     pub audio_type: AudioFeedbackType,
+    /// Frequency in Hz
     pub frequency: Option<f32>,
+    /// Volume level (0.0 - 1.0)
     pub volume: f32,
+    /// 3D spatial position
     pub spatialization: Option<Position3D>,
+    /// Audio effects to apply
     pub effects: Vec<AudioEffect>,
 }
 
 /// Types of audio feedback
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AudioFeedbackType {
+    /// Pure tone
     Tone,
+    /// Chime sound
     Chime,
+    /// Beep sound
     Beep,
+    /// Voice feedback
     Voice,
+    /// Music
     Music,
+    /// White noise
     WhiteNoise,
+    /// Pink noise
     PinkNoise,
 }
 
 /// Audio effects
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioEffect {
+    /// Type of effect
     pub effect_type: AudioEffectType,
+    /// Effect intensity (0.0 - 1.0)
     pub intensity: f32,
 }
 
 /// Audio effect types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AudioEffectType {
+    /// Reverb effect
     Reverb,
+    /// Echo effect
     Echo,
+    /// Distortion effect
     Distortion,
+    /// Filter effect
     Filter,
+    /// Pitch shift effect
     Pitch,
+    /// Speed change effect
     Speed,
 }
 
 /// Haptic feedback content
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HapticContent {
+    /// Vibration pattern
     pub pattern: HapticPattern,
+    /// Intensity level (0.0 - 1.0)
     pub intensity: f32,
+    /// Vibration frequency
     pub frequency: f32,
+    /// Haptic actuator location
     pub location: HapticLocation,
 }
 
 /// Haptic patterns
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum HapticPattern {
+    /// Single vibration
     Single,
+    /// Double vibration
     Double,
+    /// Triple vibration
     Triple,
+    /// Continuous vibration
     Continuous,
+    /// Pulsing pattern
     Pulse,
+    /// Ramping intensity
     Ramp,
+    /// Wave pattern
     Wave,
 }
 
 /// Haptic feedback locations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum HapticLocation {
+    /// Left side
     Left,
+    /// Right side
     Right,
+    /// Center
     Center,
+    /// All actuators
     All,
+    /// Custom position
     Custom(Position2D),
 }
 
 /// Textual feedback content
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextualContent {
+    /// Text message
     pub message: String,
+    /// Urgency level
     pub urgency: UrgencyLevel,
+    /// Text formatting
     pub formatting: TextFormatting,
+    /// Display duration in milliseconds
     pub display_duration_ms: u64,
 }
 
 /// Text formatting
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextFormatting {
+    /// Font size
     pub font_size: f32,
+    /// Text color
     pub color: String,
+    /// Background color
     pub background_color: Option<String>,
+    /// Bold text
     pub bold: bool,
+    /// Italic text
     pub italic: bool,
+    /// Underlined text
     pub underline: bool,
 }
 
 /// Gesture feedback content
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GestureContent {
+    /// Type of gesture
     pub gesture_type: GestureType,
+    /// Gesture direction
     pub direction: Direction,
+    /// Gesture speed
     pub speed: f32,
+    /// Gesture amplitude
     pub amplitude: f32,
 }
 
 /// Gesture types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GestureType {
+    /// Pointing gesture
     Point,
+    /// Waving gesture
     Wave,
+    /// Nodding gesture
     Nod,
+    /// Shaking gesture
     Shake,
+    /// Circular gesture
     Circle,
+    /// Swiping gesture
     Swipe,
 }
 
 /// Directions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Direction {
+    /// Upward direction
     Up,
+    /// Downward direction
     Down,
+    /// Left direction
     Left,
+    /// Right direction
     Right,
+    /// Forward direction
     Forward,
+    /// Backward direction
     Backward,
+    /// Clockwise rotation
     Clockwise,
+    /// Counterclockwise rotation
     Counterclockwise,
 }
 
 /// Timing information for modality activation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModalityTiming {
+    /// Start time offset in milliseconds
     pub start_offset_ms: u64,
+    /// Duration in milliseconds
     pub duration_ms: u64,
+    /// Synchronization priority
     pub synchronization_priority: SyncPriority,
 }
 
 /// Synchronization priority
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SyncPriority {
+    /// Primary priority (synchronized first)
     Primary,
+    /// Secondary priority
     Secondary,
+    /// Background priority
     Background,
 }
 
 /// Position in 2D space
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Position2D {
+    /// X coordinate
     pub x: f32,
+    /// Y coordinate
     pub y: f32,
 }
 
 /// Position in 3D space
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Position3D {
+    /// X coordinate
     pub x: f32,
+    /// Y coordinate
     pub y: f32,
+    /// Z coordinate
     pub z: f32,
 }
 
 /// Size in 2D space
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Size2D {
+    /// Width
     pub width: f32,
+    /// Height
     pub height: f32,
 }
 
 /// Urgency levels
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum UrgencyLevel {
+    /// Low urgency
     Low,
+    /// Medium urgency
     Medium,
+    /// High urgency
     High,
+    /// Critical urgency
     Critical,
 }
 
 /// User response to feedback
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserResponse {
+    /// Modality that triggered response
     pub modality: ModalityType,
+    /// Response time in milliseconds
     pub response_time_ms: u64,
+    /// Response accuracy
     pub accuracy: f32,
+    /// User satisfaction score
     pub satisfaction: f32,
 }
 

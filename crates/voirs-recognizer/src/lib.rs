@@ -1,22 +1,3 @@
-#![allow(clippy::cast_precision_loss)]
-#![allow(clippy::cast_possible_truncation)]
-#![allow(clippy::cast_sign_loss)]
-#![allow(clippy::cast_possible_wrap)]
-#![allow(clippy::float_cmp)]
-#![allow(clippy::missing_docs_in_private_items)]
-#![allow(clippy::missing_errors_doc)]
-#![allow(clippy::missing_panics_doc)]
-#![allow(clippy::too_many_lines)]
-#![allow(clippy::must_use_candidate)]
-#![allow(clippy::uninlined_format_args)]
-#![allow(clippy::struct_excessive_bools)]
-#![allow(clippy::unused_self)]
-#![allow(clippy::doc_markdown)]
-#![allow(clippy::explicit_auto_deref)]
-#![allow(missing_docs)]
-#![allow(clippy::missing_docs_in_private_items)]
-#![allow(clippy::unnecessary_debug_formatting)]
-
 //! # `VoiRS` Recognition
 //!
 //! Voice recognition and analysis capabilities for the `VoiRS` ecosystem.
@@ -193,6 +174,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 // Re-export core VoiRS types
+/// Item
 pub use voirs_sdk::{AudioBuffer, LanguageCode, Phoneme, VoirsError};
 
 // Public API modules
@@ -213,14 +195,17 @@ pub mod traits;
 pub mod wake_word;
 
 #[cfg(feature = "wasm")]
+/// Pub
 pub mod wasm;
 
 // C API bindings (optional)
 #[cfg(feature = "c-api")]
+/// Pub
 pub mod c_api;
 
 // REST API bindings (optional)
 #[cfg(feature = "rest-api")]
+/// Pub
 pub mod rest_api;
 
 // Python bindings (optional)
@@ -229,9 +214,11 @@ pub mod python;
 
 // Re-export Python module when the feature is enabled
 #[cfg(feature = "python")]
+/// Item
 pub use python::*;
 
 // Re-export key types from traits to avoid ambiguous glob re-exports
+/// Item
 pub use traits::{
     ASRConfig, ASRFeature, ASRMetadata, ASRModel, AudioAnalysis, AudioAnalysisConfig,
     AudioAnalyzer, AudioAnalyzerMetadata, AudioStream, PhonemeAlignment, PhonemeRecognitionConfig,
@@ -240,33 +227,44 @@ pub use traits::{
 };
 
 // Re-export specific implementations to avoid conflicts
+/// Item
 pub use analysis::AudioAnalyzerImpl;
+/// Item
 pub use asr::{ASRBackend, ASRBenchmarkingSuite, AccuracyValidator, IntelligentASRFallback};
 
 // Advanced optimization exports
+/// Item
 pub use asr::advanced_optimization::{
     AdvancedOptimizationConfig, KnowledgeDistillationOptimizer, MixedPrecisionOptimizer,
     OptimizationObjective, OptimizationPlatform, ProgressivePruningOptimizer,
 };
+/// Item
 pub use asr::optimization_integration::{
     ModelStats, OptimizationPipeline, OptimizationResults, OptimizationSummary,
 };
+/// Item
 pub use audio_formats::{
     load_audio, load_audio_with_sample_rate, AudioFormat, AudioLoadConfig, UniversalAudioLoader,
 };
+/// Item
 pub use audio_utilities::{
     analyze_audio_quality, extract_speech_segments, load_and_preprocess, optimize_for_recognition,
     split_audio_smart, AudioQualityReport, AudioUtilities,
 };
+/// Item
 pub use performance::{
     PerformanceMetrics, PerformanceRequirements, PerformanceValidator, ValidationResult,
 };
 #[cfg(feature = "forced-align")]
+/// Item
 pub use phoneme::ForcedAlignModel;
 
 #[cfg(feature = "mfa")]
+/// Item
 pub use phoneme::MFAModel;
+/// Item
 pub use preprocessing::{AudioPreprocessingConfig, AudioPreprocessor};
+/// Item
 pub use wake_word::{
     EnergyOptimizer, NeuralWakeWordModel, TemplateWakeWordModel, TrainingPhase, TrainingProgress,
     TrainingValidationReport, WakeWordConfig, WakeWordDetection, WakeWordDetector,
@@ -299,50 +297,62 @@ pub mod prelude {
     // pub use crate::asr::WhisperModel;
 
     #[cfg(feature = "whisper-pure")]
+    /// Item
     pub use crate::asr::PureRustWhisper;
 
     #[cfg(feature = "deepspeech")]
+    /// Item
     pub use crate::asr::DeepSpeechModel;
 
     #[cfg(feature = "wav2vec2")]
+    /// Item
     pub use crate::asr::Wav2Vec2Model;
 
     #[cfg(feature = "forced-align")]
+    /// Item
     pub use crate::phoneme::ForcedAlignModel;
 
     #[cfg(feature = "mfa")]
+    /// Item
     pub use crate::phoneme::MFAModel;
 
+    /// Item
     pub use crate::analysis::AudioAnalyzerImpl;
 
     // Re-export ASR utilities
+    /// Item
     pub use crate::asr::{
         ASRBackend, ASRBenchmarkingSuite, AccuracyValidator, IntelligentASRFallback,
     };
 
     // Re-export audio format utilities
+    /// Item
     pub use crate::audio_formats::{
         load_audio, load_audio_with_sample_rate, AudioFormat, AudioLoadConfig, UniversalAudioLoader,
     };
 
     // Re-export audio utilities
+    /// Item
     pub use crate::audio_utilities::{
         analyze_audio_quality, extract_speech_segments, load_and_preprocess,
         optimize_for_recognition, split_audio_smart, AudioQualityReport, AudioUtilities,
     };
 
     // Re-export performance utilities
+    /// Item
     pub use crate::performance::{
         PerformanceMetrics, PerformanceRequirements, PerformanceValidator, ValidationResult,
     };
 
     // Re-export integration utilities
+    /// Item
     pub use crate::integration::{
         ComponentInfo, IntegratedPerformanceMonitor, IntegrationConfig, PipelineProcessingConfig,
         UnifiedVoirsPipeline, VoirsIntegrationManager,
     };
 
     // Re-export wake word utilities
+    /// Item
     pub use crate::wake_word::{
         EnergyOptimizer, NeuralWakeWordModel, TemplateWakeWordModel, TrainingPhase,
         TrainingProgress, TrainingValidationReport, WakeWordConfig, WakeWordDetection,
@@ -351,12 +361,15 @@ pub mod prelude {
     };
 
     // Re-export SDK types
+    /// Item
     pub use voirs_sdk::{AudioBuffer, LanguageCode, Phoneme, VoirsError};
 
     // Re-export async trait
+    /// Item
     pub use async_trait::async_trait;
 
     // Re-export error enhancement utilities
+    /// Item
     pub use crate::error_enhancement::{
         enhance_recognition_error, get_quick_fixes, is_error_recoverable, ErrorEnhancer,
     };
@@ -368,6 +381,7 @@ pub mod prelude {
 
 /// Recognition-specific error types
 #[derive(Debug, thiserror::Error)]
+/// Recognition Error
 pub enum RecognitionError {
     /// Model loading failed
     #[error("Failed to load model: {message}")]
@@ -746,6 +760,7 @@ pub fn validate_model_file(path: &std::path::Path) -> RecognitionResult<()> {
 
 /// Create a default ASR configuration for a given language
 #[must_use]
+/// default asr config
 pub fn default_asr_config(language: LanguageCode) -> ASRConfig {
     ASRConfig {
         language: Some(language),
@@ -755,6 +770,7 @@ pub fn default_asr_config(language: LanguageCode) -> ASRConfig {
 
 /// Create a default phoneme recognition configuration for a given language
 #[must_use]
+/// default phoneme config
 pub fn default_phoneme_config(language: LanguageCode) -> PhonemeRecognitionConfig {
     PhonemeRecognitionConfig {
         language,
@@ -764,12 +780,14 @@ pub fn default_phoneme_config(language: LanguageCode) -> PhonemeRecognitionConfi
 
 /// Create a default audio analysis configuration
 #[must_use]
+/// default analysis config
 pub fn default_analysis_config() -> AudioAnalysisConfig {
     AudioAnalysisConfig::default()
 }
 
 /// Convert confidence score to human-readable label
 #[must_use]
+/// confidence to label
 pub fn confidence_to_label(confidence: f32) -> &'static str {
     match confidence {
         c if c >= 0.9 => "Very High",
@@ -782,6 +800,7 @@ pub fn confidence_to_label(confidence: f32) -> &'static str {
 
 /// Utility function to merge transcripts
 #[must_use]
+/// merge transcripts
 pub fn merge_transcripts(transcripts: &[Transcript]) -> Transcript {
     if transcripts.is_empty() {
         return Transcript {

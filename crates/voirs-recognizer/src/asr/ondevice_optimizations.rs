@@ -29,17 +29,26 @@ pub struct DeviceProfile {
     pub battery_info: Option<BatteryInfo>,
 }
 
+/// Target device type for optimization
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeviceType {
+    /// Mobile phone or smartphone
     Mobile,
+    /// Tablet device
     Tablet,
+    /// Laptop computer
     Laptop,
+    /// Desktop computer
     Desktop,
+    /// Edge computing device
     EdgeDevice,
+    /// Internet of Things device
     IoT,
+    /// Embedded system
     Embedded,
 }
 
+/// CPU information and capabilities
 #[derive(Debug, Clone)]
 pub struct CpuInfo {
     /// Number of CPU cores
@@ -58,24 +67,37 @@ pub struct CpuInfo {
     pub simd_support: Vec<SimdInstructionSet>,
 }
 
+/// CPU architecture type
 #[derive(Debug, Clone, PartialEq)]
 pub enum CpuArchitecture {
+    /// ARM 64-bit architecture
     ARM64,
+    /// x86 64-bit architecture
     X86_64,
+    /// ARM 32-bit architecture
     ARM32,
+    /// x86 32-bit architecture
     X86,
-    RISC_V,
+    /// RISC-V architecture
+    RiscV,
 }
 
+/// SIMD instruction set support
 #[derive(Debug, Clone, PartialEq)]
 pub enum SimdInstructionSet {
-    NEON,   // ARM NEON
-    AVX2,   // x86 AVX2
-    AVX512, // x86 AVX-512
-    SSE4_2, // x86 SSE 4.2
-    SVE,    // ARM Scalable Vector Extension
+    /// ARM NEON SIMD instructions
+    NEON,
+    /// x86 AVX2 SIMD instructions
+    AVX2,
+    /// x86 AVX-512 SIMD instructions
+    AVX512,
+    /// x86 SSE 4.2 SIMD instructions
+    SSE4_2,
+    /// ARM Scalable Vector Extension
+    SVE,
 }
 
+/// Device memory information
 #[derive(Debug, Clone)]
 pub struct MemoryInfo {
     /// Total RAM (MB)
@@ -88,6 +110,7 @@ pub struct MemoryInfo {
     pub cache_sizes: Vec<usize>,
 }
 
+/// GPU information and capabilities
 #[derive(Debug, Clone)]
 pub struct GpuInfo {
     /// GPU vendor
@@ -102,16 +125,24 @@ pub struct GpuInfo {
     pub fp16_support: bool,
 }
 
+/// GPU vendor identifier
 #[derive(Debug, Clone, PartialEq)]
 pub enum GpuVendor {
+    /// Apple GPU
     Apple,
+    /// NVIDIA GPU
     Nvidia,
+    /// AMD GPU
     AMD,
+    /// Intel GPU
     Intel,
+    /// ARM GPU
     ARM,
+    /// Qualcomm GPU
     Qualcomm,
 }
 
+/// NPU (Neural Processing Unit) information
 #[derive(Debug, Clone)]
 pub struct NpuInfo {
     /// NPU vendor
@@ -124,25 +155,39 @@ pub struct NpuInfo {
     pub memory_mb: usize,
 }
 
+/// NPU vendor identifier
 #[derive(Debug, Clone, PartialEq)]
 pub enum NpuVendor {
+    /// Apple Neural Engine
     Apple,
+    /// Qualcomm NPU
     Qualcomm,
+    /// MediaTek NPU
     MediaTek,
+    /// Samsung NPU
     Samsung,
+    /// Intel NPU
     Intel,
+    /// Google TPU/Edge TPU
     Google,
 }
 
+/// Supported data type for neural network operations
 #[derive(Debug, Clone, PartialEq)]
 pub enum DataType {
+    /// 32-bit floating point
     FP32,
+    /// 16-bit floating point
     FP16,
+    /// 8-bit integer
     INT8,
+    /// 4-bit integer
     INT4,
+    /// Bfloat16 format
     BF16,
 }
 
+/// Thermal information and constraints
 #[derive(Debug, Clone)]
 pub struct ThermalInfo {
     /// Current temperature (Celsius)
@@ -155,6 +200,7 @@ pub struct ThermalInfo {
     pub thermal_management: bool,
 }
 
+/// Battery information and constraints
 #[derive(Debug, Clone)]
 pub struct BatteryInfo {
     /// Current battery level (0-100)
@@ -165,14 +211,20 @@ pub struct BatteryInfo {
     pub power_constraints: PowerConstraints,
 }
 
+/// Battery status
 #[derive(Debug, Clone, PartialEq)]
 pub enum BatteryStatus {
+    /// Battery is charging
     Charging,
+    /// Battery is discharging
     Discharging,
+    /// Battery is full
     Full,
+    /// Battery status unknown
     Unknown,
 }
 
+/// Power consumption constraints
 #[derive(Debug, Clone)]
 pub struct PowerConstraints {
     /// Maximum power consumption (watts)
@@ -200,6 +252,7 @@ pub struct OnDeviceConfig {
     pub power_management: PowerManagementConfig,
 }
 
+/// Real-time processing constraints
 #[derive(Debug, Clone)]
 pub struct RealtimeConstraints {
     /// Maximum processing latency (ms)
@@ -212,13 +265,18 @@ pub struct RealtimeConstraints {
     pub deadline_policy: DeadlinePolicy,
 }
 
+/// Policy for handling deadline misses
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeadlinePolicy {
-    Drop,       // Drop frames if deadline missed
-    Degrade,    // Reduce quality if deadline missed
-    BestEffort, // Continue processing regardless
+    /// Drop frames if deadline missed
+    Drop,
+    /// Reduce quality if deadline missed
+    Degrade,
+    /// Continue processing regardless
+    BestEffort,
 }
 
+/// Model compression configuration
 #[derive(Debug, Clone)]
 pub struct CompressionConfig {
     /// Model pruning enabled
@@ -233,6 +291,7 @@ pub struct CompressionConfig {
     pub dynamic_models: bool,
 }
 
+/// Neural network quantization settings
 #[derive(Debug, Clone)]
 pub struct QuantizationSettings {
     /// Weight quantization bits
@@ -245,6 +304,7 @@ pub struct QuantizationSettings {
     pub calibration: bool,
 }
 
+/// Hardware acceleration configuration
 #[derive(Debug, Clone)]
 pub struct AccelerationConfig {
     /// Preferred acceleration backend
@@ -257,14 +317,20 @@ pub struct AccelerationConfig {
     pub npu_caching: bool,
 }
 
+/// Hardware acceleration backend
 #[derive(Debug, Clone, PartialEq)]
 pub enum AccelerationBackend {
+    /// CPU-only processing
     CPU,
+    /// GPU acceleration
     GPU,
+    /// NPU/AI accelerator
     NPU,
+    /// Automatic backend selection
     AutoSelect,
 }
 
+/// Adaptive inference configuration
 #[derive(Debug, Clone)]
 pub struct AdaptiveInferenceConfig {
     /// Enable quality adaptation
@@ -277,6 +343,7 @@ pub struct AdaptiveInferenceConfig {
     pub thresholds: AdaptationThresholds,
 }
 
+/// Adaptation thresholds for quality adjustments
 #[derive(Debug, Clone)]
 pub struct AdaptationThresholds {
     /// CPU usage threshold for downgrade (0.0 - 1.0)
@@ -289,6 +356,7 @@ pub struct AdaptationThresholds {
     pub battery_threshold: f32,
 }
 
+/// Power management configuration
 #[derive(Debug, Clone)]
 pub struct PowerManagementConfig {
     /// Enable dynamic frequency scaling
@@ -318,6 +386,7 @@ pub struct OnDeviceOptimizer {
     resource_monitor: ResourceMonitor,
 }
 
+/// Performance metrics for on-device optimization
 #[derive(Debug, Clone)]
 pub struct PerformanceMetrics {
     /// Average processing latency (ms)
@@ -359,15 +428,22 @@ impl Default for PerformanceMetrics {
     }
 }
 
+/// Quality level for model selection
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum QualityLevel {
-    Ultra,   // Highest quality, most resource intensive
-    High,    // High quality, balanced resource usage
-    Medium,  // Medium quality, moderate resource usage
-    Low,     // Lower quality, lightweight
-    Minimal, // Minimal quality, ultra-lightweight
+    /// Highest quality, most resource intensive
+    Ultra,
+    /// High quality, balanced resource usage
+    High,
+    /// Medium quality, moderate resource usage
+    Medium,
+    /// Lower quality, lightweight
+    Low,
+    /// Minimal quality, ultra-lightweight
+    Minimal,
 }
 
+/// Model variant for a specific quality level
 #[derive(Debug, Clone)]
 pub struct ModelVariant {
     /// Model parameters count
@@ -395,6 +471,7 @@ pub struct ProcessingPipeline {
     postprocessing: PostprocessingOptimizer,
 }
 
+/// Audio preprocessing stage
 #[derive(Debug, Clone)]
 pub enum PreprocessingStage {
     /// SIMD-optimized audio preprocessing
@@ -407,6 +484,7 @@ pub enum PreprocessingStage {
     NoiseSuppression,
 }
 
+/// Feature extraction optimizer
 #[derive(Debug)]
 pub struct FeatureExtractionOptimizer {
     /// Use SIMD instructions for FFT
@@ -419,6 +497,7 @@ pub struct FeatureExtractionOptimizer {
     feature_compression: bool,
 }
 
+/// Inference optimizer
 #[derive(Debug)]
 pub struct InferenceOptimizer {
     /// Current backend
@@ -431,6 +510,7 @@ pub struct InferenceOptimizer {
     dynamic_batching: bool,
 }
 
+/// Cached model for efficient inference
 #[derive(Debug, Clone)]
 pub struct CachedModel {
     /// Model weights (quantized if applicable)
@@ -441,6 +521,7 @@ pub struct CachedModel {
     compilation_artifacts: Option<Vec<u8>>,
 }
 
+/// Model metadata
 #[derive(Debug, Clone)]
 pub struct ModelMetadata {
     /// Input shape
@@ -453,6 +534,7 @@ pub struct ModelMetadata {
     pub target_backend: AccelerationBackend,
 }
 
+/// Quantization parameters
 #[derive(Debug, Clone)]
 pub struct QuantizationParams {
     /// Scale factors
@@ -463,13 +545,18 @@ pub struct QuantizationParams {
     pub scheme: QuantizationScheme,
 }
 
+/// Quantization scheme
 #[derive(Debug, Clone, PartialEq)]
 pub enum QuantizationScheme {
+    /// Per-tensor quantization
     PerTensor,
+    /// Per-channel quantization
     PerChannel,
+    /// Dynamic quantization
     Dynamic,
 }
 
+/// Post-processing optimizer
 #[derive(Debug)]
 pub struct PostprocessingOptimizer {
     /// Beam search optimization
@@ -480,6 +567,7 @@ pub struct PostprocessingOptimizer {
     confidence_scoring: bool,
 }
 
+/// Lightweight language model for post-processing
 #[derive(Debug)]
 pub struct LightweightLanguageModel {
     /// N-gram probabilities
@@ -503,6 +591,7 @@ pub struct ResourceMonitor {
     enabled: bool,
 }
 
+/// Resource usage snapshot
 #[derive(Debug, Clone)]
 pub struct ResourceUsage {
     /// Timestamp
@@ -1109,23 +1198,44 @@ impl ResourceMonitor {
 /// On-device processing errors
 #[derive(Debug, thiserror::Error)]
 pub enum OnDeviceError {
+    /// Processing deadline exceeded
     #[error("Processing deadline exceeded: {deadline_ms}ms")]
-    DeadlineExceeded { deadline_ms: u32 },
+    DeadlineExceeded {
+        /// Deadline in milliseconds
+        deadline_ms: u32,
+    },
 
+    /// Insufficient device resources
     #[error("Insufficient device resources: {resource}")]
-    InsufficientResources { resource: String },
+    InsufficientResources {
+        /// Resource name
+        resource: String,
+    },
 
+    /// Hardware acceleration not available
     #[error("Hardware acceleration not available: {backend:?}")]
-    AccelerationUnavailable { backend: AccelerationBackend },
+    AccelerationUnavailable {
+        /// Requested backend
+        backend: AccelerationBackend,
+    },
 
+    /// Thermal throttling active
     #[error("Thermal throttling active")]
     ThermalThrottling,
 
+    /// Model loading failed
     #[error("Model loading failed: {reason}")]
-    ModelLoadingFailed { reason: String },
+    ModelLoadingFailed {
+        /// Failure reason
+        reason: String,
+    },
 
+    /// Feature extraction failed
     #[error("Feature extraction failed: {reason}")]
-    FeatureExtractionFailed { reason: String },
+    FeatureExtractionFailed {
+        /// Failure reason
+        reason: String,
+    },
 }
 
 #[cfg(test)]

@@ -4,7 +4,7 @@ pub mod adaptive_acoustics;
 pub mod simulation;
 
 use crate::types::Position3D;
-use ndarray::{Array1, Array2};
+use scirs2_core::ndarray::{Array1, Array2};
 use serde::{Deserialize, Serialize};
 pub use simulation::{
     AcousticResponse, AdvancedRoomSimulator, DiffractionProcessor, DynamicEnvironmentManager,
@@ -475,8 +475,11 @@ impl RoomSimulator {
     }
 
     /// Generate random ray direction in 3D space
-    fn random_ray_direction(&self, rng: &mut rand::prelude::ThreadRng) -> Position3D {
-        use rand::Rng;
+    fn random_ray_direction(
+        &self,
+        rng: &mut scirs2_core::random::prelude::ThreadRng,
+    ) -> Position3D {
+        use scirs2_core::random::Rng;
 
         let theta = rng.gen_range(0.0..std::f32::consts::PI * 2.0);
         let phi = rng.gen_range(0.0..std::f32::consts::PI);
@@ -611,9 +614,9 @@ impl RoomSimulator {
         incident: Position3D,
         normal: Position3D,
         scattering_coeff: f32,
-        rng: &mut rand::prelude::ThreadRng,
+        rng: &mut scirs2_core::random::prelude::ThreadRng,
     ) -> Position3D {
-        use rand::Rng;
+        use scirs2_core::random::Rng;
 
         // Specular reflection component
         let dot = incident.dot(&normal);
@@ -713,7 +716,8 @@ impl RoomSimulator {
         for (i, sample) in buffer.iter_mut().enumerate() {
             let time = i as f32 / sample_rate as f32;
             let amplitude = (decay_rate * time / 20.0).exp(); // Convert dB to linear
-            *sample = amplitude * (rand::random::<f32>() - 0.5) * 2.0; // Noise with decay
+            *sample = amplitude * (scirs2_core::random::random::<f32>() - 0.5) * 2.0;
+            // Noise with decay
         }
 
         Ok(())

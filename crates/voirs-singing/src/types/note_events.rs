@@ -62,6 +62,17 @@ pub struct BreathInfo {
 
 impl NoteEvent {
     /// Create a new note event
+    ///
+    /// # Arguments
+    ///
+    /// * `note` - Note name (C, D, E, F, G, A, B) with optional sharp (#) or flat (b)
+    /// * `octave` - Octave number (0-8)
+    /// * `duration` - Note duration in beats
+    /// * `velocity` - Note velocity (0.0-1.0)
+    ///
+    /// # Returns
+    ///
+    /// A new `NoteEvent` instance with default values for optional parameters
     pub fn new(note: String, octave: u8, duration: f32, velocity: f32) -> Self {
         Self {
             frequency: Self::note_to_frequency(&note, octave),
@@ -81,6 +92,15 @@ impl NoteEvent {
     }
 
     /// Convert note name and octave to frequency
+    ///
+    /// # Arguments
+    ///
+    /// * `note` - Note name (C, D, E, F, G, A, B) with optional sharp (#) or flat (b)
+    /// * `octave` - Octave number (0-8)
+    ///
+    /// # Returns
+    ///
+    /// The frequency in Hz corresponding to the note and octave
     pub fn note_to_frequency(note: &str, octave: u8) -> f32 {
         let base_frequencies = [
             ("C", 16.35),
@@ -113,36 +133,84 @@ impl NoteEvent {
     }
 
     /// Set lyric for this note
+    ///
+    /// # Arguments
+    ///
+    /// * `lyric` - The lyric text to sing on this note
+    ///
+    /// # Returns
+    ///
+    /// Self with updated lyric
     pub fn with_lyric(mut self, lyric: String) -> Self {
         self.lyric = Some(lyric);
         self
     }
 
     /// Set phonemes for this note
+    ///
+    /// # Arguments
+    ///
+    /// * `phonemes` - Sequence of phonemes to use for pronunciation
+    ///
+    /// # Returns
+    ///
+    /// Self with updated phoneme sequence
     pub fn with_phonemes(mut self, phonemes: Vec<String>) -> Self {
         self.phonemes = phonemes;
         self
     }
 
     /// Set expression for this note
+    ///
+    /// # Arguments
+    ///
+    /// * `expression` - The expression type to apply (e.g., Happy, Sad, Passionate)
+    ///
+    /// # Returns
+    ///
+    /// Self with updated expression
     pub fn with_expression(mut self, expression: Expression) -> Self {
         self.expression = expression;
         self
     }
 
     /// Set vibrato intensity
+    ///
+    /// # Arguments
+    ///
+    /// * `vibrato` - Vibrato intensity (0.0-1.0, clamped to range)
+    ///
+    /// # Returns
+    ///
+    /// Self with updated vibrato intensity
     pub fn with_vibrato(mut self, vibrato: f32) -> Self {
         self.vibrato = vibrato.clamp(0.0, 1.0);
         self
     }
 
     /// Set breath before note
+    ///
+    /// # Arguments
+    ///
+    /// * `breath` - Breath intensity before this note (0.0-1.0, clamped to range)
+    ///
+    /// # Returns
+    ///
+    /// Self with updated breath intensity
     pub fn with_breath_before(mut self, breath: f32) -> Self {
         self.breath_before = breath.clamp(0.0, 1.0);
         self
     }
 
     /// Set legato connection
+    ///
+    /// # Arguments
+    ///
+    /// * `legato` - Whether to connect smoothly to the next note
+    ///
+    /// # Returns
+    ///
+    /// Self with updated legato setting
     pub fn with_legato(mut self, legato: bool) -> Self {
         self.legato = legato;
         self

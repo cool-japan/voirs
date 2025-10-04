@@ -82,16 +82,24 @@ pub struct DynamicRangeProcessor {
 
 // === Supporting Types ===
 
+/// Interpolation method for resampling
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InterpolationMethod {
+    /// Linear interpolation (fast, lower quality)
     Linear,
+    /// Cubic interpolation (balanced quality and speed)
     Cubic,
+    /// Sinc interpolation (high quality)
     Sinc,
+    /// Lanczos resampling (high quality with windowing)
     Lanczos,
+    /// Kaiser windowed sinc (excellent quality, configurable)
     Kaiser,
+    /// Blackman windowed sinc (very high quality)
     Blackman,
 }
 
+/// Anti-aliasing filter configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AntiAliasingConfig {
     /// Cutoff frequency as ratio of Nyquist frequency
@@ -106,33 +114,52 @@ pub struct AntiAliasingConfig {
     pub stopband_attenuation: f32,
 }
 
+/// Digital filter type for anti-aliasing
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FilterType {
+    /// Butterworth filter (maximally flat passband)
     Butterworth,
+    /// Chebyshev Type I filter (passband ripple)
     Chebyshev1,
+    /// Chebyshev Type II filter (stopband ripple)
     Chebyshev2,
+    /// Elliptic filter (ripple in both bands, steepest rolloff)
     Elliptic,
+    /// Bessel filter (maximally flat group delay, linear phase)
     Bessel,
+    /// Kaiser window filter (configurable characteristics)
     Kaiser,
 }
 
+/// Quality vs speed tradeoff level
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum QualityLevel {
-    Fast,     // Lower quality, higher speed
-    Balanced, // Good balance of quality and speed
-    High,     // High quality, slower processing
-    Maximum,  // Maximum quality, slowest processing
+    /// Lower quality, higher speed
+    Fast,
+    /// Good balance of quality and speed
+    Balanced,
+    /// High quality, slower processing
+    High,
+    /// Maximum quality, slowest processing
+    Maximum,
 }
 
+/// Method for aligning phase between audio channels
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PhaseAlignmentMethod {
+    /// Cross-correlation based alignment (time domain)
     CrossCorrelation,
+    /// Phase vocoder based alignment (frequency domain)
     PhaseVocoder,
+    /// Simple time delay alignment
     TimeDelay,
+    /// Frequency domain analysis and correction
     FrequencyDomain,
+    /// Hybrid time and frequency domain approach
     Hybrid,
 }
 
+/// Configuration for maintaining harmonic phase relationships
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HarmonicPhaseConfig {
     /// Maintain harmonic phase relationships
@@ -145,6 +172,7 @@ pub struct HarmonicPhaseConfig {
     pub phase_offsets: Vec<f32>,
 }
 
+/// Configuration for cross-correlation analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CorrelationConfig {
     /// Window size for correlation analysis
@@ -157,6 +185,7 @@ pub struct CorrelationConfig {
     pub max_delay_range: u32,
 }
 
+/// Pan law for stereo positioning
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PanLaw {
     /// -3dB pan law (most common)
@@ -171,6 +200,7 @@ pub enum PanLaw {
     Custom(f32),
 }
 
+/// Configuration for positioning multiple voices in stereo field
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoicePositioning {
     /// Automatic voice spacing
@@ -185,6 +215,7 @@ pub struct VoicePositioning {
     pub position_modulation: PositionModulation,
 }
 
+/// Configuration for simulating distance cues in audio
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DistanceSimulation {
     /// Enable distance simulation
@@ -199,6 +230,7 @@ pub struct DistanceSimulation {
     pub distance_filtering: bool,
 }
 
+/// Configuration for dynamic position modulation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PositionModulation {
     /// Enable position movement
@@ -211,29 +243,37 @@ pub struct PositionModulation {
     pub modulation_depth: f32,
 }
 
+/// Pattern for spatial position movement
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MovementPattern {
+    /// Circular movement pattern
     Circular,
+    /// Linear back-and-forth movement
     Linear,
+    /// Figure-8 movement pattern
     Figure8,
+    /// Random wandering movement
     Random,
-    Breathing, // Slight movement like choir breathing
+    /// Slight movement like choir breathing
+    Breathing,
 }
 
+/// Configuration for spatial room simulation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpatialSimulation {
-    /// Room size simulation
-    pub room_size: (f32, f32, f32), // width, depth, height
+    /// Room size simulation (width, depth, height in meters)
+    pub room_size: (f32, f32, f32),
     /// Early reflections
     pub early_reflections: EarlyReflectionConfig,
     /// Late reverb
     pub late_reverb: LateReverbConfig,
-    /// Source positions in room
-    pub source_positions: Vec<(f32, f32, f32)>, // x, y, z
-    /// Listener position
+    /// Source positions in room (x, y, z coordinates)
+    pub source_positions: Vec<(f32, f32, f32)>,
+    /// Listener position (x, y, z coordinates)
     pub listener_position: (f32, f32, f32),
 }
 
+/// Configuration for early reflections in room simulation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EarlyReflectionConfig {
     /// Enable early reflections
@@ -242,38 +282,41 @@ pub struct EarlyReflectionConfig {
     pub density: f32,
     /// Reflection level
     pub level: f32,
-    /// Reflection delay spread
+    /// Reflection delay spread (seconds)
     pub delay_spread: f32,
     /// High frequency damping
     pub hf_damping: f32,
 }
 
+/// Configuration for late reverb tail
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LateReverbConfig {
-    /// Reverb time (RT60)
+    /// Reverb time (RT60 in seconds)
     pub reverb_time: f32,
     /// High frequency decay ratio
     pub hf_decay_ratio: f32,
-    /// Diffusion
+    /// Diffusion amount
     pub diffusion: f32,
-    /// Density
+    /// Echo density
     pub density: f32,
-    /// Wet/dry mix
+    /// Wet/dry mix level
     pub wet_level: f32,
 }
 
+/// Configuration for stereo field enhancement
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StereoEnhancement {
     /// Bass enhancement for center content
     pub bass_enhancement: f32,
-    /// Mid-side processing
+    /// Mid-side processing configuration
     pub mid_side_processing: MidSideConfig,
-    /// Harmonic enhancement
+    /// Harmonic enhancement amount
     pub harmonic_enhancement: f32,
-    /// Stereo exciter
+    /// Stereo exciter amount
     pub exciter_amount: f32,
 }
 
+/// Configuration for mid-side stereo processing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MidSideConfig {
     /// Enable M/S processing
@@ -288,6 +331,7 @@ pub struct MidSideConfig {
     pub side_eq: EqConfig,
 }
 
+/// Configuration for parametric equalizer
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EqConfig {
     /// Enable EQ
@@ -296,9 +340,10 @@ pub struct EqConfig {
     pub bands: Vec<EqBand>,
 }
 
+/// Single band in a parametric equalizer
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EqBand {
-    /// Center frequency
+    /// Center frequency (Hz)
     pub frequency: f32,
     /// Gain in dB
     pub gain: f32,
@@ -308,121 +353,142 @@ pub struct EqBand {
     pub band_type: EqBandType,
 }
 
+/// Type of equalizer band filter
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EqBandType {
+    /// Peak/notch filter (bell curve)
     Peak,
+    /// High shelf filter (boost/cut high frequencies)
     HighShelf,
+    /// Low shelf filter (boost/cut low frequencies)
     LowShelf,
+    /// High-pass filter (attenuate low frequencies)
     HighPass,
+    /// Low-pass filter (attenuate high frequencies)
     LowPass,
+    /// Band-pass filter (only pass certain frequency range)
     BandPass,
+    /// Notch filter (reject narrow frequency range)
     Notch,
 }
 
+/// Configuration for Head-Related Transfer Function (HRTF) processing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HrtfConfig {
     /// HRTF database selection
     pub database: HrtfDatabase,
-    /// Head size adjustment
+    /// Head size adjustment factor
     pub head_size: f32,
-    /// Ear position adjustment
+    /// Ear spacing adjustment (meters)
     pub ear_spacing: f32,
     /// Individual HRTF customization
     pub custom_hrtf: Option<CustomHrtfData>,
 }
 
+/// HRTF database selection
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HrtfDatabase {
-    MIT,     // MIT KEMAR database
-    CIPIC,   // UC Davis CIPIC database
-    ARI,     // Austrian Research Institute
-    Generic, // Generic/average HRTF
-    Custom,  // User-provided HRTF
+    /// MIT KEMAR database
+    MIT,
+    /// UC Davis CIPIC database
+    CIPIC,
+    /// Austrian Research Institute database
+    ARI,
+    /// Generic/average HRTF
+    Generic,
+    /// User-provided HRTF
+    Custom,
 }
 
+/// Custom HRTF impulse response data
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomHrtfData {
-    /// Left ear impulse responses
+    /// Left ear impulse responses for each direction
     pub left_ear_irs: Vec<Vec<f32>>,
-    /// Right ear impulse responses
+    /// Right ear impulse responses for each direction
     pub right_ear_irs: Vec<Vec<f32>>,
-    /// Azimuth angles
+    /// Azimuth angles (degrees)
     pub azimuth_angles: Vec<f32>,
-    /// Elevation angles
+    /// Elevation angles (degrees)
     pub elevation_angles: Vec<f32>,
 }
 
+/// Configuration for dynamic range compressor
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompressorConfig {
     /// Enable compressor
     pub enabled: bool,
-    /// Threshold (dB)
+    /// Threshold level (dB)
     pub threshold: f32,
-    /// Ratio
+    /// Compression ratio (e.g., 4.0 = 4:1)
     pub ratio: f32,
-    /// Attack time (ms)
+    /// Attack time (milliseconds)
     pub attack: f32,
-    /// Release time (ms)
+    /// Release time (milliseconds)
     pub release: f32,
     /// Knee width (dB)
     pub knee_width: f32,
     /// Makeup gain (dB)
     pub makeup_gain: f32,
-    /// Sidechain filtering
+    /// Sidechain filtering configuration
     pub sidechain_filter: Option<EqConfig>,
 }
 
+/// Configuration for peak limiter
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LimiterConfig {
     /// Enable limiter
     pub enabled: bool,
     /// Ceiling level (dB)
     pub ceiling: f32,
-    /// Release time (ms)
+    /// Release time (milliseconds)
     pub release: f32,
-    /// Lookahead time (ms)
+    /// Lookahead time (milliseconds)
     pub lookahead: f32,
     /// ISR (Inter-Sample Peak) detection
     pub isr_detection: bool,
 }
 
+/// Configuration for noise gate
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GateConfig {
     /// Enable gate
     pub enabled: bool,
-    /// Threshold (dB)
+    /// Threshold level (dB)
     pub threshold: f32,
     /// Ratio (for expander-style gating)
     pub ratio: f32,
-    /// Attack time (ms)
+    /// Attack time (milliseconds)
     pub attack: f32,
-    /// Hold time (ms)
+    /// Hold time (milliseconds)
     pub hold: f32,
-    /// Release time (ms)
+    /// Release time (milliseconds)
     pub release: f32,
 }
 
+/// Configuration for dynamic range expander
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExpanderConfig {
     /// Enable expander
     pub enabled: bool,
-    /// Threshold (dB)
+    /// Threshold level (dB)
     pub threshold: f32,
-    /// Ratio
+    /// Expansion ratio
     pub ratio: f32,
-    /// Attack time (ms)
+    /// Attack time (milliseconds)
     pub attack: f32,
-    /// Release time (ms)
+    /// Release time (milliseconds)
     pub release: f32,
     /// Knee width (dB)
     pub knee_width: f32,
 }
 
+/// Configuration for multiband dynamic processing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultibandConfig {
     /// Enable multiband processing
     pub enabled: bool,
-    /// Crossover frequencies
+    /// Crossover frequencies (Hz)
     pub crossover_frequencies: Vec<f32>,
     /// Per-band compressors
     pub band_compressors: Vec<CompressorConfig>,
@@ -432,17 +498,18 @@ pub struct MultibandConfig {
     pub crossover_slopes: Vec<f32>,
 }
 
+/// Configuration for preserving natural vocal dynamics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NaturalDynamicsConfig {
     /// Preserve micro-dynamics
     pub preserve_micro_dynamics: bool,
-    /// Transient preservation
+    /// Transient preservation amount (0.0-1.0)
     pub transient_preservation: f32,
-    /// Breath dynamics preservation
+    /// Breath dynamics preservation amount (0.0-1.0)
     pub breath_preservation: f32,
-    /// Musical phrase shaping
+    /// Musical phrase shaping amount (0.0-1.0)
     pub phrase_shaping: f32,
-    /// Dynamic range target
+    /// Dynamic range target (dB)
     pub target_dynamic_range: f32,
 }
 
@@ -703,6 +770,12 @@ impl HighQualityResampler {
     }
 }
 
+impl Default for PhaseCoherenceProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PhaseCoherenceProcessor {
     /// Create a new phase coherence processor
     pub fn new() -> Self {
@@ -770,7 +843,7 @@ impl PhaseCoherenceProcessor {
         let start = delay.max(0) as usize;
         let end = (reference
             .len()
-            .min(signal.len().saturating_sub(delay.abs() as usize)))
+            .min(signal.len().saturating_sub(delay.unsigned_abs() as usize)))
         .min(start + window_size);
 
         if start >= end {
@@ -786,7 +859,7 @@ impl PhaseCoherenceProcessor {
             let sig_idx = if delay >= 0 {
                 i
             } else {
-                i + delay.abs() as usize
+                i + delay.unsigned_abs() as usize
             };
 
             if ref_idx < reference.len() && sig_idx < signal.len() {
@@ -853,6 +926,12 @@ impl PhaseCoherenceProcessor {
     }
 }
 
+impl Default for StereoImagingProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StereoImagingProcessor {
     /// Create a new stereo imaging processor
     pub fn new() -> Self {
@@ -880,7 +959,7 @@ impl StereoImagingProcessor {
     }
 
     /// Process stereo audio with imaging
-    pub fn process_stereo(&self, left: &mut Vec<f32>, right: &mut Vec<f32>) {
+    pub fn process_stereo(&self, left: &mut [f32], right: &mut [f32]) {
         self.apply_stereo_width(left, right);
         self.apply_stereo_enhancement(left, right);
 
@@ -890,7 +969,7 @@ impl StereoImagingProcessor {
     }
 
     /// Apply stereo width adjustment
-    fn apply_stereo_width(&self, left: &mut Vec<f32>, right: &mut Vec<f32>) {
+    fn apply_stereo_width(&self, left: &mut [f32], right: &mut [f32]) {
         for (l, r) in left.iter_mut().zip(right.iter_mut()) {
             let mid = (*l + *r) * 0.5;
             let side = (*l - *r) * 0.5;
@@ -903,7 +982,7 @@ impl StereoImagingProcessor {
     }
 
     /// Apply stereo enhancement
-    fn apply_stereo_enhancement(&self, left: &mut Vec<f32>, right: &mut Vec<f32>) {
+    fn apply_stereo_enhancement(&self, left: &mut [f32], right: &mut [f32]) {
         let enhancement = &self.stereo_enhancement;
 
         if enhancement.harmonic_enhancement > 0.0 {
@@ -927,7 +1006,7 @@ impl StereoImagingProcessor {
     }
 
     /// Apply spatial simulation
-    fn apply_spatial_simulation(&self, left: &mut Vec<f32>, right: &mut Vec<f32>) {
+    fn apply_spatial_simulation(&self, left: &mut [f32], right: &mut [f32]) {
         let early_refs = &self.spatial_simulation.early_reflections;
 
         if early_refs.enabled && early_refs.level > 0.0 {
@@ -1005,6 +1084,12 @@ impl StereoImagingProcessor {
     }
 }
 
+impl Default for DynamicRangeProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DynamicRangeProcessor {
     /// Create a new dynamic range processor
     pub fn new() -> Self {
@@ -1043,7 +1128,7 @@ impl DynamicRangeProcessor {
     }
 
     /// Process audio with dynamic range control
-    pub fn process(&self, audio: &mut Vec<f32>) {
+    pub fn process(&self, audio: &mut [f32]) {
         if self.gate.enabled {
             self.apply_gate(audio);
         }
@@ -1062,7 +1147,7 @@ impl DynamicRangeProcessor {
     }
 
     /// Apply noise gate
-    fn apply_gate(&self, audio: &mut Vec<f32>) {
+    fn apply_gate(&self, audio: &mut [f32]) {
         let threshold_linear = self.db_to_linear(self.gate.threshold);
         let attack_coeff = self.time_to_coefficient(self.gate.attack);
         let release_coeff = self.time_to_coefficient(self.gate.release);
@@ -1095,7 +1180,7 @@ impl DynamicRangeProcessor {
     }
 
     /// Apply expander
-    fn apply_expander(&self, audio: &mut Vec<f32>) {
+    fn apply_expander(&self, audio: &mut [f32]) {
         let threshold_linear = self.db_to_linear(self.expander.threshold);
         let ratio = self.expander.ratio;
 
@@ -1112,7 +1197,7 @@ impl DynamicRangeProcessor {
     }
 
     /// Apply compressor
-    fn apply_compressor(&self, audio: &mut Vec<f32>) {
+    fn apply_compressor(&self, audio: &mut [f32]) {
         let threshold_linear = self.db_to_linear(self.compressor.threshold);
         let ratio = self.compressor.ratio;
         let makeup_gain = self.db_to_linear(self.compressor.makeup_gain);
@@ -1145,7 +1230,7 @@ impl DynamicRangeProcessor {
     }
 
     /// Apply limiter
-    fn apply_limiter(&self, audio: &mut Vec<f32>) {
+    fn apply_limiter(&self, audio: &mut [f32]) {
         let ceiling_linear = self.db_to_linear(self.limiter.ceiling);
 
         for sample in audio.iter_mut() {

@@ -2,7 +2,7 @@
 
 use clap::ValueEnum;
 use std::str::FromStr;
-use voirs::{AudioFormat, QualityLevel};
+use voirs_sdk::{AudioFormat, QualityLevel};
 
 /// CLI wrapper for AudioFormat to implement clap traits
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

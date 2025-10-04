@@ -5,12 +5,12 @@ use crate::types::NoteEvent;
 use crate::Result;
 use std::collections::HashMap;
 
-/// Scale analysis system
+/// Scale analysis system for detecting musical scales and modes
 #[derive(Debug, Clone)]
 pub struct ScaleAnalyzer {
-    /// Scale patterns for recognition
+    /// Scale patterns for pattern-based recognition (maps scale name to pattern)
     scale_patterns: HashMap<String, ScalePattern>,
-    /// Analysis threshold
+    /// Minimum confidence threshold (0.0-1.0) for scale recognition
     threshold: f32,
 }
 
@@ -26,7 +26,7 @@ impl ScaleAnalyzer {
         analyzer
     }
 
-    /// Initialize common scale patterns
+    /// Initialize common scale patterns including major, minor, pentatonic, and blues scales
     fn initialize_scale_patterns(&mut self) {
         // Major scale
         self.add_scale_pattern(
@@ -67,7 +67,13 @@ impl ScaleAnalyzer {
         );
     }
 
-    /// Add a scale pattern
+    /// Add a scale pattern to the recognition database
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Scale name
+    /// * `intervals` - Semitone intervals from root note
+    /// * `characteristics` - Scale characteristics and properties
     fn add_scale_pattern(
         &mut self,
         name: &str,
@@ -82,7 +88,19 @@ impl ScaleAnalyzer {
         self.scale_patterns.insert(name.to_string(), pattern);
     }
 
-    /// Analyze scales from note events
+    /// Analyze scales from note events by matching against known scale patterns
+    ///
+    /// # Arguments
+    ///
+    /// * `note_events` - Musical note events to analyze
+    ///
+    /// # Returns
+    ///
+    /// Vector of matched scales sorted by confidence (highest first)
+    ///
+    /// # Errors
+    ///
+    /// Returns error if scale analysis fails
     pub async fn analyze_scales(&self, note_events: &[NoteEvent]) -> Result<Vec<ScaleResult>> {
         let mut scale_results = Vec::new();
 
@@ -103,6 +121,14 @@ impl ScaleAnalyzer {
     }
 
     /// Extract unique pitch classes from note events
+    ///
+    /// # Arguments
+    ///
+    /// * `note_events` - Note events to extract pitch classes from
+    ///
+    /// # Returns
+    ///
+    /// Sorted vector of unique pitch classes (0-11)
     fn extract_pitch_classes(&self, note_events: &[NoteEvent]) -> Vec<u8> {
         let mut pitch_classes = Vec::new();
 
@@ -117,7 +143,15 @@ impl ScaleAnalyzer {
         pitch_classes
     }
 
-    /// Convert frequency to pitch class
+    /// Convert frequency to pitch class (0-11, where C=0)
+    ///
+    /// # Arguments
+    ///
+    /// * `frequency` - Frequency in Hz
+    ///
+    /// # Returns
+    ///
+    /// Pitch class number (0=C, 1=C#, 2=D, etc.)
     fn frequency_to_pitch_class(&self, frequency: f32) -> u8 {
         let a4_freq = 440.0;
         let semitones_from_a4 = 12.0 * (frequency / a4_freq).log2();
@@ -125,7 +159,16 @@ impl ScaleAnalyzer {
         ((semitones + 9) % 12) as u8 // +9 to make C = 0
     }
 
-    /// Match scale pattern against pitch classes
+    /// Match scale pattern against pitch classes by trying all possible roots
+    ///
+    /// # Arguments
+    ///
+    /// * `pattern` - Scale pattern to match
+    /// * `pitch_classes` - Detected pitch classes
+    ///
+    /// # Returns
+    ///
+    /// Scale result with best-matching root or None if confidence below threshold
     fn match_scale_pattern(
         &self,
         pattern: &ScalePattern,
@@ -159,7 +202,17 @@ impl ScaleAnalyzer {
         }
     }
 
-    /// Calculate confidence for scale pattern match
+    /// Calculate confidence for scale pattern match using F1 score
+    ///
+    /// # Arguments
+    ///
+    /// * `pattern` - Scale pattern template
+    /// * `pitch_classes` - Detected pitch classes
+    /// * `root` - Root note to transpose pattern to
+    ///
+    /// # Returns
+    ///
+    /// Confidence score (0.0-1.0) based on precision and recall
     fn calculate_scale_confidence(
         &self,
         pattern: &ScalePattern,
@@ -202,7 +255,16 @@ impl ScaleAnalyzer {
         }
     }
 
-    /// Generate note names for a scale
+    /// Generate note names for a scale given its pattern and root
+    ///
+    /// # Arguments
+    ///
+    /// * `pattern` - Scale pattern with intervals
+    /// * `root` - Root note pitch class
+    ///
+    /// # Returns
+    ///
+    /// Vector of note names in the scale
     fn generate_scale_notes(&self, pattern: &ScalePattern, root: u8) -> Vec<String> {
         pattern
             .intervals
@@ -212,6 +274,14 @@ impl ScaleAnalyzer {
     }
 
     /// Convert pitch class to note name
+    ///
+    /// # Arguments
+    ///
+    /// * `pitch_class` - Pitch class (0-11)
+    ///
+    /// # Returns
+    ///
+    /// Note name as string (C, C#, D, etc.)
     fn pitch_class_to_note_name(&self, pitch_class: u8) -> String {
         let note_names = [
             "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
@@ -219,12 +289,20 @@ impl ScaleAnalyzer {
         note_names[pitch_class as usize % 12].to_string()
     }
 
-    /// Set analysis threshold
+    /// Set analysis threshold for scale recognition
+    ///
+    /// # Arguments
+    ///
+    /// * `threshold` - Minimum confidence (0.0-1.0) required for scale recognition
     pub fn set_threshold(&mut self, threshold: f32) {
         self.threshold = threshold.clamp(0.0, 1.0);
     }
 
     /// Get available scale patterns
+    ///
+    /// # Returns
+    ///
+    /// Reference to the scale pattern database
     pub fn scale_patterns(&self) -> &HashMap<String, ScalePattern> {
         &self.scale_patterns
     }

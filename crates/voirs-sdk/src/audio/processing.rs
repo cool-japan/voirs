@@ -246,7 +246,7 @@ impl AudioBuffer {
 
     /// Apply pitch shifting using phase vocoder algorithm
     pub fn pitch_shift(&self, semitones: f32) -> Result<AudioBuffer> {
-        use rustfft::{num_complex::Complex, FftPlanner};
+        use scirs2_core::Complex;
         use std::f32::consts::PI;
 
         if semitones == 0.0 {
@@ -259,11 +259,6 @@ impl AudioBuffer {
         let frame_size = 1024; // FFT frame size
         let hop_size = frame_size / 4; // 75% overlap
         let _overlap_factor = frame_size / hop_size;
-
-        // Initialize FFT planner
-        let mut planner = FftPlanner::new();
-        let fft = planner.plan_fft_forward(frame_size);
-        let ifft = planner.plan_fft_inverse(frame_size);
 
         // Prepare input with zero padding
         let mut input_samples = self.samples.clone();
@@ -289,22 +284,30 @@ impl AudioBuffer {
 
         while input_pos + frame_size <= input_samples.len() {
             // Extract and window the input frame
-            let mut frame: Vec<Complex<f32>> = (0..frame_size)
-                .map(|i| {
-                    let windowed_sample = input_samples[input_pos + i] * window[i];
-                    Complex::new(windowed_sample, 0.0)
-                })
+            let frame_real: Vec<f32> = (0..frame_size)
+                .map(|i| input_samples[input_pos + i] * window[i])
                 .collect();
 
-            // Forward FFT
-            fft.process(&mut frame);
+            // Forward FFT (f32 -> f64 for scirs2_fft)
+            let frame_real_f64: Vec<f64> = frame_real.iter().map(|&x| x as f64).collect();
+            let frame_complex_f64 =
+                scirs2_fft::rfft(&frame_real_f64, None).map_err(|e| VoirsError::AudioError {
+                    message: format!("FFT failed: {}", e),
+                    buffer_info: None,
+                })?;
+
+            // Convert back to f32 Complex
+            let frame_complex: Vec<Complex<f32>> = frame_complex_f64
+                .iter()
+                .map(|c| Complex::new(c.re as f32, c.im as f32))
+                .collect();
 
             // Phase vocoder processing
-            let mut modified_frame = vec![Complex::new(0.0, 0.0); frame_size];
+            let mut modified_frame = vec![Complex::new(0.0f64, 0.0f64); frame_size / 2 + 1];
 
-            for k in 0..frame_size / 2 + 1 {
-                let magnitude = frame[k].norm();
-                let phase = frame[k].arg();
+            for k in 0..frame_complex.len() {
+                let magnitude = frame_complex[k].norm();
+                let phase = frame_complex[k].arg();
 
                 // Calculate phase difference
                 let phase_diff = phase - previous_phase[k];
@@ -331,25 +334,31 @@ impl AudioBuffer {
                         synthesis_phase[target_bin] += shifted_freq * hop_size as f32;
 
                         // Set the shifted frequency component
-                        let new_complex =
-                            Complex::from_polar(magnitude, synthesis_phase[target_bin]);
+                        let new_complex = Complex::new(
+                            (magnitude * synthesis_phase[target_bin].cos()) as f64,
+                            (magnitude * synthesis_phase[target_bin].sin()) as f64,
+                        );
                         modified_frame[target_bin] = new_complex;
-
-                        // Mirror for negative frequencies (since we're dealing with real signals)
-                        if target_bin > 0 && target_bin < frame_size / 2 {
-                            modified_frame[frame_size - target_bin] = new_complex.conj();
-                        }
                     }
                 }
             }
 
             // Inverse FFT
-            ifft.process(&mut modified_frame);
+            let frame_output_f64 =
+                scirs2_fft::irfft(&modified_frame, Some(frame_size)).map_err(|e| {
+                    VoirsError::AudioError {
+                        message: format!("IFFT failed: {}", e),
+                        buffer_info: None,
+                    }
+                })?;
+            let frame_output: Vec<f32> = frame_output_f64.iter().map(|&x| x as f32).collect();
 
             // Overlap-add synthesis with windowing
+            // For 75% overlap with Hanning window, normalization factor is 2/3
+            let norm_factor = 2.0 / 3.0;
             for i in 0..frame_size {
                 if output_pos + i < output_samples.len() {
-                    let windowed_sample = modified_frame[i].re * window[i] / frame_size as f32;
+                    let windowed_sample = frame_output[i] * window[i] * norm_factor;
                     output_samples[output_pos + i] += windowed_sample;
                 }
             }
@@ -363,7 +372,10 @@ impl AudioBuffer {
         output_samples.truncate(output_length);
 
         // Normalize the output to prevent clipping
-        let max_amplitude = output_samples.iter().map(|&s| s.abs()).fold(0.0, f32::max);
+        let max_amplitude = output_samples
+            .iter()
+            .map(|&s: &f32| s.abs())
+            .fold(0.0f32, f32::max);
         if max_amplitude > 1.0 {
             let normalization_factor = 0.95 / max_amplitude;
             for sample in &mut output_samples {

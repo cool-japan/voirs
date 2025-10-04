@@ -80,11 +80,17 @@ pub struct UiChange {
 /// Types of UI changes
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum UiChangeType {
+    /// Description
     Color,
+    /// Description
     Text,
+    /// Description
     Layout,
+    /// Description
     Animation,
+    /// Description
     Interaction,
+    /// Description
     Navigation,
 }
 
@@ -104,28 +110,47 @@ pub struct FeedbackChange {
 /// Feedback delivery timing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FeedbackTiming {
+    /// Immediate feedback delivery
     Immediate,
-    Delayed { delay_ms: u64 },
+    /// Delayed feedback delivery
+    Delayed {
+        /// Delay in milliseconds
+        delay_ms: u64
+    },
+    /// Feedback at end of session
     EndOfSession,
-    Custom { trigger: String },
+    /// Custom trigger-based feedback
+    Custom {
+        /// Trigger condition
+        trigger: String
+    },
 }
 
 /// Feedback presentation style
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FeedbackPresentation {
+    /// Visual feedback
     Visual,
+    /// Audio feedback
     Audio,
+    /// Haptic feedback
     Haptic,
+    /// Combined multimodal feedback
     Combined,
 }
 
 /// Experiment status
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ExperimentStatus {
+    /// Experiment in draft state
     Draft,
+    /// Experiment actively running
     Active,
+    /// Experiment temporarily paused
     Paused,
+    /// Experiment completed
     Completed,
+    /// Experiment cancelled
     Cancelled,
 }
 
@@ -162,10 +187,17 @@ pub struct UserAssignment {
 /// Assignment method
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AssignmentMethod {
+    /// Random assignment
     Random,
+    /// Deterministic assignment
     Deterministic,
+    /// Manual assignment
     Manual,
-    Cohort { cohort_id: String },
+    /// Cohort-based assignment
+    Cohort {
+        /// Cohort identifier
+        cohort_id: String
+    },
 }
 
 /// Experiment metrics and results
@@ -584,26 +616,49 @@ pub struct StatisticalResult {
 /// A/B testing errors
 #[derive(Debug, thiserror::Error)]
 pub enum ABTestError {
+    /// Experiment not found error
     #[error("Experiment not found: {experiment_id}")]
-    ExperimentNotFound { experiment_id: String },
+    ExperimentNotFound {
+        /// Experiment identifier
+        experiment_id: String
+    },
 
+    /// Experiment not active error
     #[error("Experiment not active: {experiment_id}")]
-    ExperimentNotActive { experiment_id: String },
+    ExperimentNotActive {
+        /// Experiment identifier
+        experiment_id: String
+    },
 
+    /// User not assigned error
     #[error("User {user_id} not assigned to experiment {experiment_id}")]
     UserNotAssigned {
+        /// User identifier
         user_id: String,
+        /// Experiment identifier
         experiment_id: String,
     },
 
+    /// Invalid configuration error
     #[error("Invalid configuration: {message}")]
-    InvalidConfiguration { message: String },
+    InvalidConfiguration {
+        /// Error message
+        message: String
+    },
 
+    /// Insufficient data error
     #[error("Insufficient data: {message}")]
-    InsufficientData { message: String },
+    InsufficientData {
+        /// Error message
+        message: String
+    },
 
+    /// Statistical analysis error
     #[error("Statistical analysis error: {message}")]
-    StatisticalError { message: String },
+    StatisticalError {
+        /// Error message
+        message: String
+    },
 }
 
 #[cfg(test)]

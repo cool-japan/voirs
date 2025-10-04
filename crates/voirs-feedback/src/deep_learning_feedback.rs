@@ -32,19 +32,47 @@ pub type DeepLearningResult<T> = Result<T, DeepLearningError>;
 #[derive(Debug, thiserror::Error)]
 pub enum DeepLearningError {
     #[error("Model not found: {model_name}")]
-    ModelNotFound { model_name: String },
+    /// Raised when a requested deep learning model cannot be located.
+    ModelNotFound {
+        /// Identifier of the model that was requested.
+        model_name: String,
+    },
     #[error("Model loading failed: {reason}")]
-    ModelLoadingFailed { reason: String },
+    /// Raised when a model file is found but cannot be loaded into memory.
+    ModelLoadingFailed {
+        /// Explanation of why loading the model failed.
+        reason: String,
+    },
     #[error("Inference failed: {details}")]
-    InferenceFailed { details: String },
+    /// Raised when inference cannot be completed successfully.
+    InferenceFailed {
+        /// Additional context about the inference failure.
+        details: String,
+    },
     #[error("Feature extraction failed: {reason}")]
-    FeatureExtractionFailed { reason: String },
+    /// Raised when preprocessing fails to extract the required features.
+    FeatureExtractionFailed {
+        /// Explanation of the feature extraction issue.
+        reason: String,
+    },
     #[error("Model configuration error: {config_error}")]
-    ConfigurationError { config_error: String },
+    /// Indicates that a model configuration is invalid or inconsistent.
+    ConfigurationError {
+        /// Human-readable description of the configuration problem.
+        config_error: String,
+    },
     #[error("Unsupported audio format: {format}")]
-    UnsupportedFormat { format: String },
+    /// Raised when input audio is provided in an unsupported format.
+    UnsupportedFormat {
+        /// Name or identifier of the unsupported audio format.
+        format: String,
+    },
     #[error("GPU memory insufficient for model: {required_mb} MB required")]
-    InsufficientGpuMemory { required_mb: usize },
+    /// Indicates that the current GPU does not have enough memory for inference.
+    InsufficientGpuMemory {
+        /// Amount of GPU memory that would be required to proceed.
+        required_mb: usize,
+    },
 }
 
 /// Deep learning feedback generation system
@@ -157,7 +185,10 @@ pub enum ModelType {
     /// Variational autoencoder
     VAE,
     /// Custom model architecture
-    Custom { architecture: String },
+    Custom {
+        /// Name or description of the custom architecture.
+        architecture: String,
+    },
 }
 
 /// Tokenizer configuration
@@ -679,6 +710,7 @@ pub struct TransformerFeedbackModel {
 
 #[cfg(feature = "adaptive")]
 #[derive(Debug)]
+/// Description
 pub struct TransformerModelState {
     /// Model weights
     weights: HashMap<String, Tensor>,
@@ -690,6 +722,7 @@ pub struct TransformerModelState {
 
 #[cfg(feature = "adaptive")]
 #[derive(Debug, Clone)]
+/// Description
 pub struct TransformerConfig {
     /// Vocabulary size
     pub vocab_size: usize,
@@ -1281,6 +1314,7 @@ pub struct MockFeedbackModel {
 }
 
 impl MockFeedbackModel {
+    /// Description
     pub fn new(config: ModelConfig) -> Self {
         let info = ModelInfo {
             name: "MockFeedback".to_string(),
@@ -1355,6 +1389,7 @@ pub struct MockFeatureExtractor {
 }
 
 impl MockFeatureExtractor {
+    /// Description
     pub fn new() -> Self {
         Self {
             supported_features: vec![
@@ -1380,25 +1415,33 @@ impl FeatureExtractor for MockFeatureExtractor {
 
         let mfcc = Some(
             (0..frame_count)
-                .map(|_| (0..13).map(|_| rand::random::<f32>()).collect())
+                .map(|_| {
+                    (0..13)
+                        .map(|_| scirs2_core::random::random::<f32>())
+                        .collect()
+                })
                 .collect(),
         );
 
         let mel_spectrogram = Some(
             (0..frame_count)
-                .map(|_| (0..80).map(|_| rand::random::<f32>()).collect())
+                .map(|_| {
+                    (0..80)
+                        .map(|_| scirs2_core::random::random::<f32>())
+                        .collect()
+                })
                 .collect(),
         );
 
         let f0 = Some(
             (0..frame_count)
-                .map(|_| 100.0 + rand::random::<f32>() * 300.0)
+                .map(|_| 100.0 + scirs2_core::random::random::<f32>() * 300.0)
                 .collect(),
         );
 
         let centroid = Some(
             (0..frame_count)
-                .map(|_| 1000.0 + rand::random::<f32>() * 3000.0)
+                .map(|_| 1000.0 + scirs2_core::random::random::<f32>() * 3000.0)
                 .collect(),
         );
 
@@ -1434,11 +1477,19 @@ impl FeatureExtractor for MockFeatureExtractor {
         // Generate mock embeddings
         let token_embeddings = Some(
             (0..word_count)
-                .map(|_| (0..768).map(|_| rand::random::<f32>()).collect())
+                .map(|_| {
+                    (0..768)
+                        .map(|_| scirs2_core::random::random::<f32>())
+                        .collect()
+                })
                 .collect(),
         );
 
-        let sentence_embeddings = Some((0..768).map(|_| rand::random::<f32>()).collect());
+        let sentence_embeddings = Some(
+            (0..768)
+                .map(|_| scirs2_core::random::random::<f32>())
+                .collect(),
+        );
 
         Ok(TextFeatures {
             token_embeddings,
@@ -1471,6 +1522,7 @@ impl FeatureExtractor for MockFeatureExtractor {
 }
 
 impl ModelCache {
+    /// Description
     pub fn new(max_size_mb: usize) -> Self {
         Self {
             cached_models: HashMap::new(),
@@ -1482,6 +1534,7 @@ impl ModelCache {
 }
 
 impl InferenceStatistics {
+    /// Description
     pub fn new() -> Self {
         Self {
             total_inferences: 0,

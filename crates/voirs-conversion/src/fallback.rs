@@ -146,27 +146,39 @@ pub struct FallbackContext {
 /// Previous fallback attempt
 #[derive(Debug, Clone)]
 pub struct FallbackAttempt {
+    /// Name of the fallback strategy that was attempted
     pub strategy_name: String,
+    /// Whether the fallback attempt was successful
     pub success: bool,
+    /// Quality score achieved by this fallback attempt if successful
     pub quality_achieved: Option<f32>,
+    /// Time taken to execute this fallback attempt
     pub processing_time: Duration,
+    /// Error message if the fallback attempt failed
     pub error: Option<String>,
 }
 
 /// Available processing resources
 #[derive(Debug, Clone)]
 pub struct ResourceContext {
+    /// Current CPU utilization as a percentage (0.0 to 100.0)
     pub cpu_usage_percent: f32,
+    /// Available system memory in megabytes
     pub memory_available_mb: f64,
+    /// Whether GPU acceleration is available for processing
     pub gpu_available: bool,
+    /// Overall processing capacity normalized to 0.0 to 1.0 scale
     pub processing_capacity: f32, // 0.0 to 1.0
 }
 
 /// Time constraints for fallback processing
 #[derive(Debug, Clone)]
 pub struct TimeConstraints {
+    /// Maximum allowed time for fallback processing to complete
     pub max_processing_time: Duration,
+    /// Optional absolute deadline for fallback completion
     pub deadline: Option<Instant>,
+    /// Whether real-time processing constraints must be met
     pub real_time_requirement: bool,
 }
 
@@ -194,31 +206,47 @@ pub enum FailureType {
 /// Strategy performance tracking
 #[derive(Debug, Clone, Default)]
 pub struct StrategyPerformance {
+    /// Total number of times this strategy was attempted
     pub total_attempts: u32,
+    /// Number of successful fallback attempts using this strategy
     pub successful_attempts: u32,
+    /// Average quality score achieved by this strategy
     pub average_quality: f32,
+    /// Average time taken by this strategy to execute
     pub average_processing_time: Duration,
+    /// Recent success rate calculated from latest attempts
     pub recent_success_rate: f32,
+    /// Overall effectiveness score combining success rate and quality
     pub effectiveness_score: f32,
 }
 
 /// Performance tracking for the degradation controller
 #[derive(Debug, Default, Clone)]
 pub struct PerformanceTracker {
+    /// Total number of degradation attempts across all strategies
     pub total_degradations: u64,
+    /// Number of degradation attempts that successfully recovered
     pub successful_degradations: u64,
+    /// Average time spent executing fallback strategies
     pub average_fallback_time: Duration,
+    /// Count of how many times each strategy has been used
     pub strategy_usage: HashMap<String, u64>,
+    /// History of quality improvements achieved through fallbacks
     pub quality_improvements: Vec<QualityImprovement>,
 }
 
 /// Quality improvement tracking
 #[derive(Debug, Clone)]
 pub struct QualityImprovement {
+    /// Quality score before applying the fallback strategy
     pub original_quality: f32,
+    /// Quality score after applying the fallback strategy
     pub final_quality: f32,
+    /// Name of the strategy that achieved the improvement
     pub strategy_used: String,
+    /// Time taken to achieve the quality improvement
     pub processing_time: Duration,
+    /// When this quality improvement was recorded
     pub timestamp: Instant,
 }
 
@@ -236,21 +264,32 @@ pub struct FailureHistory {
 /// Individual failure record
 #[derive(Debug, Clone)]
 pub struct FailureRecord {
+    /// When this failure occurred
     pub timestamp: Instant,
+    /// Type of failure that was encountered
     pub failure_type: FailureType,
+    /// Type of conversion that was being attempted
     pub conversion_type: ConversionType,
+    /// Additional context about the failure conditions
     pub context: String,
+    /// Description of the resolution strategy if attempted
     pub resolution: Option<String>,
+    /// Whether the resolution attempt was successful
     pub resolution_success: bool,
 }
 
 /// Pattern of successful fallback resolution
 #[derive(Debug, Clone)]
 pub struct SuccessPattern {
+    /// Type of failure this pattern successfully handles
     pub failure_type: FailureType,
+    /// Type of conversion this pattern applies to
     pub conversion_type: ConversionType,
+    /// Name of the strategy that successfully resolved this pattern
     pub successful_strategy: String,
+    /// Confidence score in this pattern's reliability (0.0 to 1.0)
     pub confidence: f32,
+    /// Number of times this pattern has been successfully applied
     pub usage_count: u32,
 }
 

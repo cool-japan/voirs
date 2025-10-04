@@ -327,13 +327,17 @@ pub struct EmotionParameters {
     pub duration_ms: Option<u64>,
     /// Transition parameters
     pub fade_in_ms: Option<u64>,
+    /// Fade-out duration in milliseconds for emotion transition
     pub fade_out_ms: Option<u64>,
     /// Prosody adjustments
     pub pitch_shift: f32,
+    /// Tempo scaling factor (1.0 = normal, <1.0 = slower, >1.0 = faster)
     pub tempo_scale: f32,
+    /// Energy level scaling factor (1.0 = normal, <1.0 = quieter, >1.0 = louder)
     pub energy_scale: f32,
     /// Voice quality adjustments
     pub breathiness: f32,
+    /// Voice roughness level (0.0 = smooth, 1.0 = very rough)
     pub roughness: f32,
     /// Custom parameters
     pub custom_params: HashMap<String, f32>,

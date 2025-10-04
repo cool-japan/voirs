@@ -7,28 +7,28 @@ license = { workspace = true }
 repository = { workspace = true }
 homepage = { workspace = true }
 documentation = "https://docs.rs/voirs-conversion"
-keywords = { workspace = true }
+keywords = ["voirs", "conversion", "voice-conversion", "real-time", "audio"]
 categories = ["multimedia::audio", "science", "asynchronous"]
 rust-version = { workspace = true }
 description = "Real-time voice conversion system for VoiRS"
 
 [dependencies]
+# SciRS2 - Scientific computing abstractions
+scirs2-core = { workspace = true }
+scirs2-fft = { workspace = true }
+
 # Core ML and tensor operations
-ndarray = { workspace = true }
 candle-core = { workspace = true }
 candle-nn = { workspace = true }
 
 # Real-time audio processing
 cpal = { workspace = true }
 dasp = { workspace = true }
-realfft = { workspace = true }
-rustfft = { workspace = true }
 
 # Async and concurrency
 tokio = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
-rayon = { workspace = true }
 async-stream = { workspace = true }
 tokio-stream = { workspace = true }
 
@@ -42,9 +42,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 # Math and random
-rand = { workspace = true }
 fastrand = { workspace = true }
-num-complex = { workspace = true }
 num_cpus = { workspace = true }
 
 # Time and synchronization
@@ -56,19 +54,19 @@ chrono = { workspace = true }
 flate2 = { workspace = true }
 
 # HTTP client for IoT cloud connectivity
-reqwest = { version = "0.11.22", default-features = false, features = ["json", "rustls-tls"], optional = true }
+reqwest = { version = "0.12.23", default-features = false, features = ["json", "rustls-tls"], optional = true }
 
 # VoiRS dependencies
-voirs-acoustic = { version = "0.1.0-alpha.1", path = "../voirs-acoustic", optional = true }
-voirs-cloning = { version = "0.1.0-alpha.1", path = "../voirs-cloning", optional = true }
-voirs-emotion = { version = "0.1.0-alpha.1", path = "../voirs-emotion", optional = true }
-voirs-spatial = { version = "0.1.0-alpha.1", path = "../voirs-spatial", optional = true }
+voirs-acoustic = { workspace = true, optional = true }
+voirs-cloning = { workspace = true, optional = true }
+voirs-emotion = { workspace = true, optional = true }
+voirs-spatial = { workspace = true, optional = true }
 
 # WebAssembly dependencies
-wasm-bindgen = { version = "0.2.92", optional = true }
-wasm-bindgen-futures = { version = "0.4.42", optional = true }
-js-sys = { version = "0.3.69", optional = true }
-web-sys = { version = "0.3.69", optional = true, features = [
+wasm-bindgen = { version = "0.2.104", optional = true }
+wasm-bindgen-futures = { version = "0.4.54", optional = true }
+js-sys = { version = "0.3.81", optional = true }
+web-sys = { version = "0.3.81", optional = true, features = [
     "console",
     "AudioContext",
     "AudioContextState",
@@ -83,12 +81,17 @@ web-sys = { version = "0.3.69", optional = true, features = [
     "Document",
     "Navigator",
 ] }
-getrandom = { version = "0.2", features = ["js"], optional = true }
+# getrandom 0.3 renamed the former `js` feature to `wasm_js`.
+# The old `js` feature caused a resolver error after cargo upgrade.
+# If targeting wasm32-unknown-unknown, remember to also set:
+#   RUSTFLAGS='--cfg getrandom_backend="wasm_js"'
+# (The feature alone only makes the backend available.)
+getrandom = { version = "0.3", features = ["wasm_js"], optional = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }
 criterion = { workspace = true }
-tempfile = "3.8"
+tempfile = "3.23"
 
 [features]
 default = ["real-time"]

@@ -124,7 +124,7 @@ impl QualityAssessor {
 
     /// Calculate spectral quality using FFT-based analysis
     fn calculate_spectral_quality(&self, samples: &[f32], sample_rate: u32) -> f32 {
-        use rustfft::{num_complex::Complex, FftPlanner};
+        use scirs2_core::Complex;
 
         if samples.is_empty() || samples.len() < 512 {
             return 0.0;
@@ -132,24 +132,26 @@ impl QualityAssessor {
 
         // Use a window size that's a power of 2
         let window_size = 1024.min(samples.len());
-        let mut planner = FftPlanner::new();
-        let fft = planner.plan_fft_forward(window_size);
 
-        // Take the first window_size samples for analysis
-        let mut buffer: Vec<Complex<f32>> = samples[..window_size]
+        // Take the first window_size samples, apply Hanning window, and convert to f64
+        let input_f64: Vec<scirs2_core::Complex<f64>> = samples[..window_size]
             .iter()
-            .map(|&x| Complex::new(x, 0.0))
+            .enumerate()
+            .map(|(i, &x)| {
+                let window_val = 0.5
+                    * (1.0
+                        - (2.0 * std::f32::consts::PI * i as f32 / (window_size - 1) as f32).cos());
+                scirs2_core::Complex::new((x * window_val) as f64, 0.0)
+            })
             .collect();
 
-        // Apply Hanning window to reduce spectral leakage
-        for (i, sample) in buffer.iter_mut().enumerate() {
-            let window_val = 0.5
-                * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (window_size - 1) as f32).cos());
-            *sample *= window_val;
-        }
-
         // Perform FFT
-        fft.process(&mut buffer);
+        let fft_result = scirs2_fft::fft(&input_f64, None)
+            .unwrap_or_else(|_| vec![scirs2_core::Complex::new(0.0, 0.0); window_size]);
+        let buffer: Vec<Complex<f32>> = fft_result
+            .iter()
+            .map(|c| Complex::new(c.re as f32, c.im as f32))
+            .collect();
 
         // Calculate magnitude spectrum (only use positive frequencies)
         let nyquist = window_size / 2;

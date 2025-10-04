@@ -4,7 +4,7 @@ use super::files::BatchInput;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use voirs::Result;
+use voirs_sdk::Result;
 
 /// State file for tracking batch processing progress
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,7 +96,7 @@ impl BatchState {
 
         let content = std::fs::read_to_string(path)?;
         let state: BatchState = serde_json::from_str(&content)
-            .map_err(|e| voirs::VoirsError::config_error(&e.to_string()))?;
+            .map_err(|e| voirs_sdk::VoirsError::config_error(&e.to_string()))?;
 
         Ok(Some(state))
     }
@@ -104,7 +104,7 @@ impl BatchState {
     /// Save state to file
     pub fn save_to_file(&self, path: &PathBuf) -> Result<()> {
         let content = serde_json::to_string_pretty(self)
-            .map_err(|e| voirs::VoirsError::config_error(&e.to_string()))?;
+            .map_err(|e| voirs_sdk::VoirsError::config_error(&e.to_string()))?;
 
         // Create parent directory if it doesn't exist
         if let Some(parent) = path.parent() {
@@ -361,13 +361,13 @@ mod tests {
 
     #[test]
     fn test_calculate_config_hash() {
-        let hash1 = calculate_config_hash(&voirs::QualityLevel::High, 1.0, 0.0, 0.0);
+        let hash1 = calculate_config_hash(&voirs_sdk::QualityLevel::High, 1.0, 0.0, 0.0);
 
-        let hash2 = calculate_config_hash(&voirs::QualityLevel::Medium, 1.0, 0.0, 0.0);
+        let hash2 = calculate_config_hash(&voirs_sdk::QualityLevel::Medium, 1.0, 0.0, 0.0);
 
         assert_ne!(hash1, hash2);
 
-        let hash3 = calculate_config_hash(&voirs::QualityLevel::High, 1.0, 0.0, 0.0);
+        let hash3 = calculate_config_hash(&voirs_sdk::QualityLevel::High, 1.0, 0.0, 0.0);
 
         assert_eq!(hash1, hash3);
     }

@@ -518,6 +518,10 @@ pub struct AdaptationMetrics {
 }
 
 impl AdaptationMetrics {
+    /// Create a new `AdaptationMetrics` instance with default values
+    ///
+    /// # Returns
+    /// A new metrics instance with all counters set to zero
     pub fn new() -> Self {
         Self {
             update_count: 0,
@@ -528,6 +532,10 @@ impl AdaptationMetrics {
         }
     }
 
+    /// Update metrics with a new timestamp
+    ///
+    /// # Arguments
+    /// * `now` - Current timestamp for computing update frequency
     pub fn update(&mut self, now: Instant) {
         self.update_count += 1;
 
@@ -712,6 +720,10 @@ pub struct StreamingMetrics {
 }
 
 impl StreamingMetrics {
+    /// Create a new `StreamingMetrics` instance with default values
+    ///
+    /// # Returns
+    /// A new metrics instance with all counters set to zero and current timestamp
     pub fn new() -> Self {
         Self {
             chunks_processed: 0,
@@ -958,7 +970,7 @@ impl StreamingEmotionController {
         let noise_level = breathiness * 0.05; // Reduced for streaming quality
 
         for sample in audio.iter_mut() {
-            let noise = (rand::random::<f32>() - 0.5) * noise_level;
+            let noise = (scirs2_core::random::random::<f32>() - 0.5) * noise_level;
             *sample = *sample * (1.0 - breathiness * 0.2) + noise;
         }
 

@@ -3,8 +3,8 @@
 //! This module provides voice activity detection capabilities for identifying
 //! speech segments in audio streams.
 
-use crate::RecognitionResult;
-use realfft::RealFftPlanner;
+use crate::{RecognitionError, RecognitionResult};
+use scirs2_fft::RealFftPlanner;
 use voirs_sdk::AudioBuffer;
 
 /// Voice Activity Detection configuration
@@ -338,20 +338,21 @@ impl VoiceActivityDetector {
             *sample *= window_val;
         }
 
-        // Perform FFT
-        let fft = self.fft_planner.plan_fft_forward(fft_size);
-        let mut spectrum = fft.make_output_vec();
-        fft.process(&mut input, &mut spectrum).map_err(|e| {
-            crate::RecognitionError::AudioProcessingError {
-                message: format!("FFT processing failed: {:?}", e),
+        // Convert input to f64 for FFT computation
+        let input_f64: Vec<f64> = input.iter().map(|&x| x as f64).collect();
+
+        // Perform FFT using functional API
+        let spectrum = scirs2_fft::rfft(&input_f64, None).map_err(|e| {
+            RecognitionError::AudioProcessingError {
+                message: format!("FFT computation failed: {e}"),
                 source: None,
             }
         })?;
 
-        // Calculate magnitude spectrum
+        // Calculate magnitude spectrum and convert to f32
         let mut magnitudes: Vec<f32> = spectrum
             .iter()
-            .map(|c| (c.re * c.re + c.im * c.im).sqrt())
+            .map(|c| (c.re * c.re + c.im * c.im).sqrt() as f32)
             .collect();
 
         // Calculate spectral centroid

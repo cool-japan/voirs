@@ -119,9 +119,13 @@ pub struct PerformanceTrends {
 /// Trend direction enumeration
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TrendDirection {
+    /// Metric is improving over time
     Improving,
+    /// Metric is stable with no significant changes
     Stable,
+    /// Metric is degrading over time
     Degrading,
+    /// Trend cannot be determined
     Unknown,
 }
 
@@ -164,21 +168,32 @@ pub struct PerformanceAlert {
 /// Alert type enumeration
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AlertType {
+    /// Latency exceeded threshold
     LatencyThresholdExceeded,
+    /// Uptime fell below threshold
     UptimeThresholdViolated,
+    /// Error rate exceeded threshold
     ErrorRateThresholdExceeded,
+    /// Compatibility score decreased
     CompatibilityScoreDecreased,
+    /// General performance degradation detected
     PerformanceDegradation,
+    /// System is overloaded
     SystemOverload,
+    /// Predictive alert based on trends
     PredictiveAlert,
 }
 
 /// Alert severity levels
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AlertSeverity {
+    /// Informational alert
     Info,
+    /// Warning level alert
     Warning,
+    /// Critical alert requiring attention
     Critical,
+    /// Emergency alert requiring immediate action
     Emergency,
 }
 
@@ -198,11 +213,17 @@ pub struct LatencyTracker {
 /// Individual latency measurement
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LatencyMeasurement {
+    /// Description
     pub timestamp: DateTime<Utc>,
+    /// Description
     pub operation: String,
+    /// Description
     pub latency_ms: u32,
+    /// Description
     pub platform: String,
+    /// Description
     pub user_id: String,
+    /// Description
     pub context: LatencyContext,
 }
 
@@ -241,11 +262,17 @@ pub struct LatencyStatistics {
 /// Latency percentile analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LatencyPercentiles {
+    /// Description
     pub p50: u32, // Median
+    /// Description
     pub p75: u32,
+    /// Description
     pub p90: u32,
+    /// Description
     pub p95: u32,
+    /// Description
     pub p99: u32,
+    /// Description
     pub p99_9: u32,
 }
 
@@ -282,10 +309,15 @@ pub struct ServiceUptimeRecord {
 /// Status change event
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusChange {
+    /// Description
     pub timestamp: DateTime<Utc>,
+    /// Description
     pub from_status: ServiceStatus,
+    /// Description
     pub to_status: ServiceStatus,
+    /// Description
     pub reason: String,
+    /// Description
     pub impact_severity: AlertSeverity,
 }
 
@@ -328,10 +360,15 @@ pub struct UserImpact {
 /// Service degradation levels
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DegradationLevel {
+    /// No degradation
     None,
+    /// Minor degradation
     Minor,
+    /// Moderate degradation
     Moderate,
+    /// Severe degradation
     Severe,
+    /// Complete service failure
     Complete,
 }
 
@@ -497,10 +534,15 @@ pub struct CompatibilityIssue {
 /// Fix status enumeration
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum FixStatus {
+    /// Issue is open
     Open,
+    /// Fix is in progress
     InProgress,
+    /// Issue has been fixed
     Fixed,
+    /// Issue will not be fixed
     WontFix,
+    /// Duplicate issue
     Duplicate,
 }
 
@@ -584,21 +626,32 @@ pub struct OptimizationStrategy {
 /// Performance aspect enumeration
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PerformanceAspect {
+    /// Latency performance
     Latency,
+    /// Throughput performance
     Throughput,
+    /// Memory usage optimization
     MemoryUsage,
+    /// CPU usage optimization
     CpuUsage,
+    /// Error rate reduction
     ErrorRate,
+    /// Cross-platform compatibility
     Compatibility,
+    /// Overall system performance
     Overall,
 }
 
 /// Optimization complexity levels
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum OptimizationComplexity {
+    /// Low complexity optimization
     Low,
+    /// Medium complexity optimization
     Medium,
+    /// High complexity optimization
     High,
+    /// Critical complexity optimization
     Critical,
 }
 
@@ -622,10 +675,15 @@ pub struct AppliedOptimization {
 /// Optimization status
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum OptimizationStatus {
+    /// Optimization has been applied
     Applied,
+    /// Optimization is being monitored
     Monitoring,
+    /// Optimization is effective
     Effective,
+    /// Optimization is ineffective
     Ineffective,
+    /// Optimization was rolled back
     RolledBack,
 }
 
@@ -984,19 +1042,28 @@ fn percentile(sorted_values: &[u32], percentile: f32) -> u32 {
 /// Latency analysis report
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LatencyAnalysisReport {
+    /// Description
     pub overall_stats: LatencyStatistics,
+    /// Description
     pub percentiles: LatencyPercentiles,
+    /// Description
     pub operation_breakdown: HashMap<String, LatencyStatistics>,
+    /// Description
     pub recent_measurements: Vec<LatencyMeasurement>,
+    /// Description
     pub threshold_compliance: ThresholdCompliance,
 }
 
 /// Threshold compliance analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThresholdCompliance {
+    /// Description
     pub target_threshold_ms: u32,
+    /// Description
     pub compliance_rate: f32,
+    /// Description
     pub violation_count: u32,
+    /// Description
     pub total_measurements: u32,
 }
 

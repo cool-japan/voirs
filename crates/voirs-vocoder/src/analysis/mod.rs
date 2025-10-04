@@ -7,9 +7,9 @@
 //! - Feature extraction for machine learning
 
 use crate::{AudioBuffer, Result, VocoderError};
-use ndarray::{Array1, Array2, s};
-use realfft::RealFftPlanner;
-use rustfft::num_complex::Complex;
+use scirs2_core::ndarray::{Array1, Array2, s};
+use scirs2_fft::{FftPlanner, RealFftPlanner};
+use scirs2_core::Complex;
 use std::f32::consts::PI;
 
 pub mod spectrum;
@@ -113,7 +113,7 @@ impl AdvancedAudioAnalyzer {
         Self {
             config,
             sample_rate,
-            fft_planner: RealFftPlanner::new(),
+            fft_planner: RealFftPlanner::<f32>::new(),
         }
     }
     
@@ -216,9 +216,7 @@ impl AdvancedAudioAnalyzer {
         
         // Compute FFT
         let mut spectrum = vec![Complex::new(0.0, 0.0); self.config.fft_size / 2 + 1];
-        self.fft.process(&mut padded, &mut spectrum).map_err(|e| {
-            VocoderError::ProcessingError(format!("FFT processing failed: {:?}", e))
-        })?;
+        self.fft.process(&mut padded, &mut spectrum);
         
         // Convert to magnitude spectrum
         let magnitude_spectrum: Vec<f32> = spectrum.iter()

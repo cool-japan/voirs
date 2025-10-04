@@ -402,11 +402,17 @@ pub struct Achievement {
 /// Achievement categories
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AchievementCategory {
+    /// Description
     Progress,
+    /// Description
     Skill,
+    /// Description
     Consistency,
+    /// Description
     Social,
+    /// Description
     Performance,
+    /// Description
     Special,
 }
 
@@ -434,7 +440,9 @@ pub enum UnlockCondition {
     PronunciationAccuracy { threshold: f32, sessions: u32 },
     /// Complete speed challenge
     SpeedChallenge {
+        /// Description
         max_duration_seconds: u32,
+        /// Description
         count: u32,
     },
     /// Complete collaborative challenges
@@ -580,10 +588,15 @@ pub struct Badge {
 /// Badge rarity levels
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum BadgeRarity {
+    /// Description
     Common,
+    /// Description
     Uncommon,
+    /// Description
     Rare,
+    /// Description
     Epic,
+    /// Description
     Legendary,
 }
 

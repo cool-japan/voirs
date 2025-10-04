@@ -7,7 +7,7 @@
 //! - Temporal statistics
 
 use crate::{Result, VocoderError};
-use ndarray::{Array1, Array2, s};
+use scirs2_core::ndarray::{Array1, Array2, s};
 use std::collections::HashMap;
 
 /// Comprehensive statistical analysis result
@@ -829,10 +829,10 @@ impl StatisticalAnalyzer {
     
     /// Compute spectral entropy
     fn compute_spectral_entropy(&self, samples: &Array1<f32>) -> Result<f32> {
-        use realfft::RealFftPlanner;
+        use scirs2_fft::{FftPlanner, RealFftPlanner};
         
         let fft_size = samples.len().min(1024);
-        let mut planner = RealFftPlanner::new();
+        let mut planner = RealFftPlanner::<f32>::new();
         let mut fft = planner.plan_fft_forward(fft_size);
         
         let mut input = vec![0.0; fft_size];
@@ -1306,7 +1306,7 @@ impl StatisticalAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::Array1;
+    use scirs2_core::ndarray::Array1;
     
     #[test]
     fn test_statistical_analyzer_creation() {

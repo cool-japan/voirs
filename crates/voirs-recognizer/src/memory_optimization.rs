@@ -26,6 +26,7 @@ pub struct MemoryPool<T> {
 
 /// Memory pool statistics
 #[derive(Debug, Default, Clone)]
+/// Memory Pool Stats
 pub struct MemoryPoolStats {
     /// Total allocations requested
     pub total_allocations: usize,
@@ -63,6 +64,7 @@ pub struct MemoryPressureMonitor {
 
 /// Memory pressure levels
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
+/// Memory Pressure Level
 pub enum MemoryPressureLevel {
     /// Normal memory usage
     Normal,
@@ -76,6 +78,7 @@ pub enum MemoryPressureLevel {
 
 /// Memory thresholds configuration
 #[derive(Debug, Clone)]
+/// Memory Thresholds
 pub struct MemoryThresholds {
     /// Moderate pressure threshold (percentage of total memory)
     pub moderate_percent: f32,
@@ -89,6 +92,7 @@ pub struct MemoryThresholds {
 
 /// Current memory usage information
 #[derive(Debug, Clone)]
+/// Memory Usage
 pub struct MemoryUsage {
     /// Total system memory in bytes
     pub total_memory_bytes: u64,
@@ -128,6 +132,7 @@ pub struct AudioChunkIterator<'a> {
 
 /// Memory-efficient circular buffer for streaming audio
 #[derive(Debug)]
+/// Circular Audio Buffer
 pub struct CircularAudioBuffer {
     /// Internal buffer
     buffer: Vec<f32>,
@@ -143,6 +148,7 @@ pub struct CircularAudioBuffer {
 
 /// Zero-copy audio slice wrapper
 #[derive(Debug)]
+/// Audio Slice
 pub struct AudioSlice<'a> {
     /// Audio data reference
     data: &'a [f32],
@@ -723,10 +729,15 @@ impl MemoryOptimizer {
 
 /// Combined memory statistics
 #[derive(Debug, Clone)]
+/// Memory Stats
 pub struct MemoryStats {
+    /// audio pool stats
     pub audio_pool_stats: MemoryPoolStats,
+    /// feature pool stats
     pub feature_pool_stats: MemoryPoolStats,
+    /// current usage
     pub current_usage: MemoryUsage,
+    /// pressure level
     pub pressure_level: MemoryPressureLevel,
 }
 

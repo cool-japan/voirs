@@ -15,6 +15,7 @@ use tower_http::{
 use super::handlers;
 use crate::integration::UnifiedVoirsPipeline;
 
+/// Shared Pipeline
 pub type SharedPipeline = Arc<RwLock<UnifiedVoirsPipeline>>;
 
 /// REST API server for speech recognition

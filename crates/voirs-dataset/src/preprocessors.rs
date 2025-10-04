@@ -485,7 +485,7 @@ impl DatasetPreprocessor {
     /// Preprocess multiple samples
     pub fn preprocess_samples(&self, items: &mut Vec<DatasetSample>) -> Result<Vec<DatasetSample>> {
         if self.config.parallel {
-            use rayon::prelude::*;
+            use scirs2_core::parallel_ops::*;
 
             let results: Result<Vec<_>> = items
                 .par_iter_mut()

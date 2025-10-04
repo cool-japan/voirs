@@ -3,6 +3,7 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
+/// Description
 pub struct GestureRecognizer {
     gesture_templates: HashMap<GestureType, GestureTemplate>,
 }
@@ -18,17 +19,26 @@ struct HandShape {
     palm_orientation: f32,
 }
 
+/// Description
 pub struct GestureData {
+    /// Description
     pub gesture_type: GestureType,
+    /// Description
     pub confidence: f32,
+    /// Description
     pub duration: Duration,
+    /// Description
     pub trajectory: Vec<Point2D>,
+    /// Description
     pub velocity_profile: Vec<f32>,
+    /// Description
     pub acceleration_pattern: Vec<f32>,
+    /// Description
     pub quality: f32,
 }
 
 impl GestureRecognizer {
+    /// Description
     pub fn new() -> Self {
         Self {
             gesture_templates: Self::initialize_templates(),
@@ -66,6 +76,7 @@ impl GestureRecognizer {
         templates
     }
 
+    /// Description
     pub async fn analyze_hands(&self, hand_landmarks: &[HandPosition]) -> GestureData {
         if hand_landmarks.is_empty() {
             return GestureData {
@@ -119,6 +130,7 @@ impl GestureRecognizer {
     }
 }
 
+/// Description
 pub struct PostureAnalyzer {
     reference_pose: Option<ReferencePose>,
 }
@@ -129,25 +141,37 @@ struct ReferencePose {
     spine_angle: f32,
 }
 
+/// Description
 pub struct PostureData {
+    /// Description
     pub head_pose: HeadPose,
+    /// Description
     pub shoulder_alignment: f32,
+    /// Description
     pub spine_curvature: f32,
+    /// Description
     pub body_symmetry: f32,
+    /// Description
     pub stance_stability: f32,
+    /// Description
     pub confidence_posture: f32,
+    /// Description
     pub engagement_level: f32,
+    /// Description
     pub attention_direction: f32,
+    /// Description
     pub overall_score: f32,
 }
 
 impl PostureAnalyzer {
+    /// Description
     pub fn new() -> Self {
         Self {
             reference_pose: None,
         }
     }
 
+    /// Description
     pub async fn analyze_body_pose(&mut self, body_landmarks: &[Point2D]) -> PostureData {
         if body_landmarks.len() < 25 {
             return PostureData {
@@ -343,12 +367,14 @@ impl PostureAnalyzer {
     }
 }
 
+/// Description
 pub struct GesturePostureAnalyzer {
     gesture_recognizer: GestureRecognizer,
     posture_analyzer: PostureAnalyzer,
 }
 
 impl GesturePostureAnalyzer {
+    /// Description
     pub fn new() -> Self {
         Self {
             gesture_recognizer: GestureRecognizer::new(),
@@ -356,6 +382,7 @@ impl GesturePostureAnalyzer {
         }
     }
 
+    /// Description
     pub async fn analyze_gesture_pattern(
         &self,
         _frame: &VideoFrame,
@@ -384,6 +411,7 @@ impl GesturePostureAnalyzer {
         }))
     }
 
+    /// Description
     pub async fn assess_posture(
         &mut self,
         _frame: &VideoFrame,

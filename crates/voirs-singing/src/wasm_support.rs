@@ -14,16 +14,24 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{console, AudioBuffer, AudioContext};
 
+/// Error types for WebAssembly singing synthesis operations.
+///
+/// These errors are converted to JavaScript values for interoperability with web applications.
 #[derive(Debug, Error)]
 pub enum WasmError {
+    /// Engine initialization failed with the given error message
     #[error("Engine initialization failed: {0}")]
     EngineInitFailed(String),
+    /// Synthesis operation failed with the given error message
     #[error("Synthesis failed: {0}")]
     SynthesisFailed(String),
+    /// Web Audio API context error
     #[error("Audio context error: {0}")]
     AudioContextError(String),
+    /// Invalid input parameters or data provided from JavaScript
     #[error("Invalid input: {0}")]
     InvalidInput(String),
+    /// Generic JavaScript interop error
     #[error("JavaScript error: {0}")]
     JsError(String),
 }
@@ -34,7 +42,18 @@ impl From<WasmError> for JsValue {
     }
 }
 
-// WASM bindings for the singing engine
+/// WebAssembly bindings for the VoiRS singing synthesis engine.
+///
+/// This struct provides JavaScript-compatible API for neural singing synthesis
+/// in web browsers. It wraps the core `SingingEngine` with async-compatible
+/// initialization and synthesis methods.
+///
+/// # Example (JavaScript)
+/// ```javascript
+/// const engine = new WasmSingingEngine();
+/// await engine.initializeAsync();
+/// const audio = await engine.synthesizeNote(60, 1.0, "soprano");
+/// ```
 #[wasm_bindgen]
 pub struct WasmSingingEngine {
     engine: Arc<Mutex<Option<SingingEngine>>>,
@@ -43,6 +62,16 @@ pub struct WasmSingingEngine {
 
 #[wasm_bindgen]
 impl WasmSingingEngine {
+    /// Creates a new WebAssembly singing engine instance.
+    ///
+    /// The engine is created in an uninitialized state. Call `initializeAsync()`
+    /// to fully initialize the engine before synthesis operations.
+    ///
+    /// # Returns
+    /// A new `WasmSingingEngine` instance or JavaScript error on failure
+    ///
+    /// # Errors
+    /// Returns `JsValue` error if engine creation fails
     #[wasm_bindgen(constructor)]
     pub fn new() -> Result<WasmSingingEngine, JsValue> {
         console_error_panic_hook::set_once();
@@ -56,6 +85,16 @@ impl WasmSingingEngine {
         })
     }
 
+    /// Asynchronously initializes the singing synthesis engine.
+    ///
+    /// This method must be called before any synthesis operations can be performed.
+    /// It loads neural models and prepares the engine for synthesis.
+    ///
+    /// # Returns
+    /// `Ok(())` on successful initialization
+    ///
+    /// # Errors
+    /// Returns `JsValue` error if engine initialization fails (e.g., model loading errors)
     #[wasm_bindgen(js_name = "initializeAsync")]
     pub async fn initialize_async(&mut self) -> Result<(), JsValue> {
         let engine = SingingEngine::new(self.config.clone())
@@ -68,6 +107,22 @@ impl WasmSingingEngine {
         Ok(())
     }
 
+    /// Synthesizes a single musical note with singing voice.
+    ///
+    /// Creates a simple single-note score and synthesizes it with the specified
+    /// voice type. The synthesized audio is returned as a Float32Array suitable
+    /// for Web Audio API playback.
+    ///
+    /// # Arguments
+    /// * `midi_note` - MIDI note number (0-127, where 60 is middle C)
+    /// * `duration` - Note duration in seconds
+    /// * `voice_type` - Voice type string ("soprano", "alto", "tenor", "bass", "mezzo_soprano", "baritone")
+    ///
+    /// # Returns
+    /// `Float32Array` containing synthesized audio samples at 44.1kHz sample rate
+    ///
+    /// # Errors
+    /// Returns `JsValue` error if synthesis fails or engine not initialized
     #[wasm_bindgen(js_name = "synthesizeNote")]
     pub async fn synthesize_note(
         &self,
@@ -134,6 +189,20 @@ impl WasmSingingEngine {
         Ok(Float32Array::from(&response.audio[..]))
     }
 
+    /// Synthesizes a complete musical score from JSON representation.
+    ///
+    /// Takes a JSON-encoded musical score containing multiple notes and synthesizes
+    /// it as a complete singing performance.
+    ///
+    /// # Arguments
+    /// * `score_json` - JSON string representing the musical score with notes, tempo, and key
+    /// * `voice_type` - Voice type string ("soprano", "alto", "tenor", "bass", "mezzo_soprano", "baritone")
+    ///
+    /// # Returns
+    /// `Float32Array` containing synthesized audio samples at 44.1kHz sample rate
+    ///
+    /// # Errors
+    /// Returns `JsValue` error if JSON parsing fails, synthesis fails, or engine not initialized
     #[wasm_bindgen(js_name = "synthesizeScore")]
     pub async fn synthesize_score(
         &self,
@@ -168,6 +237,21 @@ impl WasmSingingEngine {
         Ok(Float32Array::from(&response.audio[..]))
     }
 
+    /// Creates a Web Audio API AudioBuffer from synthesized audio data.
+    ///
+    /// Converts Float32Array audio samples into an AudioBuffer that can be played
+    /// through the Web Audio API.
+    ///
+    /// # Arguments
+    /// * `audio_context` - Web Audio API AudioContext
+    /// * `audio_data` - Float32Array containing audio samples
+    /// * `sample_rate` - Sample rate in Hz (typically 44100)
+    ///
+    /// # Returns
+    /// `AudioBuffer` ready for playback via Web Audio API
+    ///
+    /// # Errors
+    /// Returns `JsValue` error if buffer creation fails
     #[wasm_bindgen(js_name = "createAudioBuffer")]
     pub fn create_audio_buffer(
         &self,
@@ -185,6 +269,14 @@ impl WasmSingingEngine {
         Ok(buffer)
     }
 
+    /// Returns an array of all supported voice types.
+    ///
+    /// This static method provides a list of voice type strings that can be used
+    /// with synthesis methods.
+    ///
+    /// # Returns
+    /// JavaScript `Array` containing voice type strings: "soprano", "alto", "tenor",
+    /// "bass", "mezzo_soprano", "baritone"
     #[wasm_bindgen(js_name = "getVoiceTypes")]
     pub fn get_voice_types() -> Array {
         let voice_types = Array::new();
@@ -197,6 +289,19 @@ impl WasmSingingEngine {
         voice_types
     }
 
+    /// Updates the singing engine configuration from JSON.
+    ///
+    /// Reinitializes the engine with new configuration settings. The engine
+    /// will be recreated with the updated configuration.
+    ///
+    /// # Arguments
+    /// * `config_json` - JSON string containing configuration parameters
+    ///
+    /// # Returns
+    /// `Ok(())` on successful configuration update
+    ///
+    /// # Errors
+    /// Returns `JsValue` error if JSON parsing fails or engine reinitialization fails
     #[wasm_bindgen(js_name = "setConfig")]
     pub async fn set_config(&mut self, config_json: &str) -> Result<(), JsValue> {
         let config: WasmSingingConfig = serde_json::from_str(config_json)
@@ -214,13 +319,26 @@ impl WasmSingingEngine {
         Ok(())
     }
 
+    /// Returns the current version of the VoiRS singing WASM module.
+    ///
+    /// # Returns
+    /// Version string from package metadata (e.g., "0.1.0-alpha.2")
     #[wasm_bindgen(js_name = "getVersion")]
     pub fn get_version() -> String {
         env!("CARGO_PKG_VERSION").to_string()
     }
 }
 
-// Helper functions for WebAssembly
+/// Simple audio player for WebAssembly using Web Audio API.
+///
+/// Provides a convenient wrapper around Web Audio API AudioContext for
+/// immediate playback of synthesized audio data.
+///
+/// # Example (JavaScript)
+/// ```javascript
+/// const player = new WasmAudioPlayer();
+/// player.playAudio(audioData);
+/// ```
 #[wasm_bindgen]
 pub struct WasmAudioPlayer {
     context: AudioContext,
@@ -229,6 +347,15 @@ pub struct WasmAudioPlayer {
 
 #[wasm_bindgen]
 impl WasmAudioPlayer {
+    /// Creates a new WebAssembly audio player.
+    ///
+    /// Initializes a Web Audio API AudioContext with default settings.
+    ///
+    /// # Returns
+    /// New `WasmAudioPlayer` instance
+    ///
+    /// # Errors
+    /// Returns `JsValue` error if AudioContext creation fails
     #[wasm_bindgen(constructor)]
     pub fn new() -> Result<WasmAudioPlayer, JsValue> {
         let context = AudioContext::new()?;
@@ -240,6 +367,19 @@ impl WasmAudioPlayer {
         })
     }
 
+    /// Plays audio data immediately through the Web Audio API.
+    ///
+    /// Creates an AudioBuffer from the provided samples and plays it through
+    /// the default audio output device.
+    ///
+    /// # Arguments
+    /// * `audio_data` - Float32Array containing audio samples
+    ///
+    /// # Returns
+    /// `Ok(())` on successful playback start
+    ///
+    /// # Errors
+    /// Returns `JsValue` error if buffer creation or playback fails
     #[wasm_bindgen(js_name = "playAudio")]
     pub fn play_audio(&self, audio_data: &Float32Array) -> Result<(), JsValue> {
         let buffer = self
@@ -257,18 +397,39 @@ impl WasmAudioPlayer {
         Ok(())
     }
 
+    /// Returns the sample rate of the audio context.
+    ///
+    /// # Returns
+    /// Sample rate in Hz (typically 44100 or 48000 depending on system)
     #[wasm_bindgen(js_name = "getSampleRate")]
     pub fn get_sample_rate(&self) -> f32 {
         self.sample_rate
     }
 
+    /// Returns the underlying Web Audio API AudioContext.
+    ///
+    /// Provides access to the AudioContext for advanced audio processing operations.
+    ///
+    /// # Returns
+    /// Clone of the internal `AudioContext`
     #[wasm_bindgen(js_name = "getContext")]
     pub fn get_context(&self) -> AudioContext {
         self.context.clone()
     }
 }
 
-// Real-time synthesis for web applications
+/// Real-time singing synthesizer for interactive web applications.
+///
+/// Provides low-latency note synthesis with immediate playback through Web Audio API.
+/// Suitable for interactive applications like virtual instruments and music games.
+///
+/// # Example (JavaScript)
+/// ```javascript
+/// const context = new AudioContext();
+/// const synth = new WasmRealtimeSynthesizer(context);
+/// await synth.startRealtime();
+/// await synth.playNote(60, 1.0, "soprano");
+/// ```
 #[wasm_bindgen]
 pub struct WasmRealtimeSynthesizer {
     engine: Arc<Mutex<Option<SingingEngine>>>,
@@ -278,6 +439,19 @@ pub struct WasmRealtimeSynthesizer {
 
 #[wasm_bindgen]
 impl WasmRealtimeSynthesizer {
+    /// Creates a new real-time synthesizer with the given audio context.
+    ///
+    /// The synthesizer is created in an inactive state. Call `startRealtime()`
+    /// to initialize the engine before playing notes.
+    ///
+    /// # Arguments
+    /// * `audio_context` - Web Audio API AudioContext for audio playback
+    ///
+    /// # Returns
+    /// New `WasmRealtimeSynthesizer` instance
+    ///
+    /// # Errors
+    /// Returns `JsValue` error if initialization fails
     #[wasm_bindgen(constructor)]
     pub fn new(audio_context: AudioContext) -> Result<WasmRealtimeSynthesizer, JsValue> {
         Ok(Self {
@@ -287,6 +461,16 @@ impl WasmRealtimeSynthesizer {
         })
     }
 
+    /// Starts the real-time synthesis engine.
+    ///
+    /// Initializes the singing engine with default configuration and enables
+    /// real-time note playback. Must be called before `playNote()`.
+    ///
+    /// # Returns
+    /// `Ok(())` on successful initialization
+    ///
+    /// # Errors
+    /// Returns `JsValue` error if engine initialization fails
     #[wasm_bindgen(js_name = "startRealtime")]
     pub async fn start_realtime(&mut self) -> Result<(), JsValue> {
         let config = SingingConfigBuilder::new().build();
@@ -301,6 +485,22 @@ impl WasmRealtimeSynthesizer {
         Ok(())
     }
 
+    /// Synthesizes and immediately plays a musical note.
+    ///
+    /// Creates a note with the specified parameters, synthesizes it, and plays
+    /// the audio through the Web Audio API in a single operation. Suitable for
+    /// interactive, low-latency applications.
+    ///
+    /// # Arguments
+    /// * `midi_note` - MIDI note number (0-127, where 60 is middle C)
+    /// * `duration` - Note duration in seconds
+    /// * `voice_type` - Voice type string ("soprano", "alto", "tenor", "bass", "mezzo_soprano", "baritone")
+    ///
+    /// # Returns
+    /// `Ok(())` when playback starts successfully
+    ///
+    /// # Errors
+    /// Returns `JsValue` error if synthesizer not started, synthesis fails, or playback fails
     #[wasm_bindgen(js_name = "playNote")]
     pub async fn play_note(
         &self,
@@ -388,6 +588,10 @@ impl WasmRealtimeSynthesizer {
         Ok(())
     }
 
+    /// Stops the real-time synthesizer.
+    ///
+    /// Disables real-time synthesis mode. The engine can be restarted with
+    /// `startRealtime()`.
     #[wasm_bindgen(js_name = "stop")]
     pub fn stop(&mut self) {
         self.is_playing = false;
@@ -525,21 +729,53 @@ extern "C" {
     fn log(s: &str);
 }
 
+/// Initializes logging and error handling for WASM environment.
+///
+/// Sets up console error panic hook for better error messages in browser console.
+/// Should be called once at module initialization.
+///
+/// # Example (JavaScript)
+/// ```javascript
+/// import { init_logging } from './voirs_singing';
+/// init_logging();
+/// ```
 #[wasm_bindgen]
 pub fn init_logging() {
     console_error_panic_hook::set_once();
     web_sys::console::log_1(&"VoiRS Singing WASM module initialized".into());
 }
 
-// Performance monitoring for web applications
+/// Performance monitoring tool for web applications.
+///
+/// Tracks synthesis times and uptime statistics for performance analysis
+/// and optimization of WASM-based singing synthesis.
+///
+/// # Example (JavaScript)
+/// ```javascript
+/// const monitor = new WasmPerformanceMonitor();
+/// monitor.recordSynthesisTime(42.5);
+/// console.log(monitor.getAverageSynthesisTime());
+/// ```
 #[wasm_bindgen]
 pub struct WasmPerformanceMonitor {
     start_time: f64,
     synthesis_times: Vec<f64>,
 }
 
+impl Default for WasmPerformanceMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[wasm_bindgen]
 impl WasmPerformanceMonitor {
+    /// Creates a new performance monitor.
+    ///
+    /// Initializes the monitor with the current timestamp and empty metrics.
+    ///
+    /// # Returns
+    /// New `WasmPerformanceMonitor` instance
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
         Self {
@@ -548,11 +784,25 @@ impl WasmPerformanceMonitor {
         }
     }
 
+    /// Records a synthesis operation time.
+    ///
+    /// Adds a synthesis time measurement to the performance history for
+    /// averaging and analysis.
+    ///
+    /// # Arguments
+    /// * `time_ms` - Synthesis duration in milliseconds
     #[wasm_bindgen(js_name = "recordSynthesisTime")]
     pub fn record_synthesis_time(&mut self, time_ms: f64) {
         self.synthesis_times.push(time_ms);
     }
 
+    /// Calculates the average synthesis time across all recorded operations.
+    ///
+    /// Computes the mean of all recorded synthesis times. Returns 0.0 if no
+    /// times have been recorded.
+    ///
+    /// # Returns
+    /// Average synthesis time in milliseconds, or 0.0 if no data
     #[wasm_bindgen(js_name = "getAverageSynthesisTime")]
     pub fn get_average_synthesis_time(&self) -> f64 {
         if self.synthesis_times.is_empty() {
@@ -562,11 +812,21 @@ impl WasmPerformanceMonitor {
         }
     }
 
+    /// Returns the total uptime since monitor creation or last reset.
+    ///
+    /// Calculates the elapsed time from monitor initialization to current time.
+    ///
+    /// # Returns
+    /// Total uptime in milliseconds
     #[wasm_bindgen(js_name = "getTotalUptime")]
     pub fn get_total_uptime(&self) -> f64 {
         js_sys::Date::now() - self.start_time
     }
 
+    /// Resets all performance metrics.
+    ///
+    /// Clears all recorded synthesis times and resets the start time to now.
+    /// Useful for starting fresh performance measurements.
     #[wasm_bindgen(js_name = "reset")]
     pub fn reset(&mut self) {
         self.start_time = js_sys::Date::now();

@@ -112,7 +112,7 @@ impl RLAction {
     /// Generate random action for exploration
     #[must_use]
     pub fn random() -> Self {
-        match rand::random::<u32>() % 5 {
+        match scirs2_core::random::random::<u32>() % 5 {
             0 => RLAction::IncreaseSignificantly,
             1 => RLAction::IncreaseSlightly,
             2 => RLAction::Maintain,

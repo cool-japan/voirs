@@ -5,25 +5,25 @@
 
 use std::time::Duration;
 use voirs_acoustic::{
-    AcousticModel, DummyAcousticModel, MelSpectrogram as AcousticMel, Phoneme as AcousticPhoneme,
+    AcousticModel, DummyAcousticModel, Phoneme as AcousticPhoneme,
     SynthesisConfig as AcousticConfig,
 };
 use voirs_g2p::{DummyG2p, G2p, LanguageCode};
 use voirs_vocoder::{
-    AudioBuffer, DummyVocoder, MelSpectrogram as VocoderMel, SynthesisConfig as VocoderConfig,
+    DummyVocoder, MelSpectrogram as VocoderMel, SynthesisConfig as VocoderConfig,
     Vocoder,
 };
 
 /// API contract test suite for all VoiRS components
 pub struct ApiContractTests {
-    timeout_duration: Duration,
+    _timeout_duration: Duration,
 }
 
 impl ApiContractTests {
     /// Create new API contract test suite
     pub fn new() -> Self {
         Self {
-            timeout_duration: Duration::from_secs(30), // 30 second timeout for API calls
+            _timeout_duration: Duration::from_secs(30), // 30 second timeout for API calls
         }
     }
 
@@ -95,8 +95,8 @@ impl ApiContractTests {
         }
 
         // Contract 3: Language parameter should affect output or be gracefully ignored
-        let en_phonemes = g2p.to_phonemes("hello", Some(LanguageCode::EnUs)).await?;
-        let de_phonemes = g2p.to_phonemes("hello", Some(LanguageCode::De)).await?;
+        let _en_phonemes = g2p.to_phonemes("hello", Some(LanguageCode::EnUs)).await?;
+        let _de_phonemes = g2p.to_phonemes("hello", Some(LanguageCode::De)).await?;
         results.language_parameter_respect = true; // DummyG2p may ignore language
 
         // Contract 4: Identical inputs should produce identical outputs (determinism)
@@ -514,7 +514,7 @@ impl ApiContractTests {
             seed: acoustic_config.seed,
         };
 
-        let audio = vocoder.vocode(&vocoder_mel, Some(&vocoder_config)).await?;
+        let _audio = vocoder.vocode(&vocoder_mel, Some(&vocoder_config)).await?;
         results.acoustic_to_vocoder_compatibility = true;
 
         // Contract 3: Full pipeline should maintain data integrity

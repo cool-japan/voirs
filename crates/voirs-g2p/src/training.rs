@@ -302,10 +302,11 @@ impl ResourceUsage {
         }
 
         // Simulate GPU usage if available (mock data)
-        if self.gpu_usage.is_empty() && rand::random::<f32>() > 0.5 {
-            self.gpu_usage.push(60.0 + 30.0 * rand::random::<f32>());
+        if self.gpu_usage.is_empty() && scirs2_core::random::random::<f32>() > 0.5 {
+            self.gpu_usage
+                .push(60.0 + 30.0 * scirs2_core::random::random::<f32>());
             self.gpu_memory_usage_mb
-                .push(1000.0 + 500.0 * rand::random::<f32>());
+                .push(1000.0 + 500.0 * scirs2_core::random::random::<f32>());
         }
     }
 
@@ -538,7 +539,7 @@ impl TrainingSession {
         let complexity_factor = 1.0 + (avg_text_length / 100.0).min(0.5);
 
         // Add small random variation
-        let noise = 0.1 * (rand::random::<f32>() - 0.5);
+        let noise = 0.1 * (scirs2_core::random::random::<f32>() - 0.5);
 
         let final_loss = (base_loss * complexity_factor + noise).max(0.01);
 
@@ -559,12 +560,12 @@ impl TrainingSession {
 
         // Calculate validation loss that generally improves with training
         let base_val_loss = 1.5 * (-0.08 * epoch as f32).exp();
-        let val_noise = 0.1 * (rand::random::<f32>() - 0.5);
+        let val_noise = 0.1 * (scirs2_core::random::random::<f32>() - 0.5);
         let val_loss = (base_val_loss + val_noise).max(0.05);
 
         // Calculate accuracy that improves with training (inverse relationship with loss)
         let base_accuracy = 1.0 - 0.6 * (-0.1 * epoch as f32).exp();
-        let acc_noise = 0.05 * (rand::random::<f32>() - 0.5);
+        let acc_noise = 0.05 * (scirs2_core::random::random::<f32>() - 0.5);
         let accuracy = (base_accuracy + acc_noise).clamp(0.0, 1.0);
 
         Ok((val_loss, accuracy))
@@ -1118,7 +1119,7 @@ impl DatasetPreparation {
         for example in original_examples {
             // Add noise
             if augmentation_config.add_noise > 0.0
-                && rand::random::<f32>() < augmentation_config.add_noise
+                && scirs2_core::random::random::<f32>() < augmentation_config.add_noise
             {
                 let mut noisy_example = example.clone();
                 noisy_example.text = Self::add_text_noise(&noisy_example.text, 0.1);
@@ -1128,7 +1129,7 @@ impl DatasetPreparation {
 
             // Phoneme variations
             if augmentation_config.phoneme_variations > 0.0
-                && rand::random::<f32>() < augmentation_config.phoneme_variations
+                && scirs2_core::random::random::<f32>() < augmentation_config.phoneme_variations
             {
                 let mut variant_example = example.clone();
                 variant_example.phonemes = Self::add_phoneme_variations(&variant_example.phonemes);
@@ -1145,10 +1146,10 @@ impl DatasetPreparation {
         let mut chars: Vec<char> = text.chars().collect();
 
         for char in &mut chars {
-            if rand::random::<f32>() < noise_level {
+            if scirs2_core::random::random::<f32>() < noise_level {
                 // Simple character substitution
                 if char.is_alphabetic() {
-                    *char = match rand::random::<u8>() % 3 {
+                    *char = match scirs2_core::random::random::<u8>() % 3 {
                         0 => char.to_lowercase().next().unwrap_or(*char),
                         1 => char.to_uppercase().next().unwrap_or(*char),
                         _ => *char,
@@ -1167,8 +1168,9 @@ impl DatasetPreparation {
             .map(|p| {
                 let mut variant = p.clone();
                 // Slight confidence adjustment
-                variant.confidence =
-                    (variant.confidence * (0.9 + 0.2 * rand::random::<f32>())).min(1.0);
+                variant.confidence = (variant.confidence
+                    * (0.9 + 0.2 * scirs2_core::random::random::<f32>()))
+                .min(1.0);
                 variant
             })
             .collect()

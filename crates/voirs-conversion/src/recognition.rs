@@ -726,9 +726,7 @@ impl RecognitionGuidedConverter {
         let converted_rhythm = self.calculate_rhythm_pattern(converted, transcription);
 
         // Calculate rhythm similarity
-        let rhythm_correlation =
-            self.calculate_pattern_correlation(&original_rhythm, &converted_rhythm);
-        rhythm_correlation
+        self.calculate_pattern_correlation(&original_rhythm, &converted_rhythm)
     }
 
     /// Calculate phoneme clarity score

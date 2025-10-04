@@ -82,17 +82,35 @@ pub struct VibratoStyle {
 #[derive(Debug, Clone)]
 pub enum VibratoCharacteristics {
     /// Medieval: minimal or no vibrato
-    Medieval { occasional_tremolo: bool },
+    Medieval {
+        /// Whether occasional tremolo is used instead of vibrato
+        occasional_tremolo: bool,
+    },
     /// Renaissance: gentle, late-onset vibrato
-    Renaissance { late_onset: f32 },
+    Renaissance {
+        /// Delay before vibrato onset in seconds
+        late_onset: f32,
+    },
     /// Baroque: moderate, expressive vibrato
-    Baroque { expressive_variation: f32 },
+    Baroque {
+        /// Amount of expressive variation in vibrato (0.0-1.0)
+        expressive_variation: f32,
+    },
     /// Classical: controlled, refined vibrato
-    Classical { precision: f32 },
+    Classical {
+        /// Precision level of vibrato control (0.0-1.0)
+        precision: f32,
+    },
     /// Romantic: dramatic, wide vibrato
-    Romantic { dramatic_range: f32 },
+    Romantic {
+        /// Range of dramatic vibrato width (0.0-1.0)
+        dramatic_range: f32,
+    },
     /// Modern: varied, interpretive vibrato
-    Modern { interpretive_freedom: f32 },
+    Modern {
+        /// Level of interpretive freedom in vibrato (0.0-1.0)
+        interpretive_freedom: f32,
+    },
 }
 
 /// Historical ornamentation engine
@@ -110,50 +128,82 @@ pub struct OrnamentsEngine {
 #[derive(Debug, Clone, PartialEq)]
 pub enum OrnamentType {
     /// Baroque ornaments
+    ///
+    /// Rapid alternation between two adjacent notes
     Trill {
+        /// Trill rate in Hz
         rate: f32,
+        /// Trill duration in seconds
         duration: f32,
     },
+    /// Single rapid alternation with upper or lower auxiliary note
     Mordent {
+        /// Whether to use upper (true) or lower (false) auxiliary note
         upper: bool,
+        /// Mordent duration in seconds
         duration: f32,
     },
+    /// Ornament that turns around the main note
     Turn {
+        /// Direction of the turn movement
         direction: TurnDirection,
     },
+    /// Accented grace note that resolves to the main note
     Appoggiatura {
+        /// Emphasis strength (0.0-1.0)
         strength: f32,
     },
 
     /// Classical ornaments
+    ///
+    /// Short grace notes played quickly before the main note
     GracenNotes {
+        /// MIDI note numbers of grace notes
         notes: Vec<u8>,
+        /// Timing coefficient for grace note speed
         timing: f32,
     },
+    /// Smooth glide between two pitches
     Portamento {
+        /// Duration of the pitch glide in seconds
         glide_time: f32,
     },
+    /// Crushed grace note played as quickly as possible
     Acciaccatura {
+        /// Emphasis level (0.0-1.0)
         emphasis: f32,
     },
 
     /// Romantic ornaments
+    ///
+    /// Expressive tempo flexibility
     Rubato {
+        /// Temporal flexibility level (0.0-1.0)
         flexibility: f32,
     },
+    /// Highly expressive pitch glide
     ExpressivePortamento {
+        /// Expression intensity (0.0-1.0)
         expression_level: f32,
     },
+    /// Elaborate vocal ornamentation
     Coloratura {
+        /// Complexity level of the coloratura (0.0-1.0)
         complexity: f32,
     },
 
     /// Modal/Folk ornaments
+    ///
+    /// Microtonal pitch bend
     MicrotonalBend {
+        /// Pitch bend amount in cents
         cents: f32,
     },
+    /// Complete glottal closure creating a stop
     GlottalStop,
+    /// Nasal resonance effect
     NasalResonance {
+        /// Intensity of nasal resonance (0.0-1.0)
         intensity: f32,
     },
 }
@@ -161,8 +211,11 @@ pub enum OrnamentType {
 /// Turn direction for ornaments
 #[derive(Debug, Clone, PartialEq)]
 pub enum TurnDirection {
+    /// Turn starting with the upper auxiliary note
     Upper,
+    /// Turn starting with the lower auxiliary note
     Lower,
+    /// Inverted turn (reversed direction)
     Inverted,
 }
 
@@ -196,13 +249,25 @@ pub struct ArticulationStyle {
 #[derive(Debug, Clone)]
 pub enum SyllableSeparation {
     /// Legato (smooth connection)
-    Legato { connection_strength: f32 },
+    Legato {
+        /// Strength of connection between syllables (0.0-1.0)
+        connection_strength: f32,
+    },
     /// Detached (clear separation)
-    Detached { separation_time: f32 },
+    Detached {
+        /// Time separation between syllables in seconds
+        separation_time: f32,
+    },
     /// Marcato (emphasized)
-    Marcato { emphasis_level: f32 },
+    Marcato {
+        /// Level of emphasis on each syllable (0.0-1.0)
+        emphasis_level: f32,
+    },
     /// Staccato (short and detached)
-    Staccato { note_length_factor: f32 },
+    Staccato {
+        /// Factor to reduce note length (0.0-1.0)
+        note_length_factor: f32,
+    },
 }
 
 /// Vowel modification for historical authenticity
@@ -233,21 +298,37 @@ pub struct ExpressionStyle {
 #[derive(Debug, Clone)]
 pub enum PhraseShaping {
     /// Terraced dynamics (Baroque)
-    Terraced { level_changes: Vec<f32> },
+    Terraced {
+        /// Discrete dynamic level changes throughout the phrase
+        level_changes: Vec<f32>,
+    },
     /// Gradual crescendo/diminuendo (Classical)
-    Gradual { curve_type: DynamicCurve },
+    Gradual {
+        /// Type of dynamic curve to apply
+        curve_type: DynamicCurve,
+    },
     /// Dramatic contrasts (Romantic)
-    Dramatic { contrast_intensity: f32 },
+    Dramatic {
+        /// Intensity of dynamic contrasts (0.0-1.0)
+        contrast_intensity: f32,
+    },
     /// Modal inflection (Medieval/Folk)
-    Modal { inflection_points: Vec<f32> },
+    Modal {
+        /// Points where modal inflections occur
+        inflection_points: Vec<f32>,
+    },
 }
 
 /// Dynamic curve shapes
 #[derive(Debug, Clone)]
 pub enum DynamicCurve {
+    /// Linear progression from start to end
     Linear,
+    /// Exponential curve with accelerating change
     Exponential,
+    /// Logarithmic curve with decelerating change
     Logarithmic,
+    /// S-shaped curve with smooth acceleration and deceleration
     Sigmoid,
 }
 
@@ -261,12 +342,20 @@ pub enum TuningSystem {
     /// Just intonation (Renaissance)
     JustIntonation,
     /// Mean-tone temperament (Baroque)
-    MeanTone { comma_division: f32 },
+    MeanTone {
+        /// How the comma is divided (typically 4 for quarter-comma meantone)
+        comma_division: f32,
+    },
     /// Well-tempered (Baroque/Classical)
-    WellTempered { temperament_type: String },
+    WellTempered {
+        /// Type of well temperament (e.g., "Bach", "Werckmeister III")
+        temperament_type: String,
+    },
     /// Custom historical tuning
     Custom {
+        /// Name of the custom tuning system
         name: String,
+        /// Cent deviations from equal temperament per MIDI note
         cent_deviations: HashMap<u8, f32>,
     },
 }
@@ -351,28 +440,51 @@ pub struct VowelRule {
 #[derive(Debug, Clone)]
 pub enum DiphthongStyle {
     /// Smooth glide between vowels
-    Smooth { glide_duration: f32 },
+    Smooth {
+        /// Duration of the vowel glide in seconds
+        glide_duration: f32,
+    },
     /// Distinct vowel separation
-    Distinct { separation_time: f32 },
+    Distinct {
+        /// Time between distinct vowel articulations in seconds
+        separation_time: f32,
+    },
     /// Emphasized transition
-    Emphasized { emphasis_point: f32 },
+    Emphasized {
+        /// Point in the diphthong where emphasis occurs (0.0-1.0)
+        emphasis_point: f32,
+    },
 }
 
 /// Cultural performance elements
 #[derive(Debug, Clone)]
 pub enum CulturalElement {
     /// Ornamentation traditions
-    Ornamentation { style: String, intensity: f32 },
+    Ornamentation {
+        /// Name of the ornamentation style
+        style: String,
+        /// Intensity of ornamentation (0.0-1.0)
+        intensity: f32,
+    },
     /// Rhythmic characteristics
-    Rhythmic { swing_factor: f32, syncopation: f32 },
+    Rhythmic {
+        /// Swing timing factor (0.0-1.0, where 0.0 is straight, 1.0 is full swing)
+        swing_factor: f32,
+        /// Amount of syncopation (0.0-1.0)
+        syncopation: f32,
+    },
     /// Tonal inflection
     Tonal {
+        /// Whether microtonal pitch bends are used
         micro_tonal_bends: bool,
+        /// Whether quarter-tone intervals are used
         quarter_tones: bool,
     },
     /// Breath pattern traditions
     Breathing {
+        /// Typical phrase length in seconds
         phrase_length: f32,
+        /// Amount of audible breath noise (0.0-1.0)
         breath_noise: f32,
     },
 }
@@ -402,7 +514,14 @@ pub struct VibratoAdjustment {
 }
 
 impl HistoricalPractice {
-    /// Create a new historical practice system
+    /// Create a new historical practice system with default settings
+    ///
+    /// Initializes the system with Classical period as default and populates
+    /// period styles and regional variations.
+    ///
+    /// # Returns
+    ///
+    /// A new `HistoricalPractice` instance with Classical period settings
     pub fn new() -> Self {
         let mut practice = Self {
             period: HistoricalPeriod::Classical,
@@ -418,6 +537,13 @@ impl HistoricalPractice {
     }
 
     /// Set the historical period for synthesis
+    ///
+    /// Updates the current period and automatically adjusts the tuning system
+    /// to match the period's preferred tuning.
+    ///
+    /// # Arguments
+    ///
+    /// * `period` - The historical period to apply
     pub fn set_period(&mut self, period: HistoricalPeriod) {
         self.period = period;
         if let Some(style) = self.period_styles.get(&period) {
@@ -429,11 +555,30 @@ impl HistoricalPractice {
     }
 
     /// Get current historical period
+    ///
+    /// # Returns
+    ///
+    /// The currently active historical period
     pub fn current_period(&self) -> HistoricalPeriod {
         self.period
     }
 
     /// Apply historical performance practice to a musical score
+    ///
+    /// Modifies the score to include period-appropriate tuning, ornamentation,
+    /// articulation, and expression characteristics.
+    ///
+    /// # Arguments
+    ///
+    /// * `score` - The musical score to modify with historical practices
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if successful
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::Processing` if the period style is not found
     pub fn apply_to_score(&self, score: &mut MusicalScore) -> Result<()> {
         let style = self
             .period_styles
@@ -450,6 +595,21 @@ impl HistoricalPractice {
     }
 
     /// Apply historical performance practice to voice characteristics
+    ///
+    /// Adjusts voice parameters including vibrato style and voice-type-specific
+    /// adaptations for the current historical period.
+    ///
+    /// # Arguments
+    ///
+    /// * `voice` - The voice characteristics to modify
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if successful
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::Processing` if the period style is not found
     pub fn apply_to_voice(&self, voice: &mut VoiceCharacteristics) -> Result<()> {
         let style = self
             .period_styles
@@ -801,16 +961,43 @@ impl HistoricalPractice {
     }
 
     /// Get available historical periods
+    ///
+    /// Returns a list of all historical periods that have been initialized
+    /// with period styles.
+    ///
+    /// # Returns
+    ///
+    /// A vector of available `HistoricalPeriod` values
     pub fn available_periods(&self) -> Vec<HistoricalPeriod> {
         self.period_styles.keys().cloned().collect()
     }
 
     /// Get available regional styles
+    ///
+    /// Returns a list of all initialized regional style names (e.g., "italian_bel_canto").
+    ///
+    /// # Returns
+    ///
+    /// A vector of regional style names as strings
     pub fn available_regional_styles(&self) -> Vec<String> {
         self.regional_styles.keys().cloned().collect()
     }
 
     /// Set regional style
+    ///
+    /// Applies a specific regional performance style to the synthesis.
+    ///
+    /// # Arguments
+    ///
+    /// * `style_name` - The name of the regional style (e.g., "italian_bel_canto")
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if the style was found and applied
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::Processing` if the specified style is not found
     pub fn set_regional_style(&mut self, style_name: &str) -> Result<()> {
         if !self.regional_styles.contains_key(style_name) {
             return Err(Error::Processing(format!(
@@ -823,6 +1010,12 @@ impl HistoricalPractice {
     }
 
     /// Get tuning system information
+    ///
+    /// Returns a human-readable description of the current tuning system.
+    ///
+    /// # Returns
+    ///
+    /// A string describing the active tuning system
     pub fn tuning_system_info(&self) -> String {
         match &self.tuning_system {
             TuningSystem::EqualTemperament => "Equal Temperament (12-TET)".to_string(),
@@ -841,6 +1034,12 @@ impl HistoricalPractice {
 
 impl OrnamentsEngine {
     /// Create a new ornaments engine
+    ///
+    /// Initializes an ornaments engine with empty catalog and default intensity.
+    ///
+    /// # Returns
+    ///
+    /// A new `OrnamentsEngine` with intensity set to 0.5
     pub fn new() -> Self {
         Self {
             ornament_catalog: HashMap::new(),
@@ -850,11 +1049,22 @@ impl OrnamentsEngine {
     }
 
     /// Set ornamentation intensity
+    ///
+    /// Controls the overall intensity of ornamentation application. Higher values
+    /// result in more ornaments being applied. Value is automatically clamped to 0.0-1.0.
+    ///
+    /// # Arguments
+    ///
+    /// * `intensity` - Intensity level (0.0 = minimal, 1.0 = maximum), will be clamped
     pub fn set_intensity(&mut self, intensity: f32) {
         self.intensity = intensity.clamp(0.0, 1.0);
     }
 
     /// Get current ornamentation intensity
+    ///
+    /// # Returns
+    ///
+    /// The current intensity value (0.0-1.0)
     pub fn intensity(&self) -> f32 {
         self.intensity
     }

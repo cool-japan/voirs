@@ -488,7 +488,7 @@ impl ConversionProfiler {
         let type_metrics = metrics
             .metrics_by_type
             .entry(session.conversion_type.clone())
-            .or_insert_with(ConversionTypeMetrics::new);
+            .or_default();
 
         type_metrics.update_with_session(session);
 
@@ -824,59 +824,93 @@ pub struct ProfilingReport {
 /// Session information summary
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionInfo {
+    /// Unique identifier for the profiling session
     pub session_id: String,
+    /// Type of voice conversion being profiled
     pub conversion_type: ConversionType,
+    /// Duration of the audio in seconds
     pub audio_duration: f64,
+    /// Total number of audio samples processed
     pub audio_samples: usize,
+    /// Audio sample rate in Hz
     pub sample_rate: f32,
+    /// Number of audio channels
     pub channels: usize,
+    /// Session start timestamp
     pub start_time: SystemTime,
+    /// Session end timestamp (None if still running)
     pub end_time: Option<SystemTime>,
 }
 
 /// Performance summary
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerformanceSummary {
+    /// Total time spent processing the conversion
     pub total_processing_time: Duration,
+    /// Real-time factor (processing_time / audio_duration)
     pub real_time_factor: f64,
+    /// Peak memory usage in megabytes
     pub peak_memory_mb: f64,
+    /// Average CPU usage percentage across all cores
     pub average_cpu_usage: f64,
+    /// Peak CPU usage percentage
     pub peak_cpu_usage: f64,
+    /// Number of performance bottlenecks detected
     pub bottleneck_count: usize,
+    /// Performance grade (A-F based on metrics)
     pub performance_grade: String,
 }
 
 /// Detailed timing breakdown
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimingBreakdown {
+    /// Percentage of time spent in preprocessing
     pub preprocessing_percentage: f64,
+    /// Percentage of time spent in conversion
     pub conversion_percentage: f64,
+    /// Percentage of time spent in postprocessing
     pub postprocessing_percentage: f64,
+    /// Percentage of time spent in model initialization
     pub model_init_percentage: f64,
+    /// Percentage of time spent in quality assessment
     pub quality_assessment_percentage: f64,
+    /// Name of the slowest processing stage
     pub slowest_stage: String,
+    /// Name of the fastest processing stage
     pub fastest_stage: String,
 }
 
 /// Memory usage analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryAnalysis {
+    /// Peak memory usage in megabytes
     pub peak_memory_mb: f64,
+    /// Average memory usage in megabytes
     pub average_memory_mb: f64,
+    /// Memory efficiency score (0.0-1.0)
     pub memory_efficiency_score: f64,
+    /// Total number of memory allocations
     pub allocation_count: usize,
+    /// Total number of memory deallocations
     pub deallocation_count: usize,
+    /// Whether potential memory leaks were detected
     pub potential_leaks: bool,
+    /// Rate of memory growth over time (MB/s)
     pub memory_growth_rate: f64,
 }
 
 /// CPU usage analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CpuAnalysis {
+    /// Average CPU usage percentage
     pub average_usage: f64,
+    /// Peak CPU usage percentage
     pub peak_usage: f64,
+    /// CPU efficiency score (0.0-1.0)
     pub cpu_efficiency_score: f64,
+    /// Thread utilization percentage
     pub thread_utilization: f64,
+    /// List of CPU-intensive processing stages
     pub cpu_intensive_stages: Vec<String>,
 }
 
@@ -1196,6 +1230,7 @@ impl Default for TimingData {
 }
 
 impl TimingData {
+    /// Creates a new TimingData instance with zero durations.
     pub fn new() -> Self {
         Self {
             total_duration: Duration::from_millis(0),
@@ -1216,6 +1251,7 @@ impl Default for MemoryData {
 }
 
 impl MemoryData {
+    /// Creates a new MemoryData instance with zero memory usage.
     pub fn new() -> Self {
         Self {
             peak_memory: 0,
@@ -1236,6 +1272,7 @@ impl Default for CpuData {
 }
 
 impl CpuData {
+    /// Creates a new CpuData instance with zero CPU usage.
     pub fn new() -> Self {
         Self {
             average_cpu_usage: 0.0,
@@ -1247,6 +1284,7 @@ impl CpuData {
 }
 
 impl StageTimingInfo {
+    /// Creates a new StageTimingInfo for the specified stage name.
     pub fn new(name: &str) -> Self {
         Self {
             name: name.to_string(),
@@ -1258,6 +1296,7 @@ impl StageTimingInfo {
         }
     }
 
+    /// Updates timing statistics with a new execution duration measurement.
     pub fn update_timing(&mut self, new_duration: Duration) {
         self.execution_count += 1;
         self.duration += new_duration;
@@ -1280,6 +1319,7 @@ impl Default for ConversionTypeMetrics {
 }
 
 impl ConversionTypeMetrics {
+    /// Creates a new ConversionTypeMetrics instance with zero values.
     pub fn new() -> Self {
         Self {
             conversion_count: 0,
@@ -1290,6 +1330,7 @@ impl ConversionTypeMetrics {
         }
     }
 
+    /// Updates metrics with data from a completed profiling session.
     pub fn update_with_session(&mut self, session: &ProfilingSession) {
         self.conversion_count += 1;
 

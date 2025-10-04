@@ -397,25 +397,40 @@ impl PlatformAdapter for WebAdapter {
 /// Browser information structure
 #[derive(Debug, Clone)]
 pub struct BrowserInfo {
+    /// Description
     pub name: String,
+    /// Description
     pub version: String,
+    /// Description
     pub user_agent: String,
+    /// Description
     pub supports_web_audio: bool,
+    /// Description
     pub supports_media_recorder: bool,
+    /// Description
     pub supports_web_workers: bool,
+    /// Description
     pub supports_service_worker: bool,
+    /// Description
     pub supports_indexed_db: bool,
+    /// Description
     pub supports_local_storage: bool,
 }
 
 /// Web audio context information
 #[derive(Debug, Clone)]
 pub struct WebAudioContext {
+    /// Description
     pub sample_rate: u32,
+    /// Description
     pub buffer_size: usize,
+    /// Description
     pub state: String,
+    /// Description
     pub latency: f32,
+    /// Description
     pub max_channel_count: u32,
+    /// Description
     pub supports_worklets: bool,
 }
 
@@ -488,25 +503,40 @@ impl WebUtils {
 /// Web audio settings
 #[derive(Debug, Clone)]
 pub struct WebAudioSettings {
+    /// Description
     pub sample_rate: u32,
+    /// Description
     pub buffer_size: usize,
+    /// Description
     pub channels: u32,
+    /// Description
     pub enable_echo_cancellation: bool,
+    /// Description
     pub enable_noise_reduction: bool,
+    /// Description
     pub enable_automatic_gain_control: bool,
+    /// Description
     pub enable_low_latency: bool,
 }
 
 /// Browser capabilities
 #[derive(Debug, Clone)]
 pub struct BrowserCapabilities {
+    /// Description
     pub max_audio_channels: u32,
+    /// Description
     pub max_sample_rate: u32,
+    /// Description
     pub supports_offline: bool,
+    /// Description
     pub supports_background_sync: bool,
+    /// Description
     pub supports_push_notifications: bool,
+    /// Description
     pub storage_quota_mb: u32,
+    /// Description
     pub supports_file_api: bool,
+    /// Description
     pub supports_drag_drop: bool,
 }
 
@@ -551,31 +581,47 @@ impl WebStorageManager {
 /// Storage usage information
 #[derive(Debug, Clone)]
 pub struct StorageUsage {
+    /// Description
     pub used_bytes: u64,
+    /// Description
     pub available_bytes: u64,
+    /// Description
     pub total_bytes: u64,
 }
 
 /// Progressive Web App capabilities
 #[derive(Debug, Clone)]
 pub struct PWACapabilities {
+    /// Description
     pub supports_service_worker: bool,
+    /// Description
     pub supports_web_manifest: bool,
+    /// Description
     pub supports_install_prompt: bool,
+    /// Description
     pub supports_background_sync: bool,
+    /// Description
     pub supports_push_notifications: bool,
+    /// Description
     pub supports_offline_usage: bool,
+    /// Description
     pub is_installed: bool,
 }
 
 /// WebRTC capabilities for real-time communication
 #[derive(Debug, Clone)]
 pub struct WebRTCCapabilities {
+    /// Description
     pub supports_peer_connection: bool,
+    /// Description
     pub supports_data_channels: bool,
+    /// Description
     pub supports_media_streams: bool,
+    /// Description
     pub supports_screen_sharing: bool,
+    /// Description
     pub max_data_channel_size: usize,
+    /// Description
     pub supported_codecs: Vec<String>,
 }
 

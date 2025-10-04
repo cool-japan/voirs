@@ -25,10 +25,22 @@ use crate::{
 pub mod decoder;
 pub mod duration;
 pub mod flows;
+pub mod loader;
 pub mod posterior;
 pub mod text_encoder;
+pub mod trainer;
+
+#[cfg(feature = "onnx")]
+pub mod onnx_loader;
+
+#[cfg(feature = "onnx")]
+pub mod onnx_chinese;
+
+#[cfg(feature = "onnx")]
+pub mod onnx_kokoro;
 
 // Re-export main components
+pub use loader::{load_vits_from_safetensors, VitsInference};
 pub use text_encoder::{PhonemeEmbedding, TextEncoder, TextEncoderConfig};
 
 // Re-export implemented components
@@ -36,6 +48,10 @@ pub use decoder::{Decoder, DecoderConfig};
 pub use duration::{DurationConfig, DurationPredictor};
 pub use flows::{FlowConfig, NormalizingFlows};
 pub use posterior::{PosteriorConfig, PosteriorEncoder};
+pub use trainer::{
+    MultiPeriodDiscriminator, MultiScaleDiscriminator, TrainingMetrics, ValidationMetrics,
+    VitsTrainer, VitsTrainingConfig,
+};
 
 /// VITS model configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

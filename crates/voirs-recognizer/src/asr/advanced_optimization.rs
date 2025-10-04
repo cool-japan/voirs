@@ -13,6 +13,7 @@ use tracing::{debug, info};
 
 /// Advanced optimization configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Advanced Optimization Config
 pub struct AdvancedOptimizationConfig {
     /// Enable knowledge distillation
     pub enable_knowledge_distillation: bool,
@@ -84,16 +85,23 @@ impl Default for AdvancedOptimizationConfig {
 
 /// Target platform for optimization
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Optimization Platform
 pub enum OptimizationPlatform {
+    /// C p u
     CPU,
+    /// G p u
     GPU,
+    /// Mobile
     Mobile,
+    /// Edge
     Edge,
+    /// Server
     Server,
 }
 
 /// Optimization objective
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Optimization Objective
 pub enum OptimizationObjective {
     /// Minimize latency
     Latency,
@@ -109,6 +117,7 @@ pub enum OptimizationObjective {
 
 /// Knowledge distillation trainer
 #[derive(Debug)]
+/// Knowledge Distillation Optimizer
 pub struct KnowledgeDistillationOptimizer {
     /// Teacher model reference (larger, accurate model)
     teacher_layers: HashMap<String, Tensor>,
@@ -124,6 +133,7 @@ pub struct KnowledgeDistillationOptimizer {
 
 /// Knowledge distillation statistics
 #[derive(Debug, Clone)]
+/// Distillation Stats
 pub struct DistillationStats {
     /// Teacher-student loss over time
     pub loss_history: Vec<f32>,
@@ -318,6 +328,7 @@ impl KnowledgeDistillationOptimizer {
 
 /// Progressive pruning optimizer
 #[derive(Debug)]
+/// Progressive Pruning Optimizer
 pub struct ProgressivePruningOptimizer {
     /// Configuration
     config: AdvancedOptimizationConfig,
@@ -335,6 +346,7 @@ pub struct ProgressivePruningOptimizer {
 
 /// Result of a pruning step
 #[derive(Debug, Clone)]
+/// Pruning Step Result
 pub struct PruningStepResult {
     /// Step number
     pub step: usize,
@@ -580,6 +592,7 @@ impl ProgressivePruningOptimizer {
 
 /// Mixed-precision optimizer
 #[derive(Debug)]
+/// Mixed Precision Optimizer
 pub struct MixedPrecisionOptimizer {
     /// Configuration
     config: AdvancedOptimizationConfig,
@@ -595,6 +608,7 @@ pub struct MixedPrecisionOptimizer {
 
 /// Performance measurement for a precision setting
 #[derive(Debug, Clone)]
+/// Performance Measurement
 pub struct PerformanceMeasurement {
     /// Inference time (milliseconds)
     pub inference_time_ms: f32,
@@ -608,6 +622,7 @@ pub struct PerformanceMeasurement {
 
 /// Result of precision search
 #[derive(Debug, Clone)]
+/// Precision Search Result
 pub struct PrecisionSearchResult {
     /// Layer name
     pub layer_name: String,
@@ -807,6 +822,7 @@ impl MixedPrecisionOptimizer {
 
 /// Mixed-precision optimization statistics
 #[derive(Debug, Clone)]
+/// Mixed Precision Stats
 pub struct MixedPrecisionStats {
     /// Total number of layers
     pub total_layers: usize,

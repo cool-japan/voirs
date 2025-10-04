@@ -20,37 +20,69 @@ use tokio::sync::RwLock;
 #[derive(Debug, thiserror::Error)]
 pub enum DataManagementError {
     #[error("Export failed: {message}")]
-    ExportError { message: String },
+    /// Raised when exporting feedback data cannot complete successfully.
+    ExportError {
+        /// Human-readable reason for the export failure.
+        message: String,
+    },
 
     #[error("Import failed: {message}")]
-    ImportError { message: String },
+    /// Raised when importing feedback data fails.
+    ImportError {
+        /// Human-readable reason for the import failure.
+        message: String,
+    },
 
     #[error("Backup failed: {message}")]
-    BackupError { message: String },
+    /// Raised when creating a feedback data backup fails.
+    BackupError {
+        /// Human-readable reason for the backup failure.
+        message: String,
+    },
 
     #[error("Restore failed: {message}")]
-    RestoreError { message: String },
+    /// Raised when restoring feedback data fails.
+    RestoreError {
+        /// Human-readable reason for the restore failure.
+        message: String,
+    },
 
     #[error("Data validation failed: {message}")]
-    ValidationError { message: String },
+    /// Raised when imported data does not pass validation.
+    ValidationError {
+        /// Human-readable reason for the validation failure.
+        message: String,
+    },
 
     #[error("I/O error: {source}")]
+    /// Description
     IoError {
         #[from]
+        /// Description
         source: std::io::Error,
     },
 
     #[error("Serialization error: {source}")]
+    /// Description
     SerializationError {
         #[from]
+        /// Description
         source: serde_json::Error,
     },
 
     #[error("Compression error: {message}")]
-    CompressionError { message: String },
+    /// Raised when compressing export payloads fails.
+    CompressionError {
+        /// Human-readable reason for the compression failure.
+        message: String,
+    },
 
     #[error("Encryption error: {message}")]
-    EncryptionError { message: String },
+    /// Raised when encrypting export payloads fails.
+    EncryptionError {
+        /// Human-readable reason for the encryption failure.
+        message: String,
+    },
 }
 
 /// Result type for data management operations
@@ -126,13 +158,27 @@ pub struct DataTransformation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TransformationType {
     /// Map old value to new value
-    ValueMapping { from: String, to: String },
+    ValueMapping {
+        /// Source value
+        from: String,
+        /// Target value
+        to: String
+    },
     /// Apply mathematical operation
-    MathOperation { operation: String },
+    MathOperation {
+        /// Mathematical operation string
+        operation: String
+    },
     /// Convert data type
-    TypeConversion { target_type: String },
+    TypeConversion {
+        /// Target type name
+        target_type: String
+    },
     /// Apply custom function
-    CustomFunction { function_name: String },
+    CustomFunction {
+        /// Function name to apply
+        function_name: String
+    },
 }
 
 /// Comprehensive data export package
@@ -182,41 +228,62 @@ pub struct ExportMetadata {
 /// Export-friendly session data
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportSessionData {
+    /// Session identifier
     pub session_id: String,
+    /// User identifier
     pub user_id: String,
+    /// Session start time
     pub started_at: DateTime<Utc>,
+    /// Session end time
     pub ended_at: Option<DateTime<Utc>>,
+    /// Duration in seconds
     pub duration_seconds: u64,
+    /// Number of activities
     pub activity_count: u32,
 }
 
 /// Export-friendly performance metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportPerformanceMetrics {
+    /// Metric timestamp
     pub timestamp: DateTime<Utc>,
+    /// Response time in milliseconds
     pub response_time_ms: f64,
+    /// System throughput
     pub throughput: f64,
+    /// Error rate
     pub error_rate: f64,
+    /// Memory usage in bytes
     pub memory_usage: u64,
 }
 
 /// Export-friendly user interaction event
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportUserInteractionEvent {
+    /// Event identifier
     pub event_id: String,
+    /// User identifier
     pub user_id: String,
+    /// Event timestamp
     pub timestamp: DateTime<Utc>,
+    /// Type of event
     pub event_type: String,
+    /// Event details
     pub details: String,
 }
 
 /// Export-friendly system metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportSystemMetrics {
+    /// Metric timestamp
     pub timestamp: DateTime<Utc>,
+    /// CPU usage percentage
     pub cpu_usage_percent: f64,
+    /// Memory usage in bytes
     pub memory_usage_bytes: u64,
+    /// Disk usage in bytes
     pub disk_usage_bytes: u64,
+    /// Network I/O in bytes
     pub network_io_bytes: u64,
 }
 
@@ -264,13 +331,21 @@ pub struct TrainingExportData {
 /// Training session for export
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportTrainingSession {
+    /// Session identifier
     pub session_id: String,
+    /// User identifier
     pub user_id: String,
+    /// Exercise identifier
     pub exercise_id: String,
+    /// Session start time
     pub started_at: DateTime<Utc>,
+    /// Session completion time
     pub completed_at: Option<DateTime<Utc>>,
+    /// Session score
     pub score: f64,
+    /// Number of attempts
     pub attempts: u32,
+    /// Feedback count
     pub feedback_count: u32,
 }
 
@@ -340,75 +415,115 @@ impl Default for ExportOptions {
 /// Data types for selective export/import
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DataType {
+    /// User progress data
     UserProgress,
+    /// Analytics data
     Analytics,
+    /// System configurations
     Configurations,
+    /// Training data
     Training,
+    /// Feedback data
     Feedback,
+    /// Quality metrics
     QualityMetrics,
+    /// Gamification data
     Gamification,
+    /// System logs
     SystemLogs,
 }
 
 /// Custom exercise definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomExercise {
+    /// Exercise identifier
     pub id: String,
+    /// Exercise name
     pub name: String,
+    /// Exercise description
     pub description: String,
+    /// Exercise content
     pub content: String,
+    /// Difficulty level
     pub difficulty: f64,
+    /// Creator user ID
     pub created_by: String,
+    /// Creation timestamp
     pub created_at: DateTime<Utc>,
+    /// Exercise tags
     pub tags: Vec<String>,
 }
 
 /// Training statistics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrainingStatistics {
+    /// Total training sessions
     pub total_sessions: u64,
+    /// Total exercises completed
     pub total_exercises: u64,
+    /// Average score across sessions
     pub average_score: f64,
+    /// Rate of improvement
     pub improvement_rate: f64,
+    /// Time spent in minutes
     pub time_spent_minutes: u64,
 }
 
 /// Achievement data
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Achievement {
+    /// Achievement identifier
     pub id: String,
+    /// Achievement name
     pub name: String,
+    /// Achievement description
     pub description: String,
+    /// Unlock timestamp
     pub unlocked_at: DateTime<Utc>,
+    /// Progress percentage
     pub progress: f64,
 }
 
 /// Leaderboard entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LeaderboardEntry {
+    /// User identifier
     pub user_id: String,
+    /// User score
     pub score: f64,
+    /// User rank
     pub rank: u64,
+    /// Entry timestamp
     pub timestamp: DateTime<Utc>,
 }
 
 /// Points transaction
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PointsTransaction {
+    /// Transaction identifier
     pub transaction_id: String,
+    /// User identifier
     pub user_id: String,
+    /// Points amount
     pub points: i64,
+    /// Transaction reason
     pub reason: String,
+    /// Transaction timestamp
     pub timestamp: DateTime<Utc>,
 }
 
 /// Badge data
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Badge {
+    /// Badge identifier
     pub id: String,
+    /// Badge name
     pub name: String,
+    /// Badge description
     pub description: String,
+    /// Badge icon
     pub icon: String,
+    /// Earn timestamp
     pub earned_at: DateTime<Utc>,
 }
 
@@ -456,31 +571,44 @@ pub trait DataStorage: Send + Sync {
 /// Backup information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupInfo {
+    /// Backup file path
     pub path: String,
+    /// Creation timestamp
     pub created_at: DateTime<Utc>,
+    /// Backup size in bytes
     pub size_bytes: u64,
+    /// Backup format
     pub format: ExportFormat,
+    /// Total record count
     pub record_count: u64,
+    /// Data checksum
     pub checksum: String,
 }
 
 /// Data validation report
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidationReport {
+    /// Whether validation passed
     pub is_valid: bool,
+    /// Validation errors
     pub errors: Vec<String>,
+    /// Validation warnings
     pub warnings: Vec<String>,
+    /// Record counts by type
     pub record_counts: HashMap<String, u64>,
+    /// Integrity check results
     pub integrity_checks: HashMap<String, bool>,
 }
 
 /// File-based data storage implementation
 #[derive(Debug)]
 pub struct FileDataStorage {
+    /// Base directory for storage
     base_directory: String,
 }
 
 impl FileDataStorage {
+    /// Description
     pub fn new(base_directory: String) -> Self {
         Self { base_directory }
     }
@@ -505,9 +633,11 @@ impl DataStorage for FileDataStorage {
             }
             ExportFormat::Binary => {
                 let binary_data =
-                    bincode::serialize(package).map_err(|e| DataManagementError::ExportError {
-                        message: format!("Binary serialization failed: {}", e),
-                    })?;
+                    bincode::serde::encode_to_vec(package, bincode::config::standard()).map_err(
+                        |e| DataManagementError::ExportError {
+                            message: format!("Binary serialization failed: {}", e),
+                        },
+                    )?;
                 fs::write(path, binary_data).await?;
             }
             ExportFormat::CompressedJson => {
@@ -545,9 +675,11 @@ impl DataStorage for FileDataStorage {
                 serde_json::from_str(&json_str)?
             }
             ExportFormat::Binary => {
-                bincode::deserialize(&data).map_err(|e| DataManagementError::ImportError {
-                    message: format!("Binary deserialization failed: {}", e),
-                })?
+                bincode::serde::decode_from_slice(&data, bincode::config::standard())
+                    .map(|(v, _)| v)
+                    .map_err(|e| DataManagementError::ImportError {
+                        message: format!("Binary deserialization failed: {}", e),
+                    })?
             }
             ExportFormat::CompressedJson => {
                 let decompressed = Self::decompress_data(&data)?;

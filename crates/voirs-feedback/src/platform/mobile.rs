@@ -376,8 +376,11 @@ impl PlatformAdapter for MobileAdapter {
 /// Mobile platform types
 #[derive(Debug, Clone, PartialEq)]
 pub enum MobilePlatform {
+    /// Description
     IOS,
+    /// Description
     Android,
+    /// Description
     Unknown,
 }
 
@@ -394,70 +397,110 @@ impl ToString for MobilePlatform {
 /// Device information structure
 #[derive(Debug, Clone)]
 pub struct DeviceInfo {
+    /// Description
     pub platform: MobilePlatform,
+    /// Description
     pub device_model: String,
+    /// Description
     pub os_version: String,
+    /// Description
     pub screen_width: u32,
+    /// Description
     pub screen_height: u32,
+    /// Description
     pub screen_density: f32,
+    /// Description
     pub battery_level: f32,
+    /// Description
     pub is_low_power_mode: bool,
+    /// Description
     pub available_storage: u64,
+    /// Description
     pub total_storage: u64,
+    /// Description
     pub network_type: NetworkType,
 }
 
 /// Network status information
 #[derive(Debug, Clone)]
 pub struct NetworkStatus {
+    /// Description
     pub is_connected: bool,
+    /// Description
     pub network_type: NetworkType,
+    /// Description
     pub is_metered: bool,
+    /// Description
     pub signal_strength: f32,
 }
 
 /// Permission types for mobile platforms
 #[derive(Debug, Clone, PartialEq)]
 pub enum Permission {
+    /// Description
     Microphone,
+    /// Description
     LocalStorage,
+    /// Description
     Notifications,
+    /// Description
     Camera,
+    /// Description
     Location,
+    /// Description
     Bluetooth,
 }
 
 /// Mobile audio configuration
 #[derive(Debug, Clone)]
 pub struct MobileAudioConfig {
+    /// Description
     pub category: AudioCategory,
+    /// Description
     pub mode: AudioMode,
+    /// Description
     pub enable_noise_cancellation: bool,
+    /// Description
     pub enable_echo_cancellation: bool,
+    /// Description
     pub enable_automatic_gain_control: bool,
+    /// Description
     pub prefer_low_latency: bool,
 }
 
 /// Audio category for mobile platforms
 #[derive(Debug, Clone, PartialEq)]
 pub enum AudioCategory {
+    /// Description
     Ambient,
+    /// Description
     SoloAmbient,
+    /// Description
     Playback,
+    /// Description
     Record,
+    /// Description
     PlayAndRecord,
+    /// Description
     MultiRoute,
 }
 
 /// Audio mode for mobile platforms
 #[derive(Debug, Clone, PartialEq)]
 pub enum AudioMode {
+    /// Description
     Default,
+    /// Description
     VoiceChat,
+    /// Description
     GameChat,
+    /// Description
     VideoRecording,
+    /// Description
     Measurement,
+    /// Description
     MoviePlayback,
+    /// Description
     VideoChat,
 }
 
@@ -551,14 +594,23 @@ impl MobileUtils {
 /// Mobile audio settings
 #[derive(Debug, Clone)]
 pub struct MobileAudioSettings {
+    /// Description
     pub sample_rate: u32,
+    /// Description
     pub buffer_size: usize,
+    /// Description
     pub channels: u32,
+    /// Description
     pub enable_echo_cancellation: bool,
+    /// Description
     pub enable_noise_reduction: bool,
+    /// Description
     pub enable_automatic_gain_control: bool,
+    /// Description
     pub enable_low_latency: bool,
+    /// Description
     pub category: AudioCategory,
+    /// Description
     pub mode: AudioMode,
 }
 
@@ -623,13 +675,21 @@ impl MobileUtils {
 /// Performance profile for mobile optimization
 #[derive(Debug, Clone)]
 pub struct PerformanceProfile {
+    /// Description
     pub cpu_usage_limit: f32,
+    /// Description
     pub memory_usage_limit: f32,
+    /// Description
     pub network_usage_limit: f32,
+    /// Description
     pub audio_buffer_size: usize,
+    /// Description
     pub audio_sample_rate: u32,
+    /// Description
     pub enable_background_processing: bool,
+    /// Description
     pub enable_hardware_acceleration: bool,
+    /// Description
     pub enable_power_saving_mode: bool,
 }
 

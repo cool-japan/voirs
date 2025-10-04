@@ -1338,7 +1338,7 @@ impl QueryProcessor {
         // Simulate memory usage with gradual increase and occasional drops
         let base_usage = 60.0;
         let trend = (hour as f64 * 0.5) % 20.0; // Gradual increase with resets
-        let variation = ((hour as f64 * 0.2).cos() * 8.0);
+        let variation = (hour as f64 * 0.2).cos() * 8.0;
         (base_usage + trend + variation).clamp(30.0, 90.0)
     }
 
@@ -1350,7 +1350,7 @@ impl QueryProcessor {
         } else {
             0.0
         };
-        let variation = ((hour as f64 * 0.4).sin().abs() * 30.0);
+        let variation = (hour as f64 * 0.4).sin().abs() * 30.0;
         base_time + peak_delay + variation
     }
 
@@ -1358,7 +1358,7 @@ impl QueryProcessor {
         // Simulate error rate as percentage
         let base_rate = 0.5;
         let spike = if hour % 13 == 0 { 2.0 } else { 0.0 }; // Occasional spikes
-        let variation = ((hour as f64 * 0.1).sin().abs() * 0.3);
+        let variation = (hour as f64 * 0.1).sin().abs() * 0.3;
         (base_rate + spike + variation).clamp(0.0, 5.0)
     }
 
@@ -1370,7 +1370,7 @@ impl QueryProcessor {
         } else {
             0.0
         };
-        let variation = ((hour as f64 * 0.2).cos() * 10.0);
+        let variation = (hour as f64 * 0.2).cos() * 10.0;
         (base_throughput + business_hours_boost + variation).max(5.0)
     }
 

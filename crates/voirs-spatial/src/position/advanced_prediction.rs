@@ -8,7 +8,7 @@ use crate::position::{HeadTracker, MotionSnapshot, Position3D};
 use crate::{Error, Result};
 use candle_core::{Device, Tensor};
 use candle_nn::{linear, Linear, Module, VarBuilder, VarMap};
-use ndarray::Array1;
+use scirs2_core::ndarray::Array1;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};

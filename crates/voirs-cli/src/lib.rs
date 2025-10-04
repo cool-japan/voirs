@@ -6,8 +6,8 @@
 use crate::cli_types::{CliAudioFormat, CliQualityLevel};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
-use voirs::{AudioFormat, QualityLevel, Result, VoirsPipeline};
 use voirs_sdk::config::{AppConfig, PipelineConfig};
+use voirs_sdk::{AudioFormat, QualityLevel, Result, VoirsPipeline};
 
 pub mod audio;
 pub mod cli_types;
@@ -293,8 +293,7 @@ pub enum Commands {
         /// Text to synthesize
         text: String,
 
-        /// Output file path
-        #[arg(short, long)]
+        /// Output file path (use '-' for stdout, omit for auto-generated filename)
         output: Option<PathBuf>,
 
         /// Speaking rate (0.5 - 2.0)
@@ -316,6 +315,10 @@ pub enum Commands {
         /// Enable audio enhancement
         #[arg(long)]
         enhance: bool,
+
+        /// Play audio after synthesis
+        #[arg(short, long)]
+        play: bool,
     },
 
     /// Synthesize from file
@@ -574,6 +577,14 @@ pub enum Commands {
         command: CloudCommands,
     },
 
+    /// Kokoro multilingual TTS commands (requires onnx feature)
+    #[cfg(feature = "onnx")]
+    Kokoro {
+        /// Kokoro subcommand to execute
+        #[command(subcommand)]
+        command: commands::kokoro::KokoroCommands,
+    },
+
     /// Accuracy benchmarking commands
     Accuracy {
         /// Accuracy command configuration
@@ -635,11 +646,65 @@ pub enum Commands {
         command: commands::capabilities::CapabilitiesCommand,
     },
 
+    /// Checkpoint management commands
+    Checkpoint {
+        /// Checkpoint subcommand to execute
+        #[command(subcommand)]
+        command: commands::checkpoint::CheckpointCommands,
+    },
+
     /// Advanced monitoring and debugging commands
     Monitor {
         /// Monitoring subcommand to execute
         #[command(subcommand)]
         command: commands::monitoring::MonitoringCommand,
+    },
+
+    /// Train models (vocoder, acoustic, g2p)
+    Train {
+        /// Training subcommand to execute
+        #[command(subcommand)]
+        command: commands::train::TrainCommands,
+    },
+
+    /// Convert model formats (ONNX, PyTorch → SafeTensors)
+    ConvertModel {
+        /// Input model path
+        input: PathBuf,
+
+        /// Output path (SafeTensors format)
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Source format (auto-detect if not specified)
+        #[arg(long)]
+        from: Option<String>,
+
+        /// Model type (vocoder, acoustic, g2p)
+        #[arg(long)]
+        model_type: String,
+
+        /// Verify conversion by running test inference
+        #[arg(long)]
+        verify: bool,
+    },
+
+    /// Run vocoder inference (mel → audio)
+    VocoderInfer {
+        /// Path to vocoder checkpoint (SafeTensors)
+        checkpoint: PathBuf,
+
+        /// Path to mel spectrogram file (optional, generates dummy if omitted)
+        #[arg(long)]
+        mel: Option<PathBuf>,
+
+        /// Output audio file path
+        #[arg(short, long, default_value = "vocoder_output.wav")]
+        output: PathBuf,
+
+        /// Number of diffusion sampling steps
+        #[arg(long, default_value = "50")]
+        steps: usize,
     },
 }
 
@@ -674,6 +739,7 @@ impl CliApp {
         tracing_subscriber::fmt()
             .with_max_level(level)
             .with_target(false)
+            .with_writer(std::io::stderr) // Always write logs to stderr, not stdout
             .init();
 
         Ok(())
@@ -706,7 +772,7 @@ impl CliApp {
         }
 
         let content =
-            std::fs::read_to_string(config_path).map_err(|e| voirs::VoirsError::IoError {
+            std::fs::read_to_string(config_path).map_err(|e| voirs_sdk::VoirsError::IoError {
                 path: config_path.to_path_buf(),
                 operation: voirs_sdk::error::IoOperation::Read,
                 source: e,
@@ -773,7 +839,7 @@ impl CliApp {
         if trimmed.starts_with('{') {
             // Likely JSON format
             serde_json::from_str(content).map_err(|e| {
-                voirs::VoirsError::config_error(format!(
+                voirs_sdk::VoirsError::config_error(format!(
                     "Failed to parse JSON configuration: {}",
                     e
                 ))
@@ -783,7 +849,7 @@ impl CliApp {
             serde_yaml::from_str(content).or_else(|yaml_err| {
                 // Try TOML as fallback
                 toml::from_str(content).map_err(|toml_err| {
-                    voirs::VoirsError::config_error(format!(
+                    voirs_sdk::VoirsError::config_error(format!(
                         "Failed to parse configuration. YAML error: {}, TOML error: {}",
                         yaml_err, toml_err
                     ))
@@ -795,7 +861,7 @@ impl CliApp {
                 .or_else(|_| serde_json::from_str(content))
                 .or_else(|_| serde_yaml::from_str(content))
                 .map_err(|e| {
-                    voirs::VoirsError::config_error(format!(
+                    voirs_sdk::VoirsError::config_error(format!(
                         "Unable to parse configuration file. Supported formats: TOML, JSON, YAML. Last error: {}", e
                     ))
                 })
@@ -834,6 +900,7 @@ impl CliApp {
                 volume,
                 quality,
                 enhance,
+                play,
             } => {
                 commands::synthesize::run_synthesize(
                     text,
@@ -843,6 +910,7 @@ impl CliApp {
                     *volume,
                     (*quality).into(),
                     *enhance,
+                    *play,
                     &config,
                     &self.global,
                 )
@@ -1031,7 +1099,7 @@ impl CliApp {
                     println!("{}", completion::get_installation_instructions(*shell));
                 } else if let Some(output_path) = output {
                     completion::generate_completion_to_file(*shell, output_path).map_err(|e| {
-                        voirs::VoirsError::IoError {
+                        voirs_sdk::VoirsError::IoError {
                             path: output_path.clone(),
                             operation: voirs_sdk::error::IoOperation::Write,
                             source: e,
@@ -1040,7 +1108,7 @@ impl CliApp {
                     println!("Completion script generated: {}", output_path.display());
                 } else {
                     completion::generate_completion_to_stdout(*shell).map_err(|e| {
-                        voirs::VoirsError::IoError {
+                        voirs_sdk::VoirsError::IoError {
                             path: std::env::current_dir().unwrap_or_default(),
                             operation: voirs_sdk::error::IoOperation::Write,
                             source: e,
@@ -1059,11 +1127,19 @@ impl CliApp {
                 commands::cloud::execute_cloud_command(command, &config, &self.global).await
             }
 
+            #[cfg(feature = "onnx")]
+            Commands::Kokoro { command } => {
+                commands::kokoro::execute_kokoro_command(command, &config, &self.global).await
+            }
+
             Commands::Accuracy { command } => {
                 commands::accuracy::execute_accuracy_command(command.clone())
                     .await
                     .map_err(|e| {
-                        voirs::VoirsError::config_error(format!("Accuracy command failed: {}", e))
+                        voirs_sdk::VoirsError::config_error(format!(
+                            "Accuracy command failed: {}",
+                            e
+                        ))
                     })
             }
 
@@ -1071,7 +1147,7 @@ impl CliApp {
                 commands::performance::execute_performance_command(command.clone())
                     .await
                     .map_err(|e| {
-                        voirs::VoirsError::config_error(format!(
+                        voirs_sdk::VoirsError::config_error(format!(
                             "Performance command failed: {}",
                             e
                         ))
@@ -1085,7 +1161,10 @@ impl CliApp {
                 commands::emotion::execute_emotion_command(command.clone(), &output_formatter)
                     .await
                     .map_err(|e| {
-                        voirs::VoirsError::config_error(format!("Emotion command failed: {}", e))
+                        voirs_sdk::VoirsError::config_error(format!(
+                            "Emotion command failed: {}",
+                            e
+                        ))
                     })
             }
 
@@ -1096,7 +1175,10 @@ impl CliApp {
                 commands::cloning::execute_cloning_command(command.clone(), &output_formatter)
                     .await
                     .map_err(|e| {
-                        voirs::VoirsError::config_error(format!("Cloning command failed: {}", e))
+                        voirs_sdk::VoirsError::config_error(format!(
+                            "Cloning command failed: {}",
+                            e
+                        ))
                     })
             }
 
@@ -1107,7 +1189,10 @@ impl CliApp {
                 commands::conversion::execute_conversion_command(command.clone(), &output_formatter)
                     .await
                     .map_err(|e| {
-                        voirs::VoirsError::config_error(format!("Conversion command failed: {}", e))
+                        voirs_sdk::VoirsError::config_error(format!(
+                            "Conversion command failed: {}",
+                            e
+                        ))
                     })
             }
 
@@ -1118,7 +1203,10 @@ impl CliApp {
                 commands::singing::execute_singing_command(command.clone(), &output_formatter)
                     .await
                     .map_err(|e| {
-                        voirs::VoirsError::config_error(format!("Singing command failed: {}", e))
+                        voirs_sdk::VoirsError::config_error(format!(
+                            "Singing command failed: {}",
+                            e
+                        ))
                     })
             }
 
@@ -1129,7 +1217,10 @@ impl CliApp {
                 commands::spatial::execute_spatial_command(command.clone(), &output_formatter)
                     .await
                     .map_err(|e| {
-                        voirs::VoirsError::config_error(format!("Spatial command failed: {}", e))
+                        voirs_sdk::VoirsError::config_error(format!(
+                            "Spatial command failed: {}",
+                            e
+                        ))
                     })
             }
 
@@ -1143,8 +1234,22 @@ impl CliApp {
                 )
                 .await
                 .map_err(|e| {
-                    voirs::VoirsError::config_error(format!("Capabilities command failed: {}", e))
+                    voirs_sdk::VoirsError::config_error(format!(
+                        "Capabilities command failed: {}",
+                        e
+                    ))
                 })
+            }
+
+            Commands::Checkpoint { command } => {
+                commands::checkpoint::execute_checkpoint_command(command.clone(), &self.global)
+                    .await
+                    .map_err(|e| {
+                        voirs_sdk::VoirsError::config_error(format!(
+                            "Checkpoint command failed: {}",
+                            e
+                        ))
+                    })
             }
 
             Commands::Monitor { command } => {
@@ -1157,9 +1262,53 @@ impl CliApp {
                 )
                 .await
                 .map_err(|e| {
-                    voirs::VoirsError::config_error(format!("Monitoring command failed: {}", e))
+                    voirs_sdk::VoirsError::config_error(format!("Monitoring command failed: {}", e))
                 })
             }
+
+            Commands::Train { command } => {
+                commands::train::execute_train_command(command.clone(), &self.global)
+                    .await
+                    .map_err(|e| {
+                        voirs_sdk::VoirsError::config_error(format!("Train command failed: {}", e))
+                    })
+            }
+
+            Commands::ConvertModel {
+                input,
+                output,
+                from,
+                model_type,
+                verify,
+            } => commands::convert_model::run_convert_model(
+                input.clone(),
+                output.clone(),
+                from.clone(),
+                model_type.clone(),
+                *verify,
+                &self.global,
+            )
+            .await
+            .map_err(|e| {
+                voirs_sdk::VoirsError::config_error(format!("Model conversion failed: {}", e))
+            }),
+
+            Commands::VocoderInfer {
+                checkpoint,
+                mel,
+                output,
+                steps,
+            } => commands::vocoder_inference::run_vocoder_inference(
+                checkpoint.as_path(),
+                mel.as_deref(),
+                output.as_path(),
+                *steps,
+                &self.global,
+            )
+            .await
+            .map_err(|e| {
+                voirs_sdk::VoirsError::config_error(format!("Vocoder inference failed: {}", e))
+            }),
         }
     }
 }
@@ -1168,7 +1317,7 @@ impl CliApp {
 pub mod utils {
     use crate::cli_types::CliAudioFormat;
     use std::path::Path;
-    use voirs::AudioFormat;
+    use voirs_sdk::AudioFormat;
 
     /// Determine output format from file extension
     pub fn format_from_extension(path: &Path) -> Option<AudioFormat> {

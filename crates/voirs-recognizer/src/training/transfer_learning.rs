@@ -28,6 +28,7 @@ pub struct TransferLearningCoordinator {
 
 /// Configuration for transfer learning
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Transfer Learning Config
 pub struct TransferLearningConfig {
     /// Available pre-trained models
     pub pretrained_models: Vec<PretrainedModelInfo>,
@@ -135,6 +136,7 @@ impl Default for TransferLearningConfig {
 
 /// Information about a pre-trained model
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Pretrained Model Info
 pub struct PretrainedModelInfo {
     /// Model name/identifier
     pub name: String,
@@ -152,6 +154,7 @@ pub struct PretrainedModelInfo {
 
 /// Metadata about a pre-trained model
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Model Metadata
 pub struct ModelMetadata {
     /// Number of parameters
     pub parameters: usize,
@@ -167,6 +170,7 @@ pub struct ModelMetadata {
 
 /// Transfer learning strategies
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Transfer Strategy
 pub enum TransferStrategy {
     /// Freeze all layers and only train classifier
     FeatureExtraction,
@@ -180,24 +184,31 @@ pub enum TransferStrategy {
     ProgressiveResizing,
     /// Task-specific layer replacement
     LayerReplacement {
+        /// Layers to replace
         layers_to_replace: Vec<String>,
+        /// Replacement strategy
         replacement_strategy: LayerReplacementStrategy,
     },
 }
 
 /// Layer replacement strategies
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Layer Replacement Strategy
 pub enum LayerReplacementStrategy {
     /// Replace with randomly initialized layers
     RandomInitialization,
     /// Replace with task-specific architecture
     TaskSpecificArchitecture,
     /// Replace with pre-trained layers from another model
-    PretrainedReplacement { source_model: String },
+    PretrainedReplacement {
+        /// Source model path
+        source_model: String,
+    },
 }
 
 /// Layer freezing policy
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Layer Freezing Policy
 pub struct LayerFreezingPolicy {
     /// Regular expression pattern for layer names
     pub layer_pattern: String,
@@ -211,6 +222,7 @@ pub struct LayerFreezingPolicy {
 
 /// Model selection criteria for choosing the best pre-trained model
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Model Selection Criteria
 pub struct ModelSelectionCriteria {
     /// Primary metric for model selection
     pub primary_metric: String,
@@ -235,6 +247,7 @@ pub struct PretrainedModelRegistry {
 }
 
 impl PretrainedModelRegistry {
+    /// new
     pub fn new() -> Self {
         Self {
             models: HashMap::new(),
@@ -395,6 +408,7 @@ pub struct LayerAnalyzer {
 }
 
 impl LayerAnalyzer {
+    /// new
     pub fn new() -> Self {
         Self {
             layer_importance: HashMap::new(),
@@ -580,6 +594,7 @@ pub struct FineTuningScheduler {
 
 /// State of a layer during training
 #[derive(Debug, Clone)]
+/// Layer State
 pub struct LayerState {
     /// Whether layer is currently frozen
     pub is_frozen: bool,
@@ -591,6 +606,7 @@ pub struct LayerState {
 
 /// Scheduled event for layer modification
 #[derive(Debug, Clone)]
+/// Scheduled Event
 pub struct ScheduledEvent {
     /// Epoch when event should occur
     pub epoch: u32,
@@ -602,19 +618,25 @@ pub struct ScheduledEvent {
 
 /// Types of scheduled events
 #[derive(Debug, Clone)]
+/// Scheduled Event Type
 pub enum ScheduledEventType {
     /// Unfreeze layers
     Unfreeze,
     /// Change learning rate
-    ChangeLearningRate { new_scale: f32 },
+    ChangeLearningRate {
+        /// New learning rate scale
+        new_scale: f32,
+    },
     /// Replace layers
     ReplaceLayers {
+        /// Replacement config
         replacement_config: LayerReplacementConfig,
     },
 }
 
 /// Layer replacement configuration
 #[derive(Debug, Clone)]
+/// Layer Replacement Config
 pub struct LayerReplacementConfig {
     /// New layer specifications
     pub new_layers: Vec<LayerConfiguration>,
@@ -624,6 +646,7 @@ pub struct LayerReplacementConfig {
 
 /// Initialization strategies for new layers
 #[derive(Debug, Clone)]
+/// Initialization Strategy
 pub enum InitializationStrategy {
     /// Random initialization
     Random,
@@ -632,10 +655,14 @@ pub enum InitializationStrategy {
     /// He initialization
     He,
     /// Copy from another model
-    CopyFromModel { source_model_path: PathBuf },
+    CopyFromModel {
+        /// Path to source model
+        source_model_path: PathBuf,
+    },
 }
 
 impl FineTuningScheduler {
+    /// new
     pub fn new() -> Self {
         Self {
             current_epoch: 0,
@@ -727,6 +754,7 @@ impl FineTuningScheduler {
 
 /// Layer modification instruction
 #[derive(Debug, Clone)]
+/// Layer Modification
 pub struct LayerModification {
     /// Pattern matching layers to modify
     pub layer_pattern: String,
@@ -736,19 +764,28 @@ pub struct LayerModification {
 
 /// Types of layer modifications
 #[derive(Debug, Clone)]
+/// Layer Modification Type
 pub enum LayerModificationType {
     /// Unfreeze layers
     Unfreeze,
     /// Freeze layers
+    /// New learning rate scale
     Freeze,
     /// Change learning rate
-    ChangeLearningRate { new_scale: f32 },
+    ChangeLearningRate {
+        /// New learning rate scale
+        new_scale: f32,
+    },
     /// Replace layers
-    ReplaceLayers { config: LayerReplacementConfig },
+    ReplaceLayers {
+        /// Layer replacement configuration
+        config: LayerReplacementConfig,
+    },
 }
 
 /// Progress tracking for transfer learning
 #[derive(Debug, Clone)]
+/// Transfer Learning Progress
 pub struct TransferLearningProgress {
     /// Current phase
     pub current_phase: TransferLearningPhase,
@@ -768,6 +805,7 @@ pub struct TransferLearningProgress {
 
 /// Phases of transfer learning
 #[derive(Debug, Clone, PartialEq)]
+/// Transfer Learning Phase
 pub enum TransferLearningPhase {
     /// Selecting best pre-trained model
     ModelSelection,
@@ -787,6 +825,7 @@ pub enum TransferLearningPhase {
 
 /// Task specification for transfer learning
 #[derive(Debug, Clone)]
+/// Task Specification
 pub struct TaskSpecification {
     /// Target domain
     pub domain: String,
@@ -802,6 +841,7 @@ pub struct TaskSpecification {
 
 /// Types of tasks for transfer learning
 #[derive(Debug, Clone, PartialEq)]
+/// Task Type
 pub enum TaskType {
     /// Speech recognition
     SpeechRecognition,
@@ -810,11 +850,15 @@ pub enum TaskType {
     /// Speaker identification
     SpeakerIdentification,
     /// Emotion recognition
+    /// Custom task description
     EmotionRecognition,
     /// Keyword spotting
     KeywordSpotting,
     /// Custom task
-    Custom { task_description: String },
+    Custom {
+        /// Description of the custom task
+        task_description: String,
+    },
 }
 
 impl TransferLearningCoordinator {

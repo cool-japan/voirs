@@ -2,18 +2,18 @@
 
 use std::time::Duration;
 
-/// Synthesis result
+/// Synthesis result containing audio and metadata
 #[derive(Debug, Clone)]
 pub struct SynthesisResult {
-    /// Synthesized audio
+    /// Synthesized audio samples in range [-1.0, 1.0]
     pub audio: Vec<f32>,
-    /// Sample rate
+    /// Sample rate in Hz
     pub sample_rate: f32,
-    /// Duration
+    /// Total duration of audio
     pub duration: Duration,
-    /// Performance statistics
+    /// Performance statistics from synthesis
     pub stats: SynthesisStats,
-    /// Quality metrics
+    /// Quality metrics for the synthesized audio
     pub quality_metrics: QualityMetrics,
 }
 
@@ -191,21 +191,43 @@ impl PrecisionMetricsReport {
 
 impl SynthesisResult {
     /// Get duration in seconds
+    ///
+    /// # Returns
+    ///
+    /// Duration as floating point seconds
     pub fn duration_secs(&self) -> f32 {
         self.duration.as_secs_f32()
     }
 
     /// Get audio length in samples
+    ///
+    /// # Returns
+    ///
+    /// Number of audio samples
     pub fn sample_count(&self) -> usize {
         self.audio.len()
     }
 
     /// Check if the result meets quality thresholds
+    ///
+    /// # Arguments
+    ///
+    /// * `threshold` - Minimum quality score (0.0-1.0)
+    ///
+    /// # Returns
+    ///
+    /// true if quality meets or exceeds threshold
     pub fn meets_quality_threshold(&self, threshold: f32) -> bool {
         self.quality_metrics.overall_quality >= threshold
     }
 
     /// Get audio as 16-bit PCM samples
+    ///
+    /// Converts normalized float samples to 16-bit integers.
+    ///
+    /// # Returns
+    ///
+    /// Vector of 16-bit PCM samples
     pub fn to_pcm16(&self) -> Vec<i16> {
         self.audio
             .iter()

@@ -83,31 +83,58 @@ pub type PluginResult<T> = std::result::Result<T, PluginError>;
 pub enum PluginError {
     /// Plugin not found
     #[error("Plugin not found: {name}")]
-    NotFound { name: String },
+    NotFound {
+        /// Name of the missing plugin
+        name: String,
+    },
 
     /// Plugin already registered
     #[error("Plugin already registered: {name} version {version}")]
-    AlreadyRegistered { name: String, version: String },
+    AlreadyRegistered {
+        /// Name of the plugin
+        name: String,
+        /// Version string of the plugin
+        version: String,
+    },
 
     /// Plugin initialization failed
     #[error("Plugin initialization failed: {reason}")]
-    InitializationFailed { reason: String },
+    InitializationFailed {
+        /// Reason for initialization failure
+        reason: String,
+    },
 
     /// Plugin execution error
     #[error("Plugin execution error in {plugin}: {reason}")]
-    ExecutionError { plugin: String, reason: String },
+    ExecutionError {
+        /// Name of the plugin that failed
+        plugin: String,
+        /// Reason for execution failure
+        reason: String,
+    },
 
     /// Invalid plugin configuration
     #[error("Invalid plugin configuration: {reason}")]
-    InvalidConfiguration { reason: String },
+    InvalidConfiguration {
+        /// Reason for configuration invalidity
+        reason: String,
+    },
 
     /// Plugin API version mismatch
     #[error("Plugin API version mismatch: expected {expected}, got {actual}")]
-    VersionMismatch { expected: String, actual: String },
+    VersionMismatch {
+        /// Expected API version
+        expected: String,
+        /// Actual API version found
+        actual: String,
+    },
 
     /// Plugin dependency missing
     #[error("Plugin dependency missing: {dependency}")]
-    DependencyMissing { dependency: String },
+    DependencyMissing {
+        /// Name of the missing dependency
+        dependency: String,
+    },
 }
 
 /// Plugin metadata information

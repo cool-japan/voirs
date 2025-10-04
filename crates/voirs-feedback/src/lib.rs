@@ -135,8 +135,10 @@ pub mod data_management;
 pub mod data_pipeline;
 #[cfg(feature = "adaptive")]
 pub mod deep_learning_feedback;
+/// Description
 pub mod emotional_intelligence;
 pub mod enhanced_performance;
+/// Description
 pub mod enterprise;
 pub mod error_context;
 #[cfg(feature = "gamification")]
@@ -168,22 +170,16 @@ pub mod visualization;
 // Re-export all public types from traits
 pub use traits::*;
 
-// Re-export implementations
-pub use adaptive::*;
-pub use enhanced_performance::*;
-pub use memory_monitor::*;
-pub use metrics_dashboard::*;
-pub use persistence::*;
-pub use progress::*;
-pub use realtime::*;
-pub use training::*;
-pub use ux_analytics::*;
+// Re-export core types needed by FeedbackSystem
+pub use adaptive::core::AdaptiveFeedbackEngine;
+pub use progress::core::ProgressAnalyzer;
+pub use realtime::stream::FeedbackStream;
+pub use realtime::system::RealtimeFeedbackSystem;
+pub use training::core::InteractiveTrainer;
 
-#[cfg(feature = "gamification")]
-pub use gamification::*;
-
-#[cfg(feature = "ui")]
-pub use visualization::*;
+// Note: Full feature modules are not glob re-exported to avoid ambiguity.
+// Import from specific modules: feedback::adaptive::*, feedback::training::*, etc.
+// Or use the prelude: use voirs_feedback::prelude::*;
 
 /// Version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -198,7 +194,8 @@ pub mod prelude {
         TrainingProvider, TrainingResult, UserFeedback,
     };
 
-    pub use crate::adaptive::{AdaptiveFeedbackEngine, LearningStyle};
+    pub use crate::adaptive::core::AdaptiveFeedbackEngine;
+    pub use crate::adaptive::types::LearningStyle;
     pub use crate::cloud_deployment::{
         CloudOrchestrator, CloudProvider, DeploymentConfig, KubernetesOrchestrator,
     };
@@ -218,19 +215,25 @@ pub mod prelude {
     pub use crate::load_balancer::{
         LoadBalancer, LoadBalancerConfig, LoadBalancingAlgorithm, WorkerNode,
     };
-    pub use crate::progress::ProgressAnalyzer;
+    pub use crate::progress::core::ProgressAnalyzer;
     pub use crate::quality_monitor::{
         QualityAlert, QualityMetrics, QualityMonitor, QualityMonitorConfig,
     };
-    pub use crate::realtime::{FeedbackStream, RealtimeFeedbackSystem};
-    pub use crate::training::{InteractiveTrainer, TrainingSession};
+    pub use crate::realtime::stream::FeedbackStream;
+    pub use crate::realtime::system::RealtimeFeedbackSystem;
+    pub use crate::training::core::InteractiveTrainer;
+    pub use crate::training::types::TrainingSession;
     pub use crate::traits::UserProgress;
 
     #[cfg(feature = "gamification")]
-    pub use crate::gamification::{AchievementSystem, Leaderboard};
+    pub use crate::gamification::achievements::AchievementSystem;
+    #[cfg(feature = "gamification")]
+    pub use crate::gamification::Leaderboard;
 
     #[cfg(feature = "ui")]
-    pub use crate::visualization::{FeedbackVisualizer, ProgressChart};
+    pub use crate::visualization::core::FeedbackVisualizer;
+    #[cfg(feature = "ui")]
+    pub use crate::visualization::charts::ProgressChart;
 
     // Re-export SDK types
     pub use voirs_evaluation::{ComparisonResult, PronunciationScore, QualityScore};
@@ -512,7 +515,7 @@ impl FeedbackSystem {
         #[cfg(feature = "persistence")]
         let persistence_manager = {
             use crate::persistence::backends::sqlite::SQLitePersistenceManager;
-            use crate::persistence::{PersistenceBackend, PersistenceConfig};
+            use crate::persistence::{PersistenceBackend, PersistenceConfig, PersistenceManager};
 
             let persistence_config = PersistenceConfig {
                 backend: PersistenceBackend::SQLite,

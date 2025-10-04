@@ -10,7 +10,8 @@
 use super::encoder::WhisperConfig;
 use crate::RecognitionError;
 use candle_core::{Device, Tensor};
-use rustfft::{num_complex::Complex, FftPlanner};
+use scirs2_core::Complex;
+use scirs2_fft::{FftPlanner, RealFftPlanner};
 use voirs_sdk::AudioBuffer;
 
 /// Audio processor for Whisper
@@ -251,10 +252,7 @@ impl WhisperAudioProcessor {
         let n_frames = (samples.len() - n_fft) / hop_length + 1;
         let n_freqs = n_fft / 2 + 1;
 
-        // Use rustfft for FFT computation
-        let mut planner = FftPlanner::new();
-        let fft = planner.plan_fft_forward(n_fft);
-
+        // Use scirs2_fft for FFT computation
         let mut stft_real = vec![0.0f32; n_frames * n_freqs];
         let mut stft_imag = vec![0.0f32; n_frames * n_freqs];
 
@@ -275,23 +273,28 @@ impl WhisperAudioProcessor {
             }
 
             // Apply window and prepare for FFT
-            let mut fft_input: Vec<Complex<f32>> = (0..n_fft)
+            let windowed_frame: Vec<f64> = (0..n_fft)
                 .map(|i| {
                     let sample = if frame_start + i < samples.len() {
                         samples[frame_start + i] * window_data[i]
                     } else {
                         0.0
                     };
-                    Complex::new(sample, 0.0)
+                    sample as f64
                 })
                 .collect();
 
-            // Compute FFT
-            fft.process(&mut fft_input);
+            // Compute real FFT using scirs2_fft functional API
+            let spectrum = scirs2_fft::rfft(&windowed_frame, None).map_err(|e| {
+                RecognitionError::AudioProcessingError {
+                    message: format!("FFT computation failed: {e}"),
+                    source: None,
+                }
+            })?;
 
             // Store magnitude spectrum (only positive frequencies)
-            for (freq_idx, &fft_val) in fft_input.iter().take(n_freqs).enumerate() {
-                let magnitude = fft_val.norm();
+            for (freq_idx, &fft_val) in spectrum.iter().take(n_freqs).enumerate() {
+                let magnitude = (fft_val.re * fft_val.re + fft_val.im * fft_val.im).sqrt() as f32;
                 stft_real[frame_idx * n_freqs + freq_idx] = magnitude;
                 stft_imag[frame_idx * n_freqs + freq_idx] = 0.0; // We only need magnitude
             }
@@ -458,18 +461,21 @@ impl WhisperAudioProcessor {
 
     /// Get audio processing configuration
     #[must_use]
+    /// config
     pub fn config(&self) -> &WhisperConfig {
         &self.config
     }
 
     /// Get mel filter bank
     #[must_use]
+    /// mel filters
     pub fn mel_filters(&self) -> &Tensor {
         &self.mel_filters
     }
 
     /// Get window function
     #[must_use]
+    /// window
     pub fn window(&self) -> &Tensor {
         &self.window
     }

@@ -19,7 +19,7 @@ pub use quality_metrics::*;
 use crate::hifigan::HiFiGanVocoder;
 use crate::{MelSpectrogram, Vocoder};
 use anyhow::Result;
-use ndarray::Array2;
+use scirs2_core::ndarray::Array2;
 use serde::{Deserialize, Serialize};
 
 /// 3D spatial audio vocoder for immersive audio experiences

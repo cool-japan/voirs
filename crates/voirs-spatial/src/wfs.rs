@@ -6,9 +6,9 @@
 
 use crate::types::Position3D;
 use crate::{Error, Result};
-use ndarray::{Array1, Array2, Axis};
-use num_complex::Complex32;
-use realfft::{RealFftPlanner, RealToComplex};
+use scirs2_core::ndarray::{s, Array1, Array2, Axis};
+use scirs2_core::Complex32;
+use scirs2_fft::{irfft, rfft, FftPlanner, RealFftPlanner, RealToComplex};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::f32::consts::PI;
@@ -111,7 +111,7 @@ pub struct WfsProcessor {
     /// Forward FFT
     forward_fft: Arc<dyn RealToComplex<f32>>,
     /// Inverse FFT
-    inverse_fft: Arc<dyn realfft::ComplexToReal<f32>>,
+    inverse_fft: Arc<dyn scirs2_fft::ComplexToReal<f32>>,
     /// Speaker driving functions cache
     driving_functions_cache: HashMap<String, Vec<WfsDrivingFunction>>,
     /// Processing buffers
@@ -377,8 +377,8 @@ impl WfsProcessor {
             let output_length = output_length.min(processed_signal.len());
             output
                 .row_mut(speaker_idx)
-                .slice_mut(ndarray::s![..output_length])
-                .assign(&processed_signal.slice(ndarray::s![..output_length]));
+                .slice_mut(s![..output_length])
+                .assign(&processed_signal.slice(s![..output_length]));
         }
 
         Ok(output)
@@ -403,8 +403,8 @@ impl WfsProcessor {
             if start_idx < signal_length {
                 let copy_length = signal_length - start_idx;
                 output
-                    .slice_mut(ndarray::s![start_idx..])
-                    .assign(&signal.slice(ndarray::s![..copy_length]));
+                    .slice_mut(s![start_idx..])
+                    .assign(&signal.slice(s![..copy_length]));
             }
         }
 
@@ -442,17 +442,15 @@ impl WfsProcessor {
         // Copy signal to padded buffer
         let copy_length = signal.len().min(buffer_size);
         padded_signal
-            .slice_mut(ndarray::s![..copy_length])
-            .assign(&signal.slice(ndarray::s![..copy_length]));
+            .slice_mut(s![..copy_length])
+            .assign(&signal.slice(s![..copy_length]));
 
         // Transform to frequency domain
         let mut spectrum = Array1::zeros(frequency_response.len());
-        self.forward_fft
-            .process(
-                padded_signal.as_slice_mut().unwrap(),
-                spectrum.as_slice_mut().unwrap(),
-            )
-            .map_err(|e| Error::LegacyProcessing(format!("FFT error: {e:?}")))?;
+        self.forward_fft.process(
+            padded_signal.as_slice().unwrap(),
+            spectrum.as_slice_mut().unwrap(),
+        );
 
         // Apply frequency response
         for (spectrum_bin, &response) in spectrum.iter_mut().zip(frequency_response.iter()) {
@@ -462,14 +460,10 @@ impl WfsProcessor {
         // Transform back to time domain
         let mut result = Array1::zeros(buffer_size);
         self.inverse_fft
-            .process(
-                spectrum.as_slice_mut().unwrap(),
-                result.as_slice_mut().unwrap(),
-            )
-            .map_err(|e| Error::LegacyProcessing(format!("IFFT error: {e:?}")))?;
+            .process(spectrum.as_slice().unwrap(), result.as_slice_mut().unwrap());
 
         // Return original length
-        Ok(result.slice(ndarray::s![..signal.len()]).to_owned())
+        Ok(result.slice(s![..signal.len()]).to_owned())
     }
 
     /// Update source position (invalidates cache for that source)

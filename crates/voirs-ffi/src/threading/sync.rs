@@ -28,19 +28,19 @@ impl<T> VoirsRwLock<T> {
     }
 
     /// Acquire a read lock
-    pub fn read(&self) -> parking_lot::RwLockReadGuard<T> {
+    pub fn read(&self) -> parking_lot::RwLockReadGuard<'_, T> {
         self.read_count.fetch_add(1, Ordering::Relaxed);
         self.inner.read()
     }
 
     /// Acquire a write lock
-    pub fn write(&self) -> parking_lot::RwLockWriteGuard<T> {
+    pub fn write(&self) -> parking_lot::RwLockWriteGuard<'_, T> {
         self.write_count.fetch_add(1, Ordering::Relaxed);
         self.inner.write()
     }
 
     /// Try to acquire a read lock without blocking
-    pub fn try_read(&self) -> Option<parking_lot::RwLockReadGuard<T>> {
+    pub fn try_read(&self) -> Option<parking_lot::RwLockReadGuard<'_, T>> {
         self.inner.try_read().map(|guard| {
             self.read_count.fetch_add(1, Ordering::Relaxed);
             guard
@@ -48,7 +48,7 @@ impl<T> VoirsRwLock<T> {
     }
 
     /// Try to acquire a write lock without blocking
-    pub fn try_write(&self) -> Option<parking_lot::RwLockWriteGuard<T>> {
+    pub fn try_write(&self) -> Option<parking_lot::RwLockWriteGuard<'_, T>> {
         self.inner.try_write().map(|guard| {
             self.write_count.fetch_add(1, Ordering::Relaxed);
             guard

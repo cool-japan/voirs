@@ -7,7 +7,7 @@ use crate::visualization::types::{
     ActiveGoal, InstantFeedback, LayoutPreferences, RealtimeDashboardData,
 };
 #[cfg(feature = "ui")]
-use egui::{Color32, Pos2, Rect, Stroke, Ui, Vec2};
+use egui::{Color32, Pos2, Rect, Stroke, StrokeKind, Ui, Vec2};
 use std::collections::HashMap;
 
 // ============================================================================
@@ -319,7 +319,12 @@ impl RealtimeDashboard {
                 painter.rect_filled(fill_rect, 5.0, Color32::from_rgb(100, 150, 255));
 
                 // Border
-                painter.rect_stroke(rect, 5.0, Stroke::new(1.0, Color32::WHITE));
+                painter.rect_stroke(
+                    rect,
+                    5.0,
+                    Stroke::new(1.0, Color32::WHITE),
+                    StrokeKind::Middle,
+                );
 
                 // Progress text
                 painter.text(

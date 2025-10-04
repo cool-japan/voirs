@@ -179,9 +179,9 @@ impl ReviewSession {
         let mut sample_queue: VecDeque<String> = sample_ids.into_iter().collect();
 
         if config.randomize_order {
-            use rand::seq::SliceRandom;
+            use scirs2_core::random::seq::SliceRandom;
             let mut vec: Vec<String> = sample_queue.into_iter().collect();
-            vec.shuffle(&mut rand::thread_rng());
+            vec.shuffle(&mut scirs2_core::random::thread_rng());
             sample_queue = vec.into_iter().collect();
         }
 

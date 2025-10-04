@@ -47,6 +47,7 @@ fn test_synthesize_with_options() {
             volume,
             quality,
             enhance,
+            play,
         } => {
             assert_eq!(text, "Test text");
             assert_eq!(output.unwrap().to_str().unwrap(), "test.wav");
@@ -54,6 +55,7 @@ fn test_synthesize_with_options() {
             assert_eq!(pitch, 2.0);
             assert_eq!(volume, 5.0);
             assert!(enhance);
+            assert!(!play); // Default is false
         }
         _ => panic!("Expected Synthesize command"),
     }

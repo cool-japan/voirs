@@ -36,3 +36,4 @@
 - [Quality Metrics](./quality-metrics.md)
 - [Troubleshooting](./troubleshooting.md)
 - [FAQ](./faq.md)
+ - [WebAssembly Build Guide](./wasm.md)

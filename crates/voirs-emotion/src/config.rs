@@ -542,12 +542,19 @@ impl Default for PluginSystemConfig {
 }
 
 /// Convenience type aliases for backward compatibility with existing code
+/// Alias for `LearningConfig` - configuration for emotion learning system
 pub type EmotionLearningConfig = LearningConfig;
+/// Alias for `HistoryConfig` - configuration for emotion history tracking
 pub type EmotionHistoryConfig = HistoryConfig;
+/// Alias for `VariationConfig` - configuration for natural emotion variation
 pub type NaturalVariationConfig = VariationConfig;
+/// Alias for `ABTestingConfig` - configuration for A/B testing of emotion models
 pub type ABTestConfig = ABTestingConfig;
+/// Alias for `RecognitionConfig` - configuration for emotion recognition system
 pub type EmotionRecognitionConfig = RecognitionConfig;
+/// Alias for `ConsistencyConfig` - configuration for emotion consistency validation
 pub type EmotionConsistencyConfig = ConsistencyConfig;
+/// Alias for `RealtimeConfig` - configuration for real-time emotion processing
 pub type RealtimeEmotionConfig = RealtimeConfig;
 
 // === Unified Sub-Configuration Structures ===

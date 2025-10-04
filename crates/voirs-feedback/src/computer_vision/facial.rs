@@ -3,21 +3,29 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::time::SystemTime;
 
+/// Description
 pub struct LipMovementModel {
     previous_lip_state: Option<Vec<Point2D>>,
     movement_history: Vec<MovementData>,
 }
 
 #[derive(Clone)]
+/// Description
 pub struct MovementData {
+    /// Description
     pub vertical: f32,
+    /// Description
     pub horizontal: f32,
+    /// Description
     pub velocity: f32,
+    /// Description
     pub clarity: f32,
+    /// Description
     pub sync_score: f32,
 }
 
 impl LipMovementModel {
+    /// Description
     pub fn new() -> Self {
         Self {
             previous_lip_state: None,
@@ -25,6 +33,7 @@ impl LipMovementModel {
         }
     }
 
+    /// Description
     pub async fn analyze_movement(&mut self, lip_points: &[Point2D]) -> MovementData {
         let movement_data = if let Some(ref previous) = self.previous_lip_state {
             self.calculate_movement(previous, lip_points)
@@ -122,11 +131,13 @@ impl LipMovementModel {
     }
 }
 
+/// Description
 pub struct ExpressionClassifier {
     expression_models: HashMap<ExpressionType, Vec<f32>>,
 }
 
 impl ExpressionClassifier {
+    /// Description
     pub fn new() -> Self {
         Self {
             expression_models: Self::initialize_models(),
@@ -145,6 +156,7 @@ impl ExpressionClassifier {
         models
     }
 
+    /// Description
     pub async fn classify(&self, features: &[f32]) -> (ExpressionType, f32, f32) {
         let mut best_score = 0.0;
         let mut best_expression = ExpressionType::Neutral;
@@ -160,6 +172,7 @@ impl ExpressionClassifier {
         (best_expression, best_score, best_score)
     }
 
+    /// Description
     pub async fn get_secondary_expressions(&self, features: &[f32]) -> Vec<(ExpressionType, f32)> {
         let mut scores: Vec<(ExpressionType, f32)> = self
             .expression_models
@@ -192,12 +205,14 @@ impl ExpressionClassifier {
     }
 }
 
+/// Description
 pub struct FacialAnalyzer {
     lip_movement_model: LipMovementModel,
     expression_classifier: ExpressionClassifier,
 }
 
 impl FacialAnalyzer {
+    /// Description
     pub fn new() -> Self {
         Self {
             lip_movement_model: LipMovementModel::new(),
@@ -205,6 +220,7 @@ impl FacialAnalyzer {
         }
     }
 
+    /// Description
     pub async fn analyze_lip_movement(
         &mut self,
         _frame: &VideoFrame,
@@ -232,6 +248,7 @@ impl FacialAnalyzer {
         })
     }
 
+    /// Description
     pub async fn recognize_facial_expression(
         &self,
         _frame: &VideoFrame,

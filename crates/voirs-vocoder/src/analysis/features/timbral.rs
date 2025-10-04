@@ -9,7 +9,7 @@
 //! - Noisiness
 
 use crate::{Result, VocoderError};
-use ndarray::Array2;
+use scirs2_core::ndarray::Array2;
 
 /// Timbral features
 #[derive(Debug, Clone)]
@@ -75,7 +75,7 @@ pub trait TimbralFeatureComputer {
 
 impl TimbralFeatureComputer for crate::analysis::features::FeatureExtractor {
     fn compute_timbral_features(&self, audio: &[f32]) -> Result<TimbralFeatureVector> {
-        let samples = ndarray::Array1::from_vec(audio.to_vec());
+        let samples = scirs2_core::ndarray::Array1::from_vec(audio.to_vec());
         let power_spectrogram = self.compute_power_spectrogram_const(&samples)?;
         self.extract_timbral_features(&power_spectrogram)
     }

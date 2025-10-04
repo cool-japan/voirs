@@ -6,21 +6,31 @@ use wasm_bindgen::prelude::*;
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent, Worker};
 
 #[derive(Serialize, Deserialize)]
+/// Worker Message
 pub struct WorkerMessage {
+    /// id
     pub id: String,
+    /// command
     pub command: String,
+    /// data
     pub data: serde_json::Value,
 }
 
 #[derive(Serialize, Deserialize)]
+/// Worker Response
 pub struct WorkerResponse {
+    /// id
     pub id: String,
+    /// success
     pub success: bool,
+    /// data
     pub data: Option<serde_json::Value>,
+    /// error
     pub error: Option<String>,
 }
 
 #[wasm_bindgen]
+/// Wasm Recognizer Worker
 pub struct WasmRecognizerWorker {
     recognizer: WasmVoirsRecognizer,
     worker_scope: Option<DedicatedWorkerGlobalScope>,
@@ -29,6 +39,7 @@ pub struct WasmRecognizerWorker {
 #[wasm_bindgen]
 impl WasmRecognizerWorker {
     #[wasm_bindgen(constructor)]
+    /// new
     pub fn new() -> Self {
         crate::wasm::utils::set_panic_hook();
 
@@ -43,6 +54,7 @@ impl WasmRecognizerWorker {
     }
 
     #[wasm_bindgen]
+    /// start worker
     pub fn start_worker(&self) {
         if let Some(scope) = &self.worker_scope {
             let closure = Closure::wrap(Box::new(move |event: MessageEvent| {
@@ -60,6 +72,7 @@ impl WasmRecognizerWorker {
     }
 
     #[wasm_bindgen]
+    /// handle message
     pub async fn handle_message(&mut self, message: JsValue) -> Result<JsValue, JsValue> {
         let worker_msg: WorkerMessage = message
             .into_serde()
@@ -251,6 +264,7 @@ impl WasmRecognizerWorker {
     }
 
     #[wasm_bindgen]
+    /// post response
     pub fn post_response(&self, response: &JsValue) {
         if let Some(scope) = &self.worker_scope {
             if let Err(e) = scope.post_message(response) {
@@ -269,6 +283,7 @@ impl Default for WasmRecognizerWorker {
 // Helper functions for web worker integration
 
 #[wasm_bindgen]
+/// create recognizer worker script
 pub fn create_recognizer_worker_script() -> String {
     r#"
 // Web Worker script for VoiRS Recognizer
@@ -322,6 +337,7 @@ console.log('VoiRS Recognizer Worker script loaded');
 }
 
 #[wasm_bindgen]
+/// get worker capabilities
 pub fn get_worker_capabilities() -> JsValue {
     let capabilities = serde_json::json!({
         "web_workers": true,

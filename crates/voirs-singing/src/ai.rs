@@ -329,9 +329,8 @@ impl StyleTransfer {
         let preservation = self.calculate_preservation(source, transferred, config)?;
 
         // Overall quality: Weighted combination
-        let overall_quality = (consistency * 0.4 + naturalness * 0.3 + preservation * 0.3)
-            .min(1.0)
-            .max(0.0);
+        let overall_quality =
+            (consistency * 0.4 + naturalness * 0.3 + preservation * 0.3).clamp(0.0, 1.0);
 
         Ok(TransferQualityMetrics {
             consistency,
@@ -355,7 +354,7 @@ impl StyleTransfer {
         // Simple heuristic: consistency based on how "natural" the values are
         let consistency = (brightness + warmth + (1.0 - breathiness)) / 3.0;
 
-        Ok(consistency.max(0.0).min(1.0))
+        Ok(consistency.clamp(0.0, 1.0))
     }
 
     /// Calculate naturalness score
@@ -790,27 +789,23 @@ impl EmotionRecognizer {
         voice_chars: &VoiceCharacteristics,
         expression_features: &ExpressionFeatures,
     ) -> Result<Vec<f32>> {
-        let mut features = Vec::new();
-
-        // Voice characteristics features
-        features.push(voice_chars.timbre.get("brightness").copied().unwrap_or(0.5));
-        features.push(voice_chars.timbre.get("warmth").copied().unwrap_or(0.5));
-        features.push(
+        // Voice characteristics features + Expression features
+        let features = vec![
+            voice_chars.timbre.get("brightness").copied().unwrap_or(0.5),
+            voice_chars.timbre.get("warmth").copied().unwrap_or(0.5),
             voice_chars
                 .timbre
                 .get("breathiness")
                 .copied()
                 .unwrap_or(0.3),
-        );
-        features.push(voice_chars.timbre.get("roughness").copied().unwrap_or(0.2));
-        features.push(voice_chars.vocal_power);
-
-        // Expression features
-        features.push(expression_features.volume);
-        features.push(expression_features.vibrato_rate);
-        features.push(expression_features.vibrato_depth);
-        features.push(expression_features.tremolo_rate);
-        features.push(expression_features.tremolo_depth);
+            voice_chars.timbre.get("roughness").copied().unwrap_or(0.2),
+            voice_chars.vocal_power,
+            expression_features.volume,
+            expression_features.vibrato_rate,
+            expression_features.vibrato_depth,
+            expression_features.tremolo_rate,
+            expression_features.tremolo_depth,
+        ];
 
         Ok(features)
     }

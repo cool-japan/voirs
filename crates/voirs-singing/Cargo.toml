@@ -12,6 +12,10 @@ categories = ["multimedia::audio", "multimedia", "science"]
 keywords = ["voice", "singing", "synthesis", "music", "audio"]
 
 [dependencies]
+# SciRS2 - Scientific computing abstractions
+scirs2-core = { workspace = true }
+scirs2-fft = { workspace = true }
+
 # Core dependencies
 candle-core = { workspace = true }
 candle-nn = { workspace = true }
@@ -22,18 +26,12 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 
 # Audio processing
-rustfft = { workspace = true }
 dasp = { workspace = true }
 hound = { workspace = true }
 
 # Musical processing
 musicxml = { workspace = true, optional = true }
 midly = { workspace = true, optional = true }
-
-# Numerical computing
-ndarray = { workspace = true }
-rand = { workspace = true }
-nalgebra = { workspace = true }
 
 # Utilities
 uuid = { workspace = true, features = ["v4", "serde"] }

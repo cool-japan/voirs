@@ -28,44 +28,44 @@ pub struct VoiceBlender {
 /// Voice blend state
 #[derive(Debug, Clone)]
 pub struct BlendState {
-    /// Source voice characteristics
+    /// Source voice characteristics (starting point of transition)
     pub source_voice: VoiceCharacteristics,
-    /// Target voice characteristics
+    /// Target voice characteristics (ending point of transition)
     pub target_voice: VoiceCharacteristics,
-    /// Current blend progress (0.0-1.0)
+    /// Current blend progress (0.0 = source, 1.0 = target)
     pub blend_progress: f32,
-    /// Blend direction (1.0 = forward, -1.0 = reverse)
+    /// Blend direction (1.0 = forward toward target, -1.0 = reverse toward source)
     pub blend_direction: f32,
-    /// Transition start time
+    /// Transition start time (used for time-based progress calculation)
     pub transition_start: std::time::Instant,
-    /// Transition duration
+    /// Transition duration (total time for blend to complete)
     pub transition_duration: Duration,
-    /// Is transition active
+    /// Is transition currently active
     pub is_transitioning: bool,
-    /// Current blended voice
+    /// Current blended voice characteristics (interpolated result)
     pub current_voice: VoiceCharacteristics,
 }
 
 /// Blending configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlendConfig {
-    /// Default transition duration
-    pub default_transition_duration: f32, // seconds
-    /// Blend curve type
+    /// Default transition duration in seconds
+    pub default_transition_duration: f32,
+    /// Blend curve type determining interpolation behavior
     pub blend_curve: BlendCurveType,
-    /// Enable automatic voice matching
+    /// Enable automatic voice matching for optimal transitions
     pub auto_voice_matching: bool,
-    /// Cross-fade overlap duration
-    pub crossfade_overlap: f32, // seconds
-    /// Preserve pitch during blending
+    /// Cross-fade overlap duration in seconds
+    pub crossfade_overlap: f32,
+    /// Preserve pitch during blending (prevents pitch drift)
     pub preserve_pitch: bool,
-    /// Preserve timing during blending
+    /// Preserve timing during blending (maintains temporal alignment)
     pub preserve_timing: bool,
-    /// Voice similarity threshold for automatic blending
+    /// Voice similarity threshold (0.0-1.0) for automatic blending decisions
     pub similarity_threshold: f32,
-    /// Enable harmonic alignment
+    /// Enable harmonic alignment for smoother spectral transitions
     pub harmonic_alignment: bool,
-    /// Maximum blend speed
+    /// Maximum blend speed multiplier (higher values allow faster transitions)
     pub max_blend_speed: f32,
 }
 
@@ -104,19 +104,19 @@ pub struct BlendCurves {
 /// Voice morphing parameters
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceMorphParams {
-    /// Pitch shift in semitones
+    /// Pitch shift in semitones (12 semitones = 1 octave)
     pub pitch_shift: f32,
-    /// Formant shift factor
+    /// Formant shift factor (1.0 = no shift, >1.0 = higher formants, <1.0 = lower formants)
     pub formant_shift: f32,
-    /// Timbre modification
+    /// Timbre modification factor (-1.0 to 1.0)
     pub timbre_morph: f32,
-    /// Resonance modification
+    /// Resonance modification factor (-1.0 to 1.0)
     pub resonance_morph: f32,
-    /// Vibrato modification
+    /// Vibrato modification factor (-1.0 to 1.0, affects both frequency and depth)
     pub vibrato_morph: f32,
-    /// Breathiness modification
+    /// Breathiness modification (0.0 = none, 1.0 = maximum breathiness)
     pub breathiness_morph: f32,
-    /// Roughness modification
+    /// Roughness modification (0.0 = smooth, 1.0 = maximum roughness)
     pub roughness_morph: f32,
 }
 
@@ -155,20 +155,28 @@ pub enum TransitionType {
 /// Voice similarity metrics
 #[derive(Debug, Clone)]
 pub struct VoiceSimilarity {
-    /// Overall similarity score (0.0-1.0)
+    /// Overall similarity score (0.0 = completely different, 1.0 = identical)
     pub overall_similarity: f32,
-    /// Pitch similarity
+    /// Pitch similarity score (0.0-1.0, based on F0 mean and range comparison)
     pub pitch_similarity: f32,
-    /// Timbre similarity
+    /// Timbre similarity score (0.0-1.0, based on spectral characteristics)
     pub timbre_similarity: f32,
-    /// Resonance similarity
+    /// Resonance similarity score (0.0-1.0, based on formant patterns)
     pub resonance_similarity: f32,
-    /// Vibrato similarity
+    /// Vibrato similarity score (0.0-1.0, based on frequency and depth)
     pub vibrato_similarity: f32,
 }
 
 impl VoiceBlender {
-    /// Create new voice blender
+    /// Create new voice blender with specified configuration
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Blending configuration parameters
+    ///
+    /// # Returns
+    ///
+    /// A new `VoiceBlender` instance with empty voice library and default blend curves
     pub fn new(config: BlendConfig) -> Self {
         Self {
             state: BlendState::new(),
@@ -179,17 +187,47 @@ impl VoiceBlender {
         }
     }
 
-    /// Add voice to library
+    /// Add a voice to the blender's voice library
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Unique identifier for the voice
+    /// * `voice` - Voice characteristics to store
     pub fn add_voice(&mut self, name: String, voice: VoiceCharacteristics) {
         self.voice_library.insert(name, voice);
     }
 
-    /// Remove voice from library
+    /// Remove a voice from the blender's voice library
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Identifier of the voice to remove
+    ///
+    /// # Returns
+    ///
+    /// `Some(VoiceCharacteristics)` if the voice was found and removed, `None` otherwise
     pub fn remove_voice(&mut self, name: &str) -> Option<VoiceCharacteristics> {
         self.voice_library.remove(name)
     }
 
-    /// Start voice transition
+    /// Start a transition between two voices from the library
+    ///
+    /// Initiates a smooth blend from the source voice to the target voice over the specified
+    /// duration. The transition duration is automatically optimized based on voice similarity.
+    ///
+    /// # Arguments
+    ///
+    /// * `source_name` - Name of the source voice in the library
+    /// * `target_name` - Name of the target voice in the library
+    /// * `duration` - Optional transition duration; uses default config duration if `None`
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if the transition was successfully started
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if either the source or target voice is not found in the voice library
     pub fn start_transition(
         &mut self,
         source_name: &str,
@@ -240,7 +278,18 @@ impl VoiceBlender {
         Ok(())
     }
 
-    /// Update blend state and get current voice
+    /// Update blend state and get the current interpolated voice
+    ///
+    /// Advances the blend transition and computes the current interpolated voice characteristics
+    /// based on elapsed time and the configured blend curve.
+    ///
+    /// # Arguments
+    ///
+    /// * `delta_time` - Time step in seconds (currently unused, as elapsed time is computed internally)
+    ///
+    /// # Returns
+    ///
+    /// The current interpolated `VoiceCharacteristics` at this point in the transition
     pub fn update(&mut self, delta_time: f32) -> VoiceCharacteristics {
         if !self.state.is_transitioning {
             return self.state.current_voice.clone();
@@ -270,7 +319,14 @@ impl VoiceBlender {
         self.state.current_voice.clone()
     }
 
-    /// Manually set blend progress
+    /// Manually set the blend progress value
+    ///
+    /// Allows direct control of the blend progress, bypassing time-based transition.
+    /// The progress value is clamped to the range [0.0, 1.0].
+    ///
+    /// # Arguments
+    ///
+    /// * `progress` - Blend progress value (0.0 = source voice, 1.0 = target voice)
     pub fn set_blend_progress(&mut self, progress: f32) {
         let clamped_progress = progress.clamp(0.0, 1.0);
         self.state.blend_progress = clamped_progress;
@@ -284,7 +340,19 @@ impl VoiceBlender {
         }
     }
 
-    /// Create morphed voice from base voice
+    /// Create a morphed voice by applying transformation parameters to a base voice
+    ///
+    /// Applies pitch shifting, formant modification, and timbre adjustments to create
+    /// a new voice with modified characteristics while preserving the base voice's identity.
+    ///
+    /// # Arguments
+    ///
+    /// * `base_voice` - The original voice characteristics to modify
+    /// * `morph_params` - Morphing parameters specifying the transformations to apply
+    ///
+    /// # Returns
+    ///
+    /// A new `VoiceCharacteristics` instance with applied modifications
     pub fn morph_voice(
         &self,
         base_voice: &VoiceCharacteristics,
@@ -320,17 +388,37 @@ impl VoiceBlender {
         morphed
     }
 
-    /// Get blend status
+    /// Get a reference to the current blend state
+    ///
+    /// # Returns
+    ///
+    /// A reference to the current `BlendState` containing transition progress and voice information
     pub fn get_blend_state(&self) -> &BlendState {
         &self.state
     }
 
-    /// Get transition history
+    /// Get the history of all voice transitions
+    ///
+    /// # Returns
+    ///
+    /// A slice containing all `BlendTransition` records in chronological order
     pub fn get_transition_history(&self) -> &[BlendTransition] {
         &self.transition_history
     }
 
-    /// Calculate voice similarity
+    /// Calculate similarity metrics between two voices
+    ///
+    /// Computes multidimensional similarity scores comparing pitch, timbre, resonance,
+    /// and vibrato characteristics between two voices.
+    ///
+    /// # Arguments
+    ///
+    /// * `voice1` - First voice to compare
+    /// * `voice2` - Second voice to compare
+    ///
+    /// # Returns
+    ///
+    /// A `VoiceSimilarity` struct containing overall and per-dimension similarity scores (0.0-1.0)
     pub fn calculate_voice_similarity(
         &self,
         voice1: &VoiceCharacteristics,
@@ -571,6 +659,18 @@ impl Default for VoiceMorphParams {
 }
 
 /// Linear interpolation utility function
+///
+/// Performs linear interpolation between two values based on a parameter t.
+///
+/// # Arguments
+///
+/// * `a` - Start value (returned when t = 0.0)
+/// * `b` - End value (returned when t = 1.0)
+/// * `t` - Interpolation parameter (typically 0.0-1.0, but not clamped)
+///
+/// # Returns
+///
+/// The interpolated value: `a + (b - a) * t`
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }

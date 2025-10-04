@@ -2,8 +2,9 @@
 
 use crate::models::singing::config::VibratoConfig;
 use anyhow::Result;
-use ndarray::Array2;
-use rustfft::{num_complex::Complex, FftPlanner};
+use scirs2_core::ndarray::{Array2, ArrayView1};
+use scirs2_core::Complex;
+use scirs2_fft::{FftPlanner, RealFftPlanner};
 use std::collections::VecDeque;
 
 /// Processor for vibrato detection and enhancement
@@ -13,7 +14,7 @@ pub struct VibratoProcessor {
     /// Vibrato history buffer
     vibrato_history: VecDeque<VibratoFrame>,
     /// FFT planner for analysis
-    fft_planner: FftPlanner<f32>,
+    fft_planner: FftPlanner,
     /// Window size for analysis
     window_size: usize,
     /// Hop size for analysis
@@ -78,7 +79,7 @@ impl VibratoProcessor {
     /// Analyze vibrato characteristics in a frame
     fn analyze_vibrato(
         &mut self,
-        frame: &ndarray::ArrayView1<f32>,
+        frame: &ArrayView1<f32>,
         frame_idx: usize,
     ) -> Result<VibratoFrame> {
         // Convert frame to frequency domain
@@ -87,16 +88,18 @@ impl VibratoProcessor {
         // Apply windowing
         self.apply_hann_window(&mut spectrum);
 
-        // Perform FFT
-        let mut fft_input: Vec<Complex<f32>> =
-            spectrum.iter().map(|&x| Complex::new(x, 0.0)).collect();
+        // Perform FFT using functional API
+        let fft_output = scirs2_fft::rfft(&spectrum, None)?;
 
-        let fft = self.fft_planner.plan_fft_forward(fft_input.len());
-        fft.process(&mut fft_input);
+        // Convert f64 Complex to f32 Complex
+        let fft_output_f32: Vec<Complex<f32>> = fft_output
+            .iter()
+            .map(|c| Complex::new(c.re as f32, c.im as f32))
+            .collect();
 
         // Detect vibrato characteristics
-        let rate = self.detect_vibrato_rate(&fft_input)?;
-        let depth = self.detect_vibrato_depth(&fft_input)?;
+        let rate = self.detect_vibrato_rate(&fft_output_f32)?;
+        let depth = self.detect_vibrato_depth(&fft_output_f32)?;
         let strength = self.calculate_vibrato_strength(rate, depth)?;
 
         Ok(VibratoFrame {
@@ -245,7 +248,10 @@ impl VibratoProcessor {
     }
 
     /// Convert mel spectrogram frame to linear spectrum
-    fn mel_to_spectrum(&mut self, frame: &ndarray::ArrayView1<f32>) -> Result<Vec<f32>> {
+    fn mel_to_spectrum(
+        &mut self,
+        frame: &scirs2_core::ndarray::ArrayView1<f32>,
+    ) -> Result<Vec<f32>> {
         let mel_bins = frame.len();
         let mut spectrum = vec![0.0; self.window_size / 2 + 1];
 
@@ -343,7 +349,7 @@ pub struct VibratoStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::Array1;
+    use scirs2_core::ndarray::Array1;
 
     #[test]
     fn test_vibrato_processor_creation() {

@@ -7,16 +7,20 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation = "https://docs.rs/voirs-evaluation"
-keywords.workspace = true
+keywords = ["voirs", "evaluation", "quality", "metrics", "mos"]
 categories = ["science", "multimedia::audio", "mathematics"]
 rust-version.workspace = true
 description = "Quality evaluation and assessment framework for VoiRS"
 
 [dependencies]
+# SciRS2 - Scientific computing abstractions
+scirs2-core.workspace = true
+scirs2-fft.workspace = true
+
 # Core VoiRS dependencies
-voirs-sdk = { version = "0.1.0-alpha.1", path = "../voirs-sdk" }
-voirs-recognizer = { version = "0.1.0-alpha.1", path = "../voirs-recognizer" }
-voirs-g2p = { version = "0.1.0-alpha.1", path = "../voirs-g2p" }
+voirs-sdk.workspace = true
+voirs-recognizer.workspace = true
+voirs-g2p.workspace = true
 
 # Async and traits
 async-trait.workspace = true
@@ -27,20 +31,16 @@ futures.workspace = true
 # Audio processing
 hound.workspace = true
 dasp.workspace = true
-realfft.workspace = true
-rustfft.workspace = true
 
 # Audio format support
 symphonia = { version = "0.5", features = ["all"] }
 # Note: mp3-decoder is included in symphonia features
-ogg = "0.8"
+ogg = "0.9"
 lewton = "0.10"
 
 # Math and statistics
-ndarray.workspace = true
 ordered-float.workspace = true
-num-complex.workspace = true
-statrs = "0.17"
+statrs = "0.18"
 
 # Serialization
 serde = { workspace = true, features = ["derive"] }
@@ -58,9 +58,8 @@ tracing.workspace = true
 once_cell.workspace = true
 parking_lot.workspace = true
 chrono.workspace = true
-rand.workspace = true
 flate2.workspace = true
-uuid = { version = "1.0", features = ["v4", "serde"] }
+uuid = { version = "1.18", features = ["v4", "serde"] }
 base64 = "0.22"
 
 # Machine learning
@@ -72,12 +71,12 @@ unicode-normalization.workspace = true
 regex.workspace = true
 
 # Web and networking
-warp = "0.3"
+# Enable necessary warp features after upgrade (websocket and server)
+warp = { version = "0.4", features = ["websocket", "server"] }
 futures-util = "0.3"
-tokio-tungstenite = "0.20"
+tokio-tungstenite = "0.28"
 
 # Performance
-rayon.workspace = true
 crossbeam-utils.workspace = true
 num_cpus.workspace = true
 libc.workspace = true
@@ -93,8 +92,6 @@ numpy = { workspace = true, optional = true }
 tokio-test = "0.4"
 tempfile.workspace = true
 criterion.workspace = true
-rand.workspace = true
-rayon.workspace = true
 tracing-subscriber.workspace = true
 
 [features]

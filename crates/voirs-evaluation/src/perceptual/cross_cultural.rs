@@ -6,7 +6,7 @@
 use crate::perceptual::{CulturalProfile, CulturalRegion, DemographicProfile};
 use crate::traits::{EvaluationResult, QualityScore};
 use crate::EvaluationError;
-use rand::prelude::*;
+use scirs2_core::random::prelude::*;
 use std::collections::HashMap;
 use voirs_sdk::AudioBuffer;
 

@@ -3,10 +3,14 @@
 use super::reports::{NaturalnessProfile, NaturalnessReport};
 use crate::types::{VoiceCharacteristics, VoiceType};
 use crate::{Error, Result};
-use rustfft::{num_complex::Complex, FftPlanner};
+use scirs2_core::Complex;
 use std::collections::HashMap;
 
 /// Naturalness testing for human-like singing quality
+///
+/// Evaluates multiple aspects of naturalness including breath patterns, vibrato,
+/// formant frequencies, note transitions, and timbre consistency. Uses voice-type
+/// specific reference profiles for accurate assessment.
 pub struct NaturalnessTester {
     reference_profiles: HashMap<VoiceType, NaturalnessProfile>,
 }
@@ -32,7 +36,7 @@ impl NaturalnessTester {
         sample_rate: u32,
         voice_characteristics: &VoiceCharacteristics,
     ) -> Result<NaturalnessReport> {
-        let voice_type = voice_characteristics.voice_type.clone();
+        let voice_type = voice_characteristics.voice_type;
         let reference_profile = self.reference_profiles.get(&voice_type).ok_or_else(|| {
             Error::Validation(format!(
                 "No reference profile for voice type: {:?}",
@@ -108,11 +112,16 @@ impl NaturalnessTester {
             }
 
             // Perform FFT to detect vibrato frequency
-            let mut planner = FftPlanner::new();
-            let fft = planner.plan_fft_forward(chunk.len());
-            let mut buffer: Vec<Complex<f32>> =
-                chunk.iter().map(|&x| Complex::new(x, 0.0)).collect();
-            fft.process(&mut buffer);
+            let input_f64: Vec<scirs2_core::Complex<f64>> = chunk
+                .iter()
+                .map(|&x| scirs2_core::Complex::new(x as f64, 0.0))
+                .collect();
+            let fft_result = scirs2_fft::fft(&input_f64, None)
+                .map_err(|e| Error::Processing(format!("FFT error: {e}")))?;
+            let buffer: Vec<Complex<f32>> = fft_result
+                .iter()
+                .map(|c| Complex::new(c.re as f32, c.im as f32))
+                .collect();
 
             // Analyze frequency modulation for vibrato
             let vibrato_rate = self.detect_vibrato_rate(&buffer, sample_rate as f32);
@@ -154,11 +163,11 @@ impl NaturalnessTester {
             let mut max_magnitude = 0.0;
             let mut peak_bin = start_bin;
 
-            for i in start_bin..=end_bin {
-                let magnitude = fft_buffer[i].norm();
+            for (offset, item) in fft_buffer[start_bin..=end_bin].iter().enumerate() {
+                let magnitude = item.norm();
                 if magnitude > max_magnitude {
                     max_magnitude = magnitude;
-                    peak_bin = i;
+                    peak_bin = start_bin + offset;
                 }
             }
 
@@ -255,10 +264,16 @@ impl NaturalnessTester {
     /// Extract formant frequencies from a frame
     fn extract_formants_from_frame(&self, frame: &[f32], sample_rate: f32) -> (f32, f32) {
         // Simplified formant extraction using FFT peaks
-        let mut planner = FftPlanner::new();
-        let fft = planner.plan_fft_forward(frame.len());
-        let mut buffer: Vec<Complex<f32>> = frame.iter().map(|&x| Complex::new(x, 0.0)).collect();
-        fft.process(&mut buffer);
+        let input_f64: Vec<scirs2_core::Complex<f64>> = frame
+            .iter()
+            .map(|&x| scirs2_core::Complex::new(x as f64, 0.0))
+            .collect();
+        let fft_result = scirs2_fft::fft(&input_f64, None)
+            .unwrap_or_else(|_| vec![scirs2_core::Complex::new(0.0, 0.0); input_f64.len()]);
+        let buffer: Vec<Complex<f32>> = fft_result
+            .iter()
+            .map(|c| Complex::new(c.re as f32, c.im as f32))
+            .collect();
 
         let bin_resolution = sample_rate / frame.len() as f32;
         let spectrum: Vec<f32> = buffer.iter().map(|c| c.norm()).collect();
@@ -408,10 +423,16 @@ impl NaturalnessTester {
 
     /// Calculate spectral centroid
     fn calculate_spectral_centroid(&self, frame: &[f32], sample_rate: f32) -> f32 {
-        let mut planner = FftPlanner::new();
-        let fft = planner.plan_fft_forward(frame.len());
-        let mut buffer: Vec<Complex<f32>> = frame.iter().map(|&x| Complex::new(x, 0.0)).collect();
-        fft.process(&mut buffer);
+        let input_f64: Vec<scirs2_core::Complex<f64>> = frame
+            .iter()
+            .map(|&x| scirs2_core::Complex::new(x as f64, 0.0))
+            .collect();
+        let fft_result = scirs2_fft::fft(&input_f64, None)
+            .unwrap_or_else(|_| vec![scirs2_core::Complex::new(0.0, 0.0); input_f64.len()]);
+        let buffer: Vec<Complex<f32>> = fft_result
+            .iter()
+            .map(|c| Complex::new(c.re as f32, c.im as f32))
+            .collect();
 
         let bin_resolution = sample_rate / frame.len() as f32;
         let mut weighted_sum = 0.0;

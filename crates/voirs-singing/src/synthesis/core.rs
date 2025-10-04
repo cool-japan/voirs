@@ -6,7 +6,7 @@ use crate::precision_quality::PrecisionQualityAnalyzer;
 use crate::score::MusicalScore;
 use crate::techniques::SingingTechnique;
 use crate::types::{SingingRequest, VoiceCharacteristics};
-use rustfft::FftPlanner;
+use scirs2_fft::{FftPlanner, RealFftPlanner};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -17,65 +17,113 @@ use super::results::{QualityMetrics, SynthesisResult, SynthesisStats};
 /// This engine is designed to be thread-safe and can be shared across threads
 /// when wrapped in Arc. All mutable operations use interior mutability patterns.
 pub struct SynthesisEngine {
-    /// Configuration
+    /// Configuration for singing synthesis
     config: SingingConfig,
-    /// FFT planner (thread-safe)
-    fft_planner: FftPlanner<f32>,
-    /// Synthesis models (thread-safe via trait bounds)
+    /// FFT planner for spectral processing (thread-safe)
+    fft_planner: FftPlanner,
+    /// Registered synthesis models mapped by name (thread-safe via trait bounds)
     models: HashMap<String, Box<dyn SynthesisModel>>,
-    /// Current voice characteristics
+    /// Current voice characteristics for synthesis
     voice_characteristics: VoiceCharacteristics,
-    /// Current technique
+    /// Current singing technique being applied
     technique: SingingTechnique,
-    /// Performance statistics
+    /// Performance statistics tracking
     stats: SynthesisStats,
-    /// Precision quality analyzer for enhanced metrics
+    /// Precision quality analyzer for enhanced metrics analysis
     precision_analyzer: PrecisionQualityAnalyzer,
 }
 
-/// Synthesis model trait
+/// Synthesis model trait for audio generation
+///
+/// All synthesis models must be Send + Sync for thread-safe operation.
 pub trait SynthesisModel: Send + Sync {
     /// Synthesize audio from parameters
+    ///
+    /// # Arguments
+    ///
+    /// * `params` - Synthesis parameters including pitch, timing, and dynamics
+    ///
+    /// # Returns
+    ///
+    /// Vector of audio samples as f32 values in range [-1.0, 1.0]
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if synthesis fails or parameters are invalid
     fn synthesize(&self, params: &SynthesisParams) -> crate::Result<Vec<f32>>;
 
-    /// Get model name
+    /// Get model name identifier
+    ///
+    /// # Returns
+    ///
+    /// String reference to the model name
     fn name(&self) -> &str;
 
-    /// Get model version
+    /// Get model version string
+    ///
+    /// # Returns
+    ///
+    /// String reference to the version (e.g., "1.0.0")
     fn version(&self) -> &str;
 
-    /// Load model from file
+    /// Load model parameters from file
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - File path to load model parameters from
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read or parameters are invalid
     fn load_from_file(&mut self, path: &str) -> crate::Result<()>;
 
-    /// Save model to file
+    /// Save model parameters to file
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - File path to save model parameters to
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be written
     fn save_to_file(&self, path: &str) -> crate::Result<()>;
 }
 
-/// Synthesis parameters
+/// Synthesis parameters for audio generation
+///
+/// Contains all necessary information to synthesize singing voice audio.
 #[derive(Debug, Clone)]
 pub struct SynthesisParams {
-    /// Pitch contour
+    /// Pitch contour over time with F0 values in Hz
     pub pitch_contour: PitchContour,
-    /// Voice characteristics
+    /// Voice characteristics including range, timbre, and vibrato
     pub voice_characteristics: VoiceCharacteristics,
-    /// Singing technique
+    /// Singing technique to apply (classical, pop, jazz, etc.)
     pub technique: SingingTechnique,
-    /// Duration in seconds
+    /// Total duration of synthesis in seconds
     pub duration: f32,
-    /// Sample rate
+    /// Audio sample rate in Hz (e.g., 44100.0)
     pub sample_rate: f32,
-    /// Phoneme sequence
+    /// Phoneme sequence for linguistic control
     pub phonemes: Vec<String>,
-    /// Timing information
+    /// Timing information for each phoneme in seconds
     pub timing: Vec<f32>,
-    /// Dynamics
+    /// Dynamic levels (0.0-1.0) for volume control over time
     pub dynamics: Vec<f32>,
-    /// Expression
+    /// Expression parameters (0.0-1.0) for emotional control
     pub expression: Vec<f32>,
 }
 
 impl SynthesisEngine {
     /// Create a new synthesis engine
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Singing configuration for the engine
+    ///
+    /// # Returns
+    ///
+    /// A new SynthesisEngine instance with default settings
     pub fn new(config: SingingConfig) -> Self {
         Self {
             config: config.clone(),
@@ -88,32 +136,69 @@ impl SynthesisEngine {
         }
     }
 
-    /// Set voice characteristics
+    /// Set voice characteristics for synthesis
+    ///
+    /// # Arguments
+    ///
+    /// * `characteristics` - Voice characteristics to apply to future synthesis
     pub fn set_voice_characteristics(&mut self, characteristics: VoiceCharacteristics) {
         self.voice_characteristics = characteristics;
     }
 
     /// Set singing technique
+    ///
+    /// # Arguments
+    ///
+    /// * `technique` - Singing technique to apply (classical, pop, jazz, etc.)
     pub fn set_technique(&mut self, technique: SingingTechnique) {
         self.technique = technique;
     }
 
-    /// Add a synthesis model
+    /// Add a synthesis model to the engine
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Unique identifier for the model
+    /// * `model` - Boxed synthesis model implementation
     pub fn add_model(&mut self, name: String, model: Box<dyn SynthesisModel>) {
         self.models.insert(name, model);
     }
 
-    /// Remove a synthesis model
+    /// Remove a synthesis model from the engine
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Name of the model to remove
+    ///
+    /// # Returns
+    ///
+    /// The removed model if it existed, None otherwise
     pub fn remove_model(&mut self, name: &str) -> Option<Box<dyn SynthesisModel>> {
         self.models.remove(name)
     }
 
-    /// Get model names
+    /// Get list of registered model names
+    ///
+    /// # Returns
+    ///
+    /// Vector of model name strings
     pub fn model_names(&self) -> Vec<String> {
         self.models.keys().cloned().collect()
     }
 
-    /// Synthesize from request
+    /// Synthesize audio from a singing request
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - Singing request containing score and synthesis parameters
+    ///
+    /// # Returns
+    ///
+    /// SynthesisResult containing audio samples, quality metrics, and statistics
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no models are available or synthesis fails
     pub async fn synthesize(&mut self, request: SingingRequest) -> crate::Result<SynthesisResult> {
         let start_time = Instant::now();
 
@@ -267,12 +352,16 @@ impl SynthesisEngine {
         })
     }
 
-    /// Get current statistics
+    /// Get current performance statistics
+    ///
+    /// # Returns
+    ///
+    /// Reference to the current synthesis statistics
     pub fn stats(&self) -> &SynthesisStats {
         &self.stats
     }
 
-    /// Reset statistics
+    /// Reset performance statistics to default values
     pub fn reset_stats(&mut self) {
         self.stats = SynthesisStats::default();
     }

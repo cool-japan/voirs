@@ -5,6 +5,22 @@ All notable changes to VoiRS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0-alpha.2] - 2025-10-04
+
+### Added
+- DiffWave vocoder training pipeline with gradient-based updates, SafeTensors checkpointing, and improved CLI ergonomics for long-running training runs.
+- Automatic IPA Kokoro demo leveraging eSpeak NG plus expanded training documentation covering streaming, batch, and evaluation workflows.
+
+### Changed
+- Replaced direct `rand`, `rustfft`, `realfft`, `num_complex`, `rayon`, and `ndarray` usage with `scirs2_*` abstractions (Beta 3) across the workspace to unify the DSP stack.
+- Updated installation instructions, quick-start material, and roadmap to reflect the alpha.2 capabilities and training-first workflow.
+
+### Known Issues
+- Real FFT planner trait objects and `plan_fft_forward` support remain blocked pending SCIRS2 Beta 4; temporary functional FFT fallbacks ship in this release.
+- A handful of `scirs2_core::random` and `parallel_ops` helpers still require upstream improvements—see `MIGRATION_STATUS.md` for active workstreams.
+
+---
+
 ## [0.1.0-alpha.1] - 2025-09-21
 
 ### Initial Alpha Release

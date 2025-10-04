@@ -6,25 +6,19 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
 use voirs_acoustic::{AcousticModel, DummyAcousticModel, SynthesisConfig as AcousticConfig};
-use voirs_cloning::{CloningConfigBuilder, CloningMethod, VoiceCloner, VoiceClonerBuilder};
-use voirs_conversion::VoiceConverter;
-use voirs_emotion::{EmotionConfig, EmotionConfigBuilder};
 use voirs_g2p::{DummyG2p, G2p, LanguageCode};
-use voirs_singing::{SingingEngine, SingingEngineBuilder};
-use voirs_spatial::{SpatialProcessor, SpatialProcessorBuilder};
 use voirs_vocoder::{DummyVocoder, SynthesisConfig as VocoderConfig, Vocoder};
 
 /// Comprehensive cross-platform compatibility testing framework
 pub struct CrossPlatformCompatibilityTests {
     test_environments: Vec<TestEnvironment>,
     feature_matrix: FeatureCompatibilityMatrix,
-    results: Arc<Mutex<Vec<PlatformTestResults>>>,
+    _results: Arc<Mutex<Vec<PlatformTestResults>>>,
 }
 
 impl CrossPlatformCompatibilityTests {
@@ -37,7 +31,7 @@ impl CrossPlatformCompatibilityTests {
         Ok(Self {
             test_environments,
             feature_matrix,
-            results,
+            _results: results,
         })
     }
 
@@ -501,7 +495,7 @@ impl CrossPlatformCompatibilityTests {
             }
 
             // Memory recommendation
-            if let Some(mem) = &platform_result.memory_tests {
+            if let Some(_mem) = &platform_result.memory_tests {
                 if platform_result.environment.memory_limit.is_some() {
                     recommendations.push(DeploymentRecommendation {
                         platform: platform_name.clone(),

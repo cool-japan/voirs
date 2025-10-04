@@ -342,19 +342,23 @@ pub unsafe extern "C" fn voirs_audio_get_supported_formats(
         return VoirsErrorCode::InvalidParameter;
     }
 
-    // Static list of supported formats as byte strings
-    static FORMAT_STRINGS: &[&[u8]] = &[b"wav\0", b"flac\0", b"mp3\0", b"ogg\0", b"opus\0"];
+    // Static list of supported formats as null-terminated byte strings
+    const FORMAT_STRINGS: [&[u8]; 5] = [b"wav\0", b"flac\0", b"mp3\0", b"ogg\0", b"opus\0"];
 
-    // For safety, we need to handle this differently since we can't return a pointer to local data
-    // Store in a static buffer
-    static mut FORMAT_BUFFER: [*const c_char; 5] = [std::ptr::null(); 5];
-
-    // Initialize the buffer
-    for (i, &format_str) in FORMAT_STRINGS.iter().enumerate() {
-        FORMAT_BUFFER[i] = format_str.as_ptr() as *const c_char;
+    // Thread-local storage for format pointers (safe for FFI)
+    thread_local! {
+        static FORMAT_BUFFER: [*const c_char; 5] = [
+            FORMAT_STRINGS[0].as_ptr() as *const c_char,
+            FORMAT_STRINGS[1].as_ptr() as *const c_char,
+            FORMAT_STRINGS[2].as_ptr() as *const c_char,
+            FORMAT_STRINGS[3].as_ptr() as *const c_char,
+            FORMAT_STRINGS[4].as_ptr() as *const c_char,
+        ];
     }
 
-    *formats = FORMAT_BUFFER.as_ptr() as *const c_char;
+    FORMAT_BUFFER.with(|buffer| {
+        *formats = buffer.as_ptr() as *const c_char;
+    });
     *count = FORMAT_STRINGS.len() as c_uint;
 
     VoirsErrorCode::Success

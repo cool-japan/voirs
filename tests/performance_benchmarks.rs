@@ -6,12 +6,12 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use voirs_acoustic::{
-    AcousticModel, DummyAcousticModel, MelSpectrogram as AcousticMel, Phoneme as AcousticPhoneme,
+    AcousticModel, DummyAcousticModel, Phoneme as AcousticPhoneme,
     SynthesisConfig as AcousticConfig,
 };
 use voirs_g2p::{DummyG2p, G2p, LanguageCode};
 use voirs_vocoder::{
-    AudioBuffer, DummyVocoder, MelSpectrogram as VocoderMel, SynthesisConfig as VocoderConfig,
+    DummyVocoder, MelSpectrogram as VocoderMel, SynthesisConfig as VocoderConfig,
     Vocoder,
 };
 

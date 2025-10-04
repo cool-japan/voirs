@@ -89,8 +89,11 @@ impl Default for PoolConfig {
 /// Cached query result
 #[derive(Debug, Clone)]
 struct CachedResult<T> {
+    /// Cached data
     data: T,
+    /// Creation timestamp
     created_at: Instant,
+    /// Time to live
     ttl: Duration,
 }
 
@@ -121,59 +124,96 @@ pub struct QueryOptimizer {
 /// Query performance statistics
 #[derive(Debug, Default, Clone)]
 pub struct QueryStats {
+    /// Description
     pub total_queries: u64,
+    /// Description
     pub cache_hits: u64,
+    /// Description
     pub cache_misses: u64,
+    /// Description
     pub average_query_time: Duration,
+    /// Description
     pub batch_operations: u64,
+    /// Description
     pub optimized_queries: u64,
+    /// Description
     pub prepared_statements_used: u64,
+    /// Description
     pub index_recommendations_generated: u64,
+    /// Description
     pub performance_regressions_detected: u64,
 }
 
 /// Prepared statement information
 #[derive(Debug, Clone)]
 pub struct PreparedStatementInfo {
+    /// Description
     pub statement_id: String,
+    /// Description
     pub query_template: String,
+    /// Description
     pub parameter_count: usize,
+    /// Description
     pub last_used: Instant,
+    /// Description
     pub usage_count: u64,
+    /// Description
     pub average_execution_time: Duration,
 }
 
 /// Index recommendation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexRecommendation {
+    /// Description
     pub table_name: String,
+    /// Description
     pub columns: Vec<String>,
+    /// Description
     pub index_type: IndexType,
+    /// Description
     pub estimated_improvement: f64, // Percentage improvement
+    /// Description
     pub frequency_score: u64,
+    /// Description
     pub created_at: std::time::SystemTime,
+    /// Description
     pub query_patterns: Vec<String>,
 }
 
 /// Index types for recommendations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum IndexType {
+    /// B-Tree index
     BTree,
+    /// Hash index
     Hash,
+    /// GIN (Generalized Inverted Index)
     Gin,
+    /// GiST (Generalized Search Tree)
     Gist,
+    /// Composite index on multiple columns
     Composite,
-    PartialIndex { condition: String },
+    /// Partial index with condition
+    PartialIndex {
+        /// Index condition
+        condition: String
+    },
 }
 
 /// Performance baseline for regression detection
 #[derive(Debug, Clone)]
 pub struct PerformanceBaseline {
+    /// Description
     pub query_signature: String,
+    /// Description
     pub baseline_time: Duration,
+    /// Description
     pub baseline_established_at: Instant,
+    /// Description
     pub sample_count: u64,
+    /// Description
     pub variance: f64,
+    /// Description
     pub last_updated: Instant,
 }
 
@@ -409,7 +449,9 @@ impl QueryOptimizer {
         let cache = self.query_cache.read().await;
         if let Some(cached) = cache.get(key) {
             if !cached.is_expired() {
-                if let Ok(data) = bincode::deserialize::<T>(&cached.data) {
+                if let Ok((data, _)) =
+                    bincode::serde::decode_from_slice(&cached.data, bincode::config::standard())
+                {
                     return Some(data);
                 }
             }
@@ -422,7 +464,7 @@ impl QueryOptimizer {
     where
         T: Serialize,
     {
-        if let Ok(serialized) = bincode::serialize(data) {
+        if let Ok(serialized) = bincode::serde::encode_to_vec(data, bincode::config::standard()) {
             let cached = CachedResult::new(
                 serialized,
                 Duration::from_secs(self.config.cache_ttl_seconds),
@@ -1406,108 +1448,156 @@ impl QueryOptimizer {
 /// Complete user data structure for optimized queries
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompleteUserData {
+    /// User identifier
     pub user_id: String,
+    /// User progress data
     pub progress: Option<UserProgress>,
+    /// User preferences
     pub preferences: Option<UserPreferences>,
+    /// Total session count
     pub session_count: u64,
+    /// Total feedback count
     pub feedback_count: u64,
 }
 
 /// Query performance analysis result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryPerformanceAnalysis {
+    /// SQL query analyzed
     pub query: String,
+    /// Total execution time
     pub total_execution_time: Duration,
+    /// Execution plan from database
     pub execution_plan: serde_json::Value,
+    /// Optimization recommendations
     pub recommendations: Vec<String>,
+    /// Indexes used in query
     pub index_usage: Vec<String>,
+    /// Scan types performed
     pub scan_types: Vec<String>,
+    /// Estimated query cost
     pub cost_estimate: f64,
 }
 
 /// Execution plan analysis details
 #[derive(Debug, Clone)]
 pub struct ExecutionPlanAnalysis {
+    /// Optimization recommendations
     pub recommendations: Vec<String>,
+    /// Indexes used
     pub index_usage: Vec<String>,
+    /// Scan types found
     pub scan_types: Vec<String>,
+    /// Total cost estimate
     pub cost_estimate: f64,
 }
 
 /// Connection pool statistics and health
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionPoolStats {
+    /// Total number of connections
     pub total_connections: u32,
+    /// Number of idle connections
     pub idle_connections: u32,
+    /// Utilization percentage
     pub utilization_percentage: f32,
+    /// Connection acquisition time
     pub acquisition_time: Duration,
+    /// Optimization recommendations
     pub recommendations: Vec<String>,
+    /// Pool health status
     pub health_status: PoolHealthStatus,
 }
 
 /// Pool health status
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PoolHealthStatus {
+    /// Pool is healthy
     Healthy,
+    /// Pool has warnings
     Warning,
+    /// Pool is in critical state
     Critical,
 }
 
 /// Pool scaling recommendation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolScalingRecommendation {
+    /// Recommended scaling action
     pub action: ScalingAction,
+    /// Recommended minimum connections
     pub recommended_min_connections: u32,
+    /// Recommended maximum connections
     pub recommended_max_connections: u32,
+    /// Confidence in recommendation (0.0-1.0)
     pub confidence: f64,
+    /// Reasoning for recommendation
     pub reasoning: Vec<String>,
 }
 
 /// Scaling action recommendation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ScalingAction {
+    /// Scale up connections
     ScaleUp,
+    /// Scale down connections
     ScaleDown,
+    /// No change needed
     NoChange,
 }
 
 /// Query routing decision
 #[derive(Debug, Clone)]
 pub struct QueryRoutingDecision {
+    /// Target database for query
     pub target: QueryTarget,
+    /// Reasoning for routing decision
     pub reasoning: String,
+    /// Estimated load impact
     pub estimated_load_impact: LoadImpact,
 }
 
 /// Query target for routing
 #[derive(Debug, Clone)]
 pub enum QueryTarget {
+    /// Route to primary database
     Primary,
+    /// Route to read replica at index
     ReadReplica(usize),
 }
 
 /// Estimated load impact
 #[derive(Debug, Clone)]
 pub enum LoadImpact {
+    /// Low load impact
     Low,
+    /// Medium load impact
     Medium,
+    /// High load impact
     High,
 }
 
 /// User cache context for intelligent preloading
 #[derive(Debug, Clone)]
 pub struct UserCacheContext {
+    /// User identifier
     pub user_id: String,
+    /// Last access timestamp
     pub last_access_time: chrono::DateTime<chrono::Utc>,
+    /// User access patterns
     pub access_patterns: Vec<String>,
+    /// Preferred data types
     pub preferred_data_types: Vec<String>,
 }
 
 /// Predicted query for cache preloading
 #[derive(Debug, Clone)]
 pub struct PredictedQuery {
+    /// SQL query
     pub query: String,
+    /// Query hash/identifier
     pub query_hash: String,
+    /// Prediction probability (0.0-1.0)
     pub probability: f64,
 }
 

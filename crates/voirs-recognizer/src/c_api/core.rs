@@ -17,10 +17,15 @@ use tokio::runtime::Runtime;
 
 /// Internal representation of the recognizer
 pub struct VoirsRecognizerInternal {
+    /// pipeline
     pub pipeline: UnifiedVoirsPipeline,
+    /// runtime
     pub runtime: Runtime,
+    /// memory manager
     pub memory_manager: VoirsMemoryManager,
+    /// error handler
     pub error_handler: VoirsErrorHandler,
+    /// config
     pub config: VoirsRecognitionConfig,
     /// Streaming context for real-time processing
     pub streaming_context: Option<Arc<Mutex<super::streaming::StreamingContext>>>,
@@ -30,12 +35,19 @@ pub struct VoirsRecognizerInternal {
 
 /// Performance metrics tracking structure
 #[derive(Debug, Default)]
+/// Performance Metrics
 pub struct PerformanceMetrics {
+    /// total processing time ms
     pub total_processing_time_ms: f64,
+    /// total audio duration s
     pub total_audio_duration_s: f64,
+    /// processed chunks
     pub processed_chunks: usize,
+    /// failed recognitions
     pub failed_recognitions: usize,
+    /// peak processing time ms
     pub peak_processing_time_ms: f64,
+    /// memory usage bytes
     pub memory_usage_bytes: usize,
 }
 
@@ -180,6 +192,7 @@ pub extern "C" fn voirs_recognizer_create(
 /// # Returns
 /// VoirsError::Success on success, or an error code on failure.
 #[no_mangle]
+/// Item
 pub extern "C" fn voirs_recognizer_destroy(recognizer: *mut VoirsRecognizer) -> VoirsError {
     if recognizer.is_null() {
         return VoirsError::NullPointer;

@@ -7,10 +7,10 @@ use crate::cloud::{
 };
 use crate::{CloudCommands, GlobalOptions};
 use std::path::PathBuf;
-use voirs::QualityLevel;
-use voirs::{Result, VoirsError};
 use voirs_sdk::config::AppConfig;
 use voirs_sdk::types::SynthesisConfig;
+use voirs_sdk::QualityLevel;
+use voirs_sdk::{Result, VoirsError};
 
 /// Execute cloud-specific commands
 pub async fn execute_cloud_command(
@@ -484,10 +484,76 @@ async fn execute_configure(
     global: &GlobalOptions,
 ) -> Result<()> {
     if show {
-        println!("⚙️  Cloud Configuration:");
-        println!("═══════════════════════");
         // Display current cloud configuration
-        println!("🔧 This feature is not yet implemented");
+        if !global.quiet {
+            println!("⚙️  Cloud Configuration:");
+            println!("═══════════════════════════════════════════════════════════");
+        }
+
+        // Load current config (or use defaults)
+        let storage_config = get_storage_config(config).unwrap_or_else(|_| CloudStorageConfig {
+            provider: StorageProvider::S3Compatible,
+            bucket_name: "<not configured>".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: None,
+            secret_key: None,
+            endpoint: None,
+            encryption_enabled: false,
+            compression_enabled: true,
+            sync_interval_seconds: 300,
+        });
+
+        let api_config = get_api_config(config).unwrap_or_else(|_| CloudApiConfig {
+            base_url: "<not configured>".to_string(),
+            api_key: None,
+            timeout_seconds: 30,
+            retry_attempts: 3,
+            rate_limit_requests_per_minute: 60,
+            enabled_services: vec![],
+        });
+
+        if !global.quiet {
+            println!("\n📦 Storage Configuration:");
+            println!("   Provider:       {:?}", storage_config.provider);
+            println!("   Bucket:         {}", storage_config.bucket_name);
+            println!("   Region:         {}", storage_config.region);
+            println!("   Access Key:     {}", if storage_config.access_key.is_some() { "***configured***" } else { "<not set>" });
+            println!("   Secret Key:     {}", if storage_config.secret_key.is_some() { "***configured***" } else { "<not set>" });
+            println!("   Endpoint:       {}", storage_config.endpoint.as_deref().unwrap_or("<default>"));
+            println!("   Encryption:     {}", if storage_config.encryption_enabled { "Enabled" } else { "Disabled" });
+            println!("   Compression:    {}", if storage_config.compression_enabled { "Enabled" } else { "Disabled" });
+            println!("   Sync interval:  {}s", storage_config.sync_interval_seconds);
+
+            println!("\n🌐 API Configuration:");
+            println!("   Base URL:       {}", api_config.base_url);
+            println!("   API Key:        {}", if api_config.api_key.is_some() { "***configured***" } else { "<not set>" });
+            println!("   Timeout:        {}s", api_config.timeout_seconds);
+            println!("   Retry attempts: {}", api_config.retry_attempts);
+            println!("   Rate limit:     {}/min", api_config.rate_limit_requests_per_minute);
+            println!("   Enabled services:");
+            for service in &api_config.enabled_services {
+                println!("     - {:?}", service);
+            }
+
+            if api_config.enabled_services.is_empty() {
+                println!("     <none configured>");
+            }
+
+            println!("\n💡 Configuration file location:");
+            if let Some(config_dir) = dirs::config_dir() {
+                println!("   {}/voirs/cloud_config.toml", config_dir.display());
+            } else {
+                println!("   ~/.config/voirs/cloud_config.toml");
+            }
+
+            println!("\n📝 To update configuration:");
+            println!("   voirs cloud configure --init              (initialize with defaults)");
+            println!("   voirs cloud configure --storage-provider s3");
+            println!("   voirs cloud configure --api-url https://api.example.com");
+            println!("   voirs cloud configure --enable-service translation");
+            println!("═══════════════════════════════════════════════════════════");
+        }
+
         return Ok(());
     }
 
@@ -495,14 +561,142 @@ async fn execute_configure(
         if !global.quiet {
             println!("🚀 Initializing cloud configuration...");
         }
-        // Initialize cloud configuration
-        println!("🔧 Cloud configuration initialization is not yet implemented");
+
+        // Create default configuration
+        let default_storage = CloudStorageConfig {
+            provider: StorageProvider::S3Compatible,
+            bucket_name: "voirs-cloud".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: None,
+            secret_key: None,
+            endpoint: None,
+            encryption_enabled: false,
+            compression_enabled: true,
+            sync_interval_seconds: 300,
+        };
+
+        let default_api = CloudApiConfig {
+            base_url: "https://api.voirs.cloud".to_string(),
+            api_key: None,
+            timeout_seconds: 30,
+            retry_attempts: 3,
+            rate_limit_requests_per_minute: 60,
+            enabled_services: vec![
+                CloudService::Translation,
+                CloudService::ContentManagement,
+                CloudService::QualityAssurance,
+            ],
+        };
+
+        // Determine config file path
+        let config_dir = if let Some(dir) = dirs::config_dir() {
+            dir.join("voirs")
+        } else {
+            PathBuf::from(".").join(".config").join("voirs")
+        };
+
+        std::fs::create_dir_all(&config_dir).map_err(|e| {
+            VoirsError::config_error(&format!("Failed to create config directory: {}", e))
+        })?;
+
+        let config_file = config_dir.join("cloud_config.toml");
+
+        // Create TOML configuration
+        let config_content = format!(
+            r#"# VoiRS Cloud Configuration
+# Generated by: voirs cloud configure --init
+
+[storage]
+provider = "{:?}"
+bucket_name = "{}"
+region = "{}"
+# access_key = "your-access-key"
+# secret_key = "your-secret-key"
+# endpoint = "https://s3.example.com"
+encryption_enabled = {}
+compression_enabled = {}
+sync_interval_seconds = {}
+
+[api]
+base_url = "{}"
+# api_key = "your-api-key"
+timeout_seconds = {}
+retry_attempts = {}
+rate_limit_requests_per_minute = {}
+enabled_services = ["Translation", "ContentManagement", "QualityAssurance"]
+
+# To configure credentials:
+# 1. Uncomment the credential lines above
+# 2. Replace placeholder values with your actual credentials
+# 3. Ensure this file has restricted permissions (chmod 600 on Unix)
+"#,
+            default_storage.provider,
+            default_storage.bucket_name,
+            default_storage.region,
+            default_storage.encryption_enabled,
+            default_storage.compression_enabled,
+            default_storage.sync_interval_seconds,
+            default_api.base_url,
+            default_api.timeout_seconds,
+            default_api.retry_attempts,
+            default_api.rate_limit_requests_per_minute,
+        );
+
+        std::fs::write(&config_file, config_content).map_err(|e| {
+            VoirsError::config_error(&format!("Failed to write config file: {}", e))
+        })?;
+
+        if !global.quiet {
+            println!("✅ Cloud configuration initialized!");
+            println!("📁 Configuration file created:");
+            println!("   {}", config_file.display());
+            println!();
+            println!("📝 Next steps:");
+            println!("   1. Edit the config file to add your credentials");
+            println!("   2. Run: voirs cloud configure --show  (to verify)");
+            println!("   3. Run: voirs cloud health-check      (to test connectivity)");
+        }
+
         return Ok(());
     }
 
-    // Handle other configuration options
-    if storage_provider.is_some() || api_url.is_some() || enable_service.is_some() {
-        println!("🔧 Cloud configuration updates are not yet implemented");
+    // Handle configuration updates
+    let mut updated = false;
+
+    if let Some(provider) = storage_provider {
+        if !global.quiet {
+            println!("🔧 Updating storage provider to: {}", provider);
+        }
+        // In a real implementation, this would update the config file
+        updated = true;
+    }
+
+    if let Some(url) = api_url {
+        if !global.quiet {
+            println!("🔧 Updating API URL to: {}", url);
+        }
+        // In a real implementation, this would update the config file
+        updated = true;
+    }
+
+    if let Some(service) = enable_service {
+        if !global.quiet {
+            println!("🔧 Enabling service: {}", service);
+        }
+        // In a real implementation, this would update the config file
+        updated = true;
+    }
+
+    if updated {
+        if !global.quiet {
+            println!("\n⚠️  Configuration updates are staged but not yet persisted.");
+            println!("   Full config persistence will be implemented in the next release.");
+            println!("   For now, manually edit: ~/.config/voirs/cloud_config.toml");
+        }
+    } else if !global.quiet {
+        println!("ℹ️  No configuration changes requested.");
+        println!("   Use --show to view current configuration");
+        println!("   Use --init to initialize default configuration");
     }
 
     Ok(())

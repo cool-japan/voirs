@@ -56,50 +56,75 @@ pub struct PerformanceMonitor {
 /// Timestamped performance metrics for historical analysis
 #[derive(Debug, Clone)]
 pub struct TimestampedMetrics {
+    /// Description
     pub timestamp: Instant,
+    /// Description
     pub metrics: PerformanceMetrics,
 }
 
 /// Benchmark result with detailed performance characteristics
 #[derive(Debug, Clone)]
 pub struct BenchmarkResult {
+    /// Description
     pub name: String,
+    /// Description
     pub average_duration: Duration,
+    /// Description
     pub min_duration: Duration,
+    /// Description
     pub max_duration: Duration,
+    /// Description
     pub samples: u32,
+    /// Description
     pub throughput_ops_per_sec: f32,
+    /// Description
     pub success_rate: f32,
+    /// Description
     pub timestamp: Instant,
 }
 
 /// Performance optimization recommendations
 #[derive(Debug, Clone)]
 pub struct PerformanceRecommendation {
+    /// Description
     pub category: OptimizationCategory,
+    /// Description
     pub severity: OptimizationSeverity,
+    /// Description
     pub description: String,
+    /// Description
     pub suggested_action: String,
+    /// Description
     pub expected_improvement: f32,
 }
 
 /// Optimization categories
 #[derive(Debug, Clone)]
 pub enum OptimizationCategory {
+    /// Description
     CPU,
+    /// Description
     Memory,
+    /// Description
     Latency,
+    /// Description
     Throughput,
+    /// Description
     Network,
+    /// Description
     Storage,
 }
 
 /// Optimization severity levels
 #[derive(Debug, Clone)]
 pub enum OptimizationSeverity {
+    /// Description
     Low,
+    /// Description
     Medium,
+    /// Description
     High,
+    /// Description
     Critical,
 }
 
@@ -424,10 +449,15 @@ impl PerformanceMonitor {
 /// Comprehensive performance report
 #[derive(Debug, Clone)]
 pub struct PerformanceReport {
+    /// Description
     pub current_metrics: PerformanceMetrics,
+    /// Description
     pub historical_data: Vec<TimestampedMetrics>,
+    /// Description
     pub benchmarks: HashMap<String, BenchmarkResult>,
+    /// Description
     pub recommendations: Vec<PerformanceRecommendation>,
+    /// Description
     pub report_timestamp: Instant,
 }
 

@@ -2,8 +2,8 @@
 
 use crate::config::profiles::{ConfigProfile, ProfileManager};
 use std::path::Path;
-use voirs::{Result, VoirsError};
 use voirs_sdk::config::AppConfig;
+use voirs_sdk::{Result, VoirsError};
 
 /// Run config command
 pub async fn run_config(
@@ -35,11 +35,11 @@ pub async fn run_config(
 /// List available configuration profiles
 pub async fn run_list_profiles() -> Result<()> {
     let profile_manager =
-        ProfileManager::new().map_err(|e| voirs::VoirsError::config_error(e.to_string()))?;
+        ProfileManager::new().map_err(|e| voirs_sdk::VoirsError::config_error(e.to_string()))?;
 
     let profiles = profile_manager
         .list_profiles()
-        .map_err(|e| voirs::VoirsError::config_error(e.to_string()))?;
+        .map_err(|e| voirs_sdk::VoirsError::config_error(e.to_string()))?;
 
     if profiles.is_empty() {
         println!("No profiles found. Use 'voirs profile create' to create a new profile.");
@@ -85,11 +85,11 @@ pub async fn run_list_profiles() -> Result<()> {
 /// Show information about a specific profile
 pub async fn run_profile_info(name: &str) -> Result<()> {
     let profile_manager =
-        ProfileManager::new().map_err(|e| voirs::VoirsError::config_error(e.to_string()))?;
+        ProfileManager::new().map_err(|e| voirs_sdk::VoirsError::config_error(e.to_string()))?;
 
     let profile = profile_manager
         .load_profile(name)
-        .map_err(|e| voirs::VoirsError::config_error(e.to_string()))?;
+        .map_err(|e| voirs_sdk::VoirsError::config_error(e.to_string()))?;
 
     println!("Profile: {}", profile.info.name);
     println!("========{}", "=".repeat(profile.info.name.len()));
@@ -144,11 +144,11 @@ pub async fn run_profile_info(name: &str) -> Result<()> {
 /// Switch to a different profile
 pub async fn run_switch_profile(name: &str) -> Result<()> {
     let mut profile_manager =
-        ProfileManager::new().map_err(|e| voirs::VoirsError::config_error(e.to_string()))?;
+        ProfileManager::new().map_err(|e| voirs_sdk::VoirsError::config_error(e.to_string()))?;
 
     profile_manager
         .switch_profile(name)
-        .map_err(|e| voirs::VoirsError::config_error(e.to_string()))?;
+        .map_err(|e| voirs_sdk::VoirsError::config_error(e.to_string()))?;
 
     println!("Switched to profile: {}", name);
 
@@ -162,13 +162,13 @@ pub async fn run_create_profile(
     copy_from: Option<String>,
 ) -> Result<()> {
     let mut profile_manager =
-        ProfileManager::new().map_err(|e| voirs::VoirsError::config_error(e.to_string()))?;
+        ProfileManager::new().map_err(|e| voirs_sdk::VoirsError::config_error(e.to_string()))?;
 
     if let Some(source) = copy_from {
         // Copy from existing profile
         profile_manager
             .copy_profile(&source, name, description)
-            .map_err(|e| voirs::VoirsError::config_error(e.to_string()))?;
+            .map_err(|e| voirs_sdk::VoirsError::config_error(e.to_string()))?;
 
         println!("Created profile '{}' copied from '{}'", name, source);
     } else {
@@ -176,7 +176,7 @@ pub async fn run_create_profile(
         let config = crate::config::CliConfig::default();
         profile_manager
             .create_profile(name, description, config)
-            .map_err(|e| voirs::VoirsError::config_error(e.to_string()))?;
+            .map_err(|e| voirs_sdk::VoirsError::config_error(e.to_string()))?;
 
         println!("Created profile '{}'", name);
     }
@@ -187,11 +187,11 @@ pub async fn run_create_profile(
 /// Delete a profile
 pub async fn run_delete_profile(name: &str) -> Result<()> {
     let mut profile_manager =
-        ProfileManager::new().map_err(|e| voirs::VoirsError::config_error(e.to_string()))?;
+        ProfileManager::new().map_err(|e| voirs_sdk::VoirsError::config_error(e.to_string()))?;
 
     profile_manager
         .delete_profile(name)
-        .map_err(|e| voirs::VoirsError::config_error(e.to_string()))?;
+        .map_err(|e| voirs_sdk::VoirsError::config_error(e.to_string()))?;
 
     println!("Deleted profile: {}", name);
 
@@ -201,11 +201,11 @@ pub async fn run_delete_profile(name: &str) -> Result<()> {
 /// Export a profile to a file
 pub async fn run_export_profile(name: &str, path: &Path) -> Result<()> {
     let profile_manager =
-        ProfileManager::new().map_err(|e| voirs::VoirsError::config_error(e.to_string()))?;
+        ProfileManager::new().map_err(|e| voirs_sdk::VoirsError::config_error(e.to_string()))?;
 
     profile_manager
         .export_profile(name, path)
-        .map_err(|e| voirs::VoirsError::config_error(e.to_string()))?;
+        .map_err(|e| voirs_sdk::VoirsError::config_error(e.to_string()))?;
 
     println!("Exported profile '{}' to: {}", name, path.display());
 
@@ -215,11 +215,11 @@ pub async fn run_export_profile(name: &str, path: &Path) -> Result<()> {
 /// Import a profile from a file
 pub async fn run_import_profile(path: &Path, name: Option<&str>) -> Result<()> {
     let mut profile_manager =
-        ProfileManager::new().map_err(|e| voirs::VoirsError::config_error(e.to_string()))?;
+        ProfileManager::new().map_err(|e| voirs_sdk::VoirsError::config_error(e.to_string()))?;
 
     profile_manager
         .import_profile(path, name)
-        .map_err(|e| voirs::VoirsError::config_error(e.to_string()))?;
+        .map_err(|e| voirs_sdk::VoirsError::config_error(e.to_string()))?;
 
     let imported_name = name.unwrap_or("(from file)");
     println!(

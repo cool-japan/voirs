@@ -806,7 +806,8 @@ impl DefaultMultiModalProcessor {
     /// Compute spectral centroid for frequency analysis
     fn compute_spectral_centroid(&self, segment: &[f32], sample_rate: u32) -> Result<f32> {
         // Compute FFT for spectral analysis
-        use rustfft::{FftPlanner, num_complex::Complex};
+        use scirs2_fft::FftPlanner;
+        use scirs2_core::Complex;
         
         let mut planner = FftPlanner::new();
         let fft = planner.plan_fft_forward(segment.len());

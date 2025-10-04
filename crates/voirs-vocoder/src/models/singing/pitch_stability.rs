@@ -2,8 +2,8 @@
 
 use crate::models::singing::config::PitchStabilityConfig;
 use anyhow::Result;
-use ndarray::{Array1, Array2};
-use realfft::RealFftPlanner;
+use scirs2_core::ndarray::{Array1, Array2};
+use scirs2_fft::RealFftPlanner;
 use std::collections::VecDeque;
 
 /// Processor for pitch stability analysis and correction
@@ -12,8 +12,6 @@ pub struct PitchStabilityProcessor {
     config: PitchStabilityConfig,
     /// Pitch history buffer
     pitch_history: VecDeque<f32>,
-    /// FFT planner for pitch analysis
-    fft_planner: RealFftPlanner<f32>,
     /// Window size for pitch analysis
     window_size: usize,
     /// Hop size for analysis
@@ -29,7 +27,6 @@ impl PitchStabilityProcessor {
         Ok(Self {
             config: config.clone(),
             pitch_history: VecDeque::with_capacity(100),
-            fft_planner: RealFftPlanner::new(),
             window_size: 2048,
             hop_size: 512,
             sample_rate: 22050,
@@ -66,7 +63,7 @@ impl PitchStabilityProcessor {
     }
 
     /// Estimate pitch from mel spectrogram frame
-    fn estimate_pitch(&self, frame: &ndarray::ArrayView1<f32>) -> Result<f32> {
+    fn estimate_pitch(&self, frame: &scirs2_core::ndarray::ArrayView1<f32>) -> Result<f32> {
         // Use both mel-based and FFT-based pitch estimation for better accuracy
         let mel_pitch = self.estimate_pitch_from_mel(frame)?;
 
@@ -76,7 +73,10 @@ impl PitchStabilityProcessor {
     }
 
     /// Estimate pitch from mel spectrogram frame (mel-based approach)
-    fn estimate_pitch_from_mel(&self, frame: &ndarray::ArrayView1<f32>) -> Result<f32> {
+    fn estimate_pitch_from_mel(
+        &self,
+        frame: &scirs2_core::ndarray::ArrayView1<f32>,
+    ) -> Result<f32> {
         // Convert mel spectrogram to frequency domain for pitch estimation
         let mel_bins = frame.len();
         let mut frequencies = Vec::new();
@@ -105,16 +105,12 @@ impl PitchStabilityProcessor {
     }
 
     /// Advanced pitch estimation from raw audio using FFT analysis
-    /// This method uses the configured FFT planner, window size, and hop size
+    /// This method uses the configured window size and hop size
     pub fn estimate_pitch_from_audio(&mut self, audio: &[f32]) -> Result<f32> {
         if audio.len() < self.window_size {
             return Ok(0.0);
         }
 
-        // Create FFT for the configured window size
-        let fft = self.fft_planner.plan_fft_forward(self.window_size);
-        let mut spectrum =
-            vec![realfft::num_complex::Complex::new(0.0, 0.0); self.window_size / 2 + 1];
         let mut input = audio[..self.window_size].to_vec();
 
         // Apply window function (Hann window)
@@ -127,8 +123,7 @@ impl PitchStabilityProcessor {
         }
 
         // Perform FFT
-        fft.process(&mut input, &mut spectrum)
-            .map_err(|e| anyhow::anyhow!("FFT error: {}", e))?;
+        let spectrum = scirs2_fft::rfft(&input, None)?;
 
         // Find fundamental frequency using autocorrelation in frequency domain
         let mut max_magnitude = 0.0;

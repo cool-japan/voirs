@@ -11,6 +11,7 @@ pub struct VoirsErrorHandler {
 }
 
 impl VoirsErrorHandler {
+    /// new
     pub fn new() -> Self {
         Self {
             last_error_message: Mutex::new(None),
@@ -79,6 +80,7 @@ pub extern "C" fn voirs_clear_error() {
 /// A pointer to a null-terminated C string describing the error.
 /// The returned pointer is valid for the lifetime of the program.
 #[no_mangle]
+/// Item
 pub extern "C" fn voirs_error_to_string(error: VoirsError) -> *const c_char {
     let message = match error {
         VoirsError::Success => "Success",
@@ -127,6 +129,7 @@ pub extern "C" fn voirs_error_to_string(error: VoirsError) -> *const c_char {
 /// # Returns
 /// true if the error represents success, false otherwise
 #[no_mangle]
+/// Item
 pub extern "C" fn voirs_is_success(error: VoirsError) -> bool {
     matches!(error, VoirsError::Success)
 }
@@ -139,6 +142,7 @@ pub extern "C" fn voirs_is_success(error: VoirsError) -> bool {
 /// # Returns
 /// true if the error represents a failure, false otherwise
 #[no_mangle]
+/// Item
 pub extern "C" fn voirs_is_error(error: VoirsError) -> bool {
     !matches!(error, VoirsError::Success)
 }
@@ -165,6 +169,7 @@ pub(crate) use handle_error_with_message;
 
 /// Convert Rust errors to VoirsError codes
 pub trait ToVoirsError {
+    /// To voirs error
     fn to_voirs_error(&self) -> VoirsError;
 }
 

@@ -366,7 +366,7 @@ fn create_diverse_audio_samples(sample_rate: u32) -> Vec<(String, AudioBuffer)> 
     for i in 0..(sample_rate as f32 * 1.8) as usize {
         let t = i as f32 / sample_rate as f32;
         let signal = 0.08 * (2.0 * std::f32::consts::PI * 160.0 * t).sin();
-        let noise = 0.02 * (rand::random::<f32>() - 0.5);
+        let noise = 0.02 * (scirs2_core::random::random::<f32>() - 0.5);
         noisy.push(signal + noise);
     }
     samples.push((

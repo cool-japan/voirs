@@ -7,6 +7,7 @@
 use super::builder_impl::VoirsPipelineBuilder;
 
 /// Trait for feature-specific builders to ensure consistency
+#[async_trait::async_trait]
 pub trait FeatureBuilder<T> {
     /// Enable the feature with default configuration
     fn with_enabled(enabled: bool) -> Self;

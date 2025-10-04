@@ -95,7 +95,7 @@ impl DatasetProcessor {
     /// Process multiple samples
     pub fn process_samples(&self, samples: &mut [DatasetSample]) -> Result<()> {
         if self.config.parallel {
-            use rayon::prelude::*;
+            use scirs2_core::parallel_ops::*;
 
             // Use parallel iterator to process samples concurrently
             let results: Result<Vec<()>> = samples

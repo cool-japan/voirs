@@ -800,12 +800,12 @@ impl CloudStorageImpl {
     ) -> Result<String> {
         // Simulate network delay
         tokio::time::sleep(tokio::time::Duration::from_millis(
-            100 + rand::random::<u64>() % 500,
+            100 + scirs2_core::random::random::<u64>() % 500,
         ))
         .await;
 
         // Simulate occasional upload failures for testing resilience
-        if rand::random::<f32>() < 0.05 {
+        if scirs2_core::random::random::<f32>() < 0.05 {
             // 5% failure rate
             return Err(DatasetError::CloudStorage(String::from(
                 "Simulated S3 network timeout",
@@ -820,9 +820,9 @@ impl CloudStorageImpl {
             if use_multipart { "multipart" } else { "single" },
             manifest_path,
             if use_multipart {
-                2000 + rand::random::<u64>() % 3000
+                2000 + scirs2_core::random::random::<u64>() % 3000
             } else {
-                500 + rand::random::<u64>() % 1000
+                500 + scirs2_core::random::random::<u64>() % 1000
             }
         );
 
@@ -1111,12 +1111,12 @@ impl CloudStorageImpl {
     ) -> Result<String> {
         // Simulate network delay (GCS typically has good performance)
         tokio::time::sleep(tokio::time::Duration::from_millis(
-            80 + rand::random::<u64>() % 300,
+            80 + scirs2_core::random::random::<u64>() % 300,
         ))
         .await;
 
         // Simulate occasional upload failures for testing resilience
-        if rand::random::<f32>() < 0.03 {
+        if scirs2_core::random::random::<f32>() < 0.03 {
             // 3% failure rate (GCS is generally reliable)
             return Err(DatasetError::CloudStorage(String::from(
                 "Simulated GCS authentication timeout",
@@ -1131,7 +1131,7 @@ impl CloudStorageImpl {
             if use_resumable { "resumable" } else { "simple" },
             manifest_path,
             storage_class,
-            if use_resumable { 1500 + rand::random::<u64>() % 2500 } else { 400 + rand::random::<u64>() % 800 }
+            if use_resumable { 1500 + scirs2_core::random::random::<u64>() % 2500 } else { 400 + scirs2_core::random::random::<u64>() % 800 }
         );
 
         // Create detailed operation metadata with GCS-specific fields

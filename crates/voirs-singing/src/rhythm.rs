@@ -153,6 +153,14 @@ pub enum TempoCurveType {
 
 impl RhythmGenerator {
     /// Create a new rhythm generator with the specified tempo
+    ///
+    /// # Arguments
+    ///
+    /// * `tempo` - Base tempo in BPM (beats per minute)
+    ///
+    /// # Returns
+    ///
+    /// A new `RhythmGenerator` instance with default settings and built-in groove patterns
     pub fn new(tempo: f32) -> Self {
         let mut generator = Self {
             tempo,
@@ -171,32 +179,65 @@ impl RhythmGenerator {
     }
 
     /// Set the time signature
+    ///
+    /// # Arguments
+    ///
+    /// * `numerator` - The number of beats per measure
+    /// * `denominator` - The note value that represents one beat (e.g., 4 for quarter note)
     pub fn set_time_signature(&mut self, numerator: u8, denominator: u8) {
         self.time_signature = (numerator, denominator);
         self.update_accent_pattern();
     }
 
     /// Set the swing factor (0.0 = no swing, 1.0 = maximum swing)
+    ///
+    /// # Arguments
+    ///
+    /// * `swing` - Swing factor in range 0.0-1.0, where 0.0 is straight timing and 1.0 is maximum swing
     pub fn set_swing_factor(&mut self, swing: f32) {
         self.swing_factor = swing.clamp(0.0, 1.0);
     }
 
     /// Set the humanization level (0.0 = perfect timing, 1.0 = maximum variation)
+    ///
+    /// # Arguments
+    ///
+    /// * `humanization` - Humanization level in range 0.0-1.0, where 0.0 is perfect timing and 1.0 is maximum random variation
     pub fn set_humanization(&mut self, humanization: f32) {
         self.humanization = humanization.clamp(0.0, 1.0);
     }
 
     /// Set rhythm complexity
+    ///
+    /// # Arguments
+    ///
+    /// * `complexity` - Complexity level in range 0.0-1.0, where 0.0 is simple (quarter notes) and 1.0 is complex (sixteenth notes)
     pub fn set_complexity(&mut self, complexity: f32) {
         self.complexity = complexity.clamp(0.0, 1.0);
     }
 
     /// Add a groove pattern
+    ///
+    /// # Arguments
+    ///
+    /// * `pattern` - The groove pattern to add to the internal collection
     pub fn add_groove_pattern(&mut self, pattern: GroovePattern) {
         self.groove_patterns.insert(pattern.name.clone(), pattern);
     }
 
     /// Set current groove pattern
+    ///
+    /// # Arguments
+    ///
+    /// * `pattern_name` - Name of the groove pattern to activate (must exist in the collection)
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if the pattern was found and set, or an error if the pattern doesn't exist
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::Processing` if the specified pattern name is not found in the collection
     pub fn set_groove_pattern(&mut self, pattern_name: &str) -> crate::Result<()> {
         if self.groove_patterns.contains_key(pattern_name) {
             self.current_pattern = Some(pattern_name.to_string());
@@ -210,6 +251,14 @@ impl RhythmGenerator {
     }
 
     /// Generate timing values for the given musical score
+    ///
+    /// # Arguments
+    ///
+    /// * `score` - The musical score to process
+    ///
+    /// # Returns
+    ///
+    /// A vector of timing values in beats, one for each note in the score, with swing, groove, and humanization applied
     pub fn generate_timing(&self, score: &MusicalScore) -> Vec<f32> {
         let mut timings = Vec::new();
 
@@ -240,6 +289,14 @@ impl RhythmGenerator {
     }
 
     /// Generate rhythmic pattern for given duration
+    ///
+    /// # Arguments
+    ///
+    /// * `duration_beats` - Duration in beats for which to generate the pattern
+    ///
+    /// # Returns
+    ///
+    /// A vector of timing positions in beats where notes should occur, with density based on complexity setting
     pub fn generate_pattern(&self, duration_beats: f32) -> Vec<f32> {
         let mut pattern = Vec::new();
         let subdivision = match self.complexity {
@@ -251,7 +308,7 @@ impl RhythmGenerator {
         let mut current_time = 0.0;
         while current_time < duration_beats {
             // Add some randomness based on complexity
-            if rand::random::<f32>() < 0.5 + self.complexity * 0.3 {
+            if scirs2_core::random::random::<f32>() < 0.5 + self.complexity * 0.3 {
                 pattern.push(current_time);
             }
             current_time += subdivision;
@@ -288,7 +345,7 @@ impl RhythmGenerator {
 
     /// Apply humanization to timing
     fn apply_humanization(&self, timing: f32) -> f32 {
-        let variation = (rand::random::<f32>() - 0.5) * self.humanization * 0.05;
+        let variation = (scirs2_core::random::random::<f32>() - 0.5) * self.humanization * 0.05;
         timing + variation
     }
 
@@ -344,6 +401,10 @@ impl RhythmGenerator {
 
 impl RhythmProcessor {
     /// Create a new rhythm processor
+    ///
+    /// # Returns
+    ///
+    /// A new `RhythmProcessor` instance with default settings (no quantization, swing, or humanization)
     pub fn new() -> Self {
         Self {
             quantization: 0.0,
@@ -356,36 +417,74 @@ impl RhythmProcessor {
     }
 
     /// Set the quantization level
+    ///
+    /// # Arguments
+    ///
+    /// * `quantization` - Quantization strength in range 0.0-1.0, where 0.0 is no quantization and 1.0 is perfect grid alignment
     pub fn set_quantization(&mut self, quantization: f32) {
         self.quantization = quantization.clamp(0.0, 1.0);
     }
 
     /// Set the swing amount
+    ///
+    /// # Arguments
+    ///
+    /// * `swing` - Swing amount in range 0.0-1.0, where 0.0 is straight timing and 1.0 is maximum swing
     pub fn set_swing(&mut self, swing: f32) {
         self.swing = swing.clamp(0.0, 1.0);
     }
 
     /// Set the humanization level
+    ///
+    /// # Arguments
+    ///
+    /// * `humanization` - Humanization level in range 0.0-1.0, where 0.0 is perfect timing and 1.0 is maximum random variation
     pub fn set_humanization(&mut self, humanization: f32) {
         self.humanization = humanization.clamp(0.0, 1.0);
     }
 
     /// Set groove template
+    ///
+    /// # Arguments
+    ///
+    /// * `template` - The groove template to apply to timing processing
     pub fn set_groove_template(&mut self, template: GrooveTemplate) {
         self.groove_template = Some(template);
     }
 
     /// Add beat timing adjustment
+    ///
+    /// # Arguments
+    ///
+    /// * `beat_position` - The beat position (in 16th note resolution) to adjust
+    /// * `adjustment` - Timing adjustment in beats to add at this position
     pub fn add_beat_adjustment(&mut self, beat_position: u32, adjustment: f32) {
         self.beat_adjustments.insert(beat_position, adjustment);
     }
 
     /// Add velocity adjustment
+    ///
+    /// # Arguments
+    ///
+    /// * `beat_position` - The beat position (in 16th note resolution) to adjust
+    /// * `adjustment` - Velocity multiplier in range 0.0-1.0 to apply at this position
     pub fn add_velocity_adjustment(&mut self, beat_position: u32, adjustment: f32) {
         self.velocity_adjustments.insert(beat_position, adjustment);
     }
 
     /// Process timing values
+    ///
+    /// # Arguments
+    ///
+    /// * `timings` - Mutable slice of timing values in beats to process in-place
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success
+    ///
+    /// # Errors
+    ///
+    /// Currently does not return errors, but uses Result for API consistency
     pub fn process_timing(&self, timings: &mut [f32]) -> crate::Result<()> {
         for timing in timings.iter_mut() {
             *timing = self.process_single_timing(*timing);
@@ -394,6 +493,18 @@ impl RhythmProcessor {
     }
 
     /// Process musical score timing
+    ///
+    /// # Arguments
+    ///
+    /// * `score` - Mutable reference to the musical score to process
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success
+    ///
+    /// # Errors
+    ///
+    /// Currently does not return errors, but uses Result for API consistency
     pub fn process_score(&self, score: &mut MusicalScore) -> crate::Result<()> {
         for note in &mut score.notes {
             // Process timing
@@ -461,7 +572,7 @@ impl RhythmProcessor {
 
     /// Apply humanization to timing
     fn apply_humanization(&self, timing: f32) -> f32 {
-        let variation = (rand::random::<f32>() - 0.5) * self.humanization * 0.03;
+        let variation = (scirs2_core::random::random::<f32>() - 0.5) * self.humanization * 0.03;
         timing + variation
     }
 
@@ -502,6 +613,14 @@ impl RhythmProcessor {
 
 impl TimingController {
     /// Create a new timing controller with base tempo
+    ///
+    /// # Arguments
+    ///
+    /// * `base_tempo` - Base tempo in BPM (beats per minute)
+    ///
+    /// # Returns
+    ///
+    /// A new `TimingController` instance with default sample rate of 44100 Hz
     pub fn new(base_tempo: f32) -> Self {
         Self {
             base_tempo,
@@ -515,6 +634,15 @@ impl TimingController {
     }
 
     /// Create with sample rate
+    ///
+    /// # Arguments
+    ///
+    /// * `base_tempo` - Base tempo in BPM (beats per minute)
+    /// * `sample_rate` - Sample rate in Hz for precise timing calculations
+    ///
+    /// # Returns
+    ///
+    /// A new `TimingController` instance with the specified sample rate
     pub fn with_sample_rate(base_tempo: f32, sample_rate: f32) -> Self {
         let mut controller = Self::new(base_tempo);
         controller.sample_rate = sample_rate;
@@ -522,11 +650,20 @@ impl TimingController {
     }
 
     /// Set rubato settings
+    ///
+    /// # Arguments
+    ///
+    /// * `settings` - Rubato settings to apply for expressive timing variations
     pub fn set_rubato_settings(&mut self, settings: RubatoSettings) {
         self.rubato_settings = settings;
     }
 
     /// Add a tempo variation at a specific time
+    ///
+    /// # Arguments
+    ///
+    /// * `time` - Time in beats where the tempo change occurs
+    /// * `tempo` - New tempo in BPM to apply from this point forward
     pub fn add_tempo_variation(&mut self, time: f32, tempo: f32) {
         self.tempo_variations.push((time, tempo));
         self.tempo_variations
@@ -534,6 +671,11 @@ impl TimingController {
     }
 
     /// Add a timing adjustment at a specific time
+    ///
+    /// # Arguments
+    ///
+    /// * `time` - Time in beats where the adjustment occurs
+    /// * `adjustment` - Fine timing adjustment in seconds to add at this point
     pub fn add_timing_adjustment(&mut self, time: f32, adjustment: f32) {
         self.timing_adjustments.push((time, adjustment));
         self.timing_adjustments
@@ -541,6 +683,10 @@ impl TimingController {
     }
 
     /// Add tempo curve
+    ///
+    /// # Arguments
+    ///
+    /// * `curve` - Tempo curve defining a smooth tempo change over a time range
     pub fn add_tempo_curve(&mut self, curve: TempoCurve) {
         self.tempo_curves.push(curve);
         self.tempo_curves
@@ -548,6 +694,14 @@ impl TimingController {
     }
 
     /// Get the tempo at a specific time
+    ///
+    /// # Arguments
+    ///
+    /// * `time` - Time in beats at which to query the tempo
+    ///
+    /// # Returns
+    ///
+    /// The effective tempo in BPM at the specified time, including all curves, variations, and rubato
     pub fn get_tempo_at_time(&self, time: f32) -> f32 {
         let mut tempo = self.base_tempo;
 
@@ -580,6 +734,14 @@ impl TimingController {
     }
 
     /// Get the timing adjustment at a specific time
+    ///
+    /// # Arguments
+    ///
+    /// * `time` - Time in beats at which to query the adjustment
+    ///
+    /// # Returns
+    ///
+    /// The timing adjustment in seconds at the specified time, or 0.0 if none is defined
     pub fn get_timing_adjustment(&self, time: f32) -> f32 {
         self.timing_adjustments
             .iter()
@@ -590,6 +752,15 @@ impl TimingController {
     }
 
     /// Convert beats to seconds at given time
+    ///
+    /// # Arguments
+    ///
+    /// * `beats` - Number of beats to convert
+    /// * `start_time` - Starting time in beats from which to begin the conversion
+    ///
+    /// # Returns
+    ///
+    /// The duration in seconds, accounting for tempo changes over the beat range
     pub fn beats_to_seconds(&self, beats: f32, start_time: f32) -> f32 {
         if beats == 0.0 {
             return 0.0;
@@ -610,6 +781,15 @@ impl TimingController {
     }
 
     /// Convert seconds to beats at given time
+    ///
+    /// # Arguments
+    ///
+    /// * `seconds` - Duration in seconds to convert
+    /// * `start_time` - Starting time in beats from which to begin the conversion
+    ///
+    /// # Returns
+    ///
+    /// The number of beats equivalent to the given duration, accounting for tempo changes
     pub fn seconds_to_beats(&self, seconds: f32, start_time: f32) -> f32 {
         if seconds == 0.0 {
             return 0.0;
@@ -631,6 +811,18 @@ impl TimingController {
     }
 
     /// Process score timing with tempo control
+    ///
+    /// # Arguments
+    ///
+    /// * `score` - Mutable reference to the musical score to process
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success
+    ///
+    /// # Errors
+    ///
+    /// Currently does not return errors, but uses Result for API consistency
     pub fn process_score_timing(&self, score: &mut MusicalScore) -> crate::Result<()> {
         for note in &mut score.notes {
             // Apply tempo variations to note timing
@@ -670,7 +862,7 @@ impl TimingController {
             RubatoCurve::Sinusoidal => {
                 (time * self.rubato_settings.frequency * 2.0 * std::f32::consts::PI).sin()
             }
-            RubatoCurve::Random => rand::random::<f32>(),
+            RubatoCurve::Random => scirs2_core::random::random::<f32>(),
         };
 
         let rubato_offset = (rubato_value - 0.5)
@@ -682,6 +874,10 @@ impl TimingController {
     }
 
     /// Update current time (for real-time processing)
+    ///
+    /// # Arguments
+    ///
+    /// * `delta_seconds` - Time increment in seconds to advance the internal clock
     pub fn update_time(&mut self, delta_seconds: f32) {
         let beats_per_second = self.get_tempo_at_time(self.current_time) / 60.0;
         self.current_time += delta_seconds * beats_per_second;
@@ -693,12 +889,19 @@ impl TimingController {
     }
 }
 
+/// Default implementation for RhythmProcessor
+///
+/// Creates a rhythm processor with no quantization, swing, or humanization applied.
 impl Default for RhythmProcessor {
     fn default() -> Self {
         Self::new()
     }
 }
 
+/// Default implementation for RubatoSettings
+///
+/// Creates rubato settings with moderate intensity (0.3), low frequency (0.1),
+/// 5% tempo variation range, sinusoidal curve, and auto-rubato disabled.
 impl Default for RubatoSettings {
     fn default() -> Self {
         Self {
@@ -711,6 +914,10 @@ impl Default for RubatoSettings {
     }
 }
 
+/// Default implementation for GrooveTemplate
+///
+/// Creates a straight groove template with no timing, velocity, or duration modifications,
+/// using 16th note resolution (16 positions per beat).
 impl Default for GrooveTemplate {
     fn default() -> Self {
         Self {
@@ -725,6 +932,10 @@ impl Default for GrooveTemplate {
 
 impl GrooveTemplate {
     /// Create swing groove template
+    ///
+    /// # Returns
+    ///
+    /// A `GrooveTemplate` configured for swing timing with delayed off-beats and dynamic accents
     pub fn swing() -> Self {
         let mut template = Self::default();
         template.name = "swing".to_string();
@@ -746,6 +957,10 @@ impl GrooveTemplate {
     }
 
     /// Create shuffle groove template
+    ///
+    /// # Returns
+    ///
+    /// A `GrooveTemplate` configured for shuffle timing with characteristic triplet-based feel
     pub fn shuffle() -> Self {
         let mut template = Self::default();
         template.name = "shuffle".to_string();

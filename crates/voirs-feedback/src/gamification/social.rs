@@ -498,8 +498,11 @@ pub struct PeerGroupConfig {
 /// Privacy levels for groups
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PrivacyLevel {
+    /// Description
     Public,
+    /// Description
     Private,
+    /// Description
     InviteOnly,
 }
 
@@ -586,9 +589,13 @@ pub struct CollaborativeChallengeConfig {
 /// Challenge status
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ChallengeStatus {
+    /// Description
     Pending,
+    /// Description
     Active,
+    /// Description
     Completed,
+    /// Description
     Cancelled,
 }
 
@@ -606,9 +613,13 @@ pub struct ChallengeReward {
 /// Reward types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RewardType {
+    /// Description
     Points,
+    /// Description
     Badge,
+    /// Description
     Title,
+    /// Description
     Certification,
 }
 
@@ -679,9 +690,13 @@ pub struct MentorshipConfig {
 /// Mentorship status
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MentorshipStatus {
+    /// Description
     Active,
+    /// Description
     Paused,
+    /// Description
     Completed,
+    /// Description
     Cancelled,
 }
 
@@ -769,28 +784,41 @@ pub struct TimeSlot {
 /// Recurrence patterns
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Recurrence {
+    /// Description
     None,
+    /// Description
     Daily,
+    /// Description
     Weekly,
+    /// Description
     Monthly,
 }
 
 /// Experience levels
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ExperienceLevel {
+    /// Description
     Beginner,
+    /// Description
     Intermediate,
+    /// Description
     Advanced,
+    /// Description
     Expert,
 }
 
 /// Communication styles
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CommunicationStyle {
+    /// Description
     Formal,
+    /// Description
     Casual,
+    /// Description
     Direct,
+    /// Description
     Supportive,
+    /// Description
     Analytical,
 }
 
@@ -810,10 +838,15 @@ pub struct SocialConnection {
 /// Connection types
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ConnectionType {
+    /// Description
     Friend,
+    /// Description
     StudyPartner,
+    /// Description
     Mentor,
+    /// Description
     Mentee,
+    /// Description
     PeerGroup,
 }
 
@@ -841,11 +874,17 @@ pub struct Forum {
 /// Forum categories
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ForumCategory {
+    /// Description
     General,
+    /// Description
     QuestionsAndAnswers,
+    /// Description
     TipsAndTricks,
+    /// Description
     Challenges,
+    /// Description
     Announcements,
+    /// Description
     Feedback,
 }
 

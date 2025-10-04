@@ -10,6 +10,7 @@ use tokio::sync::RwLock;
 
 /// Detailed Whisper-specific error types with recovery suggestions
 #[derive(Debug, Clone)]
+/// Whisper Error
 pub enum WhisperError {
     /// Model loading errors with specific component information
     ModelLoad {
@@ -100,6 +101,7 @@ pub enum WhisperError {
 
 /// Model component identifier
 #[derive(Debug, Clone)]
+/// Model Component
 pub enum ModelComponent {
     /// Encoder component of the model
     Encoder,
@@ -121,6 +123,7 @@ pub enum ModelComponent {
 
 /// Audio processing stage
 #[derive(Debug, Clone)]
+/// Audio Stage
 pub enum AudioStage {
     /// Audio preprocessing stage
     Preprocessing,
@@ -138,6 +141,7 @@ pub enum AudioStage {
 
 /// Audio format specification for audio processing
 #[derive(Debug, Clone)]
+/// Audio Format
 pub struct AudioFormat {
     /// Audio sample rate in Hz (e.g., 16000, 44100)
     pub sample_rate: u32,
@@ -153,6 +157,7 @@ pub struct AudioFormat {
 
 /// Memory operation type for error context
 #[derive(Debug, Clone, Copy)]
+/// Memory Operation
 pub enum MemoryOperation {
     /// Memory allocation operation
     Allocation,
@@ -170,6 +175,7 @@ pub enum MemoryOperation {
 
 /// Buffer state for streaming errors
 #[derive(Debug, Clone)]
+/// Buffer State
 pub struct BufferState {
     /// Current buffer fill percentage (0.0 to 100.0)
     pub fill_percentage: f32,
@@ -284,6 +290,7 @@ pub struct ErrorRecoveryManager {
 
 /// Memory usage monitor with cleanup strategies
 #[derive(Debug)]
+/// Memory Monitor
 pub struct MemoryMonitor {
     peak_usage_mb: f32,
     current_usage_mb: f32,
@@ -303,6 +310,7 @@ impl ErrorRecoveryManager {
     /// * `fallback_enabled` - Whether fallback mechanisms are enabled
     /// * `memory_threshold_mb` - Memory threshold in MB for triggering cleanup
     #[must_use]
+    /// new
     pub fn new(max_retries: u32, fallback_enabled: bool, memory_threshold_mb: f32) -> Self {
         Self {
             retry_counts: Arc::new(RwLock::new(std::collections::HashMap::new())),
@@ -394,11 +402,13 @@ impl ErrorRecoveryManager {
         *count <= self.max_retries
     }
 
+    /// reset retry count
     pub async fn reset_retry_count(&self, error_key: &str) {
         let mut counts = self.retry_counts.write().await;
         counts.remove(error_key);
     }
 
+    /// get memory stats
     pub async fn get_memory_stats(&self) -> MemoryStats {
         let monitor = self.memory_monitor.read().await;
         MemoryStats {
@@ -413,22 +423,35 @@ impl ErrorRecoveryManager {
 
 /// Recovery action to take after error analysis
 #[derive(Debug, Clone)]
+/// Recovery Action
 pub enum RecoveryAction {
+    /// Retry
     Retry,
+    /// Retry after cleanup
     RetryAfterCleanup,
+    /// Use fallback
     UseFallback(String),
+    /// Skip and continue
     SkipAndContinue,
+    /// Reset
     Reset,
+    /// Fail
     Fail(String),
 }
 
 /// Memory usage statistics
 #[derive(Debug, Clone)]
+/// Memory Stats
 pub struct MemoryStats {
+    /// peak usage mb
     pub peak_usage_mb: f32,
+    /// current usage mb
     pub current_usage_mb: f32,
+    /// allocation count
     pub allocation_count: u64,
+    /// deallocation count
     pub deallocation_count: u64,
+    /// memory leaks detected
     pub memory_leaks_detected: u32,
 }
 
@@ -446,6 +469,7 @@ impl MemoryMonitor {
         }
     }
 
+    /// record allocation
     pub fn record_allocation(&mut self, size_mb: f32) {
         self.current_usage_mb += size_mb;
         self.allocation_count += 1;
@@ -454,6 +478,7 @@ impl MemoryMonitor {
         }
     }
 
+    /// record deallocation
     pub fn record_deallocation(&mut self, size_mb: f32) {
         self.current_usage_mb = (self.current_usage_mb - size_mb).max(0.0);
         self.deallocation_count += 1;
@@ -501,6 +526,7 @@ impl WhisperError {
     }
 
     #[must_use]
+    /// is recoverable
     pub fn is_recoverable(&self) -> bool {
         match self {
             WhisperError::ModelLoad { recoverable, .. } => *recoverable,
@@ -518,6 +544,7 @@ impl WhisperError {
     }
 
     #[must_use]
+    /// to recognition error
     pub fn to_recognition_error(self) -> RecognitionError {
         match self {
             WhisperError::ModelLoad { details, .. } => RecognitionError::ModelLoadError {

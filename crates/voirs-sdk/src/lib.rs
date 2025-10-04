@@ -206,24 +206,6 @@
 //! - **Architectures**: x86_64, ARM64
 //! - **Runtimes**: Tokio async runtime required
 
-#![allow(unexpected_cfgs)]
-#![allow(hidden_glob_reexports)]
-#![allow(unreachable_code)]
-#![allow(unused_variables)]
-#![allow(unused_imports)]
-#![allow(unused_mut)]
-#![allow(dead_code)]
-#![allow(missing_docs)]
-#![allow(clippy::uninlined_format_args)]
-#![allow(clippy::should_implement_trait)]
-#![allow(clippy::derivable_impls)]
-#![allow(clippy::vec_init_then_push)]
-#![allow(clippy::needless_borrows_for_generic_args)]
-#![allow(clippy::needless_bool_assign)]
-#![allow(clippy::unnecessary_cast)]
-#![allow(clippy::new_without_default)]
-#![allow(async_fn_in_trait)]
-
 pub mod adapters;
 pub mod r#async;
 pub mod audio;

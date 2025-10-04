@@ -413,7 +413,7 @@ impl AcousticEmotionAdapter {
 
                 // Add enhanced breathiness
                 let noise = if acoustic_config.breathiness > 0.1 {
-                    (rand::random::<f32>() - 0.5) * acoustic_config.breathiness * 0.1
+                    (scirs2_core::random::random::<f32>() - 0.5) * acoustic_config.breathiness * 0.1
                 } else {
                     0.0
                 };
@@ -851,7 +851,7 @@ impl AcousticEmotionAdapter {
 
                 // Add breathiness by adding noise
                 let noise = if emotion_params.breathiness > 0.1 {
-                    (rand::random::<f32>() - 0.5) * emotion_params.breathiness * 0.1
+                    (scirs2_core::random::random::<f32>() - 0.5) * emotion_params.breathiness * 0.1
                 } else {
                     0.0
                 };
@@ -1175,7 +1175,7 @@ impl AcousticEmotionAdapter {
         let noise_level = breathiness * 0.1;
 
         for sample in audio.iter_mut() {
-            let noise = (rand::random::<f32>() - 0.5) * noise_level;
+            let noise = (scirs2_core::random::random::<f32>() - 0.5) * noise_level;
             *sample = *sample * (1.0 - breathiness * 0.3) + noise;
         }
 
@@ -1610,35 +1610,55 @@ impl Default for ProsodyModificationParams {
 #[derive(Debug, Clone, PartialEq)]
 pub struct VoirsAcousticEmotionConfig {
     // Basic prosody parameters
+    /// Pitch shift multiplier (1.0 = no change, >1.0 = higher, <1.0 = lower)
     pub pitch_shift: f32,
+    /// Tempo scaling factor (1.0 = normal, <1.0 = slower, >1.0 = faster)
     pub tempo_scale: f32,
+    /// Energy level scaling (1.0 = normal, <1.0 = quieter, >1.0 = louder)
     pub energy_scale: f32,
 
     // Voice quality parameters
+    /// Breathiness level (0.0 = clear, 1.0 = very breathy)
     pub breathiness: f32,
+    /// Roughness level (0.0 = smooth, 1.0 = very rough)
     pub roughness: f32,
+    /// Brightness of voice timbre (0.0 = dark, 1.0 = bright)
     pub brightness: f32,
+    /// Resonance strength (0.0 = minimal, 1.0 = maximum)
     pub resonance: f32,
 
     // Emotion dimensions
+    /// Emotional valence from -1.0 (negative) to +1.0 (positive)
     pub valence: f32,
+    /// Arousal level from 0.0 (calm) to 1.0 (excited)
     pub arousal: f32,
+    /// Dominance level from 0.0 (submissive) to 1.0 (dominant)
     pub dominance: f32,
 
     // Acoustic conditioning parameters
+    /// Energy boost applied to signal (0.0 = none, 1.0 = maximum)
     pub energy_boost: f32,
+    /// Spectral brightness enhancement (0.0 = none, 1.0 = maximum)
     pub spectral_brightness: f32,
+    /// Harmonic richness enhancement (0.0 = none, 1.0 = maximum)
     pub harmonic_richness: f32,
+    /// Temporal dynamics modification strength (0.0 = none, 1.0 = maximum)
     pub temporal_dynamics: f32,
 
     // Speaker adaptation parameters
+    /// Pitch range expansion factor (1.0 = normal, >1.0 = wider range)
     pub pitch_range_expansion: f32,
+    /// Formant frequency shift in semitones
     pub formant_shift: f32,
+    /// Voice quality adjustment strength (0.0 = none, 1.0 = maximum)
     pub voice_quality_adjustment: f32,
 
     // Prosody modification parameters
+    /// Pitch contour variation strength (0.0 = flat, 1.0 = highly varied)
     pub pitch_contour_variation: f32,
+    /// Rhythm modification strength (0.0 = none, 1.0 = maximum)
     pub rhythm_modification: f32,
+    /// Stress pattern enhancement level (0.0 = none, 1.0 = maximum)
     pub stress_pattern_enhancement: f32,
 }
 

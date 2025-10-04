@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 
 /// Memory optimization configuration
 #[derive(Debug, Clone)]
+/// Memory Optimization Config
 pub struct MemoryOptimizationConfig {
     /// Enable gradient checkpointing
     pub gradient_checkpointing: bool,
@@ -43,6 +44,7 @@ impl Default for MemoryOptimizationConfig {
 
 /// Mixed precision training modes
 #[derive(Debug, Clone, PartialEq)]
+/// Mixed Precision Mode
 pub enum MixedPrecisionMode {
     /// Full precision (FP32)
     FP32,
@@ -56,6 +58,7 @@ pub enum MixedPrecisionMode {
 
 /// Quantization configuration
 #[derive(Debug, Clone)]
+/// Quantization Config
 pub struct QuantizationConfig {
     /// Weight quantization bits
     pub weight_bits: u8,
@@ -80,6 +83,7 @@ impl Default for QuantizationConfig {
 
 /// Quantization modes
 #[derive(Debug, Clone, PartialEq)]
+/// Quantization Mode
 pub enum QuantizationMode {
     /// Post-training quantization
     PostTrainingQuantization,
@@ -91,6 +95,7 @@ pub enum QuantizationMode {
 
 /// Memory pool for efficient allocation/deallocation
 #[derive(Debug)]
+/// Memory Pool
 pub struct MemoryPool {
     /// Available memory blocks by size
     available_blocks: HashMap<usize, VecDeque<Vec<f32>>>,
@@ -103,12 +108,19 @@ pub struct MemoryPool {
 }
 
 #[derive(Debug, Clone, Default)]
+/// Memory Stats
 pub struct MemoryStats {
+    /// allocations
     pub allocations: usize,
+    /// deallocations
     pub deallocations: usize,
+    /// cache hits
     pub cache_hits: usize,
+    /// cache misses
     pub cache_misses: usize,
+    /// peak usage
     pub peak_usage: usize,
+    /// current usage
     pub current_usage: usize,
 }
 
@@ -219,9 +231,13 @@ impl MemoryPool {
 
 /// Mixed precision tensor wrapper
 #[derive(Debug, Clone)]
+/// Mixed Precision Tensor
 pub enum MixedPrecisionTensor {
+    /// F p32
     FP32(Vec<Vec<f32>>),
+    /// F p16
     FP16(Vec<Vec<u16>>), // Using u16 to represent FP16
+    /// B f16
     BF16(Vec<Vec<u16>>), // Using u16 to represent BF16
 }
 
@@ -418,6 +434,7 @@ impl GradientCheckpoint {
 
 /// Parameter sharing for memory efficiency
 #[derive(Debug, Clone)]
+/// Shared Parameters
 pub struct SharedParameters {
     /// Shared weight matrices
     shared_weights: HashMap<String, Arc<Vec<Vec<f32>>>>,
@@ -470,6 +487,7 @@ impl SharedParameters {
 
 /// Activation compression for memory efficiency
 #[derive(Debug)]
+/// Activation Compressor
 pub struct ActivationCompressor {
     /// Compression ratio
     compression_ratio: f32,
@@ -546,6 +564,7 @@ impl ActivationCompressor {
 
 /// Compressed activation data
 #[derive(Debug, Clone)]
+/// Compressed Activations
 pub struct CompressedActivations {
     data: Vec<Vec<u8>>,
     min_val: f32,
@@ -573,6 +592,7 @@ impl CompressedActivations {
 
 /// Memory-efficient neural network layer
 #[derive(Debug)]
+/// Memory Efficient Layer
 pub struct MemoryEfficientLayer {
     /// Layer configuration
     config: MemoryOptimizationConfig,

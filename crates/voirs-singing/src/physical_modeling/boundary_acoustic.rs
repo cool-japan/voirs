@@ -8,64 +8,68 @@ use super::advanced_physics::Complex32;
 /// Advanced boundary condition modeling
 #[derive(Debug, Clone)]
 pub struct BoundaryConditionModel {
-    /// Lip radiation impedance (frequency-dependent)
+    /// Lip radiation impedance as function of frequency (complex values)
     pub lip_radiation_impedance: Vec<Complex32>,
-    /// Nostril radiation (for nasal sounds)
+    /// Nostril radiation impedance for nasal sounds (complex values)
     pub nostril_impedance: Vec<Complex32>,
-    /// Glottal impedance (time-varying)
+    /// Time history of glottal impedance values
     pub glottal_impedance_history: Vec<f32>,
-    /// Wall impedance (acoustic properties of tissues)
+    /// Wall acoustic impedance per section (complex values)
     pub wall_acoustic_impedance: Vec<Complex32>,
-    /// Subglottal impedance
+    /// Subglottal impedance (complex value)
     pub subglottal_impedance: Complex32,
-    /// Frequency-dependent boundary losses
+    /// Frequency-dependent boundary loss coefficients (0-1)
     pub boundary_loss_coefficients: Vec<f32>,
 }
 
 /// Advanced acoustic propagation with dispersion and absorption
 #[derive(Debug, Clone)]
 pub struct AcousticPropagationModel {
-    /// Frequency-dependent attenuation
+    /// Frequency-dependent attenuation coefficients (0-1)
     pub frequency_attenuation: Vec<f32>,
-    /// Dispersion relation parameters
+    /// Dispersion relation polynomial coefficients
     pub dispersion_coefficients: Vec<f32>,
-    /// Modal decomposition for complex geometries
+    /// Modal decomposition for complex vocal tract geometries
     pub acoustic_modes: Vec<AcousticMode>,
-    /// Scattering parameters
+    /// Scattering matrix for mode coupling (complex values)
     pub scattering_matrix: Vec<Vec<Complex32>>,
-    /// Diffraction effects at constrictions
+    /// Diffraction correction factors at constrictions
     pub diffraction_corrections: Vec<f32>,
-    /// Multi-path propagation
+    /// Multiple propagation paths for echo and resonance
     pub propagation_paths: Vec<PropagationPath>,
 }
 
 /// Acoustic mode for modal analysis
 #[derive(Debug, Clone)]
 pub struct AcousticMode {
-    /// Mode frequency
+    /// Mode frequency in Hz
     pub frequency: f32,
-    /// Mode shape (spatial distribution)
+    /// Mode shape spatial distribution (normalized)
     pub mode_shape: Vec<f32>,
-    /// Modal damping
+    /// Modal damping ratio (0-1)
     pub damping: f32,
-    /// Modal excitation coefficient
+    /// Modal excitation coefficient (dimensionless)
     pub excitation_coeff: f32,
 }
 
 /// Propagation path for multi-path analysis
 #[derive(Debug, Clone)]
 pub struct PropagationPath {
-    /// Path length
+    /// Path length in meters
     pub length: f32,
-    /// Path delay
+    /// Path delay in seconds
     pub delay: f32,
-    /// Path attenuation
+    /// Path attenuation factor (0-1)
     pub attenuation: f32,
-    /// Path phase shift
+    /// Path phase shift in radians
     pub phase_shift: f32,
 }
 
 impl BoundaryConditionModel {
+    /// Create new boundary condition model with physically accurate impedances
+    ///
+    /// # Returns
+    /// New boundary condition model with frequency-dependent impedances
     pub fn new() -> crate::Result<Self> {
         // Initialize frequency-dependent lip radiation impedance
         let mut lip_impedance = Vec::new();
@@ -118,6 +122,11 @@ impl BoundaryConditionModel {
         })
     }
 
+    /// Update time-varying glottal impedance based on current state
+    ///
+    /// # Arguments
+    /// * `glottal_area` - Current glottal opening area in m²
+    /// * `velocity` - Flow velocity through glottis in m/s
     pub fn update_glottal_impedance(&mut self, glottal_area: f32, velocity: f32) {
         // Model time-varying glottal impedance based on area and flow
         let impedance = if glottal_area > 0.001 {
@@ -131,6 +140,13 @@ impl BoundaryConditionModel {
         self.glottal_impedance_history[0] = impedance;
     }
 
+    /// Get frequency-dependent lip reflection coefficient
+    ///
+    /// # Arguments
+    /// * `frequency` - Frequency in Hz
+    ///
+    /// # Returns
+    /// Complex reflection coefficient at specified frequency
     pub fn get_lip_reflection_coefficient(&self, frequency: f32) -> Complex32 {
         let freq_index = (frequency / 20.0).min(999.0) as usize;
         let impedance = self.lip_radiation_impedance[freq_index];
@@ -151,6 +167,13 @@ impl BoundaryConditionModel {
         }
     }
 
+    /// Get boundary loss coefficient at specified frequency
+    ///
+    /// # Arguments
+    /// * `frequency` - Frequency in Hz
+    ///
+    /// # Returns
+    /// Loss coefficient (0-1) at specified frequency
     pub fn get_boundary_loss(&self, frequency: f32) -> f32 {
         let freq_index = (frequency / 20.0).min(999.0) as usize;
         self.boundary_loss_coefficients[freq_index]
@@ -158,6 +181,10 @@ impl BoundaryConditionModel {
 }
 
 impl AcousticPropagationModel {
+    /// Create new acoustic propagation model with default parameters
+    ///
+    /// # Returns
+    /// New propagation model with dispersion and multi-path effects
     pub fn new() -> crate::Result<Self> {
         Ok(Self {
             frequency_attenuation: (0..1000).map(|i| 0.001 * (i as f32)).collect(),
@@ -179,6 +206,13 @@ impl AcousticPropagationModel {
         })
     }
 
+    /// Calculate modal response to excitation spectrum
+    ///
+    /// # Arguments
+    /// * `excitation_spectrum` - Frequency spectrum of excitation
+    ///
+    /// # Returns
+    /// Modal response spectrum
     pub fn calculate_modal_response(&self, excitation_spectrum: &[f32]) -> Vec<f32> {
         let mut response = vec![0.0; excitation_spectrum.len()];
 
@@ -201,6 +235,10 @@ impl AcousticPropagationModel {
         response
     }
 
+    /// Apply frequency-dependent attenuation to spectrum
+    ///
+    /// # Arguments
+    /// * `spectrum` - Frequency spectrum to attenuate (modified in-place)
     pub fn apply_frequency_attenuation(&self, spectrum: &mut [f32]) {
         for (i, sample) in spectrum.iter_mut().enumerate() {
             if i < self.frequency_attenuation.len() {
@@ -209,6 +247,13 @@ impl AcousticPropagationModel {
         }
     }
 
+    /// Calculate frequency-dependent group delay from dispersion
+    ///
+    /// # Arguments
+    /// * `frequency` - Frequency in Hz
+    ///
+    /// # Returns
+    /// Group delay in seconds
     pub fn calculate_dispersion_delay(&self, frequency: f32) -> f32 {
         // Calculate frequency-dependent group delay
         let omega = 2.0 * std::f32::consts::PI * frequency;
@@ -223,6 +268,14 @@ impl AcousticPropagationModel {
         delay
     }
 
+    /// Apply diffraction correction at area discontinuities
+    ///
+    /// # Arguments
+    /// * `section` - Vocal tract section index
+    /// * `area_ratio` - Ratio of areas at junction
+    ///
+    /// # Returns
+    /// Diffraction correction factor
     pub fn apply_diffraction_correction(&self, section: usize, area_ratio: f32) -> f32 {
         if section < self.diffraction_corrections.len() {
             // Diffraction correction based on area change
@@ -241,21 +294,29 @@ impl AcousticPropagationModel {
         }
     }
 
+    /// Calculate multi-path propagation response
+    ///
+    /// # Arguments
+    /// * `input_signal` - Input time-domain signal
+    /// * `sample_rate` - Sampling rate in Hz
+    ///
+    /// # Returns
+    /// Output signal with multi-path effects
     pub fn calculate_multipath_response(&self, input_signal: &[f32], sample_rate: f32) -> Vec<f32> {
         let mut output = vec![0.0; input_signal.len()];
 
         for path in &self.propagation_paths {
             let delay_samples = (path.delay * sample_rate) as usize;
 
-            for i in delay_samples..input_signal.len() {
-                let delayed_index = i - delay_samples;
+            for (offset, sample) in output[delay_samples..].iter_mut().enumerate() {
+                let delayed_index = offset;
                 let delayed_sample = input_signal[delayed_index] * path.attenuation;
 
                 // Apply phase shift (simplified as a small delay)
                 let phase_delay_samples =
                     (path.phase_shift / (2.0 * std::f32::consts::PI) * sample_rate) as usize;
                 if delayed_index >= phase_delay_samples {
-                    output[i] += delayed_sample;
+                    *sample += delayed_sample;
                 }
             }
         }
@@ -265,6 +326,14 @@ impl AcousticPropagationModel {
 }
 
 impl AcousticMode {
+    /// Create new acoustic mode with sinusoidal mode shape
+    ///
+    /// # Arguments
+    /// * `frequency` - Mode frequency in Hz
+    /// * `num_sections` - Number of vocal tract sections
+    ///
+    /// # Returns
+    /// New acoustic mode with normalized mode shape
     pub fn new(frequency: f32, num_sections: usize) -> Self {
         // Generate mode shape (simplified as sinusoidal)
         let mut mode_shape = Vec::with_capacity(num_sections);
@@ -282,6 +351,13 @@ impl AcousticMode {
         }
     }
 
+    /// Get modal amplitude response at excitation frequency
+    ///
+    /// # Arguments
+    /// * `excitation_frequency` - Excitation frequency in Hz
+    ///
+    /// # Returns
+    /// Modal amplitude gain factor
     pub fn get_modal_amplitude(&self, excitation_frequency: f32) -> f32 {
         let freq_ratio = excitation_frequency / self.frequency;
         let q_factor = 1.0 / (2.0 * self.damping);
@@ -293,6 +369,14 @@ impl AcousticMode {
 }
 
 impl PropagationPath {
+    /// Create new propagation path with specified length
+    ///
+    /// # Arguments
+    /// * `length` - Path length in meters
+    /// * `sound_speed` - Sound speed in m/s
+    ///
+    /// # Returns
+    /// New propagation path with calculated delay and attenuation
     pub fn new(length: f32, sound_speed: f32) -> Self {
         let delay = length / sound_speed;
         let attenuation = (-0.1 * length).exp(); // Simple exponential decay
@@ -305,6 +389,11 @@ impl PropagationPath {
         }
     }
 
+    /// Update path parameters for specific frequency
+    ///
+    /// # Arguments
+    /// * `frequency` - Frequency in Hz
+    /// * `sound_speed` - Sound speed in m/s
     pub fn update_for_frequency(&mut self, frequency: f32, sound_speed: f32) {
         // Update phase shift based on frequency
         let wavelength = sound_speed / frequency;

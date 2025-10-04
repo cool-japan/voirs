@@ -129,8 +129,8 @@ impl ARCorePlatform {
         #[cfg(target_os = "android")]
         {
             // Simulate device tier detection
-            use rand::Rng;
-            let mut rng = rand::thread_rng();
+            use scirs2_core::random::Rng;
+            let mut rng = scirs2_core::random::thread_rng();
             self.device_tier = match rng.gen_range(0..4) {
                 0 => AndroidDeviceTier::HighEnd,
                 1 => AndroidDeviceTier::MidRange,

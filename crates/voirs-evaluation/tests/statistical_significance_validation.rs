@@ -20,7 +20,7 @@ fn generate_normal_samples(mean: f32, std_dev: f32, n: usize) -> Vec<f32> {
     (0..n)
         .map(|_| {
             // Use sum of 12 uniform random variables to approximate normal distribution
-            let sum: f32 = (0..12).map(|_| rand::random::<f32>()).sum();
+            let sum: f32 = (0..12).map(|_| scirs2_core::random::random::<f32>()).sum();
             mean + std_dev * (sum - 6.0) // Shift and scale to desired mean/std
         })
         .collect()

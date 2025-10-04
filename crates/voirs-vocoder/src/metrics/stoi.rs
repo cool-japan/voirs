@@ -5,17 +5,13 @@
 //! intelligibility ratings.
 
 use crate::Result;
-use ndarray::{s, Array1, Array2};
-use realfft::RealFftPlanner;
+use scirs2_core::ndarray::{s, Array1, Array2};
 use std::f32::consts::PI;
 
 /// STOI intelligibility assessor
 pub struct StoiCalculator {
     /// Sample rate for analysis
     sample_rate: u32,
-
-    /// FFT planner
-    fft_planner: RealFftPlanner<f32>,
 
     /// Frame length in samples
     frame_length: usize,
@@ -40,7 +36,6 @@ impl StoiCalculator {
 
         Self {
             sample_rate,
-            fft_planner: RealFftPlanner::new(),
             frame_length,
             overlap,
             n_bands,
@@ -124,19 +119,22 @@ impl StoiCalculator {
     }
 
     /// Apply simplified bandpass filter around center frequency
-    fn bandpass_filter(&mut self, signal: &Array1<f32>, center_freq: f32) -> Array1<f32> {
+    fn bandpass_filter(&self, signal: &Array1<f32>, center_freq: f32) -> Array1<f32> {
         // Simplified bandpass using FFT filtering
         let n = signal.len();
         let next_power_of_2 = n.next_power_of_two();
 
-        let fft = self.fft_planner.plan_fft_forward(next_power_of_2);
-        let ifft = self.fft_planner.plan_fft_inverse(next_power_of_2);
+        // Prepare input
+        let mut input = vec![0.0f64; next_power_of_2];
+        for (i, &val) in signal.as_slice().unwrap().iter().enumerate() {
+            input[i] = val as f64;
+        }
 
-        let mut input = vec![0.0; next_power_of_2];
-        input[..n].copy_from_slice(signal.as_slice().unwrap());
-
-        let mut spectrum = fft.make_output_vec();
-        fft.process(&mut input, &mut spectrum).unwrap();
+        // Forward FFT using scirs2_fft
+        let mut spectrum = match scirs2_fft::rfft(&input, None) {
+            Ok(s) => s,
+            Err(_) => return Array1::zeros(n),
+        };
 
         // Apply bandpass filter in frequency domain
         let freq_resolution = self.sample_rate as f32 / next_power_of_2 as f32;
@@ -151,13 +149,14 @@ impl StoiCalculator {
             }
         }
 
-        // Convert back to time domain
-        let mut output = vec![0.0; next_power_of_2];
-        ifft.process(&mut spectrum, &mut output).unwrap();
+        // Convert back to time domain using inverse FFT
+        let output_f64 = match scirs2_fft::irfft(&spectrum, Some(next_power_of_2)) {
+            Ok(o) => o,
+            Err(_) => return Array1::zeros(n),
+        };
 
-        // Normalize and extract original length
-        let scale = 1.0 / next_power_of_2 as f32;
-        Array1::from_vec(output[..n].iter().map(|&x| x * scale).collect())
+        // Extract original length and convert to f32
+        Array1::from_vec(output_f64[..n].iter().map(|&x| x as f32).collect())
     }
 
     /// Frame signal into overlapping windows with RMS calculation
@@ -266,7 +265,7 @@ pub fn calculate_stoi(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::Array1;
+    use scirs2_core::ndarray::Array1;
 
     #[test]
     fn test_stoi_calculator_creation() {

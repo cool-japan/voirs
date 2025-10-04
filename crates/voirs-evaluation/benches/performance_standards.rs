@@ -254,10 +254,12 @@ fn bench_statistical_reliability_validation(c: &mut Criterion) {
                     // Perform paired t-tests on similar distributions (null hypothesis true)
                     for _ in 0..count {
                         let sample_size = 30;
-                        let data_a: Vec<f32> =
-                            (0..sample_size).map(|_| rand::random::<f32>()).collect();
-                        let data_b: Vec<f32> =
-                            (0..sample_size).map(|_| rand::random::<f32>()).collect();
+                        let data_a: Vec<f32> = (0..sample_size)
+                            .map(|_| scirs2_core::random::random::<f32>())
+                            .collect();
+                        let data_b: Vec<f32> = (0..sample_size)
+                            .map(|_| scirs2_core::random::random::<f32>())
+                            .collect();
 
                         if let Ok(result) = analyzer.paired_t_test(&data_a, &data_b, None) {
                             if result.p_value < significance_level {

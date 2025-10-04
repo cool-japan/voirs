@@ -3,13 +3,29 @@
 //! This module implements granular synthesis techniques for creating special vocal effects
 //! including texture manipulation, time-stretching, pitch-shifting, and unique timbral effects.
 
-#![allow(dead_code, missing_docs)]
+#![allow(dead_code)]
 
 use crate::effects::SingingEffect;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Granular synthesis processor
+/// Granular synthesis processor for advanced audio manipulation.
+///
+/// This processor implements granular synthesis techniques by decomposing audio into small
+/// grains (typically 5-500ms) and manipulating their playback position, pitch, amplitude,
+/// and density. This enables sophisticated effects including:
+///
+/// - Time-stretching without pitch change
+/// - Pitch-shifting without time change
+/// - Textural transformations (smooth, rough, crystalline, cloudy)
+/// - Spectral freezing and morphing
+/// - Stochastic variations for organic, evolving sounds
+///
+/// # Technical Details
+///
+/// The processor maintains a circular input buffer and spawns multiple concurrent grains,
+/// each with independent envelope, pitch shift, and amplitude parameters. Grains are
+/// processed in parallel and mixed to produce the final output.
 #[derive(Debug, Clone)]
 pub struct GranularSynthesisEffect {
     name: String,
@@ -55,7 +71,15 @@ struct GrainState {
     envelope_value: f32, // Current envelope value
 }
 
-/// Grain envelope types
+/// Envelope shapes applied to individual grains.
+///
+/// The envelope controls the amplitude trajectory of each grain over its lifetime,
+/// affecting the smoothness of grain transitions and the overall sonic character.
+/// Different envelope types produce different perceptual qualities:
+///
+/// - Smooth envelopes (Gaussian, Hann) reduce artifacts and produce flowing textures
+/// - Sharp envelopes (Linear, Exponential) emphasize grain boundaries
+/// - Specialized envelopes (Kaiser, Tukey) offer precise control over sidelobe suppression
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GrainEnvelope {
     /// Linear attack/decay
@@ -74,7 +98,17 @@ pub enum GrainEnvelope {
     Tukey,
 }
 
-/// Window function types for grain processing
+/// Window functions applied during grain processing.
+///
+/// Window functions shape the spectral characteristics of individual grains,
+/// controlling frequency domain artifacts and smoothing transitions. Each window
+/// offers different trade-offs between main lobe width and side lobe suppression:
+///
+/// - Rectangle: No windowing, maximum time resolution but spectral artifacts
+/// - Hann/Hamming: Balanced time-frequency resolution, minimal artifacts
+/// - Blackman: Superior sidelobe suppression, wider main lobe
+/// - Kaiser: Adjustable parameter for flexible main lobe/sidelobe trade-off
+/// - Tukey: Combines flat top with tapered edges
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WindowFunction {
     /// Rectangular window (no windowing)
@@ -91,7 +125,32 @@ pub enum WindowFunction {
     Tukey,
 }
 
-/// Granular synthesis configuration
+/// Configuration parameters for granular synthesis.
+///
+/// This structure defines all parameters controlling the granular synthesis process,
+/// including grain characteristics (size, density, overlap), randomization amounts,
+/// pitch/time manipulation, and mixing settings. All parameters include documented
+/// valid ranges and are clamped during processing to prevent invalid values.
+///
+/// # Example
+///
+/// ```ignore
+/// use voirs_singing::granular_synthesis::{GranularConfig, GrainEnvelope, WindowFunction};
+///
+/// let config = GranularConfig {
+///     grain_size_ms: 100.0,
+///     grain_density: 30.0,
+///     grain_overlap: 0.7,
+///     position_variation: 0.2,
+///     pitch_variation_semitones: 2.0,
+///     amplitude_variation: 0.1,
+///     envelope_type: GrainEnvelope::Gaussian,
+///     window_function: WindowFunction::Hann,
+///     time_stretch: 1.5,
+///     pitch_shift_semitones: 0.0,
+///     dry_wet_mix: 0.8,
+/// };
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GranularConfig {
     /// Grain size in milliseconds (5-500ms)
@@ -137,7 +196,35 @@ impl Default for GranularConfig {
 }
 
 impl GranularSynthesisEffect {
-    /// Create new granular synthesis effect
+    /// Creates a new granular synthesis effect processor.
+    ///
+    /// Initializes the granular synthesis engine with the specified configuration,
+    /// allocating internal buffers and setting up the grain processing pipeline.
+    /// The processor is configured with a 2-second circular input buffer and
+    /// supports up to 64 concurrent grains.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Identifier for this effect instance
+    /// * `config` - Granular synthesis configuration parameters
+    /// * `sample_rate` - Audio sample rate in Hz (e.g., 44100.0, 48000.0)
+    ///
+    /// # Returns
+    ///
+    /// A new `GranularSynthesisEffect` instance ready for audio processing.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use voirs_singing::granular_synthesis::{GranularSynthesisEffect, GranularConfig};
+    ///
+    /// let config = GranularConfig::default();
+    /// let effect = GranularSynthesisEffect::new(
+    ///     String::from("my_granular"),
+    ///     config,
+    ///     44100.0
+    /// );
+    /// ```
     pub fn new(name: String, config: GranularConfig, sample_rate: f32) -> Self {
         let mut effect = Self {
             name,
@@ -200,7 +287,41 @@ impl GranularSynthesisEffect {
             .insert(String::from("dry_wet_mix"), config.dry_wet_mix);
     }
 
-    /// Process granular synthesis on audio buffer
+    /// Processes audio through the granular synthesis engine.
+    ///
+    /// Applies granular synthesis to the input audio, generating grains based on density
+    /// settings, processing each active grain, and mixing the results into the output buffer.
+    /// The input is added to a circular buffer for grain source material, and grains are
+    /// triggered at intervals determined by grain density.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Input audio samples to process
+    /// * `output` - Output buffer to write processed audio (must be pre-allocated)
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - Processing completed successfully
+    /// * `Err(...)` - Processing error occurred
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if grain triggering or processing fails (though current
+    /// implementation does not produce errors under normal operation).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut effect = GranularSynthesisEffect::new(
+    ///     String::from("granular"),
+    ///     GranularConfig::default(),
+    ///     44100.0
+    /// );
+    ///
+    /// let input = vec![0.0; 4410];  // 100ms at 44.1kHz
+    /// let mut output = vec![0.0; 4410];
+    /// effect.process_granular(&input, &mut output)?;
+    /// ```
     pub fn process_granular(&mut self, input: &[f32], output: &mut [f32]) -> crate::Result<()> {
         if input.is_empty() || output.is_empty() {
             return Ok(());
@@ -366,9 +487,8 @@ impl GranularSynthesisEffect {
                 // Simplified Kaiser window (beta=5)
                 let alpha = 5.0;
                 let x = 2.0 * clamped_progress - 1.0;
-                let kaiser = Self::modified_bessel_i0(alpha * (1.0 - x * x).sqrt())
-                    / Self::modified_bessel_i0(alpha);
-                kaiser
+                Self::modified_bessel_i0(alpha * (1.0 - x * x).sqrt())
+                    / Self::modified_bessel_i0(alpha)
             }
             GrainEnvelope::Tukey => {
                 let alpha = 0.5; // Taper ratio
@@ -478,20 +598,45 @@ impl GranularSynthesisEffect {
                         + y * (1.2067492 + y * (0.2659732 + y * (0.360768e-1 + y * 0.45813e-2)))))
         } else {
             let z = 3.75 / ax;
-            let ans = (ax.exp() / ax.sqrt())
-                * (0.39894228
-                    + z * (0.1328592e-1
-                        + z * (0.225319e-2
-                            + z * (-0.157565e-2
-                                + z * (0.916281e-2
-                                    + z * (-0.2057706e-1
-                                        + z * (0.2635537e-1
-                                            + z * (-0.1647633e-1 + z * 0.392377e-2))))))));
-            ans
+            (ax.exp() / ax.sqrt())
+                * (0.398_942_3
+                    + z * (0.013_285_92
+                        + z * (0.002_253_19
+                            + z * (-0.001_575_65
+                                + z * (0.009_162_81
+                                    + z * (-0.020_577_06
+                                        + z * (0.026_355_37
+                                            + z * (-0.016_476_33 + z * 0.003_923_77))))))))
         }
     }
 
-    /// Apply granular texture effects
+    /// Applies a preset texture configuration to the granular synthesis.
+    ///
+    /// Sets grain parameters to predefined values optimized for specific sonic textures.
+    /// This provides a quick way to achieve characteristic granular sounds without
+    /// manually adjusting individual parameters.
+    ///
+    /// # Arguments
+    ///
+    /// * `texture_type` - The texture preset to apply (Smooth, Rough, Crystalline, or Cloudy)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use voirs_singing::granular_synthesis::{GranularSynthesisEffect, GranularTexture, GranularConfig};
+    ///
+    /// let mut effect = GranularSynthesisEffect::new(
+    ///     String::from("granular"),
+    ///     GranularConfig::default(),
+    ///     44100.0
+    /// );
+    ///
+    /// // Apply smooth, flowing texture
+    /// effect.apply_texture_effect(GranularTexture::Smooth);
+    ///
+    /// // Switch to rough, granular texture
+    /// effect.apply_texture_effect(GranularTexture::Rough);
+    /// ```
     pub fn apply_texture_effect(&mut self, texture_type: GranularTexture) {
         match texture_type {
             GranularTexture::Smooth => {
@@ -521,7 +666,35 @@ impl GranularSynthesisEffect {
         }
     }
 
-    /// Get current configuration
+    /// Retrieves the current granular synthesis configuration.
+    ///
+    /// Returns a `GranularConfig` structure populated with the current parameter
+    /// values. This is useful for saving presets, displaying current settings,
+    /// or cloning configurations across multiple effect instances.
+    ///
+    /// # Returns
+    ///
+    /// A `GranularConfig` containing all current parameter values.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use voirs_singing::granular_synthesis::{GranularSynthesisEffect, GranularConfig};
+    ///
+    /// let mut effect = GranularSynthesisEffect::new(
+    ///     String::from("granular"),
+    ///     GranularConfig::default(),
+    ///     44100.0
+    /// );
+    ///
+    /// // Modify some parameters
+    /// effect.set_parameter("grain_size_ms", 100.0)?;
+    /// effect.set_parameter("grain_density", 40.0)?;
+    ///
+    /// // Retrieve current configuration
+    /// let current_config = effect.get_config();
+    /// assert_eq!(current_config.grain_size_ms, 100.0);
+    /// ```
     pub fn get_config(&self) -> GranularConfig {
         GranularConfig {
             grain_size_ms: self.grain_size * 1000.0,

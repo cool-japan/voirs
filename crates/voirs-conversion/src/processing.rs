@@ -1,8 +1,8 @@
 //! Audio processing utilities for voice conversion
 
 use crate::{core::AudioFeatures, Error, Result};
-use realfft::RealFftPlanner;
-use rustfft::num_complex::Complex;
+use scirs2_core::Complex;
+use scirs2_fft::RealFftPlanner;
 use tracing::{debug, trace};
 
 /// Audio buffer for processing
@@ -394,7 +394,7 @@ impl FeatureExtractor {
     pub fn new(sample_rate: u32) -> Self {
         Self {
             sample_rate,
-            fft_planner: RealFftPlanner::new(),
+            fft_planner: RealFftPlanner::<f32>::new(),
             cache: std::collections::HashMap::new(),
         }
     }
@@ -592,14 +592,13 @@ impl FeatureExtractor {
     }
 
     fn compute_fft(&self, audio: &[f32]) -> Result<Vec<f32>> {
-        let mut planner = RealFftPlanner::new();
+        let mut planner = RealFftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(audio.len());
 
-        let mut input = audio.to_vec();
+        let input = audio.to_vec();
         let mut output = vec![Complex::new(0.0, 0.0); audio.len() / 2 + 1];
 
-        fft.process(&mut input, &mut output)
-            .map_err(|e| Error::processing(format!("FFT error: {e:?}")))?;
+        fft.process(&input, &mut output);
 
         Ok(output.iter().map(|c| c.norm()).collect())
     }

@@ -16,17 +16,29 @@ use std::time::{Duration, SystemTime};
 /// Browser extension error types
 #[derive(Debug, Clone)]
 pub enum BrowserExtensionError {
+    /// Extension not installed in specified browser
     ExtensionNotInstalled(String),
+    /// Browser not supported
     BrowserNotSupported(String),
+    /// Permission denied for operation
     PermissionDenied(String),
+    /// Communication error with extension
     CommunicationError(String),
+    /// Script injection failed
     ScriptInjectionFailed(String),
+    /// Content Security Policy violation
     ContentSecurityPolicyError(String),
+    /// Manifest configuration error
     ManifestError(String),
+    /// Browser storage error
     StorageError(String),
+    /// Network communication error
     NetworkError(String),
+    /// Configuration error
     ConfigurationError(String),
+    /// API rate limit exceeded
     ApiLimitExceeded,
+    /// Unauthorized access attempt
     UnauthorizedAccess,
 }
 
@@ -68,12 +80,19 @@ impl Error for BrowserExtensionError {}
 /// Supported browsers
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BrowserType {
+    /// Google Chrome
     Chrome,
+    /// Mozilla Firefox
     Firefox,
+    /// Apple Safari
     Safari,
+    /// Microsoft Edge
     Edge,
+    /// Opera browser
     Opera,
+    /// Brave browser
     Brave,
+    /// Custom browser with name
     Custom(String),
 }
 
@@ -94,284 +113,444 @@ impl fmt::Display for BrowserType {
 /// Extension manifest configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtensionManifest {
+    /// Extension name
     pub name: String,
+    /// Extension version
     pub version: String,
+    /// Extension description
     pub description: String,
+    /// Manifest version (2 or 3)
     pub manifest_version: u32,
+    /// Required permissions
     pub permissions: Vec<ExtensionPermission>,
+    /// Host URL patterns
     pub host_permissions: Vec<String>,
+    /// Content script configurations
     pub content_scripts: Vec<ContentScript>,
+    /// Background script configuration
     pub background: Option<BackgroundScript>,
+    /// Browser action configuration
     pub action: Option<BrowserAction>,
+    /// Options page URL
     pub options_page: Option<String>,
+    /// Web accessible resources
     pub web_accessible_resources: Vec<WebAccessibleResource>,
 }
 
 /// Extension permissions
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ExtensionPermission {
+    /// Access to active tab
     ActiveTab,
+    /// Browser storage access
     Storage,
+    /// Script execution permission
     Scripting,
+    /// Notification permission
     Notifications,
+    /// Audio capture permission
     AudioCapture,
+    /// Video capture permission
     VideoCapture,
+    /// Tab capture permission
     TabCapture,
+    /// Desktop capture permission
     DesktopCapture,
+    /// Identity API access
     Identity,
+    /// Cookie access
     Cookies,
+    /// Browsing history access
     History,
+    /// Bookmark access
     BookMarks,
+    /// Tab API access
     Tabs,
+    /// Context menu API access
     ContextMenus,
+    /// Background script permission
     Background,
+    /// Offline document access
     OfflineDocument,
+    /// Unlimited storage permission
     UnlimitedStorage,
+    /// Custom permission with name
     Custom(String),
 }
 
 /// Content script configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentScript {
+    /// URL patterns to match
     pub matches: Vec<String>,
+    /// JavaScript files to inject
     pub js: Vec<String>,
+    /// CSS files to inject
     pub css: Vec<String>,
+    /// Script execution timing
     pub run_at: RunAt,
+    /// Run in all frames
     pub all_frames: bool,
+    /// Match about:blank pages
     pub match_about_blank: bool,
 }
 
 /// Script execution timing
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum RunAt {
+    /// Run at document start
     DocumentStart,
+    /// Run at document end
     DocumentEnd,
+    /// Run when document is idle
     DocumentIdle,
 }
 
 /// Background script configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackgroundScript {
+    /// Service worker script path
     pub service_worker: Option<String>,
+    /// Legacy background scripts
     pub scripts: Vec<String>,
+    /// Persistent background page
     pub persistent: bool,
 }
 
 /// Browser action configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrowserAction {
+    /// Default popup HTML file
     pub default_popup: Option<String>,
+    /// Default action title
     pub default_title: String,
+    /// Default icon paths by size
     pub default_icon: HashMap<String, String>,
 }
 
 /// Web accessible resources
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebAccessibleResource {
+    /// Resource paths
     pub resources: Vec<String>,
+    /// URL patterns that can access these resources
     pub matches: Vec<String>,
+    /// Use dynamic URL for resources
     pub use_dynamic_url: bool,
 }
 
 /// Extension configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtensionConfig {
+    /// Target browser type
     pub browser: BrowserType,
+    /// Extension identifier
     pub extension_id: String,
+    /// Extension manifest
     pub manifest: ExtensionManifest,
+    /// API endpoint URL
     pub api_endpoint: String,
+    /// Enable real-time features
     pub realtime_enabled: bool,
+    /// Auto-inject into pages
     pub auto_inject: bool,
+    /// Privacy settings
     pub privacy_settings: PrivacySettings,
+    /// UI settings
     pub ui_settings: UISettings,
 }
 
 /// Privacy settings for the extension
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrivacySettings {
+    /// Collect browsing data
     pub collect_browsing_data: bool,
+    /// Store audio files locally
     pub store_audio_locally: bool,
+    /// Send anonymized metrics
     pub send_anonymized_metrics: bool,
+    /// Respect Do Not Track header
     pub respect_do_not_track: bool,
+    /// Support incognito mode
     pub incognito_mode_support: bool,
 }
 
 /// UI settings for the extension
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UISettings {
+    /// Show pronunciation hints
     pub show_pronunciation_hints: bool,
+    /// Highlight difficult words
     pub highlight_difficult_words: bool,
+    /// Enable tooltips
     pub enable_tooltips: bool,
+    /// Show floating feedback panel
     pub floating_feedback_panel: bool,
+    /// UI theme
     pub theme: ExtensionTheme,
+    /// UI position on page
     pub position: UIPosition,
+    /// UI opacity level
     pub opacity: f32,
 }
 
 /// Extension theme
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ExtensionTheme {
+    /// Light theme
     Light,
+    /// Dark theme
     Dark,
+    /// Auto theme based on system
     Auto,
+    /// Custom theme
     Custom(String),
 }
 
 /// UI positioning
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum UIPosition {
+    /// Top-left corner
     TopLeft,
+    /// Top-right corner
     TopRight,
+    /// Bottom-left corner
     BottomLeft,
+    /// Bottom-right corner
     BottomRight,
+    /// Center of screen
     Center,
-    Custom { x: i32, y: i32 },
+    /// Custom position with coordinates
+    Custom {
+        /// X coordinate
+        x: i32,
+        /// Y coordinate
+        y: i32,
+    },
 }
 
 /// Page analysis result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PageAnalysis {
+    /// Page URL
     pub url: String,
+    /// Page title
     pub title: String,
+    /// Extracted text content
     pub text_content: String,
+    /// Identified difficult words
     pub difficult_words: Vec<DifficultWord>,
+    /// Learning opportunities
     pub learning_opportunities: Vec<LearningOpportunity>,
+    /// Pronunciation hints
     pub pronunciation_hints: Vec<PronunciationHint>,
+    /// Estimated reading level
     pub estimated_reading_level: f32,
+    /// Detected language code
     pub language_detected: String,
+    /// Analysis timestamp
     pub analysis_timestamp: SystemTime,
 }
 
 /// Difficult word identification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DifficultWord {
+    /// The difficult word
     pub word: String,
+    /// Difficulty score
     pub difficulty_score: f32,
+    /// Position in text
     pub position: TextPosition,
+    /// Phonetic transcription
     pub phonetic_transcription: String,
+    /// Word definition
     pub definition: Option<String>,
+    /// Usage examples
     pub usage_examples: Vec<String>,
+    /// Audio pronunciation URL
     pub audio_url: Option<String>,
 }
 
 /// Text position in the page
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextPosition {
+    /// Start offset in text
     pub start_offset: usize,
+    /// End offset in text
     pub end_offset: usize,
+    /// CSS selector for element
     pub element_selector: String,
+    /// HTML element type
     pub element_type: String,
 }
 
 /// Learning opportunity on the page
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LearningOpportunity {
+    /// Type of opportunity
     pub opportunity_type: OpportunityType,
+    /// Opportunity description
     pub description: String,
+    /// Required action
     pub action_required: String,
+    /// Estimated learning benefit
     pub estimated_benefit: f32,
+    /// Difficulty level
     pub difficulty_level: f32,
+    /// Position in page if applicable
     pub position: Option<TextPosition>,
 }
 
 /// Types of learning opportunities
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum OpportunityType {
+    /// Pronunciation practice opportunity
     PronunciationPractice,
+    /// Vocabulary expansion opportunity
     VocabularyExpansion,
+    /// Reading comprehension opportunity
     ReadingComprehension,
+    /// Listening practice opportunity
     ListeningPractice,
+    /// Speaking practice opportunity
     SpeakingPractice,
+    /// Grammar review opportunity
     GrammarReview,
 }
 
 /// Pronunciation hint for specific text
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PronunciationHint {
+    /// Text to pronounce
     pub text: String,
+    /// Phonetic transcription
     pub phonetic: String,
+    /// Audio pronunciation URL
     pub audio_url: Option<String>,
+    /// Position in text
     pub position: TextPosition,
+    /// Confidence score
     pub confidence: f32,
+    /// Alternative pronunciations
     pub alternatives: Vec<String>,
 }
 
 /// Web page integration result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebPageIntegration {
+    /// Injected script files
     pub injected_scripts: Vec<String>,
+    /// Modified DOM elements
     pub modified_elements: Vec<String>,
+    /// Created UI overlays
     pub created_overlays: Vec<UIOverlay>,
+    /// Registered event listeners
     pub event_listeners: Vec<EventListener>,
+    /// Browser storage keys used
     pub storage_keys: Vec<String>,
 }
 
 /// UI overlay for the extension
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UIOverlay {
+    /// Overlay identifier
     pub overlay_id: String,
+    /// Type of overlay
     pub overlay_type: OverlayType,
+    /// Overlay position
     pub position: UIPosition,
+    /// Overlay size
     pub size: Size,
+    /// Overlay content HTML
     pub content: String,
+    /// Whether overlay is visible
     pub visible: bool,
+    /// CSS z-index
     pub z_index: i32,
 }
 
 /// Types of UI overlays
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum OverlayType {
+    /// Feedback panel overlay
     FeedbackPanel,
+    /// Pronunciation tooltip overlay
     PronunciationTooltip,
+    /// Progress bar overlay
     ProgressBar,
+    /// Notification banner overlay
     NotificationBanner,
+    /// Settings panel overlay
     SettingsPanel,
+    /// Help dialog overlay
     HelpDialog,
 }
 
 /// Size specification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Size {
+    /// Width in pixels
     pub width: i32,
+    /// Height in pixels
     pub height: i32,
 }
 
 /// Event listener configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventListener {
+    /// Event type (e.g., click, mouseover)
     pub event_type: String,
+    /// CSS selector for target element
     pub selector: String,
+    /// Handler function name
     pub handler_function: String,
+    /// Use capture phase
     pub capture: bool,
 }
 
 /// Browser extension manager
 pub struct BrowserExtensionManager {
+    /// Extension configuration
     config: ExtensionConfig,
+    /// Real-time configuration
     realtime_config: RealtimeConfig,
+    /// Installed extensions by browser
     installed_extensions: HashMap<BrowserType, ExtensionInfo>,
+    /// Active extension sessions
     active_sessions: HashMap<String, ExtensionSession>,
 }
 
 /// Information about an installed extension
 #[derive(Debug, Clone)]
 struct ExtensionInfo {
+    /// Extension identifier
     extension_id: String,
+    /// Extension version
     version: String,
+    /// Whether extension is enabled
     enabled: bool,
+    /// Granted permissions
     permissions: Vec<ExtensionPermission>,
+    /// Installation date
     install_date: SystemTime,
 }
 
 /// Active extension session
 #[derive(Debug, Clone)]
 struct ExtensionSession {
+    /// Session identifier
     session_id: String,
+    /// Browser tab ID
     tab_id: String,
+    /// Current page URL
     url: String,
+    /// Session start time
     start_time: SystemTime,
+    /// Page analysis results
     page_analysis: Option<PageAnalysis>,
+    /// Page integration details
     integration: Option<WebPageIntegration>,
+    /// Number of feedback items provided
     feedback_count: u32,
 }
 
@@ -932,19 +1111,28 @@ impl BrowserExtensionManager {
 /// Extension statistics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtensionStats {
+    /// Number of active sessions
     pub active_sessions: u32,
+    /// Total feedback items provided
     pub total_feedback_provided: u32,
+    /// Number of browsers with extension installed
     pub installed_browsers: u32,
+    /// Extension uptime in seconds
     pub uptime_seconds: u32,
 }
 
 /// Audio feedback result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioFeedback {
+    /// Speech clarity score
     pub clarity_score: f32,
+    /// Volume level
     pub volume_level: f32,
+    /// Speech rate in words per minute
     pub speech_rate: f32,
+    /// Confidence score
     pub confidence: f32,
+    /// Improvement suggestions
     pub suggestions: Vec<String>,
 }
 

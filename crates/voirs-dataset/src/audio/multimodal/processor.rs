@@ -873,16 +873,21 @@ impl DefaultMultiModalProcessor {
     /// Compute spectral centroid for frequency analysis
     fn compute_spectral_centroid(&self, segment: &[f32], sample_rate: u32) -> Result<f32> {
         // Compute FFT for spectral analysis
-        use rustfft::{num_complex::Complex, FftPlanner};
+        use scirs2_core::Complex;
 
-        let mut planner = FftPlanner::new();
-        let fft = planner.plan_fft_forward(segment.len());
-
-        // Convert to complex
-        let mut buffer: Vec<Complex<f32>> = segment.iter().map(|&x| Complex::new(x, 0.0)).collect();
+        // Convert to f64 complex for FFT
+        let input_f64: Vec<scirs2_core::Complex<f64>> = segment
+            .iter()
+            .map(|&x| scirs2_core::Complex::new(x as f64, 0.0))
+            .collect();
 
         // Perform FFT
-        fft.process(&mut buffer);
+        let fft_result = scirs2_fft::fft(&input_f64, None)
+            .map_err(|e| crate::DatasetError::AudioError(format!("FFT error: {e}")))?;
+        let buffer: Vec<Complex<f32>> = fft_result
+            .iter()
+            .map(|c| Complex::new(c.re as f32, c.im as f32))
+            .collect();
 
         // Compute spectral centroid
         let mut weighted_sum = 0.0;

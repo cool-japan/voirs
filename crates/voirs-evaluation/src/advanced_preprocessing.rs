@@ -184,7 +184,6 @@ impl AdvancedPreprocessor {
         let mut processed_audio = audio.clone();
         let mut operations_applied = Vec::new();
         let mut detected_issues = Vec::new();
-        let mut recommendations = Vec::new();
 
         // Step 1: Analyze audio quality
         let initial_assessment = self.analyze_audio_quality(audio)?;
@@ -231,7 +230,7 @@ impl AdvancedPreprocessor {
         }
 
         // Step 3: Generate recommendations for remaining issues
-        recommendations =
+        let recommendations =
             self.generate_preprocessing_recommendations(&initial_assessment.detected_issues);
 
         // Step 4: Calculate final quality metrics
@@ -841,7 +840,7 @@ mod tests {
             .map(|i| {
                 let t = i as f32 / 1000.0;
                 let signal = 0.5 * (2.0 * PI * 440.0 * t).sin();
-                let noise = (rand::random::<f32>() - 0.5) * 0.1;
+                let noise = (scirs2_core::random::random::<f32>() - 0.5) * 0.1;
                 signal + noise
             })
             .collect();

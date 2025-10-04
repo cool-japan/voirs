@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::sync::RwLock;
 
+/// Description
 pub struct MLComputerVisionAnalyzer {
     facial_analyzer: Arc<RwLock<FacialAnalyzer>>,
     gesture_posture_analyzer: Arc<RwLock<GesturePostureAnalyzer>>,
@@ -16,6 +17,7 @@ pub struct MLComputerVisionAnalyzer {
 }
 
 impl MLComputerVisionAnalyzer {
+    /// Description
     pub fn new() -> Self {
         Self {
             facial_analyzer: Arc::new(RwLock::new(FacialAnalyzer::new())),
@@ -25,6 +27,7 @@ impl MLComputerVisionAnalyzer {
         }
     }
 
+    /// Description
     pub async fn perform_multimodal_analysis(
         &self,
         frame: &VideoFrame,
@@ -264,11 +267,13 @@ impl ComputerVisionAnalyzer for MLComputerVisionAnalyzer {
     }
 }
 
+/// Description
 pub struct SimpleLandmarkDetector {
     detection_confidence: f32,
 }
 
 impl SimpleLandmarkDetector {
+    /// Description
     pub fn new() -> Self {
         Self {
             detection_confidence: 0.8,
@@ -337,6 +342,7 @@ impl LandmarkDetector for SimpleLandmarkDetector {
     }
 }
 
+/// Description
 pub struct ComputerVisionSystem {
     analyzer: Arc<dyn ComputerVisionAnalyzer>,
     landmark_detector: Arc<dyn LandmarkDetector>,
@@ -344,6 +350,7 @@ pub struct ComputerVisionSystem {
 }
 
 impl ComputerVisionSystem {
+    /// Description
     pub fn new() -> Self {
         Self {
             analyzer: Arc::new(MLComputerVisionAnalyzer::new()),
@@ -469,6 +476,7 @@ impl ComputerVisionSystem {
         suggestions
     }
 
+    /// Description
     pub async fn analyze_frame(&self, frame: &VideoFrame) -> Result<MultiModalAnalysis> {
         let facial_landmarks = self
             .landmark_detector
@@ -558,11 +566,13 @@ impl ComputerVisionSystem {
         Ok(analysis)
     }
 
+    /// Description
     pub async fn get_analysis_history(&self) -> Vec<MultiModalAnalysis> {
         let history = self.analysis_history.read().await;
         history.clone()
     }
 
+    /// Description
     pub async fn get_improvement_trends(&self) -> Result<ImprovementTrends> {
         let history = self.analysis_history.read().await;
 

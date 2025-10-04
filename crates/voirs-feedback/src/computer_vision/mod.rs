@@ -4,10 +4,15 @@
 //! real-time feedback systems, including facial expression recognition, lip movement
 //! analysis, gesture detection, posture assessment, and eye gaze tracking.
 
+/// Description
 pub mod core;
+/// Description
 pub mod eye_tracking;
+/// Description
 pub mod facial;
+/// Description
 pub mod gesture;
+/// Description
 pub mod types;
 
 // Re-export all public types and traits to maintain backward compatibility

@@ -784,23 +784,33 @@ impl StreamProcessor {
     }
 }
 
-/// Stream session for tracking streaming state
+/// Stream session for tracking streaming state and performance metrics
 #[derive(Debug, Clone)]
 pub struct StreamSession {
+    /// Unique identifier for this streaming session
     pub session_id: String,
+    /// Title of the stream for display purposes
     pub stream_title: String,
+    /// Timestamp when the stream session started
     pub start_time: std::time::Instant,
+    /// Target streaming platform for this session
     pub platform: StreamingPlatform,
+    /// Total number of audio frames processed in this session
     pub processed_frames: u64,
+    /// Cumulative latency across all processed frames in milliseconds
     pub total_latency_ms: f32,
+    /// Number of quality degradation events during the session
     pub quality_drops: u32,
 }
 
-/// Bandwidth adaptation state
+/// Bandwidth adaptation state for dynamic quality adjustment during streaming
 #[derive(Debug, Clone)]
 pub struct BandwidthAdaptationState {
+    /// Current quality level based on bandwidth conditions
     pub current_quality: StreamQuality,
+    /// Target bitrate in kbps for current quality level
     pub target_bitrate: u32,
+    /// Historical record of quality adaptation events
     pub adaptation_history: Vec<AdaptationEvent>,
 }
 
@@ -844,20 +854,27 @@ impl BandwidthAdaptationState {
     }
 }
 
+/// Record of a bandwidth adaptation event
 #[derive(Debug, Clone)]
 pub struct AdaptationEvent {
+    /// Time when the adaptation occurred
     pub timestamp: std::time::Instant,
+    /// Direction of quality change (increase or decrease)
     pub direction: AdaptationDirection,
+    /// New quality level after adaptation
     pub new_quality: StreamQuality,
 }
 
+/// Direction of quality adaptation
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdaptationDirection {
+    /// Quality level increased due to improved conditions
     Increase,
+    /// Quality level decreased due to bandwidth constraints
     Decrease,
 }
 
-/// Stream performance monitor
+/// Stream performance monitor for tracking real-time streaming metrics
 #[derive(Debug)]
 pub struct StreamPerformanceMonitor {
     processing_times: Vec<std::time::Duration>,
@@ -932,104 +949,168 @@ impl StreamPerformanceMonitor {
     }
 }
 
-/// Stream performance metrics
+/// Stream performance metrics for monitoring streaming quality and health
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamPerformanceMetrics {
+    /// Average processing latency across recent frames in milliseconds
     pub average_latency_ms: f32,
+    /// Current audio bitrate in kilobits per second
     pub current_bitrate_kbps: u32,
+    /// Total number of quality degradation events
     pub quality_drops: u32,
+    /// Stream uptime duration in seconds
     pub uptime_seconds: u64,
+    /// Current buffer health as percentage (0-100)
     pub buffer_health_percent: f32,
 }
 
-/// Platform-specific integration information
+/// Platform-specific integration information with API details and capabilities
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PlatformIntegration {
+    /// Twitch live streaming integration
     Twitch(TwitchIntegration),
+    /// YouTube Live streaming integration
     YouTube(YouTubeIntegration),
+    /// Discord voice channel integration
     Discord(DiscordIntegration),
+    /// OBS Studio plugin integration
     OBS(OBSIntegration),
+    /// Streamlabs tools integration
     Streamlabs(StreamlabsIntegration),
+    /// XSplit broadcaster integration
     XSplit(XSplitIntegration),
+    /// Generic RTMP streaming integration
     RTMP(RTMPIntegration),
+    /// Facebook Live streaming integration
     Facebook(FacebookIntegration),
+    /// TikTok Live streaming integration
     TikTok(TikTokIntegration),
 }
 
+/// Twitch platform integration details and capabilities
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TwitchIntegration {
+    /// Twitch API version being used
     pub api_version: String,
+    /// Whether chat integration is enabled
     pub chat_integration: bool,
+    /// Whether Twitch emote support is available
     pub emote_support: bool,
+    /// Whether subscriber-specific features are enabled
     pub subscriber_features: bool,
+    /// Whether clip creation integration is available
     pub clip_integration: bool,
 }
 
+/// YouTube Live platform integration details and capabilities
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct YouTubeIntegration {
+    /// YouTube API version being used
     pub api_version: String,
+    /// Whether live chat integration is enabled
     pub live_chat_integration: bool,
+    /// Whether Super Chat support is available
     pub super_chat_support: bool,
+    /// Whether stream recording is supported
     pub recording_support: bool,
+    /// Whether analytics integration is available
     pub analytics_integration: bool,
 }
 
+/// Discord platform integration details and capabilities
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiscordIntegration {
+    /// Discord API version being used
     pub api_version: String,
+    /// Whether voice channel integration is enabled
     pub voice_channel_integration: bool,
+    /// Whether bot integration is available
     pub bot_integration: bool,
+    /// Whether stage channel support is available
     pub stage_channel_support: bool,
+    /// Whether permission system integration is enabled
     pub permission_system: bool,
 }
 
+/// OBS Studio plugin integration details and capabilities
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OBSIntegration {
+    /// OBS plugin version being used
     pub plugin_version: String,
+    /// Whether audio filter support is available
     pub audio_filter_support: bool,
+    /// Whether scene switching integration is enabled
     pub scene_switching: bool,
+    /// Whether audio source integration is available
     pub source_integration: bool,
+    /// Whether hotkey support is enabled
     pub hotkey_support: bool,
 }
 
+/// Streamlabs platform integration details and capabilities
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamlabsIntegration {
+    /// Streamlabs API version being used
     pub api_version: String,
+    /// Whether donation integration is enabled
     pub donation_integration: bool,
+    /// Whether alert system integration is available
     pub alert_system: bool,
+    /// Whether overlay support is enabled
     pub overlay_support: bool,
+    /// Whether chatbot integration is available
     pub chatbot_integration: bool,
 }
 
+/// XSplit broadcaster integration details and capabilities
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct XSplitIntegration {
+    /// XSplit plugin version being used
     pub plugin_version: String,
+    /// Whether scene management integration is enabled
     pub scene_management: bool,
+    /// Whether audio plugin support is available
     pub audio_plugin_support: bool,
+    /// Whether broadcast profile support is enabled
     pub broadcast_profiles: bool,
 }
 
+/// RTMP protocol integration details and capabilities
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RTMPIntegration {
+    /// RTMP protocol version being used
     pub protocol_version: String,
+    /// Whether custom streaming server support is enabled
     pub streaming_server_support: bool,
+    /// Whether custom endpoint configuration is available
     pub custom_endpoints: bool,
+    /// Whether authentication support is enabled
     pub authentication_support: bool,
 }
 
+/// Facebook Live platform integration details and capabilities
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FacebookIntegration {
+    /// Facebook API version being used
     pub api_version: String,
+    /// Whether live video integration is enabled
     pub live_video_integration: bool,
+    /// Whether comment integration is available
     pub comment_integration: bool,
+    /// Whether reaction support is enabled
     pub reaction_support: bool,
 }
 
+/// TikTok Live platform integration details and capabilities
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TikTokIntegration {
+    /// TikTok API version being used
     pub api_version: String,
+    /// Whether live stream integration is enabled
     pub live_stream_integration: bool,
+    /// Whether gift integration is available
     pub gift_integration: bool,
+    /// Whether comment moderation is enabled
     pub comment_moderation: bool,
 }
 

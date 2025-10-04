@@ -21,13 +21,21 @@ pub struct WhisperTokenizer {
 
 /// Special tokens for Whisper
 #[derive(Debug, Clone)]
+/// Special Tokens
 pub struct SpecialTokens {
+    /// sot
     pub sot: u32,             // Start of transcript
+    /// eot
     pub eot: u32,             // End of transcript
+    /// sot prev
     pub sot_prev: u32,        // Start of previous segment
+    /// no speech
     pub no_speech: u32,       // No speech
+    /// no timestamps
     pub no_timestamps: u32,   // No timestamps
+    /// timestamp begin
     pub timestamp_begin: u32, // Beginning of timestamp tokens
+    /// language begin
     pub language_begin: u32,  // Beginning of language tokens
 }
 
@@ -41,6 +49,7 @@ pub struct BytePairEncoding {
 }
 
 impl WhisperTokenizer {
+    /// new
     pub async fn new() -> Result<Self, RecognitionError> {
         // Create Whisper tokenizer with multilingual vocabulary
         let mut vocab = HashMap::new();
@@ -196,6 +205,7 @@ impl WhisperTokenizer {
         }
     }
 
+    /// decode
     pub fn decode(&self, tokens: &[u32]) -> Result<String, RecognitionError> {
         let mut text = String::new();
 
@@ -227,6 +237,7 @@ impl WhisperTokenizer {
         Ok(text)
     }
 
+    /// encode
     pub fn encode(&self, text: &str) -> Result<Vec<u32>, RecognitionError> {
         let mut tokens = Vec::new();
 
@@ -357,12 +368,14 @@ impl WhisperTokenizer {
 
     /// Get the vocabulary size
     #[must_use]
+    /// vocab size
     pub fn vocab_size(&self) -> usize {
         self.vocab.len()
     }
 
     /// Get token for a specific language
     #[must_use]
+    /// language token
     pub fn language_token(&self, language: LanguageCode) -> u32 {
         match language {
             LanguageCode::EnUs | LanguageCode::EnGb => 50259, // <|en|>
@@ -378,6 +391,7 @@ impl WhisperTokenizer {
 
     /// Detect language from tokens by finding language token
     #[must_use]
+    /// detect language from tokens
     pub fn detect_language_from_tokens(&self, tokens: &[u32]) -> LanguageCode {
         for &token in tokens {
             match token {
@@ -396,18 +410,21 @@ impl WhisperTokenizer {
 
     /// Get special tokens
     #[must_use]
+    /// special tokens
     pub fn special_tokens(&self) -> &SpecialTokens {
         &self.special_tokens
     }
 
     /// Check if a token is a timestamp token
     #[must_use]
+    /// is timestamp token
     pub fn is_timestamp_token(&self, token_id: u32) -> bool {
         token_id >= self.special_tokens.timestamp_begin && token_id <= 51865
     }
 
     /// Convert timestamp token to time in seconds
     #[must_use]
+    /// timestamp to seconds
     pub fn timestamp_to_seconds(&self, token_id: u32) -> Option<f32> {
         if self.is_timestamp_token(token_id) {
             let offset = token_id - self.special_tokens.timestamp_begin;
@@ -419,6 +436,7 @@ impl WhisperTokenizer {
 
     /// Convert time in seconds to timestamp token
     #[must_use]
+    /// seconds to timestamp token
     pub fn seconds_to_timestamp_token(&self, seconds: f32) -> u32 {
         let offset = (seconds / 0.02).round() as u32;
         self.special_tokens.timestamp_begin + offset.min(1500)
@@ -427,8 +445,11 @@ impl WhisperTokenizer {
 
 /// Whisper task types
 #[derive(Debug, Clone, Copy)]
+/// Whisper Task
 pub enum WhisperTask {
+    /// Transcribe
     Transcribe,
+    /// Translate
     Translate,
 }
 
@@ -473,6 +494,7 @@ impl BytePairEncoding {
 
     /// Apply BPE encoding to a word
     #[must_use]
+    /// encode word
     pub fn encode_word(&self, word: &str) -> Vec<String> {
         if word.len() <= 1 {
             return vec![word.to_string()];
@@ -521,6 +543,7 @@ impl BytePairEncoding {
 
     /// Get all merge rules
     #[must_use]
+    /// get merges
     pub fn get_merges(&self) -> &HashMap<(String, String), u32> {
         &self.merges
     }

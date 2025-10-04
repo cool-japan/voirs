@@ -50,11 +50,17 @@ pub struct TranscriptBuffer {
 
 /// Individual transcript segment with timing
 #[derive(Debug, Clone)]
+/// Transcript Segment
 pub struct TranscriptSegment {
+    /// text
     pub text: String,
+    /// start time
     pub start_time: f32,
+    /// end time
     pub end_time: f32,
+    /// confidence
     pub confidence: f32,
+    /// language
     pub language: LanguageCode,
 }
 
@@ -86,21 +92,33 @@ struct IncrementalContext {
 
 /// Streaming configuration parameters
 #[derive(Debug, Clone)]
+/// Streaming Config
 pub struct StreamingConfig {
+    /// chunk duration ms
     pub chunk_duration_ms: u32,            // Duration of each processing chunk
+    /// overlap duration ms
     pub overlap_duration_ms: u32,          // Overlap between chunks
+    /// min silence duration ms
     pub min_silence_duration_ms: u32,      // Minimum silence before finalizing segment
+    /// max segment duration s
     pub max_segment_duration_s: f32,       // Maximum segment duration
+    /// vad threshold
     pub vad_threshold: f32,                // Voice activity detection threshold
+    /// max latency ms
     pub max_latency_ms: u32,               // Maximum processing latency
+    /// buffer duration s
     pub buffer_duration_s: f32,            // Audio buffer duration
+    /// incremental decoding
     pub incremental_decoding: bool,        // Enable incremental decoding with context
+    /// latency mode
     pub latency_mode: LatencyMode,         // Latency vs accuracy trade-off
+    /// overlap strategy
     pub overlap_strategy: OverlapStrategy, // How to handle overlapping chunks
 }
 
 /// Latency vs accuracy trade-off modes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Latency Mode
 pub enum LatencyMode {
     /// Ultra-low latency (sacrifice some accuracy)
     UltraLow,
@@ -114,6 +132,7 @@ pub enum LatencyMode {
 
 /// Overlap strategy for chunk processing
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Overlap Strategy
 pub enum OverlapStrategy {
     /// No overlap processing
     None,
@@ -145,6 +164,7 @@ impl Default for StreamingConfig {
 impl LatencyMode {
     /// Get the model parameters for this latency mode
     #[must_use]
+    /// model params
     pub fn model_params(&self) -> (u32, u32, f32) {
         // Returns (beam_size, max_tokens, temperature)
         match self {
@@ -157,6 +177,7 @@ impl LatencyMode {
 
     /// Get the recommended chunk duration for this latency mode
     #[must_use]
+    /// chunk duration ms
     pub fn chunk_duration_ms(&self) -> u32 {
         match self {
             LatencyMode::UltraLow => 500,      // 0.5 second chunks
@@ -170,6 +191,7 @@ impl LatencyMode {
 impl StreamingConfig {
     /// Create configuration optimized for ultra-low latency
     #[must_use]
+    /// ultra low latency
     pub fn ultra_low_latency() -> Self {
         Self {
             chunk_duration_ms: 500,
@@ -187,6 +209,7 @@ impl StreamingConfig {
 
     /// Create configuration optimized for real-time conversation
     #[must_use]
+    /// real time conversation
     pub fn real_time_conversation() -> Self {
         Self {
             chunk_duration_ms: 750,
@@ -204,6 +227,7 @@ impl StreamingConfig {
 
     /// Create configuration optimized for high accuracy transcription
     #[must_use]
+    /// high accuracy
     pub fn high_accuracy() -> Self {
         Self {
             chunk_duration_ms: 2000,
@@ -221,6 +245,7 @@ impl StreamingConfig {
 
     /// Create configuration optimized for broadcasting/podcasts
     #[must_use]
+    /// broadcast optimized
     pub fn broadcast_optimized() -> Self {
         Self {
             chunk_duration_ms: 1500,
@@ -238,6 +263,7 @@ impl StreamingConfig {
 }
 
 impl StreamingWhisperProcessor {
+    /// new
     pub async fn new(
         config: WhisperConfig,
         streaming_config: StreamingConfig,
@@ -543,11 +569,17 @@ impl StreamingWhisperProcessor {
 
 /// Processing statistics
 #[derive(Debug, Clone)]
+/// Processing Stats
 pub struct ProcessingStats {
+    /// chunks processed
     pub chunks_processed: u64,
+    /// is processing
     pub is_processing: bool,
+    /// buffer duration seconds
     pub buffer_duration_seconds: f32,
+    /// buffer fill percentage
     pub buffer_fill_percentage: f32,
+    /// last processed time
     pub last_processed_time: f32,
 }
 

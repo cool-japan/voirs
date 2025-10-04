@@ -4,17 +4,13 @@
 //! log spectral distance, and other frequency-domain measures.
 
 use crate::Result;
-use ndarray::{s, Array1, Array2};
-use realfft::RealFftPlanner;
+use scirs2_core::ndarray::{s, Array1, Array2};
 use std::f32::consts::PI;
 
 /// Spectral analyzer for quality metrics
 pub struct SpectralAnalyzer {
     /// Sample rate
     sample_rate: u32,
-
-    /// FFT planner
-    fft_planner: RealFftPlanner<f32>,
 
     /// Frame size for analysis
     frame_size: usize,
@@ -37,7 +33,6 @@ impl SpectralAnalyzer {
 
         Self {
             sample_rate,
-            fft_planner: RealFftPlanner::new(),
             frame_size,
             hop_length,
             n_mels: 80,
@@ -46,11 +41,7 @@ impl SpectralAnalyzer {
     }
 
     /// Calculate mel-cepstral distortion (MCD) between two signals
-    pub fn calculate_mcd(
-        &mut self,
-        reference: &Array1<f32>,
-        degraded: &Array1<f32>,
-    ) -> Result<f32> {
+    pub fn calculate_mcd(&self, reference: &Array1<f32>, degraded: &Array1<f32>) -> Result<f32> {
         // Extract MFCC features for both signals
         let ref_mfcc = self.extract_mfcc(reference)?;
         let deg_mfcc = self.extract_mfcc(degraded)?;
@@ -79,11 +70,7 @@ impl SpectralAnalyzer {
     }
 
     /// Calculate log spectral distance (LSD)
-    pub fn calculate_lsd(
-        &mut self,
-        reference: &Array1<f32>,
-        degraded: &Array1<f32>,
-    ) -> Result<f32> {
+    pub fn calculate_lsd(&self, reference: &Array1<f32>, degraded: &Array1<f32>) -> Result<f32> {
         let ref_spectrum = self.compute_log_spectrum(reference)?;
         let deg_spectrum = self.compute_log_spectrum(degraded)?;
 
@@ -189,7 +176,7 @@ impl SpectralAnalyzer {
     }
 
     /// Extract MFCC features
-    fn extract_mfcc(&mut self, audio: &Array1<f32>) -> Result<Array2<f32>> {
+    fn extract_mfcc(&self, audio: &Array1<f32>) -> Result<Array2<f32>> {
         // First get mel spectrogram
         let mel_spec = self.compute_mel_spectrogram(audio)?;
 
@@ -223,7 +210,7 @@ impl SpectralAnalyzer {
     }
 
     /// Compute mel spectrogram
-    fn compute_mel_spectrogram(&mut self, audio: &Array1<f32>) -> Result<Array2<f32>> {
+    fn compute_mel_spectrogram(&self, audio: &Array1<f32>) -> Result<Array2<f32>> {
         let power_spectrum = self.compute_power_spectrum(audio)?;
         let mel_filterbank = self.create_mel_filterbank();
 
@@ -312,38 +299,36 @@ impl SpectralAnalyzer {
     }
 
     /// Compute power spectrum for all frames
-    fn compute_power_spectrum(&mut self, audio: &Array1<f32>) -> Result<Array2<f32>> {
+    fn compute_power_spectrum(&self, audio: &Array1<f32>) -> Result<Array2<f32>> {
         let n_frames = (audio.len().saturating_sub(self.frame_size)) / self.hop_length + 1;
         let n_fft_bins = self.frame_size / 2 + 1;
         let mut spectrum = Array2::zeros((n_frames, n_fft_bins));
 
-        let fft = self.fft_planner.plan_fft_forward(self.frame_size);
-        let mut input = vec![0.0; self.frame_size];
-        let mut output = fft.make_output_vec();
-
         // Hanning window
-        let window: Vec<f32> = (0..self.frame_size)
-            .map(|i| 0.5 * (1.0 - (2.0 * PI * i as f32 / (self.frame_size - 1) as f32).cos()))
+        let window: Vec<f64> = (0..self.frame_size)
+            .map(|i| {
+                0.5 * (1.0 - (2.0 * PI as f64 * i as f64 / (self.frame_size - 1) as f64).cos())
+            })
             .collect();
 
         for frame in 0..n_frames {
             let start = frame * self.hop_length;
             let end = (start + self.frame_size).min(audio.len());
 
-            // Clear input
-            input.fill(0.0);
-
             // Copy audio with windowing
+            let mut input = vec![0.0f64; self.frame_size];
             for (i, &sample) in audio.slice(s![start..end]).iter().enumerate() {
-                input[i] = sample * window[i];
+                input[i] = sample as f64 * window[i];
             }
 
-            // Compute FFT
-            fft.process(&mut input, &mut output).unwrap();
+            // Compute FFT using scirs2_fft
+            let output = scirs2_fft::rfft(&input, None)
+                .map_err(|e| crate::VocoderError::ProcessingError(format!("FFT error: {:?}", e)))?;
 
             // Convert to power spectrum
             for (i, complex_val) in output.iter().enumerate() {
-                spectrum[[frame, i]] = complex_val.norm_sqr();
+                spectrum[[frame, i]] =
+                    (complex_val.re * complex_val.re + complex_val.im * complex_val.im) as f32;
             }
         }
 
@@ -351,7 +336,7 @@ impl SpectralAnalyzer {
     }
 
     /// Compute log power spectrum
-    fn compute_log_spectrum(&mut self, audio: &Array1<f32>) -> Result<Array2<f32>> {
+    fn compute_log_spectrum(&self, audio: &Array1<f32>) -> Result<Array2<f32>> {
         let power_spectrum = self.compute_power_spectrum(audio)?;
 
         // Convert to log scale
@@ -395,7 +380,7 @@ pub fn calculate_spectral_convergence(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::Array1;
+    use scirs2_core::ndarray::Array1;
     use std::f32::consts::PI;
 
     #[test]

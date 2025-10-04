@@ -301,8 +301,9 @@ pub fn extract_mel_spectrogram(
     n_fft: usize,
     hop_length: usize,
 ) -> Result<FeatureResult> {
-    // Simplified mel spectrogram extraction
-    // In a real implementation, this would use proper STFT and mel filter banks
+    use rustfft::FftPlanner;
+    use scirs2_core::ndarray::Array2;
+    use scirs2_core::Complex32; // Use SciRS2 Complex type (SCIRS2 POLICY)
 
     let sample_rate = audio.sample_rate() as f32;
     let samples = audio.samples();
@@ -320,35 +321,138 @@ pub fn extract_mel_spectrogram(
         1
     };
 
-    // Generate mock mel spectrogram data for now
-    // In a real implementation, this would compute actual mel spectrograms
-    let values: Vec<f32> = (0..n_frames * n_mels)
+    // Create FFT planner
+    let mut planner = FftPlanner::<f32>::new();
+    let fft = planner.plan_fft_forward(n_fft);
+
+    // Create Hann window
+    let window: Vec<f32> = (0..n_fft)
         .map(|i| {
-            let frame = i / n_mels;
-            let mel_bin = i % n_mels;
-            let freq = (mel_bin as f32 / n_mels as f32) * sample_rate / 2.0;
-            let amplitude = if frame < samples.len() / hop_length {
-                let sample_idx = frame * hop_length;
-                if sample_idx < samples.len() {
-                    samples[sample_idx].abs() * (1.0 - freq / (sample_rate / 2.0))
-                } else {
-                    0.0
-                }
-            } else {
-                0.0
-            };
-            amplitude.max(1e-8).ln() // Log magnitude
+            let x = i as f32 / (n_fft - 1) as f32;
+            0.5 * (1.0 - (2.0 * std::f32::consts::PI * x).cos())
         })
         .collect();
+
+    // Create mel filterbank
+    let mel_fb = create_mel_filterbank(n_mels, n_fft, sample_rate);
+
+    // Compute STFT
+    let mut mel_spec = Vec::with_capacity(n_frames * n_mels);
+
+    for frame_idx in 0..n_frames {
+        let start = frame_idx * hop_length;
+
+        // Extract frame and apply window (Complex32 is compatible with rustfft)
+        let mut frame_data: Vec<Complex32> = (0..n_fft)
+            .map(|i| {
+                let sample_idx = start + i;
+                let sample = if sample_idx < samples.len() {
+                    samples[sample_idx] * window[i]
+                } else {
+                    0.0_f32
+                };
+                Complex32::new(sample, 0.0_f32)
+            })
+            .collect();
+
+        // Apply FFT
+        fft.process(&mut frame_data);
+
+        // Compute power spectrum (first half + DC and Nyquist)
+        let n_freqs = n_fft / 2 + 1;
+        let power_spec: Vec<f32> = frame_data
+            .iter()
+            .take(n_freqs)
+            .map(|c| c.norm_sqr())
+            .collect();
+
+        // Apply mel filterbank
+        for mel_idx in 0..n_mels {
+            let mut mel_energy = 0.0_f32;
+            for (freq_idx, &power) in power_spec.iter().enumerate() {
+                mel_energy += power * mel_fb[[mel_idx, freq_idx]];
+            }
+            // Convert to log scale with small epsilon to avoid log(0)
+            let log_mel = (mel_energy + 1e-10_f32).ln();
+            mel_spec.push(log_mel);
+        }
+    }
 
     let frame_rate = sample_rate / hop_length as f32;
 
     Ok(FeatureResult::new(
         "mel_spectrogram".to_string(),
-        values,
+        mel_spec,
         (n_frames, n_mels),
         frame_rate,
     ))
+}
+
+/// Create mel filterbank matrix
+fn create_mel_filterbank(
+    n_mels: usize,
+    n_fft: usize,
+    sample_rate: f32,
+) -> scirs2_core::ndarray::Array2<f32> {
+    use scirs2_core::ndarray::Array2;
+
+    let n_freqs = n_fft / 2 + 1;
+    let mut filterbank = Array2::zeros((n_mels, n_freqs));
+
+    // Helper: Hz to Mel conversion
+    let hz_to_mel = |hz: f32| 2595.0 * (1.0 + hz / 700.0).log10();
+    let mel_to_hz = |mel: f32| 700.0 * (10.0_f32.powf(mel / 2595.0) - 1.0);
+
+    let f_min = 0.0;
+    let f_max = sample_rate / 2.0;
+
+    let mel_min = hz_to_mel(f_min);
+    let mel_max = hz_to_mel(f_max);
+
+    // Create mel frequency points
+    let mel_points: Vec<f32> = (0..=n_mels + 1)
+        .map(|i| mel_min + (mel_max - mel_min) * i as f32 / (n_mels + 1) as f32)
+        .map(mel_to_hz)
+        .collect();
+
+    // Convert to FFT bin numbers
+    let bin_points: Vec<usize> = mel_points
+        .iter()
+        .map(|&f| ((n_fft + 1) as f32 * f / sample_rate).floor() as usize)
+        .collect();
+
+    // Create triangular filters
+    for mel_idx in 0..n_mels {
+        let left = bin_points[mel_idx];
+        let center = bin_points[mel_idx + 1];
+        let right = bin_points[mel_idx + 2];
+
+        // Left slope
+        for bin in left..center {
+            if center > left {
+                filterbank[[mel_idx, bin]] = (bin - left) as f32 / (center - left) as f32;
+            }
+        }
+
+        // Right slope
+        for bin in center..right {
+            if right > center {
+                filterbank[[mel_idx, bin]] = (right - bin) as f32 / (right - center) as f32;
+            }
+        }
+    }
+
+    // Normalize filters
+    for mel_idx in 0..n_mels {
+        let sum: f32 = filterbank.row(mel_idx).sum();
+        if sum > 0.0 {
+            for freq_idx in 0..n_freqs {
+                filterbank[[mel_idx, freq_idx]] /= sum;
+            }
+        }
+    }
+
+    filterbank
 }
 
 /// Extract MFCC coefficients from audio

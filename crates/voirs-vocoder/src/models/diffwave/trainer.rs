@@ -542,11 +542,11 @@ impl DiffWaveTrainer {
         match &self.config.loss_config.primary_loss {
             LossType::L1 => {
                 let diff = (predicted - target)?;
-                diff.abs()?.mean_all()
+                Ok(diff.abs()?.mean_all()?)
             }
             LossType::L2 => {
                 let diff = (predicted - target)?;
-                diff.powf(2.0)?.mean_all()
+                Ok(diff.powf(2.0)?.mean_all()?)
             }
             LossType::Huber { delta } => {
                 self.huber_loss(predicted, target, *delta)
@@ -554,7 +554,7 @@ impl DiffWaveTrainer {
             _ => {
                 // Fallback to L2 for other loss types
                 let diff = (predicted - target)?;
-                diff.powf(2.0)?.mean_all()
+                Ok(diff.powf(2.0)?.mean_all()?)
             }
         }
     }
@@ -563,15 +563,15 @@ impl DiffWaveTrainer {
     fn huber_loss(&self, predicted: &Tensor, target: &Tensor, delta: f64) -> Result<Tensor> {
         let diff = (predicted - target)?;
         let abs_diff = diff.abs()?;
-        
+
         let quadratic = abs_diff.le(delta)?.to_dtype(candle_core::DType::F32)?;
         let linear = abs_diff.gt(delta)?.to_dtype(candle_core::DType::F32)?;
-        
+
         let quadratic_loss = (diff.powf(2.0)? * 0.5)?;
-        let linear_loss = (abs_diff * delta - delta * delta * 0.5)?;
-        
-        let loss = (quadratic_loss * quadratic)? + (linear_loss * linear)?;
-        loss.mean_all()
+        let linear_loss = ((abs_diff * delta)? - delta * delta * 0.5)?;
+
+        let loss = ((quadratic_loss * quadratic)? + (linear_loss * linear)?)?;
+        Ok(loss.mean_all()?)
     }
     
     /// Generate dummy batch for training/validation
@@ -580,16 +580,19 @@ impl DiffWaveTrainer {
         let seq_len = 8192; // Audio sequence length
         let mel_frames = seq_len / 256; // Mel frames (hop_length = 256)
         let mel_channels = 80;
-        
+
         // Generate dummy audio
         let audio = Tensor::randn(0f32, 1f32, (batch_size, seq_len), &self.device)?;
-        
+
         // Generate dummy mel spectrogram
         let mel = Tensor::randn(0f32, 1f32, (batch_size, mel_channels, mel_frames), &self.device)?;
-        
-        // Generate random timesteps
-        let timesteps = Tensor::randint(0u32, 1000u32, (batch_size,), &self.device)?;
-        
+
+        // Generate random timesteps (using randn and scaling to [0, 1000))
+        let timesteps_f32 = Tensor::randn(0f32, 1f32, (batch_size,), &self.device)?
+            .abs()?
+            .mul(500.0)?;  // Scale to approximately [0, 1000)
+        let timesteps = timesteps_f32.to_dtype(candle_core::DType::U32)?;
+
         Ok((audio, mel, timesteps))
     }
     

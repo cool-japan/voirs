@@ -914,7 +914,7 @@ impl WhisperDecoder {
 
     /// Sample from multinomial distribution
     fn multinomial_sample(&self, probs: &[f32]) -> Result<u32, RecognitionError> {
-        use rand::Rng;
+        use scirs2_core::random::Rng;
 
         let total: f32 = probs.iter().sum();
         if total <= 0.0 {
@@ -928,7 +928,7 @@ impl WhisperDecoder {
             return Ok(max_idx as u32);
         }
 
-        let mut rng = rand::thread_rng();
+        let mut rng = scirs2_core::random::thread_rng();
         let mut cumulative = 0.0;
         let threshold = rng.r#gen::<f32>() * total;
 
@@ -945,14 +945,14 @@ impl WhisperDecoder {
 
     /// Sample from a vector of probabilities
     fn multinomial_sample_from_vec(&self, probs: &[f32]) -> Result<usize, RecognitionError> {
-        use rand::Rng;
+        use scirs2_core::random::Rng;
 
         let total: f32 = probs.iter().sum();
         if total <= 0.0 {
             return Ok(0);
         }
 
-        let mut rng = rand::thread_rng();
+        let mut rng = scirs2_core::random::thread_rng();
         let mut cumulative = 0.0;
         let threshold = rng.r#gen::<f32>() * total;
 

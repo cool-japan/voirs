@@ -1502,7 +1502,7 @@ impl ZeroShotConverter {
             let t = i as f32 / sample_rate as f32;
 
             // Use content features to modulate base frequency and harmonics
-            let base_freq = 120.0 + content_features.get(0).unwrap_or(&0.0) * 100.0;
+            let base_freq = 120.0 + content_features.first().unwrap_or(&0.0) * 100.0;
             let harmonic_content = content_features.get(1).unwrap_or(&0.5);
 
             // Generate harmonic series
@@ -1574,14 +1574,14 @@ impl ZeroShotConverter {
         let window_size = audio.len();
         let num_bands = 16;
         let band_size = window_size / num_bands;
-        let mut band_energies = vec![0.0; num_bands];
-
         // Calculate energy in each frequency band
-        for band in 0..num_bands {
-            let start = band * band_size;
-            let end = ((band + 1) * band_size).min(window_size);
-            band_energies[band] = audio[start..end].iter().map(|x| x * x).sum();
-        }
+        let band_energies: Vec<f32> = (0..num_bands)
+            .map(|band| {
+                let start = band * band_size;
+                let end = ((band + 1) * band_size).min(window_size);
+                audio[start..end].iter().map(|x| x * x).sum()
+            })
+            .collect();
 
         let total_energy: f32 = band_energies.iter().sum();
         let rolloff_threshold = total_energy * 0.85; // 85% rolloff
@@ -1891,19 +1891,22 @@ impl ZeroShotConverter {
     fn apply_time_stretching(&self, audio: &[f32], stretch_factor: f32) -> Result<Vec<f32>> {
         // Simple time stretching using linear interpolation
         let new_length = (audio.len() as f32 / stretch_factor) as usize;
-        let mut stretched = vec![0.0; new_length.max(1)];
 
-        for i in 0..new_length {
-            let src_pos = i as f32 * stretch_factor;
-            let idx = src_pos as usize;
+        let stretched: Vec<f32> = (0..new_length.max(1))
+            .map(|i| {
+                let src_pos = i as f32 * stretch_factor;
+                let idx = src_pos as usize;
 
-            if idx + 1 < audio.len() {
-                let frac = src_pos - idx as f32;
-                stretched[i] = audio[idx] * (1.0 - frac) + audio[idx + 1] * frac;
-            } else if idx < audio.len() {
-                stretched[i] = audio[idx];
-            }
-        }
+                if idx + 1 < audio.len() {
+                    let frac = src_pos - idx as f32;
+                    audio[idx] * (1.0 - frac) + audio[idx + 1] * frac
+                } else if idx < audio.len() {
+                    audio[idx]
+                } else {
+                    0.0
+                }
+            })
+            .collect();
 
         Ok(stretched)
     }

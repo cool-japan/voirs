@@ -3,7 +3,7 @@
 use crate::models::hifigan::HiFiGanConfig;
 use crate::models::singing::*;
 use anyhow::Result;
-use ndarray::Array2;
+use scirs2_core::ndarray::Array2;
 use serde::{Deserialize, Serialize};
 
 /// Main singing voice processor that integrates all singing-specific features

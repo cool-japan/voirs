@@ -6,7 +6,7 @@
 //! - Harmonic analysis for music information retrieval
 
 use crate::{Result, VocoderError};
-use ndarray::{Array1, Array2};
+use scirs2_core::ndarray::{Array1, Array2};
 
 /// Chroma feature computation methods
 pub trait ChromaFeatureComputer {

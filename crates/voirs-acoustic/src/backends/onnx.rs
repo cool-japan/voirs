@@ -428,11 +428,11 @@ impl OnnxAcousticModel {
 
         // Reshape data to 2D matrix (mel_dim, seq_len)
         let mut mel_matrix = vec![vec![0.0; seq_len]; mel_dim];
-        for i in 0..mel_dim {
-            for j in 0..seq_len {
+        for (i, row) in mel_matrix.iter_mut().enumerate().take(mel_dim) {
+            for (j, cell) in row.iter_mut().enumerate().take(seq_len) {
                 let idx = i * seq_len + j;
                 if idx < mel_data.len() {
-                    mel_matrix[i][j] = mel_data[idx];
+                    *cell = mel_data[idx];
                 }
             }
         }

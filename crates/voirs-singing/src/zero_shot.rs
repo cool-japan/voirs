@@ -163,9 +163,15 @@ pub enum QualityMode {
 #[derive(Clone)]
 pub enum FeatureExtractor {
     /// Mel-frequency cepstral coefficients
-    MFCC { num_coeffs: usize },
+    MFCC {
+        /// Number of MFCC coefficients to extract
+        num_coeffs: usize,
+    },
     /// Mel-spectrogram features
-    MelSpectrogram { num_mels: usize },
+    MelSpectrogram {
+        /// Number of mel frequency bands
+        num_mels: usize,
+    },
     /// Fundamental frequency tracking
     F0Tracking,
     /// Spectral centroid
@@ -244,22 +250,30 @@ pub struct ZeroShotRequest {
 pub enum TargetVoiceSpec {
     /// Reference audio samples
     AudioSamples {
+        /// Audio samples containing the target voice
         samples: Vec<AudioSample>,
+        /// Optional textual description of the voice
         voice_description: Option<String>,
     },
     /// Voice characteristics description
     VoiceDescription {
+        /// Explicit voice characteristics to use
         characteristics: VoiceCharacteristics,
+        /// Preferred singing styles
         style_preferences: Vec<String>,
     },
     /// Existing reference voice
     ReferenceVoice {
+        /// ID of the reference voice to use
         voice_id: String,
+        /// Strength of adaptation (0.0-1.0+)
         adaptation_strength: f32,
     },
     /// Voice interpolation between multiple references
     VoiceInterpolation {
+        /// IDs of voices to interpolate between
         voice_ids: Vec<String>,
+        /// Interpolation weights for each voice
         weights: Vec<f32>,
     },
 }
@@ -346,17 +360,48 @@ impl ZeroShotSynthesizer {
         Ok(())
     }
 
-    /// Remove a reference voice
+    /// Remove a reference voice from the database
+    ///
+    /// # Arguments
+    ///
+    /// * `voice_id` - The unique identifier of the voice to remove
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(ReferenceVoice)` if the voice was found and removed, `None` otherwise
     pub fn remove_reference_voice(&mut self, voice_id: &str) -> Option<ReferenceVoice> {
         self.reference_voices.remove(voice_id)
     }
 
-    /// List available reference voices
+    /// List all available reference voice identifiers in the database
+    ///
+    /// # Returns
+    ///
+    /// Returns a vector of voice ID strings for all registered reference voices
     pub fn list_reference_voices(&self) -> Vec<&str> {
         self.reference_voices.keys().map(|s| s.as_str()).collect()
     }
 
-    /// Perform zero-shot synthesis
+    /// Perform zero-shot singing synthesis with voice adaptation
+    ///
+    /// This method adapts the base model to the target voice specification and
+    /// synthesizes singing audio with the adapted voice characteristics.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - Zero-shot synthesis request containing target voice, content, and configuration
+    ///
+    /// # Returns
+    ///
+    /// Returns a `ZeroShotResult` containing synthesized audio, adapted voice characteristics,
+    /// and quality metrics
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Voice adaptation fails
+    /// - Synthesis fails
+    /// - Target voice specification is invalid
     pub async fn synthesize_zero_shot(
         &self,
         request: ZeroShotRequest,
@@ -502,7 +547,29 @@ impl ZeroShotSynthesizer {
         })
     }
 
-    /// Create reference voice from audio samples
+    /// Create a reference voice from audio samples
+    ///
+    /// This method analyzes audio samples to create a reference voice that can be used
+    /// for zero-shot synthesis. It extracts voice embeddings, analyzes vocal range,
+    /// and calculates quality metrics.
+    ///
+    /// # Arguments
+    ///
+    /// * `voice_id` - Unique identifier for the voice
+    /// * `voice_name` - Human-readable name for the voice
+    /// * `audio_samples` - Vector of audio samples containing the voice
+    /// * `characteristics` - Voice characteristics (timbre, range, etc.)
+    ///
+    /// # Returns
+    ///
+    /// Returns a `ReferenceVoice` that can be added to the synthesizer's database
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - No audio samples are provided
+    /// - Voice embedding extraction fails
+    /// - Vocal range analysis fails
     pub fn create_reference_voice(
         voice_id: String,
         voice_name: String,
@@ -598,7 +665,23 @@ impl VoiceAdaptationEngine {
         })
     }
 
-    /// Adapt voice from audio samples
+    /// Adapt voice characteristics from raw audio samples
+    ///
+    /// Extracts features from audio samples and adapts voice characteristics
+    /// including voice type, pitch range, and vibrato parameters.
+    ///
+    /// # Arguments
+    ///
+    /// * `samples` - Audio samples to analyze
+    /// * `config` - Zero-shot configuration for adaptation
+    ///
+    /// # Returns
+    ///
+    /// Returns adapted `VoiceCharacteristics` extracted from the audio
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if feature extraction or voice estimation fails
     pub async fn adapt_from_audio(
         &self,
         samples: &[AudioSample],
@@ -620,7 +703,25 @@ impl VoiceAdaptationEngine {
         Ok(adapted_voice)
     }
 
-    /// Adapt voice from reference
+    /// Adapt voice characteristics from a reference voice
+    ///
+    /// Uses an existing reference voice to generate adapted voice characteristics,
+    /// applying the specified adaptation strength to control how much the characteristics
+    /// are modified.
+    ///
+    /// # Arguments
+    ///
+    /// * `reference` - Reference voice to adapt from
+    /// * `adaptation_strength` - Strength of adaptation (0.0-1.0+)
+    /// * `config` - Zero-shot configuration for adaptation
+    ///
+    /// # Returns
+    ///
+    /// Returns adapted `VoiceCharacteristics` based on the reference voice
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if adaptation fails
     pub async fn adapt_from_reference(
         &self,
         reference: &ReferenceVoice,
@@ -638,7 +739,29 @@ impl VoiceAdaptationEngine {
         Ok(adapted)
     }
 
-    /// Interpolate between multiple voices
+    /// Interpolate voice characteristics between multiple reference voices
+    ///
+    /// Creates a blended voice by combining characteristics from multiple reference voices
+    /// using weighted interpolation. This allows creating new voices that blend properties
+    /// from existing voices.
+    ///
+    /// # Arguments
+    ///
+    /// * `voice_ids` - IDs of reference voices to interpolate
+    /// * `weights` - Interpolation weights for each voice (should sum to 1.0, but will be normalized)
+    /// * `reference_voices` - Database of available reference voices
+    /// * `config` - Zero-shot configuration for adaptation
+    ///
+    /// # Returns
+    ///
+    /// Returns interpolated `VoiceCharacteristics` combining the reference voices
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Voice IDs and weights have different lengths
+    /// - Total weight is zero or negative
+    /// - Any reference voice ID is not found
     pub async fn interpolate_voices(
         &self,
         voice_ids: &[String],
@@ -738,7 +861,22 @@ impl SpeakerEncoder {
         })
     }
 
-    /// Extract features from audio samples
+    /// Extract voice features from audio samples
+    ///
+    /// Processes audio samples through configured feature extractors to generate
+    /// a fixed-dimensional feature vector suitable for speaker encoding.
+    ///
+    /// # Arguments
+    ///
+    /// * `samples` - Audio samples to extract features from (uses up to first 5 samples)
+    ///
+    /// # Returns
+    ///
+    /// Returns a feature vector with dimension matching `embedding_dim`
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if feature extraction fails
     pub fn extract_features(&self, samples: &[AudioSample]) -> Result<Vec<f32>, Error> {
         let mut features = Vec::new();
 

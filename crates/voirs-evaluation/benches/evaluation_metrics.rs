@@ -11,7 +11,7 @@ fn generate_test_audio(length: usize, sample_rate: u32) -> AudioBuffer {
             let t = i as f32 / sample_rate as f32;
             0.5 * (2.0 * std::f32::consts::PI * 440.0 * t).sin()
                 + 0.3 * (2.0 * std::f32::consts::PI * 880.0 * t).sin()
-                + 0.2 * rand::random::<f32>()
+                + 0.2 * scirs2_core::random::random::<f32>()
                 - 0.1
         })
         .collect();
@@ -26,8 +26,12 @@ fn bench_statistical_tests(c: &mut Criterion) {
     let sample_sizes = vec![100, 500, 1000, 5000];
 
     for sample_size in sample_sizes {
-        let data_a: Vec<f32> = (0..sample_size).map(|_| rand::random::<f32>()).collect();
-        let data_b: Vec<f32> = (0..sample_size).map(|_| rand::random::<f32>()).collect();
+        let data_a: Vec<f32> = (0..sample_size)
+            .map(|_| scirs2_core::random::random::<f32>())
+            .collect();
+        let data_b: Vec<f32> = (0..sample_size)
+            .map(|_| scirs2_core::random::random::<f32>())
+            .collect();
 
         let analyzer = StatisticalAnalyzer::new();
 
@@ -163,8 +167,12 @@ fn bench_performance_optimizations(c: &mut Criterion) {
     let data_sizes = vec![1000, 10000, 100000];
 
     for data_size in data_sizes {
-        let data_a: Vec<f32> = (0..data_size).map(|_| rand::random::<f32>()).collect();
-        let data_b: Vec<f32> = (0..data_size).map(|_| rand::random::<f32>()).collect();
+        let data_a: Vec<f32> = (0..data_size)
+            .map(|_| scirs2_core::random::random::<f32>())
+            .collect();
+        let data_b: Vec<f32> = (0..data_size)
+            .map(|_| scirs2_core::random::random::<f32>())
+            .collect();
 
         // Sequential correlation
         group.bench_with_input(

@@ -351,7 +351,7 @@ enum GraphOperation {
 #[derive(Debug, Clone, Copy)]
 enum ActivationFunction {
     ReLU,
-    GELU,
+    Gelu,
     Swish,
     Tanh,
     Sigmoid,
@@ -887,7 +887,7 @@ impl RealtimeMLOptimizer {
         if cache_hit {
             metrics.cache_hit_rate = (metrics.cache_hit_rate * 0.9) + 0.1;
         } else {
-            metrics.cache_hit_rate = metrics.cache_hit_rate * 0.9;
+            metrics.cache_hit_rate *= 0.9;
         }
 
         Ok(())

@@ -320,6 +320,7 @@ pub mod batching;
 pub mod conditioning;
 pub mod config;
 pub mod fastspeech;
+pub mod fastspeech2_trainer;
 pub mod mel;
 pub mod memory;
 pub mod metrics;

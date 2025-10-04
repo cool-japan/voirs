@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
-use voirs::{Result, VoirsError};
 use voirs_sdk::config::AppConfig;
+use voirs_sdk::{Result, VoirsError};
 
 /// Cross-language test results
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -445,8 +445,6 @@ async fn simulate_synthesis_test(
 
     // Test synthesis parameter consistency
     let mut parameter_consistency = true;
-    let mut audio_consistency = true;
-    let mut metadata_consistency = true;
 
     // Check if all bindings support the same basic parameters
     for binding in bindings {
@@ -482,10 +480,10 @@ async fn simulate_synthesis_test(
     }
 
     // Test audio output consistency (mock implementation)
-    audio_consistency = test_audio_output_consistency(text, bindings);
+    let audio_consistency = test_audio_output_consistency(text, bindings);
 
     // Test metadata consistency
-    metadata_consistency = test_metadata_consistency(text, bindings);
+    let metadata_consistency = test_metadata_consistency(text, bindings);
 
     details.insert(
         "parameter_consistency".to_string(),

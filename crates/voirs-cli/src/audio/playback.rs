@@ -9,7 +9,7 @@ use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use voirs::{Result, VoirsError};
+use voirs_sdk::{Result, VoirsError};
 
 /// Audio data representation
 #[derive(Debug, Clone)]
@@ -505,6 +505,62 @@ impl AudioPlayer {
             channels: spec.channels,
         })
     }
+}
+
+/// Simple cross-platform audio file playback using system commands
+pub fn play_audio_file_simple<P: AsRef<Path>>(path: P) -> Result<()> {
+    use std::process::Command;
+
+    let path = path.as_ref();
+
+    #[cfg(target_os = "macos")]
+    let (command, args) = ("afplay", vec![path.to_str().unwrap()]);
+
+    #[cfg(target_os = "linux")]
+    let (command, args) = {
+        if Command::new("aplay").arg("--version").output().is_ok() {
+            ("aplay", vec![path.to_str().unwrap()])
+        } else if Command::new("paplay").arg("--version").output().is_ok() {
+            ("paplay", vec![path.to_str().unwrap()])
+        } else {
+            return Err(VoirsError::config_error(
+                "No audio player found. Install 'alsa-utils' (aplay) or 'pulseaudio-utils' (paplay)."
+                    .to_string(),
+            ));
+        }
+    };
+
+    #[cfg(target_os = "windows")]
+    let (command, args) = (
+        "powershell",
+        vec![
+            "-c",
+            &format!(
+                "(New-Object Media.SoundPlayer '{}').PlaySync()",
+                path.display()
+            ),
+        ],
+    );
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        return Err(VoirsError::config_error(
+            "Audio playback not supported on this platform".to_string(),
+        ));
+    }
+
+    let status = Command::new(command).args(&args).status().map_err(|e| {
+        VoirsError::config_error(format!("Failed to play audio with '{}': {}", command, e))
+    })?;
+
+    if !status.success() {
+        return Err(VoirsError::config_error(format!(
+            "Audio player '{}' exited with error",
+            command
+        )));
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

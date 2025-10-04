@@ -22,6 +22,7 @@ pub struct AudioBufferPool {
     stats: Arc<Mutex<PoolStats>>,
 }
 
+/// Buffer pool statistics tracking hits and misses for performance analysis
 #[derive(Debug, Default, Clone)]
 pub struct PoolStats {
     small_hits: usize,
@@ -39,6 +40,7 @@ impl Default for AudioBufferPool {
 }
 
 impl AudioBufferPool {
+    /// Create a new audio buffer pool with pre-allocated capacity for different buffer sizes
     pub fn new() -> Self {
         Self {
             small_buffers: Arc::new(Mutex::new(Vec::with_capacity(10))),
@@ -143,6 +145,7 @@ impl AudioBufferPool {
         }
     }
 
+    /// Get buffer pool statistics including hit rates and cache performance
     pub fn get_stats(&self) -> PoolStats {
         self.stats.lock().unwrap().clone()
     }
@@ -162,20 +165,25 @@ impl PoolStats {
     }
 }
 
+/// Buffer size categories for memory pool management
 #[derive(Debug)]
 enum BufferCategory {
+    /// Small buffers for audio under 1 second
     Small,
+    /// Medium buffers for audio 1-5 seconds
     Medium,
+    /// Large buffers for audio over 5 seconds
     Large,
 }
 
-/// Fast-path optimization for small audio samples
+/// Fast-path optimization for small audio samples to reduce memory overhead
 #[derive(Debug)]
 pub struct SmallAudioOptimizer {
     buffer_pool: AudioBufferPool,
     small_sample_cache: Arc<Mutex<HashMap<String, CachedResult>>>,
 }
 
+/// Cached conversion result with metadata
 #[derive(Debug, Clone)]
 struct CachedResult {
     result: Vec<f32>,
@@ -190,6 +198,7 @@ impl Default for SmallAudioOptimizer {
 }
 
 impl SmallAudioOptimizer {
+    /// Create a new small audio optimizer with buffer pooling and caching enabled
     pub fn new() -> Self {
         Self {
             buffer_pool: AudioBufferPool::new(),
@@ -373,7 +382,7 @@ impl SmallAudioOptimizer {
     }
 }
 
-/// Performance monitor for conversion operations
+/// Performance monitor for conversion operations tracking timing and memory
 #[derive(Debug)]
 pub struct ConversionPerformanceMonitor {
     conversion_times: Arc<Mutex<Vec<Duration>>>,
@@ -388,6 +397,7 @@ impl Default for ConversionPerformanceMonitor {
 }
 
 impl ConversionPerformanceMonitor {
+    /// Create a new performance monitor for tracking conversion timing and memory usage
     pub fn new() -> Self {
         Self {
             conversion_times: Arc::new(Mutex::new(Vec::new())),
@@ -396,10 +406,12 @@ impl ConversionPerformanceMonitor {
         }
     }
 
+    /// Start timing a conversion operation
     pub fn start_timing(&mut self) {
         self.start_time = Some(Instant::now());
     }
 
+    /// End timing and record the elapsed duration for the current conversion operation
     pub fn end_timing(&mut self) {
         if let Some(start) = self.start_time.take() {
             let duration = start.elapsed();
@@ -407,10 +419,12 @@ impl ConversionPerformanceMonitor {
         }
     }
 
+    /// Record memory usage in bytes for performance analysis
     pub fn record_memory_usage(&self, bytes: usize) {
         self.memory_usage.lock().unwrap().push(bytes);
     }
 
+    /// Get average conversion time across all recorded operations
     pub fn get_average_conversion_time(&self) -> Duration {
         let times = self.conversion_times.lock().unwrap();
         if times.is_empty() {
@@ -421,6 +435,7 @@ impl ConversionPerformanceMonitor {
         }
     }
 
+    /// Get memory statistics including minimum, maximum, and average usage in bytes
     pub fn get_memory_stats(&self) -> (usize, usize, f64) {
         let usage = self.memory_usage.lock().unwrap();
         if usage.is_empty() {

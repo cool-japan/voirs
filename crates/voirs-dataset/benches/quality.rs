@@ -28,7 +28,7 @@ fn create_noisy_audio(sample_rate: u32, duration_secs: f32, snr_db: f32) -> Audi
         .map(|i| {
             let t = i as f32 / sample_rate as f32;
             let signal = (2.0 * std::f32::consts::PI * 440.0 * t).sin() * signal_amplitude;
-            let noise = (rand::random::<f32>() - 0.5) * 2.0 * noise_amplitude;
+            let noise = (scirs2_core::random::random::<f32>() - 0.5) * 2.0 * noise_amplitude;
             signal + noise
         })
         .collect();
@@ -287,7 +287,7 @@ fn bench_signal_degradation(c: &mut Criterion) {
 
     // Pre-generate random noise to avoid expensive random calls in benchmark loop
     use rand::{Rng, SeedableRng};
-    let mut rng = rand::rngs::StdRng::seed_from_u64(42); // Fixed seed for reproducibility
+    let mut rng = scirs2_core::random::Random::seed(42); // Fixed seed for reproducibility
     let noise_samples: Vec<f32> = (0..reference.samples().len())
         .map(|_| rng.r#gen::<f32>() - 0.5)
         .collect();

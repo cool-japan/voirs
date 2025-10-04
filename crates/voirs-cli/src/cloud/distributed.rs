@@ -123,6 +123,7 @@ pub struct DistributedConfig {
 pub struct LoadBalancer {
     strategy: LoadBalancingStrategy,
     node_scores: Arc<RwLock<HashMap<String, f32>>>,
+    round_robin_counter: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl DistributedProcessingManager {
@@ -607,6 +608,7 @@ impl LoadBalancer {
         Self {
             strategy,
             node_scores: Arc::new(RwLock::new(HashMap::new())),
+            round_robin_counter: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }
     }
 
@@ -673,12 +675,19 @@ impl LoadBalancer {
     }
 
     fn select_round_robin_node<'a>(&self, nodes: &[&'a CloudNode]) -> Result<&'a CloudNode> {
-        // Simplified round-robin selection
+        // True round-robin selection with atomic counter
         if nodes.is_empty() {
             return Err(anyhow::anyhow!("No nodes available"));
         }
 
-        let index = fastrand::usize(0..nodes.len());
+        // Atomically fetch and increment the counter
+        let current_index = self
+            .round_robin_counter
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        // Use modulo to wrap around to the beginning
+        let index = current_index % nodes.len();
+
         Ok(nodes[index])
     }
 }

@@ -698,7 +698,7 @@ impl AccentSystem {
                 && self.matches_context(&substitution.context, context)?
             {
                 // Apply substitution with probability
-                if rand::random::<f32>() < substitution.probability {
+                if scirs2_core::random::random::<f32>() < substitution.probability {
                     if let Some(target_phoneme) = substitution.target.first() {
                         let mut modified = target_phoneme.clone();
                         // Preserve some original properties

@@ -633,7 +633,8 @@ fn convert_mel_spectrogram_to_vocoder(mel: &MelSpectrogram) -> vocoder::MelSpect
     }
 }
 
-// Alternative conversion that takes ownership when possible
+// Alternative conversion that takes ownership when possible (for future optimization)
+#[allow(dead_code)]
 fn convert_mel_spectrogram_owned(mel: MelSpectrogram) -> vocoder::MelSpectrogram {
     // Zero-copy conversion when we own the mel spectrogram
     vocoder::MelSpectrogram {

@@ -3,14 +3,14 @@
 use crate::GlobalOptions;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use voirs::VoirsPipeline;
-use voirs::{QualityLevel, Result};
 use voirs_g2p::{
     accuracy::{AccuracyBenchmark, TestCase},
     LanguageCode,
 };
 use voirs_sdk::config::AppConfig;
 use voirs_sdk::types::SynthesisConfig;
+use voirs_sdk::VoirsPipeline;
+use voirs_sdk::{QualityLevel, Result};
 
 /// Benchmark results for a model
 #[derive(Debug, Clone)]
@@ -342,30 +342,72 @@ fn get_memory_usage() -> f64 {
 
 /// Calculate quality score based on various metrics
 fn calculate_quality_score(model_id: &str, real_time_factor: &f64, success_rate: &f64) -> f64 {
-    // Simple quality scoring based on performance metrics
-    let performance_score = if *real_time_factor < 0.1 {
+    // Performance score: Logarithmic scale for better granularity
+    // RTF < 0.05 is exceptional, 0.05-0.1 is excellent, 0.1-0.5 is good, 0.5-1.0 is acceptable
+    let performance_score = if *real_time_factor < 0.05 {
         5.0
+    } else if *real_time_factor < 0.1 {
+        4.5 + 0.5 * (0.1 - real_time_factor) / 0.05 // 4.5-5.0
+    } else if *real_time_factor < 0.25 {
+        3.5 + 1.0 * (0.25 - real_time_factor) / 0.15 // 3.5-4.5
     } else if *real_time_factor < 0.5 {
-        4.0
+        2.5 + 1.0 * (0.5 - real_time_factor) / 0.25 // 2.5-3.5
     } else if *real_time_factor < 1.0 {
-        3.0
+        1.5 + 1.0 * (1.0 - real_time_factor) / 0.5 // 1.5-2.5
     } else if *real_time_factor < 2.0 {
-        2.0
+        0.5 + 1.0 * (2.0 - real_time_factor) / 1.0 // 0.5-1.5
     } else {
-        1.0
+        (5.0 / real_time_factor).min(0.5) // Decreasing score for very slow models
     };
 
-    let reliability_score = success_rate * 5.0;
-
-    // Model-specific adjustments (placeholder)
-    let model_bonus = match model_id {
-        id if id.contains("hifigan") => 0.5,
-        id if id.contains("tacotron") => 0.3,
-        id if id.contains("fastspeech") => 0.4,
-        _ => 0.0,
+    // Reliability score: Non-linear scaling emphasizing high success rates
+    let reliability_score = if *success_rate >= 0.99 {
+        5.0
+    } else if *success_rate >= 0.95 {
+        4.0 + 1.0 * (success_rate - 0.95) / 0.04 // 4.0-5.0
+    } else if *success_rate >= 0.90 {
+        3.0 + 1.0 * (success_rate - 0.90) / 0.05 // 3.0-4.0
+    } else if *success_rate >= 0.75 {
+        1.5 + 1.5 * (success_rate - 0.75) / 0.15 // 1.5-3.0
+    } else {
+        success_rate * 2.0 // 0.0-1.5
     };
 
-    ((performance_score + reliability_score) / 2.0 + model_bonus).min(5.0)
+    // Model-specific adjustments based on architecture characteristics
+    // Vocoder models: HiFi-GAN (fast, high quality), WaveGlow (slower, very high quality)
+    // Acoustic models: Tacotron2 (stable, good quality), FastSpeech2 (fast, good quality)
+    let (model_quality_baseline, model_speed_expectation) = if model_id.contains("hifigan") {
+        (0.6, 0.15) // High quality vocoder, expect RTF ~0.15
+    } else if model_id.contains("waveglow") || model_id.contains("wavernn") {
+        (0.8, 0.5) // Very high quality but slower
+    } else if model_id.contains("melgan") || model_id.contains("parallel-wavegan") {
+        (0.5, 0.1) // Fast but lower quality
+    } else if model_id.contains("tacotron") {
+        (0.5, 0.3) // Stable acoustic model
+    } else if model_id.contains("fastspeech") {
+        (0.6, 0.2) // Fast acoustic model
+    } else if model_id.contains("vits") {
+        (0.7, 0.25) // End-to-end high quality
+    } else if model_id.contains("diffwave") || model_id.contains("diffusion") {
+        (0.9, 1.0) // Highest quality but slowest
+    } else {
+        (0.3, 0.5) // Unknown model, neutral expectations
+    };
+
+    // Bonus for meeting speed expectations
+    let speed_bonus = if *real_time_factor <= model_speed_expectation {
+        model_quality_baseline
+    } else if *real_time_factor <= model_speed_expectation * 2.0 {
+        // Linear decay for slightly slower than expected
+        model_quality_baseline * (1.0 - (real_time_factor - model_speed_expectation) / model_speed_expectation)
+    } else {
+        0.0 // No bonus if significantly slower than expected
+    };
+
+    // Weighted average: 40% performance, 40% reliability, 20% model-specific
+    let total_score = performance_score * 0.4 + reliability_score * 0.4 + speed_bonus * 0.2;
+
+    total_score.min(5.0).max(0.0)
 }
 
 /// Display benchmark results
@@ -551,7 +593,7 @@ async fn load_model_pipeline(
     let model_path = cache_dir.join("models").join(model_id);
 
     if !model_path.exists() {
-        return Err(voirs::VoirsError::config_error(format!(
+        return Err(voirs_sdk::VoirsError::config_error(format!(
             "Model '{}' not found in cache. Please download it first using 'voirs download-model {}'",
             model_id, model_id
         )));
@@ -561,7 +603,7 @@ async fn load_model_pipeline(
     let model_config_path = model_path.join("config.json");
     let model_config = if model_config_path.exists() {
         let config_content = std::fs::read_to_string(&model_config_path).map_err(|e| {
-            voirs::VoirsError::IoError {
+            voirs_sdk::VoirsError::IoError {
                 path: model_config_path.clone(),
                 operation: voirs_sdk::error::IoOperation::Read,
                 source: e,
@@ -569,7 +611,7 @@ async fn load_model_pipeline(
         })?;
 
         serde_json::from_str::<ModelMetadata>(&config_content).map_err(|e| {
-            voirs::VoirsError::config_error(format!(
+            voirs_sdk::VoirsError::config_error(format!(
                 "Invalid model config for '{}': {}",
                 model_id, e
             ))
@@ -621,14 +663,14 @@ async fn load_model_pipeline(
     let vocoder_path = model_path.join(&model_config.vocoder_model);
 
     if !acoustic_path.exists() {
-        return Err(voirs::VoirsError::config_error(format!(
+        return Err(voirs_sdk::VoirsError::config_error(format!(
             "Acoustic model file not found: {}",
             acoustic_path.display()
         )));
     }
 
     if !vocoder_path.exists() {
-        return Err(voirs::VoirsError::config_error(format!(
+        return Err(voirs_sdk::VoirsError::config_error(format!(
             "Vocoder model file not found: {}",
             vocoder_path.display()
         )));
@@ -670,7 +712,7 @@ async fn load_model_pipeline(
 
     // Build the pipeline
     let pipeline = builder.build().await.map_err(|e| {
-        voirs::VoirsError::config_error(format!("Failed to load model '{}': {}", model_id, e))
+        voirs_sdk::VoirsError::config_error(format!("Failed to load model '{}': {}", model_id, e))
     })?;
 
     if !global.quiet {
@@ -865,7 +907,7 @@ async fn run_accuracy_test(
     let metrics = benchmark
         .evaluate(&g2p)
         .await
-        .map_err(|e| voirs::VoirsError::config_error(format!("Accuracy test failed: {}", e)))?;
+        .map_err(|e| voirs_sdk::VoirsError::config_error(format!("Accuracy test failed: {}", e)))?;
 
     // Check if accuracy targets are met:
     // English: >95%, Japanese: >90%

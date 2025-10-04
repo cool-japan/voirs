@@ -5,8 +5,7 @@
 //! and advanced spectral features for enhanced dataset quality assessment.
 
 use crate::{AudioData, Result};
-use num_complex::Complex;
-use rustfft::FftPlanner;
+use scirs2_core::Complex;
 use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
 
@@ -87,7 +86,6 @@ pub struct TemporalFeatures {
 /// Advanced audio analyzer with modern techniques
 pub struct AdvancedAudioAnalyzer {
     config: AdvancedAnalysisConfig,
-    fft_planner: FftPlanner<f32>,
     bark_filters: Vec<Vec<f32>>,
     mel_filters: Vec<Vec<f32>>,
     chroma_filters: Vec<Vec<f32>>,
@@ -98,7 +96,6 @@ impl AdvancedAudioAnalyzer {
     pub fn new(config: AdvancedAnalysisConfig) -> Result<Self> {
         let mut analyzer = Self {
             config: config.clone(),
-            fft_planner: FftPlanner::new(),
             bark_filters: Vec::new(),
             mel_filters: Vec::new(),
             chroma_filters: Vec::new(),
@@ -456,13 +453,11 @@ impl AdvancedAudioAnalyzer {
     }
 
     /// Compute spectrogram using FFT
-    fn compute_spectrogram(&mut self, samples: &[f32], _sample_rate: f32) -> Result<Vec<Vec<f32>>> {
+    fn compute_spectrogram(&self, samples: &[f32], _sample_rate: f32) -> Result<Vec<Vec<f32>>> {
         let window_size = self.config.window_size;
         let hop_size = self.config.hop_size;
-        let fft = self.fft_planner.plan_fft_forward(window_size);
 
         let mut spectrogram = Vec::new();
-        let mut buffer = vec![Complex::new(0.0, 0.0); window_size];
 
         // Apply Hann window
         let window: Vec<f32> = (0..window_size)
@@ -474,13 +469,21 @@ impl AdvancedAudioAnalyzer {
                 break;
             }
 
-            // Windowed signal
-            for i in 0..window_size {
-                buffer[i] = Complex::new(samples[start + i] * window[i], 0.0);
-            }
+            // Windowed signal and convert to f64 complex
+            let input_f64: Vec<scirs2_core::Complex<f64>> = (0..window_size)
+                .map(|i| {
+                    let val = samples[start + i] * window[i];
+                    scirs2_core::Complex::new(val as f64, 0.0)
+                })
+                .collect();
 
             // Apply FFT
-            fft.process(&mut buffer);
+            let fft_result = scirs2_fft::fft(&input_f64, None)
+                .unwrap_or_else(|_| vec![scirs2_core::Complex::new(0.0, 0.0); window_size]);
+            let buffer: Vec<Complex<f32>> = fft_result
+                .iter()
+                .map(|c| Complex::new(c.re as f32, c.im as f32))
+                .collect();
 
             // Calculate magnitude spectrum
             let magnitude: Vec<f32> = buffer

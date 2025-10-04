@@ -36,23 +36,36 @@ pub struct ThreadSafeEmotionCache {
 /// Emotion cache statistics
 #[derive(Debug, Clone, Default)]
 pub struct EmotionCacheStats {
+    /// Number of successful cache lookups
     pub cache_hits: u64,
+    /// Number of cache misses requiring computation
     pub cache_misses: u64,
+    /// Total number of emotion states currently cached
     pub states_cached: u64,
+    /// Number of emotion states evicted from cache
     pub states_evicted: u64,
+    /// Number of concurrent emotion processing operations
     pub concurrent_processing: u64,
+    /// Average time spent processing emotions
     pub average_processing_time: Duration,
+    /// Number of emotion interpolation operations performed
     pub interpolation_count: u64,
+    /// Number of emotion blending operations performed
     pub blend_operations: u64,
 }
 
 /// Emotion access information for cache management
 #[derive(Debug, Clone)]
 pub struct EmotionAccessInfo {
+    /// Timestamp of last access to this emotion state
     pub last_accessed: Instant,
+    /// Total number of times this emotion state has been accessed
     pub access_count: u32,
+    /// Cumulative time spent processing this emotion state
     pub total_processing_time: Duration,
+    /// Number of times this emotion was used in interpolation
     pub interpolation_usage: u32,
+    /// Number of times this emotion was used in blending
     pub blend_usage: u32,
 }
 
@@ -325,44 +338,68 @@ pub struct ConcurrentEmotionProcessor {
 /// Information about active emotion processing operation
 #[derive(Debug, Clone)]
 pub struct EmotionProcessingInfo {
+    /// Unique identifier for this processing operation
     pub operation_id: String,
+    /// Timestamp when the operation started
     pub start_time: Instant,
+    /// Type of emotion processing being performed
     pub emotion_type: EmotionProcessingType,
+    /// Thread ID where the operation is running
     pub thread_id: std::thread::ThreadId,
+    /// Current status of the processing operation
     pub status: EmotionProcessingStatus,
 }
 
 /// Type of emotion processing operation
 #[derive(Debug, Clone, PartialEq)]
 pub enum EmotionProcessingType {
+    /// Processing a single emotion state
     SingleState,
+    /// Interpolating between two emotion states
     Interpolation,
+    /// Blending multiple emotion states together
     Blending,
+    /// Recognizing emotion from input data
     Recognition,
+    /// Adapting emotion parameters based on feedback
     Adaptation,
 }
 
 /// Status of emotion processing operation
 #[derive(Debug, Clone, PartialEq)]
 pub enum EmotionProcessingStatus {
+    /// Operation is initializing and preparing resources
     Starting,
+    /// Operation is actively processing emotion data
     Processing,
+    /// Operation is completing and cleaning up
     Finalizing,
+    /// Operation completed successfully
     Completed,
+    /// Operation failed with error message
     Failed(String),
 }
 
 /// Metrics for emotion processing operations
 #[derive(Debug, Default, Clone)]
 pub struct EmotionProcessingMetrics {
+    /// Total number of emotion processing operations started
     pub total_operations: u64,
+    /// Number of operations that completed successfully
     pub successful_operations: u64,
+    /// Number of operations that failed
     pub failed_operations: u64,
+    /// Average time spent processing emotions across all operations
     pub average_processing_time: Duration,
+    /// Maximum number of concurrent operations observed
     pub concurrent_operations_peak: usize,
+    /// Current number of active concurrent operations
     pub current_concurrent_operations: usize,
+    /// Number of interpolation operations performed
     pub interpolation_operations: u64,
+    /// Number of blending operations performed
     pub blending_operations: u64,
+    /// Number of emotion recognition operations performed
     pub recognition_operations: u64,
 }
 

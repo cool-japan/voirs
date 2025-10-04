@@ -840,16 +840,34 @@ pub mod device_detection {
         // to detect the actual device capabilities
 
         #[cfg(target_os = "ios")]
-        return detect_ios_device();
+        {
+            detect_ios_device()
+        }
 
         #[cfg(target_os = "android")]
-        return detect_android_device();
+        {
+            detect_android_device()
+        }
 
-        #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
-        return detect_arm_device();
+        #[cfg(all(
+            not(target_os = "ios"),
+            not(target_os = "android"),
+            any(target_arch = "arm", target_arch = "aarch64")
+        ))]
+        {
+            detect_arm_device()
+        }
 
         // Fallback for unknown platforms
-        MobileDeviceInfo::default()
+        #[cfg(not(any(
+            target_os = "ios",
+            target_os = "android",
+            target_arch = "arm",
+            target_arch = "aarch64"
+        )))]
+        {
+            MobileDeviceInfo::default()
+        }
     }
 }
 

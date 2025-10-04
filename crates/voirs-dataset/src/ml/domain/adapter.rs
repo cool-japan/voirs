@@ -543,8 +543,8 @@ impl DataMixer {
         }
 
         // Shuffle the mixed samples
-        use rand::seq::SliceRandom;
-        let mut rng = rand::thread_rng();
+        use scirs2_core::random::seq::SliceRandom;
+        let mut rng = scirs2_core::random::thread_rng();
         mixed_samples.shuffle(&mut rng);
 
         Ok(mixed_samples)

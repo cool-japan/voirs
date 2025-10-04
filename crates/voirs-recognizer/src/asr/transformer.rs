@@ -17,6 +17,7 @@ use voirs_sdk::{AudioBuffer, LanguageCode};
 
 /// Transformer-based ASR model configuration
 #[derive(Debug, Clone, PartialEq)]
+/// Transformer Config
 pub struct TransformerConfig {
     /// Number of encoder layers
     pub encoder_layers: usize,
@@ -62,6 +63,7 @@ impl Default for TransformerConfig {
 
 /// Multi-head attention mechanism
 #[derive(Debug, Clone)]
+/// Multi Head Attention
 pub struct MultiHeadAttention {
     /// Number of attention heads
     pub num_heads: usize,
@@ -111,7 +113,7 @@ impl MultiHeadAttention {
 
         for row in &mut weights {
             for weight in row {
-                *weight = (rand::random::<f32>() - 0.5) * 2.0 * limit;
+                *weight = (scirs2_core::random::random::<f32>() - 0.5) * 2.0 * limit;
             }
         }
 
@@ -279,6 +281,7 @@ impl MultiHeadAttention {
 
 /// Positional encoding for Transformer
 #[derive(Debug, Clone)]
+/// Positional Encoding
 pub struct PositionalEncoding {
     /// Maximum sequence length
     pub max_len: usize,
@@ -330,6 +333,7 @@ impl PositionalEncoding {
 
 /// Feed-forward network layer
 #[derive(Debug, Clone)]
+/// Feed Forward
 pub struct FeedForward {
     /// First linear layer weights
     pub w1: Vec<Vec<f32>>,
@@ -389,6 +393,7 @@ impl FeedForward {
 
 /// Transformer encoder layer
 #[derive(Debug, Clone)]
+/// Transformer Encoder Layer
 pub struct TransformerEncoderLayer {
     /// Multi-head attention
     pub attention: MultiHeadAttention,
@@ -396,8 +401,11 @@ pub struct TransformerEncoderLayer {
     pub feed_forward: FeedForward,
     /// Layer normalization parameters
     pub norm1_weight: Vec<f32>,
+    /// norm1 bias
     pub norm1_bias: Vec<f32>,
+    /// norm2 weight
     pub norm2_weight: Vec<f32>,
+    /// norm2 bias
     pub norm2_bias: Vec<f32>,
 }
 
@@ -463,6 +471,7 @@ impl TransformerEncoderLayer {
 
 /// Main Transformer ASR model
 #[derive(Debug, Clone)]
+/// Transformer A S R
 pub struct TransformerASR {
     /// Model configuration
     pub config: TransformerConfig,

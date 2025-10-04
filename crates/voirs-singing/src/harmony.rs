@@ -96,6 +96,22 @@ impl MultiVoiceSynthesizer {
     }
 
     /// Set harmony arrangement
+    ///
+    /// Configures the multi-voice synthesizer with a harmony arrangement and initializes
+    /// synthesis engines for each voice part. If engines already exist for voice parts,
+    /// they are reused; otherwise, new engines are created with default configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `arrangement` - The harmony arrangement containing voice parts, mixing settings, and musical parameters
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the arrangement was set successfully.
+    ///
+    /// # Errors
+    ///
+    /// This method currently does not produce errors but returns a Result for future extensibility.
     pub async fn set_arrangement(
         &mut self,
         arrangement: HarmonyArrangement,
@@ -114,6 +130,26 @@ impl MultiVoiceSynthesizer {
     }
 
     /// Generate harmony arrangement from a lead melody
+    ///
+    /// Automatically creates a multi-voice harmony arrangement based on the specified harmony type.
+    /// The method generates appropriate harmony lines (e.g., thirds, fifths, chord tones) for each
+    /// voice type, with proper stereo positioning, volume balancing, and effect assignments.
+    ///
+    /// # Arguments
+    ///
+    /// * `lead_melody` - The primary melody to harmonize
+    /// * `harmony_type` - The style of harmony to generate (parallel, four-part SATB, jazz, close, open, or custom)
+    /// * `voice_types` - Ordered list of voice types to use in the arrangement (first is typically the lead)
+    ///
+    /// # Returns
+    ///
+    /// Returns a complete `HarmonyArrangement` with generated voice parts, mixing parameters, and metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - `HarmonyType::Custom` is specified (requires manual arrangement)
+    /// - Internal harmony generation fails
     pub fn generate_harmony(
         &self,
         lead_melody: &MusicalScore,
@@ -143,6 +179,21 @@ impl MultiVoiceSynthesizer {
     }
 
     /// Synthesize multi-voice harmony
+    ///
+    /// Renders all voice parts in the current harmony arrangement and mixes them into a single
+    /// audio output. Each voice part is synthesized independently using its assigned synthesis
+    /// engine, then mixed with volume, panning, and normalization applied.
+    ///
+    /// # Returns
+    ///
+    /// Returns a mono audio buffer containing the mixed harmony output at the configured sample rate.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - No harmony arrangement has been set (call `set_arrangement` first)
+    /// - Individual voice synthesis fails
+    /// - Audio mixing fails
     pub async fn synthesize(&mut self) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
         let arrangement = self
             .arrangement
@@ -175,7 +226,7 @@ impl MultiVoiceSynthesizer {
         }
 
         // Mix voice parts
-        let mixed_audio = self.mix_voices(&voice_outputs, &arrangement, max_length)?;
+        let mixed_audio = self.mix_voices(&voice_outputs, arrangement, max_length)?;
 
         Ok(mixed_audio)
     }
@@ -608,6 +659,64 @@ impl MultiVoiceSynthesizer {
     }
 }
 
+impl VoiceCharacteristics {
+    /// Create voice characteristics for a specific voice type
+    ///
+    /// Generates appropriate vocal parameters (range, formants, timbre) for standard voice classifications.
+    /// Each voice type has predefined frequency ranges, mean fundamental frequency (F0), formant frequencies,
+    /// and timbral characteristics that match typical human vocal characteristics.
+    ///
+    /// # Arguments
+    ///
+    /// * `voice_type` - The vocal classification (Soprano, Alto, Tenor, Bass, etc.)
+    ///
+    /// # Returns
+    ///
+    /// Returns a `VoiceCharacteristics` instance configured with appropriate parameters for the voice type.
+    ///
+    /// # Voice Type Ranges
+    ///
+    /// - Soprano: C4-C6 (261-1047 Hz)
+    /// - MezzoSoprano: A3-A5 (220-880 Hz)
+    /// - Alto: F3-F5 (175-698 Hz)
+    /// - Tenor: D3-D5 (147-587 Hz)
+    /// - Baritone: A2-A4 (110-440 Hz)
+    /// - Bass: E2-E4 (82-330 Hz)
+    pub fn for_voice_type(voice_type: VoiceType) -> Self {
+        let (range, f0_mean) = match voice_type {
+            VoiceType::Soprano => ((261.0, 1047.0), 523.0), // C4 to C6, average A4
+            VoiceType::MezzoSoprano => ((220.0, 880.0), 440.0), // A3 to A5, average A4
+            VoiceType::Alto => ((175.0, 698.0), 349.0),     // F3 to F5, average F4
+            VoiceType::Tenor => ((147.0, 587.0), 294.0),    // D3 to D5, average D4
+            VoiceType::Baritone => ((110.0, 440.0), 220.0), // A2 to A4, average A3
+            VoiceType::Bass => ((82.0, 330.0), 165.0),      // E2 to E4, average E3
+        };
+
+        let mut resonance = HashMap::new();
+        resonance.insert(String::from("formant_f1"), f0_mean * 1.5);
+        resonance.insert(String::from("formant_f2"), f0_mean * 3.0);
+        resonance.insert(String::from("formant_f3"), f0_mean * 5.0);
+
+        let mut timbre = HashMap::new();
+        timbre.insert(String::from("brightness"), 0.7);
+        timbre.insert(String::from("warmth"), 0.8);
+        timbre.insert(String::from("breathiness"), 0.3);
+
+        Self {
+            voice_type,
+            range,
+            f0_mean,
+            f0_std: f0_mean * 0.1,
+            vibrato_frequency: 5.5,
+            vibrato_depth: 0.15,
+            breath_capacity: 15.0,
+            vocal_power: 0.8,
+            resonance,
+            timbre,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -841,43 +950,6 @@ mod tests {
             let serialized = serde_json::to_string(&harmony_type).unwrap();
             let deserialized: HarmonyType = serde_json::from_str(&serialized).unwrap();
             assert_eq!(harmony_type, deserialized);
-        }
-    }
-}
-
-impl VoiceCharacteristics {
-    /// Create voice characteristics for a specific voice type
-    pub fn for_voice_type(voice_type: VoiceType) -> Self {
-        let (range, f0_mean) = match voice_type {
-            VoiceType::Soprano => ((261.0, 1047.0), 523.0), // C4 to C6, average A4
-            VoiceType::MezzoSoprano => ((220.0, 880.0), 440.0), // A3 to A5, average A4
-            VoiceType::Alto => ((175.0, 698.0), 349.0),     // F3 to F5, average F4
-            VoiceType::Tenor => ((147.0, 587.0), 294.0),    // D3 to D5, average D4
-            VoiceType::Baritone => ((110.0, 440.0), 220.0), // A2 to A4, average A3
-            VoiceType::Bass => ((82.0, 330.0), 165.0),      // E2 to E4, average E3
-        };
-
-        let mut resonance = HashMap::new();
-        resonance.insert(String::from("formant_f1"), f0_mean * 1.5);
-        resonance.insert(String::from("formant_f2"), f0_mean * 3.0);
-        resonance.insert(String::from("formant_f3"), f0_mean * 5.0);
-
-        let mut timbre = HashMap::new();
-        timbre.insert(String::from("brightness"), 0.7);
-        timbre.insert(String::from("warmth"), 0.8);
-        timbre.insert(String::from("breathiness"), 0.3);
-
-        Self {
-            voice_type,
-            range,
-            f0_mean,
-            f0_std: f0_mean * 0.1,
-            vibrato_frequency: 5.5,
-            vibrato_depth: 0.15,
-            breath_capacity: 15.0,
-            vocal_power: 0.8,
-            resonance,
-            timbre,
         }
     }
 }

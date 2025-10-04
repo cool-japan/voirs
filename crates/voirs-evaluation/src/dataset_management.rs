@@ -695,7 +695,9 @@ mod tests {
                 .unwrap()
                 .as_secs(),
             tags,
-            location: PathBuf::from("/tmp/test_dataset"),
+            location: PathBuf::from(
+                "/nonexistent/path/that/definitely/does/not/exist/test_dataset",
+            ),
             size_bytes: 1024 * 1024, // 1MB
             is_validated: false,
             access_level: AccessLevel::Public,

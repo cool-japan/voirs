@@ -170,27 +170,27 @@ impl SimilarityScore {
             + embedding.spearman_correlation.abs() * 0.1
             + embedding.mahalanobis_similarity * 0.1;
 
-        let spectral_score = (spectral.mfcc_similarity * 0.25
+        let spectral_score = spectral.mfcc_similarity * 0.25
             + spectral.spectral_centroid_similarity * 0.15
             + spectral.spectral_rolloff_similarity * 0.1
             + spectral.spectral_bandwidth_similarity * 0.1
             + spectral.zcr_similarity * 0.1
             + spectral.chroma_similarity * 0.15
-            + spectral.spectral_contrast_similarity * 0.15);
+            + spectral.spectral_contrast_similarity * 0.15;
 
-        let perceptual_score = (perceptual.psychoacoustic_similarity * 0.25
+        let perceptual_score = perceptual.psychoacoustic_similarity * 0.25
             + perceptual.bark_similarity * 0.15
             + perceptual.erb_similarity * 0.15
             + perceptual.loudness_similarity * 0.15
             + perceptual.roughness_similarity * 0.15
-            + perceptual.sharpness_similarity * 0.15);
+            + perceptual.sharpness_similarity * 0.15;
 
-        let temporal_score = (temporal.rhythm_similarity * 0.2
+        let temporal_score = temporal.rhythm_similarity * 0.2
             + temporal.speaking_rate_similarity * 0.15
             + temporal.pause_pattern_similarity * 0.15
             + temporal.energy_contour_similarity * 0.15
             + temporal.pitch_contour_similarity * 0.2
-            + temporal.formant_trajectory_similarity * 0.15);
+            + temporal.formant_trajectory_similarity * 0.15;
 
         embedding_score * weights.embedding_weight
             + spectral_score * weights.spectral_weight

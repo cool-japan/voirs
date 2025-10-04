@@ -30,8 +30,8 @@
 //! ```
 
 use crate::EvaluationError;
-use num_complex::Complex;
-use realfft::{RealFftPlanner, RealToComplex};
+use scirs2_core::Complex;
+use scirs2_fft::{RealFftPlanner, RealToComplex};
 use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
 use std::sync::Mutex;
@@ -139,7 +139,7 @@ impl PsychoacousticEvaluator {
         let bark_frequencies = Self::generate_bark_frequencies(config.num_bark_bands);
         let critical_band_filters =
             Self::generate_critical_band_filters(&bark_frequencies, config.frame_size);
-        let fft_planner = Mutex::new(RealFftPlanner::new());
+        let fft_planner = Mutex::new(RealFftPlanner::<f32>::new());
 
         Self {
             config,
@@ -396,11 +396,7 @@ impl PsychoacousticEvaluator {
         let mut output_buffer = vec![Complex::new(0.0, 0.0); n / 2 + 1];
 
         // Perform FFT
-        fft.process(&mut input_buffer, &mut output_buffer)
-            .map_err(|e| EvaluationError::AudioProcessingError {
-                message: format!("FFT processing failed: {e}"),
-                source: None,
-            })?;
+        fft.process(&input_buffer, &mut output_buffer);
 
         // Convert to magnitude spectrum
         let magnitude_spectrum: Vec<f32> = output_buffer.iter().map(|c| c.norm()).collect();

@@ -17,20 +17,39 @@ use tokio::time::{interval, sleep};
 #[derive(Debug, thiserror::Error)]
 pub enum QualityMonitorError {
     #[error("Quality threshold violation: {metric} is {value}, threshold: {threshold}")]
+    /// Description
     ThresholdViolation {
+        /// Description
         metric: String,
+        /// Description
         value: f64,
+        /// Description
         threshold: f64,
     },
 
     #[error("Monitoring system failure: {message}")]
-    MonitoringFailure { message: String },
+    /// Description
+    /// Description
+    MonitoringFailure {
+        /// Human-readable description of the monitoring failure.
+        message: String,
+    },
 
     #[error("Alert delivery failed: {message}")]
-    AlertDeliveryError { message: String },
+    /// Description
+    /// Description
+    AlertDeliveryError {
+        /// Human-readable description of the alert delivery issue.
+        message: String,
+    },
 
     #[error("Invalid quality configuration: {message}")]
-    InvalidConfigError { message: String },
+    /// Description
+    /// Description
+    InvalidConfigError {
+        /// Human-readable description of the configuration problem.
+        message: String,
+    },
 }
 
 /// Result type for quality monitoring operations

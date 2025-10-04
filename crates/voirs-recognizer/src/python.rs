@@ -22,6 +22,7 @@ use crate::{PerformanceValidator, RecognitionError};
 
 /// Python wrapper for AudioBuffer
 #[pyclass]
+/// Py Audio Buffer
 pub struct PyAudioBuffer {
     inner: AudioBuffer,
 }
@@ -29,6 +30,7 @@ pub struct PyAudioBuffer {
 #[pymethods]
 impl PyAudioBuffer {
     #[new]
+    /// new
     pub fn new(samples: Vec<f32>, sample_rate: u32) -> Self {
         Self {
             inner: AudioBuffer::mono(samples, sample_rate),
@@ -37,6 +39,7 @@ impl PyAudioBuffer {
 
     /// Create from stereo samples
     #[staticmethod]
+    /// from stereo
     pub fn from_stereo(samples: Vec<f32>, sample_rate: u32) -> Self {
         Self {
             inner: AudioBuffer::stereo(samples, sample_rate),
@@ -50,6 +53,7 @@ impl PyAudioBuffer {
 
     /// Get audio samples as NumPy array
     #[cfg(feature = "python")]
+    /// samples numpy
     pub fn samples_numpy<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
         let samples = self.inner.samples();
         samples.to_pyarray(py)
@@ -58,6 +62,7 @@ impl PyAudioBuffer {
     /// Create PyAudioBuffer from NumPy array
     #[cfg(feature = "python")]
     #[staticmethod]
+    /// from numpy
     pub fn from_numpy(samples: PyReadonlyArray1<f32>, sample_rate: u32) -> PyResult<Self> {
         let samples_vec = samples.as_array().to_vec();
         Ok(Self {
@@ -68,6 +73,7 @@ impl PyAudioBuffer {
     /// Create stereo PyAudioBuffer from NumPy array
     #[cfg(feature = "python")]
     #[staticmethod]
+    /// from numpy stereo
     pub fn from_numpy_stereo(samples: PyReadonlyArray1<f32>, sample_rate: u32) -> PyResult<Self> {
         let samples_vec = samples.as_array().to_vec();
         Ok(Self {
@@ -109,6 +115,7 @@ impl PyAudioBuffer {
 /// Python wrapper for ASR configuration
 #[pyclass]
 #[derive(Clone)]
+/// Py A S R Config
 pub struct PyASRConfig {
     inner: ASRConfig,
 }
@@ -117,6 +124,7 @@ pub struct PyASRConfig {
 impl PyASRConfig {
     #[new]
     #[pyo3(signature = (language=None, word_timestamps=false, confidence_threshold=0.5, sentence_segmentation=true, language_detection=false))]
+    /// new
     pub fn new(
         language: Option<String>,
         word_timestamps: bool,
@@ -152,6 +160,7 @@ impl PyASRConfig {
 
     /// Create default configuration
     #[staticmethod]
+    /// default
     pub fn default() -> Self {
         Self {
             inner: ASRConfig::default(),
@@ -199,6 +208,7 @@ impl PyASRConfig {
 /// Python wrapper for word timestamps
 #[pyclass]
 #[derive(Clone)]
+/// Py Word Timestamp
 pub struct PyWordTimestamp {
     word: String,
     start_time: f32,
@@ -239,6 +249,7 @@ impl PyWordTimestamp {
 
 /// Python wrapper for recognition results
 #[pyclass]
+/// Py Recognition Result
 pub struct PyRecognitionResult {
     text: String,
     confidence: f32,
@@ -285,6 +296,7 @@ impl PyRecognitionResult {
 
 /// Python wrapper for VoiRS ASR system
 #[pyclass]
+/// Py Voi R S Recognizer
 pub struct PyVoiRSRecognizer {
     asr: IntelligentASRFallback,
     rt: tokio::runtime::Runtime,
@@ -308,6 +320,7 @@ pub struct PyVoiRSRecognizer {
 #[pymethods]
 impl PyVoiRSRecognizer {
     #[new]
+    /// new
     pub fn new(config: Option<PyASRConfig>) -> PyResult<Self> {
         let rt = tokio::runtime::Runtime::new()
             .map_err(|e| PyValueError::new_err(format!("Failed to create runtime: {}", e)))?;
@@ -386,6 +399,7 @@ impl PyVoiRSRecognizer {
 /// Python wrapper for audio analysis configuration
 #[pyclass]
 #[derive(Clone)]
+/// Py Audio Analysis Config
 pub struct PyAudioAnalysisConfig {
     inner: AudioAnalysisConfig,
 }
@@ -394,6 +408,7 @@ pub struct PyAudioAnalysisConfig {
 impl PyAudioAnalysisConfig {
     #[new]
     #[pyo3(signature = (quality_metrics=true, prosody_analysis=true, speaker_analysis=true, emotional_analysis=false))]
+    /// new
     pub fn new(
         quality_metrics: bool,
         prosody_analysis: bool,
@@ -413,6 +428,7 @@ impl PyAudioAnalysisConfig {
 
     /// Create default configuration
     #[staticmethod]
+    /// default
     pub fn default() -> Self {
         Self {
             inner: AudioAnalysisConfig::default(),
@@ -433,6 +449,7 @@ impl PyAudioAnalysisConfig {
 
 /// Python wrapper for audio analysis results
 #[pyclass]
+/// Py Audio Analysis Result
 pub struct PyAudioAnalysisResult {
     quality_metrics: HashMap<String, f32>,
     prosody_features: HashMap<String, f32>,
@@ -484,6 +501,7 @@ impl PyAudioAnalysisResult {
 
 /// Python wrapper for audio analyzer
 #[pyclass]
+/// Py Audio Analyzer
 pub struct PyAudioAnalyzer {
     analyzer: AudioAnalyzerImpl,
     rt: tokio::runtime::Runtime,
@@ -492,6 +510,7 @@ pub struct PyAudioAnalyzer {
 #[pymethods]
 impl PyAudioAnalyzer {
     #[new]
+    /// new
     pub fn new(config: Option<PyAudioAnalysisConfig>) -> PyResult<Self> {
         let rt = tokio::runtime::Runtime::new()
             .map_err(|e| PyValueError::new_err(format!("Failed to create runtime: {}", e)))?;
@@ -574,6 +593,7 @@ impl PyAudioAnalyzer {
 
 /// Python wrapper for performance validator
 #[pyclass]
+/// Py Performance Validator
 pub struct PyPerformanceValidator {
     validator: PerformanceValidator,
 }
@@ -581,6 +601,7 @@ pub struct PyPerformanceValidator {
 #[pymethods]
 impl PyPerformanceValidator {
     #[new]
+    /// new
     pub fn new() -> Self {
         Self {
             validator: PerformanceValidator::new(),
@@ -609,12 +630,14 @@ impl PyPerformanceValidator {
 
 /// Utility function to convert confidence to label
 #[pyfunction]
+/// confidence to label
 pub fn confidence_to_label(confidence: f32) -> String {
     crate::confidence_to_label(confidence).to_string()
 }
 
 /// Load audio from file path
 #[pyfunction]
+/// load audio file
 pub fn load_audio_file(path: String, sample_rate: Option<u32>) -> PyResult<PyAudioBuffer> {
     let audio = if let Some(sr) = sample_rate {
         crate::audio_formats::load_audio_with_sample_rate(&path, sr)

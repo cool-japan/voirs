@@ -61,7 +61,7 @@ where
 
     /// Insert value with compression
     pub fn insert(&self, key: K, value: V) -> Result<()> {
-        let serialized = bincode::serialize(&value)
+        let serialized = bincode::serde::encode_to_vec(&value, bincode::config::standard())
             .map_err(|e| crate::G2pError::InvalidInput(format!("Serialization failed: {e}")))?;
         let original_size = serialized.len();
 
@@ -126,9 +126,11 @@ where
                 .read_to_end(&mut decompressed)
                 .map_err(|e| crate::G2pError::InvalidInput(format!("Decompression failed: {e}")))?;
 
-            let value: V = bincode::deserialize(&decompressed).map_err(|e| {
-                crate::G2pError::InvalidInput(format!("Deserialization failed: {e}"))
-            })?;
+            let (value, _): (V, usize) =
+                bincode::serde::decode_from_slice(&decompressed, bincode::config::standard())
+                    .map_err(|e| {
+                        crate::G2pError::InvalidInput(format!("Deserialization failed: {e}"))
+                    })?;
             Ok(Some(value))
         } else {
             stats.misses += 1;
@@ -191,7 +193,7 @@ impl AdaptiveCompressionManager {
 
     /// Decide whether to compress based on size and type
     pub fn should_compress<T: Serialize>(&self, data: &T) -> bool {
-        if let Ok(serialized) = bincode::serialize(data) {
+        if let Ok(serialized) = bincode::serde::encode_to_vec(data, bincode::config::standard()) {
             serialized.len() > self.compression_threshold
         } else {
             false
@@ -200,7 +202,7 @@ impl AdaptiveCompressionManager {
 
     /// Compress data adaptively
     pub fn compress_adaptive<T: Serialize>(&self, data: &T) -> Result<Vec<u8>> {
-        let serialized = bincode::serialize(data)
+        let serialized = bincode::serde::encode_to_vec(data, bincode::config::standard())
             .map_err(|e| crate::G2pError::InvalidInput(format!("Serialization failed: {e}")))?;
         let mut stats = self.stats.lock().unwrap();
 
@@ -254,8 +256,10 @@ impl AdaptiveCompressionManager {
             payload.to_vec()
         };
 
-        let value: T = bincode::deserialize(&decompressed)
-            .map_err(|e| crate::G2pError::InvalidInput(format!("Deserialization failed: {e}")))?;
+        let (value, _): (T, usize) =
+            bincode::serde::decode_from_slice(&decompressed, bincode::config::standard()).map_err(
+                |e| crate::G2pError::InvalidInput(format!("Deserialization failed: {e}")),
+            )?;
         Ok(value)
     }
 

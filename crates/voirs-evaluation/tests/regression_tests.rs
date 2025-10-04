@@ -3,8 +3,8 @@
 //! These tests ensure that quality metrics remain stable across code changes
 //! and that performance doesn't regress over time.
 
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use scirs2_core::random::rngs::StdRng;
+use scirs2_core::random::{Random, Rng, SeedableRng};
 use std::collections::HashMap;
 use std::time::Instant;
 use voirs_evaluation::quality::{mcd::MCDEvaluator, pesq::PESQEvaluator, stoi::STOIEvaluator};
@@ -32,8 +32,7 @@ fn generate_regression_test_audio(
     sample_rate: u32,
     seed: u64,
 ) -> (AudioBuffer, AudioBuffer) {
-    use rand::{Rng, SeedableRng};
-    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let mut rng = scirs2_core::random::Random::seed(seed);
 
     let samples_count = (duration_seconds * sample_rate as f32) as usize;
     let mut reference_samples = Vec::with_capacity(samples_count);
@@ -388,7 +387,7 @@ async fn test_metric_correlation_stability() {
         let mut degraded_samples = degraded.samples().to_vec();
 
         // Use deterministic degradation for consistent results
-        let mut rng = rand::rngs::StdRng::seed_from_u64(42 + i as u64);
+        let mut rng = scirs2_core::random::rngs::StdRng::seed_from_u64(42 + i as u64);
 
         // More moderate degradation levels
         let noise_level = (1.0 - quality) * 0.05; // Reduced noise level

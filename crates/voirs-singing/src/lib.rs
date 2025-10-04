@@ -4,12 +4,6 @@
 //! musical note processing, pitch contour generation, rhythm control, vibrato modeling,
 //! and musical format support.
 
-// Temporarily allow common warnings to get the code compiling
-#![allow(unused_imports)]
-#![allow(dead_code)]
-#![allow(unused_variables)]
-#![allow(unused_mut)]
-#![allow(deprecated)]
 //!
 //! ## Quick Start
 //!
@@ -90,6 +84,7 @@ pub mod core;
 pub mod custom_score;
 pub mod effects;
 pub mod formats;
+/// GPU acceleration for neural singing synthesis.
 pub mod gpu_acceleration;
 pub mod granular_synthesis;
 pub mod harmony;

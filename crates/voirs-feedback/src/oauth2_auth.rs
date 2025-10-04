@@ -26,7 +26,10 @@ pub enum OAuth2Error {
 
     /// Invalid access token
     #[error("Invalid access token: {message}")]
-    InvalidAccessToken { message: String },
+    InvalidAccessToken {
+        /// Error message
+        message: String
+    },
 
     /// Token expired
     #[error("Token expired")]
@@ -38,19 +41,33 @@ pub enum OAuth2Error {
 
     /// Provider error
     #[error("OAuth provider error: {provider} - {message}")]
-    ProviderError { provider: String, message: String },
+    ProviderError {
+        /// Provider name
+        provider: String,
+        /// Error message
+        message: String
+    },
 
     /// Configuration error
     #[error("OAuth configuration error: {message}")]
-    ConfigurationError { message: String },
+    ConfigurationError {
+        /// Error message
+        message: String
+    },
 
     /// Network error
     #[error("Network error: {message}")]
-    NetworkError { message: String },
+    NetworkError {
+        /// Error message
+        message: String
+    },
 
     /// JWT error
     #[error("JWT error: {message}")]
-    JwtError { message: String },
+    JwtError {
+        /// Error message
+        message: String
+    },
 
     /// PKCE error
     #[error("PKCE verification error")]
@@ -58,7 +75,12 @@ pub enum OAuth2Error {
 
     /// Scope error
     #[error("Insufficient scope: required {required}, got {actual}")]
-    ScopeError { required: String, actual: String },
+    ScopeError {
+        /// Required scope
+        required: String,
+        /// Actual scope
+        actual: String
+    },
 }
 
 /// Result type for OAuth 2.0 operations
@@ -76,7 +98,12 @@ pub enum OAuth2Provider {
     /// Auth0
     Auth0,
     /// Custom provider
-    Custom { name: String, base_url: String },
+    Custom {
+        /// Provider name
+        name: String,
+        /// Base URL
+        base_url: String
+    },
 }
 
 /// OAuth 2.0 grant types
@@ -221,13 +248,16 @@ pub struct PkceChallenge {
 impl PkceChallenge {
     /// Generate new PKCE challenge
     pub fn new() -> Self {
-        use rand::{distributions::Alphanumeric, Rng};
+        use scirs2_core::random::Random;
 
         // Generate random code verifier (43-128 characters)
-        let code_verifier: String = rand::thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(128)
-            .map(char::from)
+        let mut rng = Random::seed(0); // Use system time for real randomness
+        const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        let code_verifier: String = (0..128)
+            .map(|_| {
+                let idx = rng.gen_range(0..CHARSET.len());
+                CHARSET[idx] as char
+            })
             .collect();
 
         // Generate code challenge using SHA256

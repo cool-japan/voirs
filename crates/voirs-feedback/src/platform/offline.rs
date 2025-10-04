@@ -15,6 +15,7 @@ pub struct OfflineManager {
     config: OfflineConfig,
     cache: OfflineCache,
     queue: OperationQueue,
+    /// Description
     pub storage: OfflineStorage,
 }
 
@@ -449,19 +450,28 @@ impl OperationQueue {
 /// Queued operation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueuedOperation {
+    /// Description
     pub id: String,
+    /// Description
     pub operation_type: OperationType,
+    /// Description
     pub session_id: String,
+    /// Description
     pub data: serde_json::Value,
+    /// Description
     pub timestamp: DateTime<Utc>,
+    /// Description
     pub retry_count: u32,
 }
 
 /// Operation type
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum OperationType {
+    /// Description
     ProcessFeedback,
+    /// Description
     SaveProgress,
+    /// Description
     SaveSession,
 }
 
@@ -621,25 +631,35 @@ impl OfflineStorage {
 /// Offline status
 #[derive(Debug, Clone)]
 pub struct OfflineStatus {
+    /// Description
     pub is_offline: bool,
+    /// Description
     pub cached_models: bool,
+    /// Description
     pub pending_operations: u32,
+    /// Description
     pub storage_usage: StorageUsage,
+    /// Description
     pub last_sync: Option<DateTime<Utc>>,
 }
 
 /// Cache usage information
 #[derive(Debug, Clone)]
 pub struct CacheUsage {
+    /// Description
     pub total_size: u64,
+    /// Description
     pub model_count: u32,
+    /// Description
     pub data_count: u32,
 }
 
 /// Storage usage information
 #[derive(Debug, Clone)]
 pub struct StorageUsage {
+    /// Description
     pub used_bytes: u64,
+    /// Description
     pub available_bytes: u64,
 }
 
@@ -647,22 +667,48 @@ pub struct StorageUsage {
 #[derive(Debug, thiserror::Error)]
 pub enum OfflineError {
     #[error("Model not cached: Required model not available offline")]
+    /// Description
     ModelNotCached,
 
     #[error("Storage error: {message}")]
-    StorageError { message: String },
+    /// Description
+    /// Description
+    StorageError {
+        /// Human-readable description of the storage issue.
+        message: String,
+    },
 
     #[error("Serialization error: {message}")]
-    SerializationError { message: String },
+    /// Description
+    /// Description
+    SerializationError {
+        /// Human-readable description of the serialization issue.
+        message: String,
+    },
 
     #[error("Cache error: {message}")]
-    CacheError { message: String },
+    /// Description
+    /// Description
+    CacheError {
+        /// Human-readable description of the cache issue.
+        message: String,
+    },
 
     #[error("Network error: {message}")]
-    NetworkError { message: String },
+    /// Description
+    /// Description
+    NetworkError {
+        /// Human-readable description of the network issue.
+        message: String,
+    },
 
     #[error("Configuration error: {message}")]
-    ConfigError { message: String },
+    /// Description
+    /// Description
+    ConfigError {
+        /// Human-readable description of the configuration issue.
+        message: String,
+    },
 }
 
 /// Offline result type

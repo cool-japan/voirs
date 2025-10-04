@@ -395,8 +395,8 @@ impl PluginLoader {
             PluginType::Voice => Ok(Arc::new(super::voices::DefaultVoicePlugin::new(
                 &manifest.name,
             ))),
-            PluginType::Processor => Ok(Arc::new(MockProcessorPlugin::new(&manifest.name))),
-            PluginType::Extension => Ok(Arc::new(MockExtensionPlugin::new(&manifest.name))),
+            PluginType::Processor => Ok(Arc::new(TextProcessorPlugin::new(&manifest.name))),
+            PluginType::Extension => Ok(Arc::new(UtilityExtensionPlugin::new(&manifest.name))),
         }
     }
 
@@ -551,21 +551,86 @@ impl Plugin for WasmPlugin {
     }
 }
 
-// Mock plugin implementations for testing
+// Default processor plugin implementations
 
-struct MockProcessorPlugin {
+/// Text normalization and preprocessing plugin
+struct TextProcessorPlugin {
     name: String,
+    normalize_unicode: bool,
+    remove_punctuation: bool,
+    lowercase: bool,
 }
 
-impl MockProcessorPlugin {
+impl TextProcessorPlugin {
     fn new(name: &str) -> Self {
         Self {
             name: format!("processor-{}", name),
+            normalize_unicode: true,
+            remove_punctuation: false,
+            lowercase: false,
+        }
+    }
+
+    fn normalize_text(&self, text: &str) -> String {
+        let mut result = text.to_string();
+
+        // Unicode normalization (NFKC - compatibility normalization)
+        if self.normalize_unicode {
+            result = result
+                .chars()
+                .map(|c| match c {
+                    '\u{FF01}'..='\u{FF5E}' => {
+                        // Convert full-width ASCII to half-width
+                        char::from_u32(c as u32 - 0xFEE0).unwrap_or(c)
+                    }
+                    '\u{3000}' => ' ', // Ideographic space to regular space
+                    _ => c,
+                })
+                .collect();
+        }
+
+        // Remove punctuation
+        if self.remove_punctuation {
+            result = result
+                .chars()
+                .filter(|c| !c.is_ascii_punctuation() && *c != '。' && *c != '、')
+                .collect();
+        }
+
+        // Convert to lowercase
+        if self.lowercase {
+            result = result.to_lowercase();
+        }
+
+        result
+    }
+
+    fn detect_language(&self, text: &str) -> String {
+        // Simple heuristic-based language detection
+        let has_cjk = text.chars().any(|c| {
+            matches!(c,
+                '\u{4E00}'..='\u{9FFF}' | // CJK Unified Ideographs
+                '\u{3040}'..='\u{309F}' | // Hiragana
+                '\u{30A0}'..='\u{30FF}'   // Katakana
+            )
+        });
+
+        let has_hiragana = text.chars().any(|c| matches!(c, '\u{3040}'..='\u{309F}'));
+        let has_hangul = text.chars().any(|c| matches!(c, '\u{AC00}'..='\u{D7AF}'));
+
+        if has_hiragana {
+            "ja".to_string()
+        } else if has_hangul {
+            "ko".to_string()
+        } else if has_cjk {
+            "zh".to_string()
+        } else {
+            "en".to_string()
         }
     }
 }
 
-impl Plugin for MockProcessorPlugin {
+impl Plugin for TextProcessorPlugin {
     fn name(&self) -> &str {
         &self.name
     }
@@ -575,14 +640,23 @@ impl Plugin for MockProcessorPlugin {
     }
 
     fn description(&self) -> &str {
-        "Mock processor plugin"
+        "Text normalization and preprocessing plugin"
     }
 
     fn plugin_type(&self) -> PluginType {
         PluginType::Processor
     }
 
-    fn initialize(&mut self, _config: &serde_json::Value) -> PluginResult<()> {
+    fn initialize(&mut self, config: &serde_json::Value) -> PluginResult<()> {
+        if let Some(normalize) = config.get("normalize_unicode").and_then(|v| v.as_bool()) {
+            self.normalize_unicode = normalize;
+        }
+        if let Some(remove_punct) = config.get("remove_punctuation").and_then(|v| v.as_bool()) {
+            self.remove_punctuation = remove_punct;
+        }
+        if let Some(lowercase) = config.get("lowercase").and_then(|v| v.as_bool()) {
+            self.lowercase = lowercase;
+        }
         Ok(())
     }
 
@@ -591,15 +665,71 @@ impl Plugin for MockProcessorPlugin {
     }
 
     fn get_capabilities(&self) -> Vec<String> {
-        vec!["process".to_string()]
+        vec![
+            "normalize".to_string(),
+            "detect_language".to_string(),
+            "tokenize".to_string(),
+            "clean".to_string(),
+        ]
     }
 
     fn execute(&self, command: &str, args: &serde_json::Value) -> PluginResult<serde_json::Value> {
         match command {
-            "process" => Ok(serde_json::json!({
-                "status": "processed",
-                "args": args
-            })),
+            "normalize" => {
+                let text = args
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| PluginError::ExecutionFailed("Missing 'text' argument".to_string()))?;
+
+                let normalized = self.normalize_text(text);
+                Ok(serde_json::json!({
+                    "normalized_text": normalized,
+                    "original_length": text.len(),
+                    "normalized_length": normalized.len()
+                }))
+            }
+            "detect_language" => {
+                let text = args
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| PluginError::ExecutionFailed("Missing 'text' argument".to_string()))?;
+
+                let language = self.detect_language(text);
+                Ok(serde_json::json!({
+                    "language": language,
+                    "confidence": 0.85 // Heuristic confidence
+                }))
+            }
+            "tokenize" => {
+                let text = args
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| PluginError::ExecutionFailed("Missing 'text' argument".to_string()))?;
+
+                let tokens: Vec<&str> = text.split_whitespace().collect();
+                Ok(serde_json::json!({
+                    "tokens": tokens,
+                    "token_count": tokens.len()
+                }))
+            }
+            "clean" => {
+                let text = args
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| PluginError::ExecutionFailed("Missing 'text' argument".to_string()))?;
+
+                // Remove extra whitespace, normalize line endings
+                let cleaned = text
+                    .lines()
+                    .map(|line| line.trim())
+                    .filter(|line| !line.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+
+                Ok(serde_json::json!({
+                    "cleaned_text": cleaned
+                }))
+            }
             _ => Err(PluginError::ExecutionFailed(format!(
                 "Unknown command: {}",
                 command
@@ -608,19 +738,90 @@ impl Plugin for MockProcessorPlugin {
     }
 }
 
-struct MockExtensionPlugin {
+/// Utility extension plugin providing common helper functions
+struct UtilityExtensionPlugin {
     name: String,
+    cache: std::sync::Mutex<HashMap<String, serde_json::Value>>,
 }
 
-impl MockExtensionPlugin {
+impl UtilityExtensionPlugin {
     fn new(name: &str) -> Self {
         Self {
             name: format!("extension-{}", name),
+            cache: std::sync::Mutex::new(HashMap::new()),
         }
+    }
+
+    fn validate_audio_format(&self, format: &str) -> bool {
+        matches!(
+            format.to_lowercase().as_str(),
+            "wav" | "mp3" | "ogg" | "flac" | "aac" | "opus" | "m4a"
+        )
+    }
+
+    fn convert_duration(&self, duration_str: &str) -> Result<f64, String> {
+        // Parse duration strings like "1:30", "90s", "1.5m"
+        if let Some(colon_pos) = duration_str.find(':') {
+            // Format: "MM:SS"
+            let minutes: f64 = duration_str[..colon_pos]
+                .parse()
+                .map_err(|_| "Invalid minutes")?;
+            let seconds: f64 = duration_str[colon_pos + 1..]
+                .parse()
+                .map_err(|_| "Invalid seconds")?;
+            Ok(minutes * 60.0 + seconds)
+        } else if duration_str.ends_with('s') {
+            // Format: "90s"
+            duration_str[..duration_str.len() - 1]
+                .parse()
+                .map_err(|_| "Invalid seconds value".to_string())
+        } else if duration_str.ends_with('m') {
+            // Format: "1.5m"
+            let minutes: f64 = duration_str[..duration_str.len() - 1]
+                .parse()
+                .map_err(|_| "Invalid minutes value")?;
+            Ok(minutes * 60.0)
+        } else if duration_str.ends_with('h') {
+            // Format: "0.5h"
+            let hours: f64 = duration_str[..duration_str.len() - 1]
+                .parse()
+                .map_err(|_| "Invalid hours value")?;
+            Ok(hours * 3600.0)
+        } else {
+            // Assume seconds as default
+            duration_str
+                .parse()
+                .map_err(|_| "Invalid duration format".to_string())
+        }
+    }
+
+    fn calculate_audio_bitrate(&self, file_size_bytes: u64, duration_seconds: f64) -> u64 {
+        if duration_seconds > 0.0 {
+            (file_size_bytes * 8) / duration_seconds as u64 / 1000 // kbps
+        } else {
+            0
+        }
+    }
+
+    fn generate_safe_filename(&self, input: &str) -> String {
+        input
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                    c
+                } else if c.is_whitespace() {
+                    '_'
+                } else {
+                    '-'
+                }
+            })
+            .collect::<String>()
+            .trim_matches('-')
+            .to_string()
     }
 }
 
-impl Plugin for MockExtensionPlugin {
+impl Plugin for UtilityExtensionPlugin {
     fn name(&self) -> &str {
         &self.name
     }
@@ -630,7 +831,7 @@ impl Plugin for MockExtensionPlugin {
     }
 
     fn description(&self) -> &str {
-        "Mock extension plugin"
+        "Utility extension plugin with helper functions"
     }
 
     fn plugin_type(&self) -> PluginType {
@@ -642,19 +843,115 @@ impl Plugin for MockExtensionPlugin {
     }
 
     fn cleanup(&mut self) -> PluginResult<()> {
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.clear();
+        }
         Ok(())
     }
 
     fn get_capabilities(&self) -> Vec<String> {
-        vec!["extend".to_string()]
+        vec![
+            "validate_format".to_string(),
+            "convert_duration".to_string(),
+            "calculate_bitrate".to_string(),
+            "safe_filename".to_string(),
+            "cache_get".to_string(),
+            "cache_set".to_string(),
+            "cache_clear".to_string(),
+        ]
     }
 
     fn execute(&self, command: &str, args: &serde_json::Value) -> PluginResult<serde_json::Value> {
         match command {
-            "extend" => Ok(serde_json::json!({
-                "status": "extended",
-                "args": args
-            })),
+            "validate_format" => {
+                let format = args
+                    .get("format")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| PluginError::ExecutionFailed("Missing 'format' argument".to_string()))?;
+
+                let is_valid = self.validate_audio_format(format);
+                Ok(serde_json::json!({
+                    "valid": is_valid,
+                    "format": format
+                }))
+            }
+            "convert_duration" => {
+                let duration = args
+                    .get("duration")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| PluginError::ExecutionFailed("Missing 'duration' argument".to_string()))?;
+
+                match self.convert_duration(duration) {
+                    Ok(seconds) => Ok(serde_json::json!({
+                        "seconds": seconds,
+                        "minutes": seconds / 60.0,
+                        "hours": seconds / 3600.0
+                    })),
+                    Err(e) => Err(PluginError::ExecutionFailed(e)),
+                }
+            }
+            "calculate_bitrate" => {
+                let file_size = args
+                    .get("file_size")
+                    .and_then(|v| v.as_u64())
+                    .ok_or_else(|| PluginError::ExecutionFailed("Missing 'file_size' argument".to_string()))?;
+                let duration = args
+                    .get("duration")
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| PluginError::ExecutionFailed("Missing 'duration' argument".to_string()))?;
+
+                let bitrate = self.calculate_audio_bitrate(file_size, duration);
+                Ok(serde_json::json!({
+                    "bitrate_kbps": bitrate
+                }))
+            }
+            "safe_filename" => {
+                let filename = args
+                    .get("filename")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| PluginError::ExecutionFailed("Missing 'filename' argument".to_string()))?;
+
+                let safe_name = self.generate_safe_filename(filename);
+                Ok(serde_json::json!({
+                    "safe_filename": safe_name
+                }))
+            }
+            "cache_get" => {
+                let key = args
+                    .get("key")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| PluginError::ExecutionFailed("Missing 'key' argument".to_string()))?;
+
+                let cache = self.cache.lock().unwrap();
+                Ok(serde_json::json!({
+                    "value": cache.get(key).cloned(),
+                    "exists": cache.contains_key(key)
+                }))
+            }
+            "cache_set" => {
+                let key = args
+                    .get("key")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| PluginError::ExecutionFailed("Missing 'key' argument".to_string()))?;
+                let value = args
+                    .get("value")
+                    .ok_or_else(|| PluginError::ExecutionFailed("Missing 'value' argument".to_string()))?;
+
+                let mut cache = self.cache.lock().unwrap();
+                cache.insert(key.to_string(), value.clone());
+                Ok(serde_json::json!({
+                    "success": true,
+                    "key": key
+                }))
+            }
+            "cache_clear" => {
+                let mut cache = self.cache.lock().unwrap();
+                let count = cache.len();
+                cache.clear();
+                Ok(serde_json::json!({
+                    "cleared": count
+                }))
+            }
             _ => Err(PluginError::ExecutionFailed(format!(
                 "Unknown command: {}",
                 command
@@ -666,6 +963,106 @@ impl Plugin for MockExtensionPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct MockProcessorPlugin {
+        name: String,
+        version: String,
+        description: String,
+    }
+
+    impl MockProcessorPlugin {
+        fn new(suffix: &str) -> Self {
+            Self {
+                name: format!("processor-{}", suffix),
+                version: "0.1.0".to_string(),
+                description: "Mock processor plugin".to_string(),
+            }
+        }
+    }
+
+    impl Plugin for MockProcessorPlugin {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn version(&self) -> &str {
+            &self.version
+        }
+
+        fn description(&self) -> &str {
+            &self.description
+        }
+
+        fn plugin_type(&self) -> PluginType {
+            PluginType::Processor
+        }
+
+        fn initialize(&mut self, _config: &serde_json::Value) -> PluginResult<()> {
+            Ok(())
+        }
+
+        fn cleanup(&mut self) -> PluginResult<()> {
+            Ok(())
+        }
+
+        fn get_capabilities(&self) -> Vec<String> {
+            vec!["mock-processor".to_string()]
+        }
+
+        fn execute(&self, _command: &str, _args: &serde_json::Value) -> PluginResult<serde_json::Value> {
+            Ok(serde_json::Value::Null)
+        }
+    }
+
+    struct MockExtensionPlugin {
+        name: String,
+        version: String,
+        description: String,
+    }
+
+    impl MockExtensionPlugin {
+        fn new(suffix: &str) -> Self {
+            Self {
+                name: format!("extension-{}", suffix),
+                version: "0.1.0".to_string(),
+                description: "Mock extension plugin".to_string(),
+            }
+        }
+    }
+
+    impl Plugin for MockExtensionPlugin {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn version(&self) -> &str {
+            &self.version
+        }
+
+        fn description(&self) -> &str {
+            &self.description
+        }
+
+        fn plugin_type(&self) -> PluginType {
+            PluginType::Extension
+        }
+
+        fn initialize(&mut self, _config: &serde_json::Value) -> PluginResult<()> {
+            Ok(())
+        }
+
+        fn cleanup(&mut self) -> PluginResult<()> {
+            Ok(())
+        }
+
+        fn get_capabilities(&self) -> Vec<String> {
+            vec!["mock-extension".to_string()]
+        }
+
+        fn execute(&self, _command: &str, _args: &serde_json::Value) -> PluginResult<serde_json::Value> {
+            Ok(serde_json::Value::Null)
+        }
+    }
 
     #[test]
     fn test_loader_config_default() {

@@ -185,7 +185,8 @@ impl UncertaintyEstimator {
 
         // Normalize by Nyquist frequency and add some variance
         let normalized_centroid = spectral_centroid / (sample_rate / 2.0);
-        let entropy = (1.0 - normalized_centroid).max(0.1) + rand::random::<f32>() * 0.2;
+        let entropy =
+            (1.0 - normalized_centroid).max(0.1) + scirs2_core::random::random::<f32>() * 0.2;
 
         Ok(entropy.min(1.0))
     }
@@ -210,7 +211,7 @@ impl UncertaintyEstimator {
         let quality = sample.quality.overall_quality.unwrap_or(0.5);
 
         // Higher quality = lower uncertainty, with some randomness
-        let uncertainty = (1.0 - quality) * 0.8 + rand::random::<f32>() * 0.4;
+        let uncertainty = (1.0 - quality) * 0.8 + scirs2_core::random::random::<f32>() * 0.4;
         Ok(uncertainty.min(1.0))
     }
 

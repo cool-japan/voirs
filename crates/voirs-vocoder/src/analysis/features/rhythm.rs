@@ -8,7 +8,7 @@
 //! - Tempo stability
 
 use crate::{Result, VocoderError};
-use ndarray::{Array1, Array2};
+use scirs2_core::ndarray::{Array1, Array2};
 
 /// Rhythm and beat features
 #[derive(Debug, Clone)]
@@ -233,7 +233,7 @@ impl RhythmFeatureComputer for crate::analysis::features::FeatureExtractor {
         let mut envelope = Vec::new();
         for start in (0..samples.len() - window_size).step_by(hop_size) {
             let end = start + window_size;
-            let window = samples.slice(ndarray::s![start..end]);
+            let window = samples.slice(scirs2_core::ndarray::s![start..end]);
             let rms = (window.iter().map(|&x| x * x).sum::<f32>() / window_size as f32).sqrt();
             envelope.push(rms);
         }

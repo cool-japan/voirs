@@ -1,5 +1,6 @@
 //! Voice management command implementations.
 
+use indicatif::{ProgressBar, ProgressStyle};
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use voirs_sdk::{config::AppConfig, error::Result, VoiceConfig, VoirsPipeline};
@@ -51,10 +52,9 @@ pub async fn run_voice_info(voice_id: &str, config: &AppConfig) -> Result<()> {
     let voices = pipeline.list_voices().await?;
 
     // Find the requested voice
-    let voice = voices
-        .iter()
-        .find(|v| v.id == voice_id)
-        .ok_or_else(|| voirs::VoirsError::audio_error(format!("Voice '{}' not found", voice_id)))?;
+    let voice = voices.iter().find(|v| v.id == voice_id).ok_or_else(|| {
+        voirs_sdk::VoirsError::audio_error(format!("Voice '{}' not found", voice_id))
+    })?;
 
     // Display voice information
     println!("Voice Information");
@@ -176,10 +176,9 @@ pub async fn run_download_voice(voice_id: &str, force: bool, config: &AppConfig)
     let voices = pipeline.list_voices().await?;
 
     // Find the requested voice
-    let voice = voices
-        .iter()
-        .find(|v| v.id == voice_id)
-        .ok_or_else(|| voirs::VoirsError::audio_error(format!("Voice '{}' not found", voice_id)))?;
+    let voice = voices.iter().find(|v| v.id == voice_id).ok_or_else(|| {
+        voirs_sdk::VoirsError::audio_error(format!("Voice '{}' not found", voice_id))
+    })?;
 
     // Check if already downloaded
     let cache_dir = config.pipeline.effective_cache_dir();
@@ -194,7 +193,7 @@ pub async fn run_download_voice(voice_id: &str, force: bool, config: &AppConfig)
     }
 
     // Create voice directory
-    std::fs::create_dir_all(&voice_dir).map_err(|e| voirs::VoirsError::from(e))?;
+    std::fs::create_dir_all(&voice_dir).map_err(|e| voirs_sdk::VoirsError::from(e))?;
 
     println!("Preparing to download voice models...");
 
@@ -220,7 +219,7 @@ pub async fn run_download_voice(voice_id: &str, force: bool, config: &AppConfig)
 
         // Create parent directories if needed
         if let Some(parent) = local_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| voirs::VoirsError::from(e))?;
+            std::fs::create_dir_all(parent).map_err(|e| voirs_sdk::VoirsError::from(e))?;
         }
 
         println!("  Downloading {} model...", model_type);
@@ -262,7 +261,7 @@ pub async fn run_download_voice(voice_id: &str, force: bool, config: &AppConfig)
                 &local_path,
                 format!("Placeholder for {} model: {}", model_type, model_path),
             )
-            .map_err(|e| voirs::VoirsError::from(e))?;
+            .map_err(|e| voirs_sdk::VoirsError::from(e))?;
 
             println!("    ⚠ Placeholder created: {}", local_path.display());
         }
@@ -271,10 +270,10 @@ pub async fn run_download_voice(voice_id: &str, force: bool, config: &AppConfig)
     // Save voice configuration
     let voice_config_path = voice_dir.join("voice.json");
     let voice_json = serde_json::to_string_pretty(voice).map_err(|e| {
-        voirs::VoirsError::config_error(format!("Failed to serialize voice config: {}", e))
+        voirs_sdk::VoirsError::config_error(format!("Failed to serialize voice config: {}", e))
     })?;
 
-    std::fs::write(&voice_config_path, voice_json).map_err(|e| voirs::VoirsError::from(e))?;
+    std::fs::write(&voice_config_path, voice_json).map_err(|e| voirs_sdk::VoirsError::from(e))?;
 
     println!();
     println!("Voice '{}' downloaded successfully!", voice_id);
@@ -327,7 +326,7 @@ async fn download_model_file(
         ))
         .build()
         .map_err(|e| {
-            voirs::VoirsError::config_error(format!("Failed to create HTTP client: {}", e))
+            voirs_sdk::VoirsError::config_error(format!("Failed to create HTTP client: {}", e))
         })?;
 
     // Attempt download with retries
@@ -355,8 +354,9 @@ async fn download_model_file(
         }
     }
 
-    Err(last_error
-        .unwrap_or_else(|| voirs::VoirsError::config_error("Download failed after all retries")))
+    Err(last_error.unwrap_or_else(|| {
+        voirs_sdk::VoirsError::config_error("Download failed after all retries")
+    }))
 }
 
 /// Attempt a single download
@@ -366,14 +366,13 @@ async fn attempt_download(
     local_path: &std::path::Path,
     attempt: u32,
 ) -> Result<()> {
-    let response = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| voirs::VoirsError::config_error(format!("HTTP request failed: {}", e)))?;
+    let response =
+        client.get(url).send().await.map_err(|e| {
+            voirs_sdk::VoirsError::config_error(format!("HTTP request failed: {}", e))
+        })?;
 
     if !response.status().is_success() {
-        return Err(voirs::VoirsError::config_error(format!(
+        return Err(voirs_sdk::VoirsError::config_error(format!(
             "HTTP error {}: {}",
             response.status(),
             response
@@ -385,19 +384,29 @@ async fn attempt_download(
 
     // Get content length for progress tracking
     let total_size = response.content_length().unwrap_or(0);
-    if total_size > 0 {
-        println!(
-            "      File size: {:.2} MB",
-            total_size as f64 / 1024.0 / 1024.0
+
+    // Create progress bar
+    let pb = if total_size > 0 {
+        let pb = ProgressBar::new(total_size);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("      [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+                .unwrap()
+                .progress_chars("#>-"),
         );
-    }
+        Some(pb)
+    } else {
+        println!("      Downloading (size unknown)...");
+        None
+    };
 
     // Download with progress tracking
-    let mut file = std::fs::File::create(local_path).map_err(|e| voirs::VoirsError::IoError {
-        path: local_path.to_path_buf(),
-        operation: voirs_sdk::error::IoOperation::Write,
-        source: e,
-    })?;
+    let mut file =
+        std::fs::File::create(local_path).map_err(|e| voirs_sdk::VoirsError::IoError {
+            path: local_path.to_path_buf(),
+            operation: voirs_sdk::error::IoOperation::Write,
+            source: e,
+        })?;
 
     let mut downloaded = 0u64;
     let mut stream = response.bytes_stream();
@@ -405,11 +414,11 @@ async fn attempt_download(
     use futures_util::StreamExt;
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| {
-            voirs::VoirsError::config_error(format!("Download stream error: {}", e))
+            voirs_sdk::VoirsError::config_error(format!("Download stream error: {}", e))
         })?;
 
         file.write_all(&chunk)
-            .map_err(|e| voirs::VoirsError::IoError {
+            .map_err(|e| voirs_sdk::VoirsError::IoError {
                 path: local_path.to_path_buf(),
                 operation: voirs_sdk::error::IoOperation::Write,
                 source: e,
@@ -417,50 +426,53 @@ async fn attempt_download(
 
         downloaded += chunk.len() as u64;
 
-        // Show progress every 1MB or if we have total size
-        if total_size > 0 && (downloaded % (1024 * 1024) == 0 || downloaded == total_size) {
-            let progress = (downloaded as f64 / total_size as f64) * 100.0;
-            println!(
-                "      Progress: {:.1}% ({} / {} bytes)",
-                progress, downloaded, total_size
-            );
-        } else if total_size == 0 && downloaded % (1024 * 1024) == 0 {
-            println!(
-                "      Downloaded: {:.2} MB",
-                downloaded as f64 / 1024.0 / 1024.0
-            );
+        // Update progress bar
+        if let Some(ref pb) = pb {
+            pb.set_position(downloaded);
         }
     }
 
-    file.flush().map_err(|e| voirs::VoirsError::IoError {
+    file.flush().map_err(|e| voirs_sdk::VoirsError::IoError {
         path: local_path.to_path_buf(),
         operation: voirs_sdk::error::IoOperation::Write,
         source: e,
     })?;
 
-    println!(
-        "      Total downloaded: {:.2} MB",
-        downloaded as f64 / 1024.0 / 1024.0
-    );
+    // Finish progress bar
+    if let Some(pb) = pb {
+        pb.finish_and_clear();
+        println!(
+            "      ✓ Downloaded {:.2} MB",
+            downloaded as f64 / 1024.0 / 1024.0
+        );
+    } else {
+        println!(
+            "      ✓ Downloaded {:.2} MB",
+            downloaded as f64 / 1024.0 / 1024.0
+        );
+    }
+
     Ok(())
 }
 
 /// Verify downloaded file integrity
 fn verify_downloaded_file(local_path: &std::path::Path, config: &AppConfig) -> Result<()> {
     // Basic file existence and size check
-    let metadata = std::fs::metadata(local_path).map_err(|e| voirs::VoirsError::IoError {
+    let metadata = std::fs::metadata(local_path).map_err(|e| voirs_sdk::VoirsError::IoError {
         path: local_path.to_path_buf(),
         operation: voirs_sdk::error::IoOperation::Read,
         source: e,
     })?;
 
     if metadata.len() == 0 {
-        return Err(voirs::VoirsError::config_error("Downloaded file is empty"));
+        return Err(voirs_sdk::VoirsError::config_error(
+            "Downloaded file is empty",
+        ));
     }
 
     // Check for minimum file size (models should be at least 1KB)
     if metadata.len() < 1024 {
-        return Err(voirs::VoirsError::config_error(
+        return Err(voirs_sdk::VoirsError::config_error(
             "Downloaded file is too small to be a valid model",
         ));
     }
@@ -494,7 +506,7 @@ fn verify_file_checksum(file_path: &std::path::Path) -> Result<()> {
         // Also try looking for a .sha256 file with same base name
         let alt_checksum_path = file_path.with_extension("sha256");
         if !alt_checksum_path.exists() {
-            return Err(voirs::VoirsError::config_error(
+            return Err(voirs_sdk::VoirsError::config_error(
                 "No checksum file found for verification",
             ));
         }
@@ -503,14 +515,14 @@ fn verify_file_checksum(file_path: &std::path::Path) -> Result<()> {
     let expected_checksum = std::fs::read_to_string(&checksum_path)
         .or_else(|_| std::fs::read_to_string(&file_path.with_extension("sha256")))
         .map_err(|e| {
-            voirs::VoirsError::config_error(format!("Failed to read checksum file: {}", e))
+            voirs_sdk::VoirsError::config_error(format!("Failed to read checksum file: {}", e))
         })?
         .trim()
         .to_lowercase();
 
     // Validate checksum format (should be 64 hex characters for SHA256)
     if expected_checksum.len() != 64 || !expected_checksum.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(voirs::VoirsError::config_error(
+        return Err(voirs_sdk::VoirsError::config_error(
             "Invalid checksum format - expected 64 hex characters",
         ));
     }
@@ -520,7 +532,7 @@ fn verify_file_checksum(file_path: &std::path::Path) -> Result<()> {
 
     // Compare checksums
     if calculated_checksum != expected_checksum {
-        return Err(voirs::VoirsError::config_error(format!(
+        return Err(voirs_sdk::VoirsError::config_error(format!(
             "Checksum mismatch - expected: {}, calculated: {}",
             expected_checksum, calculated_checksum
         )));
@@ -531,7 +543,7 @@ fn verify_file_checksum(file_path: &std::path::Path) -> Result<()> {
 
 /// Calculate SHA256 hash of a file
 fn calculate_file_sha256(file_path: &std::path::Path) -> Result<String> {
-    let mut file = std::fs::File::open(file_path).map_err(|e| voirs::VoirsError::IoError {
+    let mut file = std::fs::File::open(file_path).map_err(|e| voirs_sdk::VoirsError::IoError {
         path: file_path.to_path_buf(),
         operation: voirs_sdk::error::IoOperation::Read,
         source: e,
@@ -543,7 +555,7 @@ fn calculate_file_sha256(file_path: &std::path::Path) -> Result<String> {
     loop {
         let bytes_read = file
             .read(&mut buffer)
-            .map_err(|e| voirs::VoirsError::IoError {
+            .map_err(|e| voirs_sdk::VoirsError::IoError {
                 path: file_path.to_path_buf(),
                 operation: voirs_sdk::error::IoOperation::Read,
                 source: e,

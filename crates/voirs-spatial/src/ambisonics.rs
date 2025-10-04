@@ -4,8 +4,8 @@
 //! for immersive spatial audio reproduction. Supports various orders and normalization schemes.
 
 use crate::{Error, Position3D, Result};
-use ndarray::{Array1, Array2, Axis};
-use num_complex::Complex32;
+use scirs2_core::ndarray::{Array1, Array2, Axis};
+use scirs2_core::Complex32;
 use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
 

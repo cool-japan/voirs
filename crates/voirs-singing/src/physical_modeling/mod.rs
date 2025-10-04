@@ -13,7 +13,7 @@
 //! - `solver`: Multi-scale physics solver
 //! - `enhanced`: Enhanced vocal tract model combining all components
 
-#![allow(dead_code, missing_docs)]
+#![allow(dead_code)]
 
 // Core modules
 pub mod advanced_physics;

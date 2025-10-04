@@ -4,10 +4,10 @@
 //! Based on the original STOI algorithm and Extended STOI (ESTOI) for better correlation.
 
 use crate::EvaluationError;
-use ndarray::{Array1, Array2};
-use num_complex::Complex32;
-use rand::Rng;
-use realfft::{RealFftPlanner, RealToComplex};
+use scirs2_core::ndarray::{Array1, Array2};
+use scirs2_core::random::Rng;
+use scirs2_core::Complex32;
+use scirs2_fft::{RealFftPlanner, RealToComplex};
 use std::f32::consts::PI;
 use std::sync::Mutex;
 use voirs_sdk::{AudioBuffer, LanguageCode};
@@ -68,7 +68,7 @@ impl STOIEvaluator {
         // Create third-octave bands from 150 Hz to sample_rate/2
         let octave_bands = Self::create_octave_bands(sample_rate);
 
-        let fft_planner = Mutex::new(RealFftPlanner::new());
+        let fft_planner = Mutex::new(RealFftPlanner::<f32>::new());
 
         Ok(Self {
             sample_rate,
@@ -200,9 +200,6 @@ impl STOIEvaluator {
         let num_freqs = self.frame_len / 2 + 1;
 
         let mut stft = Array2::zeros((num_frames, num_freqs));
-        let mut fft_planner = self.fft_planner.lock().unwrap();
-        let fft = fft_planner.plan_fft_forward(self.frame_len);
-        let mut spectrum = fft.make_output_vec();
 
         for (frame_idx, frame_start) in (0..signal.len() - self.frame_len + 1)
             .step_by(hop_size)
@@ -222,17 +219,21 @@ impl STOIEvaluator {
                 }
             }
 
-            // Compute FFT
-            fft.process(frame.as_slice_mut().unwrap(), &mut spectrum)
-                .map_err(|e| EvaluationError::AudioProcessingError {
-                    message: format!("FFT processing failed: {e}"),
-                    source: None,
-                })?;
+            // Compute FFT using functional API
+            let frame_slice =
+                frame
+                    .as_slice()
+                    .ok_or_else(|| EvaluationError::AudioProcessingError {
+                        message: "Failed to get frame slice".to_string(),
+                        source: None,
+                    })?;
+            let spectrum = scirs2_fft::rfft(frame_slice, None)?;
 
-            // Store complex spectrum
+            // Store complex spectrum (convert Complex64 to Complex32)
             for (freq_idx, &complex_val) in spectrum.iter().enumerate() {
                 if freq_idx < num_freqs {
-                    stft[[frame_idx, freq_idx]] = complex_val;
+                    stft[[frame_idx, freq_idx]] =
+                        Complex32::new(complex_val.re as f32, complex_val.im as f32);
                 }
             }
         }
@@ -298,9 +299,10 @@ impl STOIEvaluator {
                 }
 
                 // Extract segments
-                let clean_seg = clean_bands.slice(ndarray::s![frame_start..frame_end, band_idx]);
-                let processed_seg =
-                    processed_bands.slice(ndarray::s![frame_start..frame_end, band_idx]);
+                let clean_seg =
+                    clean_bands.slice(scirs2_core::ndarray::s![frame_start..frame_end, band_idx]);
+                let processed_seg = processed_bands
+                    .slice(scirs2_core::ndarray::s![frame_start..frame_end, band_idx]);
 
                 // Compute correlation
                 let correlation = self.compute_correlation_coefficient(&clean_seg, &processed_seg);
@@ -321,8 +323,8 @@ impl STOIEvaluator {
     /// Compute correlation coefficient between two segments
     fn compute_correlation_coefficient(
         &self,
-        x: &ndarray::ArrayView1<f32>,
-        y: &ndarray::ArrayView1<f32>,
+        x: &scirs2_core::ndarray::ArrayView1<f32>,
+        y: &scirs2_core::ndarray::ArrayView1<f32>,
     ) -> f32 {
         if x.len() != y.len() || x.is_empty() {
             return 0.0;
@@ -727,12 +729,8 @@ impl STOIEvaluator {
     /// Compute average power spectrum
     fn compute_average_spectrum(&self, signal: &[f32]) -> Result<Vec<f32>, EvaluationError> {
         let hop_size = self.frame_len / 2;
-        let mut avg_spectrum = vec![0.0; self.frame_len / 2 + 1];
+        let mut avg_spectrum = vec![0.0f32; self.frame_len / 2 + 1];
         let mut frame_count = 0;
-
-        let mut fft_planner = self.fft_planner.lock().unwrap();
-        let fft = fft_planner.plan_fft_forward(self.frame_len);
-        let mut spectrum = fft.make_output_vec();
 
         for frame_start in (0..signal.len() - self.frame_len + 1).step_by(hop_size) {
             // Extract frame
@@ -743,18 +741,13 @@ impl STOIEvaluator {
                 }
             }
 
-            // Compute FFT
-            fft.process(&mut frame, &mut spectrum).map_err(|e| {
-                EvaluationError::AudioProcessingError {
-                    message: format!("FFT processing failed: {e}"),
-                    source: None,
-                }
-            })?;
+            // Compute FFT using functional API
+            let spectrum = scirs2_fft::rfft(&frame, None)?;
 
-            // Accumulate power spectrum
+            // Accumulate power spectrum (convert f64 to f32)
             for (i, &complex_val) in spectrum.iter().enumerate() {
                 if i < avg_spectrum.len() {
-                    avg_spectrum[i] += complex_val.norm_sqr();
+                    avg_spectrum[i] += complex_val.norm_sqr() as f32;
                 }
             }
             frame_count += 1;
@@ -952,7 +945,7 @@ impl STOIEvaluator {
             let mut bootstrap_processed = Vec::with_capacity(bootstrap_len);
 
             for _ in 0..bootstrap_len {
-                let idx = rand::thread_rng().gen_range(0..signal_len);
+                let idx = scirs2_core::random::thread_rng().gen_range(0..signal_len);
                 bootstrap_clean.push(clean.samples()[idx]);
                 bootstrap_processed.push(processed.samples()[idx]);
             }
@@ -990,7 +983,7 @@ impl STOIEvaluator {
             let mut bootstrap_processed = Vec::with_capacity(bootstrap_len);
 
             for _ in 0..bootstrap_len {
-                let idx = rand::thread_rng().gen_range(0..signal_len);
+                let idx = scirs2_core::random::thread_rng().gen_range(0..signal_len);
                 bootstrap_clean.push(clean.samples()[idx]);
                 bootstrap_processed.push(processed.samples()[idx]);
             }

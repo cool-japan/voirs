@@ -3,6 +3,7 @@
 //! This module provides cross-platform synchronization capabilities for VoiRS feedback system
 //! including data synchronization, conflict resolution, and offline support.
 
+use async_trait::async_trait;
 use crate::traits::UserProgress;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -306,8 +307,11 @@ pub struct DataChange {
 /// Change type enumeration
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ChangeType {
+    /// Description
     Create,
+    /// Description
     Update,
+    /// Description
     Delete,
 }
 
@@ -420,6 +424,7 @@ pub struct ResolvedChanges {
 }
 
 /// Local storage trait
+#[async_trait]
 pub trait LocalStorage: Send + Sync {
     /// Get pending changes
     async fn get_pending_changes(&self) -> Result<Vec<DataChange>, SyncError>;
@@ -432,6 +437,7 @@ pub trait LocalStorage: Send + Sync {
 }
 
 /// Remote storage trait
+#[async_trait]
 pub trait RemoteStorage: Send + Sync {
     /// Get remote changes
     async fn get_remote_changes(&self) -> Result<Vec<DataChange>, SyncError>;
@@ -462,6 +468,7 @@ impl DefaultLocalStorage {
     }
 }
 
+#[async_trait]
 impl LocalStorage for DefaultLocalStorage {
     async fn get_pending_changes(&self) -> Result<Vec<DataChange>, SyncError> {
         Ok(self.changes.clone())
@@ -499,6 +506,7 @@ impl DefaultRemoteStorage {
     }
 }
 
+#[async_trait]
 impl RemoteStorage for DefaultRemoteStorage {
     async fn get_remote_changes(&self) -> Result<Vec<DataChange>, SyncError> {
         Ok(self.changes.clone())
@@ -527,28 +535,68 @@ impl RemoteStorage for DefaultRemoteStorage {
 #[derive(Debug, thiserror::Error)]
 pub enum SyncError {
     #[error("Network error: {message}")]
-    NetworkError { message: String },
+    /// Description
+    /// Description
+    NetworkError {
+        /// Human-readable description of the network issue.
+        message: String,
+    },
 
     #[error("Storage error: {message}")]
-    StorageError { message: String },
+    /// Description
+    /// Description
+    StorageError {
+        /// Human-readable description of the storage issue.
+        message: String,
+    },
 
     #[error("Conflict resolution error: {message}")]
-    ConflictError { message: String },
+    /// Description
+    /// Description
+    ConflictError {
+        /// Details about the conflict that could not be resolved.
+        message: String,
+    },
 
     #[error("Authentication error: {message}")]
-    AuthError { message: String },
+    /// Description
+    /// Description
+    AuthError {
+        /// Human-readable description of the authentication failure.
+        message: String,
+    },
 
     #[error("Serialization error: {message}")]
-    SerializationError { message: String },
+    /// Description
+    /// Description
+    SerializationError {
+        /// Human-readable description of the serialization issue.
+        message: String,
+    },
 
     #[error("Configuration error: {message}")]
-    ConfigError { message: String },
+    /// Description
+    /// Description
+    ConfigError {
+        /// Human-readable description of the configuration issue.
+        message: String,
+    },
 
     #[error("Concurrency error: {message}")]
-    ConcurrencyError { message: String },
+    /// Description
+    /// Description
+    ConcurrencyError {
+        /// Human-readable description of the concurrency issue.
+        message: String,
+    },
 
     #[error("Timeout error: {message}")]
-    TimeoutError { message: String },
+    /// Description
+    /// Description
+    TimeoutError {
+        /// Human-readable description of the timeout condition.
+        message: String,
+    },
 }
 
 /// Synchronization result type

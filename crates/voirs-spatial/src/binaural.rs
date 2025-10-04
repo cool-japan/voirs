@@ -5,8 +5,8 @@
 
 use crate::hrtf::{HrtfDatabase, HrtfProcessor};
 use crate::types::{AudioChannel, BinauraAudio, Position3D};
-use ndarray::{Array1, Array2};
-use realfft::{RealFftPlanner, RealToComplex};
+use scirs2_core::ndarray::{Array1, Array2};
+use scirs2_fft::{RealFftPlanner, RealToComplex};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -103,15 +103,15 @@ struct ConvolutionState {
     /// FFT forward transform
     forward_fft: Arc<dyn RealToComplex<f32>>,
     /// FFT inverse transform  
-    inverse_fft: Arc<dyn realfft::ComplexToReal<f32>>,
+    inverse_fft: Arc<dyn scirs2_fft::ComplexToReal<f32>>,
     /// FFT buffer size
     fft_size: usize,
     /// Overlap-add buffers for left and right channels
     overlap_left: Array1<f32>,
     overlap_right: Array1<f32>,
     /// Frequency domain buffers
-    freq_buffer_left: Vec<num_complex::Complex<f32>>,
-    freq_buffer_right: Vec<num_complex::Complex<f32>>,
+    freq_buffer_left: Vec<scirs2_core::Complex<f32>>,
+    freq_buffer_right: Vec<scirs2_core::Complex<f32>>,
     /// Input FFT buffer
     input_fft_buffer: Vec<f32>,
     /// Output IFFT buffer
@@ -208,8 +208,8 @@ impl BinauralRenderer {
             fft_size,
             overlap_left: Array1::zeros(config.hrir_length - 1),
             overlap_right: Array1::zeros(config.hrir_length - 1),
-            freq_buffer_left: vec![num_complex::Complex::new(0.0, 0.0); fft_size / 2 + 1],
-            freq_buffer_right: vec![num_complex::Complex::new(0.0, 0.0); fft_size / 2 + 1],
+            freq_buffer_left: vec![scirs2_core::Complex::new(0.0, 0.0); fft_size / 2 + 1],
+            freq_buffer_right: vec![scirs2_core::Complex::new(0.0, 0.0); fft_size / 2 + 1],
             input_fft_buffer: vec![0.0; fft_size],
             output_ifft_buffer: vec![0.0; fft_size],
         };

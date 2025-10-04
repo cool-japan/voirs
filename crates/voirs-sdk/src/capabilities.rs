@@ -131,39 +131,29 @@ impl CapabilityManager {
 
     /// Check if GPU is available
     fn check_gpu_available() -> bool {
-        // Check for CUDA availability
-        #[cfg(feature = "cuda")]
-        {
-            return Self::check_cuda_available();
-        }
-
         // Check for common GPU directories/files
         #[cfg(target_os = "linux")]
         {
-            return std::path::Path::new("/dev/nvidia0").exists()
-                || std::path::Path::new("/dev/dri/card0").exists();
+            std::path::Path::new("/dev/nvidia0").exists()
+                || std::path::Path::new("/dev/dri/card0").exists()
         }
 
         #[cfg(target_os = "macos")]
         {
             // Metal is available on all modern Macs
-            return true;
+            true
         }
 
         #[cfg(target_os = "windows")]
         {
             // Assume GPU is available on Windows
-            return true;
+            true
         }
 
-        false
-    }
-
-    /// Check CUDA availability
-    #[cfg(feature = "cuda")]
-    fn check_cuda_available() -> bool {
-        // This would use actual CUDA API calls in a real implementation
-        std::env::var("CUDA_VISIBLE_DEVICES").is_ok()
+        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+        {
+            false
+        }
     }
 
     /// Detect GPU memory

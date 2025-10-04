@@ -11,7 +11,7 @@ use crate::{
     types::{Expression, NoteEvent, VoiceCharacteristics},
     Error, Result,
 };
-use rustfft::{num_complex::Complex32, FftPlanner};
+use scirs2_core::Complex32;
 use std::collections::HashMap;
 
 /// Enhanced precision quality analyzer
@@ -20,7 +20,12 @@ pub struct PrecisionQualityAnalyzer {
     timing_analyzer: TimingAnalyzer,
     naturalness_scorer: NaturalnessScorer,
     expression_recognizer: ExpressionRecognizer,
-    fft_planner: FftPlanner<f32>,
+}
+
+impl Default for PrecisionQualityAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PrecisionQualityAnalyzer {
@@ -31,7 +36,6 @@ impl PrecisionQualityAnalyzer {
             timing_analyzer: TimingAnalyzer::new(),
             naturalness_scorer: NaturalnessScorer::new(),
             expression_recognizer: ExpressionRecognizer::new(),
-            fft_planner: FftPlanner::new(),
         }
     }
 
@@ -392,17 +396,65 @@ pub struct TimingAnalyzer {
     onset_detector: OnsetDetector,
 }
 
+impl Default for TimingAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TimingAnalyzer {
+    /// Creates a new timing analyzer with onset detection.
+    ///
+    /// Initializes the timing analyzer with a default onset detector for
+    /// identifying note onsets in audio signals.
+    ///
+    /// # Returns
+    ///
+    /// A new `TimingAnalyzer` instance
     pub fn new() -> Self {
         Self {
             onset_detector: OnsetDetector::new(),
         }
     }
 
+    /// Detects onset times in audio using spectral flux analysis.
+    ///
+    /// Analyzes the audio signal to identify the precise timing of note onsets,
+    /// which is critical for measuring timing accuracy.
+    ///
+    /// # Arguments
+    ///
+    /// * `audio` - Audio samples to analyze
+    /// * `sample_rate` - Sample rate of the audio in Hz
+    ///
+    /// # Returns
+    ///
+    /// A vector of onset times in seconds
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if onset detection fails
     pub fn detect_onset_times(&mut self, audio: &[f32], sample_rate: f32) -> Result<Vec<f32>> {
         self.onset_detector.detect_onsets(audio, sample_rate)
     }
 
+    /// Aligns detected onsets with target onsets for comparison.
+    ///
+    /// Uses nearest neighbor matching to pair each target onset with the
+    /// closest detected onset for timing accuracy calculation.
+    ///
+    /// # Arguments
+    ///
+    /// * `detected` - Detected onset times in seconds
+    /// * `target` - Target onset times in seconds
+    ///
+    /// # Returns
+    ///
+    /// A vector of (detected, target) onset pairs for comparison
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if alignment fails
     pub fn align_onsets(&self, detected: &[f32], target: &[f32]) -> Result<Vec<(f32, f32)>> {
         // Simple nearest neighbor alignment
         let mut aligned_pairs = Vec::new();
@@ -429,6 +481,18 @@ impl TimingAnalyzer {
         Ok(aligned_pairs)
     }
 
+    /// Calculates rhythm consistency based on timing deviation statistics.
+    ///
+    /// Computes a consistency score based on the variance in timing deviations,
+    /// with lower variance indicating more consistent rhythm.
+    ///
+    /// # Arguments
+    ///
+    /// * `deviations` - Timing deviations in milliseconds
+    ///
+    /// # Returns
+    ///
+    /// Rhythm consistency score from 0.0 (inconsistent) to 1.0 (perfectly consistent)
     pub fn calculate_rhythm_consistency(&self, deviations: &[f32]) -> f32 {
         if deviations.is_empty() {
             return 1.0;
@@ -444,18 +508,48 @@ impl TimingAnalyzer {
 
 /// Onset detection using spectral flux
 pub struct OnsetDetector {
-    fft_planner: FftPlanner<f32>,
     prev_spectrum: Vec<f32>,
 }
 
+impl Default for OnsetDetector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OnsetDetector {
+    /// Creates a new onset detector.
+    ///
+    /// Initializes the onset detector for spectral flux-based onset detection
+    /// with empty previous spectrum state.
+    ///
+    /// # Returns
+    ///
+    /// A new `OnsetDetector` instance
     pub fn new() -> Self {
         Self {
-            fft_planner: FftPlanner::new(),
             prev_spectrum: Vec::new(),
         }
     }
 
+    /// Detects note onsets in audio using spectral flux analysis.
+    ///
+    /// Computes the spectral flux between consecutive audio frames and
+    /// performs peak picking to identify onset times. Uses an adaptive
+    /// threshold based on flux statistics.
+    ///
+    /// # Arguments
+    ///
+    /// * `audio` - Audio samples to analyze
+    /// * `sample_rate` - Sample rate of the audio in Hz
+    ///
+    /// # Returns
+    ///
+    /// A vector of onset times in seconds
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if FFT processing fails
     pub fn detect_onsets(&mut self, audio: &[f32], sample_rate: f32) -> Result<Vec<f32>> {
         let frame_size = 1024;
         let hop_size = 512;
@@ -493,16 +587,19 @@ impl OnsetDetector {
         Ok(onsets)
     }
 
-    fn calculate_spectrum(&mut self, frame: &[f32]) -> Result<Vec<f32>> {
-        let mut fft = self.fft_planner.plan_fft_forward(frame.len());
-        let mut buffer: Vec<Complex32> = frame.iter().map(|&x| Complex32::new(x, 0.0)).collect();
+    fn calculate_spectrum(&self, frame: &[f32]) -> Result<Vec<f32>> {
+        let input_f64: Vec<scirs2_core::Complex<f64>> = frame
+            .iter()
+            .map(|&x| scirs2_core::Complex::new(x as f64, 0.0))
+            .collect();
 
-        fft.process(&mut buffer);
+        let fft_result = scirs2_fft::fft(&input_f64, None)
+            .map_err(|e| Error::Processing(format!("FFT error: {e}")))?;
 
-        Ok(buffer
+        Ok(fft_result
             .iter()
             .take(frame.len() / 2)
-            .map(|c| c.norm())
+            .map(|c| c.norm() as f32)
             .collect())
     }
 
@@ -540,7 +637,21 @@ pub struct NaturalnessScorer {
     quality_factors: HashMap<String, f32>,
 }
 
+impl Default for NaturalnessScorer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NaturalnessScorer {
+    /// Creates a new naturalness scorer with default quality factors.
+    ///
+    /// Initializes quality enhancement factors for professional singing,
+    /// natural vibrato, proper formants, and smooth transitions.
+    ///
+    /// # Returns
+    ///
+    /// A new `NaturalnessScorer` instance with predefined quality factors
     pub fn new() -> Self {
         let mut quality_factors = HashMap::new();
         quality_factors.insert(String::from("professional_singing"), 1.2);
@@ -551,6 +662,23 @@ impl NaturalnessScorer {
         Self { quality_factors }
     }
 
+    /// Analyzes breath pattern naturalness in the audio.
+    ///
+    /// Evaluates breath-related characteristics including breath locations,
+    /// energy envelope patterns, and breath noise integration for naturalness.
+    ///
+    /// # Arguments
+    ///
+    /// * `audio` - Audio samples to analyze
+    /// * `sample_rate` - Sample rate of the audio in Hz
+    ///
+    /// # Returns
+    ///
+    /// Breath naturalness score from 0.0 to 5.0
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if breath pattern analysis fails
     pub fn analyze_breath_patterns(&self, audio: &[f32], sample_rate: f32) -> Result<f32> {
         // Analyze breath-related naturalness factors
         let energy_envelope = self.calculate_energy_envelope(audio, sample_rate)?;
@@ -561,6 +689,24 @@ impl NaturalnessScorer {
         Ok((breath_naturalness * 4.0).min(5.0)) // Scale to 0-5 range
     }
 
+    /// Analyzes vibrato quality and naturalness.
+    ///
+    /// Evaluates vibrato rate, depth, and regularity to determine if the
+    /// vibrato characteristics match natural singing patterns (4.5-6.5 Hz rate,
+    /// moderate depth, good regularity).
+    ///
+    /// # Arguments
+    ///
+    /// * `audio` - Audio samples to analyze
+    /// * `sample_rate` - Sample rate of the audio in Hz
+    ///
+    /// # Returns
+    ///
+    /// Vibrato naturalness score from 0.0 to 5.0
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if vibrato analysis fails
     pub fn analyze_vibrato_quality(&self, audio: &[f32], sample_rate: f32) -> Result<f32> {
         let f0_contour = self.extract_f0_for_vibrato(audio, sample_rate)?;
         let vibrato_rate = self.calculate_vibrato_rate(&f0_contour, sample_rate)?;
@@ -576,6 +722,24 @@ impl NaturalnessScorer {
         Ok((overall * 4.0).min(5.0))
     }
 
+    /// Analyzes formant structure naturalness.
+    ///
+    /// Compares detected formant frequencies with expected formants for the
+    /// voice type to determine if the vocal tract resonances are natural.
+    ///
+    /// # Arguments
+    ///
+    /// * `audio` - Audio samples to analyze
+    /// * `sample_rate` - Sample rate of the audio in Hz
+    /// * `voice_characteristics` - Voice type and characteristics for comparison
+    ///
+    /// # Returns
+    ///
+    /// Formant naturalness score from 0.0 to 5.0
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if formant extraction fails
     pub fn analyze_formant_structure(
         &self,
         audio: &[f32],
@@ -589,6 +753,23 @@ impl NaturalnessScorer {
         Ok((formant_accuracy * 4.5).min(5.0)) // Slightly higher baseline for good formants
     }
 
+    /// Analyzes spectral characteristics naturalness.
+    ///
+    /// Evaluates spectral balance, harmonic richness, and noise characteristics
+    /// to determine overall spectral naturalness of the singing voice.
+    ///
+    /// # Arguments
+    ///
+    /// * `audio` - Audio samples to analyze
+    /// * `sample_rate` - Sample rate of the audio in Hz
+    ///
+    /// # Returns
+    ///
+    /// Spectral naturalness score from 0.0 to 5.0
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if spectral analysis fails
     pub fn analyze_spectral_characteristics(&self, audio: &[f32], sample_rate: f32) -> Result<f32> {
         let spectrum = self.calculate_average_spectrum(audio, sample_rate)?;
         let spectral_balance = self.evaluate_spectral_balance(&spectrum);
@@ -599,6 +780,23 @@ impl NaturalnessScorer {
         Ok((overall * 4.2).min(5.0))
     }
 
+    /// Analyzes temporal dynamics naturalness.
+    ///
+    /// Evaluates transition smoothness, dynamic range, and temporal consistency
+    /// to determine if the time-varying characteristics are natural.
+    ///
+    /// # Arguments
+    ///
+    /// * `audio` - Audio samples to analyze
+    /// * `sample_rate` - Sample rate of the audio in Hz
+    ///
+    /// # Returns
+    ///
+    /// Temporal naturalness score from 0.0 to 5.0
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if temporal analysis fails
     pub fn analyze_temporal_dynamics(&self, audio: &[f32], sample_rate: f32) -> Result<f32> {
         let dynamics_envelope = self.calculate_dynamics_envelope(audio, sample_rate)?;
         let transition_smoothness = self.evaluate_transition_smoothness(&dynamics_envelope);
@@ -609,6 +807,19 @@ impl NaturalnessScorer {
         Ok((overall * 4.1).min(5.0))
     }
 
+    /// Enhances MOS score using quality factors.
+    ///
+    /// Applies quality enhancement multipliers based on voice characteristics
+    /// to boost the raw MOS score while keeping it within the 1-5 range.
+    ///
+    /// # Arguments
+    ///
+    /// * `raw_mos` - Raw MOS score before enhancement
+    /// * `voice_characteristics` - Voice characteristics to determine applicable factors
+    ///
+    /// # Returns
+    ///
+    /// Enhanced MOS score clamped to 1.0-5.0 range
     pub fn enhance_mos_score(
         &self,
         raw_mos: f32,
@@ -623,9 +834,17 @@ impl NaturalnessScorer {
             }
         }
 
-        enhanced.min(5.0).max(1.0) // Clamp to MOS range
+        enhanced.clamp(1.0, 5.0) // Clamp to MOS range
     }
 
+    /// Returns the quality enhancement factors.
+    ///
+    /// Retrieves a copy of the quality factor multipliers used to enhance
+    /// the MOS score for different vocal characteristics.
+    ///
+    /// # Returns
+    ///
+    /// A hashmap of quality factor names to their multiplier values
     pub fn get_quality_factors(&self) -> HashMap<String, f32> {
         self.quality_factors.clone()
     }
@@ -748,13 +967,10 @@ impl NaturalnessScorer {
         _voice_characteristics: &VoiceCharacteristics,
     ) -> bool {
         // Simple logic for applying quality factors
-        match factor_name {
-            "professional_singing" => true,
-            "natural_vibrato" => true,
-            "proper_formants" => true,
-            "smooth_transitions" => true,
-            _ => false,
-        }
+        matches!(
+            factor_name,
+            "professional_singing" | "natural_vibrato" | "proper_formants" | "smooth_transitions"
+        )
     }
 }
 
@@ -763,7 +979,21 @@ pub struct ExpressionRecognizer {
     expression_models: HashMap<Expression, ExpressionModel>,
 }
 
+impl Default for ExpressionRecognizer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ExpressionRecognizer {
+    /// Creates a new expression recognizer with default models.
+    ///
+    /// Initializes expression models for Neutral, Happy, Sad, Excited, and Calm
+    /// expressions with their typical feature characteristics.
+    ///
+    /// # Returns
+    ///
+    /// A new `ExpressionRecognizer` with predefined expression models
     pub fn new() -> Self {
         let mut expression_models = HashMap::new();
 
@@ -777,6 +1007,24 @@ impl ExpressionRecognizer {
         Self { expression_models }
     }
 
+    /// Extracts expression features from audio segments.
+    ///
+    /// Segments the audio and extracts expression-related features including
+    /// attack time, sustain level, decay time, spectral centroid, and dynamic range
+    /// for each segment, then classifies the expression type.
+    ///
+    /// # Arguments
+    ///
+    /// * `audio` - Audio samples to analyze
+    /// * `sample_rate` - Sample rate of the audio in Hz
+    ///
+    /// # Returns
+    ///
+    /// A vector of detected expressions with confidence scores
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if feature extraction or classification fails
     pub fn extract_expression_features(
         &self,
         audio: &[f32],
@@ -796,6 +1044,23 @@ impl ExpressionRecognizer {
         Ok(detected_expressions)
     }
 
+    /// Compares detected expression with target expression.
+    ///
+    /// Calculates similarity between the target expression and detected expression
+    /// features using the expression model for the target type.
+    ///
+    /// # Arguments
+    ///
+    /// * `target` - Target expression to match against
+    /// * `detected` - Detected expression with extracted features
+    ///
+    /// # Returns
+    ///
+    /// Similarity score from 0.0 (no match) to 1.0 (perfect match)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the target expression type is unknown
     pub fn compare_expressions(
         &self,
         target: &Expression,
@@ -889,12 +1154,23 @@ impl ExpressionRecognizer {
 /// Expression model for classification
 #[derive(Clone)]
 pub struct ExpressionModel {
+    /// Expression name
     pub name: String,
+    /// Typical feature values for this expression
     pub typical_features: ExpressionFeatures,
+    /// Tolerance ranges for feature matching
     pub tolerance: ExpressionFeatures,
 }
 
 impl ExpressionModel {
+    /// Creates a neutral expression model.
+    ///
+    /// Defines typical feature values for neutral expression including
+    /// moderate attack, sustain, and decay characteristics.
+    ///
+    /// # Returns
+    ///
+    /// An `ExpressionModel` configured for neutral expression
     pub fn new_neutral() -> Self {
         Self {
             name: String::from("Neutral"),
@@ -915,6 +1191,14 @@ impl ExpressionModel {
         }
     }
 
+    /// Creates a happy expression model.
+    ///
+    /// Defines typical feature values for happy expression including
+    /// quick attack, high sustain level, and bright spectral centroid.
+    ///
+    /// # Returns
+    ///
+    /// An `ExpressionModel` configured for happy expression
     pub fn new_happy() -> Self {
         Self {
             name: String::from("Happy"),
@@ -935,6 +1219,14 @@ impl ExpressionModel {
         }
     }
 
+    /// Creates a sad expression model.
+    ///
+    /// Defines typical feature values for sad expression including
+    /// slow attack, high sustain, long decay, and low spectral centroid.
+    ///
+    /// # Returns
+    ///
+    /// An `ExpressionModel` configured for sad expression
     pub fn new_sad() -> Self {
         Self {
             name: String::from("Sad"),
@@ -955,6 +1247,14 @@ impl ExpressionModel {
         }
     }
 
+    /// Creates an excited expression model.
+    ///
+    /// Defines typical feature values for excited expression including
+    /// very fast attack, short decay, and moderate dynamic range.
+    ///
+    /// # Returns
+    ///
+    /// An `ExpressionModel` configured for excited expression
     pub fn new_excited() -> Self {
         Self {
             name: String::from("Excited"),
@@ -975,6 +1275,14 @@ impl ExpressionModel {
         }
     }
 
+    /// Creates a calm expression model.
+    ///
+    /// Defines typical feature values for calm expression including
+    /// slow attack, very high sustain, long decay, and low dynamic range.
+    ///
+    /// # Returns
+    ///
+    /// An `ExpressionModel` configured for calm expression
     pub fn new_calm() -> Self {
         Self {
             name: String::from("Calm"),
@@ -995,6 +1303,19 @@ impl ExpressionModel {
         }
     }
 
+    /// Calculates similarity between detected features and this expression model.
+    ///
+    /// Computes a normalized similarity score by comparing each detected feature
+    /// against the typical values for this expression, using the tolerance ranges
+    /// to determine acceptable deviations.
+    ///
+    /// # Arguments
+    ///
+    /// * `detected_features` - Expression features extracted from audio
+    ///
+    /// # Returns
+    ///
+    /// Similarity score from 0.0 (no match) to 1.0 (perfect match)
     pub fn calculate_similarity(&self, detected_features: &ExpressionFeatures) -> f32 {
         let attack_similarity = 1.0
             - ((detected_features.attack_time - self.typical_features.attack_time).abs()
@@ -1027,15 +1348,22 @@ impl ExpressionModel {
     }
 }
 
-// Report structures
+/// Pitch accuracy analysis report
 #[derive(Debug, Clone)]
 pub struct PitchAccuracyReport {
+    /// Percentage of notes within 5 cents of target pitch
     pub accuracy_percentage: f32,
+    /// Number of notes within 5 cents of target
     pub notes_within_5_cents: usize,
+    /// Total number of notes analyzed
     pub total_notes: usize,
+    /// Mean deviation in cents from target pitch
     pub mean_cent_deviation: f32,
+    /// Maximum deviation in cents observed
     pub max_cent_deviation: f32,
+    /// Pitch stability score (0.0-1.0)
     pub pitch_stability: f32,
+    /// Individual cent deviations for each note
     pub cent_deviations: Vec<f32>,
 }
 
@@ -1053,14 +1381,22 @@ impl Default for PitchAccuracyReport {
     }
 }
 
+/// Timing accuracy analysis report
 #[derive(Debug, Clone)]
 pub struct TimingAccuracyReport {
+    /// Percentage of notes within 10ms of target timing
     pub accuracy_percentage: f32,
+    /// Number of notes within 10ms of target
     pub notes_within_10ms: usize,
+    /// Total number of notes analyzed
     pub total_notes: usize,
+    /// Mean timing deviation in milliseconds
     pub mean_timing_deviation_ms: f32,
+    /// Maximum timing deviation in milliseconds
     pub max_timing_deviation_ms: f32,
+    /// Rhythm consistency score (0.0-1.0)
     pub rhythm_consistency: f32,
+    /// Individual timing deviations in milliseconds
     pub timing_deviations_ms: Vec<f32>,
 }
 
@@ -1078,24 +1414,39 @@ impl Default for TimingAccuracyReport {
     }
 }
 
+/// Naturalness quality score report
 #[derive(Debug, Clone)]
 pub struct NaturalnessScoreReport {
+    /// Mean Opinion Score (MOS) on 1-5 scale
     pub mos_score: f32,
+    /// Breath pattern naturalness score (0-5)
     pub breath_naturalness: f32,
+    /// Vibrato quality naturalness score (0-5)
     pub vibrato_naturalness: f32,
+    /// Formant structure naturalness score (0-5)
     pub formant_naturalness: f32,
+    /// Spectral characteristics naturalness score (0-5)
     pub spectral_naturalness: f32,
+    /// Temporal dynamics naturalness score (0-5)
     pub temporal_naturalness: f32,
+    /// Quality enhancement factors applied
     pub quality_factors: HashMap<String, f32>,
 }
 
+/// Expression recognition analysis report
 #[derive(Debug, Clone)]
 pub struct ExpressionRecognitionReport {
+    /// Percentage of correctly recognized expressions
     pub recognition_rate_percentage: f32,
+    /// Number of expressions correctly recognized
     pub expressions_correctly_recognized: usize,
+    /// Total number of expressions analyzed
     pub total_expressions: usize,
+    /// Mean recognition accuracy across all expressions
     pub mean_recognition_accuracy: f32,
+    /// Individual recognition accuracies for each expression
     pub individual_accuracies: Vec<f32>,
+    /// Detected expressions with confidence scores
     pub detected_expressions: Vec<DetectedExpression>,
 }
 
@@ -1112,19 +1463,29 @@ impl Default for ExpressionRecognitionReport {
     }
 }
 
+/// Detected musical expression with confidence
 #[derive(Debug, Clone)]
 pub struct DetectedExpression {
+    /// Type of expression detected
     pub expression_type: Expression,
+    /// Confidence score (0.0-1.0)
     pub confidence: f32,
+    /// Extracted expression features
     pub features: ExpressionFeatures,
 }
 
+/// Features extracted for expression recognition
 #[derive(Debug, Clone)]
 pub struct ExpressionFeatures {
+    /// Attack time in seconds
     pub attack_time: f32,
+    /// Sustain level (0.0-1.0)
     pub sustain_level: f32,
+    /// Decay time in seconds
     pub decay_time: f32,
+    /// Spectral centroid in Hz
     pub spectral_centroid: f32,
+    /// Dynamic range (0.0-1.0)
     pub dynamic_range: f32,
 }
 
@@ -1137,8 +1498,8 @@ mod tests {
     fn test_precision_quality_analyzer_creation() {
         let analyzer = PrecisionQualityAnalyzer::new();
         // Just test that the analyzer was created successfully
-        // FFT planner doesn't have is_empty method, so we just verify it exists
-        let _planner = &analyzer.fft_planner;
+        // Verify that the analyzer components exist
+        let _pitch_gen = &analyzer.pitch_generator;
     }
 
     #[test]
@@ -1184,14 +1545,14 @@ mod tests {
         let mut audio = vec![0.0; samples];
 
         // Add clear onsets at 0.0s and 0.25s with sine waves
-        for i in 0..samples {
+        for (i, sample) in audio.iter_mut().enumerate() {
             let t = i as f32 / sample_rate;
             if t < 0.25 {
                 // First note: 440Hz sine wave
-                audio[i] = 0.5 * (2.0 * std::f32::consts::PI * 440.0 * t).sin();
+                *sample = 0.5 * (2.0 * std::f32::consts::PI * 440.0 * t).sin();
             } else if t >= 0.25 && t < 0.5 {
                 // Second note: 523.25Hz sine wave
-                audio[i] = 0.5 * (2.0 * std::f32::consts::PI * 523.25 * (t - 0.25)).sin();
+                *sample = 0.5 * (2.0 * std::f32::consts::PI * 523.25 * (t - 0.25)).sin();
             }
         }
 
@@ -1203,7 +1564,7 @@ mod tests {
                 duration: 0.25,
                 velocity: 127.0,
                 vibrato: 0.1,
-                lyric: Some(String::from("la"));
+                lyric: Some(String::from("la")),
                 phonemes: vec![String::from("l"), String::from("a")],
                 expression: Expression::Neutral,
                 timing_offset: 0.0,
@@ -1218,7 +1579,7 @@ mod tests {
                 duration: 0.25,
                 velocity: 127.0,
                 vibrato: 0.1,
-                lyric: Some(String::from("la"));
+                lyric: Some(String::from("la")),
                 phonemes: vec![String::from("l"), String::from("a")],
                 expression: Expression::Neutral,
                 timing_offset: 0.25,

@@ -661,7 +661,9 @@ pub struct PointTransaction {
 /// Transaction types
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TransactionType {
+    /// Description
     Award,
+    /// Description
     Spend,
 }
 
@@ -700,30 +702,47 @@ pub struct PointCost {
 /// Item categories
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ItemCategory {
+    /// Description
     PowerUp,
+    /// Description
     Enhancement,
+    /// Description
     Cosmetic,
+    /// Description
     Insurance,
+    /// Description
     Collectible,
 }
 
 /// Benefits provided by items
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Benefit {
+    /// Description
     ExtraSession,
+    /// Description
     EnhancedFeedback,
+    /// Description
     Theme(String),
+    /// Description
     StreakProtection,
+    /// Description
     Badge(String),
+    /// Description
     DoublePoints,
+    /// Description
     SkipCooldown,
 }
 
 /// Item availability
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ItemAvailability {
+    /// Description
     Always,
+    /// Description
+    /// Description
     Limited { remaining: u32 },
+    /// Description
+    /// Description
     TimeLimited { expires_at: DateTime<Utc> },
 }
 

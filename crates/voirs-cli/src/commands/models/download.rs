@@ -11,8 +11,8 @@ use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::PathBuf;
 use tokio::io::AsyncWriteExt;
-use voirs::Result;
 use voirs_sdk::config::AppConfig;
+use voirs_sdk::Result;
 
 /// Run download model command
 pub async fn run_download_model(
@@ -259,7 +259,7 @@ async fn download_model_files(
 
         // Verify file was created
         if !file_path.exists() {
-            return Err(voirs::VoirsError::config_error(&format!(
+            return Err(voirs_sdk::VoirsError::config_error(&format!(
                 "Failed to create file: {}",
                 file_path.display()
             ))
@@ -334,7 +334,7 @@ async fn verify_downloaded_files(
         let file_path = model_dir.join(&file.name);
 
         if !file_path.exists() {
-            return Err(voirs::VoirsError::model_error(format!(
+            return Err(voirs_sdk::VoirsError::model_error(format!(
                 "Downloaded file not found: {}",
                 file.name
             )));
@@ -409,7 +409,7 @@ async fn verify_model_installation(
     // Check for config.json (always required)
     let config_path = model_dir.join("config.json");
     if !config_path.exists() {
-        return Err(voirs::VoirsError::model_error(
+        return Err(voirs_sdk::VoirsError::model_error(
             "Model verification failed: missing config.json",
         ));
     }
@@ -435,7 +435,7 @@ async fn verify_model_installation(
     }
 
     let model_path = found_model_file.ok_or_else(|| {
-        voirs::VoirsError::model_error(
+        voirs_sdk::VoirsError::model_error(
             "Model verification failed: no model file found (expected .safetensors, .bin, .pt, or .onnx)"
         )
     })?;
@@ -458,7 +458,7 @@ async fn verify_model_installation(
         let validation_result = loader.validate_file(&model_path)?;
 
         if !validation_result.is_valid {
-            return Err(voirs::VoirsError::model_error(format!(
+            return Err(voirs_sdk::VoirsError::model_error(format!(
                 "SafeTensors validation failed: {}",
                 validation_result.validation_errors.join(", ")
             )));
@@ -556,7 +556,7 @@ fn verify_file_checksum(file_path: &PathBuf, expected_hash: &str) -> Result<()> 
     let actual_hash = format!("{:x}", result);
 
     if actual_hash != expected_hash {
-        return Err(voirs::VoirsError::config_error(&format!(
+        return Err(voirs_sdk::VoirsError::config_error(&format!(
             "Checksum mismatch: expected {}, got {}",
             expected_hash, actual_hash
         ))

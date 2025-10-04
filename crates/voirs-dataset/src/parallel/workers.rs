@@ -4,7 +4,7 @@
 //! load balancing, and resource monitoring.
 
 use crate::{DatasetError, Result};
-use rayon::{ThreadPool, ThreadPoolBuilder};
+use scirs2_core::parallel_ops::{ThreadPool, ThreadPoolBuilder};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;

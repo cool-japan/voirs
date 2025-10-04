@@ -253,7 +253,7 @@ async fn test_pipeline_with_different_configs() {
     // Verify that speed changes affect duration appropriately
     // (Note: DummyAcousticModel should respect speed parameter)
     for i in 1..results.len() {
-        let (prev_speed, prev_duration) = results[i - 1];
+        let (prev_speed, _prev_duration) = results[i - 1];
         let (curr_speed, curr_duration) = results[i];
 
         // Duration should be inversely related to speed

@@ -22,6 +22,7 @@ pub struct AdvancedRegressionDetector {
 
 /// Configuration for the regression detector
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Detector Config
 pub struct DetectorConfig {
     /// Statistical confidence level (e.g., 0.95 for 95% confidence)
     pub confidence_level: f64,
@@ -41,19 +42,27 @@ pub struct DetectorConfig {
 
 /// Strategy for updating performance baselines
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Baseline Strategy
 pub enum BaselineStrategy {
     /// Never update baseline automatically
     Manual,
     /// Update when improvement is detected
     OnImprovement,
     /// Update on rolling window basis
-    RollingWindow { days: u32 },
+    RollingWindow {
+        /// Number of days
+        days: u32,
+    },
     /// Update when statistical significance threshold is met
-    Statistical { p_value: f64 },
+    Statistical {
+        /// P-value threshold
+        p_value: f64,
+    },
 }
 
 /// Alert channel configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Alert Channel
 pub struct AlertChannel {
     /// Channel type (email, slack, webhook, etc.)
     pub channel_type: AlertChannelType,
@@ -65,20 +74,31 @@ pub struct AlertChannel {
 
 /// Types of alert channels
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Alert Channel Type
 pub enum AlertChannelType {
+    /// Email
     Email,
+    /// Slack
     Slack,
+    /// Webhook
     Webhook,
+    /// File
     File,
+    /// Console
     Console,
 }
 
 /// Alert severity levels
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+/// Alert Severity
 pub enum AlertSeverity {
+    /// Info
     Info,
+    /// Warning
     Warning,
+    /// Critical
     Critical,
+    /// Emergency
     Emergency,
 }
 
@@ -94,6 +114,7 @@ pub struct PerformanceDataStore {
 
 /// Individual performance measurement data point
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Performance Data Point
 pub struct PerformanceDataPoint {
     /// Timestamp when measurement was taken
     pub timestamp: u64,
@@ -111,6 +132,7 @@ pub struct PerformanceDataPoint {
 
 /// Core performance metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Performance Metrics
 pub struct PerformanceMetrics {
     /// Real-time factor
     pub rtf: f64,
@@ -132,6 +154,7 @@ pub struct PerformanceMetrics {
 
 /// Test configuration for reproducible measurements
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Test Config
 pub struct TestConfig {
     /// Model type/size
     pub model: String,
@@ -149,6 +172,7 @@ pub struct TestConfig {
 
 /// Environment information for context
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Environment Info
 pub struct EnvironmentInfo {
     /// Operating system
     pub os: String,
@@ -180,6 +204,7 @@ pub struct AlertManager {
 
 /// Result of regression analysis
 #[derive(Debug, Clone)]
+/// Regression Analysis Result
 pub struct RegressionAnalysisResult {
     /// Whether regression was detected
     pub has_regression: bool,
@@ -197,6 +222,7 @@ pub struct RegressionAnalysisResult {
 
 /// Individual metric regression
 #[derive(Debug, Clone)]
+/// Metric Regression
 pub struct MetricRegression {
     /// Metric name
     pub metric: String,
@@ -216,6 +242,7 @@ pub struct MetricRegression {
 
 /// Individual metric improvement
 #[derive(Debug, Clone)]
+/// Metric Improvement
 pub struct MetricImprovement {
     /// Metric name
     pub metric: String,
@@ -231,6 +258,7 @@ pub struct MetricImprovement {
 
 /// Trend analysis for performance metrics over time
 #[derive(Debug, Clone)]
+/// Trend Analysis
 pub struct TrendAnalysis {
     /// Overall trend direction
     pub trend_direction: TrendDirection,
@@ -244,15 +272,21 @@ pub struct TrendAnalysis {
 
 /// Direction of performance trend
 #[derive(Debug, Clone, PartialEq)]
+/// Trend Direction
 pub enum TrendDirection {
+    /// Improving
     Improving,
+    /// Degrading
     Degrading,
+    /// Stable
     Stable,
+    /// Volatile
     Volatile,
 }
 
 /// Performance projection based on trend analysis
 #[derive(Debug, Clone)]
+/// Performance Projection
 pub struct PerformanceProjection {
     /// Projected values for next measurement
     pub next_values: PerformanceMetrics,
@@ -264,6 +298,7 @@ pub struct PerformanceProjection {
 
 /// Detected seasonal pattern in performance
 #[derive(Debug, Clone)]
+/// Seasonal Pattern
 pub struct SeasonalPattern {
     /// Pattern type (daily, weekly, etc.)
     pub pattern_type: String,

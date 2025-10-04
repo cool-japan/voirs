@@ -14,35 +14,59 @@ use uuid::Uuid;
 pub enum GdprError {
     /// Data subject not found
     #[error("Data subject {subject_id} not found")]
-    DataSubjectNotFound { subject_id: String },
+    DataSubjectNotFound {
+        /// Subject identifier
+        subject_id: String
+    },
 
     /// Consent validation failed
     #[error("Consent validation failed: {reason}")]
-    ConsentValidationFailed { reason: String },
+    ConsentValidationFailed {
+        /// Reason for validation failure
+        reason: String
+    },
 
     /// Data retention policy violation
     #[error("Data retention policy violation: {details}")]
-    RetentionPolicyViolation { details: String },
+    RetentionPolicyViolation {
+        /// Violation details
+        details: String
+    },
 
     /// Anonymization failed
     #[error("Data anonymization failed: {message}")]
-    AnonymizationFailed { message: String },
+    AnonymizationFailed {
+        /// Error message
+        message: String
+    },
 
     /// Data export failed
     #[error("Data export failed: {message}")]
-    DataExportFailed { message: String },
+    DataExportFailed {
+        /// Error message
+        message: String
+    },
 
     /// Data deletion failed
     #[error("Data deletion failed: {message}")]
-    DataDeletionFailed { message: String },
+    DataDeletionFailed {
+        /// Error message
+        message: String
+    },
 
     /// Privacy policy violation
     #[error("Privacy policy violation: {violation}")]
-    PrivacyPolicyViolation { violation: String },
+    PrivacyPolicyViolation {
+        /// Violation description
+        violation: String
+    },
 
     /// Insufficient consent
     #[error("Insufficient consent for operation: {operation}")]
-    InsufficientConsent { operation: String },
+    InsufficientConsent {
+        /// Operation name
+        operation: String
+    },
 }
 
 /// Result type for GDPR operations
@@ -81,7 +105,10 @@ pub enum LegalBasis {
     /// Necessary for public task performance
     PublicTask,
     /// Legitimate interests pursued by controller
-    LegitimateInterests { interest: String },
+    LegitimateInterests {
+        /// Description of legitimate interest
+        interest: String
+    },
 }
 
 /// Consent status and details
@@ -233,9 +260,15 @@ pub enum RequestStatus {
     /// Request completed successfully
     Completed,
     /// Request rejected with reason
-    Rejected { reason: String },
+    Rejected {
+        /// Rejection reason
+        reason: String
+    },
     /// Request requires additional information
-    RequiresInfo { details: String },
+    RequiresInfo {
+        /// Details of required information
+        details: String
+    },
 }
 
 /// Data subject request record
@@ -336,12 +369,20 @@ pub enum NotificationStatus {
     /// Notification pending
     Pending,
     /// Supervisory authority notified
-    AuthorityNotified { notified_at: DateTime<Utc> },
+    AuthorityNotified {
+        /// Timestamp of authority notification
+        notified_at: DateTime<Utc>
+    },
     /// Data subjects notified
-    SubjectsNotified { notified_at: DateTime<Utc> },
+    SubjectsNotified {
+        /// Timestamp of subject notification
+        notified_at: DateTime<Utc>
+    },
     /// Both authority and subjects notified
     FullyNotified {
+        /// Authority notification timestamp
         authority_at: DateTime<Utc>,
+        /// Subjects notification timestamp
         subjects_at: DateTime<Utc>,
     },
 }

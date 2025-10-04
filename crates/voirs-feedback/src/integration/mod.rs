@@ -17,12 +17,26 @@ pub mod lms;
 pub mod platform;
 pub mod video_conferencing;
 
-// Re-export main types
+// Re-export main types from submodules
 pub use api::*;
 pub use browser_extensions::*;
-pub use ecosystem::*;
+
+// Re-export from ecosystem (includes ConfigValue)
+pub use ecosystem::{
+    ConfigValue, EcosystemConfig, EcosystemIntegration, EcosystemIntegrationBuilder,
+    PerformanceMetrics, SharedState, SyncManager, SyncStatistics, SyncTask, SyncTaskStatus,
+    SyncTaskType,
+};
+
 pub use lms::*;
-pub use platform::*;
+
+// Re-export from platform (exclude ConfigValue to avoid ambiguity - use ecosystem::ConfigValue)
+pub use platform::{
+    ConflictResolution, CrossPlatformSync, OfflineDataEntry, OfflineStorage, OfflineStorageStats,
+    Platform, PlatformCapabilities, PlatformConfig, PlatformFeature, PlatformManager,
+    ResourceConstraints, SyncOperation, SyncOperationType, SyncableData,
+};
+
 pub use video_conferencing::*;
 
 /// Integration error types

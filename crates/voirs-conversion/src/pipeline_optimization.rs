@@ -10,7 +10,7 @@ use crate::{
     types::{ConversionRequest, ConversionResult, ConversionType},
     Error, Result,
 };
-use rayon::prelude::*;
+use scirs2_core::parallel_ops::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};

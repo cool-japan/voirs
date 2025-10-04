@@ -5,7 +5,7 @@
 //! and noise reduction algorithms.
 
 use crate::EvaluationError;
-use ndarray::{Array1, Array2};
+use scirs2_core::ndarray::{Array1, Array2};
 use std::collections::HashMap;
 use voirs_sdk::{AudioBuffer, LanguageCode};
 
@@ -642,7 +642,7 @@ mod tests {
         // Add noise to create estimated signal
         let mut noisy_samples = clean_samples.clone();
         for sample in &mut noisy_samples {
-            *sample += 0.1 * (rand::random::<f32>() - 0.5);
+            *sample += 0.1 * (scirs2_core::random::random::<f32>() - 0.5);
         }
 
         let reference = AudioBuffer::new(clean_samples, 16000, 1);

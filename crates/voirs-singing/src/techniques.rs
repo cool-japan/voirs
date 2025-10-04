@@ -289,31 +289,59 @@ pub struct ExpressionParams {
     pub timbre_modifier: f32,
 }
 
-/// Vibrato processor
+/// Vibrato processor for real-time vibrato effect application
+///
+/// Processes audio samples to apply vibrato modulation based on configured settings.
+/// Maintains internal state for phase and time tracking to produce smooth, continuous
+/// vibrato effects across sample buffers.
 pub struct VibratoProcessor {
+    /// Vibrato configuration settings
     settings: VibratoSettings,
+    /// Current phase of the vibrato oscillator (0.0-1.0)
     phase: f32,
+    /// Elapsed time in seconds since processor creation
     time: f32,
 }
 
-/// Breath control processor
+/// Breath control processor for realistic breathing simulation
+///
+/// Manages breath sound insertion, breath noise modeling, and timing of breath events
+/// in singing synthesis. Tracks breath state and timing to create natural breathing
+/// patterns between phrases and during sustained notes.
 pub struct BreathProcessor {
+    /// Breath control configuration settings
     settings: BreathControl,
+    /// Current breath state (0.0 = empty, 1.0 = full capacity)
     breath_state: f32,
+    /// Time in seconds since last breath event
     last_breath_time: f32,
 }
 
-/// Legato processor
+/// Legato processor for smooth note transitions
+///
+/// Handles smooth connections between consecutive notes using portamento, glissando,
+/// and other legato techniques. Maintains transition state and frequency tracking to
+/// create seamless pitch changes without audible gaps or artifacts.
 pub struct LegatoProcessor {
+    /// Legato configuration settings
     settings: LegatoSettings,
+    /// Current transition progress (0.0 = start, 1.0 = complete)
     transition_state: f32,
+    /// Previous note frequency in Hz for smooth interpolation
     last_frequency: f32,
 }
 
-/// Vocal fry processor
+/// Vocal fry processor for creaky voice effect
+///
+/// Simulates vocal fry (also known as glottal fry or creaky voice), a low-frequency
+/// vocal effect characterized by irregular glottal pulses. Commonly used in contemporary
+/// vocal styles and for expressive emphasis in singing and speech.
 pub struct VocalFryProcessor {
+    /// Vocal fry configuration settings
     settings: VocalFry,
+    /// Current fry state intensity (0.0-1.0)
     fry_state: f32,
+    /// Phase accumulator for irregularity modulation
     irregularity_phase: f32,
 }
 
@@ -598,7 +626,7 @@ impl VibratoProcessor {
                     -1.0
                 }
             }
-            VibratoShape::Random => (rand::random::<f32>() - 0.5) * 2.0,
+            VibratoShape::Random => (scirs2_core::random::random::<f32>() - 0.5) * 2.0,
         };
 
         let depth =
@@ -770,6 +798,93 @@ impl Default for ResonanceSettings {
             mixing: 0.6,
             enabled: true,
         }
+    }
+}
+
+impl Default for BeltingProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Default for FalsettoProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Default for MixedVoiceProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Default for WhistleRegisterProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// Add new technique variants to existing SingingTechnique
+impl SingingTechnique {
+    /// Belting singing technique (powerful chest voice)
+    pub fn belting() -> Self {
+        let mut technique = Self::default();
+        technique.breath_control.support = 1.0;
+        technique.breath_control.flow_rate = 0.9;
+        technique.vibrato.frequency = 4.0;
+        technique.vibrato.depth = 0.2; // Less vibrato for power
+        technique.dynamics.base_volume = 0.9;
+        technique.dynamics.compression = 0.8;
+        technique.resonance.chest = 1.0;
+        technique.resonance.head = 0.3;
+        technique
+    }
+
+    /// Falsetto singing technique (light head voice)
+    pub fn falsetto() -> Self {
+        let mut technique = Self::default();
+        technique.breath_control.support = 0.4;
+        technique.breath_control.flow_rate = 0.3;
+        technique.breath_control.noise_level = 0.4; // Breathiness
+        technique.vibrato.frequency = 5.5;
+        technique.vibrato.depth = 0.5;
+        technique.dynamics.base_volume = 0.4;
+        technique.dynamics.compression = 0.2;
+        technique.resonance.chest = 0.1;
+        technique.resonance.head = 0.9;
+        technique
+    }
+
+    /// Mixed voice singing technique
+    pub fn mixed_voice() -> Self {
+        let mut technique = Self::default();
+        technique.breath_control.support = 0.8;
+        technique.breath_control.flow_rate = 0.7;
+        technique.vibrato.frequency = 5.0;
+        technique.vibrato.depth = 0.4;
+        technique.dynamics.base_volume = 0.7;
+        technique.dynamics.compression = 0.5;
+        technique.resonance.chest = 0.6;
+        technique.resonance.head = 0.7;
+        technique.resonance.mixing = 0.9; // Key for mixed voice
+        technique
+    }
+
+    /// Whistle register technique (ultra-high frequencies)
+    pub fn whistle_register() -> Self {
+        let mut technique = Self::default();
+        technique.breath_control.support = 0.3;
+        technique.breath_control.flow_rate = 0.2;
+        technique.breath_control.capacity = 0.4;
+        technique.vibrato.frequency = 3.0;
+        technique.vibrato.depth = 0.1; // Minimal vibrato
+        technique.dynamics.base_volume = 0.3;
+        technique.dynamics.compression = 0.1;
+        technique.resonance.chest = 0.0;
+        technique.resonance.head = 0.4;
+        technique.resonance.throat = 0.1; // Very focused
+        technique
     }
 }
 
@@ -993,92 +1108,5 @@ impl WhistleRegisterProcessor {
                 note.frequency *= 1.02;
             }
         }
-    }
-}
-
-impl Default for BeltingProcessor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Default for FalsettoProcessor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Default for MixedVoiceProcessor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Default for WhistleRegisterProcessor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-// Add new technique variants to existing SingingTechnique
-impl SingingTechnique {
-    /// Belting singing technique (powerful chest voice)
-    pub fn belting() -> Self {
-        let mut technique = Self::default();
-        technique.breath_control.support = 1.0;
-        technique.breath_control.flow_rate = 0.9;
-        technique.vibrato.frequency = 4.0;
-        technique.vibrato.depth = 0.2; // Less vibrato for power
-        technique.dynamics.base_volume = 0.9;
-        technique.dynamics.compression = 0.8;
-        technique.resonance.chest = 1.0;
-        technique.resonance.head = 0.3;
-        technique
-    }
-
-    /// Falsetto singing technique (light head voice)  
-    pub fn falsetto() -> Self {
-        let mut technique = Self::default();
-        technique.breath_control.support = 0.4;
-        technique.breath_control.flow_rate = 0.3;
-        technique.breath_control.noise_level = 0.4; // Breathiness
-        technique.vibrato.frequency = 5.5;
-        technique.vibrato.depth = 0.5;
-        technique.dynamics.base_volume = 0.4;
-        technique.dynamics.compression = 0.2;
-        technique.resonance.chest = 0.1;
-        technique.resonance.head = 0.9;
-        technique
-    }
-
-    /// Mixed voice singing technique
-    pub fn mixed_voice() -> Self {
-        let mut technique = Self::default();
-        technique.breath_control.support = 0.8;
-        technique.breath_control.flow_rate = 0.7;
-        technique.vibrato.frequency = 5.0;
-        technique.vibrato.depth = 0.4;
-        technique.dynamics.base_volume = 0.7;
-        technique.dynamics.compression = 0.5;
-        technique.resonance.chest = 0.6;
-        technique.resonance.head = 0.7;
-        technique.resonance.mixing = 0.9; // Key for mixed voice
-        technique
-    }
-
-    /// Whistle register technique (ultra-high frequencies)
-    pub fn whistle_register() -> Self {
-        let mut technique = Self::default();
-        technique.breath_control.support = 0.3;
-        technique.breath_control.flow_rate = 0.2;
-        technique.breath_control.capacity = 0.4;
-        technique.vibrato.frequency = 3.0;
-        technique.vibrato.depth = 0.1; // Minimal vibrato
-        technique.dynamics.base_volume = 0.3;
-        technique.dynamics.compression = 0.1;
-        technique.resonance.chest = 0.0;
-        technique.resonance.head = 0.4;
-        technique.resonance.throat = 0.1; // Very focused
-        technique
     }
 }

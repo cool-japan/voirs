@@ -104,8 +104,8 @@ impl OculusPlatform {
     async fn is_quest_device(&self) -> bool {
         // In real implementation, would check device properties
         // For simulation, randomly return true 70% of the time
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
+        use scirs2_core::random::Rng;
+        let mut rng = scirs2_core::random::thread_rng();
         rng.gen_bool(0.7)
     }
 

@@ -1155,38 +1155,56 @@ impl PostgresPersistenceManager {
 /// Analytics result for skill progression
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillProgressionAnalytics {
+    /// Description
     pub user_id: String,
+    /// Description
     pub daily_stats: Vec<DailySkillStats>,
+    /// Description
     pub analysis_period_days: i32,
+    /// Description
     pub total_sessions: u32,
+    /// Description
     pub overall_improvement: f32,
 }
 
 /// Daily skill statistics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DailySkillStats {
+    /// Description
     pub date: DateTime<Utc>,
+    /// Description
     pub average_score: f32,
+    /// Description
     pub session_count: u32,
+    /// Description
     pub min_score: f32,
+    /// Description
     pub max_score: f32,
+    /// Description
     pub improvement: f32,
 }
 
 /// Database optimization result
 #[derive(Debug)]
 pub struct DatabaseOptimizationResult {
+    /// Description
     pub optimization_duration: std::time::Duration,
+    /// Description
     pub table_stats: Vec<TableOptimizationStats>,
+    /// Description
     pub tables_analyzed: usize,
+    /// Description
     pub recommendations: Vec<String>,
 }
 
 /// Table optimization statistics
 #[derive(Debug)]
 pub struct TableOptimizationStats {
+    /// Description
     pub table_name: String,
+    /// Description
     pub size_pretty: String,
+    /// Description
     pub size_bytes: u64,
 }
 

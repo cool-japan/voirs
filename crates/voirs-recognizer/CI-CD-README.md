@@ -109,7 +109,7 @@ docker-compose --profile full up
 
 ```env
 # Application
-VERSION=0.1.0-alpha.1
+VERSION=0.1.0-alpha.2
 RUST_LOG=info
 
 # Ports

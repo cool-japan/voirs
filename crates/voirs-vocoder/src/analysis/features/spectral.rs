@@ -9,7 +9,7 @@
 //! - Zero crossing rate estimation
 
 use crate::{Result, VocoderError};
-use ndarray::Array2;
+use scirs2_core::ndarray::Array2;
 
 /// Spectral features computed over time
 #[derive(Debug, Clone)]
@@ -76,7 +76,7 @@ pub trait SpectralFeatureComputer {
 impl SpectralFeatureComputer for crate::analysis::features::FeatureExtractor {
     fn compute_spectral_features(&self, audio: &[f32]) -> Result<SpectralFeatureMatrix> {
         // Compute power spectrogram
-        let power_spectrogram = self.compute_power_spectrogram_const(&ndarray::Array1::from_vec(audio.to_vec()))?;
+        let power_spectrogram = self.compute_power_spectrogram_const(&scirs2_core::ndarray::Array1::from_vec(audio.to_vec()))?;
         self.extract_spectral_features(&power_spectrogram)
     }
 

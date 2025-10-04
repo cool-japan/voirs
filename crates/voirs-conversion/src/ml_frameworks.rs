@@ -183,12 +183,19 @@ pub struct TensorSpec {
 /// Supported tensor data types
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum TensorDataType {
+    /// 32-bit floating point
     Float32,
+    /// 64-bit floating point
     Float64,
+    /// 32-bit signed integer
     Int32,
+    /// 64-bit signed integer
     Int64,
+    /// 8-bit unsigned integer
     UInt8,
+    /// 8-bit signed integer
     Int8,
+    /// 16-bit floating point (half precision)
     Float16,
 }
 
@@ -300,19 +307,26 @@ pub enum RnnType {
     Vanilla,
 }
 
-/// Activation functions
+/// Activation functions for neural network layers
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum ActivationFunction {
+    /// Rectified Linear Unit activation function
     ReLU,
+    /// Leaky ReLU with small negative slope for negative values
     LeakyReLU,
+    /// Hyperbolic tangent activation function
     Tanh,
+    /// Sigmoid activation function mapping to (0, 1)
     Sigmoid,
+    /// Swish activation function (x * sigmoid(x))
     Swish,
+    /// Gaussian Error Linear Unit activation function
     GELU,
+    /// Mish activation function (smooth non-monotonic)
     Mish,
 }
 
-/// Layer specification for custom architectures
+/// Layer specification for custom architectures defining layer configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LayerSpec {
     /// Layer type
@@ -325,7 +339,7 @@ pub struct LayerSpec {
     pub output_shape: Vec<usize>,
 }
 
-/// Inference performance metrics
+/// Inference performance metrics tracking timing and resource usage
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InferenceMetrics {
     /// Total inference count
@@ -361,7 +375,7 @@ impl Default for InferenceMetrics {
     }
 }
 
-/// Memory usage statistics
+/// Memory usage statistics for ML inference operations
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct MemoryUsageStats {
     /// Peak memory usage in bytes
@@ -374,7 +388,7 @@ pub struct MemoryUsageStats {
     pub allocation_count: u64,
 }
 
-/// ML framework manager
+/// ML framework manager for coordinating multiple inference backends
 pub struct MLFrameworkManager {
     /// Available frameworks
     frameworks: HashMap<MLFramework, FrameworkInfo>,
@@ -386,7 +400,7 @@ pub struct MLFrameworkManager {
     model_registry: Arc<RwLock<HashMap<String, MLModelMetadata>>>,
 }
 
-/// Framework information
+/// Framework information containing version, providers, and capabilities
 #[derive(Debug, Clone)]
 pub struct FrameworkInfo {
     /// Framework version
@@ -399,7 +413,7 @@ pub struct FrameworkInfo {
     capabilities: FrameworkCapabilities,
 }
 
-/// Framework capabilities
+/// Framework capabilities defining supported features
 #[derive(Debug, Clone)]
 pub struct FrameworkCapabilities {
     /// GPU support

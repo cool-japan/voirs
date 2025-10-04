@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use voirs::AudioFormat;
+use voirs_sdk::AudioFormat;
 
 /// Audio metadata container
 #[derive(Debug, Clone, Default)]

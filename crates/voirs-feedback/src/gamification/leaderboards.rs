@@ -558,250 +558,390 @@ impl Default for LeaderboardSystem {
 /// Leaderboard definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Leaderboard {
+    /// Unique identifier
     pub id: Uuid,
+    /// Leaderboard name
     pub name: String,
+    /// Description
     pub description: String,
+    /// Type of leaderboard
     pub leaderboard_type: LeaderboardType,
+    /// Metric being tracked
     pub metric: LeaderboardMetric,
+    /// Time period for rankings
     pub time_period: TimePeriod,
+    /// Current entries
     pub entries: Vec<LeaderboardEntry>,
+    /// Maximum number of entries
     pub max_entries: usize,
+    /// Creation timestamp
     pub created_at: DateTime<Utc>,
+    /// Last update timestamp
     pub last_updated: DateTime<Utc>,
+    /// Update frequency
     pub update_frequency: UpdateFrequency,
+    /// Privacy level
     pub privacy_level: PrivacyLevel,
+    /// Optional focus area filter
     pub focus_area: Option<FocusArea>,
+    /// Optional region filter
     pub region: Option<String>,
+    /// Whether leaderboard is active
     pub is_active: bool,
 }
 
 /// Leaderboard configuration
 #[derive(Debug, Clone)]
 pub struct LeaderboardConfig {
+    /// Leaderboard name
     pub name: String,
+    /// Description
     pub description: String,
+    /// Type of leaderboard
     pub leaderboard_type: LeaderboardType,
+    /// Metric being tracked
     pub metric: LeaderboardMetric,
+    /// Time period for rankings
     pub time_period: TimePeriod,
+    /// Maximum number of entries
     pub max_entries: usize,
+    /// Update frequency
     pub update_frequency: UpdateFrequency,
+    /// Privacy level
     pub privacy_level: PrivacyLevel,
+    /// Optional focus area filter
     pub focus_area: Option<FocusArea>,
+    /// Optional region filter
     pub region: Option<String>,
 }
 
 /// Leaderboard types
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum LeaderboardType {
+    /// Global leaderboard across all users
     Global,
+    /// Regional leaderboard for specific area
     Regional,
+    /// Weekly time-based leaderboard
     Weekly,
+    /// Monthly time-based leaderboard
     Monthly,
+    /// Seasonal competition leaderboard
     Seasonal,
+    /// Focus area specific leaderboard
     FocusArea,
 }
 
 /// Leaderboard metrics
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum LeaderboardMetric {
+    /// Total points earned
     TotalPoints,
+    /// Average accuracy score
     AverageAccuracy,
+    /// Current streak in days
     StreakDays,
+    /// Total number of sessions
     SessionCount,
+    /// Rate of improvement over time
     ImprovementRate,
+    /// Exercise completion rate
     CompletionRate,
 }
 
 /// Time periods
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum TimePeriod {
+    /// All-time rankings
     AllTime,
+    /// Yearly rankings
     Year,
+    /// Monthly rankings
     Month,
+    /// Weekly rankings
     Week,
+    /// Daily rankings
     Day,
 }
 
 /// Update frequencies
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum UpdateFrequency {
+    /// Real-time updates
     RealTime,
+    /// Hourly updates
     Hourly,
+    /// Daily updates
     Daily,
+    /// Weekly updates
     Weekly,
 }
 
 /// Privacy levels
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum PrivacyLevel {
+    /// Public visibility
     Public,
+    /// Friends only visibility
     FriendsOnly,
+    /// Anonymous participation
     Anonymous,
 }
 
 /// Leaderboard entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LeaderboardEntry {
+    /// User identifier
     pub user_id: Uuid,
+    /// User display name
     pub user_name: String,
+    /// Current score
     pub score: f32,
+    /// Current rank position
     pub rank: usize,
+    /// Current tier
     pub tier: LeaderboardTier,
+    /// Number of achievements earned
     pub achievement_count: u32,
+    /// Last update timestamp
     pub last_updated: DateTime<Utc>,
+    /// Whether user is anonymous
     pub is_anonymous: bool,
 }
 
 /// Leaderboard tiers
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum LeaderboardTier {
+    /// Bronze tier (lowest)
     Bronze,
+    /// Silver tier
     Silver,
+    /// Gold tier
     Gold,
+    /// Platinum tier
     Platinum,
+    /// Diamond tier (highest)
     Diamond,
 }
 
 /// Leaderboard view for clients
 #[derive(Debug, Clone)]
 pub struct LeaderboardView {
+    /// Leaderboard identifier
     pub id: Uuid,
+    /// Leaderboard name
     pub name: String,
+    /// Description
     pub description: String,
+    /// Metric being tracked
     pub metric: LeaderboardMetric,
+    /// Time period
     pub time_period: TimePeriod,
+    /// Current entries
     pub entries: Vec<LeaderboardEntry>,
+    /// Total number of entries
     pub total_entries: usize,
+    /// Last update timestamp
     pub last_updated: DateTime<Utc>,
+    /// Optional focus area
     pub focus_area: Option<FocusArea>,
 }
 
 /// User ranking information
 #[derive(Debug, Clone)]
 pub struct UserRanking {
+    /// Leaderboard identifier
     pub leaderboard_id: Uuid,
+    /// Leaderboard name
     pub leaderboard_name: String,
+    /// User's rank
     pub rank: usize,
+    /// User's score
     pub score: f32,
+    /// User's tier
     pub tier: LeaderboardTier,
+    /// Total participants
     pub total_participants: usize,
+    /// Percentile ranking
     pub percentile: f32,
 }
 
 /// User position details
 #[derive(Debug, Clone)]
 pub struct UserPosition {
+    /// Current rank
     pub rank: usize,
+    /// Current score
     pub score: f32,
+    /// Current tier
     pub tier: LeaderboardTier,
+    /// Number of users above
     pub users_above: usize,
+    /// Number of users below
     pub users_below: usize,
+    /// Percentile ranking
     pub percentile: f32,
+    /// Points needed to reach next rank
     pub points_to_next_rank: Option<f32>,
+    /// Points ahead of previous rank
     pub points_from_previous_rank: Option<f32>,
 }
 
 /// Ranking update notification
 #[derive(Debug, Clone)]
 pub struct RankingUpdate {
+    /// Leaderboard identifier
     pub leaderboard_id: Uuid,
+    /// Leaderboard name
     pub leaderboard_name: String,
+    /// Previous rank
     pub old_rank: Option<usize>,
+    /// New rank
     pub new_rank: Option<usize>,
+    /// Score change amount
     pub score_change: f32,
+    /// Tier change if any
     pub tier_change: Option<TierChange>,
 }
 
 /// Tier change types
 #[derive(Debug, Clone, PartialEq)]
 pub enum TierChange {
+    /// Promoted to higher tier
     Promoted,
+    /// Demoted to lower tier
     Demoted,
+    /// Entered leaderboard
     Entered,
+    /// Dropped from leaderboard
     Dropped,
 }
 
 /// Leaderboard summary
 #[derive(Debug, Clone)]
 pub struct LeaderboardSummary {
+    /// Leaderboard identifier
     pub id: Uuid,
+    /// Leaderboard name
     pub name: String,
+    /// Description
     pub description: String,
+    /// Type of leaderboard
     pub leaderboard_type: LeaderboardType,
+    /// Metric being tracked
     pub metric: LeaderboardMetric,
+    /// Time period
     pub time_period: TimePeriod,
+    /// Number of participants
     pub participant_count: usize,
+    /// Last update timestamp
     pub last_updated: DateTime<Utc>,
+    /// Optional focus area
     pub focus_area: Option<FocusArea>,
 }
 
 /// Seasonal competition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SeasonalCompetition {
+    /// Competition identifier
     pub id: Uuid,
+    /// Competition name
     pub name: String,
+    /// Description
     pub description: String,
+    /// Type of season
     pub season_type: SeasonType,
+    /// Competition start date
     pub start_date: DateTime<Utc>,
+    /// Competition end date
     pub end_date: DateTime<Utc>,
+    /// Associated leaderboard IDs
     pub leaderboard_ids: Vec<Uuid>,
+    /// Rewards for top participants
     pub rewards: Vec<SeasonalReward>,
+    /// List of participants
     pub participants: Vec<Uuid>,
+    /// Current status
     pub status: CompetitionStatus,
 }
 
 /// Seasonal competition configuration
 #[derive(Debug, Clone)]
 pub struct SeasonalCompetitionConfig {
+    /// Competition name
     pub name: String,
+    /// Description
     pub description: String,
+    /// Type of season
     pub season_type: SeasonType,
+    /// Competition start date
     pub start_date: DateTime<Utc>,
+    /// Competition end date
     pub end_date: DateTime<Utc>,
+    /// Rewards for top participants
     pub rewards: Vec<SeasonalReward>,
 }
 
 /// Season types
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SeasonType {
+    /// Spring season
     Spring,
+    /// Summer season
     Summer,
+    /// Fall season
     Fall,
+    /// Winter season
     Winter,
+    /// Custom season
     Custom(String),
 }
 
 /// Seasonal rewards
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SeasonalReward {
+    /// Rank range for reward eligibility
     pub rank_range: (usize, usize),
+    /// Type of reward
     pub reward_type: RewardType,
+    /// Reward value
     pub value: u32,
+    /// Reward description
     pub description: String,
 }
 
 /// Reward types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RewardType {
+    /// Points reward
     Points,
+    /// Badge reward
     Badge,
+    /// Title reward
     Title,
+    /// Trophy reward
     Trophy,
 }
 
 /// Competition status
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CompetitionStatus {
+    /// Competition not yet started
     Upcoming,
+    /// Competition currently active
     Active,
+    /// Competition has ended
     Ended,
+    /// Competition cancelled
     Cancelled,
 }
 
 /// Tier system configuration
 #[derive(Debug, Clone)]
 pub struct TierSystem {
+    /// Percentile thresholds for each tier
     pub tier_thresholds: HashMap<LeaderboardTier, f32>,
+    /// Benefits for each tier
     pub tier_benefits: HashMap<LeaderboardTier, Vec<String>>,
 }
 

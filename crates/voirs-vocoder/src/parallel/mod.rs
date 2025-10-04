@@ -126,7 +126,7 @@ impl ParallelProcessor {
         let _num_chunks = chunks.len();
 
         // Use rayon for parallel processing
-        use rayon::prelude::*;
+        use scirs2_core::parallel_ops::*;
 
         let result = chunks.into_par_iter().try_for_each(|chunk| {
             processor(chunk);
@@ -152,7 +152,7 @@ impl ParallelProcessor {
     {
         self.stats.tasks_submitted.fetch_add(1, Ordering::SeqCst);
 
-        use rayon::prelude::*;
+        use scirs2_core::parallel_ops::*;
 
         let result = mels.par_iter_mut().try_for_each(|mel| {
             processor(mel);
@@ -179,7 +179,7 @@ impl ParallelProcessor {
     {
         self.stats.tasks_submitted.fetch_add(1, Ordering::SeqCst);
 
-        use rayon::prelude::*;
+        use scirs2_core::parallel_ops::*;
 
         let results: Result<Vec<T>> = items.into_par_iter().map(processor).collect();
 
@@ -218,7 +218,7 @@ where
     U: Send,
     F: Fn(&T) -> U + Send + Sync,
 {
-    use rayon::prelude::*;
+    use scirs2_core::parallel_ops::*;
 
     let len = input.len();
 
@@ -228,7 +228,7 @@ where
     }
 
     // Use adaptive chunking for better load balancing
-    let num_cpus = rayon::current_num_threads();
+    let num_cpus = scirs2_core::parallel_ops::num_threads();
     let optimal_chunk_size = (len / (num_cpus * 4)).max(chunk_size).min(len / 2);
 
     if optimal_chunk_size > chunk_size {
@@ -249,7 +249,7 @@ where
     T: Send + Sync + Clone,
     F: Fn(&T, &T) -> T + Send + Sync,
 {
-    use rayon::prelude::*;
+    use scirs2_core::parallel_ops::*;
 
     if input.is_empty() {
         return None;
@@ -271,7 +271,7 @@ where
     T: Send + Sync + Clone,
     F: Fn(&T) -> bool + Send + Sync,
 {
-    use rayon::prelude::*;
+    use scirs2_core::parallel_ops::*;
 
     if input.len() < chunk_size {
         return input
@@ -290,7 +290,7 @@ where
 
 /// Parallel convolution operation
 pub fn parallel_convolve(signal: &[f32], kernel: &[f32], output: &mut [f32], chunk_size: usize) {
-    use rayon::prelude::*;
+    use scirs2_core::parallel_ops::*;
 
     let signal_len = signal.len();
     let kernel_len = kernel.len();

@@ -110,7 +110,7 @@ impl CryptoConsentVerifier {
 
     /// Generate a new signing key pair for a subject
     pub fn generate_key_pair(&self, subject_id: &str) -> Result<(SigningKey, VerifyingKey)> {
-        let signing_key = SigningKey::from_bytes(&rand::random::<[u8; 32]>());
+        let signing_key = SigningKey::from_bytes(&scirs2_core::random::random::<[u8; 32]>());
         let verification_key = signing_key.verifying_key();
 
         self.register_signing_key(subject_id, signing_key.clone())?;
@@ -300,7 +300,7 @@ impl Ed25519SigningService {
 
     /// Generate a new key pair
     pub fn generate_key_pair(&self, signer_id: &str) -> Result<(SigningKey, VerifyingKey)> {
-        let signing_key = SigningKey::from_bytes(&rand::random::<[u8; 32]>());
+        let signing_key = SigningKey::from_bytes(&scirs2_core::random::random::<[u8; 32]>());
         let verification_key = signing_key.verifying_key();
 
         self.register_key(signer_id, signing_key.clone())?;

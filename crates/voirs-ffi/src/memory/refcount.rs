@@ -41,12 +41,17 @@ struct ReferenceTracker {
     dependency_graph: HashMap<usize, HashSet<usize>>,
 }
 
+/// Information about a tracked reference
 #[derive(Debug, Clone)]
-struct ReferenceInfo {
-    type_name: &'static str,
-    strong_count: usize,
-    weak_count: usize,
-    created_at: std::time::Instant,
+pub struct ReferenceInfo {
+    /// Type name of the referenced object
+    pub type_name: &'static str,
+    /// Strong reference count
+    pub strong_count: usize,
+    /// Weak reference count
+    pub weak_count: usize,
+    /// Creation timestamp
+    pub created_at: std::time::Instant,
 }
 
 impl ReferenceTracker {

@@ -131,8 +131,8 @@ impl WMRPlatform {
             // - Capability detection through Windows Mixed Reality APIs
 
             // Simulate device detection
-            use rand::Rng;
-            let mut rng = rand::thread_rng();
+            use scirs2_core::random::Rng;
+            let mut rng = scirs2_core::random::thread_rng();
             self.device_type = match rng.gen_range(0..7) {
                 0 => WMRDeviceType::HoloLens2,
                 1 => WMRDeviceType::HoloLens1,

@@ -11,10 +11,10 @@ use crate::quality::mcd::MCDEvaluator;
 use crate::quality::pesq::PESQEvaluator;
 use crate::quality::stoi::STOIEvaluator;
 use crate::EvaluationError;
-use ndarray::Array1;
 use parking_lot::RwLock;
-use rayon::prelude::*;
-use realfft::{RealFftPlanner, RealToComplex};
+use scirs2_core::ndarray::Array1;
+use scirs2_core::parallel_ops::*;
+use scirs2_fft::{RealFftPlanner, RealToComplex};
 use std::collections::HashMap;
 use std::sync::Arc;
 use voirs_sdk::AudioBuffer;
@@ -42,7 +42,7 @@ impl OptimizedQualityEvaluator {
             pesq_cache: Arc::new(RwLock::new(HashMap::new())),
             stoi_cache: Arc::new(RwLock::new(HashMap::new())),
             mcd_cache: Arc::new(RwLock::new(HashMap::new())),
-            fft_planner_pool: Arc::new(RwLock::new(RealFftPlanner::new())),
+            fft_planner_pool: Arc::new(RwLock::new(RealFftPlanner::<f32>::new())),
             frequency_mappings: Arc::new(RwLock::new(HashMap::new())),
             buffer_pool: Arc::new(RwLock::new(Vec::new())),
         }

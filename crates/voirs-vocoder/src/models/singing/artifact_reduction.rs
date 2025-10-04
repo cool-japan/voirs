@@ -3,17 +3,16 @@
 use crate::models::singing::config::ArtifactReductionConfig;
 use anyhow::Result;
 #[cfg(test)]
-use ndarray::Array1;
-use ndarray::Array2;
-use rustfft::{num_complex::Complex, FftPlanner};
+use scirs2_core::ndarray::Array1;
+use scirs2_core::ndarray::{Array2, ArrayView1};
+use scirs2_core::Complex;
+use scirs2_fft::{FftPlanner, RealFftPlanner};
 use std::collections::VecDeque;
 
 /// Processor for artifact reduction in singing voice vocoding
 pub struct ArtifactReductionProcessor {
     /// Configuration
     config: ArtifactReductionConfig,
-    /// FFT planner for spectral analysis
-    fft_planner: FftPlanner<f32>,
     /// Window size for analysis
     window_size: usize,
     /// Hop size for analysis
@@ -94,7 +93,6 @@ impl ArtifactReductionProcessor {
     pub fn new(config: &ArtifactReductionConfig) -> Result<Self> {
         Ok(Self {
             config: config.clone(),
-            fft_planner: FftPlanner::new(),
             window_size: 2048,
             hop_size: 512,
             sample_rate: 22050,
@@ -129,7 +127,7 @@ impl ArtifactReductionProcessor {
     }
 
     /// Analyze artifacts in a frame
-    fn analyze_artifacts(&mut self, frame: &ndarray::ArrayView1<f32>) -> Result<ArtifactAnalysis> {
+    fn analyze_artifacts(&mut self, frame: &ArrayView1<f32>) -> Result<ArtifactAnalysis> {
         // Convert mel frame to linear spectrum
         let spectrum = self.mel_to_linear_spectrum(frame)?;
 
@@ -137,16 +135,16 @@ impl ArtifactReductionProcessor {
         let windowed_spectrum = self.apply_hann_window(&spectrum);
 
         // Perform FFT
-        let mut fft_input: Vec<Complex<f32>> = windowed_spectrum
+        let fft_input: Vec<Complex<f32>> = windowed_spectrum
             .iter()
             .map(|&x| Complex::new(x, 0.0))
             .collect();
 
-        let fft = self.fft_planner.plan_fft_forward(fft_input.len());
-        fft.process(&mut fft_input);
+        let fft_output_f64 = scirs2_fft::fft(&fft_input, None)?;
 
-        // Extract magnitude spectrum
-        let magnitude_spectrum: Vec<f32> = fft_input.iter().map(|c| c.norm()).collect();
+        // Convert f64 output to f32 and extract magnitude spectrum
+        let magnitude_spectrum: Vec<f32> =
+            fft_output_f64.iter().map(|c| (c.norm()) as f32).collect();
 
         // Update spectral history
         self.spectral_history.push_back(magnitude_spectrum.clone());
@@ -568,7 +566,7 @@ impl ArtifactReductionProcessor {
     }
 
     /// Convert mel frame to linear spectrum
-    fn mel_to_linear_spectrum(&self, frame: &ndarray::ArrayView1<f32>) -> Result<Vec<f32>> {
+    fn mel_to_linear_spectrum(&self, frame: &ArrayView1<f32>) -> Result<Vec<f32>> {
         let mel_bins = frame.len();
         let mut spectrum = vec![0.0; self.window_size / 2 + 1];
 

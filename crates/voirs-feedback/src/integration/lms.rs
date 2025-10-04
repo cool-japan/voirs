@@ -15,17 +15,29 @@ use tokio::time::timeout;
 /// LMS integration error types
 #[derive(Debug, Clone)]
 pub enum LMSError {
+    /// Authentication failed with message
     AuthenticationFailed(String),
+    /// Connection timeout occurred
     ConnectionTimeout,
+    /// Invalid API key provided
     InvalidApiKey,
+    /// Grade passback failed with message
     GradePassbackFailed(String),
+    /// Assignment not found with ID
     AssignmentNotFound(String),
+    /// Student not found with ID
     StudentNotFound(String),
+    /// Course not found with ID
     CourseNotFound(String),
+    /// Network error occurred with message
     NetworkError(String),
+    /// Configuration error with message
     ConfigurationError(String),
+    /// Rate limit exceeded
     RateLimitExceeded,
+    /// Unauthorized access attempted
     UnauthorizedAccess,
+    /// Data validation error with message
     DataValidationError(String),
 }
 
@@ -53,12 +65,19 @@ impl Error for LMSError {}
 /// Supported LMS platforms
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LMSPlatform {
+    /// Canvas LMS
     Canvas,
+    /// Blackboard Learn
     Blackboard,
+    /// Moodle LMS
     Moodle,
-    D2L, // Desire2Learn/Brightspace
+    /// Desire2Learn/Brightspace
+    D2L,
+    /// Schoology platform
     Schoology,
+    /// Sakai platform
     Sakai,
+    /// Custom LMS with name
     Custom(String),
 }
 
@@ -79,14 +98,23 @@ impl fmt::Display for LMSPlatform {
 /// LMS authentication configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LMSAuthConfig {
+    /// LMS platform type
     pub platform: LMSPlatform,
+    /// API key for authentication
     pub api_key: String,
+    /// Optional API secret
     pub api_secret: Option<String>,
+    /// Base URL of LMS instance
     pub base_url: String,
+    /// OAuth client ID
     pub oauth_client_id: Option<String>,
+    /// OAuth client secret
     pub oauth_client_secret: Option<String>,
-    pub consumer_key: Option<String>,  // For LTI integration
-    pub shared_secret: Option<String>, // For LTI integration
+    /// LTI consumer key
+    pub consumer_key: Option<String>,
+    /// LTI shared secret
+    pub shared_secret: Option<String>,
+    /// Request timeout in seconds
     pub timeout_seconds: u64,
 }
 
@@ -109,107 +137,167 @@ impl Default for LMSAuthConfig {
 /// LMS assignment information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LMSAssignment {
+    /// Assignment identifier
     pub id: String,
+    /// Assignment name
     pub name: String,
+    /// Assignment description
     pub description: String,
+    /// Associated course ID
     pub course_id: String,
+    /// Maximum points for assignment
     pub max_points: f64,
+    /// Assignment due date
     pub due_date: Option<SystemTime>,
+    /// Whether assignment is published
     pub published: bool,
+    /// Allowed submission types
     pub submission_types: Vec<String>,
+    /// Grading criteria for assignment
     pub grading_criteria: Vec<GradingCriterion>,
 }
 
 /// Grading criteria for assignments
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GradingCriterion {
+    /// Criterion name
     pub name: String,
+    /// Criterion description
     pub description: String,
+    /// Points allocated to criterion
     pub points: f64,
+    /// Related focus area
     pub focus_area: Option<FocusArea>,
 }
 
 /// Student information from LMS
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LMSStudent {
+    /// Student identifier
     pub id: String,
+    /// External student ID
     pub external_id: Option<String>,
+    /// Student full name
     pub name: String,
+    /// Student email address
     pub email: String,
+    /// Associated course ID
     pub course_id: String,
+    /// Enrollment status
     pub enrollment_status: String,
+    /// Student role
     pub role: String,
 }
 
 /// Course information from LMS
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LMSCourse {
+    /// Course identifier
     pub id: String,
+    /// Course name
     pub name: String,
+    /// Course code
     pub course_code: String,
+    /// Academic term
     pub term: String,
+    /// Course start date
     pub start_date: Option<SystemTime>,
+    /// Course end date
     pub end_date: Option<SystemTime>,
+    /// Enrollment term ID
     pub enrollment_term_id: Option<String>,
+    /// Whether course is published
     pub published: bool,
 }
 
 /// Grade submission data
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GradeSubmission {
+    /// Student identifier
     pub student_id: String,
+    /// Assignment identifier
     pub assignment_id: String,
+    /// Earned score
     pub score: f64,
+    /// Maximum possible score
     pub max_score: f64,
+    /// Optional comment
     pub comment: Option<String>,
+    /// Submission timestamp
     pub submission_time: SystemTime,
+    /// Detailed feedback by criterion
     pub detailed_feedback: Vec<DetailedFeedback>,
 }
 
 /// Detailed feedback for specific skills
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetailedFeedback {
+    /// Grading criterion name
     pub criterion_name: String,
+    /// Score for this criterion
     pub score: f64,
+    /// Maximum score for criterion
     pub max_score: f64,
+    /// Feedback text
     pub feedback: String,
+    /// Related focus area
     pub focus_area: Option<FocusArea>,
 }
 
 /// Session data for LMS integration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LMSSession {
+    /// Session timestamp
     pub timestamp: SystemTime,
+    /// Session duration
     pub duration: Duration,
+    /// Session scores
     pub score: Option<SessionScores>,
+    /// Session feedback items
     pub feedback: Vec<LMSFeedbackItem>,
 }
 
+/// Feedback item for LMS session
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LMSFeedbackItem {
+    /// Feedback message
     pub message: String,
+    /// Feedback priority
     pub priority: f64,
+    /// Feedback category
     pub category: String,
 }
 
 /// Progress report for LMS integration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LMSProgressReport {
+    /// Student identifier
     pub student_id: String,
+    /// Course identifier
     pub course_id: String,
+    /// Overall progress score (0.0-1.0)
     pub overall_progress: f64,
+    /// Completion percentage
     pub completion_percentage: f64,
+    /// Number of completed sessions
     pub sessions_completed: u32,
+    /// Total time spent in minutes
     pub time_spent_minutes: u32,
+    /// Skill scores by focus area
     pub skill_breakdown: HashMap<FocusArea, f64>,
+    /// Earned achievements
     pub achievements: Vec<String>,
+    /// Report generation timestamp
     pub generated_at: SystemTime,
 }
 
 /// LMS integration manager
 pub struct LMSIntegrationManager {
+    /// Authentication configuration
     config: LMSAuthConfig,
+    /// Rate limiter for API requests
     rate_limiter: RateLimiter,
+    /// Data cache
     cache: LMSCache,
 }
 
@@ -792,8 +880,11 @@ impl LMSIntegrationManager {
 
 /// Rate limiter for API requests
 struct RateLimiter {
+    /// Maximum number of requests allowed
     max_requests: u32,
+    /// Time window for rate limiting
     window_duration: Duration,
+    /// Request timestamps
     requests: Vec<SystemTime>,
 }
 
@@ -824,7 +915,9 @@ impl RateLimiter {
 
 /// Cache for LMS data
 struct LMSCache {
+    /// Cached courses with timestamps
     courses: HashMap<String, (LMSCourse, SystemTime)>,
+    /// Cache entry duration
     cache_duration: Duration,
 }
 

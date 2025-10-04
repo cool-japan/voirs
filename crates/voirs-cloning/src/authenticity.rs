@@ -6,8 +6,8 @@
 use crate::{Error, Result};
 use candle_core::{DType, Device, Module, Shape, Tensor};
 use candle_nn::{linear, Activation, Linear, VarBuilder, VarMap};
-use ndarray::{Array1, Array2, ArrayView1, Axis};
-use realfft::{RealFftPlanner, RealToComplex};
+use scirs2_core::ndarray::{Array1, Array2, ArrayView1, Axis};
+use scirs2_fft::{RealFftPlanner, RealToComplex};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -239,7 +239,7 @@ impl AuthenticityDetector {
             model: Arc::new(RwLock::new(None)),
             varmap: Arc::new(RwLock::new(VarMap::new())),
             device,
-            fft_planner: Arc::new(RwLock::new(RealFftPlanner::new())),
+            fft_planner: Arc::new(RwLock::new(RealFftPlanner::<f32>::new())),
         })
     }
 
@@ -546,7 +546,7 @@ impl AuthenticityDetector {
 
         let mut fft_planner = self.fft_planner.write().await;
         let mut fft = fft_planner.plan_fft_forward(window_size);
-        let mut spectrum = vec![num_complex::Complex::new(0.0, 0.0); window_size / 2 + 1];
+        let mut spectrum = vec![scirs2_core::Complex::new(0.0, 0.0); window_size / 2 + 1];
         let mut input_buffer = vec![0.0f32; window_size];
 
         if audio_data.len() < window_size {
@@ -573,8 +573,7 @@ impl AuthenticityDetector {
             }
 
             // Compute FFT
-            fft.process(&mut input_buffer, &mut spectrum)
-                .map_err(|e| Error::Processing(format!("FFT computation failed: {:?}", e)))?;
+            fft.process(&input_buffer, &mut spectrum);
 
             let magnitudes: Vec<f32> = spectrum.iter().map(|c| c.norm()).collect();
             let frequencies: Vec<f32> = (0..magnitudes.len())

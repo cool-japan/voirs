@@ -388,11 +388,6 @@ impl UnifiedConfigManager {
         let content = match format {
             ConfigFileFormat::Json => serde_json::to_string_pretty(&*config)
                 .map_err(|e| Error::Validation(format!("Failed to serialize to JSON: {e}")))?,
-            _ => {
-                return Err(Error::Validation(
-                    "Only JSON format is currently supported".to_string(),
-                ))
-            }
         };
 
         // Create backup if backup directory is configured

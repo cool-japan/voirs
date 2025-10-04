@@ -5,7 +5,7 @@
 //! - Chroma filterbank for chroma feature extraction
 
 use crate::{Result, VocoderError};
-use ndarray::Array2;
+use scirs2_core::ndarray::Array2;
 
 /// Mel-scale filterbank for mel spectrogram computation
 #[derive(Debug, Clone)]

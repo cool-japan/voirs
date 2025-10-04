@@ -13,10 +13,10 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tokio::time::{Duration, Instant};
-use voirs::{AudioFormat, QualityLevel, Result, VoirsError, VoirsPipeline};
 use voirs_sdk::config::AppConfig;
 use voirs_sdk::error::IoOperation;
 use voirs_sdk::types::SynthesisConfig;
+use voirs_sdk::{AudioFormat, QualityLevel, Result, VoirsError, VoirsPipeline};
 
 /// Enhanced synthesis options with validation
 #[derive(Debug, Clone)]
@@ -165,7 +165,8 @@ fn validate_synthesis_options(options: &EnhancedSynthesisOptions) -> Result<()> 
     // Validate output path if specified
     if let Some(output_path) = &options.output {
         if let Some(parent) = output_path.parent() {
-            if !parent.exists() {
+            // Only check if parent is not empty (empty means current directory)
+            if !parent.as_os_str().is_empty() && !parent.exists() {
                 return Err(VoirsError::IoError {
                     path: parent.to_path_buf(),
                     operation: IoOperation::Metadata,
@@ -335,28 +336,37 @@ async fn try_synthesize(
         std::env::current_dir()?.join(filename)
     };
 
+    // Check if output is stdout
+    let output_is_stdout = output_path.to_str() == Some("-");
+
     // Save audio with enhanced error handling
-    let format = utils::format_from_extension(&output_path)
-        .or(global.format.map(|f| f.into()))
-        .unwrap_or_default();
+    if output_is_stdout {
+        // Write to stdout
+        save_wav_to_stdout(&audio)?;
+    } else {
+        // Write to file
+        let format = utils::format_from_extension(&output_path)
+            .or(global.format.map(|f| f.into()))
+            .unwrap_or_default();
 
-    audio
-        .save(&output_path, format)
-        .map_err(|e| VoirsError::IoError {
-            path: output_path.clone(),
-            operation: IoOperation::Write,
-            source: std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to save audio: {}", e),
-            ),
-        })?;
+        audio
+            .save(&output_path, format)
+            .map_err(|e| VoirsError::IoError {
+                path: output_path.clone(),
+                operation: IoOperation::Write,
+                source: std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Failed to save audio: {}", e),
+                ),
+            })?;
 
-    if !global.quiet {
-        println!("✓ Synthesis complete: {}", output_path.display());
-        println!("  Duration: {:.2}s", audio.duration());
-        println!("  Quality: {:?}", options.quality);
-        if attempt > 0 {
-            println!("  Completed after {} retries", attempt);
+        if !global.quiet {
+            println!("✓ Synthesis complete: {}", output_path.display());
+            println!("  Duration: {:.2}s", audio.duration());
+            println!("  Quality: {:?}", options.quality);
+            if attempt > 0 {
+                println!("  Completed after {} retries", attempt);
+            }
         }
     }
 
@@ -528,12 +538,15 @@ pub async fn run_synthesize(
     volume: f32,
     quality: QualityLevel,
     enhance: bool,
+    play: bool,
     config: &AppConfig,
     global: &GlobalOptions,
 ) -> Result<()> {
+    let output_path = output.map(|p| p.to_path_buf());
+
     let options = EnhancedSynthesisOptions {
         text: text.to_string(),
-        output: output.map(|p| p.to_path_buf()),
+        output: output_path.clone(),
         rate,
         pitch,
         volume,
@@ -542,7 +555,19 @@ pub async fn run_synthesize(
         ..Default::default()
     };
 
-    run_enhanced_synthesize(options, config, global).await
+    run_enhanced_synthesize(options, config, global).await?;
+
+    // Play audio if requested and we have an output path that's not stdout
+    if play {
+        if let Some(ref path) = output_path {
+            if path.to_str() != Some("-") {
+                use crate::audio::playback::play_audio_file_simple;
+                play_audio_file_simple(path)?;
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Run streaming synthesis for long texts
@@ -607,22 +632,33 @@ pub async fn run_streaming_synthesis(
     };
 
     // Process chunks with progress tracking
-    let format = utils::format_from_extension(&output_path)
-        .or(global.format.map(|f| f.into()))
-        .unwrap_or_default();
-
     let audio_segments =
         process_chunks_with_progress(&chunks, &pipeline, &synth_config, &streaming_config, global)
             .await?;
 
-    // Combine audio segments and save
+    // Combine audio segments
     let combined_audio = combine_audio_segments(audio_segments)?;
-    combined_audio.save(&output_path, format)?;
 
-    if !global.quiet {
-        println!("Streaming synthesis complete: {}", output_path.display());
-        println!("Duration: {:.2}s", combined_audio.duration());
-        println!("Processed {} chunks", chunks.len());
+    // Check if output is stdout
+    let output_is_stdout = output_path.to_str() == Some("-");
+
+    // Save audio
+    if output_is_stdout {
+        // Write to stdout
+        save_wav_to_stdout(&combined_audio)?;
+    } else {
+        // Write to file
+        let format = utils::format_from_extension(&output_path)
+            .or(global.format.map(|f| f.into()))
+            .unwrap_or_default();
+
+        combined_audio.save(&output_path, format)?;
+
+        if !global.quiet {
+            println!("Streaming synthesis complete: {}", output_path.display());
+            println!("Duration: {:.2}s", combined_audio.duration());
+            println!("Processed {} chunks", chunks.len());
+        }
     }
 
     Ok(())
@@ -640,7 +676,7 @@ pub async fn run_synthesize_file(
     tracing::info!("Synthesizing file: {}", input.display());
 
     // Read input file
-    let content = std::fs::read_to_string(input).map_err(|e| voirs::VoirsError::from(e))?;
+    let content = std::fs::read_to_string(input).map_err(|e| voirs_sdk::VoirsError::from(e))?;
 
     // Determine output directory
     let output_dir = if let Some(dir) = output_dir {
@@ -653,7 +689,7 @@ pub async fn run_synthesize_file(
     };
 
     // Ensure output directory exists
-    std::fs::create_dir_all(&output_dir).map_err(|e| voirs::VoirsError::from(e))?;
+    std::fs::create_dir_all(&output_dir).map_err(|e| voirs_sdk::VoirsError::from(e))?;
 
     // Process file content
     // If file has multiple lines, treat each line as separate synthesis
@@ -805,7 +841,7 @@ async fn process_chunks_with_progress(
     synth_config: &SynthesisConfig,
     streaming_config: &StreamingConfig,
     global: &GlobalOptions,
-) -> Result<Vec<voirs::AudioBuffer>> {
+) -> Result<Vec<voirs_sdk::AudioBuffer>> {
     let progress_bar = if !global.quiet {
         let pb = ProgressBar::new(chunks.len() as u64);
         pb.set_style(
@@ -869,7 +905,7 @@ async fn process_chunks_with_progress(
                 if let Some(pb) = &progress_bar {
                     pb.finish_with_message("Processing failed");
                 }
-                return Err(voirs::VoirsError::model_error(format!(
+                return Err(voirs_sdk::VoirsError::model_error(format!(
                     "Task failed: {}",
                     e
                 )));
@@ -883,7 +919,7 @@ async fn process_chunks_with_progress(
 
     // Sort results by index to maintain order
     results.sort_by_key(|(index, _)| *index);
-    let audio_segments: Vec<voirs::AudioBuffer> =
+    let audio_segments: Vec<voirs_sdk::AudioBuffer> =
         results.into_iter().map(|(_, audio)| audio).collect();
 
     Ok(audio_segments)
@@ -897,7 +933,7 @@ async fn process_chunks_with_enhanced_progress(
     streaming_config: &StreamingConfig,
     global: &GlobalOptions,
     attempt: usize,
-) -> Result<Vec<voirs::AudioBuffer>> {
+) -> Result<Vec<voirs_sdk::AudioBuffer>> {
     let progress_bar = if !global.quiet {
         let pb = ProgressBar::new(chunks.len() as u64);
         pb.set_style(
@@ -1044,14 +1080,14 @@ async fn process_chunks_with_enhanced_progress(
 
     // Sort results by index to maintain order
     results.sort_by_key(|(index, _)| *index);
-    let audio_segments: Vec<voirs::AudioBuffer> =
+    let audio_segments: Vec<voirs_sdk::AudioBuffer> =
         results.into_iter().map(|(_, audio)| audio).collect();
 
     Ok(audio_segments)
 }
 
 /// Combine multiple audio segments into a single audio buffer
-fn combine_audio_segments(segments: Vec<voirs::AudioBuffer>) -> Result<voirs::AudioBuffer> {
+fn combine_audio_segments(segments: Vec<voirs_sdk::AudioBuffer>) -> Result<voirs_sdk::AudioBuffer> {
     if segments.is_empty() {
         return Err(VoirsError::AudioError {
             message: "No audio segments to combine".to_string(),
@@ -1075,8 +1111,56 @@ fn combine_audio_segments(segments: Vec<voirs::AudioBuffer>) -> Result<voirs::Au
     }
 
     // Create new audio buffer
-    let buffer = voirs::AudioBuffer::new(combined_samples, sample_rate, channels);
+    let buffer = voirs_sdk::AudioBuffer::new(combined_samples, sample_rate, channels);
     Ok(buffer)
+}
+
+/// Save audio buffer as WAV to stdout
+fn save_wav_to_stdout(audio: &voirs_sdk::AudioBuffer) -> Result<()> {
+    use std::io::Write;
+
+    let stdout = std::io::stdout();
+    let mut handle = stdout.lock();
+
+    let samples = audio.samples();
+    let sample_rate = audio.sample_rate();
+    let channels = audio.channels() as u16;
+    let bits_per_sample = 16u16;
+
+    // Calculate sizes
+    let num_samples = samples.len() as u32;
+    let byte_rate = sample_rate * u32::from(channels) * u32::from(bits_per_sample) / 8;
+    let block_align = channels * bits_per_sample / 8;
+    let data_size = num_samples * u32::from(bits_per_sample) / 8;
+    let data_size_plus_36 = data_size + 36;
+
+    // Write RIFF header
+    handle.write_all(b"RIFF")?;
+    handle.write_all(&data_size_plus_36.to_le_bytes())?;
+    handle.write_all(b"WAVE")?;
+
+    // Write fmt chunk
+    handle.write_all(b"fmt ")?;
+    handle.write_all(&16u32.to_le_bytes())?; // Subchunk1Size (16 for PCM)
+    handle.write_all(&1u16.to_le_bytes())?; // AudioFormat (1 = PCM)
+    handle.write_all(&channels.to_le_bytes())?;
+    handle.write_all(&sample_rate.to_le_bytes())?;
+    handle.write_all(&byte_rate.to_le_bytes())?;
+    handle.write_all(&block_align.to_le_bytes())?;
+    handle.write_all(&bits_per_sample.to_le_bytes())?;
+
+    // Write data chunk
+    handle.write_all(b"data")?;
+    handle.write_all(&data_size.to_le_bytes())?;
+
+    // Write audio samples (convert f32 [-1.0, 1.0] to i16)
+    for &sample in samples {
+        let sample_i16 = (sample * 32767.0).clamp(-32768.0, 32767.0) as i16;
+        handle.write_all(&sample_i16.to_le_bytes())?;
+    }
+
+    handle.flush()?;
+    Ok(())
 }
 
 #[cfg(test)]

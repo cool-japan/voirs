@@ -5,14 +5,13 @@
 
 use proptest::prelude::*;
 use proptest::strategy::ValueTree;
-use std::collections::HashSet;
 use voirs_acoustic::{
-    AcousticModel, DummyAcousticModel, MelSpectrogram as AcousticMel, Phoneme as AcousticPhoneme,
+    AcousticModel, DummyAcousticModel, Phoneme as AcousticPhoneme,
     SynthesisConfig as AcousticConfig,
 };
 use voirs_g2p::{DummyG2p, G2p, LanguageCode};
 use voirs_vocoder::{
-    AudioBuffer, DummyVocoder, MelSpectrogram as VocoderMel, SynthesisConfig as VocoderConfig,
+    DummyVocoder, MelSpectrogram as VocoderMel, SynthesisConfig as VocoderConfig,
     Vocoder,
 };
 
@@ -173,7 +172,7 @@ proptest! {
         energy in PropertyTests::energy_strategy()
     ) {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
+        let _ = rt.block_on(async {
             let acoustic_model = DummyAcousticModel::new();
 
             let phonemes: Vec<AcousticPhoneme> = phoneme_symbols.iter()
@@ -618,7 +617,7 @@ mod tests {
     #[test]
     fn test_property_test_helpers() {
         // Test that our property test generators work correctly
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _rt = tokio::runtime::Runtime::new().unwrap();
 
         // Test text strategy
         let text_strategy = PropertyTests::ascii_text_strategy();

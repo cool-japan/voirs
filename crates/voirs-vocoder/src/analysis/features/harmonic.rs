@@ -9,7 +9,7 @@
 //! - Pitch class profile
 
 use crate::{Result, VocoderError};
-use ndarray::{Array1, Array2};
+use scirs2_core::ndarray::{Array1, Array2};
 
 /// Harmonic features
 #[derive(Debug, Clone)]

@@ -239,9 +239,6 @@ impl ErrorEnhancer for RecognitionError {
             RecognitionError::MemoryError { message, .. } => {
                 create_memory_error_enhancement(message)
             }
-            RecognitionError::DeviceNotAvailable { device, .. } => {
-                create_device_error_enhancement(&format!("Device not available: {device}"))
-            }
             RecognitionError::UnsupportedFormat(format) => create_format_error_enhancement(format),
             RecognitionError::FeatureNotSupported { feature, .. } => {
                 create_feature_not_supported_enhancement(feature)
@@ -251,9 +248,6 @@ impl ErrorEnhancer for RecognitionError {
             }
             RecognitionError::ResourceError { message, .. } => {
                 create_resource_error_enhancement(message)
-            }
-            RecognitionError::UnsupportedFormat(format) => {
-                create_unsupported_format_enhancement(format)
             }
             RecognitionError::InvalidFormat(format) => create_invalid_format_enhancement(format),
             RecognitionError::ModelNotFound {
@@ -271,22 +265,12 @@ impl ErrorEnhancer for RecognitionError {
                 reason,
                 fallback,
             } => create_device_not_available_enhancement(device, reason, fallback),
-            RecognitionError::InsufficientMemory {
-                required_mb,
-                available_mb,
-                recommendation,
-            } => {
-                create_insufficient_memory_enhancement(*required_mb, *available_mb, recommendation)
-            }
             RecognitionError::RecognitionTimeout {
                 timeout_ms,
                 audio_duration_ms,
                 suggestion,
             } => {
                 create_recognition_timeout_enhancement(*timeout_ms, *audio_duration_ms, suggestion)
-            }
-            RecognitionError::MemoryError { message, .. } => {
-                create_memory_error_enhancement(message)
             }
             RecognitionError::TrainingError { message, .. } => {
                 create_training_error_enhancement(message)

@@ -8,24 +8,42 @@ use std::collections::HashMap;
 
 /// Sparse attention pattern types
 #[derive(Debug, Clone, PartialEq)]
+/// Sparse Attention Pattern
 pub enum SparseAttentionPattern {
     /// Local sliding window attention
-    Local { window_size: usize },
+    Local {
+        /// Window size for attention
+        window_size: usize,
+    },
     /// Strided attention with dilated patterns
-    Strided { stride: usize, dilation: usize },
+    Strided {
+        /// Stride value
+        stride: usize,
+        /// Dilation factor
+        dilation: usize,
+    },
     /// Random sparse attention
-    Random { sparsity: f32 },
+    Random {
+        /// Sparsity factor
+        sparsity: f32,
+    },
     /// Block-wise sparse attention
-    BlockSparse { block_size: usize },
+    BlockSparse {
+        /// Block size
+        block_size: usize,
+    },
     /// Longformer-style global + local attention
     GlobalLocal {
+        /// Window size
         window_size: usize,
+        /// Global tokens
         global_tokens: usize,
     },
 }
 
 /// Optimized multi-head attention with advanced patterns
 #[derive(Debug, Clone)]
+/// Optimized Multi Head Attention
 pub struct OptimizedMultiHeadAttention {
     /// Number of attention heads
     pub num_heads: usize,
@@ -53,6 +71,7 @@ pub struct OptimizedMultiHeadAttention {
 
 /// Key-Value cache for efficient inference
 #[derive(Debug, Clone)]
+/// K V Cache
 pub struct KVCache {
     /// Cached keys per head
     pub keys: Vec<Vec<Vec<f32>>>,
@@ -146,7 +165,7 @@ impl OptimizedMultiHeadAttention {
 
         for row in &mut weights {
             for weight in row {
-                *weight = (rand::random::<f32>() - 0.5) * 2.0 * limit;
+                *weight = (scirs2_core::random::random::<f32>() - 0.5) * 2.0 * limit;
             }
         }
 
@@ -412,7 +431,7 @@ impl OptimizedMultiHeadAttention {
 
             for j in 0..seq_len {
                 // Random sampling
-                if rand::random::<f32>() > keep_prob {
+                if scirs2_core::random::random::<f32>() > keep_prob {
                     continue;
                 }
 
@@ -714,6 +733,7 @@ impl OptimizedMultiHeadAttention {
 
 /// Multi-scale attention for hierarchical processing
 #[derive(Debug, Clone)]
+/// Multi Scale Attention
 pub struct MultiScaleAttention {
     /// Attention layers at different scales
     pub scales: Vec<OptimizedMultiHeadAttention>,

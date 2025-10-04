@@ -74,15 +74,30 @@ pub enum RetentionAction {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RetentionCondition {
     /// Data age condition
-    DataAge { days: u32 },
+    DataAge {
+        /// Number of days after which data is considered old.
+        days: u32,
+    },
     /// User activity condition
-    UserInactive { days: u32 },
+    UserInactive {
+        /// Number of idle days after which a user is considered inactive.
+        days: u32,
+    },
     /// Data size condition
-    DataSize { min_bytes: u64 },
+    DataSize {
+        /// Minimum size threshold in bytes to trigger the rule.
+        min_bytes: u64,
+    },
     /// User consent status
-    ConsentStatus { required: bool },
+    ConsentStatus {
+        /// Whether explicit consent is required to retain the data.
+        required: bool,
+    },
     /// Data sensitivity level
-    SensitivityLevel { level: String },
+    SensitivityLevel {
+        /// Label describing the sensitivity of the data.
+        level: String,
+    },
 }
 
 /// Scheduled cleanup task
@@ -105,10 +120,19 @@ pub struct CleanupTask {
 /// Cleanup task status
 #[derive(Debug, Clone, PartialEq)]
 pub enum CleanupStatus {
+    /// Description
     Scheduled,
+    /// Description
     Running,
+    /// Description
     Completed,
-    Failed { error: String },
+    /// Description
+    /// Description
+    Failed {
+        /// Reason the cleanup task failed.
+        error: String,
+    },
+    /// Description
     Cancelled,
 }
 
@@ -147,8 +171,11 @@ pub struct RetentionComplianceReport {
 /// Overall retention compliance status
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum RetentionComplianceStatus {
+    /// Description
     Compliant,
+    /// Description
     Warning,
+    /// Description
     NonCompliant,
 }
 

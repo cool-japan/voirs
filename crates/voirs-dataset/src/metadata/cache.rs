@@ -449,9 +449,10 @@ impl MetadataCache {
                     compressed_data
                 };
 
-                let cached_data: CachedData = bincode::deserialize(&data).map_err(|e| {
-                    DatasetError::FormatError(format!("Cache deserialization failed: {e}"))
-                })?;
+                let (cached_data, _): (CachedData, usize) =
+                    bincode::serde::decode_from_slice(&data, bincode::config::standard()).map_err(
+                        |e| DatasetError::FormatError(format!("Cache deserialization failed: {e}")),
+                    )?;
 
                 return Ok(Some(cached_data));
             }
@@ -471,9 +472,10 @@ impl MetadataCache {
                     .map_err(DatasetError::IoError)?;
             }
 
-            let serialized = bincode::serialize(&data).map_err(|e| {
-                DatasetError::FormatError(format!("Cache serialization failed: {e}"))
-            })?;
+            let serialized = bincode::serde::encode_to_vec(&data, bincode::config::standard())
+                .map_err(|e| {
+                    DatasetError::FormatError(format!("Cache serialization failed: {e}"))
+                })?;
 
             let final_data = if self.config.compression_level > 0 {
                 self.compress_data(&serialized)?

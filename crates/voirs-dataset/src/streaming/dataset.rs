@@ -6,7 +6,7 @@
 use crate::traits::{Dataset, DatasetMetadata};
 use crate::{DatasetStatistics, Result, ValidationReport};
 use async_trait::async_trait;
-use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
+use scirs2_core::random::{rngs::StdRng, seq::SliceRandom, Random, SeedableRng};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
@@ -70,7 +70,7 @@ pub struct StreamingDataset<T: Dataset> {
     /// Current position in dataset
     position: Arc<RwLock<usize>>,
     /// Random number generator for shuffling
-    rng: Arc<Mutex<StdRng>>,
+    rng: Arc<Mutex<scirs2_core::random::Random<scirs2_core::random::rngs::StdRng>>>,
     /// Buffer statistics
     stats: Arc<RwLock<BufferStatistics>>,
     /// Flag to prevent recursive prefetching
@@ -113,10 +113,14 @@ impl<T: Dataset> StreamingDataset<T> {
     /// Create a new streaming dataset with custom configuration
     pub fn with_config(dataset: T, config: StreamingConfig) -> Self {
         let rng = if let Some(seed) = config.seed {
-            StdRng::seed_from_u64(seed)
+            Random::seed(seed)
         } else {
-            use rand::thread_rng;
-            StdRng::from_rng(&mut thread_rng())
+            Random::seed(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            )
         };
 
         Self {

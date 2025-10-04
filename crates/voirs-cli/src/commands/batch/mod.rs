@@ -5,8 +5,8 @@
 
 use crate::GlobalOptions;
 use std::path::PathBuf;
-use voirs::{AudioFormat, QualityLevel, Result};
 use voirs_sdk::config::AppConfig;
+use voirs_sdk::{AudioFormat, QualityLevel, Result};
 
 pub mod files;
 pub mod parallel;
@@ -106,7 +106,7 @@ pub async fn run_batch_process(
     } else if batch_config.input_path.is_dir() {
         files::process_directory(&batch_config, config, global).await
     } else {
-        Err(voirs::VoirsError::config_error(&format!(
+        Err(voirs_sdk::VoirsError::config_error(&format!(
             "Input path does not exist: {}",
             batch_config.input_path.display()
         )))

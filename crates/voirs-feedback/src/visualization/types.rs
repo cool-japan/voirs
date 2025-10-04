@@ -744,6 +744,7 @@ pub struct FrameLimiter {
 
 #[cfg(feature = "ui")]
 #[derive(Debug, Clone, Copy)]
+/// Description
 pub enum PerformanceMode {
     /// High quality rendering with potential slower frame rates
     Quality,

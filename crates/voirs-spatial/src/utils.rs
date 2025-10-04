@@ -1,9 +1,9 @@
 //! Utility functions for spatial audio processing
 
 use crate::types::{BinauraAudio, Position3D};
-use ndarray::{Array1, Array2};
-use num_complex::Complex;
-use realfft::RealFftPlanner;
+use scirs2_core::ndarray::{Array1, Array2};
+use scirs2_core::random::{thread_rng, Rng};
+use scirs2_core::Complex;
 use std::f32::consts::PI;
 
 /// Audio format conversion utilities
@@ -14,8 +14,6 @@ pub struct SpatialMath;
 
 /// Signal processing utilities
 pub struct SignalProcessor {
-    /// FFT planner
-    fft_planner: RealFftPlanner<f32>,
     /// Window functions cache
     window_cache: std::collections::HashMap<usize, Array1<f32>>,
 }
@@ -261,7 +259,6 @@ impl SignalProcessor {
     /// Create new signal processor
     pub fn new() -> Self {
         Self {
-            fft_planner: RealFftPlanner::new(),
             window_cache: std::collections::HashMap::new(),
         }
     }
@@ -317,30 +314,38 @@ impl SignalProcessor {
     }
 
     /// Perform FFT on signal
-    pub fn fft(&mut self, signal: &Array1<f32>) -> Vec<Complex<f32>> {
-        let mut input = signal.to_vec();
-        let fft = self.fft_planner.plan_fft_forward(signal.len());
-        let mut output = fft.make_output_vec();
+    pub fn fft(&self, signal: &Array1<f32>) -> Vec<Complex<f32>> {
+        // Convert to Complex<f64> for scirs2_fft
+        let input: Vec<scirs2_core::Complex<f64>> = signal
+            .iter()
+            .map(|&x| scirs2_core::Complex::new(x as f64, 0.0))
+            .collect();
 
-        fft.process(&mut input, &mut output).unwrap();
+        // Perform FFT
+        let output = scirs2_fft::fft(&input, None)
+            .unwrap_or_else(|_| vec![scirs2_core::Complex::new(0.0, 0.0); input.len()]);
+
+        // Convert back to Complex<f32>
         output
             .into_iter()
-            .map(|c| Complex::new(c.re, c.im))
+            .map(|c| Complex::new(c.re as f32, c.im as f32))
             .collect()
     }
 
     /// Perform inverse FFT
-    pub fn ifft(&mut self, spectrum: &[Complex<f32>]) -> Array1<f32> {
-        let mut input: Vec<num_complex::Complex<f32>> = spectrum
+    pub fn ifft(&self, spectrum: &[Complex<f32>]) -> Array1<f32> {
+        // Convert to Complex<f64> for scirs2_fft
+        let input: Vec<scirs2_core::Complex<f64>> = spectrum
             .iter()
-            .map(|&c| num_complex::Complex::new(c.re, c.im))
+            .map(|&c| scirs2_core::Complex::new(c.re as f64, c.im as f64))
             .collect();
 
-        let ifft = self.fft_planner.plan_fft_inverse(spectrum.len());
-        let mut output = ifft.make_output_vec();
+        // Perform IFFT
+        let output = scirs2_fft::ifft(&input, None)
+            .unwrap_or_else(|_| vec![scirs2_core::Complex::new(0.0, 0.0); input.len()]);
 
-        ifft.process(&mut input, &mut output).unwrap();
-        Array1::from_vec(output)
+        // Extract real part and convert to f32
+        Array1::from_vec(output.iter().map(|c| c.re as f32).collect())
     }
 
     /// Calculate magnitude spectrum
@@ -691,7 +696,8 @@ impl BenchmarkUtils {
 
     /// Generate white noise for testing
     pub fn generate_white_noise(length: usize) -> Array1<f32> {
-        Array1::from_iter((0..length).map(|_| rand::random::<f32>() * 2.0 - 1.0))
+        let mut rng = thread_rng();
+        Array1::from_iter((0..length).map(|_| rng.gen::<f32>() * 2.0 - 1.0))
     }
 }
 

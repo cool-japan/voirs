@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation = "https://docs.rs/voirs-acoustic"
-keywords.workspace = true
+keywords = ["voirs", "acoustic", "tts", "mel-spectrogram", "vits"]
 categories = ["multimedia::audio", "science", "algorithms"]
 rust-version.workspace = true
 description = "Acoustic model inference for VoiRS speech synthesis (VITS/FastSpeech2)"
@@ -28,15 +28,12 @@ reqwest.workspace = true
 half.workspace = true
 bytemuck.workspace = true
 
-# Math and arrays
-ndarray.workspace = true
-
 # SciRS2 - Optimized DSP and linear algebra
-scirs2-fft = "0.1.0-beta.2"
-scirs2-signal = "0.1.0-beta.2"
-scirs2-core = "0.1.0-beta.2"
-scirs2-linalg = "0.1.0-beta.2"
-scirs2-autograd = "0.1.0-beta.2"
+scirs2-core.workspace = true
+scirs2-fft.workspace = true
+
+# NumRS2 - For loading numpy .npz voice files
+numrs2.workspace = true
 
 # Serialization
 serde.workspace = true
@@ -61,7 +58,6 @@ tracing.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
 futures.workspace = true
-rayon.workspace = true
 
 # Random number generation
 fastrand.workspace = true
@@ -76,10 +72,10 @@ memmap2.workspace = true
 log.workspace = true
 
 # VoiRS crates
-voirs-g2p = { version = "0.1.0-alpha.1", path = "../voirs-g2p" }
+voirs-g2p.workspace = true
 
 [dev-dependencies]
-voirs-vocoder = { version = "0.1.0-alpha.1", path = "../voirs-vocoder" }
+voirs-vocoder.workspace = true
 tracing-subscriber.workspace = true
 criterion = { workspace = true }
 tokio-test.workspace = true
@@ -92,7 +88,7 @@ harness = false
 default = ["candle"]
 candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers"]
 onnx = ["dep:ort"]
-gpu = []
+gpu = ["metal"]  # On macOS, use Metal; on Linux/Windows would use cuda
 cuda = ["candle-core?/cuda", "ort?/cuda"]
 metal = ["candle-core?/metal"]
 coreml = ["ort?/coreml"]

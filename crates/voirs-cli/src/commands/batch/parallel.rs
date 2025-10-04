@@ -6,10 +6,10 @@ use indicatif::{ProgressBar, ProgressStyle};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, Semaphore};
-use voirs::VoirsPipeline;
-use voirs::{AudioFormat, QualityLevel, Result};
 use voirs_sdk::config::AppConfig;
 use voirs_sdk::types::SynthesisConfig;
+use voirs_sdk::VoirsPipeline;
+use voirs_sdk::{AudioFormat, QualityLevel, Result};
 
 /// Result of processing a single batch item
 #[derive(Debug, Clone)]

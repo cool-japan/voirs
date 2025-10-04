@@ -12,8 +12,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::adaptive::UserModel;
-use crate::progress::ProgressAnalyzer;
+use crate::adaptive::models::UserModel;
+use crate::progress::core::ProgressAnalyzer;
 use crate::traits::{
     FeedbackResponse, SessionState, TrainingExercise, UserPreferences, UserProgress,
 };
@@ -373,6 +373,7 @@ pub struct CreateUserInput {
 }
 
 #[derive(async_graphql::InputObject)]
+/// Description
 pub struct UserPreferencesInput {
     /// Preferred language
     pub language: Option<String>,
@@ -387,6 +388,7 @@ pub struct UserPreferencesInput {
 }
 
 #[derive(async_graphql::InputObject)]
+/// Description
 pub struct UpdateUserInput {
     /// User ID
     pub id: ID,
@@ -401,6 +403,7 @@ pub struct UpdateUserInput {
 }
 
 #[derive(async_graphql::InputObject)]
+/// Description
 pub struct CreateSessionInput {
     /// User ID
     pub user_id: ID,
@@ -409,6 +412,7 @@ pub struct CreateSessionInput {
 }
 
 #[derive(async_graphql::InputObject)]
+/// Description
 pub struct CreateFeedbackInput {
     /// User ID
     pub user_id: ID,
@@ -427,6 +431,7 @@ pub struct CreateFeedbackInput {
 }
 
 #[derive(async_graphql::InputObject)]
+/// Description
 pub struct AudioSegmentInput {
     /// Start time in milliseconds
     pub start_ms: i32,
@@ -465,6 +470,7 @@ pub struct FilterInput {
 }
 
 #[derive(async_graphql::InputObject)]
+/// Description
 pub struct DateRangeInput {
     /// Start date
     pub start: String,
@@ -473,6 +479,7 @@ pub struct DateRangeInput {
 }
 
 #[derive(async_graphql::InputObject)]
+/// Description
 pub struct ScoreRangeInput {
     /// Minimum score
     pub min: f32,

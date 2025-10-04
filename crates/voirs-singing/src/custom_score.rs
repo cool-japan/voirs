@@ -11,20 +11,20 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
-/// Optimized custom score format
+/// Optimized custom score format with time-indexed timeline and caching
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptimizedScore {
-    /// Score metadata
+    /// Score metadata including title, composer, tempo, etc.
     pub metadata: ScoreMetadata,
     /// Time-indexed note events for efficient lookup
     pub timeline: Timeline,
-    /// Voice-specific data
+    /// Voice-specific data for polyphonic scores
     pub voices: HashMap<String, VoiceTrack>,
     /// Performance hints for optimization
     pub performance_hints: PerformanceHints,
-    /// Cached calculations
+    /// Cached calculations for expensive operations
     pub cache: ScoreCache,
-    /// Version for compatibility
+    /// Format version for compatibility
     pub version: u32,
 }
 
@@ -60,102 +60,102 @@ pub struct ScoreMetadata {
 /// Timeline structure for efficient time-based operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Timeline {
-    /// Time grid resolution (beats per grid unit)
+    /// Time grid resolution in beats per grid unit
     pub resolution: f32,
-    /// Grid-based note events
+    /// Grid-based note events indexed by time position
     pub grid: BTreeMap<u64, GridCell>,
-    /// Continuous events (tempo changes, etc.)
+    /// Continuous events like tempo and dynamic changes
     pub continuous_events: BTreeMap<u64, Vec<ContinuousEvent>>,
-    /// Index for quick note lookup
+    /// Index mapping note IDs to their grid positions
     pub note_index: HashMap<String, NoteReference>,
 }
 
-/// Grid cell containing events at a specific time
+/// Grid cell containing events at a specific time point
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GridCell {
-    /// Grid time position
+    /// Grid time position in grid units
     pub time_position: u64,
-    /// Notes starting at this time
+    /// Notes starting at this time point
     pub note_starts: Vec<OptimizedNote>,
-    /// Notes ending at this time
+    /// References to notes ending at this time point
     pub note_ends: Vec<NoteReference>,
-    /// Tempo changes
+    /// Tempo changes occurring at this time
     pub tempo_changes: Vec<TempoChange>,
-    /// Dynamic markings
+    /// Dynamic markings at this time
     pub dynamic_changes: Vec<DynamicChange>,
-    /// Expression changes
+    /// Expression changes at this time
     pub expression_changes: Vec<ExpressionChange>,
 }
 
-/// Optimized note representation
+/// Optimized note representation with caching
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptimizedNote {
-    /// Unique note ID
+    /// Unique note identifier
     pub id: String,
-    /// Note event data
+    /// Note event data with pitch, duration, and expression
     pub event: NoteEvent,
     /// Start time in grid units
     pub start_grid: u64,
     /// Duration in grid units
     pub duration_grid: u64,
-    /// Voice assignment
+    /// Voice track assignment
     pub voice_id: String,
-    /// Layer for polyphony
+    /// Polyphony layer (0 = lowest)
     pub layer: u8,
-    /// Note priority for processing
+    /// Processing priority (0-10, higher = more important)
     pub priority: u8,
-    /// Optimization flags
+    /// Optimization flags for caching and effects
     pub flags: NoteFlags,
-    /// Cached frequency data
+    /// Precomputed frequency curve for vibrato and pitch bends
     pub frequency_cache: Vec<f32>,
-    /// Phoneme timing
+    /// Phoneme timing information for lyrics
     pub phoneme_timing: Vec<PhonemeSegment>,
 }
 
-/// Note flags for optimization
+/// Note flags for performance optimization
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct NoteFlags {
-    /// Note is cacheable
+    /// Note can be cached for reuse
     pub cacheable: bool,
-    /// Note requires real-time processing
+    /// Note requires real-time processing priority
     pub realtime: bool,
-    /// Note has complex effects
+    /// Note has complex effects requiring extra processing
     pub complex_effects: bool,
-    /// Note is part of harmony
+    /// Note is part of a harmonic chord
     pub harmony_note: bool,
-    /// Note has pitch bends
+    /// Note has pitch bend modulation
     pub has_pitch_bend: bool,
-    /// Note has vibrato
+    /// Note has vibrato effect
     pub has_vibrato: bool,
-    /// Note has breath effects
+    /// Note has breath sound effects
     pub has_breath: bool,
 }
 
 /// Voice track for polyphonic scores
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceTrack {
-    /// Voice name
+    /// Voice track name
     pub name: String,
-    /// Voice characteristics
+    /// Voice characteristics (range, timbre, etc.)
     pub characteristics: crate::types::VoiceCharacteristics,
-    /// Default technique
+    /// Default singing technique for this voice
     pub default_technique: crate::techniques::SingingTechnique,
     /// Note references in chronological order
     pub notes: Vec<NoteReference>,
-    /// Voice-specific effects
+    /// Voice-specific effects applied
     pub effects: Vec<String>,
-    /// Voice volume level
+    /// Voice volume level (0.0-1.0)
     pub volume: f32,
-    /// Voice pan position
+    /// Voice pan position (-1.0 = left, 1.0 = right)
     pub pan: f32,
 }
 
-/// Reference to a note in the timeline
+/// Reference to a note in the timeline grid
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct NoteReference {
-    /// Grid position
+    /// Grid position in timeline
     pub grid_position: u64,
-    /// Index within the grid cell
+    /// Index within the grid cell's note array
     pub cell_index: usize,
 }
 
@@ -177,35 +177,35 @@ pub enum ContinuousEvent {
 /// Tempo change event
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TempoChange {
-    /// New tempo in BPM
+    /// New tempo in beats per minute (BPM)
     pub tempo: f32,
-    /// Transition duration (for gradual changes)
+    /// Transition duration in beats for gradual changes
     pub transition_duration: f32,
-    /// Change type
+    /// Type of tempo change (immediate, accelerando, etc.)
     pub change_type: TempoChangeType,
 }
 
-/// Dynamic change event
+/// Dynamic level change event
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DynamicChange {
-    /// New dynamics level
+    /// New dynamics level (pp, p, mf, f, ff, etc.)
     pub dynamics: Dynamics,
-    /// Transition duration
+    /// Transition duration in beats for gradual changes
     pub transition_duration: f32,
-    /// Affect voices
+    /// Voice tracks affected by this change
     pub voices: Vec<String>,
 }
 
-/// Expression change event
+/// Musical expression change event
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExpressionChange {
-    /// New expression
+    /// New expression type (happy, sad, excited, etc.)
     pub expression: Expression,
-    /// Duration
+    /// Duration in beats for this expression
     pub duration: f32,
-    /// Intensity
+    /// Expression intensity (0.0-1.0)
     pub intensity: f32,
-    /// Affect voices
+    /// Voice tracks affected by this change
     pub voices: Vec<String>,
 }
 
@@ -222,91 +222,91 @@ pub enum TempoChangeType {
     ATempo,
 }
 
-/// Phoneme segment timing
+/// Phoneme segment timing information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhonemeSegment {
-    /// Phoneme symbol
+    /// Phoneme symbol (IPA or X-SAMPA)
     pub phoneme: String,
-    /// Start time within note (0.0-1.0)
+    /// Start time within note normalized (0.0-1.0)
     pub start: f32,
-    /// Duration within note (0.0-1.0)
+    /// Duration within note normalized (0.0-1.0)
     pub duration: f32,
-    /// Intensity
+    /// Phoneme intensity/emphasis (0.0-1.0)
     pub intensity: f32,
 }
 
-/// Performance optimization hints
+/// Performance optimization hints for synthesis
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerformanceHints {
-    /// Recommended buffer size
+    /// Recommended buffer size in samples
     pub buffer_size: usize,
-    /// Parallel processing recommended
+    /// Whether parallel processing is recommended
     pub parallel_processing: bool,
-    /// Pre-computation candidates
+    /// Note IDs that should be precomputed
     pub precompute_notes: Vec<String>,
-    /// Memory usage estimate (bytes)
+    /// Estimated memory usage in bytes
     pub memory_estimate: usize,
-    /// Processing complexity score
+    /// Processing complexity score (0.0-1.0)
     pub complexity_score: f32,
-    /// Recommended quality level
+    /// Recommended quality level (0-10)
     pub recommended_quality: u8,
-    /// Real-time feasibility
+    /// Whether real-time synthesis is feasible
     pub realtime_feasible: bool,
 }
 
 /// Score cache for expensive calculations
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ScoreCache {
-    /// Precomputed frequency curves
+    /// Precomputed frequency curves indexed by note ID
     pub frequency_curves: HashMap<String, Vec<f32>>,
-    /// Precomputed amplitude envelopes
+    /// Precomputed amplitude envelopes indexed by note ID
     pub amplitude_envelopes: HashMap<String, Vec<f32>>,
-    /// Harmony analysis results
+    /// Harmony analysis results at each grid position
     pub harmony_analysis: HashMap<u64, HarmonyInfo>,
-    /// Phrase boundaries
+    /// Detected phrase boundaries
     pub phrase_boundaries: Vec<PhraseBoundary>,
-    /// Breath placement suggestions
+    /// Suggested breath placement locations
     pub breath_suggestions: Vec<BreathSuggestion>,
 }
 
-/// Harmony information at a specific time
+/// Harmony information at a specific time point
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HarmonyInfo {
-    /// Root note
+    /// Root note of the chord
     pub root: String,
-    /// Chord quality
+    /// Chord quality (major, minor, diminished, etc.)
     pub quality: String,
-    /// Extensions
+    /// Chord extensions (7th, 9th, etc.)
     pub extensions: Vec<String>,
-    /// Inversion
+    /// Chord inversion (0 = root position)
     pub inversion: u8,
-    /// Stability score (0.0-1.0)
+    /// Harmonic stability score (0.0-1.0)
     pub stability: f32,
 }
 
 /// Phrase boundary information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhraseBoundary {
-    /// Position in beats
+    /// Position in beats from score start
     pub position: f32,
-    /// Boundary type
+    /// Type of boundary (minor, major, section, etc.)
     pub boundary_type: BoundaryType,
-    /// Breath recommended
+    /// Whether a breath is recommended at this boundary
     pub breath_recommended: bool,
-    /// Strength (0.0-1.0)
+    /// Boundary strength score (0.0-1.0)
     pub strength: f32,
 }
 
-/// Breath suggestion
+/// Breath placement suggestion
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BreathSuggestion {
-    /// Position in beats
+    /// Position in beats from score start
     pub position: f32,
-    /// Breath type
+    /// Type of breath (natural, deep, quick)
     pub breath_type: crate::types::BreathType,
-    /// Duration in seconds
+    /// Breath duration in seconds
     pub duration: f32,
-    /// Priority (0-10)
+    /// Breath priority (0-10, higher = more important)
     pub priority: u8,
 }
 
@@ -325,11 +325,11 @@ pub enum BoundaryType {
 
 /// Score optimizer for creating optimized scores
 pub struct ScoreOptimizer {
-    /// Grid resolution (beats per grid unit)
+    /// Grid resolution in beats per grid unit
     grid_resolution: f32,
-    /// Enable caching
+    /// Whether to enable precomputation caching
     enable_caching: bool,
-    /// Maximum cache size
+    /// Maximum cache size in bytes
     max_cache_size: usize,
 }
 

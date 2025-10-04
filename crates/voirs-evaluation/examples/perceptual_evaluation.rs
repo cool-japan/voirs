@@ -3,7 +3,7 @@
 //! This example demonstrates how to perform perceptual evaluation of synthesized speech
 //! including naturalness assessment and intelligibility scoring using the VoiRS evaluation framework.
 
-use rand::Rng;
+use scirs2_core::random::Rng;
 use voirs_evaluation::prelude::*;
 use voirs_evaluation::{QualityEvaluationConfig, QualityMetric};
 use voirs_sdk::AudioBuffer;
@@ -51,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Generate noisy audio for intelligibility testing
     println!("\n📢 Generating noisy audio...");
-    let mut rng = rand::thread_rng();
+    let mut rng = scirs2_core::random::thread_rng();
     let mut noisy_samples = Vec::with_capacity(duration_samples);
     for i in 0..duration_samples {
         let t = i as f32 / sample_rate as f32;

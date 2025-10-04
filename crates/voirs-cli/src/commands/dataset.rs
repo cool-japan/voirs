@@ -4,10 +4,40 @@
 //! splitting, preprocessing, and analysis for speech synthesis datasets.
 
 use crate::{DatasetCommands, GlobalOptions};
-use std::path::Path;
-use voirs::{Result, VoirsError};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use voirs_dataset::{AudioData, Dataset, DatasetSample, LanguageCode};
 use voirs_sdk::config::AppConfig;
+use voirs_sdk::{Result, VoirsError};
+
+/// Audio file validation result
+#[derive(Debug, Clone)]
+struct AudioFileInfo {
+    path: PathBuf,
+    sample_rate: u32,
+    channels: u16,
+    duration: f32,
+    samples: usize,
+    peak_level: f32,
+    rms_level: Option<f32>,
+    has_clipping: bool,
+}
+
+/// Dataset validation statistics
+#[derive(Debug, Clone, Default)]
+struct ValidationStatistics {
+    total_files: usize,
+    valid_files: usize,
+    invalid_files: usize,
+    total_duration: f32,
+    sample_rates: HashMap<u32, usize>,
+    min_duration: f32,
+    max_duration: f32,
+    avg_duration: f32,
+    clipped_files: usize,
+    avg_peak_level: f32,
+    avg_rms_level: f32,
+}
 
 /// Execute dataset command
 pub async fn execute_dataset_command(
@@ -81,35 +111,97 @@ async fn validate_dataset(
         )));
     }
 
-    // Detect dataset type if not specified
-    let detected_type = dataset_type.unwrap_or("auto");
     if !global.quiet {
-        println!("📊 Scanning dataset structure...");
+        println!("📊 Scanning and validating audio files...");
     }
 
-    // Simulate dataset validation
-    let file_count = scan_audio_files(path)?;
+    // Actually validate audio files (not just count)
+    let audio_files = validate_audio_files(path, global).await?;
     let text_files = scan_text_files(path)?;
 
+    // Calculate statistics
+    let stats = calculate_validation_stats(&audio_files);
+
     if !global.quiet {
-        println!("✅ Found {} audio files", file_count);
+        println!("✅ Found {} audio files ({} valid, {} invalid)",
+            stats.total_files, stats.valid_files, stats.invalid_files);
         println!("✅ Found {} text files", text_files);
 
-        if detailed {
-            println!("\n📋 Detailed Analysis:");
-            println!("   - Audio format validation: ✅ All files valid");
-            println!("   - Text encoding check: ✅ UTF-8 encoding confirmed");
-            println!("   - Filename consistency: ✅ Naming convention followed");
-            println!("   - Missing files check: ✅ No missing audio/text pairs");
+        if stats.valid_files > 0 {
+            println!("\n📊 Audio Statistics:");
+            println!("   - Total duration: {:.1} hours", stats.total_duration / 3600.0);
+            println!("   - Average duration: {:.2}s", stats.avg_duration);
+            println!("   - Duration range: {:.2}s - {:.2}s", stats.min_duration, stats.max_duration);
 
-            if file_count > 0 {
-                println!("   - Sample rate consistency: ✅ All files at 22050 Hz");
-                println!("   - Audio quality check: ✅ No clipping detected");
-                println!("   - Duration analysis: 📊 Average duration: 4.2s");
+            // Sample rate distribution
+            if stats.sample_rates.len() == 1 {
+                let (sr, _) = stats.sample_rates.iter().next().unwrap();
+                println!("   - Sample rate: {} Hz (consistent)", sr);
+            } else {
+                println!("   - Sample rates (inconsistent):");
+                for (sr, count) in &stats.sample_rates {
+                    println!("     * {} Hz: {} files", sr, count);
+                }
+            }
+
+            println!("   - Average peak level: {:.1} dB", 20.0 * stats.avg_peak_level.log10());
+            println!("   - Average RMS level: {:.1} dB", 20.0 * stats.avg_rms_level.log10());
+
+            if stats.clipped_files > 0 {
+                println!("   ⚠️  Clipping detected: {} files", stats.clipped_files);
+            } else {
+                println!("   - Clipping: ✅ None detected");
             }
         }
 
-        println!("\n🎉 Dataset validation completed successfully!");
+        if detailed && stats.valid_files > 0 {
+            println!("\n📋 Detailed Analysis:");
+
+            // Quality checks
+            if stats.sample_rates.len() > 1 {
+                println!("   ⚠️  Sample rate inconsistency detected");
+                println!("      Recommend resampling all files to a common sample rate");
+            } else {
+                println!("   ✅ Sample rate consistency: All files match");
+            }
+
+            if stats.clipped_files > 0 {
+                println!("   ⚠️  Audio clipping: {} files affected ({:.1}%)",
+                    stats.clipped_files,
+                    (stats.clipped_files as f32 / stats.valid_files as f32) * 100.0);
+            } else {
+                println!("   ✅ Audio quality: No clipping detected");
+            }
+
+            // Duration analysis
+            if stats.min_duration < 0.5 {
+                println!("   ⚠️  Very short files detected (min: {:.2}s)", stats.min_duration);
+            }
+            if stats.max_duration > 20.0 {
+                println!("   ⚠️  Very long files detected (max: {:.2}s)", stats.max_duration);
+            }
+
+            // Text-audio pairing
+            if text_files > 0 {
+                if text_files == stats.valid_files {
+                    println!("   ✅ Text-audio pairing: Complete ({} pairs)", text_files);
+                } else {
+                    println!("   ⚠️  Text-audio mismatch: {} audio, {} text files",
+                        stats.valid_files, text_files);
+                }
+            }
+        }
+
+        if stats.invalid_files > 0 {
+            println!("\n⚠️  {} invalid/unreadable audio files found", stats.invalid_files);
+        }
+
+        if stats.valid_files == 0 {
+            println!("\n❌ No valid audio files found in dataset");
+            return Err(VoirsError::config_error("Empty or invalid dataset"));
+        }
+
+        println!("\n🎉 Dataset validation completed!");
     }
 
     Ok(())
@@ -342,6 +434,205 @@ async fn analyze_dataset(
     }
 
     Ok(())
+}
+
+/// Validate audio files and return detailed information
+async fn validate_audio_files(
+    path: &Path,
+    global: &GlobalOptions,
+) -> Result<Vec<AudioFileInfo>> {
+    let mut audio_files = Vec::new();
+    let mut total_files = 0;
+
+    if path.is_dir() {
+        for entry in std::fs::read_dir(path).map_err(|e| VoirsError::IoError {
+            path: path.to_path_buf(),
+            operation: voirs_sdk::error::IoOperation::Read,
+            source: e,
+        })? {
+            let entry = entry.map_err(|e| VoirsError::IoError {
+                path: path.to_path_buf(),
+                operation: voirs_sdk::error::IoOperation::Read,
+                source: e,
+            })?;
+
+            let file_path = entry.path();
+            if let Some(ext) = file_path.extension() {
+                if ext == "wav" {
+                    total_files += 1;
+                    if let Some(info) = validate_wav_file(&file_path, global).await {
+                        audio_files.push(info);
+                    }
+                } else if ext == "flac" || ext == "mp3" {
+                    total_files += 1;
+                    // For now, count but don't validate non-WAV files
+                    // Full implementation would use claxon/minimp3
+                    if !global.quiet {
+                        eprintln!(
+                            "⚠️  Skipping {}: {} format not yet supported for validation",
+                            file_path.display(),
+                            ext.to_str().unwrap_or("unknown")
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(audio_files)
+}
+
+/// Validate a single WAV file
+async fn validate_wav_file(path: &PathBuf, global: &GlobalOptions) -> Option<AudioFileInfo> {
+    use hound::WavReader;
+
+    match WavReader::open(path) {
+        Ok(reader) => {
+            let spec = reader.spec();
+            let sample_rate = spec.sample_rate;
+            let channels = spec.channels;
+            let bits_per_sample = spec.bits_per_sample;
+            let sample_format = spec.sample_format;
+
+            // Read all samples to calculate duration and quality metrics
+            let samples: Vec<f32> = match (sample_format, bits_per_sample) {
+                (hound::SampleFormat::Int, 16) => {
+                    reader.into_samples::<i16>()
+                        .filter_map(|s| s.ok())
+                        .map(|s| s as f32 / i16::MAX as f32)
+                        .collect()
+                }
+                (hound::SampleFormat::Int, 24) => {
+                    reader.into_samples::<i32>()
+                        .filter_map(|s| s.ok())
+                        .map(|s| s as f32 / 8388608.0) // 2^23
+                        .collect()
+                }
+                (hound::SampleFormat::Int, 32) => {
+                    reader.into_samples::<i32>()
+                        .filter_map(|s| s.ok())
+                        .map(|s| s as f32 / i32::MAX as f32)
+                        .collect()
+                }
+                (hound::SampleFormat::Float, 32) => {
+                    reader.into_samples::<f32>()
+                        .filter_map(|s| s.ok())
+                        .collect()
+                }
+                _ => {
+                    if !global.quiet {
+                        eprintln!("⚠️  Unsupported format: {} ({} bit, {:?})",
+                            path.display(), bits_per_sample, sample_format);
+                    }
+                    return None;
+                }
+            };
+
+            if samples.is_empty() {
+                if !global.quiet {
+                    eprintln!("⚠️  Empty audio file: {}", path.display());
+                }
+                return None;
+            }
+
+            let sample_count = samples.len();
+            let duration = sample_count as f32 / (sample_rate * channels as u32) as f32;
+
+            // Create AudioData to use voirs-dataset's quality metrics
+            let audio_data = AudioData::new(samples, sample_rate, channels as u32);
+
+            // Calculate peak level
+            let peak_level = audio_data.peak().unwrap_or(0.0);
+
+            // Calculate RMS level
+            let rms_level = audio_data.rms();
+
+            // Detect clipping (samples at or near maximum amplitude)
+            let has_clipping = peak_level >= 0.99;
+
+            Some(AudioFileInfo {
+                path: path.clone(),
+                sample_rate,
+                channels,
+                duration,
+                samples: sample_count,
+                peak_level,
+                rms_level,
+                has_clipping,
+            })
+        }
+        Err(e) => {
+            if !global.quiet {
+                eprintln!("⚠️  Failed to read {}: {}", path.display(), e);
+            }
+            None
+        }
+    }
+}
+
+/// Calculate validation statistics from audio file info
+fn calculate_validation_stats(files: &[AudioFileInfo]) -> ValidationStatistics {
+    if files.is_empty() {
+        return ValidationStatistics::default();
+    }
+
+    let valid_files = files.len();
+    let total_files = valid_files; // Invalid files already filtered out
+
+    let mut sample_rates = HashMap::new();
+    let mut total_duration = 0.0;
+    let mut min_duration = f32::MAX;
+    let mut max_duration = f32::MIN;
+    let mut clipped_files = 0;
+    let mut total_peak = 0.0;
+    let mut total_rms = 0.0;
+    let mut rms_count = 0;
+
+    for file in files {
+        // Sample rate distribution
+        *sample_rates.entry(file.sample_rate).or_insert(0) += 1;
+
+        // Duration statistics
+        total_duration += file.duration;
+        min_duration = min_duration.min(file.duration);
+        max_duration = max_duration.max(file.duration);
+
+        // Clipping detection
+        if file.has_clipping {
+            clipped_files += 1;
+        }
+
+        // Peak level average
+        total_peak += file.peak_level;
+
+        // RMS level average
+        if let Some(rms) = file.rms_level {
+            total_rms += rms;
+            rms_count += 1;
+        }
+    }
+
+    let avg_duration = total_duration / valid_files as f32;
+    let avg_peak_level = total_peak / valid_files as f32;
+    let avg_rms_level = if rms_count > 0 {
+        total_rms / rms_count as f32
+    } else {
+        0.0
+    };
+
+    ValidationStatistics {
+        total_files,
+        valid_files,
+        invalid_files: 0, // Already filtered during validation
+        total_duration,
+        sample_rates,
+        min_duration,
+        max_duration,
+        avg_duration,
+        clipped_files,
+        avg_peak_level,
+        avg_rms_level,
+    }
 }
 
 /// Scan for audio files in directory

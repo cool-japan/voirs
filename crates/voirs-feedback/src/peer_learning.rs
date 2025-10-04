@@ -12,235 +12,366 @@ use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
 
 use crate::traits::{FeedbackContext, SessionScores};
-use crate::UserModel;
+use crate::adaptive::models::UserModel;
 
 /// User profile for peer matching
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerProfile {
+    /// Unique user identifier
     pub user_id: Uuid,
+    /// User's native language
     pub native_language: String,
+    /// Languages the user wants to learn
     pub target_languages: Vec<String>,
+    /// Current skill level
     pub skill_level: SkillLevel,
+    /// User's learning objectives
     pub learning_goals: Vec<LearningGoal>,
+    /// User's availability schedule
     pub availability: AvailabilityWindow,
+    /// Cultural background information
     pub cultural_background: CulturalBackground,
+    /// Interaction style preferences
     pub interaction_preferences: InteractionPreferences,
+    /// Average peer rating (0.0-5.0)
     pub peer_rating: f32,
+    /// Total number of completed sessions
     pub session_count: u32,
+    /// Last activity timestamp
     pub last_active: SystemTime,
 }
 
 /// Skill level classification
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SkillLevel {
+    /// Just starting to learn
     Beginner,
+    /// Basic understanding
     Elementary,
+    /// Moderate proficiency
     Intermediate,
+    /// High intermediate level
     UpperIntermediate,
+    /// Advanced skills
     Advanced,
+    /// Near-native proficiency
     Proficient,
 }
 
 /// Learning goals for targeted matching
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum LearningGoal {
+    /// Focus on correct pronunciation
     PronunciationAccuracy,
+    /// Improve speaking fluency
     FluencyImprovement,
+    /// Reduce accent
     AccentReduction,
+    /// Practice natural conversation
     ConversationalPractice,
+    /// Learn business communication
     BusinessCommunication,
+    /// Academic presentation skills
     AcademicSpeaking,
+    /// Learn about other cultures
     CulturalExchange,
+    /// Full language immersion
     LanguageImmersion,
 }
 
 /// Cultural background for cross-cultural matching
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CulturalBackground {
+    /// User's country
     pub country: String,
+    /// User's region (if applicable)
     pub region: Option<String>,
+    /// Cultural interests
     pub cultural_interests: Vec<String>,
+    /// User's time zone
     pub time_zone: String,
+    /// Interest in cultural exchange
     pub cultural_exchange_interest: bool,
 }
 
 /// User interaction preferences
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InteractionPreferences {
+    /// Preferred session length
     pub preferred_session_duration: Duration,
+    /// Preferred feedback style
     pub feedback_style: FeedbackStyle,
+    /// Communication style preference
     pub communication_style: CommunicationStyle,
+    /// Preferred group size
     pub group_size_preference: GroupSizePreference,
+    /// Topics of interest
     pub topics_of_interest: Vec<String>,
 }
 
 /// Feedback style preferences
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum FeedbackStyle {
+    /// Soft, supportive feedback
     Gentle,
+    /// Straightforward feedback
     Direct,
+    /// Positive, motivational feedback
     Encouraging,
+    /// Detailed, technical feedback
     Analytical,
+    /// Mix of different styles
     Balanced,
 }
 
 /// Communication style preferences
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CommunicationStyle {
+    /// Formal communication
     Formal,
+    /// Informal, relaxed style
     Casual,
+    /// Business-appropriate style
     Professional,
+    /// Warm, personable style
     Friendly,
+    /// Academic, educational style
     Academic,
 }
 
 /// Group size preferences
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GroupSizePreference {
+    /// One-on-one sessions
     OneOnOne,
-    SmallGroup,  // 3-4 people
-    MediumGroup, // 5-8 people
-    LargeGroup,  // 9+ people
+    /// Small group (3-4 people)
+    SmallGroup,
+    /// Medium group (5-8 people)
+    MediumGroup,
+    /// Large group (9+ people)
+    LargeGroup,
+    /// Any group size acceptable
     NoPreference,
 }
 
 /// Availability window for scheduling
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AvailabilityWindow {
+    /// Available time slots
     pub time_slots: Vec<TimeSlot>,
+    /// User's timezone
     pub timezone: String,
+    /// Willing to adjust schedule
     pub flexible_scheduling: bool,
 }
 
 /// Time slot representation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimeSlot {
-    pub day_of_week: u8, // 0-6 (Sunday-Saturday)
-    pub start_hour: u8,  // 0-23
-    pub end_hour: u8,    // 0-23
+    /// Day of week (0-6, Sunday-Saturday)
+    pub day_of_week: u8,
+    /// Start hour (0-23)
+    pub start_hour: u8,
+    /// End hour (0-23)
+    pub end_hour: u8,
 }
 
 /// Peer matching request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MatchingRequest {
+    /// ID of user requesting match
     pub requester_id: Uuid,
+    /// Language to practice
     pub target_language: String,
+    /// Preferred partner skill level
     pub preferred_skill_level: Option<SkillLevel>,
+    /// Type of session desired
     pub session_type: SessionType,
+    /// Interest in cultural exchange
     pub cultural_exchange: bool,
+    /// Maximum time to wait for match
     pub max_wait_time: Duration,
+    /// Request creation timestamp
     pub created_at: SystemTime,
 }
 
 /// Type of peer learning session
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SessionType {
+    /// Focus on pronunciation
     PronunciationPractice,
+    /// Natural conversation practice
     ConversationExchange,
+    /// Language exchange partnership
     LanguageTandem,
+    /// Cultural immersion experience
     CulturalImmersion,
+    /// Structured learning session
     StructuredLearning,
+    /// Freeform practice session
     FreeformPractice,
 }
 
 /// Peer matching result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerMatch {
+    /// Unique match identifier
     pub match_id: Uuid,
+    /// IDs of matched users
     pub participants: Vec<Uuid>,
+    /// Compatibility score (0.0-1.0)
     pub compatibility_score: f32,
+    /// Factors contributing to match
     pub matching_factors: Vec<MatchingFactor>,
+    /// Recommended activities
     pub suggested_activities: Vec<LearningActivity>,
+    /// Expected session length
     pub estimated_session_duration: Duration,
+    /// Match creation timestamp
     pub created_at: SystemTime,
 }
 
 /// Factors that contributed to the match
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MatchingFactor {
+    /// Compatible language interests
     LanguageCompatibility,
+    /// Similar skill levels
     SkillLevelAlignment,
+    /// Shared cultural interests
     CulturalInterest,
+    /// Overlapping schedules
     ScheduleOverlap,
+    /// Aligned learning goals
     LearningGoalAlignment,
+    /// Compatible interaction styles
     InteractionStyleMatch,
+    /// Close geographic location
     GeographicProximity,
+    /// History of successful sessions
     PreviousSuccessfulSessions,
 }
 
 /// Suggested learning activities for matched peers
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LearningActivity {
+    /// Type of activity
     pub activity_type: ActivityType,
+    /// Activity description
     pub description: String,
+    /// Expected duration
     pub estimated_duration: Duration,
+    /// Required skill level
     pub difficulty_level: SkillLevel,
+    /// Materials needed
     pub required_materials: Vec<String>,
+    /// Learning objectives
     pub learning_objectives: Vec<String>,
 }
 
 /// Types of peer learning activities
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ActivityType {
+    /// Pronunciation practice exercises
     PronunciationDrills,
+    /// Conversation topics
     ConversationTopics,
+    /// Role-playing scenarios
     RolePlayScenarios,
+    /// Cultural exchange activities
     CulturalExchange,
+    /// Language learning games
     LanguageGames,
+    /// Storytelling practice
     StoryTelling,
+    /// Debate topics
     DebateTopics,
+    /// Presentation practice
     PresentationPractice,
+    /// Listening comprehension
     ListeningComprehension,
+    /// Vocabulary building
     VocabularyBuilding,
 }
 
 /// Peer feedback and rating system
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerFeedback {
+    /// Session identifier
     pub session_id: Uuid,
+    /// User giving feedback
     pub from_user: Uuid,
+    /// User receiving feedback
     pub to_user: Uuid,
-    pub overall_rating: f32, // 1.0-5.0
+    /// Overall rating (1.0-5.0)
+    pub overall_rating: f32,
+    /// Detailed category ratings
     pub categories: PeerFeedbackCategories,
+    /// Optional written feedback
     pub written_feedback: Option<String>,
+    /// Suggestions for improvement
     pub improvement_suggestions: Vec<String>,
+    /// Positive highlights
     pub positive_highlights: Vec<String>,
+    /// Willingness to practice again
     pub would_practice_again: bool,
+    /// Feedback creation timestamp
     pub created_at: SystemTime,
 }
 
 /// Detailed peer feedback categories
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerFeedbackCategories {
+    /// Pronunciation accuracy rating
     pub pronunciation_accuracy: f32,
+    /// Fluency rating
     pub fluency: f32,
+    /// Vocabulary usage rating
     pub vocabulary_usage: f32,
+    /// Grammar accuracy rating
     pub grammar_accuracy: f32,
+    /// Listening skills rating
     pub listening_skills: f32,
+    /// Cultural sensitivity rating
     pub cultural_sensitivity: f32,
+    /// Helpfulness rating
     pub helpfulness: f32,
+    /// Engagement level rating
     pub engagement: f32,
 }
 
 /// Intelligent peer matching algorithm
 pub struct PeerMatchingEngine {
+    /// User profiles by ID
     profiles: RwLock<HashMap<Uuid, PeerProfile>>,
+    /// Active matching requests
     active_requests: RwLock<HashMap<Uuid, MatchingRequest>>,
+    /// Match history per user
     match_history: RwLock<HashMap<Uuid, Vec<PeerMatch>>>,
+    /// Feedback history per user
     feedback_history: RwLock<HashMap<Uuid, Vec<PeerFeedback>>>,
+    /// Algorithm configuration
     matching_algorithm: MatchingAlgorithm,
 }
 
 /// Matching algorithm configuration
 #[derive(Debug, Clone)]
 pub struct MatchingAlgorithm {
+    /// Weight for language compatibility
     pub language_weight: f32,
+    /// Weight for skill level matching
     pub skill_level_weight: f32,
+    /// Weight for cultural interests
     pub cultural_weight: f32,
+    /// Weight for schedule compatibility
     pub schedule_weight: f32,
+    /// Weight for learning goal alignment
     pub goal_weight: f32,
+    /// Weight for interaction style
     pub interaction_weight: f32,
+    /// Weight for peer ratings
     pub rating_weight: f32,
+    /// Factor promoting diversity
     pub diversity_factor: f32,
 }
 
@@ -614,21 +745,27 @@ impl SkillLevel {
 /// Errors that can occur in peer learning operations
 #[derive(Debug, thiserror::Error)]
 pub enum PeerLearningError {
+    /// User profile not found
     #[error("Profile not found for user {0}")]
     ProfileNotFound(Uuid),
 
+    /// Matching request not found
     #[error("Matching request not found: {0}")]
     RequestNotFound(Uuid),
 
+    /// No compatible peers available
     #[error("No compatible peers found")]
     NoCompatiblePeers,
 
+    /// Session not found
     #[error("Session not found: {0}")]
     SessionNotFound(Uuid),
 
+    /// Invalid feedback data
     #[error("Invalid feedback data: {0}")]
     InvalidFeedback(String),
 
+    /// System error
     #[error("System error: {0}")]
     SystemError(String),
 }

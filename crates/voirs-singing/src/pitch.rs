@@ -4,8 +4,9 @@
 
 use crate::score::MusicalNote;
 use crate::types::{Expression, VoiceCharacteristics};
-use ndarray::{Array1, Array2};
-use rustfft::{num_complex::Complex, FftPlanner};
+use scirs2_core::ndarray::{Array1, Array2};
+use scirs2_core::random::{thread_rng, Rng};
+use scirs2_core::Complex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -48,8 +49,6 @@ pub struct PitchProcessor {
     frame_size: usize,
     /// Hop size
     hop_size: usize,
-    /// FFT planner
-    fft_planner: FftPlanner<f32>,
     /// Window function
     window: Array1<f32>,
     /// Pitch shift factor
@@ -191,6 +190,16 @@ struct PhaseVocoder {
 
 impl PitchContour {
     /// Create new pitch contour
+    ///
+    /// # Arguments
+    ///
+    /// * `time_points` - Time points in seconds
+    /// * `f0_values` - Fundamental frequency values in Hz
+    ///
+    /// # Returns
+    ///
+    /// A new `PitchContour` with default confidence (1.0), voicing (true),
+    /// smoothness (0.5), and cubic interpolation
     pub fn new(time_points: Vec<f32>, f0_values: Vec<f32>) -> Self {
         let len = time_points.len();
         Self {
@@ -203,7 +212,17 @@ impl PitchContour {
         }
     }
 
-    /// Get F0 value at specific time
+    /// Get F0 value at specific time using interpolation
+    ///
+    /// # Arguments
+    ///
+    /// * `time` - Time point in seconds
+    ///
+    /// # Returns
+    ///
+    /// Interpolated F0 value in Hz at the specified time. Returns 0.0 if
+    /// time_points is empty. Uses the interpolation method specified in
+    /// `self.interpolation`
     pub fn f0_at_time(&self, time: f32) -> f32 {
         if self.time_points.is_empty() {
             return 0.0;
@@ -270,7 +289,15 @@ impl PitchContour {
         self.cubic_interpolation(time, left_idx, right_idx)
     }
 
-    /// Smooth pitch contour
+    /// Smooth pitch contour using moving average
+    ///
+    /// # Arguments
+    ///
+    /// * `factor` - Smoothing factor (0.0-1.0). 0.0 = no smoothing, 1.0 = maximum smoothing
+    ///
+    /// # Notes
+    ///
+    /// Applies a 3-point moving average filter. Requires at least 3 F0 values
     pub fn smooth(&mut self, factor: f32) {
         if self.f0_values.len() < 3 {
             return;
@@ -293,6 +320,15 @@ impl PitchContour {
     }
 
     /// Apply vibrato to pitch contour
+    ///
+    /// # Arguments
+    ///
+    /// * `params` - Vibrato parameters including frequency, depth, onset time, and waveform
+    ///
+    /// # Notes
+    ///
+    /// Vibrato is only applied to time points after `params.onset_time`. The depth
+    /// is specified in cents and can vary based on `params.depth_variation`
     pub fn apply_vibrato(&mut self, params: &VibratoParams) {
         for (i, &time) in self.time_points.iter().enumerate() {
             if time < params.onset_time {
@@ -322,7 +358,7 @@ impl PitchContour {
                         -1.0
                     }
                 }
-                VibratoWaveform::Random => (rand::random::<f32>() - 0.5) * 2.0,
+                VibratoWaveform::Random => (thread_rng().gen::<f32>() - 0.5) * 2.0,
             };
 
             let depth_cents = params.depth * (1.0 + params.depth_variation * (phase * 0.1).sin());
@@ -332,7 +368,17 @@ impl PitchContour {
         }
     }
 
-    /// Detect pitch using autocorrelation
+    /// Detect pitch using autocorrelation method
+    ///
+    /// # Arguments
+    ///
+    /// * `audio` - Audio samples
+    /// * `sample_rate` - Sample rate in Hz
+    ///
+    /// # Returns
+    ///
+    /// Detected pitch in Hz, or None if no pitch detected. Detection range is
+    /// 80-800 Hz. Requires at least 512 samples
     pub fn detect_pitch(audio: &[f32], sample_rate: f32) -> Option<f32> {
         if audio.len() < 512 {
             return None;
@@ -373,6 +419,15 @@ impl PitchContour {
 
 impl PitchGenerator {
     /// Create new pitch generator
+    ///
+    /// # Arguments
+    ///
+    /// * `voice_characteristics` - Voice characteristics to use for pitch generation
+    ///
+    /// # Returns
+    ///
+    /// A new `PitchGenerator` with default model parameters, vibrato, portamento,
+    /// and empty expression mappings
     pub fn new(voice_characteristics: VoiceCharacteristics) -> Self {
         Self {
             voice_characteristics,
@@ -383,22 +438,39 @@ impl PitchGenerator {
         }
     }
 
-    /// Set model parameters
+    /// Set pitch model parameters
+    ///
+    /// # Arguments
+    ///
+    /// * `params` - Pitch model parameters including base F0, range, stability, and variations
     pub fn set_model_params(&mut self, params: PitchModelParams) {
         self.model_params = params;
     }
 
     /// Set vibrato parameters
+    ///
+    /// # Arguments
+    ///
+    /// * `params` - Vibrato parameters including frequency, depth, onset time, and waveform
     pub fn set_vibrato_params(&mut self, params: VibratoParams) {
         self.vibrato_params = params;
     }
 
     /// Set portamento parameters
+    ///
+    /// # Arguments
+    ///
+    /// * `params` - Portamento parameters including time, curve, threshold, and strength
     pub fn set_portamento_params(&mut self, params: PortamentoParams) {
         self.portamento_params = params;
     }
 
-    /// Add expression mapping
+    /// Add expression mapping for pitch modification
+    ///
+    /// # Arguments
+    ///
+    /// * `expression` - Expression type to map
+    /// * `params` - Pitch parameters to apply for this expression
     pub fn add_expression_mapping(
         &mut self,
         expression: Expression,
@@ -408,6 +480,16 @@ impl PitchGenerator {
     }
 
     /// Generate pitch contour from musical notes
+    ///
+    /// # Arguments
+    ///
+    /// * `notes` - Musical notes to generate pitch contour from
+    /// * `duration` - Total duration in seconds
+    ///
+    /// # Returns
+    ///
+    /// A `PitchContour` sampled at 100 Hz with pitch values derived from notes,
+    /// expression mappings, pitch bends, portamento, vibrato, and model-based variations
     pub fn generate_contour(&self, notes: &[MusicalNote], duration: f32) -> PitchContour {
         let sample_rate = 100.0; // 100 Hz sampling for pitch contour
         let num_samples = (duration * sample_rate) as usize;
@@ -539,13 +621,13 @@ impl PitchGenerator {
         // Add intonation accuracy
         if self.model_params.intonation_accuracy < 1.0 {
             let deviation = (1.0 - self.model_params.intonation_accuracy) * 0.05;
-            multiplier *= 1.0 + (rand::random::<f32>() - 0.5) * deviation;
+            multiplier *= 1.0 + (thread_rng().gen::<f32>() - 0.5) * deviation;
         }
 
         // Add microtonal deviation
         if self.model_params.microtonal_deviation > 0.0 {
             let deviation = self.model_params.microtonal_deviation * 0.02;
-            multiplier *= 1.0 + (rand::random::<f32>() - 0.5) * deviation;
+            multiplier *= 1.0 + (thread_rng().gen::<f32>() - 0.5) * deviation;
         }
 
         // Add pitch variation
@@ -559,17 +641,25 @@ impl PitchGenerator {
 }
 
 impl PitchProcessor {
-    /// Create new pitch processor
+    /// Create new pitch processor for real-time pitch shifting
+    ///
+    /// # Arguments
+    ///
+    /// * `sample_rate` - Sample rate in Hz
+    /// * `frame_size` - Frame size for processing
+    ///
+    /// # Returns
+    ///
+    /// A new `PitchProcessor` with hop size = frame_size / 4, Hann window,
+    /// and default pitch/formant shift factors of 1.0
     pub fn new(sample_rate: f32, frame_size: usize) -> Self {
         let hop_size = frame_size / 4;
-        let fft_planner = FftPlanner::new();
         let window = Self::create_window(frame_size);
 
         Self {
             sample_rate,
             frame_size,
             hop_size,
-            fft_planner,
             window,
             pitch_shift: 1.0,
             formant_shift: 1.0,
@@ -588,16 +678,33 @@ impl PitchProcessor {
     }
 
     /// Set pitch shift factor
+    ///
+    /// # Arguments
+    ///
+    /// * `factor` - Pitch shift factor (1.0 = no change, 2.0 = up one octave, 0.5 = down one octave)
     pub fn set_pitch_shift(&mut self, factor: f32) {
         self.pitch_shift = factor;
     }
 
     /// Set formant shift factor
+    ///
+    /// # Arguments
+    ///
+    /// * `factor` - Formant shift factor (1.0 = no change, >1.0 = shift up, <1.0 = shift down)
     pub fn set_formant_shift(&mut self, factor: f32) {
         self.formant_shift = factor;
     }
 
-    /// Process audio with pitch modification
+    /// Process audio with pitch modification using phase vocoder
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Input audio samples
+    ///
+    /// # Returns
+    ///
+    /// Processed audio with pitch shifted according to `pitch_shift` factor.
+    /// Output length matches input length
     pub fn process(&mut self, input: &[f32]) -> Vec<f32> {
         let mut output = Vec::with_capacity(input.len());
 
@@ -624,27 +731,37 @@ impl PitchProcessor {
             .collect();
 
         // Convert to complex for FFT
-        let mut complex_input: Vec<Complex<f32>> =
-            windowed.iter().map(|&x| Complex::new(x, 0.0)).collect();
+        let input_f64: Vec<scirs2_core::Complex<f64>> = windowed
+            .iter()
+            .map(|&x| scirs2_core::Complex::new(x as f64, 0.0))
+            .collect();
 
         // Perform FFT
-        let fft = self.fft_planner.plan_fft_forward(self.frame_size);
-        fft.process(&mut complex_input);
+        let fft_result = scirs2_fft::fft(&input_f64, None)
+            .unwrap_or_else(|_| vec![scirs2_core::Complex::new(0.0, 0.0); input_f64.len()]);
+        let complex_input: Vec<Complex<f32>> = fft_result
+            .iter()
+            .map(|c| Complex::new(c.re as f32, c.im as f32))
+            .collect();
 
         // Apply pitch shift using phase vocoder
-        let mut shifted_spectrum = self
+        let shifted_spectrum = self
             .phase_vocoder
             .process_spectrum(&complex_input, self.pitch_shift);
 
         // Perform inverse FFT
-        let ifft = self.fft_planner.plan_fft_inverse(self.frame_size);
-        ifft.process(&mut shifted_spectrum);
+        let input_ifft: Vec<scirs2_core::Complex<f64>> = shifted_spectrum
+            .iter()
+            .map(|c| scirs2_core::Complex::new(c.re as f64, c.im as f64))
+            .collect();
+        let ifft_result = scirs2_fft::ifft(&input_ifft, None)
+            .unwrap_or_else(|_| vec![scirs2_core::Complex::new(0.0, 0.0); input_ifft.len()]);
 
         // Extract real part and apply window
-        let output: Vec<f32> = shifted_spectrum
+        let output: Vec<f32> = ifft_result
             .iter()
             .zip(self.window.iter())
-            .map(|(x, w)| x.re * w / self.frame_size as f32)
+            .map(|(x, w)| x.re as f32 * w)
             .collect();
 
         output

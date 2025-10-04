@@ -7,8 +7,8 @@
 
 use crate::types::Position3D;
 use crate::{Error, Result};
-use ndarray::{Array1, Array2, Array3, Axis};
-use num_complex::Complex32;
+use scirs2_core::ndarray::{Array1, Array2, Array3, Axis};
+use scirs2_core::Complex32;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::f32::consts::PI;

@@ -39,7 +39,7 @@ pub enum CliError {
 
     /// SDK error wrapper
     #[error("VoiRS SDK error: {0}")]
-    Sdk(#[from] voirs::VoirsError),
+    Sdk(#[from] voirs_sdk::VoirsError),
 
     /// Serialization error
     #[error("Serialization error: {0}")]
@@ -637,11 +637,11 @@ pub type VoirsCliError = CliError;
 pub type VoirsCLIError = CliError;
 
 /// Convert CliError to VoirsError for compatibility
-impl From<CliError> for voirs::VoirsError {
+impl From<CliError> for voirs_sdk::VoirsError {
     fn from(err: CliError) -> Self {
         match err {
             CliError::Sdk(voirs_err) => voirs_err,
-            other => voirs::VoirsError::InternalError {
+            other => voirs_sdk::VoirsError::InternalError {
                 component: "voirs-cli".to_string(),
                 message: other.to_string(),
             },

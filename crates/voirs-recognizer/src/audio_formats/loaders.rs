@@ -25,6 +25,7 @@ pub struct WavLoader {
 impl WavLoader {
     /// Create a new WAV loader with the given configuration
     #[must_use]
+    /// new
     pub fn new(config: AudioLoadConfig) -> Self {
         Self { config }
     }
@@ -38,6 +39,7 @@ impl WavLoader {
         self.load_from_reader(reader)
     }
 
+    /// load from bytes
     pub fn load_from_bytes(&self, data: &[u8]) -> Result<AudioBuffer, RecognitionError> {
         let cursor = Cursor::new(data);
         let reader = hound::WavReader::new(cursor).map_err(|e| {
@@ -164,10 +166,12 @@ pub struct FlacLoader {
 
 impl FlacLoader {
     #[must_use]
+    /// new
     pub fn new(config: AudioLoadConfig) -> Self {
         Self { config }
     }
 
+    /// load from path
     pub fn load_from_path<P: AsRef<Path>>(&self, path: P) -> Result<AudioBuffer, RecognitionError> {
         let reader = claxon::FlacReader::open(path).map_err(|e| {
             RecognitionError::InvalidFormat(format!("Failed to open FLAC file: {e}"))
@@ -176,6 +180,7 @@ impl FlacLoader {
         self.load_from_reader(reader)
     }
 
+    /// load from bytes
     pub fn load_from_bytes(&self, data: &[u8]) -> Result<AudioBuffer, RecognitionError> {
         let cursor = Cursor::new(data);
         let reader = claxon::FlacReader::new(cursor).map_err(|e| {
@@ -238,10 +243,12 @@ pub struct Mp3Loader {
 
 impl Mp3Loader {
     #[must_use]
+    /// new
     pub fn new(config: AudioLoadConfig) -> Self {
         Self { config }
     }
 
+    /// load from path
     pub fn load_from_path<P: AsRef<Path>>(&self, path: P) -> Result<AudioBuffer, RecognitionError> {
         let data = std::fs::read(path).map_err(|e| {
             RecognitionError::InvalidFormat(format!("Failed to read MP3 file: {e}"))
@@ -250,6 +257,7 @@ impl Mp3Loader {
         self.load_from_bytes(&data)
     }
 
+    /// load from bytes
     pub fn load_from_bytes(&self, data: &[u8]) -> Result<AudioBuffer, RecognitionError> {
         let mut decoder = minimp3::Decoder::new(data);
 
@@ -304,10 +312,12 @@ pub struct OggLoader {
 
 impl OggLoader {
     #[must_use]
+    /// new
     pub fn new(config: AudioLoadConfig) -> Self {
         Self { config }
     }
 
+    /// load from path
     pub fn load_from_path<P: AsRef<Path>>(&self, path: P) -> Result<AudioBuffer, RecognitionError> {
         let file = std::fs::File::open(path).map_err(|e| {
             RecognitionError::InvalidFormat(format!("Failed to open OGG file: {e}"))
@@ -320,6 +330,7 @@ impl OggLoader {
         self.load_from_reader(reader)
     }
 
+    /// load from bytes
     pub fn load_from_bytes(&self, data: &[u8]) -> Result<AudioBuffer, RecognitionError> {
         let cursor = Cursor::new(data);
         let reader = lewton::inside_ogg::OggStreamReader::new(cursor).map_err(|e| {
@@ -386,10 +397,12 @@ pub struct M4aLoader {
 
 impl M4aLoader {
     #[must_use]
+    /// new
     pub fn new(config: AudioLoadConfig) -> Self {
         Self { config }
     }
 
+    /// load from path
     pub fn load_from_path<P: AsRef<Path>>(&self, path: P) -> Result<AudioBuffer, RecognitionError> {
         let data = std::fs::read(path).map_err(|e| RecognitionError::AudioProcessingError {
             message: format!("Failed to read M4A file: {e}"),
@@ -399,6 +412,7 @@ impl M4aLoader {
         self.load_from_bytes(&data)
     }
 
+    /// load from bytes
     pub fn load_from_bytes(&self, data: &[u8]) -> Result<AudioBuffer, RecognitionError> {
         let data_vec = data.to_vec(); // Copy data to avoid lifetime issues
         let cursor = Cursor::new(data_vec);

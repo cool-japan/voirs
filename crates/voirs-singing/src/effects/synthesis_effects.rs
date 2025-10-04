@@ -16,6 +16,15 @@ pub struct BreathNoiseEffect {
 }
 
 impl BreathNoiseEffect {
+    /// Creates a new breath noise effect for natural vocal texture.
+    ///
+    /// # Arguments
+    ///
+    /// * `parameters` - Effect parameters including level, frequency, bandwidth, and sensitivity
+    ///
+    /// # Returns
+    ///
+    /// A new `BreathNoiseEffect` instance with configured noise generator and envelope follower.
     pub fn new(mut parameters: HashMap<String, f32>) -> Self {
         let mut effect = Self {
             name: "breath_noise".to_string(),
@@ -113,6 +122,15 @@ pub struct VocalFryEffect {
 }
 
 impl VocalFryEffect {
+    /// Creates a new vocal fry effect for low-frequency vocal crackle.
+    ///
+    /// # Arguments
+    ///
+    /// * `parameters` - Effect parameters including frequency, intensity, irregularity, and threshold
+    ///
+    /// # Returns
+    ///
+    /// A new `VocalFryEffect` instance with pulse generator and envelope follower.
     pub fn new(mut parameters: HashMap<String, f32>) -> Self {
         let mut effect = Self {
             name: "vocal_fry".to_string(),
@@ -231,14 +249,12 @@ impl PulseGenerator {
         let effective_freq = self.frequency * freq_variation;
         self.phase += effective_freq / sample_rate;
 
-        let output = if self.phase >= 1.0 {
+        if self.phase >= 1.0 {
             self.phase -= 1.0;
             self.amplitude * (1.0 - 2.0 * self.phase).max(0.0) // Impulse-like pulse
         } else {
             0.0
-        };
-
-        output
+        }
     }
 
     fn generate_random(&mut self) -> f32 {
@@ -276,6 +292,15 @@ pub struct HarmonicsEffect {
 }
 
 impl HarmonicsEffect {
+    /// Creates a new harmonics effect for enriching vocal timbre.
+    ///
+    /// # Arguments
+    ///
+    /// * `parameters` - Effect parameters including harmonics count, intensity, and decay rate
+    ///
+    /// # Returns
+    ///
+    /// A new `HarmonicsEffect` instance with initialized oscillators for harmonic generation.
     pub fn new(mut parameters: HashMap<String, f32>) -> Self {
         let mut effect = Self {
             name: "harmonics".to_string(),
@@ -344,11 +369,8 @@ impl SingingEffect for HarmonicsEffect {
     fn set_parameter(&mut self, name: &str, value: f32) -> crate::Result<()> {
         self.parameters.insert(name.to_string(), value);
 
-        match name {
-            "harmonics_count" => {
-                self.initialize_oscillators();
-            }
-            _ => {}
+        if name == "harmonics_count" {
+            self.initialize_oscillators();
         }
 
         Ok(())

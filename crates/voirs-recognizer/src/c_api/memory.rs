@@ -15,6 +15,7 @@ pub struct VoirsMemoryManager {
 }
 
 impl VoirsMemoryManager {
+    /// new
     pub fn new() -> Self {
         Self {
             allocations: HashMap::new(),

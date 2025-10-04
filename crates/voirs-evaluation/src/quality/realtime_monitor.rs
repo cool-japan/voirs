@@ -208,12 +208,12 @@ struct AdaptiveThresholds {
 
 /// Processing performance statistics
 #[derive(Debug, Default)]
-struct ProcessingStats {
-    total_samples_processed: u64,
-    total_processing_time: Duration,
-    peak_latency: Duration,
-    average_latency: Duration,
-    quality_violations: u32,
+pub struct ProcessingStats {
+    pub total_samples_processed: u64,
+    pub total_processing_time: Duration,
+    pub peak_latency: Duration,
+    pub average_latency: Duration,
+    pub quality_violations: u32,
 }
 
 impl RealTimeQualityMonitor {

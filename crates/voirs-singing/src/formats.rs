@@ -1,7 +1,5 @@
 //! Musical format parsers
 
-#![allow(missing_docs, clippy::new_without_default)]
-
 #[cfg(any(feature = "midi-support", feature = "musicxml-support"))]
 use crate::score::{KeySignature, Mode, Note, TimeSignature};
 use crate::score::{MusicalNote, MusicalScore};
@@ -9,18 +7,61 @@ use crate::types::{Articulation, Dynamics, Expression, NoteEvent};
 use async_trait::async_trait;
 use std::fs;
 
-/// Format parser trait
+/// Format parser trait for parsing musical score formats
 #[async_trait]
 pub trait FormatParser: Send + Sync {
+    /// Parse a musical score from a file path
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the file to parse
+    ///
+    /// # Returns
+    ///
+    /// Returns a `MusicalScore` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read or parsed
     async fn parse_file(&self, path: &str) -> crate::Result<MusicalScore>;
+
+    /// Parse a musical score from a string
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - String data to parse
+    ///
+    /// # Returns
+    ///
+    /// Returns a `MusicalScore` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the data cannot be parsed
     async fn parse_string(&self, data: &str) -> crate::Result<MusicalScore>;
+
+    /// Get list of supported file extensions
+    ///
+    /// # Returns
+    ///
+    /// Vector of file extension strings (without dots)
     fn supported_extensions(&self) -> Vec<String>;
 }
 
-/// MusicXML parser
+/// MusicXML format parser
+///
+/// Parses MusicXML files into internal musical score representation.
+/// Supports both compressed (.mxl) and uncompressed (.xml, .musicxml) formats.
 pub struct MusicXmlParser;
 
+impl Default for MusicXmlParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MusicXmlParser {
+    /// Create a new MusicXML parser
     pub fn new() -> Self {
         Self
     }
@@ -264,7 +305,7 @@ impl MusicXmlParser {
 #[async_trait]
 impl FormatParser for MusicXmlParser {
     async fn parse_file(&self, path: &str) -> crate::Result<MusicalScore> {
-        let data = fs::read_to_string(path).map_err(|e| crate::Error::Io(e))?;
+        let data = fs::read_to_string(path).map_err(crate::Error::Io)?;
         self.parse_string(&data).await
     }
 
@@ -277,7 +318,10 @@ impl FormatParser for MusicXmlParser {
     }
 }
 
-/// MIDI parser
+/// MIDI format parser
+///
+/// Parses MIDI files into internal musical score representation.
+/// Supports Standard MIDI File (SMF) format types 0 and 1.
 pub struct MidiParser {
     /// Ticks per quarter note for timing calculation
     ticks_per_quarter: u16,
@@ -285,7 +329,18 @@ pub struct MidiParser {
     tempo: u32,
 }
 
+impl Default for MidiParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MidiParser {
+    /// Create a new MIDI parser with default settings
+    ///
+    /// Default settings:
+    /// - Ticks per quarter note: 480
+    /// - Tempo: 120 BPM (500,000 microseconds per quarter note)
     pub fn new() -> Self {
         Self {
             ticks_per_quarter: 480,
@@ -348,11 +403,10 @@ impl MidiParser {
         // Track note on/off events
         let mut active_notes: std::collections::HashMap<u8, (u32, u8)> =
             std::collections::HashMap::new();
-        let mut current_time = 0u32;
 
         // Process all tracks
         for track in smf.tracks {
-            current_time = 0;
+            let mut current_time = 0u32;
 
             for event in track {
                 current_time += event.delta.as_int();
@@ -497,7 +551,7 @@ impl MidiParser {
 #[async_trait]
 impl FormatParser for MidiParser {
     async fn parse_file(&self, path: &str) -> crate::Result<MusicalScore> {
-        let data = fs::read(path).map_err(|e| crate::Error::Io(e))?;
+        let data = fs::read(path).map_err(crate::Error::Io)?;
         let mut parser = self.clone();
         parser.parse_midi_data(&data)
     }

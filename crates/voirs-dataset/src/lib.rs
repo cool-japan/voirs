@@ -3,8 +3,6 @@
 //! Dataset loading, preprocessing, and management utilities for training
 //! and evaluation of VoiRS speech synthesis models.
 
-#![allow(dead_code)]
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;

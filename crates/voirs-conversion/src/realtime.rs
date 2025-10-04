@@ -137,7 +137,7 @@ pub struct RealtimeConverter {
     /// Performance metrics
     metrics: PerformanceMetrics,
     /// Processing thread pool
-    thread_pool: rayon::ThreadPool,
+    thread_pool: scirs2_core::parallel_ops::ThreadPool,
 }
 
 impl RealtimeConverter {
@@ -169,7 +169,7 @@ impl RealtimeConverter {
         let processing_pipeline = Self::create_realtime_pipeline(&config)?;
 
         // Create thread pool for parallel processing
-        let thread_pool = rayon::ThreadPoolBuilder::new()
+        let thread_pool = scirs2_core::parallel_ops::ThreadPoolBuilder::new()
             .num_threads(config.max_threads)
             .build()
             .map_err(|e| Error::realtime(format!("Failed to create thread pool: {e}")))?;

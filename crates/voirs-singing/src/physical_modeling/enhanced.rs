@@ -14,33 +14,53 @@ use std::collections::HashMap;
 /// Enhanced vocal tract model with advanced physics
 #[derive(Debug, Clone)]
 pub struct AdvancedVocalTractModel {
-    /// Base vocal tract model
+    /// Base vocal tract model providing core functionality
     pub base_model: VocalTractModel,
 
-    /// Advanced physics components
+    /// Turbulence modeling component
     pub turbulence_model: TurbulenceModel,
+    /// Wall vibration and tissue compliance modeling
     pub wall_vibration_model: WallVibrationModel,
+    /// Thermal effects and temperature-dependent acoustics
     pub thermal_model: ThermalModel,
+    /// Nonlinear dynamics and shock formation
     pub nonlinear_dynamics: NonlinearDynamicsModel,
+    /// Boundary conditions and radiation impedances
     pub boundary_conditions: BoundaryConditionModel,
+    /// Multi-scale physics solver
     pub physics_solver: MultiScalePhysicsSolver,
 
-    /// Simulation parameters
+    /// Current physics accuracy level setting
     pub physics_accuracy_level: PhysicsAccuracyLevel,
+    /// Enable turbulence modeling flag
     pub enable_turbulence: bool,
+    /// Enable wall vibration modeling flag
     pub enable_wall_vibration: bool,
+    /// Enable thermal effects modeling flag
     pub enable_thermal_effects: bool,
+    /// Enable nonlinear dynamics flag
     pub enable_nonlinear_dynamics: bool,
+    /// Enable molecular-scale effects flag (computationally expensive)
     pub enable_molecular_effects: bool,
 
-    /// Performance optimization
+    /// Enable adaptive resolution flag
     pub adaptive_resolution: bool,
+    /// Enable GPU acceleration flag (if available)
     pub gpu_acceleration: bool,
+    /// Enable parallel processing flag
     pub parallel_processing: bool,
+    /// Precomputed lookup tables for performance optimization
     pub precomputed_lookup_tables: HashMap<String, Vec<f32>>,
 }
 
 impl AdvancedVocalTractModel {
+    /// Create new advanced vocal tract model with all physics components
+    ///
+    /// # Arguments
+    /// * `base_model` - Base vocal tract model to enhance
+    ///
+    /// # Returns
+    /// New advanced model with all physics components initialized
     pub fn new(base_model: VocalTractModel) -> crate::Result<Self> {
         let num_sections = base_model.num_sections;
 
@@ -65,6 +85,10 @@ impl AdvancedVocalTractModel {
         })
     }
 
+    /// Set physics accuracy level and adjust enabled effects accordingly
+    ///
+    /// # Arguments
+    /// * `level` - Desired accuracy level (Basic/Intermediate/High/Maximum)
     pub fn set_accuracy_level(&mut self, level: PhysicsAccuracyLevel) {
         self.physics_accuracy_level = level;
 
@@ -101,6 +125,13 @@ impl AdvancedVocalTractModel {
         }
     }
 
+    /// Process audio with all enabled advanced physics effects
+    ///
+    /// # Arguments
+    /// * `audio` - Audio buffer to process (modified in-place)
+    ///
+    /// # Returns
+    /// Ok on success, error if processing fails
     pub fn process_enhanced_physics(&mut self, audio: &mut [f32]) -> crate::Result<()> {
         let num_samples = audio.len();
         let dt = 1.0 / self.base_model.sample_rate;
@@ -109,9 +140,7 @@ impl AdvancedVocalTractModel {
         self.base_model.process_physical_model(audio)?;
 
         // Apply enhanced physics effects sample by sample
-        for i in 0..num_samples {
-            let sample_index = i;
-
+        for sample in audio.iter_mut().take(num_samples) {
             // Get current state from base model
             let mut pressures = self.base_model.junction_pressures.clone();
             let mut velocities = self.base_model.velocities.clone();
@@ -151,9 +180,9 @@ impl AdvancedVocalTractModel {
 
             // Apply boundary condition effects
             let output_correction =
-                self.apply_boundary_effects(audio[i], self.base_model.glottal_model.f0);
+                self.apply_boundary_effects(*sample, self.base_model.glottal_model.f0);
 
-            audio[i] = output_correction;
+            *sample = output_correction;
         }
 
         Ok(())
@@ -172,6 +201,10 @@ impl AdvancedVocalTractModel {
         sample * radiation_factor * loss_factor
     }
 
+    /// Optimize physics settings for real-time performance
+    ///
+    /// # Arguments
+    /// * `target_rtf` - Target real-time factor (1.0 = exact real-time)
     pub fn optimize_for_real_time(&mut self, target_rtf: f32) {
         // Adjust physics accuracy based on performance requirements
         if target_rtf < 1.0 {
@@ -192,6 +225,10 @@ impl AdvancedVocalTractModel {
         }
     }
 
+    /// Precompute lookup tables for frequently used functions
+    ///
+    /// Generates optimized lookup tables for lip radiation, temperature correction,
+    /// and nonlinear distortion to improve runtime performance.
     pub fn precompute_lookup_tables(&mut self) {
         // Precompute frequently used functions for performance
 
@@ -228,6 +265,10 @@ impl AdvancedVocalTractModel {
             .insert("nonlinear_distortion".to_string(), distortion_table);
     }
 
+    /// Get current performance metrics and estimates
+    ///
+    /// # Returns
+    /// Performance metrics including computational cost and real-time capability
     pub fn get_performance_metrics(&self) -> AdvancedPerformanceMetrics {
         let solver_status = self.physics_solver.get_solver_status();
 
@@ -317,6 +358,9 @@ impl AdvancedVocalTractModel {
         base_rtf * accuracy_factor * effects_factor
     }
 
+    /// Reset all advanced physics state to initial conditions
+    ///
+    /// Clears base model state and optionally regenerates lookup tables.
     pub fn reset_advanced_state(&mut self) {
         // Reset base model
         self.base_model.reset();
@@ -334,19 +378,33 @@ impl AdvancedVocalTractModel {
 /// Performance metrics for advanced vocal tract model
 #[derive(Debug, Clone)]
 pub struct AdvancedPerformanceMetrics {
+    /// Current physics accuracy level
     pub physics_accuracy_level: PhysicsAccuracyLevel,
+    /// Number of enabled physics effects
     pub enabled_effects: usize,
+    /// Estimated computational cost (relative units)
     pub computational_cost_estimate: f32,
+    /// Physics solver stability status
     pub solver_stability: bool,
+    /// Estimated memory usage in bytes
     pub memory_usage_estimate: usize,
+    /// Real-time capability factor (>1.0 = faster than real-time)
     pub real_time_capability: f32,
 }
 
 impl AdvancedPerformanceMetrics {
+    /// Check if model can run in real-time or faster
+    ///
+    /// # Returns
+    /// True if real-time capability >= 1.0
     pub fn is_real_time_capable(&self) -> bool {
         self.real_time_capability >= 1.0
     }
 
+    /// Get performance rating based on real-time capability
+    ///
+    /// # Returns
+    /// Performance rating (Excellent/Good/Adequate/Poor)
     pub fn performance_rating(&self) -> PerformanceRating {
         if self.real_time_capability >= 5.0 {
             PerformanceRating::Excellent
@@ -363,8 +421,12 @@ impl AdvancedPerformanceMetrics {
 /// Performance rating levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PerformanceRating {
+    /// Excellent performance (>5x real-time)
     Excellent,
+    /// Good performance (2-5x real-time)
     Good,
+    /// Adequate performance (1-2x real-time)
     Adequate,
+    /// Poor performance (<1x real-time)
     Poor,
 }

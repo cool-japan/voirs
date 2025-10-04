@@ -2,8 +2,8 @@
 
 use crate::GlobalOptions;
 use std::path::PathBuf;
-use voirs::Result;
 use voirs_sdk::config::AppConfig;
+use voirs_sdk::Result;
 
 /// Optimization strategy
 #[derive(Debug, Clone)]
@@ -44,7 +44,7 @@ pub async fn run_optimize_model(
     // Check if model exists
     let model_path = get_model_path(model_id, config)?;
     if !model_path.exists() {
-        return Err(voirs::VoirsError::model_error(format!(
+        return Err(voirs_sdk::VoirsError::model_error(format!(
             "Model '{}' not found. Please download it first.",
             model_id
         )));
@@ -88,7 +88,7 @@ fn determine_optimization_strategy(
         "quality" => Ok(OptimizationStrategy::Quality),
         "memory" => Ok(OptimizationStrategy::Memory),
         "balanced" => Ok(OptimizationStrategy::Balanced),
-        _ => Err(voirs::VoirsError::config_error(&format!(
+        _ => Err(voirs_sdk::VoirsError::config_error(&format!(
             "Invalid optimization strategy '{}'. Valid options: speed, quality, memory, balanced",
             strategy_str
         ))),
@@ -104,7 +104,7 @@ async fn analyze_model(model_path: &PathBuf, global: &GlobalOptions) -> Result<M
     // Read model configuration
     let config_path = model_path.join("config.json");
     let config_content =
-        std::fs::read_to_string(&config_path).map_err(|e| voirs::VoirsError::IoError {
+        std::fs::read_to_string(&config_path).map_err(|e| voirs_sdk::VoirsError::IoError {
             path: config_path.clone(),
             operation: voirs_sdk::error::IoOperation::Read,
             source: e,
@@ -323,24 +323,24 @@ async fn apply_optimization_step(
 /// Copy model files with validation
 fn copy_model_files(input_path: &PathBuf, output_path: &PathBuf) -> Result<()> {
     if !input_path.exists() {
-        return Err(voirs::VoirsError::config_error(format!(
+        return Err(voirs_sdk::VoirsError::config_error(format!(
             "Input path does not exist: {}",
             input_path.display()
         )));
     }
 
-    std::fs::create_dir_all(output_path).map_err(|e| voirs::VoirsError::IoError {
+    std::fs::create_dir_all(output_path).map_err(|e| voirs_sdk::VoirsError::IoError {
         path: output_path.clone(),
         operation: voirs_sdk::error::IoOperation::Write,
         source: e,
     })?;
 
-    for entry in std::fs::read_dir(input_path).map_err(|e| voirs::VoirsError::IoError {
+    for entry in std::fs::read_dir(input_path).map_err(|e| voirs_sdk::VoirsError::IoError {
         path: input_path.clone(),
         operation: voirs_sdk::error::IoOperation::Read,
         source: e,
     })? {
-        let entry = entry.map_err(|e| voirs::VoirsError::IoError {
+        let entry = entry.map_err(|e| voirs_sdk::VoirsError::IoError {
             path: input_path.clone(),
             operation: voirs_sdk::error::IoOperation::Read,
             source: e,
@@ -349,7 +349,7 @@ fn copy_model_files(input_path: &PathBuf, output_path: &PathBuf) -> Result<()> {
         let dst = output_path.join(entry.file_name());
 
         if src.is_file() {
-            std::fs::copy(&src, &dst).map_err(|e| voirs::VoirsError::IoError {
+            std::fs::copy(&src, &dst).map_err(|e| voirs_sdk::VoirsError::IoError {
                 path: src.clone(),
                 operation: voirs_sdk::error::IoOperation::Read,
                 source: e,
@@ -370,19 +370,19 @@ async fn quantize_model_files(
     }
 
     // Create output directory
-    std::fs::create_dir_all(output_path).map_err(|e| voirs::VoirsError::IoError {
+    std::fs::create_dir_all(output_path).map_err(|e| voirs_sdk::VoirsError::IoError {
         path: output_path.clone(),
         operation: voirs_sdk::error::IoOperation::Write,
         source: e,
     })?;
 
     // Process model files
-    for entry in std::fs::read_dir(input_path).map_err(|e| voirs::VoirsError::IoError {
+    for entry in std::fs::read_dir(input_path).map_err(|e| voirs_sdk::VoirsError::IoError {
         path: input_path.clone(),
         operation: voirs_sdk::error::IoOperation::Read,
         source: e,
     })? {
-        let entry = entry.map_err(|e| voirs::VoirsError::IoError {
+        let entry = entry.map_err(|e| voirs_sdk::VoirsError::IoError {
             path: input_path.clone(),
             operation: voirs_sdk::error::IoOperation::Read,
             source: e,
@@ -403,7 +403,7 @@ async fn quantize_model_files(
                 quantize_onnx_model(&src, &dst, global).await?;
             } else {
                 // Copy non-model files as-is
-                std::fs::copy(&src, &dst).map_err(|e| voirs::VoirsError::IoError {
+                std::fs::copy(&src, &dst).map_err(|e| voirs_sdk::VoirsError::IoError {
                     path: src.clone(),
                     operation: voirs_sdk::error::IoOperation::Read,
                     source: e,
@@ -426,7 +426,7 @@ async fn quantize_model_files(
         output_path.join("quantization_info.json"),
         serde_json::to_string_pretty(&metadata).unwrap(),
     )
-    .map_err(|e| voirs::VoirsError::IoError {
+    .map_err(|e| voirs_sdk::VoirsError::IoError {
         path: output_path.join("quantization_info.json"),
         operation: voirs_sdk::error::IoOperation::Write,
         source: e,
@@ -449,19 +449,19 @@ async fn optimize_model_graph(
     }
 
     // Create output directory
-    std::fs::create_dir_all(output_path).map_err(|e| voirs::VoirsError::IoError {
+    std::fs::create_dir_all(output_path).map_err(|e| voirs_sdk::VoirsError::IoError {
         path: output_path.clone(),
         operation: voirs_sdk::error::IoOperation::Write,
         source: e,
     })?;
 
     // Copy and optimize model files
-    for entry in std::fs::read_dir(input_path).map_err(|e| voirs::VoirsError::IoError {
+    for entry in std::fs::read_dir(input_path).map_err(|e| voirs_sdk::VoirsError::IoError {
         path: input_path.clone(),
         operation: voirs_sdk::error::IoOperation::Read,
         source: e,
     })? {
-        let entry = entry.map_err(|e| voirs::VoirsError::IoError {
+        let entry = entry.map_err(|e| voirs_sdk::VoirsError::IoError {
             path: input_path.clone(),
             operation: voirs_sdk::error::IoOperation::Read,
             source: e,
@@ -481,7 +481,7 @@ async fn optimize_model_graph(
                 optimize_onnx_graph(&src, &dst, global).await?;
             } else {
                 // Copy other files
-                std::fs::copy(&src, &dst).map_err(|e| voirs::VoirsError::IoError {
+                std::fs::copy(&src, &dst).map_err(|e| voirs_sdk::VoirsError::IoError {
                     path: src.clone(),
                     operation: voirs_sdk::error::IoOperation::Read,
                     source: e,
@@ -503,7 +503,7 @@ async fn optimize_model_graph(
         output_path.join("optimization_info.json"),
         serde_json::to_string_pretty(&metadata).unwrap(),
     )
-    .map_err(|e| voirs::VoirsError::IoError {
+    .map_err(|e| voirs_sdk::VoirsError::IoError {
         path: output_path.join("optimization_info.json"),
         operation: voirs_sdk::error::IoOperation::Write,
         source: e,
@@ -526,7 +526,7 @@ async fn compress_model_files(
     }
 
     // Create output directory
-    std::fs::create_dir_all(output_path).map_err(|e| voirs::VoirsError::IoError {
+    std::fs::create_dir_all(output_path).map_err(|e| voirs_sdk::VoirsError::IoError {
         path: output_path.clone(),
         operation: voirs_sdk::error::IoOperation::Write,
         source: e,
@@ -536,12 +536,12 @@ async fn compress_model_files(
     let mut total_compressed_size = 0u64;
 
     // Compress model files
-    for entry in std::fs::read_dir(input_path).map_err(|e| voirs::VoirsError::IoError {
+    for entry in std::fs::read_dir(input_path).map_err(|e| voirs_sdk::VoirsError::IoError {
         path: input_path.clone(),
         operation: voirs_sdk::error::IoOperation::Read,
         source: e,
     })? {
-        let entry = entry.map_err(|e| voirs::VoirsError::IoError {
+        let entry = entry.map_err(|e| voirs_sdk::VoirsError::IoError {
             path: input_path.clone(),
             operation: voirs_sdk::error::IoOperation::Read,
             source: e,
@@ -552,7 +552,7 @@ async fn compress_model_files(
         if src.is_file() {
             let original_size = src
                 .metadata()
-                .map_err(|e| voirs::VoirsError::IoError {
+                .map_err(|e| voirs_sdk::VoirsError::IoError {
                     path: src.clone(),
                     operation: voirs_sdk::error::IoOperation::Read,
                     source: e,
@@ -570,7 +570,7 @@ async fn compress_model_files(
                 compress_model_file(&src, &dst)?;
             } else {
                 // Copy smaller files without compression
-                std::fs::copy(&src, &dst).map_err(|e| voirs::VoirsError::IoError {
+                std::fs::copy(&src, &dst).map_err(|e| voirs_sdk::VoirsError::IoError {
                     path: src.clone(),
                     operation: voirs_sdk::error::IoOperation::Read,
                     source: e,
@@ -579,7 +579,7 @@ async fn compress_model_files(
 
             let compressed_size = dst
                 .metadata()
-                .map_err(|e| voirs::VoirsError::IoError {
+                .map_err(|e| voirs_sdk::VoirsError::IoError {
                     path: dst.clone(),
                     operation: voirs_sdk::error::IoOperation::Read,
                     source: e,
@@ -612,7 +612,7 @@ async fn compress_model_files(
         output_path.join("compression_info.json"),
         serde_json::to_string_pretty(&metadata).unwrap(),
     )
-    .map_err(|e| voirs::VoirsError::IoError {
+    .map_err(|e| voirs_sdk::VoirsError::IoError {
         path: output_path.join("compression_info.json"),
         operation: voirs_sdk::error::IoOperation::Write,
         source: e,
@@ -695,7 +695,7 @@ async fn quantize_tensor_file(
     dst: &std::path::Path,
     global: &GlobalOptions,
 ) -> Result<()> {
-    let original_data = std::fs::read(src).map_err(|e| voirs::VoirsError::IoError {
+    let original_data = std::fs::read(src).map_err(|e| voirs_sdk::VoirsError::IoError {
         path: src.to_path_buf(),
         operation: voirs_sdk::error::IoOperation::Read,
         source: e,
@@ -719,7 +719,7 @@ async fn quantize_tensor_file(
     };
 
     // Write quantized data
-    std::fs::write(dst, &quantized_data).map_err(|e| voirs::VoirsError::IoError {
+    std::fs::write(dst, &quantized_data).map_err(|e| voirs_sdk::VoirsError::IoError {
         path: dst.to_path_buf(),
         operation: voirs_sdk::error::IoOperation::Write,
         source: e,
@@ -732,7 +732,7 @@ async fn quantize_tensor_file(
         &metadata_path,
         serde_json::to_string_pretty(&metadata).unwrap(),
     )
-    .map_err(|e| voirs::VoirsError::IoError {
+    .map_err(|e| voirs_sdk::VoirsError::IoError {
         path: metadata_path,
         operation: voirs_sdk::error::IoOperation::Write,
         source: e,
@@ -876,7 +876,7 @@ async fn quantize_onnx_model(
     dst: &std::path::Path,
     global: &GlobalOptions,
 ) -> Result<()> {
-    let original_data = std::fs::read(src).map_err(|e| voirs::VoirsError::IoError {
+    let original_data = std::fs::read(src).map_err(|e| voirs_sdk::VoirsError::IoError {
         path: src.to_path_buf(),
         operation: voirs_sdk::error::IoOperation::Read,
         source: e,
@@ -885,7 +885,7 @@ async fn quantize_onnx_model(
     // Simulate ONNX quantization
     let quantized_data = simulate_onnx_quantization(&original_data)?;
 
-    std::fs::write(dst, &quantized_data).map_err(|e| voirs::VoirsError::IoError {
+    std::fs::write(dst, &quantized_data).map_err(|e| voirs_sdk::VoirsError::IoError {
         path: dst.to_path_buf(),
         operation: voirs_sdk::error::IoOperation::Write,
         source: e,
@@ -898,7 +898,7 @@ async fn quantize_onnx_model(
         &metadata_path,
         serde_json::to_string_pretty(&metadata).unwrap(),
     )
-    .map_err(|e| voirs::VoirsError::IoError {
+    .map_err(|e| voirs_sdk::VoirsError::IoError {
         path: metadata_path,
         operation: voirs_sdk::error::IoOperation::Write,
         source: e,
@@ -1021,15 +1021,16 @@ fn create_onnx_quantization_metadata(original: &[u8], quantized: &[u8]) -> serde
 
 /// Optimize model configuration
 fn optimize_model_config(src: &std::path::Path, dst: &std::path::Path) -> Result<()> {
-    let config_content = std::fs::read_to_string(src).map_err(|e| voirs::VoirsError::IoError {
-        path: src.to_path_buf(),
-        operation: voirs_sdk::error::IoOperation::Read,
-        source: e,
-    })?;
+    let config_content =
+        std::fs::read_to_string(src).map_err(|e| voirs_sdk::VoirsError::IoError {
+            path: src.to_path_buf(),
+            operation: voirs_sdk::error::IoOperation::Read,
+            source: e,
+        })?;
 
     // Parse and optimize configuration
     let mut config: serde_json::Value = serde_json::from_str(&config_content)
-        .map_err(|e| voirs::VoirsError::config_error(format!("Invalid JSON config: {}", e)))?;
+        .map_err(|e| voirs_sdk::VoirsError::config_error(format!("Invalid JSON config: {}", e)))?;
 
     // Apply optimizations to config
     if let Some(obj) = config.as_object_mut() {
@@ -1061,10 +1062,10 @@ fn optimize_model_config(src: &std::path::Path, dst: &std::path::Path) -> Result
     }
 
     let optimized_content = serde_json::to_string_pretty(&config).map_err(|e| {
-        voirs::VoirsError::config_error(format!("Failed to serialize config: {}", e))
+        voirs_sdk::VoirsError::config_error(format!("Failed to serialize config: {}", e))
     })?;
 
-    std::fs::write(dst, optimized_content).map_err(|e| voirs::VoirsError::IoError {
+    std::fs::write(dst, optimized_content).map_err(|e| voirs_sdk::VoirsError::IoError {
         path: dst.to_path_buf(),
         operation: voirs_sdk::error::IoOperation::Write,
         source: e,
@@ -1079,7 +1080,7 @@ async fn optimize_onnx_graph(
     dst: &std::path::Path,
     global: &GlobalOptions,
 ) -> Result<()> {
-    let original_data = std::fs::read(src).map_err(|e| voirs::VoirsError::IoError {
+    let original_data = std::fs::read(src).map_err(|e| voirs_sdk::VoirsError::IoError {
         path: src.to_path_buf(),
         operation: voirs_sdk::error::IoOperation::Read,
         source: e,
@@ -1088,7 +1089,7 @@ async fn optimize_onnx_graph(
     // Simulate ONNX graph optimization
     let optimized_data = simulate_onnx_graph_optimization(&original_data)?;
 
-    std::fs::write(dst, &optimized_data).map_err(|e| voirs::VoirsError::IoError {
+    std::fs::write(dst, &optimized_data).map_err(|e| voirs_sdk::VoirsError::IoError {
         path: dst.to_path_buf(),
         operation: voirs_sdk::error::IoOperation::Write,
         source: e,
@@ -1101,7 +1102,7 @@ async fn optimize_onnx_graph(
         &metadata_path,
         serde_json::to_string_pretty(&metadata).unwrap(),
     )
-    .map_err(|e| voirs::VoirsError::IoError {
+    .map_err(|e| voirs_sdk::VoirsError::IoError {
         path: metadata_path,
         operation: voirs_sdk::error::IoOperation::Write,
         source: e,
@@ -1331,13 +1332,13 @@ fn compress_model_file(src: &std::path::Path, dst: &std::path::Path) -> Result<(
     use flate2::{write::GzEncoder, Compression};
     use std::io::{Read, Write};
 
-    let mut input_file = std::fs::File::open(src).map_err(|e| voirs::VoirsError::IoError {
+    let mut input_file = std::fs::File::open(src).map_err(|e| voirs_sdk::VoirsError::IoError {
         path: src.to_path_buf(),
         operation: voirs_sdk::error::IoOperation::Read,
         source: e,
     })?;
 
-    let output_file = std::fs::File::create(dst).map_err(|e| voirs::VoirsError::IoError {
+    let output_file = std::fs::File::create(dst).map_err(|e| voirs_sdk::VoirsError::IoError {
         path: dst.to_path_buf(),
         operation: voirs_sdk::error::IoOperation::Write,
         source: e,
@@ -1347,13 +1348,14 @@ fn compress_model_file(src: &std::path::Path, dst: &std::path::Path) -> Result<(
     let mut buffer = [0; 8192];
 
     loop {
-        let bytes_read = input_file
-            .read(&mut buffer)
-            .map_err(|e| voirs::VoirsError::IoError {
-                path: src.to_path_buf(),
-                operation: voirs_sdk::error::IoOperation::Read,
-                source: e,
-            })?;
+        let bytes_read =
+            input_file
+                .read(&mut buffer)
+                .map_err(|e| voirs_sdk::VoirsError::IoError {
+                    path: src.to_path_buf(),
+                    operation: voirs_sdk::error::IoOperation::Read,
+                    source: e,
+                })?;
 
         if bytes_read == 0 {
             break;
@@ -1361,18 +1363,20 @@ fn compress_model_file(src: &std::path::Path, dst: &std::path::Path) -> Result<(
 
         encoder
             .write_all(&buffer[..bytes_read])
-            .map_err(|e| voirs::VoirsError::IoError {
+            .map_err(|e| voirs_sdk::VoirsError::IoError {
                 path: dst.to_path_buf(),
                 operation: voirs_sdk::error::IoOperation::Write,
                 source: e,
             })?;
     }
 
-    encoder.finish().map_err(|e| voirs::VoirsError::IoError {
-        path: dst.to_path_buf(),
-        operation: voirs_sdk::error::IoOperation::Write,
-        source: e,
-    })?;
+    encoder
+        .finish()
+        .map_err(|e| voirs_sdk::VoirsError::IoError {
+            path: dst.to_path_buf(),
+            operation: voirs_sdk::error::IoOperation::Write,
+            source: e,
+        })?;
 
     Ok(())
 }

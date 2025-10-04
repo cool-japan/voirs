@@ -15,13 +15,13 @@ use std::time::{Duration, Instant};
 
 /// Optimized LRU cache implementation with proper access order tracking
 #[derive(Debug)]
-struct LRU<K, V> {
+struct Lru<K, V> {
     map: HashMap<K, (V, usize)>, // (value, access_order)
     access_counter: usize,
     capacity: usize,
 }
 
-impl<K: Clone + std::hash::Hash + Eq, V> LRU<K, V> {
+impl<K: Clone + std::hash::Hash + Eq, V> Lru<K, V> {
     fn new(capacity: usize) -> Self {
         Self {
             map: HashMap::with_capacity(capacity),
@@ -108,7 +108,7 @@ impl<K: Clone + std::hash::Hash + Eq, V> LRU<K, V> {
 #[derive(Debug)]
 pub struct VoiceCache {
     /// LRU cache for voice models
-    cache: Arc<RwLock<LRU<String, CachedVoice>>>,
+    cache: Arc<RwLock<Lru<String, CachedVoice>>>,
     /// Cache configuration
     config: VoiceCacheConfig,
     /// Cache statistics
@@ -758,7 +758,7 @@ impl VoiceCache {
     /// Create a new voice cache
     pub fn new(config: VoiceCacheConfig) -> Self {
         Self {
-            cache: Arc::new(RwLock::new(LRU::new(config.max_voices))),
+            cache: Arc::new(RwLock::new(Lru::new(config.max_voices))),
             config,
             stats: Arc::new(RwLock::new(CacheStats::default())),
             preloader: Arc::new(Mutex::new(VoicePreloader::new())),
@@ -921,6 +921,12 @@ impl VoiceCache {
         }
 
         self.update_memory_stats();
+    }
+}
+
+impl Default for VoicePreloader {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

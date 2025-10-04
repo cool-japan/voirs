@@ -6,8 +6,8 @@ use hf_hub::{api::sync::Api, Repo, RepoType};
 use reqwest::Client;
 use serde_json::Value;
 use std::collections::HashMap;
-use voirs::Result;
 use voirs_sdk::config::AppConfig;
+use voirs_sdk::Result;
 
 /// Run list models command
 pub async fn run_list_models(

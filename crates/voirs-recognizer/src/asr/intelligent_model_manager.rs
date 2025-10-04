@@ -19,6 +19,7 @@ use voirs_sdk::AudioBuffer;
 
 /// Enhanced model switching configuration
 #[derive(Debug, Clone)]
+/// Intelligent Model Config
 pub struct IntelligentModelConfig {
     /// Enable context-aware switching
     pub context_aware_switching: bool,
@@ -61,6 +62,7 @@ impl Default for IntelligentModelConfig {
 
 /// System resource status
 #[derive(Debug, Clone)]
+/// Resource Status
 pub struct ResourceStatus {
     /// CPU usage percentage (0-100)
     pub cpu_usage: f32,
@@ -78,6 +80,7 @@ pub struct ResourceStatus {
 
 /// Model context information for intelligent switching
 #[derive(Debug, Clone)]
+/// Model Context
 pub struct ModelContext {
     /// Content type classification
     pub content_type: AudioContentType,
@@ -93,15 +96,21 @@ pub struct ModelContext {
 
 /// Audio quality classification for model selection
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Audio Quality Level
 pub enum AudioQualityLevel {
-    Poor,      // Heavy noise, low SNR
-    Fair,      // Some noise, medium SNR
-    Good,      // Light noise, good SNR
-    Excellent, // Clean audio, high SNR
+    /// Heavy noise, low SNR
+    Poor,
+    /// Some noise, medium SNR
+    Fair,
+    /// Light noise, good SNR
+    Good,
+    /// Clean audio, high SNR
+    Excellent,
 }
 
 /// Model resource requirements
 #[derive(Debug, Clone)]
+/// Resource Requirements
 pub struct ResourceRequirements {
     /// Memory requirement in MB
     pub memory_mb: f32,
@@ -115,15 +124,21 @@ pub struct ResourceRequirements {
 
 /// Processing priority levels
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// Processing Priority
 pub enum ProcessingPriority {
+    /// Low priority processing
     Low,
+    /// Normal priority processing
     Normal,
+    /// High priority processing
     High,
+    /// Critical priority processing
     Critical,
 }
 
 /// Model preloading strategy
 #[derive(Debug, Clone)]
+/// Preloading Strategy
 pub enum PreloadingStrategy {
     /// Keep most frequently used models loaded
     FrequencyBased,
@@ -137,6 +152,7 @@ pub enum PreloadingStrategy {
 
 /// Adaptive quality threshold manager
 #[derive(Debug, Clone)]
+/// Adaptive Thresholds
 pub struct AdaptiveThresholds {
     /// Current quality threshold per content type
     pub content_type_thresholds: HashMap<AudioContentType, f32>,
@@ -144,23 +160,31 @@ pub struct AdaptiveThresholds {
     pub quality_level_thresholds: HashMap<AudioQualityLevel, f32>,
     /// Threshold adjustment history
     pub adjustment_history: VecDeque<ThresholdAdjustment>,
-    /// Learning parameters
+    /// Learning rate for threshold adaptation
     pub learning_rate: f32,
+    /// Decay factor for historical data
     pub decay_factor: f32,
 }
 
 /// Threshold adjustment record
 #[derive(Debug, Clone)]
+/// Threshold Adjustment
 pub struct ThresholdAdjustment {
+    /// Timestamp of adjustment
     pub timestamp: Instant,
+    /// Audio content type
     pub content_type: AudioContentType,
+    /// Previous threshold value
     pub old_threshold: f32,
+    /// New threshold value
     pub new_threshold: f32,
+    /// Success rate that triggered adjustment
     pub success_rate: f32,
 }
 
 /// Model performance predictor
 #[derive(Debug)]
+/// Model Performance Predictor
 pub struct ModelPerformancePredictor {
     /// Historical performance data
     performance_data: HashMap<String, VecDeque<PerformanceRecord>>,
@@ -172,12 +196,19 @@ pub struct ModelPerformancePredictor {
 
 /// Performance record for prediction training
 #[derive(Debug, Clone)]
+/// Performance Record
 pub struct PerformanceRecord {
+    /// Model identifier key
     pub model_key: String,
+    /// Model execution context
     pub context: ModelContext,
+    /// Actual confidence score achieved
     pub actual_confidence: f32,
+    /// Actual processing time in ms
     pub actual_processing_time: f32,
+    /// Actual resource usage during execution
     pub actual_resource_usage: ResourceStatus,
+    /// Record timestamp
     pub timestamp: Instant,
 }
 
@@ -195,28 +226,43 @@ pub struct IntelligentModelCache {
 
 /// Cached model with metadata
 pub struct CachedModel {
+    /// model
     pub model: Arc<dyn ASRModel>,
+    /// load time
     pub load_time: Instant,
+    /// last access
     pub last_access: Instant,
+    /// access count
     pub access_count: usize,
+    /// resource usage
     pub resource_usage: ResourceRequirements,
+    /// warmup complete
     pub warmup_complete: bool,
 }
 
 /// Model access pattern tracker
 #[derive(Debug, Clone)]
+/// Access Pattern
 pub struct AccessPattern {
+    /// frequency
     pub frequency: f32,
+    /// recency
     pub recency: f32,
+    /// context correlation
     pub context_correlation: HashMap<AudioContentType, f32>,
+    /// time patterns
     pub time_patterns: Vec<AccessTime>,
 }
 
 /// Access time record
 #[derive(Debug, Clone)]
+/// Access Time
 pub struct AccessTime {
+    /// timestamp
     pub timestamp: Instant,
+    /// context
     pub context: AudioContentType,
+    /// success
     pub success: bool,
 }
 
@@ -233,12 +279,19 @@ pub struct IntelligentModelManager {
 
 /// Usage statistics for optimization
 #[derive(Debug, Clone, Default)]
+/// Usage Statistics
 pub struct UsageStatistics {
+    /// total requests
     pub total_requests: usize,
+    /// context distribution
     pub context_distribution: HashMap<AudioContentType, usize>,
+    /// quality distribution
     pub quality_distribution: HashMap<AudioQualityLevel, usize>,
+    /// model success rates
     pub model_success_rates: HashMap<String, f32>,
+    /// average switch time
     pub average_switch_time: f32,
+    /// resource efficiency score
     pub resource_efficiency_score: f32,
 }
 

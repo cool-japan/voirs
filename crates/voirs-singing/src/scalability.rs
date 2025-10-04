@@ -57,7 +57,9 @@ impl ScalabilityManager {
         let start_time = Instant::now();
 
         // Start performance monitoring
-        self.performance_monitor.start_monitoring(session_id).await;
+        self.performance_monitor
+            .start_monitoring(session_id)
+            .await?;
 
         // Initialize session
         let session = self
@@ -134,6 +136,19 @@ pub struct MultiVoiceCoordinator {
 }
 
 impl MultiVoiceCoordinator {
+    /// Create a new multi-voice coordinator
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Multi-voice configuration
+    ///
+    /// # Returns
+    ///
+    /// A new multi-voice coordinator instance
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if coordinator initialization fails
     pub fn new(config: MultiVoiceConfig) -> Result<Self> {
         let voice_semaphore = Arc::new(Semaphore::new(config.max_concurrent_voices));
         let voice_pool = Arc::new(Mutex::new(VecDeque::new()));
@@ -206,7 +221,7 @@ impl MultiVoiceCoordinator {
                 .unwrap_or(&VoiceType::Soprano);
 
             let characteristics = VoiceCharacteristics {
-                voice_type: voice_type.clone(),
+                voice_type: *voice_type,
                 range: self.calculate_pitch_range(notes),
                 f0_mean: self.calculate_mean_f0(notes),
                 f0_std: self.calculate_f0_std(notes),
@@ -222,7 +237,7 @@ impl MultiVoiceCoordinator {
                 *part_id,
                 VoiceInfo {
                     part_id: *part_id,
-                    voice_type: voice_type.clone(),
+                    voice_type: *voice_type,
                     notes: notes.clone(),
                     characteristics,
                 },
@@ -269,6 +284,11 @@ impl MultiVoiceCoordinator {
         variance.sqrt()
     }
 
+    /// Get the current number of active voices
+    ///
+    /// # Returns
+    ///
+    /// The number of currently active voice engines
     pub fn get_active_voice_count(&self) -> usize {
         self.voice_engines
             .read()
@@ -276,6 +296,11 @@ impl MultiVoiceCoordinator {
             .unwrap_or(0)
     }
 
+    /// Get the maximum voice capacity
+    ///
+    /// # Returns
+    ///
+    /// The maximum number of concurrent voices supported
     pub fn get_max_voice_capacity(&self) -> usize {
         self.max_voices
     }
@@ -290,6 +315,19 @@ pub struct ScoreComplexityHandler {
 }
 
 impl ScoreComplexityHandler {
+    /// Create a new score complexity handler
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Score complexity configuration
+    ///
+    /// # Returns
+    ///
+    /// A new score complexity handler instance
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if handler initialization fails
     pub fn new(config: ScoreComplexityConfig) -> Result<Self> {
         Ok(Self {
             complexity_analyzer: ScoreComplexityAnalyzer::new(),
@@ -424,7 +462,7 @@ impl ScoreComplexityHandler {
         // Quantize note timing and pitch for more efficient processing
         let quantization_step = 1.0 / 16.0; // 16th note quantization
 
-        for (_, notes) in &mut score.voice_parts {
+        for notes in score.voice_parts.values_mut() {
             for note in notes {
                 // Quantize timing
                 note.timing_offset =
@@ -447,6 +485,11 @@ impl ScoreComplexityHandler {
         Ok(())
     }
 
+    /// Get the maximum score complexity supported
+    ///
+    /// # Returns
+    ///
+    /// The maximum number of notes that can be processed
     pub fn get_max_score_complexity(&self) -> usize {
         self.config.max_notes_threshold
     }
@@ -461,6 +504,19 @@ pub struct SessionManager {
 }
 
 impl SessionManager {
+    /// Create a new session manager
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Session configuration
+    ///
+    /// # Returns
+    ///
+    /// A new session manager instance
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if manager initialization fails
     pub fn new(config: SessionConfig) -> Result<Self> {
         Ok(Self {
             active_sessions: RwLock::new(HashMap::new()),
@@ -468,6 +524,20 @@ impl SessionManager {
         })
     }
 
+    /// Initialize a new singing session
+    ///
+    /// # Arguments
+    ///
+    /// * `session_id` - Unique session identifier
+    /// * `requirements` - Session requirements including duration and complexity
+    ///
+    /// # Returns
+    ///
+    /// An initialized singing session instance
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if session duration exceeds maximum allowed or session registration fails
     pub fn initialize_session(
         &self,
         session_id: Uuid,
@@ -501,6 +571,11 @@ impl SessionManager {
         Ok(session)
     }
 
+    /// Get the number of currently active sessions
+    ///
+    /// # Returns
+    ///
+    /// The count of active singing sessions
     pub fn get_active_session_count(&self) -> usize {
         self.active_sessions
             .read()
@@ -508,6 +583,11 @@ impl SessionManager {
             .unwrap_or(0)
     }
 
+    /// Get the maximum session duration allowed
+    ///
+    /// # Returns
+    ///
+    /// The maximum session duration in Duration format
     pub fn get_max_session_duration(&self) -> Duration {
         self.config.max_session_duration
     }
@@ -520,10 +600,38 @@ pub struct ResourceOptimizer {
 }
 
 impl ResourceOptimizer {
+    /// Create a new resource optimizer
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Resource configuration including CPU and memory limits
+    ///
+    /// # Returns
+    ///
+    /// A new resource optimizer instance
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if optimizer initialization fails
     pub fn new(config: ResourceConfig) -> Result<Self> {
         Ok(Self { config })
     }
 
+    /// Perform optimized synthesis with resource management
+    ///
+    /// # Arguments
+    ///
+    /// * `score` - The optimized complex score to synthesize
+    /// * `_voice_assignments` - Voice assignments for multi-voice synthesis
+    /// * `_session` - The singing session context
+    ///
+    /// # Returns
+    ///
+    /// The synthesized audio result
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if synthesis fails or resource limits are exceeded
     pub async fn optimized_synthesis(
         &self,
         score: &OptimizedComplexScore,
@@ -543,6 +651,11 @@ impl ResourceOptimizer {
         })
     }
 
+    /// Get the current memory usage
+    ///
+    /// # Returns
+    ///
+    /// Current memory usage in megabytes
     pub fn get_current_memory_usage(&self) -> f32 {
         // Placeholder implementation
         128.0 // MB
@@ -555,13 +668,37 @@ pub struct PerformanceMonitor {
     monitoring_sessions: RwLock<HashMap<Uuid, MonitoringSession>>,
 }
 
+impl Default for PerformanceMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PerformanceMonitor {
+    /// Create a new performance monitor
+    ///
+    /// # Returns
+    ///
+    /// A new performance monitor instance
     pub fn new() -> Self {
         Self {
             monitoring_sessions: RwLock::new(HashMap::new()),
         }
     }
 
+    /// Start monitoring a synthesis session
+    ///
+    /// # Arguments
+    ///
+    /// * `session_id` - Unique identifier for the session to monitor
+    ///
+    /// # Returns
+    ///
+    /// Ok if monitoring started successfully
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if monitoring session cannot be created or registered
     pub async fn start_monitoring(&self, session_id: Uuid) -> crate::Result<()> {
         let session = MonitoringSession {
             start_time: Instant::now(),
@@ -575,6 +712,19 @@ impl PerformanceMonitor {
         Ok(())
     }
 
+    /// Finish monitoring and return collected performance metrics
+    ///
+    /// # Arguments
+    ///
+    /// * `session_id` - Unique identifier for the session being monitored
+    ///
+    /// # Returns
+    ///
+    /// Performance metrics collected during the monitoring session
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the monitoring session is not found or metrics cannot be collected
     pub async fn finish_monitoring(&self, session_id: Uuid) -> crate::Result<PerformanceMetrics> {
         let session = {
             let mut sessions = self.monitoring_sessions.write().map_err(|e| {
@@ -599,6 +749,11 @@ impl PerformanceMonitor {
         })
     }
 
+    /// Get the current CPU usage
+    ///
+    /// # Returns
+    ///
+    /// Current CPU usage as a percentage (0-100)
     pub fn get_current_cpu_usage(&self) -> f32 {
         35.0 // Placeholder
     }
@@ -606,210 +761,379 @@ impl PerformanceMonitor {
 
 // Supporting types and configurations
 
+/// Configuration for scalability management
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScalabilityConfig {
+    /// Multi-voice coordinator configuration
     pub voice_config: MultiVoiceConfig,
+    /// Score complexity handler configuration
     pub score_config: ScoreComplexityConfig,
+    /// Session manager configuration
     pub session_config: SessionConfig,
+    /// Resource optimizer configuration
     pub resource_config: ResourceConfig,
 }
 
+/// Configuration for multi-voice synthesis
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiVoiceConfig {
+    /// Maximum number of voices that can be synthesized simultaneously
     pub max_concurrent_voices: usize,
+    /// Size of the voice pool for efficient reuse
     pub voice_pool_size: usize,
+    /// Target latency in milliseconds
     pub target_latency_ms: f32,
+    /// Audio sample rate in Hz
     pub sample_rate: u32,
+    /// Audio buffer size in samples
     pub buffer_size: usize,
 }
 
+/// Configuration for score complexity handling
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoreComplexityConfig {
+    /// Maximum number of notes that can be processed
     pub max_notes_threshold: usize,
+    /// Threshold for enabling streaming processing (in number of notes)
     pub streaming_threshold: usize,
+    /// Threshold for triggering precomputation optimization (0.0-1.0)
     pub precomputation_threshold: f32,
+    /// Duration of each time segment for streaming
     pub segment_duration: Duration,
 }
 
+/// Configuration for session management
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionConfig {
+    /// Maximum allowed duration for a single session
     pub max_session_duration: Duration,
+    /// Interval for cleaning up inactive sessions
     pub cleanup_interval: Duration,
 }
 
+/// Configuration for resource optimization
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceConfig {
+    /// Maximum CPU usage allowed as a percentage (0-100)
     pub max_cpu_usage: f32,
+    /// Maximum memory usage allowed in megabytes
     pub max_memory_mb: f32,
 }
 
+/// Unique identifier for a synthesized voice
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct VoiceId(pub Uuid);
+pub struct VoiceId(
+    /// Unique voice identifier
+    pub Uuid,
+);
+
+impl Default for VoiceId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl VoiceId {
+    /// Create a new unique voice identifier
+    ///
+    /// # Returns
+    ///
+    /// A new VoiceId with a randomly generated UUID
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
 }
 
+/// Identifier for a voice part in a musical score
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PartId {
+    /// Soprano voice part (highest female voice)
     Soprano,
+    /// Alto voice part (lower female voice)
     Alto,
+    /// Tenor voice part (higher male voice)
     Tenor,
+    /// Bass voice part (lowest male voice)
     Bass,
+    /// Custom voice part with numeric identifier
     Custom(u32),
 }
 
+/// Request for large-scale singing synthesis
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LargeScaleSynthesisRequest {
+    /// Musical score as a sequence of note events
     pub score: Vec<NoteEvent>,
+    /// Requirements for voice characteristics and assignments
     pub voice_requirements: VoiceRequirements,
+    /// Requirements for session duration and complexity
     pub session_requirements: SessionRequirements,
+    /// Hints for optimization strategies
     pub optimization_hints: OptimizationHints,
 }
 
+/// Requirements for voice characteristics and behavior
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceRequirements {
+    /// Mapping of voice parts to voice types
     pub part_assignments: HashMap<PartId, VoiceType>,
+    /// Default vibrato frequency in Hz
     pub default_vibrato_frequency: f32,
+    /// Default vibrato depth (0.0-1.0)
     pub default_vibrato_depth: f32,
+    /// Default breath capacity in seconds
     pub default_breath_capacity: f32,
+    /// Default vocal power (0.0-1.0)
     pub default_vocal_power: f32,
+    /// Default resonance parameters (chest, head, etc.)
     pub default_resonance: HashMap<String, f32>,
+    /// Default timbre parameters (brightness, warmth, etc.)
     pub default_timbre: HashMap<String, f32>,
 }
 
+/// Requirements for a singing synthesis session
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionRequirements {
+    /// Expected duration of the synthesis session
     pub expected_duration: Duration,
+    /// Number of voices to be synthesized
     pub voice_count: usize,
+    /// Complexity level of the synthesis task
     pub complexity_level: ComplexityLevel,
 }
 
+/// Complexity level classification for synthesis tasks
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ComplexityLevel {
+    /// Simple synthesis with basic requirements
     Simple,
+    /// Moderate synthesis with some complexity
     Moderate,
+    /// Complex synthesis with advanced features
     Complex,
+    /// Very complex synthesis with maximum features and requirements
     VeryComplex,
 }
 
+/// Hints for optimization strategies during synthesis
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptimizationHints {
+    /// Enable quantization of note timing and pitch for efficiency
     pub enable_note_quantization: bool,
+    /// Enable caching of repeating musical phrases
     pub enable_phrase_caching: bool,
+    /// Enable voice pooling for resource reuse
     pub enable_voice_pooling: bool,
+    /// Prioritize quality over processing speed
     pub prefer_quality_over_speed: bool,
 }
 
+/// Result of a large-scale singing synthesis operation
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LargeScaleSynthesisResult {
+    /// Unique identifier for the synthesis session
     pub session_id: Uuid,
+    /// The synthesized audio result
     pub synthesis_result: SynthesisResult,
+    /// Performance metrics collected during synthesis
     pub performance_metrics: PerformanceMetrics,
+    /// Total duration of the synthesis process
     pub total_duration: Duration,
+    /// Scalability-related information
     pub scalability_info: ScalabilityInfo,
 }
 
+/// Information about scalability aspects of a synthesis operation
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ScalabilityInfo {
+    /// Number of voices used in synthesis
     pub voices_used: usize,
+    /// Total number of notes processed
     pub notes_processed: usize,
+    /// Length of the synthesis session
     pub session_length: Duration,
+    /// Peak memory usage in megabytes
     pub peak_memory_usage: f32,
+    /// Average CPU usage as a percentage (0-100)
     pub average_cpu_usage: f32,
 }
 
+/// Current status of the scalability system
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ScalabilityStatus {
+    /// Number of currently active sessions
     pub active_sessions: usize,
+    /// Number of currently active voices
     pub active_voices: usize,
+    /// Current memory usage in megabytes
     pub memory_usage_mb: f32,
+    /// Current CPU usage as a percentage (0-100)
     pub cpu_usage_percent: f32,
+    /// Maximum number of voices supported
     pub max_supported_voices: usize,
+    /// Maximum score complexity (number of notes)
     pub max_score_complexity: usize,
+    /// Maximum session duration allowed
     pub max_session_duration: Duration,
 }
 
+/// An optimized complex musical score ready for synthesis
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptimizedComplexScore {
+    /// Original number of notes before optimization
     pub original_note_count: usize,
+    /// Current number of notes after optimization
     pub note_count: usize,
+    /// Notes organized by voice parts
     pub voice_parts: HashMap<PartId, Vec<NoteEvent>>,
+    /// Time-based segments for streaming synthesis
     pub time_segments: Vec<TimeSegment>,
+    /// Complexity metrics for the score
     pub complexity_metrics: ScoreComplexityMetrics,
+    /// List of optimization techniques applied
     pub optimization_applied: Vec<String>,
 }
 
+/// A time-based segment of a musical score
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimeSegment {
+    /// Start time of the segment in seconds
     pub start_time: f32,
+    /// Duration of the segment in seconds
     pub duration: f32,
+    /// Notes contained in this segment
     pub notes: Vec<NoteEvent>,
 }
 
+/// Metrics describing the complexity of a musical score
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoreComplexityMetrics {
+    /// Total number of notes in the score
     pub note_count: usize,
+    /// Number of distinct voice parts
     pub voice_count: usize,
+    /// Harmonic complexity measure (0.0-1.0)
     pub harmonic_complexity: f32,
+    /// Rhythmic complexity measure (0.0-1.0)
     pub rhythmic_complexity: f32,
+    /// Total duration of the score
     pub total_duration: Duration,
 }
 
+/// Assignments of voices to musical parts
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceAssignments {
+    /// Mapping of part IDs to voice IDs and voice information
     pub assignments: HashMap<PartId, (VoiceId, VoiceInfo)>,
 }
 
+impl Default for VoiceAssignments {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VoiceAssignments {
+    /// Create a new empty voice assignments collection
+    ///
+    /// # Returns
+    ///
+    /// A new VoiceAssignments instance with no assignments
     pub fn new() -> Self {
         Self {
             assignments: HashMap::new(),
         }
     }
 
+    /// Add a voice assignment for a specific part
+    ///
+    /// # Arguments
+    ///
+    /// * `part_id` - The musical part identifier
+    /// * `voice_id` - The unique voice identifier
+    /// * `voice_info` - Information about the voice characteristics
     pub fn add_assignment(&mut self, part_id: PartId, voice_id: VoiceId, voice_info: VoiceInfo) {
         self.assignments.insert(part_id, (voice_id, voice_info));
     }
 }
 
+/// Information about a synthesized voice and its characteristics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceInfo {
+    /// The musical part this voice is assigned to
     pub part_id: PartId,
+    /// The type of voice (soprano, alto, tenor, bass)
     pub voice_type: VoiceType,
+    /// Notes to be synthesized by this voice
     pub notes: Vec<NoteEvent>,
+    /// Voice characteristics and parameters
     pub characteristics: VoiceCharacteristics,
 }
 
+/// Result of a synthesis operation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SynthesisResult {
+    /// Synthesized audio samples
     pub audio_data: Vec<f32>,
+    /// Sample rate in Hz
     pub sample_rate: u32,
+    /// Number of audio channels
     pub channels: usize,
+    /// Duration of the synthesized audio
     pub duration: Duration,
 }
 
+/// Performance metrics for a synthesis operation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerformanceMetrics {
+    /// Total duration of the synthesis process
     pub duration: Duration,
+    /// Peak memory usage in megabytes
     pub peak_memory_mb: f32,
+    /// Average CPU usage as a percentage (0-100)
     pub average_cpu_percent: f32,
+    /// Processing rate in notes per second
     pub notes_per_second: f32,
+    /// Number of voices synthesized
     pub voices_synthesized: usize,
+    /// Average latency in milliseconds
     pub latency_ms: f32,
 }
 
 // Supporting implementation types
 
+/// Analyzer for assessing the complexity of musical scores
 pub struct ScoreComplexityAnalyzer;
 
+impl Default for ScoreComplexityAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ScoreComplexityAnalyzer {
+    /// Create a new score complexity analyzer
+    ///
+    /// # Returns
+    ///
+    /// A new ScoreComplexityAnalyzer instance
     pub fn new() -> Self {
         Self
     }
 
+    /// Analyze a musical score and compute complexity metrics
+    ///
+    /// # Arguments
+    ///
+    /// * `score` - Slice of note events to analyze
+    ///
+    /// # Returns
+    ///
+    /// Complexity metrics for the score
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if complexity analysis fails
     pub fn analyze(&self, score: &[NoteEvent]) -> Result<ScoreComplexityMetrics> {
         let note_count = score.len();
         let voice_count = self.estimate_voice_count(score);
@@ -911,31 +1235,50 @@ impl ScoreComplexityAnalyzer {
     }
 }
 
+/// A singing synthesis session with state tracking
 pub struct SingingSession {
+    /// Unique session identifier
     pub id: Uuid,
+    /// Time when the session started
     pub start_time: Instant,
+    /// Expected duration of the session
     pub duration: Duration,
+    /// Number of voices in this session
     pub voice_count: usize,
+    /// Complexity level of the session
     pub complexity_level: ComplexityLevel,
+    /// Current state of the session
     pub state: Arc<RwLock<SessionState>>,
 }
 
+/// State of a singing synthesis session
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionState {
+    /// Session is currently active and processing
     Active,
+    /// Session is paused
     Paused,
+    /// Session completed successfully
     Completed,
+    /// Session failed with an error
     Failed,
 }
 
+/// A monitoring session for collecting performance metrics
 pub struct MonitoringSession {
+    /// Time when monitoring started
     pub start_time: Instant,
+    /// History of collected system metrics
     pub metrics_history: Vec<SystemMetrics>,
 }
 
+/// System metrics at a point in time
 pub struct SystemMetrics {
+    /// Memory usage in megabytes
     pub memory_mb: f32,
+    /// CPU usage as a percentage (0-100)
     pub cpu_percent: f32,
+    /// Latency in milliseconds
     pub latency_ms: f32,
 }
 

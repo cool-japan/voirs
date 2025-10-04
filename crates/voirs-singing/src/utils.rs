@@ -8,7 +8,17 @@
 
 /// Audio utility functions
 pub mod audio {
-    /// Convert samples to different sample rates
+    /// Convert samples to different sample rates using linear interpolation.
+    ///
+    /// # Arguments
+    ///
+    /// * `samples` - Input audio samples to resample
+    /// * `from_rate` - Original sample rate in Hz
+    /// * `to_rate` - Target sample rate in Hz
+    ///
+    /// # Returns
+    ///
+    /// A new vector of resampled audio samples at the target sample rate
     pub fn resample(samples: &[f32], from_rate: f32, to_rate: f32) -> Vec<f32> {
         if from_rate == to_rate {
             return samples.to_vec();
@@ -33,7 +43,13 @@ pub mod audio {
         output
     }
 
-    /// Apply fade in/out to audio
+    /// Apply fade in/out to audio samples to reduce clicks and pops.
+    ///
+    /// # Arguments
+    ///
+    /// * `samples` - Audio samples to modify in-place
+    /// * `fade_in_samples` - Number of samples for the fade-in duration
+    /// * `fade_out_samples` - Number of samples for the fade-out duration
     pub fn apply_fade(samples: &mut [f32], fade_in_samples: usize, fade_out_samples: usize) {
         // Fade in
         for i in 0..fade_in_samples.min(samples.len()) {
@@ -49,7 +65,12 @@ pub mod audio {
         }
     }
 
-    /// Normalize audio to peak amplitude
+    /// Normalize audio to a target peak amplitude.
+    ///
+    /// # Arguments
+    ///
+    /// * `samples` - Audio samples to normalize in-place
+    /// * `target_peak` - Target peak amplitude (typically 1.0 for full scale)
     pub fn normalize(samples: &mut [f32], target_peak: f32) {
         let max_sample = samples.iter().map(|x| x.abs()).fold(0.0, f32::max);
         if max_sample > 0.0 {
@@ -60,7 +81,15 @@ pub mod audio {
         }
     }
 
-    /// Calculate RMS of audio
+    /// Calculate the Root Mean Square (RMS) amplitude of audio samples.
+    ///
+    /// # Arguments
+    ///
+    /// * `samples` - Audio samples to analyze
+    ///
+    /// # Returns
+    ///
+    /// RMS value representing the average signal power
     pub fn rms(samples: &[f32]) -> f32 {
         let sum: f32 = samples.iter().map(|x| x * x).sum();
         (sum / samples.len() as f32).sqrt()
@@ -70,7 +99,16 @@ pub mod audio {
 /// Music theory utility functions
 pub mod music {
 
-    /// Convert note name to frequency
+    /// Convert note name and octave to frequency using equal temperament tuning.
+    ///
+    /// # Arguments
+    ///
+    /// * `note` - Note name (e.g., "C", "C#", "Db", "D", etc.)
+    /// * `octave` - Octave number (typically 0-8, where A4 = 440 Hz)
+    ///
+    /// # Returns
+    ///
+    /// Frequency in Hz corresponding to the given note and octave
     pub fn note_to_frequency(note: &str, octave: u8) -> f32 {
         let note_values = [
             ("C", 0),
@@ -103,7 +141,15 @@ pub mod music {
         440.0 * 2.0_f32.powf(semitones_from_a4 as f32 / 12.0)
     }
 
-    /// Convert frequency to note name and octave
+    /// Convert frequency to the nearest note name and octave.
+    ///
+    /// # Arguments
+    ///
+    /// * `frequency` - Frequency in Hz to convert
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing the note name (String) and octave number (u8)
     pub fn frequency_to_note(frequency: f32) -> (String, u8) {
         let note_names = [
             "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
@@ -120,7 +166,16 @@ pub mod music {
         (note_names[note_index].to_string(), octave)
     }
 
-    /// Get scale notes for a given key
+    /// Get scale notes for a given root note and scale type.
+    ///
+    /// # Arguments
+    ///
+    /// * `root` - Root note of the scale (e.g., "C", "D", "F#")
+    /// * `scale_type` - Type of scale ("major", "minor", "dorian", "phrygian", "lydian", "mixolydian", "locrian")
+    ///
+    /// # Returns
+    ///
+    /// Vector of note names in the specified scale
     pub fn get_scale_notes(root: &str, scale_type: &str) -> Vec<String> {
         let chromatic = [
             "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
@@ -144,7 +199,18 @@ pub mod music {
             .collect()
     }
 
-    /// Calculate interval between two notes in semitones
+    /// Calculate the interval between two notes in semitones.
+    ///
+    /// # Arguments
+    ///
+    /// * `from_note` - Starting note name
+    /// * `from_octave` - Starting octave number
+    /// * `to_note` - Ending note name
+    /// * `to_octave` - Ending octave number
+    ///
+    /// # Returns
+    ///
+    /// Number of semitones between the two notes (positive for ascending, negative for descending)
     pub fn interval_semitones(
         from_note: &str,
         from_octave: u8,
@@ -161,7 +227,12 @@ pub mod music {
 pub mod dsp {
     use std::f32::consts::PI;
 
-    /// Apply window function to signal
+    /// Apply a window function to a signal for spectral analysis.
+    ///
+    /// # Arguments
+    ///
+    /// * `signal` - Signal samples to modify in-place
+    /// * `window_type` - Type of window function to apply
     pub fn apply_window(signal: &mut [f32], window_type: WindowType) {
         let n = signal.len();
         for (i, sample) in signal.iter_mut().enumerate() {
@@ -178,7 +249,10 @@ pub mod dsp {
         }
     }
 
-    /// Window function types
+    /// Window function types for spectral analysis.
+    ///
+    /// Different window types provide different trade-offs between
+    /// frequency resolution and spectral leakage reduction.
     #[derive(Debug, Clone, Copy)]
     pub enum WindowType {
         /// Hamming window (raised cosine)
@@ -191,7 +265,13 @@ pub mod dsp {
         Rectangular,
     }
 
-    /// Simple low-pass filter
+    /// Apply a simple first-order low-pass filter to remove high frequencies.
+    ///
+    /// # Arguments
+    ///
+    /// * `signal` - Signal samples to filter in-place
+    /// * `cutoff` - Cutoff frequency in Hz (frequencies above this are attenuated)
+    /// * `sample_rate` - Sample rate of the signal in Hz
     pub fn low_pass_filter(signal: &mut [f32], cutoff: f32, sample_rate: f32) {
         let rc = 1.0 / (2.0 * PI * cutoff);
         let dt = 1.0 / sample_rate;
@@ -202,7 +282,13 @@ pub mod dsp {
         }
     }
 
-    /// Simple high-pass filter
+    /// Apply a simple first-order high-pass filter to remove low frequencies.
+    ///
+    /// # Arguments
+    ///
+    /// * `signal` - Signal samples to filter in-place
+    /// * `cutoff` - Cutoff frequency in Hz (frequencies below this are attenuated)
+    /// * `sample_rate` - Sample rate of the signal in Hz
     pub fn high_pass_filter(signal: &mut [f32], cutoff: f32, sample_rate: f32) {
         let rc = 1.0 / (2.0 * PI * cutoff);
         let dt = 1.0 / sample_rate;
@@ -223,7 +309,17 @@ pub mod dsp {
 
 /// Text processing utilities
 pub mod text {
-    /// Simple phoneme mapping (G2P simulation)
+    /// Convert text to phonemes using a simple grapheme-to-phoneme mapping.
+    ///
+    /// This is a basic G2P implementation for demonstration purposes.
+    ///
+    /// # Arguments
+    ///
+    /// * `text` - Input text to convert to phonemes
+    ///
+    /// # Returns
+    ///
+    /// Vector of phoneme strings in IPA notation
     pub fn text_to_phonemes(text: &str) -> Vec<String> {
         // Very simple phoneme mapping
         let phoneme_map = [
@@ -269,7 +365,17 @@ pub mod text {
         result
     }
 
-    /// Extract syllables from text
+    /// Extract syllables from text using vowel-based segmentation.
+    ///
+    /// This is a simple heuristic-based syllabification algorithm.
+    ///
+    /// # Arguments
+    ///
+    /// * `text` - Input text to syllabify
+    ///
+    /// # Returns
+    ///
+    /// Vector of syllable strings
     pub fn text_to_syllables(text: &str) -> Vec<String> {
         // Simple syllable extraction
         let words: Vec<&str> = text.split_whitespace().collect();
@@ -311,7 +417,15 @@ pub mod text {
 pub mod voice {
     use crate::types::VoiceType;
 
-    /// Get typical characteristics for voice type
+    /// Get typical vocal characteristics for a given voice type.
+    ///
+    /// # Arguments
+    ///
+    /// * `voice_type` - The voice type (Soprano, Alto, Tenor, Bass, etc.)
+    ///
+    /// # Returns
+    ///
+    /// VoiceCharacteristics structure with typical values for the voice type
     pub fn get_voice_type_characteristics(
         voice_type: VoiceType,
     ) -> crate::types::VoiceCharacteristics {
@@ -348,7 +462,17 @@ pub mod voice {
         characteristics
     }
 
-    /// Blend two voice characteristics
+    /// Blend two voice characteristics using linear interpolation.
+    ///
+    /// # Arguments
+    ///
+    /// * `voice1` - First voice characteristics (weight = 1.0 - factor)
+    /// * `voice2` - Second voice characteristics (weight = factor)
+    /// * `factor` - Blending factor (0.0 = voice1, 1.0 = voice2), clamped to [0.0, 1.0]
+    ///
+    /// # Returns
+    ///
+    /// New VoiceCharacteristics interpolated between the two inputs
     pub fn blend_voice_characteristics(
         voice1: &crate::types::VoiceCharacteristics,
         voice2: &crate::types::VoiceCharacteristics,

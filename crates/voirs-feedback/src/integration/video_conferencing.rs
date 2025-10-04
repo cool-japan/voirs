@@ -16,18 +16,31 @@ use tokio::time::timeout;
 /// Video conferencing integration error types
 #[derive(Debug, Clone)]
 pub enum VideoConferencingError {
+    /// Authentication failed with message
     AuthenticationFailed(String),
+    /// Connection timeout occurred
     ConnectionTimeout,
+    /// Invalid API key provided
     InvalidApiKey,
+    /// Meeting not found with ID
     MeetingNotFound(String),
+    /// Participant not found with ID
     ParticipantNotFound(String),
+    /// Permission denied with reason
     PermissionDenied(String),
+    /// Network error with message
     NetworkError(String),
+    /// Configuration error with message
     ConfigurationError(String),
+    /// API rate limit exceeded
     RateLimitExceeded,
+    /// Unauthorized access attempt
     UnauthorizedAccess,
+    /// Recording failed with message
     RecordingFailed(String),
+    /// Plugin installation failed with message
     PluginInstallationFailed(String),
+    /// Webhook error with message
     WebhookError(String),
 }
 
@@ -66,14 +79,23 @@ impl Error for VideoConferencingError {}
 /// Supported video conferencing platforms
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VideoConferencingPlatform {
+    /// Zoom platform
     Zoom,
+    /// Microsoft Teams platform
     MicrosoftTeams,
+    /// Google Meet platform
     GoogleMeet,
+    /// Cisco WebEx platform
     WebEx,
+    /// GoToMeeting platform
     GoToMeeting,
+    /// BlueJeans platform
     BlueJeans,
+    /// Jitsi Meet platform
     Jitsi,
+    /// Skype platform
     Skype,
+    /// Custom platform with name
     Custom(String),
 }
 
@@ -96,16 +118,27 @@ impl fmt::Display for VideoConferencingPlatform {
 /// Video conferencing authentication configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VideoConferencingAuthConfig {
+    /// Target platform
     pub platform: VideoConferencingPlatform,
+    /// API key for authentication
     pub api_key: String,
+    /// API secret for authentication
     pub api_secret: Option<String>,
+    /// Base URL for API requests
     pub base_url: String,
+    /// OAuth client ID
     pub oauth_client_id: Option<String>,
+    /// OAuth client secret
     pub oauth_client_secret: Option<String>,
+    /// Webhook callback URL
     pub webhook_url: Option<String>,
+    /// Webhook secret for verification
     pub webhook_secret: Option<String>,
+    /// Request timeout in seconds
     pub timeout_seconds: u64,
+    /// Enable meeting recording
     pub enable_recording: bool,
+    /// Enable real-time feedback
     pub enable_real_time_feedback: bool,
 }
 
@@ -130,184 +163,290 @@ impl Default for VideoConferencingAuthConfig {
 /// Meeting information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeetingInfo {
+    /// Meeting identifier
     pub meeting_id: String,
+    /// Meeting UUID
     pub meeting_uuid: Option<String>,
+    /// Meeting topic
     pub topic: String,
+    /// Meeting start time
     pub start_time: SystemTime,
+    /// Meeting duration in minutes
     pub duration_minutes: u32,
+    /// Host user ID
     pub host_id: String,
+    /// Host display name
     pub host_name: String,
+    /// List of participants
     pub participants: Vec<MeetingParticipant>,
+    /// Current meeting status
     pub status: MeetingStatus,
+    /// Meeting join URL
     pub meeting_url: String,
+    /// Whether recording is enabled
     pub recording_enabled: bool,
 }
 
 /// Meeting participant information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeetingParticipant {
+    /// Participant identifier
     pub participant_id: String,
+    /// User identifier
     pub user_id: Option<String>,
+    /// Participant display name
     pub name: String,
+    /// Participant email address
     pub email: Option<String>,
+    /// Time participant joined
     pub join_time: SystemTime,
+    /// Time participant left
     pub leave_time: Option<SystemTime>,
+    /// Duration in meeting in seconds
     pub duration_seconds: u32,
+    /// Whether camera is on
     pub camera_on: bool,
+    /// Whether microphone is on
     pub microphone_on: bool,
+    /// Participant role
     pub role: ParticipantRole,
+    /// Speech analytics data
     pub speech_analytics: Option<SpeechAnalytics>,
 }
 
 /// Meeting status
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MeetingStatus {
+    /// Meeting is scheduled
     Scheduled,
+    /// Meeting is in progress
     InProgress,
+    /// Meeting has ended
     Ended,
+    /// Meeting was cancelled
     Cancelled,
 }
 
 /// Participant role in the meeting
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ParticipantRole {
+    /// Meeting host
     Host,
+    /// Co-host
     CoHost,
+    /// Regular participant
     Participant,
+    /// Panelist
     Panelist,
+    /// Attendee
     Attendee,
 }
 
 /// Speech analytics for meeting participants
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpeechAnalytics {
+    /// Total speaking time in seconds
     pub total_speaking_time_seconds: u32,
+    /// Average volume level
     pub average_volume_level: f32,
+    /// Speech clarity score
     pub speech_clarity_score: f32,
+    /// Speech pace score
     pub pace_score: f32,
+    /// Confidence score
     pub confidence_score: f32,
+    /// Number of filler words
     pub filler_words_count: u32,
+    /// Number of interruptions
     pub interruptions_count: u32,
+    /// Engagement score
     pub engagement_score: f32,
+    /// Sentiment score
     pub sentiment_score: f32,
 }
 
 /// Real-time feedback for video conferencing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RealtimeMeetingFeedback {
+    /// Participant receiving feedback
     pub participant_id: String,
+    /// Feedback timestamp
     pub timestamp: SystemTime,
+    /// Type of feedback
     pub feedback_type: FeedbackType,
+    /// Feedback message
     pub message: String,
+    /// Feedback score
     pub score: f32,
+    /// Improvement suggestions
     pub suggestions: Vec<String>,
+    /// Feedback urgency level
     pub urgency: FeedbackUrgency,
 }
 
 /// Types of real-time feedback
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum FeedbackType {
+    /// Volume level feedback
     VolumeLevel,
+    /// Speech clarity feedback
     SpeechClarity,
+    /// Speech pace feedback
     SpeechPace,
+    /// Filler words feedback
     FillerWords,
+    /// Background noise feedback
     BackgroundNoise,
+    /// Camera position feedback
     CameraPosition,
+    /// Engagement feedback
     Engagement,
+    /// Interruption feedback
     Interruption,
+    /// Turn-taking feedback
     TurnTaking,
 }
 
 /// Urgency level of feedback
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum FeedbackUrgency {
+    /// Low urgency
     Low,
+    /// Medium urgency
     Medium,
+    /// High urgency
     High,
+    /// Critical urgency
     Critical,
 }
 
 /// Meeting analytics and insights
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeetingAnalytics {
+    /// Meeting identifier
     pub meeting_id: String,
+    /// Total meeting duration in minutes
     pub total_duration_minutes: u32,
+    /// Total number of participants
     pub total_participants: u32,
+    /// Average participation time
     pub average_participation_time: f32,
-    pub speaker_distribution: HashMap<String, f32>, // participant_id -> percentage of speaking time
+    /// Speaker distribution by participant ID
+    pub speaker_distribution: HashMap<String, f32>,
+    /// Engagement metrics
     pub engagement_metrics: EngagementMetrics,
+    /// Quality metrics
     pub quality_metrics: QualityMetrics,
+    /// Interaction patterns
     pub interaction_patterns: InteractionPatterns,
+    /// Analytics generation timestamp
     pub generated_at: SystemTime,
 }
 
 /// Engagement metrics for the meeting
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngagementMetrics {
+    /// Overall engagement score
     pub overall_engagement_score: f32,
+    /// Percentage with camera on
     pub camera_on_percentage: f32,
+    /// Percentage using microphone
     pub microphone_usage_percentage: f32,
+    /// Percentage of active speakers
     pub active_speakers_percentage: f32,
+    /// Number of questions asked
     pub question_count: u32,
+    /// Number of interactions
     pub interaction_count: u32,
 }
 
 /// Quality metrics for the meeting
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QualityMetrics {
+    /// Average audio quality
     pub average_audio_quality: f32,
+    /// Average video quality
     pub average_video_quality: f32,
+    /// Connection stability score
     pub connection_stability_score: f32,
+    /// Number of technical issues
     pub technical_issues_count: u32,
+    /// Background noise level
     pub background_noise_level: f32,
 }
 
 /// Interaction patterns in the meeting
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InteractionPatterns {
+    /// Turn-taking efficiency score
     pub turn_taking_efficiency: f32,
+    /// Interruption rate
     pub interruption_rate: f32,
+    /// Percentage of simultaneous speech
     pub simultaneous_speech_percentage: f32,
+    /// Number of silence periods
     pub silence_periods_count: u32,
+    /// Average response time in seconds
     pub average_response_time_seconds: f32,
 }
 
 /// Plugin configuration for video conferencing integration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginConfig {
+    /// Plugin name
     pub plugin_name: String,
+    /// Plugin version
     pub version: String,
+    /// Whether to auto-install
     pub auto_install: bool,
+    /// Required permissions
     pub permissions: Vec<PluginPermission>,
+    /// Plugin settings
     pub settings: HashMap<String, String>,
 }
 
 /// Plugin permissions
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PluginPermission {
+    /// Audio access permission
     AudioAccess,
+    /// Video access permission
     VideoAccess,
+    /// Screen sharing permission
     ScreenShare,
+    /// Chat access permission
     ChatAccess,
+    /// Participant data permission
     ParticipantData,
+    /// Recording permission
     Recording,
+    /// Notifications permission
     Notifications,
 }
 
 /// Video conferencing integration manager
 pub struct VideoConferencingIntegrationManager {
+    /// Authentication configuration
     config: VideoConferencingAuthConfig,
+    /// Real-time configuration
     realtime_config: RealtimeConfig,
+    /// API rate limiter
     rate_limiter: VideoConferencingRateLimiter,
+    /// Active meeting sessions
     active_sessions: HashMap<String, ActiveMeetingSession>,
 }
 
 /// Active meeting session with real-time feedback
 struct ActiveMeetingSession {
+    /// Meeting identifier
     meeting_id: String,
+    /// Participants in the meeting
     participants: HashMap<String, MeetingParticipant>,
+    /// Session start time
     start_time: SystemTime,
+    /// Feedback buffer
     feedback_buffer: Vec<RealtimeMeetingFeedback>,
+    /// Meeting analytics
     analytics: MeetingAnalytics,
 }
 
@@ -444,22 +583,27 @@ impl VideoConferencingIntegrationManager {
         // Analyze audio for real-time feedback (this doesn't need mutable self)
         let feedback = Self::analyze_audio_for_feedback_static(participant_id, audio_data).await?;
 
-        // Now update the session
+        // Determine if we need to send realtime feedback
+        let should_send_feedback = if let Some(ref feedback_item) = feedback {
+            feedback_item.urgency == FeedbackUrgency::High
+                || feedback_item.urgency == FeedbackUrgency::Critical
+        } else {
+            false
+        };
+
+        // Update the session
         if let Some(session) = self.active_sessions.get_mut(meeting_id) {
             if let Some(ref feedback_item) = feedback {
                 session.feedback_buffer.push(feedback_item.clone());
+            }
+        } // Borrow of self.active_sessions ends here
 
-                // Send feedback if urgency is high or critical
-                if feedback_item.urgency == FeedbackUrgency::High
-                    || feedback_item.urgency == FeedbackUrgency::Critical
-                {
-                    // Note: We'll need to restructure this call too
-                    let meeting_id_owned = meeting_id.to_string();
-                    let feedback_clone = feedback_item.clone();
-                    drop(session); // Release the mutable borrow
-                    self.send_realtime_feedback(&meeting_id_owned, &feedback_clone)
-                        .await?;
-                }
+        // Send feedback if urgency is high or critical (after releasing the borrow)
+        if should_send_feedback {
+            if let Some(ref feedback_item) = feedback {
+                let meeting_id_owned = meeting_id.to_string();
+                self.send_realtime_feedback(&meeting_id_owned, feedback_item)
+                    .await?;
             }
         }
 
@@ -942,8 +1086,11 @@ impl VideoConferencingIntegrationManager {
 
 /// Rate limiter for video conferencing API requests
 struct VideoConferencingRateLimiter {
+    /// Maximum requests per window
     max_requests: u32,
+    /// Time window duration
     window_duration: Duration,
+    /// Request timestamps
     requests: Vec<SystemTime>,
 }
 

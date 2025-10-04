@@ -5,14 +5,14 @@ use crate::types::NoteEvent;
 use crate::Result;
 use std::collections::HashMap;
 
-/// Automatic key signature detection system
+/// Automatic key signature detection system using Krumhansl-Schmuckler algorithm
 #[derive(Debug, Clone)]
 pub struct KeyDetector {
-    /// Key profiles for major and minor keys
+    /// Key profiles for all major and minor keys (24 total profiles)
     key_profiles: HashMap<String, KeyProfile>,
-    /// Analysis window size (in beats)
+    /// Analysis window size in beats for segmented key detection
     window_size: f32,
-    /// Minimum confidence for key detection
+    /// Minimum confidence threshold (0.0-1.0) for accepting key detection results
     min_confidence: f32,
 }
 
@@ -29,7 +29,7 @@ impl KeyDetector {
         detector
     }
 
-    /// Initialize key profiles for all major and minor keys
+    /// Initialize key profiles for all major and minor keys using Krumhansl-Schmuckler weights
     fn initialize_key_profiles(&mut self) {
         let note_names = [
             "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
@@ -42,8 +42,8 @@ impl KeyDetector {
 
             // Rotate the profile weights to match the key
             let mut rotated_weights = [0.0; 12];
-            for j in 0..12 {
-                rotated_weights[j] = profile.weights[(j + 12 - i) % 12];
+            for (j, weight) in rotated_weights.iter_mut().enumerate() {
+                *weight = profile.weights[(j + 12 - i) % 12];
             }
             profile.weights = rotated_weights;
 
@@ -57,8 +57,8 @@ impl KeyDetector {
 
             // Rotate the profile weights to match the key
             let mut rotated_weights = [0.0; 12];
-            for j in 0..12 {
-                rotated_weights[j] = profile.weights[(j + 12 - i) % 12];
+            for (j, weight) in rotated_weights.iter_mut().enumerate() {
+                *weight = profile.weights[(j + 12 - i) % 12];
             }
             profile.weights = rotated_weights;
 
@@ -66,7 +66,19 @@ impl KeyDetector {
         }
     }
 
-    /// Detect key from note events
+    /// Detect key from note events using Krumhansl-Schmuckler algorithm
+    ///
+    /// # Arguments
+    ///
+    /// * `note_events` - Musical note events to analyze for key signature
+    ///
+    /// # Returns
+    ///
+    /// Detected key with confidence score and alternative key candidates
+    ///
+    /// # Errors
+    ///
+    /// Returns error if key detection fails
     pub async fn detect_key(&self, note_events: &[NoteEvent]) -> Result<KeyResult> {
         // Extract pitch class histogram
         let pitch_histogram = self.extract_pitch_histogram(note_events);
@@ -106,7 +118,15 @@ impl KeyDetector {
         })
     }
 
-    /// Extract pitch class histogram from note events
+    /// Extract pitch class histogram from note events weighted by duration and velocity
+    ///
+    /// # Arguments
+    ///
+    /// * `note_events` - Note events to extract histogram from
+    ///
+    /// # Returns
+    ///
+    /// Normalized pitch class histogram (12 bins, one per semitone)
     fn extract_pitch_histogram(&self, note_events: &[NoteEvent]) -> [f32; 12] {
         let mut histogram = [0.0; 12];
 
@@ -126,7 +146,15 @@ impl KeyDetector {
         histogram
     }
 
-    /// Convert frequency to pitch class (0-11)
+    /// Convert frequency to pitch class (0-11, where C=0)
+    ///
+    /// # Arguments
+    ///
+    /// * `frequency` - Frequency in Hz
+    ///
+    /// # Returns
+    ///
+    /// Pitch class number (0=C, 1=C#, 2=D, etc.)
     fn frequency_to_pitch_class(&self, frequency: f32) -> u8 {
         let a4_freq = 440.0;
         let semitones_from_a4 = 12.0 * (frequency / a4_freq).log2();
@@ -134,7 +162,16 @@ impl KeyDetector {
         ((semitones + 9) % 12) as u8 // +9 to make C = 0
     }
 
-    /// Calculate correlation between histogram and key profile
+    /// Calculate Pearson correlation coefficient between histogram and key profile
+    ///
+    /// # Arguments
+    ///
+    /// * `histogram` - Observed pitch class distribution
+    /// * `profile` - Expected pitch class distribution for a key
+    ///
+    /// # Returns
+    ///
+    /// Correlation coefficient (-1.0 to 1.0, higher means better match)
     fn calculate_correlation(&self, histogram: &[f32; 12], profile: &[f32; 12]) -> f32 {
         // Pearson correlation coefficient
         let hist_mean: f32 = histogram.iter().sum::<f32>() / 12.0;
@@ -161,7 +198,15 @@ impl KeyDetector {
         }
     }
 
-    /// Parse key name into root note and mode
+    /// Parse internal key name into root note and mode
+    ///
+    /// # Arguments
+    ///
+    /// * `key_name` - Internal key name (e.g., "C_major", "A_minor")
+    ///
+    /// # Returns
+    ///
+    /// Tuple of (root_note, key_mode)
     fn parse_key_name(&self, key_name: &str) -> (String, KeyMode) {
         if key_name.contains("_major") {
             let root = key_name.replace("_major", "");
@@ -175,6 +220,15 @@ impl KeyDetector {
     }
 
     /// Format key name for display
+    ///
+    /// # Arguments
+    ///
+    /// * `root_note` - Root note (C, D, E, etc.)
+    /// * `mode` - Key mode
+    ///
+    /// # Returns
+    ///
+    /// Human-readable key name (e.g., "C major", "A minor")
     fn format_key_name(&self, root_note: &str, mode: KeyMode) -> String {
         match mode {
             KeyMode::Major => format!("{} major", root_note),
@@ -183,17 +237,29 @@ impl KeyDetector {
         }
     }
 
-    /// Set analysis window size
+    /// Set analysis window size for segmented key detection
+    ///
+    /// # Arguments
+    ///
+    /// * `window_size` - Window size in beats (minimum 1.0)
     pub fn set_window_size(&mut self, window_size: f32) {
         self.window_size = window_size.max(1.0);
     }
 
-    /// Set minimum confidence threshold
+    /// Set minimum confidence threshold for key detection
+    ///
+    /// # Arguments
+    ///
+    /// * `min_confidence` - Minimum confidence (0.0-1.0) required for key detection
     pub fn set_min_confidence(&mut self, min_confidence: f32) {
         self.min_confidence = min_confidence.clamp(0.0, 1.0);
     }
 
     /// Get available key profiles
+    ///
+    /// # Returns
+    ///
+    /// Reference to the key profile database (24 profiles for all major and minor keys)
     pub fn key_profiles(&self) -> &HashMap<String, KeyProfile> {
         &self.key_profiles
     }

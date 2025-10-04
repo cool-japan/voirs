@@ -13,6 +13,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 /// Performance profiler for comprehensive system analysis
 #[derive(Debug)]
+/// Performance Profiler
 pub struct PerformanceProfiler {
     /// CPU profiler
     cpu_profiler: Arc<Mutex<CpuProfiler>>,
@@ -32,6 +33,7 @@ pub struct PerformanceProfiler {
 
 /// Profiling configuration
 #[derive(Debug, Clone)]
+/// Profiling Config
 pub struct ProfilingConfig {
     /// Enable CPU profiling
     pub cpu_profiling: bool,
@@ -71,6 +73,7 @@ impl Default for ProfilingConfig {
 
 /// Profiling session metadata
 #[derive(Debug, Clone)]
+/// Profiling Session
 pub struct ProfilingSession {
     /// Session ID
     pub id: String,
@@ -240,6 +243,7 @@ impl PerformanceProfiler {
 
 /// Function execution profile
 #[derive(Debug, Clone)]
+/// Function Profile
 pub struct FunctionProfile {
     /// Function name
     pub name: String,
@@ -253,6 +257,7 @@ pub struct FunctionProfile {
 
 /// Complete profiling report
 #[derive(Debug, Clone)]
+/// Profiling Report
 pub struct ProfilingReport {
     /// Session information
     pub session: ProfilingSession,
@@ -270,6 +275,7 @@ pub struct ProfilingReport {
 
 /// CPU profiler implementation
 #[derive(Debug)]
+/// Cpu Profiler
 pub struct CpuProfiler {
     /// Configuration
     config: ProfilingConfig,
@@ -284,6 +290,7 @@ pub struct CpuProfiler {
 }
 
 #[derive(Debug, Clone)]
+/// Cpu Sample
 pub struct CpuSample {
     /// Sample timestamp
     pub timestamp: Instant,
@@ -296,6 +303,7 @@ pub struct CpuSample {
 }
 
 #[derive(Debug, Clone)]
+/// Function Call
 pub struct FunctionCall {
     /// Function name
     pub name: String,
@@ -306,6 +314,7 @@ pub struct FunctionCall {
 }
 
 #[derive(Debug, Clone, Default)]
+/// Cpu Profiling Report
 pub struct CpuProfilingReport {
     /// Total profiling duration
     pub total_duration: Duration,
@@ -322,6 +331,7 @@ pub struct CpuProfilingReport {
 }
 
 #[derive(Debug, Clone, Default)]
+/// Call Graph
 pub struct CallGraph {
     /// Nodes in the call graph
     pub nodes: HashMap<String, CallGraphNode>,
@@ -330,6 +340,7 @@ pub struct CallGraph {
 }
 
 #[derive(Debug, Clone)]
+/// Call Graph Node
 pub struct CallGraphNode {
     /// Function name
     pub name: String,
@@ -342,6 +353,7 @@ pub struct CallGraphNode {
 }
 
 #[derive(Debug, Clone)]
+/// Call Graph Edge
 pub struct CallGraphEdge {
     /// Caller function
     pub from: String,
@@ -352,6 +364,7 @@ pub struct CallGraphEdge {
 }
 
 #[derive(Debug, Clone)]
+/// Cpu Timeline Point
 pub struct CpuTimelinePoint {
     /// Timestamp
     pub timestamp: Instant,
@@ -496,6 +509,7 @@ impl CpuProfiler {
 
 /// Memory profiler implementation
 #[derive(Debug)]
+/// Memory Profiler
 pub struct MemoryProfiler {
     /// Configuration
     config: ProfilingConfig,
@@ -510,6 +524,7 @@ pub struct MemoryProfiler {
 }
 
 #[derive(Debug, Clone)]
+/// Allocation Info
 pub struct AllocationInfo {
     /// Allocation size
     pub size: usize,
@@ -522,6 +537,7 @@ pub struct AllocationInfo {
 }
 
 #[derive(Debug, Clone)]
+/// Memory Timeline Point
 pub struct MemoryTimelinePoint {
     /// Timestamp
     pub timestamp: Instant,
@@ -534,6 +550,7 @@ pub struct MemoryTimelinePoint {
 }
 
 #[derive(Debug, Clone)]
+/// Memory Leak
 pub struct MemoryLeak {
     /// Leak size
     pub size: usize,
@@ -546,6 +563,7 @@ pub struct MemoryLeak {
 }
 
 #[derive(Debug, Clone, Default)]
+/// Memory Profiling Report
 pub struct MemoryProfilingReport {
     /// Total memory allocated
     pub total_allocated: usize,
@@ -705,6 +723,7 @@ impl MemoryProfiler {
 
 /// GPU profiler implementation
 #[derive(Debug)]
+/// Gpu Profiler
 pub struct GpuProfiler {
     /// Configuration
     config: ProfilingConfig,
@@ -719,6 +738,7 @@ pub struct GpuProfiler {
 }
 
 #[derive(Debug, Clone)]
+/// Gpu Utilization Sample
 pub struct GpuUtilizationSample {
     /// Sample timestamp
     pub timestamp: Instant,
@@ -733,6 +753,7 @@ pub struct GpuUtilizationSample {
 }
 
 #[derive(Debug, Clone)]
+/// Gpu Memory Transfer
 pub struct GpuMemoryTransfer {
     /// Transfer start time
     pub start_time: Instant,
@@ -747,13 +768,18 @@ pub struct GpuMemoryTransfer {
 }
 
 #[derive(Debug, Clone)]
+/// Gpu Memory Direction
 pub enum GpuMemoryDirection {
+    /// Host to device
     HostToDevice,
+    /// Device to host
     DeviceToHost,
+    /// Device to device
     DeviceToDevice,
 }
 
 #[derive(Debug, Clone)]
+/// Gpu Kernel Execution
 pub struct GpuKernelExecution {
     /// Kernel name
     pub name: String,
@@ -772,6 +798,7 @@ pub struct GpuKernelExecution {
 }
 
 #[derive(Debug, Clone, Default)]
+/// Gpu Profiling Report
 pub struct GpuProfilingReport {
     /// Average GPU utilization
     pub average_gpu_utilization: f64,
@@ -790,6 +817,7 @@ pub struct GpuProfilingReport {
 }
 
 #[derive(Debug, Clone)]
+/// Kernel Statistics
 pub struct KernelStatistics {
     /// Number of executions
     pub execution_count: u64,
@@ -979,6 +1007,7 @@ impl GpuProfiler {
 
 /// Network profiler implementation
 #[derive(Debug)]
+/// Network Profiler
 pub struct NetworkProfiler {
     /// Configuration
     config: ProfilingConfig,
@@ -991,6 +1020,7 @@ pub struct NetworkProfiler {
 }
 
 #[derive(Debug, Clone)]
+/// Network Request
 pub struct NetworkRequest {
     /// Request ID
     pub id: String,
@@ -1013,6 +1043,7 @@ pub struct NetworkRequest {
 }
 
 #[derive(Debug, Clone)]
+/// Bandwidth Sample
 pub struct BandwidthSample {
     /// Sample timestamp
     pub timestamp: Instant,
@@ -1025,6 +1056,7 @@ pub struct BandwidthSample {
 }
 
 #[derive(Debug, Clone, Default)]
+/// Network Profiling Report
 pub struct NetworkProfilingReport {
     /// Total requests
     pub total_requests: usize,
@@ -1043,6 +1075,7 @@ pub struct NetworkProfilingReport {
 }
 
 #[derive(Debug, Clone)]
+/// Endpoint Statistics
 pub struct EndpointStatistics {
     /// Number of requests
     pub request_count: usize,
@@ -1177,6 +1210,7 @@ impl NetworkProfiler {
 
 /// Custom event profiler
 #[derive(Debug)]
+/// Custom Profiler
 pub struct CustomProfiler {
     /// Configuration
     config: ProfilingConfig,
@@ -1189,6 +1223,7 @@ pub struct CustomProfiler {
 }
 
 #[derive(Debug, Clone)]
+/// Custom Event
 pub struct CustomEvent {
     /// Event name
     pub name: String,
@@ -1201,6 +1236,7 @@ pub struct CustomEvent {
 }
 
 #[derive(Debug, Clone)]
+/// Custom Event Data
 pub enum CustomEventData {
     /// Counter value
     Counter(u64),
@@ -1215,6 +1251,7 @@ pub enum CustomEventData {
 }
 
 #[derive(Debug, Clone, Default)]
+/// Custom Profiling Report
 pub struct CustomProfilingReport {
     /// All custom events
     pub events: Vec<CustomEvent>,
@@ -1225,6 +1262,7 @@ pub struct CustomProfilingReport {
 }
 
 #[derive(Debug, Clone)]
+/// Function Timing Stats
 pub struct FunctionTimingStats {
     /// Number of calls
     pub call_count: usize,
@@ -1343,6 +1381,7 @@ macro_rules! profile_function {
 }
 
 #[macro_export]
+/// Macro rules
 macro_rules! profile_block {
     ($profiler:expr, $name:expr, $block:block) => {{
         let start = std::time::Instant::now();

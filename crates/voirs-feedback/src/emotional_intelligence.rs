@@ -6,83 +6,136 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
+/// Emotional state classification
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum EmotionalState {
+    /// Happy/joyful state
     Happy,
+    /// Sad/melancholic state
     Sad,
+    /// Angry/irritated state
     Angry,
+    /// Anxious/worried state
     Anxious,
+    /// Frustrated state
     Frustrated,
+    /// Confident state
     Confident,
+    /// Neutral state
     Neutral,
+    /// Excited/enthusiastic state
     Excited,
+    /// Discouraged/demotivated state
     Discouraged,
+    /// Motivated state
     Motivated,
 }
 
+/// Emotion recognition result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmotionRecognitionResult {
+    /// Primary detected emotion
     pub primary_emotion: EmotionalState,
+    /// Confidence score (0.0-1.0)
     pub confidence_score: f32,
+    /// Secondary emotions with scores
     pub secondary_emotions: Vec<(EmotionalState, f32)>,
+    /// Arousal level (0.0-1.0)
     pub arousal_level: f32,
+    /// Valence level (0.0-1.0)
     pub valence_level: f32,
+    /// Recognition timestamp
     pub timestamp: SystemTime,
 }
 
+/// Stress indicators from voice analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StressIndicators {
+    /// Voice tremor level (0.0-1.0)
     pub voice_tremor: f32,
+    /// Speech rate deviation (0.0-1.0)
     pub speech_rate_deviation: f32,
+    /// Pause frequency (0.0-1.0)
     pub pause_frequency: f32,
+    /// Pitch variance (0.0-1.0)
     pub pitch_variance: f32,
+    /// Breathing irregularity (0.0-1.0)
     pub breathing_irregularity: f32,
+    /// Overall stress level (0.0-1.0)
     pub overall_stress_level: f32,
 }
 
+/// Motivation assessment result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MotivationAssessment {
+    /// Engagement level (0.0-1.0)
     pub engagement_level: f32,
+    /// Persistence score (0.0-1.0)
     pub persistence_score: f32,
+    /// Self-efficacy score (0.0-1.0)
     pub self_efficacy: f32,
+    /// Goal orientation (0.0-1.0)
     pub goal_orientation: f32,
+    /// Intrinsic motivation (0.0-1.0)
     pub intrinsic_motivation: f32,
+    /// Overall motivation (0.0-1.0)
     pub overall_motivation: f32,
 }
 
+/// Empathetic response generated for user
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmpatheticResponse {
+    /// Response message
     pub message: String,
+    /// Emotional tone of response
     pub emotional_tone: EmotionalState,
+    /// Suggested supportive actions
     pub supportive_actions: Vec<String>,
+    /// Encouragement level (0.0-1.0)
     pub encouragement_level: f32,
+    /// Personalization factors
     pub personalization_factors: HashMap<String, String>,
 }
 
+/// Audio features extracted for emotion analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioFeatures {
+    /// Fundamental frequency (Hz)
     pub fundamental_frequency: f32,
+    /// Pitch variance
     pub pitch_variance: f32,
+    /// Energy distribution across frequency bins
     pub energy_distribution: Vec<f32>,
+    /// Spectral centroid
     pub spectral_centroid: f32,
+    /// Spectral rolloff point
     pub spectral_rolloff: f32,
+    /// Zero crossing rate
     pub zero_crossing_rate: f32,
+    /// MFCC coefficients
     pub mfcc_coefficients: Vec<f32>,
+    /// Jitter (frequency variation)
     pub jitter: f32,
+    /// Shimmer (amplitude variation)
     pub shimmer: f32,
+    /// Formant frequencies
     pub formant_frequencies: Vec<f32>,
 }
 
 #[async_trait]
+/// Description
 pub trait EmotionRecognizer: Send + Sync {
+    /// Description
     async fn recognize_emotion(
         &self,
         audio_features: &AudioFeatures,
     ) -> Result<EmotionRecognitionResult>;
+    /// Description
     async fn detect_stress_indicators(
         &self,
         audio_features: &AudioFeatures,
     ) -> Result<StressIndicators>;
+    /// Description
     async fn assess_motivation(
         &self,
         interaction_history: &[EmotionRecognitionResult],
@@ -90,7 +143,9 @@ pub trait EmotionRecognizer: Send + Sync {
 }
 
 #[async_trait]
+/// Description
 pub trait EmpatheticResponseGenerator: Send + Sync {
+    /// Description
     async fn generate_response(
         &self,
         emotion: &EmotionRecognitionResult,
@@ -99,6 +154,7 @@ pub trait EmpatheticResponseGenerator: Send + Sync {
         context: &EmotionalContext,
     ) -> Result<EmpatheticResponse>;
 
+    /// Description
     async fn adapt_communication_style(
         &self,
         user_preferences: &UserEmotionalProfile,
@@ -106,53 +162,86 @@ pub trait EmpatheticResponseGenerator: Send + Sync {
     ) -> Result<CommunicationStyle>;
 }
 
+/// Context for emotional analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmotionalContext {
+    /// Current session duration
     pub session_duration: Duration,
+    /// Recent feedback messages
     pub recent_feedback: Vec<String>,
+    /// Learning progress (0.0-1.0)
     pub learning_progress: f32,
+    /// Current difficulty level (0.0-1.0)
     pub difficulty_level: f32,
+    /// Social context description
     pub social_context: Option<String>,
+    /// Time of day context
     pub time_of_day: Option<String>,
 }
 
+/// User emotional profile
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserEmotionalProfile {
+    /// User identifier
     pub user_id: String,
+    /// Baseline emotional state
     pub emotional_baseline: EmotionalState,
+    /// Stress tolerance level (0.0-1.0)
     pub stress_tolerance: f32,
+    /// Motivation drivers
     pub motivation_drivers: Vec<String>,
+    /// Preferred encouragement style
     pub preferred_encouragement_style: EncouragementStyle,
+    /// Cultural background
     pub cultural_background: Option<String>,
+    /// Learning style preferences
     pub learning_style_preferences: Vec<String>,
 }
 
+/// Encouragement style preferences
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EncouragementStyle {
+    /// Gentle, supportive encouragement
     Gentle,
+    /// Enthusiastic, high-energy encouragement
     Enthusiastic,
+    /// Direct, straightforward encouragement
     Direct,
+    /// Analytical, detailed encouragement
     Analytical,
+    /// Supportive, empathetic encouragement
     Supportive,
+    /// Challenging, motivating encouragement
     Challenging,
 }
 
+/// Communication style configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommunicationStyle {
+    /// Emotional tone
     pub tone: EmotionalState,
+    /// Formality level (0.0-1.0)
     pub formality_level: f32,
+    /// Directness level (0.0-1.0)
     pub directness: f32,
+    /// Supportiveness level (0.0-1.0)
     pub supportiveness: f32,
+    /// Energy level (0.0-1.0)
     pub energy_level: f32,
 }
 
+/// Machine learning-based emotion recognizer
 pub struct MLEmotionRecognizer {
+    /// Model weights
     model_weights: Arc<RwLock<Vec<f32>>>,
+    /// Feature normalizers (mean, std)
     feature_normalizers: Arc<RwLock<HashMap<String, (f32, f32)>>>,
+    /// Emotion recognition history
     emotion_history: Arc<RwLock<Vec<EmotionRecognitionResult>>>,
 }
 
 impl MLEmotionRecognizer {
+    /// Description
     pub fn new() -> Self {
         Self {
             model_weights: Arc::new(RwLock::new(Self::initialize_weights())),
@@ -487,12 +576,16 @@ impl MLEmotionRecognizer {
     }
 }
 
+/// Adaptive response generator for empathetic feedback
 pub struct AdaptiveResponseGenerator {
+    /// Response templates by emotional state
     response_templates: Arc<RwLock<HashMap<EmotionalState, Vec<String>>>>,
+    /// User emotional profiles
     user_profiles: Arc<RwLock<HashMap<String, UserEmotionalProfile>>>,
 }
 
 impl AdaptiveResponseGenerator {
+    /// Description
     pub fn new() -> Self {
         Self {
             response_templates: Arc::new(RwLock::new(Self::initialize_templates())),
@@ -568,11 +661,13 @@ impl AdaptiveResponseGenerator {
         }
     }
 
+    /// Description
     pub async fn update_user_profile(&self, user_id: String, profile: UserEmotionalProfile) {
         let mut profiles = self.user_profiles.write().await;
         profiles.insert(user_id, profile);
     }
 
+    /// Description
     pub async fn get_user_profile(&self, user_id: &str) -> Option<UserEmotionalProfile> {
         let profiles = self.user_profiles.read().await;
         profiles.get(user_id).cloned()
@@ -694,13 +789,18 @@ impl AdaptiveResponseGenerator {
     }
 }
 
+/// Emotional intelligence system integrating recognition and response
 pub struct EmotionalIntelligenceSystem {
+    /// Emotion recognizer
     emotion_recognizer: Arc<dyn EmotionRecognizer>,
+    /// Empathetic response generator
     response_generator: Arc<dyn EmpatheticResponseGenerator>,
+    /// User session emotion history
     user_sessions: Arc<RwLock<HashMap<String, Vec<EmotionRecognitionResult>>>>,
 }
 
 impl EmotionalIntelligenceSystem {
+    /// Description
     pub fn new() -> Self {
         Self {
             emotion_recognizer: Arc::new(MLEmotionRecognizer::new()),
@@ -709,6 +809,7 @@ impl EmotionalIntelligenceSystem {
         }
     }
 
+    /// Description
     pub async fn process_emotional_feedback(
         &self,
         user_id: &str,
@@ -756,6 +857,7 @@ impl EmotionalIntelligenceSystem {
         Ok(response)
     }
 
+    /// Description
     pub async fn get_emotional_analytics(&self, user_id: &str) -> Option<EmotionalAnalytics> {
         let sessions = self.user_sessions.read().await;
         if let Some(history) = sessions.get(user_id) {
@@ -813,13 +915,20 @@ impl EmotionalIntelligenceSystem {
     }
 }
 
+/// Emotional analytics summary
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmotionalAnalytics {
+    /// Total number of sessions analyzed
     pub total_sessions: usize,
+    /// Average confidence score
     pub average_confidence: f32,
+    /// Average arousal level
     pub average_arousal: f32,
+    /// Average valence level
     pub average_valence: f32,
+    /// Distribution of emotions across sessions
     pub emotion_distribution: HashMap<EmotionalState, usize>,
+    /// Improvement trend over time
     pub improvement_trend: f32,
 }
 

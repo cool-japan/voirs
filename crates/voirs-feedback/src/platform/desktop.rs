@@ -386,22 +386,34 @@ impl DesktopUtils {
 /// System information structure
 #[derive(Debug, Clone)]
 pub struct SystemInfo {
+    /// Description
     pub os_name: String,
+    /// Description
     pub os_version: String,
+    /// Description
     pub architecture: String,
+    /// Description
     pub cpu_count: usize,
+    /// Description
     pub total_memory: u64,
+    /// Description
     pub available_memory: u64,
 }
 
 /// Desktop-specific audio settings
 #[derive(Debug, Clone)]
 pub struct DesktopAudioSettings {
+    /// Description
     pub sample_rate: u32,
+    /// Description
     pub buffer_size: usize,
+    /// Description
     pub channels: u32,
+    /// Description
     pub enable_low_latency: bool,
+    /// Description
     pub enable_echo_cancellation: bool,
+    /// Description
     pub enable_noise_reduction: bool,
 }
 

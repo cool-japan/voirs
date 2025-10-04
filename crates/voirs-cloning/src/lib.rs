@@ -3,16 +3,6 @@
 //! This crate provides comprehensive voice cloning capabilities including few-shot speaker
 //! adaptation, speaker verification, voice similarity measurement, and cross-language cloning.
 
-#![allow(unused_variables)]
-#![allow(unused_imports)]
-#![allow(unused_mut)]
-#![allow(dead_code)]
-#![allow(missing_docs)]
-#![allow(clippy::uninlined_format_args)]
-#![allow(clippy::should_implement_trait)]
-#![allow(clippy::derivable_impls)]
-#![allow(clippy::vec_init_then_push)]
-#![allow(clippy::needless_borrows_for_generic_args)]
 #![deny(unsafe_code)]
 
 pub mod ab_testing;

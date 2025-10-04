@@ -358,5 +358,5 @@ fn get_memory_usage_mb() -> Option<f64> {
     // This is a simplified implementation
     // In a real application, you would use platform-specific APIs
     // For now, return a simulated value
-    Some(150.0 + rand::random::<f64>() * 50.0) // Simulate 150-200 MB
+    Some(150.0 + scirs2_core::random::random::<f64>() * 50.0) // Simulate 150-200 MB
 }

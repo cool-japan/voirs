@@ -2,7 +2,7 @@ use super::{Plugin, PluginError, PluginResult, PluginType};
 use crate::audio::effects::{AudioEffect, EffectConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EffectPluginConfig {
@@ -215,6 +215,83 @@ impl EffectChain {
 }
 
 // Example builtin effect plugin implementations
+// Comb filter for reverb
+struct CombFilter {
+    buffer: Vec<f32>,
+    buffer_index: usize,
+    feedback: f32,
+    filter_state: f32,
+    damping: f32,
+}
+
+impl CombFilter {
+    fn new(size: usize) -> Self {
+        Self {
+            buffer: vec![0.0; size],
+            buffer_index: 0,
+            feedback: 0.0,
+            filter_state: 0.0,
+            damping: 0.0,
+        }
+    }
+
+    fn process(&mut self, input: f32) -> f32 {
+        let output = self.buffer[self.buffer_index];
+
+        // One-pole lowpass filter for damping
+        self.filter_state = output * (1.0 - self.damping) + self.filter_state * self.damping;
+
+        self.buffer[self.buffer_index] = input + self.filter_state * self.feedback;
+        self.buffer_index = (self.buffer_index + 1) % self.buffer.len();
+
+        output
+    }
+
+    fn set_damping(&mut self, damping: f32) {
+        self.damping = damping;
+    }
+
+    fn set_feedback(&mut self, feedback: f32) {
+        self.feedback = feedback;
+    }
+
+    fn clear(&mut self) {
+        self.buffer.fill(0.0);
+        self.filter_state = 0.0;
+        self.buffer_index = 0;
+    }
+}
+
+// Allpass filter for reverb
+struct AllpassFilter {
+    buffer: Vec<f32>,
+    buffer_index: usize,
+}
+
+impl AllpassFilter {
+    fn new(size: usize) -> Self {
+        Self {
+            buffer: vec![0.0; size],
+            buffer_index: 0,
+        }
+    }
+
+    fn process(&mut self, input: f32) -> f32 {
+        let buffered = self.buffer[self.buffer_index];
+        let output = -input + buffered;
+
+        self.buffer[self.buffer_index] = input + buffered * 0.5;
+        self.buffer_index = (self.buffer_index + 1) % self.buffer.len();
+
+        output
+    }
+
+    fn clear(&mut self) {
+        self.buffer.fill(0.0);
+        self.buffer_index = 0;
+    }
+}
+
 pub struct ReverbEffectPlugin {
     name: String,
     version: String,
@@ -222,10 +299,28 @@ pub struct ReverbEffectPlugin {
     damping: f32,
     wet_level: f32,
     dry_level: f32,
+    // Freeverb-style filter banks (using Mutex for thread-safe processing state)
+    comb_filters: Mutex<Vec<CombFilter>>,
+    allpass_filters: Mutex<Vec<AllpassFilter>>,
 }
 
 impl ReverbEffectPlugin {
     pub fn new() -> Self {
+        // Freeverb comb filter delay lengths (at 44.1kHz sample rate)
+        const COMB_DELAYS: [usize; 8] = [1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617];
+        // Freeverb allpass filter delay lengths
+        const ALLPASS_DELAYS: [usize; 4] = [556, 441, 341, 225];
+
+        let comb_filters: Vec<CombFilter> = COMB_DELAYS
+            .iter()
+            .map(|&size| CombFilter::new(size))
+            .collect();
+
+        let allpass_filters: Vec<AllpassFilter> = ALLPASS_DELAYS
+            .iter()
+            .map(|&size| AllpassFilter::new(size))
+            .collect();
+
         Self {
             name: "builtin-reverb".to_string(),
             version: "1.0.0".to_string(),
@@ -233,6 +328,19 @@ impl ReverbEffectPlugin {
             damping: 0.5,
             wet_level: 0.3,
             dry_level: 0.7,
+            comb_filters: Mutex::new(comb_filters),
+            allpass_filters: Mutex::new(allpass_filters),
+        }
+    }
+
+    fn update_filters(&self) {
+        // Update comb filter parameters based on room_size and damping
+        let feedback = 0.28 + self.room_size * 0.7;
+
+        let mut comb_filters = self.comb_filters.lock().unwrap();
+        for comb in comb_filters.iter_mut() {
+            comb.set_feedback(feedback);
+            comb.set_damping(self.damping);
         }
     }
 }
@@ -325,12 +433,31 @@ impl EffectPlugin for ReverbEffectPlugin {
         output: &mut [f32],
         config: &EffectPluginConfig,
     ) -> PluginResult<()> {
-        // Simple placeholder reverb implementation
-        for (i, &sample) in input.iter().enumerate() {
-            let wet = sample * self.wet_level * config.wet_mix;
-            let dry = sample * self.dry_level * config.dry_mix;
+        // Real Freeverb implementation with comb and allpass filters
+        self.update_filters();
+
+        let mut comb_filters = self.comb_filters.lock().unwrap();
+        let mut allpass_filters = self.allpass_filters.lock().unwrap();
+
+        for (i, &input_sample) in input.iter().enumerate() {
+            // Process through parallel comb filters
+            let mut comb_out = 0.0;
+            for comb in comb_filters.iter_mut() {
+                comb_out += comb.process(input_sample);
+            }
+
+            // Process through series allpass filters
+            let mut allpass_out = comb_out;
+            for allpass in allpass_filters.iter_mut() {
+                allpass_out = allpass.process(allpass_out);
+            }
+
+            // Mix wet and dry signals
+            let wet = allpass_out * self.wet_level * config.wet_mix;
+            let dry = input_sample * self.dry_level * config.dry_mix;
             output[i] = wet + dry;
         }
+
         Ok(())
     }
 
@@ -413,15 +540,29 @@ impl EffectPlugin for ReverbEffectPlugin {
     }
 
     fn reset(&mut self) -> PluginResult<()> {
+        // Reset parameters to defaults
         self.room_size = 0.5;
         self.damping = 0.5;
         self.wet_level = 0.3;
         self.dry_level = 0.7;
+
+        // Clear all filter buffers
+        let mut comb_filters = self.comb_filters.lock().unwrap();
+        for comb in comb_filters.iter_mut() {
+            comb.clear();
+        }
+
+        let mut allpass_filters = self.allpass_filters.lock().unwrap();
+        for allpass in allpass_filters.iter_mut() {
+            allpass.clear();
+        }
+
         Ok(())
     }
 
     fn get_latency(&self) -> u32 {
-        0 // No latency for this simple implementation
+        // Reverb has latency from the longest comb filter delay
+        1617 // Longest comb filter delay in samples (at 44.1kHz)
     }
 }
 

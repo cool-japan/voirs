@@ -7,14 +7,14 @@ license = { workspace = true }
 repository = { workspace = true }
 homepage = { workspace = true }
 documentation = "https://docs.rs/voirs-emotion"
-keywords = { workspace = true }
+keywords = ["voirs", "emotion", "prosody", "expression", "voice"]
 categories = ["science", "multimedia::audio", "algorithms"]
 rust-version = { workspace = true }
 description = "Emotion expression control system for VoiRS voice synthesis"
 
 [dependencies]
-# Core emotion processing
-ndarray = { workspace = true }
+# SciRS2 - Scientific computing abstractions
+scirs2-core = { workspace = true }
 
 # Async and concurrency
 tokio = { workspace = true }
@@ -29,7 +29,6 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 
 # Math and random
-rand = { workspace = true }
 fastrand = { workspace = true }
 wide = { workspace = true }
 
@@ -42,7 +41,7 @@ candle-core = { workspace = true, optional = true }
 candle-nn = { workspace = true, optional = true }
 
 # VoiRS dependencies
-voirs-acoustic = { version = "0.1.0-alpha.1", path = "../voirs-acoustic", optional = true }
+voirs-acoustic = { workspace = true, optional = true }
 # voirs-sdk = { path = "../voirs-sdk", optional = true } # Commented out to break cyclic dependency
 # voirs-evaluation = { path = "../voirs-evaluation", optional = true } # Commented out to break cyclic dependency
 
@@ -67,14 +66,14 @@ wasm-bindgen-test = { workspace = true }
 [features]
 default = ["acoustic-integration"]
 acoustic-integration = ["voirs-acoustic"]
-# sdk-integration = ["voirs-sdk"] # Commented out to break cyclic dependency
-# evaluation-integration = ["voirs-evaluation"] # Commented out to break cyclic dependency
+sdk-integration = []  # Prevent cyclic dependency by not depending on voirs-sdk
+evaluation-integration = []  # Prevent cyclic dependency by not depending on voirs-evaluation
 full-integration = ["acoustic-integration"]
 gpu = ["candle-core", "candle-nn"]
 cuda = ["gpu", "candle-core/cuda"]
 wasm = [
     "wasm-bindgen",
-    "wasm-bindgen-futures", 
+    "wasm-bindgen-futures",
     "js-sys",
     "web-sys",
     "console_error_panic_hook",

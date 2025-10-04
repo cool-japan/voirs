@@ -566,9 +566,10 @@ impl ScoreProcessor {
     /// Apply humanization to score
     fn apply_humanization(&self, score: &mut MusicalScore) -> crate::Result<()> {
         for note in &mut score.notes {
-            let timing_variation = (rand::random::<f32>() - 0.5) * self.options.humanization * 0.1;
+            let timing_variation =
+                (scirs2_core::random::random::<f32>() - 0.5) * self.options.humanization * 0.1;
             let velocity_variation =
-                (rand::random::<f32>() - 0.5) * self.options.humanization * 0.2;
+                (scirs2_core::random::random::<f32>() - 0.5) * self.options.humanization * 0.2;
 
             note.start_time += timing_variation;
             note.event.velocity = (note.event.velocity + velocity_variation).clamp(0.0, 1.0);
@@ -581,7 +582,7 @@ impl ScoreProcessor {
         // Add subtle tempo variations for more natural feel
         for section in &mut score.sections {
             if section.tempo_change.is_none() {
-                let variation = (rand::random::<f32>() - 0.5) * 0.1;
+                let variation = (scirs2_core::random::random::<f32>() - 0.5) * 0.1;
                 section.tempo_change = Some(score.tempo * (1.0 + variation));
             }
         }
@@ -591,7 +592,7 @@ impl ScoreProcessor {
     /// Apply dynamic variations
     fn apply_dynamic_variations(&self, score: &mut MusicalScore) -> crate::Result<()> {
         for note in &mut score.notes {
-            let variation = (rand::random::<f32>() - 0.5) * 0.1;
+            let variation = (scirs2_core::random::random::<f32>() - 0.5) * 0.1;
             note.event.velocity = (note.event.velocity + variation).clamp(0.0, 1.0);
         }
         Ok(())
@@ -603,12 +604,12 @@ impl ScoreProcessor {
             // Add subtle articulation variations
             match note.articulation {
                 Articulation::Legato => {
-                    if rand::random::<f32>() < 0.1 {
+                    if scirs2_core::random::random::<f32>() < 0.1 {
                         note.articulation = Articulation::Tenuto;
                     }
                 }
                 Articulation::Staccato => {
-                    if rand::random::<f32>() < 0.1 {
+                    if scirs2_core::random::random::<f32>() < 0.1 {
                         note.articulation = Articulation::Accent;
                     }
                 }

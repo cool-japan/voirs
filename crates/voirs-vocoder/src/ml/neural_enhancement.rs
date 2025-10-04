@@ -9,8 +9,8 @@ use crate::backends::candle::CandleBackend;
 use crate::{AudioBuffer, Result, VocoderError};
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use realfft::RealFftPlanner;
-use rustfft::num_complex::Complex32;
+use scirs2_core::Complex32;
+use scirs2_fft::RealFftPlanner;
 use std::collections::HashMap;
 use std::f32::consts::PI;
 use std::sync::Arc;
@@ -514,7 +514,7 @@ impl NeuralModel {
         };
 
         // Initialize FFT planner for spectral processing
-        let fft_planner = Arc::new(Mutex::new(RealFftPlanner::new()));
+        let fft_planner = Arc::new(Mutex::new(RealFftPlanner::<f32>::new()));
 
         // Try to initialize Candle backend for tensor operations
         #[cfg(feature = "candle")]
@@ -613,41 +613,58 @@ impl NeuralModel {
     fn apply_transformer_enhancement(&self, samples: &mut [f32]) -> Result<()> {
         // Enhanced transformer-like processing with spectral attention
 
-        // Apply spectral enhancement using FFT
-        if let Some(mut planner) = self.fft_planner.try_lock() {
-            let fft_size = samples.len().next_power_of_two();
-            let fft = planner.plan_fft_forward(fft_size);
-            let mut spectrum = vec![Complex32::new(0.0, 0.0); fft_size / 2 + 1];
-            let mut padded_samples = samples.to_vec();
-            padded_samples.resize(fft_size, 0.0);
+        let fft_size = samples.len().next_power_of_two();
+        let mut padded_samples = samples.to_vec();
+        padded_samples.resize(fft_size, 0.0);
 
-            // Forward FFT
-            if fft.process(&mut padded_samples, &mut spectrum).is_ok() {
-                // Apply spectral attention-like enhancement
-                self.apply_spectral_attention(&mut spectrum)?;
-
-                // Inverse FFT
-                let ifft = planner.plan_fft_inverse(fft_size);
-                let mut enhanced_samples = vec![0.0; fft_size];
-                if ifft.process(&mut spectrum, &mut enhanced_samples).is_ok() {
-                    // Copy enhanced samples back
-                    for (i, sample) in samples.iter_mut().enumerate() {
-                        if i < enhanced_samples.len() {
-                            let enhanced_sample: f32 = enhanced_samples[i];
-                            *sample = enhanced_sample.clamp(-1.0, 1.0);
-                        }
-                    }
+        // Forward FFT
+        let spectrum_f64 = match scirs2_fft::rfft(&padded_samples, None) {
+            Ok(s) => s,
+            Err(_) => {
+                // Fallback to time-domain enhancement if FFT fails
+                for sample in samples.iter_mut() {
+                    // Multi-head attention simulation in time domain
+                    let enhanced = *sample * 0.85
+                        + (*sample * 2.0 * PI * 440.0 / self.sample_rate).sin() * 0.15;
+                    *sample = enhanced.clamp(-1.0, 1.0);
                 }
+                return Ok(());
             }
-        }
+        };
 
-        // Fallback to time-domain enhancement if FFT fails
-        if samples.iter().all(|&x| x == 0.0) {
-            for sample in samples.iter_mut() {
-                // Multi-head attention simulation in time domain
-                let enhanced =
-                    *sample * 0.85 + (*sample * 2.0 * PI * 440.0 / self.sample_rate).sin() * 0.15;
-                *sample = enhanced.clamp(-1.0, 1.0);
+        // Convert f64 spectrum to f32 for processing
+        let mut spectrum: Vec<Complex32> = spectrum_f64
+            .into_iter()
+            .map(|c| Complex32::new(c.re as f32, c.im as f32))
+            .collect();
+
+        // Apply spectral attention-like enhancement
+        self.apply_spectral_attention(&mut spectrum)?;
+
+        // Convert spectrum back to f64 for inverse FFT
+        let spectrum_f64: Vec<scirs2_core::Complex<f64>> = spectrum
+            .into_iter()
+            .map(|c| scirs2_core::Complex::new(c.re as f64, c.im as f64))
+            .collect();
+
+        // Inverse FFT
+        let enhanced_samples = match scirs2_fft::irfft(&spectrum_f64, Some(fft_size)) {
+            Ok(s) => s,
+            Err(_) => {
+                // Fallback to time-domain enhancement
+                for sample in samples.iter_mut() {
+                    let enhanced = *sample * 0.85
+                        + (*sample * 2.0 * PI * 440.0 / self.sample_rate).sin() * 0.15;
+                    *sample = enhanced.clamp(-1.0, 1.0);
+                }
+                return Ok(());
+            }
+        };
+
+        // Copy enhanced samples back
+        for (i, sample) in samples.iter_mut().enumerate() {
+            if i < enhanced_samples.len() {
+                *sample = (enhanced_samples[i] as f32).clamp(-1.0, 1.0);
             }
         }
 

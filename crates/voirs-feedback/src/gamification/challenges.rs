@@ -258,7 +258,7 @@ impl ChallengeSystem {
     /// Helper methods
     fn calculate_user_level(&self, user_progress: &UserProgress) -> u32 {
         // Simplified level calculation
-        ((user_progress.training_stats.total_sessions / 10 + 1).min(50) as u32)
+        (user_progress.training_stats.total_sessions / 10 + 1).min(50) as u32
     }
 
     fn identify_weak_areas(&self, user_progress: &UserProgress) -> Vec<FocusArea> {
@@ -396,180 +396,290 @@ impl Default for ChallengeSystem {
 /// Challenge definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Challenge {
+    /// Unique challenge identifier
     pub id: Uuid,
+    /// Template this challenge was created from
     pub template_id: String,
+    /// Challenge display name
     pub name: String,
+    /// Challenge description
     pub description: String,
+    /// Type of challenge
     pub challenge_type: ChallengeType,
+    /// Areas this challenge focuses on
     pub focus_areas: Vec<FocusArea>,
+    /// Target value to achieve
     pub target_value: f32,
+    /// Current progress towards target
     pub current_progress: f32,
+    /// Difficulty level of challenge
     pub difficulty: ChallengeDifficulty,
+    /// Current status
     pub status: ChallengeStatus,
+    /// When challenge was created
     pub created_at: DateTime<Utc>,
+    /// When challenge expires
     pub expires_at: DateTime<Utc>,
+    /// Rewards for completing challenge
     pub rewards: Vec<ChallengeReward>,
+    /// Users participating in challenge
     pub participants: Vec<Uuid>,
 }
 
 /// Challenge template
 #[derive(Debug, Clone)]
 pub struct ChallengeTemplate {
+    /// Template identifier
     pub id: String,
+    /// Template display name
     pub name: String,
+    /// Template description
     pub description: String,
+    /// Type of challenge
     pub challenge_type: ChallengeType,
+    /// Focus areas for this challenge
     pub focus_areas: Vec<FocusArea>,
+    /// Difficulty scaling strategy
     pub difficulty_scaling: DifficultyScaling,
+    /// Challenge duration
     pub duration: chrono::Duration,
+    /// Rewards for completion
     pub rewards: Vec<ChallengeReward>,
+    /// Requirements to unlock challenge
     pub requirements: ChallengeRequirements,
 }
 
 /// Challenge types
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ChallengeType {
+    /// Focus on improving specific skills
     SkillImprovement,
+    /// Focus on performance metrics
     Performance,
+    /// Focus on consistent practice
     Consistency,
+    /// Focus on social interaction
     Social,
 }
 
 /// Difficulty levels
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ChallengeDifficulty {
+    /// Beginner level challenge
     Beginner,
+    /// Intermediate level challenge
     Intermediate,
+    /// Advanced level challenge
     Advanced,
+    /// Expert level challenge
     Expert,
 }
 
 /// Challenge status
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ChallengeStatus {
+    /// Challenge is currently active
     Active,
+    /// Challenge has been completed
     Completed,
+    /// Challenge has failed
     Failed,
+    /// Challenge has expired
     Expired,
 }
 
 /// Difficulty scaling strategies
 #[derive(Debug, Clone)]
 pub enum DifficultyScaling {
-    Progressive { base_target: f32, increment: f32 },
-    Linear { min_target: u32, max_target: u32 },
+    /// Progressive scaling with base target and increment
+    Progressive {
+        /// Base target value
+        base_target: f32,
+        /// Increment per level
+        increment: f32
+    },
+    /// Linear scaling between min and max
+    Linear {
+        /// Minimum target
+        min_target: u32,
+        /// Maximum target
+        max_target: u32
+    },
+    /// Adaptive scaling based on user performance
     Adaptive,
 }
 
 /// Challenge requirements
 #[derive(Debug, Clone)]
 pub struct ChallengeRequirements {
+    /// Minimum user level required
     pub min_level: u32,
+    /// Required achievement IDs
     pub required_achievements: Vec<String>,
+    /// Cooldown period before challenge can be taken again
     pub cooldown: Option<chrono::Duration>,
 }
 
 /// Challenge rewards
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ChallengeReward {
-    Points { currency: String, amount: u32 },
+    /// Points reward
+    Points {
+        /// Currency type
+        currency: String,
+        /// Amount of currency
+        amount: u32
+    },
+    /// Badge reward
     Badge(String),
+    /// Title reward
     Title(String),
+    /// Item reward
     Item(String),
 }
 
 /// User challenge progress
 #[derive(Debug, Clone)]
 pub struct UserChallengeProgress {
+    /// Challenge identifier
     pub challenge_id: Uuid,
+    /// Template this challenge is based on
     pub template_id: String,
+    /// Current progress value
     pub current_progress: f32,
+    /// Target value to achieve
     pub target_value: f32,
+    /// Current challenge status
     pub status: ChallengeStatus,
+    /// When challenge was started
     pub started_at: DateTime<Utc>,
+    /// When challenge was completed
     pub completed_at: Option<DateTime<Utc>>,
 }
 
 /// Session data for progress calculation
 #[derive(Debug, Clone)]
 pub struct SessionData {
+    /// Pronunciation accuracy score
     pub pronunciation_accuracy: f32,
+    /// Overall session score
     pub overall_score: f32,
+    /// Session duration in seconds
     pub duration: f32,
+    /// Whether session was collaborative
     pub was_collaborative: bool,
+    /// Focus areas covered in session
     pub focus_areas: Vec<FocusArea>,
 }
 
 /// Challenge update result
 #[derive(Debug, Clone)]
 pub struct ChallengeUpdate {
+    /// Challenge that was updated
     pub challenge_id: Uuid,
+    /// Type of update
     pub update_type: UpdateType,
+    /// Previous progress value
     pub old_progress: f32,
+    /// New progress value
     pub new_progress: f32,
+    /// Rewards earned from this update
     pub rewards_earned: Vec<ChallengeReward>,
 }
 
 /// Update types
 #[derive(Debug, Clone, PartialEq)]
 pub enum UpdateType {
+    /// Progress update
     Progress,
+    /// Challenge completed
     Completed,
+    /// Challenge failed
     Failed,
 }
 
 /// Event challenge
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventChallenge {
+    /// Unique event identifier
     pub id: Uuid,
+    /// Event name
     pub name: String,
+    /// Event description
     pub description: String,
+    /// Type of event
     pub event_type: EventType,
+    /// Event start time
     pub start_time: DateTime<Utc>,
+    /// Event end time
     pub end_time: DateTime<Utc>,
+    /// Target metrics for event
     pub target_metrics: HashMap<String, f32>,
+    /// Rewards for event completion
     pub rewards: Vec<ChallengeReward>,
+    /// Participating users
     pub participants: Vec<Uuid>,
+    /// Event leaderboard
     pub leaderboard: Vec<LeaderboardEntry>,
+    /// Current event status
     pub status: EventStatus,
 }
 
 /// Event challenge configuration
 #[derive(Debug, Clone)]
 pub struct EventChallengeConfig {
+    /// Event name
     pub name: String,
+    /// Event description
     pub description: String,
+    /// Type of event
     pub event_type: EventType,
+    /// Event start time
     pub start_time: DateTime<Utc>,
+    /// Event end time
     pub end_time: DateTime<Utc>,
+    /// Target metrics for event
     pub target_metrics: HashMap<String, f32>,
+    /// Event rewards
     pub rewards: Vec<ChallengeReward>,
 }
 
 /// Event types
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EventType {
+    /// Weekend event
     Weekend,
+    /// Seasonal event
     Seasonal,
+    /// Community event
     Community,
+    /// Special event
     Special,
 }
 
 /// Event status
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EventStatus {
+    /// Event is pending
     Pending,
+    /// Event is currently active
     Active,
+    /// Event has been completed
     Completed,
+    /// Event has been cancelled
     Cancelled,
 }
 
 /// Leaderboard entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LeaderboardEntry {
+    /// User identifier
     pub user_id: Uuid,
+    /// User display name
     pub user_name: String,
+    /// User score
     pub score: f32,
+    /// User rank
     pub rank: u32,
 }
 

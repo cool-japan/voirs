@@ -505,7 +505,7 @@ impl RegressionTester {
 
         // 2. White noise
         let noise_samples: Vec<f32> = (0..duration_samples)
-            .map(|_| (rand::random::<f32>() - 0.5) * 0.3)
+            .map(|_| (scirs2_core::random::random::<f32>() - 0.5) * 0.3)
             .collect();
         test_audios.push(AudioBuffer::new(noise_samples, sample_rate as u32, 1));
 
@@ -514,7 +514,7 @@ impl RegressionTester {
         for i in 0..duration_samples {
             let t = i as f32 / sample_rate as f32;
             let sine = 0.7 * (2.0 * std::f32::consts::PI * 220.0 * t).sin();
-            let noise = (rand::random::<f32>() - 0.5) * 0.1;
+            let noise = (scirs2_core::random::random::<f32>() - 0.5) * 0.1;
             mixed_samples.push(sine + noise);
         }
         test_audios.push(AudioBuffer::new(mixed_samples, sample_rate as u32, 1));

@@ -4,34 +4,51 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
 
+/// Errors that can occur during GPU-accelerated operations.
 #[derive(Debug, Error)]
 pub enum GpuError {
+    /// GPU device requested is not available on the system.
     #[error("GPU device not available: {0}")]
     DeviceNotAvailable(String),
+    /// CUDA-specific error occurred during execution.
     #[error("CUDA error: {0}")]
     CudaError(String),
+    /// Failed to allocate required GPU memory.
     #[error("Memory allocation error: {0}")]
     MemoryError(String),
+    /// Error occurred during GPU computation.
     #[error("Computation error: {0}")]
     ComputationError(String),
 }
 
+/// Configuration for GPU acceleration settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GpuConfig {
+    /// Type of compute device to use for acceleration.
     pub device_type: DeviceType,
+    /// Optional memory limit in megabytes (MB).
     pub memory_limit_mb: Option<u64>,
+    /// Number of samples to process in a single batch.
     pub batch_size: usize,
+    /// Enable FP16 (half-precision) computation for memory efficiency.
     pub enable_fp16: bool,
+    /// Enable Tensor Core acceleration on compatible NVIDIA GPUs.
     pub enable_tensor_cores: bool,
+    /// Size of the tensor memory pool for reuse.
     pub memory_pool_size: usize,
 }
 
+/// Type of compute device for acceleration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DeviceType {
+    /// Use CPU for computation.
     Cpu,
-    Cuda(u32), // GPU index
-    Metal,     // For Apple Silicon
-    Auto,      // Automatically select best available
+    /// Use NVIDIA CUDA GPU with the specified device index.
+    Cuda(u32),
+    /// Use Apple Metal GPU (for Apple Silicon).
+    Metal,
+    /// Automatically select best available device (CUDA > Metal > CPU).
+    Auto,
 }
 
 impl Default for GpuConfig {
@@ -47,6 +64,10 @@ impl Default for GpuConfig {
     }
 }
 
+/// GPU accelerator for neural singing synthesis operations.
+///
+/// Provides hardware acceleration for transformer models, diffusion synthesis,
+/// and neural vocoders using CUDA, Metal, or CPU backends.
 pub struct GpuAccelerator {
     device: Device,
     config: GpuConfig,
@@ -55,6 +76,19 @@ pub struct GpuAccelerator {
 }
 
 impl GpuAccelerator {
+    /// Creates a new GPU accelerator with the specified configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - GPU acceleration configuration
+    ///
+    /// # Returns
+    ///
+    /// Returns the initialized accelerator or an error if device is unavailable.
+    ///
+    /// # Errors
+    ///
+    /// Returns `GpuError::DeviceNotAvailable` if the requested device cannot be initialized.
     pub fn new(config: GpuConfig) -> Result<Self, GpuError> {
         let device = Self::select_device(&config.device_type)?;
         let memory_pool = TensorMemoryPool::new(config.memory_pool_size);
@@ -87,15 +121,41 @@ impl GpuAccelerator {
         }
     }
 
+    /// Returns a reference to the active compute device.
+    ///
+    /// # Returns
+    ///
+    /// Reference to the Candle `Device` being used for computation.
     pub fn device(&self) -> &Device {
         &self.device
     }
 
+    /// Returns a reference to the current GPU configuration.
+    ///
+    /// # Returns
+    ///
+    /// Reference to the `GpuConfig` used to initialize this accelerator.
     pub fn config(&self) -> &GpuConfig {
         &self.config
     }
 
-    // Neural synthesis acceleration
+    /// Accelerates transformer-based neural synthesis using GPU.
+    ///
+    /// Processes acoustic features through transformer layers with GPU acceleration,
+    /// optionally using FP16 precision and Tensor Cores for improved performance.
+    ///
+    /// # Arguments
+    ///
+    /// * `features` - Input acoustic features tensor
+    /// * `voice_characteristics` - Target voice characteristics for synthesis
+    ///
+    /// # Returns
+    ///
+    /// Returns the processed features tensor on the GPU device.
+    ///
+    /// # Errors
+    ///
+    /// Returns `GpuError::ComputationError` if tensor operations fail.
     pub fn accelerate_transformer_synthesis(
         &mut self,
         features: &Tensor,
@@ -119,6 +179,24 @@ impl GpuAccelerator {
         Ok(processed)
     }
 
+    /// Accelerates diffusion-based synthesis using GPU progressive denoising.
+    ///
+    /// Performs iterative denoising steps on the GPU with automatic memory management
+    /// to generate high-quality audio from noise.
+    ///
+    /// # Arguments
+    ///
+    /// * `noise` - Initial noise tensor to denoise
+    /// * `conditioning` - Conditioning information for guided generation
+    /// * `timesteps` - Number of denoising steps to perform
+    ///
+    /// # Returns
+    ///
+    /// Returns the denoised audio tensor on the GPU device.
+    ///
+    /// # Errors
+    ///
+    /// Returns `GpuError::ComputationError` if denoising operations fail.
     pub fn accelerate_diffusion_synthesis(
         &mut self,
         noise: &Tensor,
@@ -148,6 +226,22 @@ impl GpuAccelerator {
         Ok(current)
     }
 
+    /// Accelerates neural vocoder processing using GPU WaveNet-style synthesis.
+    ///
+    /// Converts mel spectrograms to raw audio waveforms using GPU-accelerated
+    /// neural vocoder layers.
+    ///
+    /// # Arguments
+    ///
+    /// * `mel_spectrogram` - Input mel spectrogram tensor
+    ///
+    /// # Returns
+    ///
+    /// Returns the generated audio waveform tensor on the GPU device.
+    ///
+    /// # Errors
+    ///
+    /// Returns `GpuError::ComputationError` if vocoder processing fails.
     pub fn accelerate_neural_vocoder(
         &mut self,
         mel_spectrogram: &Tensor,
@@ -169,7 +263,22 @@ impl GpuAccelerator {
         Ok(waveform)
     }
 
-    // Batch processing optimization
+    /// Processes multiple singing synthesis requests in optimized batches.
+    ///
+    /// Automatically divides requests into batches based on configured batch size
+    /// for improved GPU utilization and throughput.
+    ///
+    /// # Arguments
+    ///
+    /// * `requests` - Slice of singing synthesis requests to process
+    ///
+    /// # Returns
+    ///
+    /// Returns a vector of output tensors, one per input request.
+    ///
+    /// # Errors
+    ///
+    /// Returns `GpuError::ComputationError` if batch processing fails.
     pub fn batch_synthesize(
         &mut self,
         requests: &[SingingRequest],
@@ -186,7 +295,18 @@ impl GpuAccelerator {
         Ok(results)
     }
 
-    // Memory management
+    /// Optimizes GPU memory usage by clearing caches and performing cleanup.
+    ///
+    /// Clears the tensor cache, optimizes the memory pool, and triggers
+    /// device-specific memory cleanup (e.g., CUDA garbage collection).
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns `GpuError` if memory cleanup operations fail.
     pub fn optimize_memory(&mut self) -> Result<(), GpuError> {
         // Clear tensor cache
         self.tensor_cache.clear();
@@ -202,6 +322,12 @@ impl GpuAccelerator {
         Ok(())
     }
 
+    /// Retrieves current GPU memory usage statistics.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `MemoryUsage` struct containing allocated memory, cached memory,
+    /// and device utilization metrics.
     pub fn get_memory_usage(&self) -> MemoryUsage {
         MemoryUsage {
             allocated_mb: self.get_allocated_memory(),
@@ -340,7 +466,11 @@ impl GpuAccelerator {
         // Tensor Cores work best with dimensions that are multiples of 8 (FP16) or 16 (INT8)
         let mut optimized = shape.to_vec();
         for dim in &mut optimized {
-            *dim = (*dim + 7) / 8 * 8; // Round up to multiple of 8
+            // Round up to multiple of 8
+            let remainder = *dim % 8;
+            if remainder != 0 {
+                *dim += 8 - remainder;
+            }
         }
         optimized
     }
@@ -361,19 +491,36 @@ impl GpuAccelerator {
     }
 }
 
+/// GPU memory usage statistics.
 #[derive(Debug, Clone)]
 pub struct MemoryUsage {
+    /// Amount of memory currently allocated on the device in megabytes (MB).
     pub allocated_mb: u64,
+    /// Amount of cached memory on the device in megabytes (MB).
     pub cached_mb: u64,
+    /// Device compute utilization as a percentage (0.0-1.0).
     pub device_utilization: f32,
 }
 
+/// Memory pool for efficient tensor reuse and reduced allocation overhead.
+///
+/// Maintains a pool of pre-allocated tensors that can be reused across
+/// multiple operations to minimize GPU memory allocation/deallocation overhead.
 pub struct TensorMemoryPool {
     pool_size: usize,
     available_tensors: Vec<Tensor>,
 }
 
 impl TensorMemoryPool {
+    /// Creates a new tensor memory pool with the specified capacity.
+    ///
+    /// # Arguments
+    ///
+    /// * `pool_size` - Maximum number of tensors to keep in the pool
+    ///
+    /// # Returns
+    ///
+    /// Returns a new empty memory pool.
     pub fn new(pool_size: usize) -> Self {
         Self {
             pool_size,
@@ -381,6 +528,24 @@ impl TensorMemoryPool {
         }
     }
 
+    /// Gets a tensor from the pool or creates a new one if none available.
+    ///
+    /// Attempts to reuse an existing tensor with matching shape and dtype from the pool.
+    /// If no matching tensor is available, allocates a new tensor on the device.
+    ///
+    /// # Arguments
+    ///
+    /// * `shape` - Desired tensor shape (dimensions)
+    /// * `dtype` - Desired tensor data type (e.g., F32, F16)
+    /// * `device` - Target compute device
+    ///
+    /// # Returns
+    ///
+    /// Returns a tensor with the requested shape and dtype, either from the pool or newly allocated.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if tensor allocation fails.
     pub fn get_tensor(
         &mut self,
         shape: &[usize],
@@ -398,6 +563,14 @@ impl TensorMemoryPool {
         Tensor::zeros(shape, dtype, device)
     }
 
+    /// Returns a tensor to the pool for reuse.
+    ///
+    /// If the pool is not full, the tensor is added for future reuse.
+    /// If the pool is at capacity, the tensor is dropped to free memory.
+    ///
+    /// # Arguments
+    ///
+    /// * `tensor` - Tensor to return to the pool
     pub fn return_tensor(&mut self, tensor: Tensor) {
         if self.available_tensors.len() < self.pool_size {
             self.available_tensors.push(tensor);
@@ -405,61 +578,159 @@ impl TensorMemoryPool {
         // If pool is full, let tensor be dropped
     }
 
+    /// Optimizes the pool by clearing all cached tensors to free memory.
     pub fn optimize(&mut self) {
         // Clear pool to free memory
         self.available_tensors.clear();
     }
 }
 
-// Integration with existing synthesis pipeline
+/// Trait for types that support GPU acceleration.
+///
+/// Allows synthesis components to be configured with GPU acceleration
+/// and provides information about batching capabilities.
 pub trait GpuAccelerated {
+    /// Configures this component to use GPU acceleration.
+    ///
+    /// # Arguments
+    ///
+    /// * `accelerator` - GPU accelerator to use for operations
+    ///
+    /// # Returns
+    ///
+    /// Returns self configured with GPU acceleration.
     fn with_gpu_acceleration(self, accelerator: &mut GpuAccelerator) -> Self;
+
+    /// Checks whether this component supports batch processing.
+    ///
+    /// # Returns
+    ///
+    /// Returns `true` if the component can process multiple items in a batch.
     fn supports_batching(&self) -> bool;
+
+    /// Returns the optimal batch size for this component.
+    ///
+    /// # Returns
+    ///
+    /// Returns the recommended number of items to process in a single batch.
     fn optimal_batch_size(&self) -> usize;
 }
 
-// Builder for easy GPU configuration
+/// Builder for configuring GPU acceleration settings.
+///
+/// Provides a fluent API for constructing `GpuConfig` instances with
+/// custom settings for device type, memory limits, precision, and batching.
 pub struct GpuConfigBuilder {
     config: GpuConfig,
 }
 
 impl GpuConfigBuilder {
+    /// Creates a new GPU configuration builder with default settings.
+    ///
+    /// # Returns
+    ///
+    /// Returns a new builder initialized with default values.
     pub fn new() -> Self {
         Self {
             config: GpuConfig::default(),
         }
     }
 
+    /// Sets the device type for GPU acceleration.
+    ///
+    /// # Arguments
+    ///
+    /// * `device_type` - Type of compute device to use (CPU, CUDA, Metal, or Auto)
+    ///
+    /// # Returns
+    ///
+    /// Returns self for method chaining.
     pub fn device_type(mut self, device_type: DeviceType) -> Self {
         self.config.device_type = device_type;
         self
     }
 
+    /// Sets a memory limit for GPU usage.
+    ///
+    /// # Arguments
+    ///
+    /// * `limit_mb` - Maximum GPU memory to use in megabytes (MB)
+    ///
+    /// # Returns
+    ///
+    /// Returns self for method chaining.
     pub fn memory_limit(mut self, limit_mb: u64) -> Self {
         self.config.memory_limit_mb = Some(limit_mb);
         self
     }
 
+    /// Sets the batch size for processing.
+    ///
+    /// # Arguments
+    ///
+    /// * `size` - Number of samples to process in a single batch
+    ///
+    /// # Returns
+    ///
+    /// Returns self for method chaining.
     pub fn batch_size(mut self, size: usize) -> Self {
         self.config.batch_size = size;
         self
     }
 
+    /// Enables or disables FP16 (half-precision) computation.
+    ///
+    /// FP16 reduces memory usage and can improve performance on supported GPUs,
+    /// with minimal impact on quality for most neural synthesis tasks.
+    ///
+    /// # Arguments
+    ///
+    /// * `enable` - Whether to enable FP16 computation
+    ///
+    /// # Returns
+    ///
+    /// Returns self for method chaining.
     pub fn enable_fp16(mut self, enable: bool) -> Self {
         self.config.enable_fp16 = enable;
         self
     }
 
+    /// Enables or disables Tensor Core acceleration on NVIDIA GPUs.
+    ///
+    /// Tensor Cores provide significant performance improvements for matrix
+    /// operations on compatible NVIDIA GPUs (Volta architecture and later).
+    ///
+    /// # Arguments
+    ///
+    /// * `enable` - Whether to enable Tensor Core acceleration
+    ///
+    /// # Returns
+    ///
+    /// Returns self for method chaining.
     pub fn enable_tensor_cores(mut self, enable: bool) -> Self {
         self.config.enable_tensor_cores = enable;
         self
     }
 
+    /// Sets the size of the tensor memory pool.
+    ///
+    /// # Arguments
+    ///
+    /// * `size` - Maximum number of tensors to cache in the memory pool
+    ///
+    /// # Returns
+    ///
+    /// Returns self for method chaining.
     pub fn memory_pool_size(mut self, size: usize) -> Self {
         self.config.memory_pool_size = size;
         self
     }
 
+    /// Builds the final GPU configuration.
+    ///
+    /// # Returns
+    ///
+    /// Returns the constructed `GpuConfig` with all configured settings.
     pub fn build(self) -> GpuConfig {
         self.config
     }

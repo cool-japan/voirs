@@ -8,11 +8,11 @@ use std::collections::HashMap;
 /// Automatic chord detection and recognition system
 #[derive(Debug, Clone)]
 pub struct ChordRecognizer {
-    /// Chord templates for recognition
+    /// Chord templates for pattern-based recognition (maps chord name to template)
     chord_templates: HashMap<String, ChordTemplate>,
-    /// Recognition threshold
+    /// Minimum confidence threshold for chord recognition (0.0-1.0)
     threshold: f32,
-    /// Enable jazz chord extensions
+    /// Enable detection of jazz chord extensions (7ths, 9ths, etc.)
     enable_extensions: bool,
 }
 
@@ -29,7 +29,7 @@ impl ChordRecognizer {
         recognizer
     }
 
-    /// Initialize basic chord templates
+    /// Initialize basic chord templates for major, minor, and dominant 7th chords
     fn initialize_chord_templates(&mut self) {
         // Major triads
         self.add_chord_template("C", 0, vec![0, 4, 7], ChordQuality::Major);
@@ -55,7 +55,14 @@ impl ChordRecognizer {
         self.add_chord_template("D7", 2, vec![0, 4, 7, 10], ChordQuality::Dominant7);
     }
 
-    /// Add a chord template
+    /// Add a chord template to the recognition database
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Chord name identifier
+    /// * `root` - Root note pitch class (0-11)
+    /// * `intervals` - Semitone intervals from root
+    /// * `quality` - Chord quality type
     fn add_chord_template(
         &mut self,
         name: &str,
@@ -67,7 +74,19 @@ impl ChordRecognizer {
         self.chord_templates.insert(name.to_string(), template);
     }
 
-    /// Analyze chords from note events
+    /// Analyze chords from note events using sliding window approach
+    ///
+    /// # Arguments
+    ///
+    /// * `note_events` - Sequence of musical note events to analyze
+    ///
+    /// # Returns
+    ///
+    /// Vector of recognized chords with confidence scores
+    ///
+    /// # Errors
+    ///
+    /// Returns error if chord recognition fails
     pub async fn analyze_chords(&self, note_events: &[NoteEvent]) -> Result<Vec<ChordResult>> {
         let mut chord_results = Vec::new();
 
@@ -90,7 +109,15 @@ impl ChordRecognizer {
         Ok(chord_results)
     }
 
-    /// Get total duration of note events
+    /// Get total duration of note events in seconds
+    ///
+    /// # Arguments
+    ///
+    /// * `note_events` - Note events to measure
+    ///
+    /// # Returns
+    ///
+    /// Total duration from start to end of all notes
     fn get_total_duration(&self, note_events: &[NoteEvent]) -> f32 {
         note_events
             .iter()
@@ -99,6 +126,16 @@ impl ChordRecognizer {
     }
 
     /// Get notes within a time window
+    ///
+    /// # Arguments
+    ///
+    /// * `note_events` - All note events
+    /// * `start_time` - Window start time in seconds
+    /// * `duration` - Window duration in seconds
+    ///
+    /// # Returns
+    ///
+    /// Notes that overlap with the specified time window
     fn get_notes_in_window<'a>(
         &self,
         note_events: &'a [NoteEvent],
@@ -118,7 +155,19 @@ impl ChordRecognizer {
             .collect()
     }
 
-    /// Recognize chord from a collection of notes
+    /// Recognize chord from a collection of notes by template matching
+    ///
+    /// # Arguments
+    ///
+    /// * `notes` - Collection of simultaneous or overlapping notes
+    ///
+    /// # Returns
+    ///
+    /// Recognized chord result or None if no chord matches above threshold
+    ///
+    /// # Errors
+    ///
+    /// Returns error if chord matching encounters issues
     fn recognize_chord(&self, notes: &[&NoteEvent]) -> Result<Option<ChordResult>> {
         if notes.len() < 2 {
             return Ok(None); // Need at least 2 notes for a chord
@@ -155,7 +204,15 @@ impl ChordRecognizer {
         }
     }
 
-    /// Extract pitch classes from notes
+    /// Extract unique pitch classes from notes
+    ///
+    /// # Arguments
+    ///
+    /// * `notes` - Notes to extract pitch classes from
+    ///
+    /// # Returns
+    ///
+    /// Sorted vector of unique pitch classes (0-11)
     fn extract_pitch_classes(&self, notes: &[&NoteEvent]) -> Vec<u8> {
         let mut pitch_classes = Vec::new();
 
@@ -170,7 +227,15 @@ impl ChordRecognizer {
         pitch_classes
     }
 
-    /// Convert frequency to pitch class (0-11)
+    /// Convert frequency to pitch class (0-11, where C=0)
+    ///
+    /// # Arguments
+    ///
+    /// * `frequency` - Frequency in Hz
+    ///
+    /// # Returns
+    ///
+    /// Pitch class number (0=C, 1=C#, 2=D, etc.)
     fn frequency_to_pitch_class(&self, frequency: f32) -> u8 {
         let a4_freq = 440.0;
         let semitones_from_a4 = 12.0 * (frequency / a4_freq).log2();
@@ -179,6 +244,14 @@ impl ChordRecognizer {
     }
 
     /// Convert pitch class to note name
+    ///
+    /// # Arguments
+    ///
+    /// * `pitch_class` - Pitch class (0-11)
+    ///
+    /// # Returns
+    ///
+    /// Note name as string (C, C#, D, etc.)
     fn pitch_class_to_note_name(&self, pitch_class: u8) -> String {
         let note_names = [
             "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
@@ -186,7 +259,16 @@ impl ChordRecognizer {
         note_names[pitch_class as usize % 12].to_string()
     }
 
-    /// Calculate chord confidence score
+    /// Calculate chord confidence score using Jaccard similarity
+    ///
+    /// # Arguments
+    ///
+    /// * `template` - Chord template to match against
+    /// * `pitch_classes` - Detected pitch classes from audio
+    ///
+    /// # Returns
+    ///
+    /// Confidence score (0.0-1.0) based on pitch class overlap
     fn calculate_chord_confidence(&self, template: &ChordTemplate, pitch_classes: &[u8]) -> f32 {
         if pitch_classes.is_empty() || template.intervals.is_empty() {
             return 0.0;
@@ -214,12 +296,20 @@ impl ChordRecognizer {
         }
     }
 
-    /// Set recognition threshold
+    /// Set recognition threshold for chord detection
+    ///
+    /// # Arguments
+    ///
+    /// * `threshold` - Minimum confidence (0.0-1.0) required for chord recognition
     pub fn set_threshold(&mut self, threshold: f32) {
         self.threshold = threshold.clamp(0.0, 1.0);
     }
 
-    /// Enable jazz chord extensions
+    /// Enable jazz chord extensions (7ths, 9ths, etc.)
+    ///
+    /// # Arguments
+    ///
+    /// * `enable` - True to enable extended chord recognition
     pub fn enable_extensions(&mut self, enable: bool) {
         self.enable_extensions = enable;
 
@@ -228,7 +318,7 @@ impl ChordRecognizer {
         }
     }
 
-    /// Add extended chord templates
+    /// Add extended chord templates (maj7, m7) to recognition database
     fn add_extended_chords(&mut self) {
         // Major 7th chords
         self.add_chord_template("Cmaj7", 0, vec![0, 4, 7, 11], ChordQuality::Major7);
@@ -242,6 +332,10 @@ impl ChordRecognizer {
     }
 
     /// Get available chord templates
+    ///
+    /// # Returns
+    ///
+    /// Reference to the chord template database
     pub fn chord_templates(&self) -> &HashMap<String, ChordTemplate> {
         &self.chord_templates
     }

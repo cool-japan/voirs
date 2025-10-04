@@ -273,11 +273,15 @@ pub extern "C" fn voirs_supports_hardware_acceleration() -> bool {
     PlatformInfo::current().supports_hardware_acceleration()
 }
 
+// Note: AudioConfig contains String which is not FFI-safe
+// These functions are for internal use only
+#[allow(improper_ctypes_definitions)]
 #[no_mangle]
 pub extern "C" fn voirs_get_audio_config_optimal() -> AudioConfig {
     AudioConfig::optimal()
 }
 
+#[allow(improper_ctypes_definitions)]
 #[no_mangle]
 pub extern "C" fn voirs_get_audio_config_low_latency() -> AudioConfig {
     AudioConfig::low_latency()

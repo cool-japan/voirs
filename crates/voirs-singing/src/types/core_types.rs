@@ -118,6 +118,10 @@ pub enum BreathType {
 
 impl VoiceType {
     /// Get typical frequency range for voice type
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing the (min, max) frequency range in Hz for this voice type
     pub fn frequency_range(&self) -> (f32, f32) {
         match self {
             VoiceType::Soprano => (261.6, 1046.5),     // C4 to C6
@@ -130,6 +134,10 @@ impl VoiceType {
     }
 
     /// Get typical F0 mean for voice type
+    ///
+    /// # Returns
+    ///
+    /// The average fundamental frequency in Hz for this voice type
     pub fn f0_mean(&self) -> f32 {
         match self {
             VoiceType::Soprano => 523.3,      // C5
@@ -144,6 +152,10 @@ impl VoiceType {
 
 impl Expression {
     /// Get intensity modifier for expression
+    ///
+    /// # Returns
+    ///
+    /// A multiplier for intensity/energy level (1.0 = neutral, >1.0 = more intense, <1.0 = less intense)
     pub fn intensity_modifier(&self) -> f32 {
         match self {
             Expression::Neutral => 1.0,
@@ -160,6 +172,10 @@ impl Expression {
     }
 
     /// Get pitch modifier for expression
+    ///
+    /// # Returns
+    ///
+    /// A multiplier for pitch modulation (1.0 = neutral, >1.0 = higher pitch, <1.0 = lower pitch)
     pub fn pitch_modifier(&self) -> f32 {
         match self {
             Expression::Neutral => 1.0,

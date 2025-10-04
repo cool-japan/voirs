@@ -27,6 +27,7 @@ pub struct MFAModel {
 
 /// MFA model configuration
 #[derive(Debug, Clone)]
+/// M F A Config
 pub struct MFAConfig {
     /// Model name or path
     pub model: String,
@@ -58,10 +59,15 @@ pub struct MFAConfig {
 
 /// MFA output format options
 #[derive(Debug, Clone, PartialEq)]
+/// M F A Output Format
 pub enum MFAOutputFormat {
+    /// Text grid
     TextGrid,
+    /// Json
     Json,
+    /// Csv
     Csv,
+    /// Lab
     Lab,
 }
 
@@ -107,6 +113,7 @@ struct MFAState {
 
 /// Information about an MFA model
 #[derive(Debug, Clone)]
+/// M F A Model Info
 pub struct MFAModelInfo {
     /// Model name
     pub name: String,
@@ -124,6 +131,7 @@ pub struct MFAModelInfo {
 
 /// Information about an MFA dictionary
 #[derive(Debug, Clone)]
+/// M F A Dictionary Info
 pub struct MFADictionaryInfo {
     /// Dictionary name
     pub name: String,
@@ -669,6 +677,7 @@ impl MFAModel {
 
 /// MFA model statistics
 #[derive(Debug, Clone)]
+/// M F A Stats
 pub struct MFAStats {
     /// Total number of alignments performed
     pub alignment_count: usize,

@@ -159,16 +159,16 @@ impl AlignmentMatrix {
         let mut total_cost = 0.0;
         let mut count = 0;
 
-        for i in 0..self.text_len {
-            if log_probs[i].len() != self.audio_len {
+        for (i, log_prob_row) in log_probs.iter().enumerate() {
+            if log_prob_row.len() != self.audio_len {
                 return Err(VocoderError::VocodingError(
                     "Log probabilities dimension mismatch".to_string(),
                 ));
             }
 
-            for j in 0..self.audio_len {
+            for (j, &log_prob_val) in log_prob_row.iter().enumerate() {
                 if self.weights[i][j] > 0.0 {
-                    total_cost += self.weights[i][j] * log_probs[i][j];
+                    total_cost += self.weights[i][j] * log_prob_val;
                     count += 1;
                 }
             }
@@ -353,16 +353,16 @@ impl MonotonicAlignmentSearch {
         // Convert to probabilities
         let mut alignment = AlignmentMatrix::new(text_len, audio_len, false);
 
-        for i in 0..text_len {
+        for (i, alpha_row) in alpha.iter().enumerate() {
             // Compute normalizing constant for this time step
             let mut log_norm = f32::NEG_INFINITY;
-            for j in 0..audio_len {
-                log_norm = log_sum_exp(log_norm, alpha[i][j]);
+            for &alpha_val in alpha_row.iter() {
+                log_norm = log_sum_exp(log_norm, alpha_val);
             }
 
             // Normalize to get probabilities
-            for j in 0..audio_len {
-                alignment.weights[i][j] = (alpha[i][j] - log_norm).exp();
+            for (j, &alpha_val) in alpha_row.iter().enumerate() {
+                alignment.weights[i][j] = (alpha_val - log_norm).exp();
             }
         }
 

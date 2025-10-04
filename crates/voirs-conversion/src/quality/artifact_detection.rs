@@ -251,7 +251,7 @@ pub struct MemoryPool {
     /// Reusable FFT buffers
     pub fft_buffers: Vec<Vec<f32>>,
     /// Reusable complex buffers
-    pub complex_buffers: Vec<Vec<num_complex::Complex<f32>>>,
+    pub complex_buffers: Vec<Vec<scirs2_core::Complex<f32>>>,
     /// Reusable analysis windows
     pub analysis_windows: Vec<Vec<f32>>,
     /// Buffer pool size

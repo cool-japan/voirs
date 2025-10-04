@@ -1745,7 +1745,8 @@ impl RealtimeAdaptationSession {
 
         for value in &mut adapted_vector {
             // Apply small random adaptation weighted by adaptation strength
-            let adaptation = (rand::random::<f32>() - 0.5) * 0.1 * adaptation_strength;
+            let adaptation =
+                (scirs2_core::random::random::<f32>() - 0.5) * 0.1 * adaptation_strength;
             *value += adaptation;
             *value = value.clamp(-1.0, 1.0); // Keep values in reasonable range
         }

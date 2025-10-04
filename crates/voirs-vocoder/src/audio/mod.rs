@@ -321,8 +321,7 @@ pub fn optimize_dynamic_range(audio: &mut AudioBuffer) {
 
 /// Enhance spectral quality using FFT-based processing
 pub fn enhance_spectral_quality(audio: &mut AudioBuffer) {
-    use realfft::RealFftPlanner;
-    use rustfft::num_complex::Complex;
+    use scirs2_core::Complex;
 
     let samples = audio.samples_mut();
     if samples.len() < 256 {
@@ -332,12 +331,6 @@ pub fn enhance_spectral_quality(audio: &mut AudioBuffer) {
     let frame_size = 1024.min(samples.len().next_power_of_two());
     let hop_size = frame_size / 4;
 
-    let mut planner = RealFftPlanner::<f32>::new();
-    let fft = planner.plan_fft_forward(frame_size);
-    let ifft = planner.plan_fft_inverse(frame_size);
-
-    let mut input_buffer = vec![0.0f32; frame_size];
-    let mut spectrum = vec![Complex::new(0.0, 0.0); frame_size / 2 + 1];
     let mut output_samples = vec![0.0f32; samples.len()];
 
     // Hann window for overlapping frames
@@ -351,40 +344,46 @@ pub fn enhance_spectral_quality(audio: &mut AudioBuffer) {
     let mut pos = 0;
     while pos + frame_size <= samples.len() {
         // Apply window and copy to input buffer
+        let mut input_buffer = vec![0.0f32; frame_size];
         for i in 0..frame_size {
             input_buffer[i] = samples[pos + i] * window[i];
         }
 
         // Forward FFT
-        if fft.process(&mut input_buffer, &mut spectrum).is_ok() {
-            // Spectral enhancement: Boost mid-high frequencies selectively
-            let spectrum_len = spectrum.len();
-            for (i, bin) in spectrum.iter_mut().enumerate() {
-                let freq_ratio = i as f32 / spectrum_len as f32;
+        let mut spectrum = match scirs2_fft::rfft(&input_buffer, None) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
 
-                // Apply frequency-dependent enhancement
-                let enhancement = if freq_ratio < 0.1 {
-                    1.0 // Low frequencies unchanged
-                } else if freq_ratio < 0.4 {
-                    1.0 + 0.15 * ((freq_ratio - 0.1) / 0.3) // Gradual boost
-                } else if freq_ratio < 0.7 {
-                    1.15 // Mid frequencies boosted
-                } else {
-                    1.15 * (1.0 - (freq_ratio - 0.7) / 0.3) // High frequencies tapered
-                };
+        // Spectral enhancement: Boost mid-high frequencies selectively
+        let spectrum_len = spectrum.len();
+        for (i, bin) in spectrum.iter_mut().enumerate() {
+            let freq_ratio = i as f32 / spectrum_len as f32;
 
-                *bin *= enhancement;
-            }
+            // Apply frequency-dependent enhancement
+            let enhancement = if freq_ratio < 0.1 {
+                1.0 // Low frequencies unchanged
+            } else if freq_ratio < 0.4 {
+                1.0 + 0.15 * ((freq_ratio - 0.1) / 0.3) // Gradual boost
+            } else if freq_ratio < 0.7 {
+                1.15 // Mid frequencies boosted
+            } else {
+                1.15 * (1.0 - (freq_ratio - 0.7) / 0.3) // High frequencies tapered
+            };
 
-            // Inverse FFT
-            let mut time_output = vec![0.0f32; frame_size];
-            if ifft.process(&mut spectrum, &mut time_output).is_ok() {
-                // Overlap-add with windowing
-                for i in 0..frame_size {
-                    if pos + i < output_samples.len() {
-                        output_samples[pos + i] += time_output[i] * window[i] / frame_size as f32;
-                    }
-                }
+            *bin *= enhancement as f64;
+        }
+
+        // Inverse FFT
+        let time_output = match scirs2_fft::irfft(&spectrum, Some(frame_size)) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+
+        // Overlap-add with windowing
+        for i in 0..frame_size {
+            if pos + i < output_samples.len() && i < time_output.len() {
+                output_samples[pos + i] += (time_output[i] as f32) * window[i] / frame_size as f32;
             }
         }
 
@@ -399,8 +398,7 @@ pub fn enhance_spectral_quality(audio: &mut AudioBuffer) {
 
 /// Enhance harmonics using advanced spectral analysis
 pub fn enhance_harmonics(audio: &mut AudioBuffer) {
-    use realfft::RealFftPlanner;
-    use rustfft::num_complex::Complex;
+    use scirs2_core::Complex;
 
     let samples = audio.samples_mut();
     if samples.len() < 512 {
@@ -410,12 +408,6 @@ pub fn enhance_harmonics(audio: &mut AudioBuffer) {
     let frame_size = 2048.min(samples.len().next_power_of_two());
     let hop_size = frame_size / 8; // Smaller hop for better harmonic tracking
 
-    let mut planner = RealFftPlanner::<f32>::new();
-    let fft = planner.plan_fft_forward(frame_size);
-    let ifft = planner.plan_fft_inverse(frame_size);
-
-    let mut input_buffer = vec![0.0f32; frame_size];
-    let mut spectrum = vec![Complex::new(0.0, 0.0); frame_size / 2 + 1];
     let mut output_samples = vec![0.0f32; samples.len()];
 
     // Hann window
@@ -429,69 +421,75 @@ pub fn enhance_harmonics(audio: &mut AudioBuffer) {
     let mut pos = 0;
     while pos + frame_size <= samples.len() {
         // Apply window and copy to input buffer
+        let mut input_buffer = vec![0.0f32; frame_size];
         for i in 0..frame_size {
             input_buffer[i] = samples[pos + i] * window[i];
         }
 
         // Forward FFT
-        if fft.process(&mut input_buffer, &mut spectrum).is_ok() {
-            // Find fundamental frequency by looking for the strongest peak
-            let mut fundamental_bin = 0;
-            let mut max_magnitude = 0.0;
+        let mut spectrum = match scirs2_fft::rfft(&input_buffer, None) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
 
-            // Search in the range 80Hz - 800Hz (assuming 44.1kHz sample rate)
-            let min_bin = (80.0 * frame_size as f32 / 44100.0) as usize;
-            let max_bin = (800.0 * frame_size as f32 / 44100.0) as usize;
+        // Find fundamental frequency by looking for the strongest peak
+        let mut fundamental_bin = 0;
+        let mut max_magnitude = 0.0;
 
-            for (i, bin) in spectrum[min_bin..max_bin.min(spectrum.len())]
-                .iter()
-                .enumerate()
-            {
-                let magnitude = bin.norm();
-                if magnitude > max_magnitude {
-                    max_magnitude = magnitude;
-                    fundamental_bin = min_bin + i;
-                }
+        // Search in the range 80Hz - 800Hz (assuming 44.1kHz sample rate)
+        let min_bin = (80.0 * frame_size as f32 / 44100.0) as usize;
+        let max_bin = (800.0 * frame_size as f32 / 44100.0) as usize;
+
+        for (i, bin) in spectrum[min_bin..max_bin.min(spectrum.len())]
+            .iter()
+            .enumerate()
+        {
+            let magnitude = bin.norm();
+            if magnitude > max_magnitude {
+                max_magnitude = magnitude;
+                fundamental_bin = min_bin + i;
             }
+        }
 
-            // Enhance harmonics if we found a fundamental
-            if fundamental_bin > 0 && max_magnitude > 0.01 {
-                // Enhance the first 6 harmonics
-                for harmonic in 2..=6 {
-                    let harmonic_bin = fundamental_bin * harmonic;
-                    if harmonic_bin < spectrum.len() {
-                        // Calculate enhancement factor based on harmonic number
-                        let enhancement_factor = match harmonic {
-                            2 => 1.4,  // Strong second harmonic
-                            3 => 1.2,  // Moderate third harmonic
-                            4 => 1.1,  // Mild fourth harmonic
-                            5 => 1.05, // Slight fifth harmonic
-                            _ => 1.02, // Very mild higher harmonics
-                        };
+        // Enhance harmonics if we found a fundamental
+        if fundamental_bin > 0 && max_magnitude > 0.01 {
+            // Enhance the first 6 harmonics
+            for harmonic in 2..=6 {
+                let harmonic_bin = fundamental_bin * harmonic;
+                if harmonic_bin < spectrum.len() {
+                    // Calculate enhancement factor based on harmonic number
+                    let enhancement_factor = match harmonic {
+                        2 => 1.4,  // Strong second harmonic
+                        3 => 1.2,  // Moderate third harmonic
+                        4 => 1.1,  // Mild fourth harmonic
+                        5 => 1.05, // Slight fifth harmonic
+                        _ => 1.02, // Very mild higher harmonics
+                    };
 
-                        // Apply enhancement with some spread to adjacent bins
-                        for offset in -1i32..=1i32 {
-                            let bin_index = (harmonic_bin as i32 + offset) as usize;
-                            if bin_index < spectrum.len() {
-                                spectrum[bin_index] *= enhancement_factor;
-                            }
+                    // Apply enhancement with some spread to adjacent bins
+                    for offset in -1i32..=1i32 {
+                        let bin_index = (harmonic_bin as i32 + offset) as usize;
+                        if bin_index < spectrum.len() {
+                            spectrum[bin_index] *= enhancement_factor;
                         }
                     }
                 }
-
-                // Also enhance the fundamental slightly
-                spectrum[fundamental_bin] *= 1.1;
             }
 
-            // Inverse FFT
-            let mut time_output = vec![0.0f32; frame_size];
-            if ifft.process(&mut spectrum, &mut time_output).is_ok() {
-                // Overlap-add with windowing
-                for i in 0..frame_size {
-                    if pos + i < output_samples.len() {
-                        output_samples[pos + i] += time_output[i] * window[i] / frame_size as f32;
-                    }
-                }
+            // Also enhance the fundamental slightly
+            spectrum[fundamental_bin] *= 1.1;
+        }
+
+        // Inverse FFT
+        let time_output = match scirs2_fft::irfft(&spectrum, Some(frame_size)) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+
+        // Overlap-add with windowing
+        for i in 0..frame_size {
+            if pos + i < output_samples.len() && i < time_output.len() {
+                output_samples[pos + i] += (time_output[i] as f32) * window[i] / frame_size as f32;
             }
         }
 

@@ -198,7 +198,7 @@ impl BenchmarkRunner {
             };
 
             // Add some realistic variation
-            let variation = rand::random::<f64>() * 0.1 - 0.05; // ±5% variation
+            let variation = scirs2_core::random::random::<f64>() * 0.1 - 0.05; // ±5% variation
             let measurement_value = base_time * (1.0 + variation);
 
             let measurement = RegressionDetector::create_measurement(

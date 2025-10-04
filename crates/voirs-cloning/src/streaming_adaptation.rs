@@ -199,7 +199,7 @@ impl StreamingAdaptationSession {
         } else {
             // For streaming adaptation, we estimate quality based on audio features
             // In a real implementation, this would use proper quality assessment
-            0.7 + (rand::random::<f32>() - 0.5) * 0.2 // Simulated quality score
+            0.7 + (scirs2_core::random::random::<f32>() - 0.5) * 0.2 // Simulated quality score
         };
 
         // Create adaptation sample
@@ -347,8 +347,10 @@ impl StreamingAdaptationSession {
             // In a real implementation, this would extract embeddings from samples
             // For now, we simulate by applying small perturbations
             for (i, value) in adaptation_embedding.vector.iter_mut().enumerate() {
-                let perturbation =
-                    (rand::random::<f32>() - 0.5) * 0.01 * weight * self.config.learning_rate;
+                let perturbation = (scirs2_core::random::random::<f32>() - 0.5)
+                    * 0.01
+                    * weight
+                    * self.config.learning_rate;
                 *value += perturbation;
             }
         }

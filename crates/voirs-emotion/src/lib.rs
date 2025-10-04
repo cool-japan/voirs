@@ -4,9 +4,6 @@
 //! enabling dynamic emotional expression through prosody modification, acoustic parameter
 //! adjustment, and emotion interpolation.
 
-#![allow(clippy::uninlined_format_args)]
-#![allow(clippy::while_let_on_iterator)]
-#![allow(clippy::should_implement_trait)]
 #![warn(missing_docs)]
 #![deny(unsafe_code)]
 

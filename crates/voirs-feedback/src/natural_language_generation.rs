@@ -27,19 +27,43 @@ pub type NLGResult<T> = Result<T, NLGError>;
 #[derive(Debug, thiserror::Error)]
 pub enum NLGError {
     #[error("Template not found: {template_id}")]
-    TemplateNotFound { template_id: String },
+    /// Raised when a referenced template cannot be located.
+    TemplateNotFound {
+        /// Identifier of the missing template.
+        template_id: String,
+    },
     #[error("Language not supported: {language}")]
-    LanguageNotSupported { language: String },
+    /// Raised when the requested language is not enabled for generation.
+    LanguageNotSupported {
+        /// Language identifier that is not supported.
+        language: String,
+    },
     #[error("Generation failed: {reason}")]
-    GenerationFailed { reason: String },
+    /// Raised when the generator cannot produce output successfully.
+    GenerationFailed {
+        /// Explanation of the generation failure.
+        reason: String,
+    },
     #[error("Context insufficient for generation: {missing_context}")]
-    InsufficientContext { missing_context: String },
+    /// Indicates that required context data is missing.
+    InsufficientContext {
+        /// Description of the missing context elements.
+        missing_context: String,
+    },
     #[error("Tone adaptation failed: {details}")]
-    ToneAdaptationFailed { details: String },
+    /// Raised when tone adaptation cannot complete successfully.
+    ToneAdaptationFailed {
+        /// Details about the tone adaptation failure.
+        details: String,
+    },
     #[error("Translation failed: {from_lang} -> {to_lang}: {error}")]
+    /// Description
     TranslationFailed {
+        /// Description
         from_lang: String,
+        /// Description
         to_lang: String,
+        /// Description
         error: String,
     },
 }
@@ -521,20 +545,31 @@ pub struct EmotionalState {
 pub enum Emotion {
     /// Positive emotions
     Joy,
+    /// Description
     Excitement,
+    /// Description
     Pride,
+    /// Description
     Satisfaction,
+    /// Description
     Confidence,
     /// Negative emotions
     Frustration,
+    /// Description
     Disappointment,
+    /// Description
     Anxiety,
+    /// Description
     Confusion,
+    /// Description
     Discouragement,
     /// Neutral emotions
     Calm,
+    /// Description
     Focused,
+    /// Description
     Curious,
+    /// Description
     Determined,
 }
 
@@ -927,7 +962,10 @@ pub enum UserToneResponse {
     /// Neutral response
     Neutral,
     /// Request for different tone
-    RequestChange { preferred_tone: ToneType },
+    RequestChange {
+        /// Tone preference expressed by the user.
+        preferred_tone: ToneType,
+    },
 }
 
 /// Context analysis system
@@ -1620,6 +1658,7 @@ impl NaturalLanguageGenerator {
 }
 
 impl TemplateManager {
+    /// Description
     pub fn new() -> Self {
         Self {
             templates: HashMap::new(),
@@ -1630,6 +1669,7 @@ impl TemplateManager {
 }
 
 impl LanguageManager {
+    /// Description
     pub fn new() -> Self {
         Self {
             languages: HashMap::new(),
@@ -1640,6 +1680,7 @@ impl LanguageManager {
 }
 
 impl ToneAdapter {
+    /// Description
     pub fn new() -> Self {
         Self {
             tone_profiles: HashMap::new(),
@@ -1650,6 +1691,7 @@ impl ToneAdapter {
 }
 
 impl ContextAnalyzer {
+    /// Description
     pub fn new() -> Self {
         Self {
             patterns: HashMap::new(),
@@ -1660,6 +1702,7 @@ impl ContextAnalyzer {
 }
 
 impl GenerationStatistics {
+    /// Description
     pub fn new() -> Self {
         Self {
             total_generations: 0,

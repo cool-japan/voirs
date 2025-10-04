@@ -1,31 +1,50 @@
 //! Common types and data structures for musical intelligence
 
-/// Chord quality types
+/// Chord quality types representing various harmonic structures
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChordQuality {
+    /// Major triad (root, major third, perfect fifth)
     Major,
+    /// Minor triad (root, minor third, perfect fifth)
     Minor,
+    /// Diminished triad (root, minor third, diminished fifth)
     Diminished,
+    /// Augmented triad (root, major third, augmented fifth)
     Augmented,
+    /// Dominant seventh chord (root, major third, perfect fifth, minor seventh)
     Dominant7,
+    /// Major seventh chord (root, major third, perfect fifth, major seventh)
     Major7,
+    /// Minor seventh chord (root, minor third, perfect fifth, minor seventh)
     Minor7,
+    /// Minor-major seventh chord (root, minor third, perfect fifth, major seventh)
     MinorMajor7,
+    /// Fully diminished seventh chord (root, minor third, diminished fifth, diminished seventh)
     Diminished7,
+    /// Half-diminished seventh chord (root, minor third, diminished fifth, minor seventh)
     HalfDiminished7,
+    /// Suspended second chord (root, major second, perfect fifth)
     Suspended2,
+    /// Suspended fourth chord (root, perfect fourth, perfect fifth)
     Suspended4,
 }
 
-/// Key mode types
+/// Key mode types representing different modal scales
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum KeyMode {
+    /// Major mode (Ionian) with intervals: W-W-H-W-W-W-H
     Major,
+    /// Natural minor mode (Aeolian) with intervals: W-H-W-W-H-W-W
     Minor,
+    /// Dorian mode with intervals: W-H-W-W-W-H-W
     Dorian,
+    /// Phrygian mode with intervals: H-W-W-W-H-W-W
     Phrygian,
+    /// Lydian mode with intervals: W-W-W-H-W-W-H
     Lydian,
+    /// Mixolydian mode with intervals: W-W-H-W-W-H-W
     Mixolydian,
+    /// Locrian mode with intervals: H-W-W-H-W-W-W
     Locrian,
 }
 
@@ -198,6 +217,17 @@ pub struct MusicalAnalysis {
 
 impl ChordTemplate {
     /// Create a new chord template
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Chord name (e.g., "Cmaj7", "Am")
+    /// * `root` - Root note pitch class (0-11, where C=0)
+    /// * `intervals` - Semitone intervals from root note
+    /// * `quality` - Harmonic quality of the chord
+    ///
+    /// # Returns
+    ///
+    /// New chord template instance with default weight of 1.0
     pub fn new(name: String, root: u8, intervals: Vec<u8>, quality: ChordQuality) -> Self {
         Self {
             name,
@@ -210,12 +240,28 @@ impl ChordTemplate {
     }
 
     /// Add extensions to the chord
+    ///
+    /// # Arguments
+    ///
+    /// * `extensions` - Extension intervals (7th, 9th, 11th, 13th)
+    ///
+    /// # Returns
+    ///
+    /// Modified chord template with specified extensions
     pub fn with_extensions(mut self, extensions: Vec<u8>) -> Self {
         self.extensions = extensions;
         self
     }
 
     /// Set recognition weight
+    ///
+    /// # Arguments
+    ///
+    /// * `weight` - Recognition weight for pattern matching (higher values prioritize this chord)
+    ///
+    /// # Returns
+    ///
+    /// Modified chord template with specified weight
     pub fn with_weight(mut self, weight: f32) -> Self {
         self.weight = weight;
         self
@@ -223,7 +269,11 @@ impl ChordTemplate {
 }
 
 impl KeyProfile {
-    /// Create major key profile
+    /// Create major key profile using Krumhansl-Schmuckler weights
+    ///
+    /// # Returns
+    ///
+    /// Key profile optimized for major key detection with empirically-derived weights
     pub fn major() -> Self {
         Self {
             weights: [
@@ -234,7 +284,11 @@ impl KeyProfile {
         }
     }
 
-    /// Create minor key profile
+    /// Create minor key profile using Krumhansl-Schmuckler weights
+    ///
+    /// # Returns
+    ///
+    /// Key profile optimized for minor key detection with empirically-derived weights
     pub fn minor() -> Self {
         Self {
             weights: [
@@ -248,6 +302,10 @@ impl KeyProfile {
 
 impl ScaleCharacteristics {
     /// Create characteristics for major scale
+    ///
+    /// # Returns
+    ///
+    /// Scale characteristics with high brightness, low tension, suitable for classical/pop/folk contexts
     pub fn major_scale() -> Self {
         Self {
             note_count: 7,
@@ -262,6 +320,10 @@ impl ScaleCharacteristics {
     }
 
     /// Create characteristics for minor scale
+    ///
+    /// # Returns
+    ///
+    /// Scale characteristics with low brightness, moderate tension, suitable for classical/folk/blues contexts
     pub fn minor_scale() -> Self {
         Self {
             note_count: 7,

@@ -15,7 +15,7 @@ use crate::traits::{
 };
 use crate::EvaluationError;
 use async_trait::async_trait;
-use rayon::prelude::*;
+use scirs2_core::parallel_ops::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Semaphore;

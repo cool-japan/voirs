@@ -2,30 +2,108 @@
 
 use std::collections::HashMap;
 
-/// Effect processor trait
+/// Effect processor trait for singing synthesis audio effects.
+///
+/// This trait defines the interface for all audio effects that can be applied to singing voices.
+/// Effects implementing this trait can be chained together and managed through the `EffectChain`.
 pub trait SingingEffect: Send + Sync {
+    /// Returns the name identifier of this effect.
+    ///
+    /// # Returns
+    ///
+    /// A string slice representing the effect's name (e.g., "reverb", "compressor").
     fn name(&self) -> &str;
+
+    /// Processes audio samples in-place, applying the effect.
+    ///
+    /// # Arguments
+    ///
+    /// * `audio` - Mutable slice of audio samples to process (normalized to -1.0 to 1.0 range)
+    /// * `sample_rate` - Sample rate in Hz (e.g., 44100.0, 48000.0)
+    ///
+    /// # Returns
+    ///
+    /// `Result<()>` indicating success or an error if processing fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if audio processing encounters invalid parameters or internal failures.
     fn process(&mut self, audio: &mut [f32], sample_rate: f32) -> crate::Result<()>;
+
+    /// Sets a parameter value for this effect.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Parameter name (e.g., "threshold", "attack", "frequency")
+    /// * `value` - Parameter value (range and units depend on the specific parameter)
+    ///
+    /// # Returns
+    ///
+    /// `Result<()>` indicating success or an error if the parameter is invalid.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the parameter name is unknown or the value is out of valid range.
     fn set_parameter(&mut self, name: &str, value: f32) -> crate::Result<()>;
+
+    /// Gets the current value of a parameter.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Parameter name to query
+    ///
+    /// # Returns
+    ///
+    /// `Some(f32)` with the parameter value if it exists, or `None` if the parameter is unknown.
     fn get_parameter(&self, name: &str) -> Option<f32>;
+
+    /// Returns a map of all parameters and their current values.
+    ///
+    /// # Returns
+    ///
+    /// A `HashMap` containing all parameter names as keys and their values.
     fn get_parameters(&self) -> HashMap<String, f32>;
+
+    /// Resets the effect's internal state to initial conditions.
+    ///
+    /// This clears any buffers, delays, or accumulated state while preserving parameter settings.
     fn reset(&mut self);
+
+    /// Creates a boxed clone of this effect.
+    ///
+    /// # Returns
+    ///
+    /// A new boxed instance of this effect with the same configuration.
     fn clone_effect(&self) -> Box<dyn SingingEffect>;
 }
 
-/// Effect chain for processing audio
+/// Effect chain for processing audio through multiple effects in sequence.
+///
+/// The `EffectChain` manages a series of effects that are applied sequentially to audio,
+/// with support for dry/wet mixing, bypass, and enable/disable functionality.
 pub struct EffectChain {
+    /// Ordered vector of effects to apply sequentially
     effects: Vec<Box<dyn SingingEffect>>,
+    /// Whether the effect chain is enabled
     enabled: bool,
+    /// Dry/wet mix ratio (0.0 = fully dry, 1.0 = fully wet)
     dry_wet_mix: f32,
+    /// Whether to bypass all processing (pass audio through unchanged)
     bypass: bool,
 }
 
-/// Effect processor wrapper
+/// Effect processor wrapper providing parameter management and processing control.
+///
+/// `EffectProcessor` wraps a single effect with additional control features like
+/// parameter caching, enable/disable, and bypass functionality.
 pub struct EffectProcessor {
+    /// The wrapped effect instance
     effect: Box<dyn SingingEffect>,
+    /// Cached parameter values for quick access
     parameters: HashMap<String, f32>,
+    /// Whether the processor is enabled
     enabled: bool,
+    /// Whether to bypass processing (pass audio through unchanged)
     bypass: bool,
 }
 

@@ -295,9 +295,9 @@ impl OnnxVocoder {
 
         // Flatten mel spectrogram data (batch_size=1, mel_dim, time_steps)
         let mut mel_data = Vec::with_capacity(mel_dim * time_steps);
-        for i in 0..mel_dim {
+        for mel_row in mel_spectrogram.data.iter().take(mel_dim) {
             for j in 0..time_steps {
-                mel_data.push(mel_spectrogram.data[i][j]);
+                mel_data.push(mel_row[j]);
             }
         }
 

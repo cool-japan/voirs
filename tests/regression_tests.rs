@@ -276,10 +276,10 @@ impl RegressionTests {
         current: &SynthesisOutput,
         golden_path: &Path,
         test_case: &TestCase,
-        mcd_evaluator: &MCDEvaluator,
+        _mcd_evaluator: &MCDEvaluator,
         pesq_evaluator: &PESQEvaluator,
-        si_sdr_evaluator: &SISdrEvaluator,
-        stoi_evaluator: &STOIEvaluator,
+        _si_sdr_evaluator: &SISdrEvaluator,
+        _stoi_evaluator: &STOIEvaluator,
     ) -> Result<ComparisonResult, Box<dyn std::error::Error>> {
         let comparison_start = Instant::now();
         let mut result = ComparisonResult::new();
@@ -457,7 +457,7 @@ impl RegressionTests {
         let mut total_checks = 0;
 
         // PESQ check
-        if let Some(pesq) = result.pesq_score {
+        if let Some(_pesq) = result.pesq_score {
             total_checks += 1;
             if result.meets_pesq_threshold {
                 score += 1;
@@ -665,7 +665,7 @@ impl RegressionResults {
 
         if regression_tests > 0 {
             let regression_pass_rate =
-                ((passed_tests - baseline_tests) as f32 / regression_tests as f32 * 100.0);
+                (passed_tests - baseline_tests) as f32 / regression_tests as f32 * 100.0;
             println!("Regression pass rate: {:.1}%", regression_pass_rate);
 
             if regression_pass_rate >= 90.0 {

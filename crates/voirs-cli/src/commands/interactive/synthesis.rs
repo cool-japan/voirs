@@ -14,7 +14,7 @@ use tokio::sync::RwLock;
 /// Real-time synthesis engine
 pub struct SynthesisEngine {
     /// VoiRS SDK pipeline for synthesis
-    pipeline: Option<Arc<RwLock<voirs::VoirsPipeline>>>,
+    pipeline: Option<Arc<RwLock<voirs_sdk::VoirsPipeline>>>,
 
     /// Audio player for immediate playback
     audio_player: AudioPlayer,
@@ -102,10 +102,10 @@ impl SynthesisEngine {
     }
 
     /// Create a new VoiRS pipeline
-    async fn create_pipeline(&self, voice: &str) -> Result<voirs::VoirsPipeline> {
+    async fn create_pipeline(&self, voice: &str) -> Result<voirs_sdk::VoirsPipeline> {
         // Create pipeline using VoiRS SDK builder
-        let pipeline = voirs::VoirsPipeline::builder()
-            .with_quality(voirs::QualityLevel::High)
+        let pipeline = voirs_sdk::VoirsPipeline::builder()
+            .with_quality(voirs_sdk::QualityLevel::High)
             .with_voice(voice)
             .build()
             .await

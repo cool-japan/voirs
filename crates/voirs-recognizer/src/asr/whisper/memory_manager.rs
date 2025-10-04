@@ -30,6 +30,7 @@ pub struct WhisperMemoryManager {
 
 /// Memory management configuration
 #[derive(Debug, Clone)]
+/// Memory Config
 pub struct MemoryConfig {
     /// Maximum total memory usage in MB
     pub max_memory_mb: f32,
@@ -110,10 +111,15 @@ struct CachedTensor {
 
 /// Cache priority levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+/// Cache Priority
 pub enum CachePriority {
+    /// Low
     Low = 0,
+    /// Normal
     Normal = 1,
+    /// High
     High = 2,
+    /// Critical
     Critical = 3,
 }
 
@@ -164,6 +170,7 @@ enum CleanupTask {
 }
 
 impl WhisperMemoryManager {
+    /// new
     pub fn new(config: MemoryConfig) -> Result<Self, RecognitionError> {
         let error_recovery = Arc::new(ErrorRecoveryManager::new(
             3,    // max retries
@@ -492,25 +499,41 @@ impl WhisperMemoryManager {
 
 /// Memory usage statistics
 #[derive(Debug, Clone)]
+/// Memory Stats
 pub struct MemoryStats {
+    /// total allocated mb
     pub total_allocated_mb: f32,
+    /// peak usage mb
     pub peak_usage_mb: f32,
+    /// pool count
     pub pool_count: usize,
+    /// cached tensors
     pub cached_tensors: usize,
+    /// cache hit rate
     pub cache_hit_rate: f32,
+    /// allocation count
     pub allocation_count: u64,
+    /// oom events
     pub oom_events: u32,
+    /// device usage
     pub device_usage: HashMap<String, f32>,
+    /// memory pressure
     pub memory_pressure: f32,
 }
 
 /// Cleanup operation statistics
 #[derive(Debug, Default)]
+/// Cleanup Stats
 pub struct CleanupStats {
+    /// expired tensors
     pub expired_tensors: u32,
+    /// unused pools
     pub unused_pools: u32,
+    /// cache evictions
     pub cache_evictions: u32,
+    /// defrag success
     pub defrag_success: bool,
+    /// gpu memory released mb
     pub gpu_memory_released_mb: u32,
 }
 

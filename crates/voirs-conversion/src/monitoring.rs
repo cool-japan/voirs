@@ -71,27 +71,44 @@ impl Default for MonitorConfig {
 pub enum QualityEvent {
     /// Quality update with metrics
     QualityUpdate {
+        /// Timestamp when the quality measurement was taken
         timestamp: Instant,
+        /// Unique identifier for the conversion session
         session_id: String,
+        /// Overall quality score from 0.0 to 1.0
         overall_quality: f32,
+        /// Detected audio artifacts if any
         artifacts: Option<DetectedArtifacts>,
+        /// Processing latency in milliseconds
         processing_latency_ms: u64,
+        /// Additional quality metrics as key-value pairs
         metadata: HashMap<String, f32>,
     },
     /// Performance update
     PerformanceUpdate {
+        /// Timestamp when the performance measurement was taken
         timestamp: Instant,
+        /// Unique identifier for the conversion session
         session_id: String,
+        /// CPU usage as a percentage (0.0 to 100.0)
         cpu_usage_percent: f32,
+        /// Memory usage in megabytes
         memory_usage_mb: f64,
+        /// Processing throughput in samples per second
         throughput_samples_per_sec: f64,
+        /// Current processing queue length
         queue_length: usize,
     },
     /// Quality alert
-    QualityAlert { alert: QualityAlert },
+    QualityAlert {
+        /// The quality alert to be processed
+        alert: QualityAlert,
+    },
     /// System status update
     SystemStatus {
+        /// Timestamp of the status update
         timestamp: Instant,
+        /// Current system status
         status: SystemStatus,
     },
 }
@@ -99,41 +116,62 @@ pub enum QualityEvent {
 /// Quality alert structure
 #[derive(Debug, Clone)]
 pub struct QualityAlert {
+    /// Timestamp when the alert was generated
     pub timestamp: Instant,
+    /// Session identifier associated with this alert
     pub session_id: String,
+    /// Type of alert being raised
     pub alert_type: AlertType,
+    /// Severity level of the alert
     pub severity: AlertSeverity,
+    /// Human-readable alert message
     pub message: String,
+    /// Optional suggested action to resolve the issue
     pub suggested_action: Option<String>,
+    /// Additional metadata about the alert as key-value pairs
     pub metadata: HashMap<String, String>,
 }
 
 /// Alert types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AlertType {
+    /// Quality score has fallen below acceptable threshold
     QualityDegradation,
+    /// Processing latency exceeds configured limits
     HighLatency,
+    /// Audio artifacts detected in output
     ArtifactsDetected,
+    /// General performance degradation detected
     PerformanceIssue,
+    /// System resources are critically overloaded
     SystemOverload,
+    /// Memory usage approaching system limits
     MemoryPressure,
+    /// Conversion session has failed
     SessionFailure,
 }
 
 /// Alert severity levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AlertSeverity {
+    /// Informational alert, no action required
     Info,
+    /// Warning level, attention recommended
     Warning,
+    /// Critical alert requiring immediate attention
     Critical,
 }
 
 /// System status
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SystemStatus {
+    /// System operating normally with good performance
     Healthy,
+    /// System performance is degraded but functional
     Degraded,
+    /// System resources are overloaded, quality may suffer
     Overloaded,
+    /// System is experiencing failures
     Failing,
 }
 
@@ -153,62 +191,94 @@ pub struct MetricsCollector {
 /// Quality data point
 #[derive(Debug, Clone)]
 pub struct QualityDataPoint {
+    /// Timestamp of this quality measurement
     pub timestamp: Instant,
+    /// Session identifier for this measurement
     pub session_id: String,
+    /// Overall quality score from 0.0 to 1.0
     pub overall_quality: f32,
+    /// Aggregate artifact severity score
     pub artifact_score: f32,
+    /// Processing latency in milliseconds
     pub processing_latency_ms: u64,
+    /// Severity scores for each detected artifact type
     pub artifacts_by_type: HashMap<ArtifactType, f32>,
+    /// Additional quality metrics as key-value pairs
     pub metadata: HashMap<String, f32>,
 }
 
 /// Per-session metrics
 #[derive(Debug, Clone)]
 pub struct SessionMetrics {
+    /// Unique session identifier
     pub session_id: String,
+    /// When the session started
     pub start_time: Instant,
+    /// Total number of audio samples processed
     pub samples_processed: u64,
+    /// Average quality score for this session
     pub average_quality: f32,
+    /// Recent quality scores showing trend over time
     pub quality_trend: VecDeque<f32>,
+    /// Count of each artifact type detected
     pub artifact_counts: HashMap<ArtifactType, u64>,
+    /// Performance metrics for this session
     pub performance_metrics: PerformanceMetrics,
+    /// Alerts generated during this session
     pub alerts: Vec<QualityAlert>,
 }
 
 /// Performance metrics
 #[derive(Debug, Clone, Default)]
 pub struct PerformanceMetrics {
+    /// Average processing latency in milliseconds
     pub average_latency_ms: f64,
+    /// Peak processing latency in milliseconds
     pub peak_latency_ms: u64,
+    /// Processing throughput in samples per second
     pub throughput_samples_per_sec: f64,
+    /// CPU usage as a percentage (0.0 to 100.0)
     pub cpu_usage_percent: f32,
+    /// Memory usage in megabytes
     pub memory_usage_mb: f64,
 }
 
 /// Aggregate statistics
 #[derive(Debug, Clone, Default)]
 pub struct AggregateStats {
+    /// Total number of quality data points collected
     pub total_points: u64,
+    /// Overall average quality across all measurements
     pub overall_avg_quality: f32,
+    /// Variance in quality measurements
     pub quality_variance: f32,
+    /// Average processing latency in milliseconds
     pub average_latency_ms: f64,
+    /// Average throughput in samples per second
     pub throughput_samples_per_sec: f64,
 }
 
 /// Trend analyzer
 #[derive(Debug, Default)]
 pub struct TrendAnalyzer {
+    /// Current quality trend direction
     pub quality_trend: TrendDirection,
+    /// Current latency trend direction
     pub latency_trend: TrendDirection,
+    /// Current throughput trend direction
     pub throughput_trend: TrendDirection,
 }
 
 /// Trend direction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrendDirection {
+    /// Trend direction not yet determined
     Unknown,
+    /// Metric is improving over time
     Improving,
+    /// Metric is stable with minimal variation
     Stable,
+    /// Metric is degrading over time
     Degrading,
 }
 
@@ -230,10 +300,15 @@ pub struct AlertSystem {
 /// Alert configuration
 #[derive(Debug, Clone)]
 pub struct AlertConfig {
+    /// Minimum seconds between duplicate alerts
     pub alert_cooldown_seconds: u64,
+    /// Maximum number of alerts to keep in history
     pub max_alert_history: usize,
+    /// Enable email notifications for alerts
     pub enable_email_alerts: bool,
+    /// Enable Slack notifications for alerts
     pub enable_slack_alerts: bool,
+    /// Enable webhook notifications for alerts
     pub enable_webhook_alerts: bool,
 }
 
@@ -251,7 +326,9 @@ impl Default for AlertConfig {
 
 /// Alert handler trait
 pub trait AlertHandler: Send + Sync + std::fmt::Debug {
+    /// Process and handle a quality alert
     fn handle_alert(&mut self, alert: &QualityAlert) -> Result<()>;
+    /// Get the name of this alert handler
     fn name(&self) -> &str;
 }
 
@@ -283,75 +360,107 @@ impl AlertHandler for LoggingAlertHandler {
 /// Performance tracker
 #[derive(Debug, Default)]
 pub struct PerformanceTracker {
+    /// When performance tracking started
     pub start_time: Option<Instant>,
+    /// Current number of active conversion sessions
     pub active_sessions: usize,
+    /// Total number of sessions since start
     pub total_sessions: u64,
+    /// Current system resource usage
     pub system_resources: SystemResources,
+    /// Historical performance trend data
     pub performance_trends: PerformanceTrends,
 }
 
 /// Performance trends
 #[derive(Debug, Default)]
 pub struct PerformanceTrends {
+    /// Historical CPU usage measurements
     pub cpu_trend: VecDeque<f32>,
+    /// Historical memory usage measurements
     pub memory_trend: VecDeque<f64>,
+    /// Historical throughput measurements
     pub throughput_trend: VecDeque<f64>,
 }
 
 /// System resource usage data
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct SystemResources {
+    /// CPU usage as a percentage (0.0 to 100.0)
     pub cpu_usage_percent: f32,
+    /// Memory usage in megabytes
     pub memory_usage_mb: f64,
+    /// GPU usage percentage if GPU is available
     pub gpu_usage_percent: Option<f32>,
+    /// Disk I/O rate in megabytes per second
     pub disk_io_mb_per_sec: f64,
+    /// Network I/O rate in megabytes per second
     pub network_io_mb_per_sec: f64,
 }
 
 /// Dashboard data structure for real-time monitoring visualization
 #[derive(Debug)]
 pub struct QualityDashboard {
-    /// Per-session dashboard data
+    /// Dashboard data for each active session
     pub current_sessions: HashMap<String, SessionDashboard>,
-    /// System overview
+    /// System-wide overview metrics
     pub system_overview: SystemOverview,
-    /// Historical trends
+    /// Historical trend data for visualization
     pub trends: DashboardTrends,
-    /// Recent alerts
+    /// Most recent alerts for display
     pub recent_alerts: VecDeque<QualityAlert>,
 }
 
 /// Per-session dashboard data
 #[derive(Debug, Clone)]
 pub struct SessionDashboard {
+    /// Unique session identifier
     pub session_id: String,
+    /// When this session started
     pub start_time: Instant,
+    /// Most recent quality score
     pub current_quality: f32,
+    /// Recent quality scores for trend visualization
     pub quality_trend: Vec<f32>,
+    /// Current processing latency in milliseconds
     pub current_latency_ms: u64,
+    /// Current throughput in samples per second
     pub throughput_samples_per_sec: f64,
+    /// Currently detected artifact types
     pub active_artifacts: Vec<ArtifactType>,
+    /// Total number of alerts for this session
     pub alert_count: usize,
 }
 
 /// System overview for dashboard
 #[derive(Debug, Clone, Default)]
 pub struct SystemOverview {
+    /// Number of currently active sessions
     pub active_sessions: usize,
+    /// Total sessions processed today
     pub total_sessions_today: u64,
+    /// Average quality score across all sessions
     pub average_quality: f32,
+    /// Overall system load as a percentage
     pub system_load_percent: f32,
+    /// Total memory usage in megabytes
     pub memory_usage_mb: f64,
+    /// System uptime in hours
     pub uptime_hours: f64,
+    /// Number of alerts in the last hour
     pub alerts_last_hour: usize,
 }
 
 /// Trend data for dashboard visualization
 #[derive(Debug, Default)]
 pub struct DashboardTrends {
+    /// Quality measurements over time for trend charts
     pub quality_over_time: Vec<(Instant, f32)>,
+    /// Latency measurements over time for trend charts
     pub latency_over_time: Vec<(Instant, f64)>,
+    /// Throughput measurements over time for trend charts
     pub throughput_over_time: Vec<(Instant, f64)>,
+    /// System resource usage over time for trend charts
     pub resource_usage_over_time: Vec<(Instant, SystemResources)>,
 }
 
@@ -923,6 +1032,7 @@ impl PerformanceTracker {
 
 // Utility implementations
 impl AlertType {
+    /// Get the string representation of this alert type
     pub fn as_str(&self) -> &'static str {
         match self {
             AlertType::QualityDegradation => "quality_degradation",

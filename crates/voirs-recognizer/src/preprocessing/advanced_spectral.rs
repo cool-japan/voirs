@@ -13,6 +13,7 @@ use voirs_sdk::AudioBuffer;
 
 /// Advanced spectral processing configuration
 #[derive(Debug, Clone)]
+/// Advanced Spectral Config
 pub struct AdvancedSpectralConfig {
     /// FFT size for spectral analysis
     pub fft_size: usize,
@@ -61,11 +62,17 @@ impl Default for AdvancedSpectralConfig {
 
 /// Window types for STFT
 #[derive(Debug, Clone, Copy)]
+/// Window Type
 pub enum WindowType {
+    /// Hann
     Hann,
+    /// Hamming
     Hamming,
+    /// Blackman
     Blackman,
+    /// Kaiser
     Kaiser,
+    /// Tukey
     Tukey,
 }
 
@@ -99,6 +106,7 @@ impl Complex {
 
 /// Processing statistics for advanced spectral processing
 #[derive(Debug, Clone)]
+/// Advanced Spectral Stats
 pub struct AdvancedSpectralStats {
     /// Noise gate activation percentage
     pub noise_gate_activation: f32,
@@ -114,6 +122,7 @@ pub struct AdvancedSpectralStats {
 
 /// Result of advanced spectral processing
 #[derive(Debug, Clone)]
+/// Advanced Spectral Result
 pub struct AdvancedSpectralResult {
     /// Enhanced audio buffer
     pub enhanced_audio: AudioBuffer,
@@ -123,6 +132,7 @@ pub struct AdvancedSpectralResult {
 
 /// Advanced spectral processor
 #[derive(Debug)]
+/// Advanced Spectral Processor
 pub struct AdvancedSpectralProcessor {
     config: AdvancedSpectralConfig,
     window: Vec<f32>,

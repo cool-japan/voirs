@@ -1,6 +1,6 @@
 //! Voice conversion integration for VoiRS SDK
 
-use crate::{Result, VoirsError};
+use crate::VoirsError;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -38,7 +38,7 @@ pub struct VoiceConverterConfig {
 
 impl VoiceConverter {
     /// Create new voice converter
-    pub async fn new() -> Result<Self> {
+    pub async fn new() -> crate::Result<Self> {
         let converter = voirs_conversion::VoiceConverter::new()
             .map_err(|e| VoirsError::model_error(format!("Voice converter: {}", e)))?;
 
@@ -50,7 +50,7 @@ impl VoiceConverter {
     }
 
     /// Create with custom configuration
-    pub async fn with_config(conversion_config: ConversionConfig) -> Result<Self> {
+    pub async fn with_config(conversion_config: ConversionConfig) -> crate::Result<Self> {
         let converter = voirs_conversion::VoiceConverter::with_config(conversion_config)
             .map_err(|e| VoirsError::model_error(format!("Voice converter: {}", e)))?;
 
@@ -68,7 +68,7 @@ impl VoiceConverter {
         source_sample_rate: u32,
         target: ConversionTarget,
         conversion_type: Option<ConversionType>,
-    ) -> Result<ConversionResult> {
+    ) -> crate::Result<ConversionResult> {
         let config = self.config.read().await;
         if !config.enabled {
             return Err(VoirsError::ConfigError {
@@ -103,7 +103,7 @@ impl VoiceConverter {
         source_audio: Vec<f32>,
         source_sample_rate: u32,
         target_age: AgeGroup,
-    ) -> Result<ConversionResult> {
+    ) -> crate::Result<ConversionResult> {
         let characteristics = VoiceCharacteristics::for_age(target_age);
         let target = ConversionTarget::new(characteristics);
 
@@ -122,7 +122,7 @@ impl VoiceConverter {
         source_audio: Vec<f32>,
         source_sample_rate: u32,
         target_gender: Gender,
-    ) -> Result<ConversionResult> {
+    ) -> crate::Result<ConversionResult> {
         let characteristics = VoiceCharacteristics::for_gender(target_gender);
         let target = ConversionTarget::new(characteristics);
 
@@ -141,7 +141,7 @@ impl VoiceConverter {
         source_audio: Vec<f32>,
         source_sample_rate: u32,
         pitch_factor: f32,
-    ) -> Result<ConversionResult> {
+    ) -> crate::Result<ConversionResult> {
         let mut characteristics = VoiceCharacteristics::new();
         characteristics.pitch.mean_f0 *= pitch_factor;
         let target = ConversionTarget::new(characteristics);
@@ -161,7 +161,7 @@ impl VoiceConverter {
         source_audio: Vec<f32>,
         source_sample_rate: u32,
         speed_factor: f32,
-    ) -> Result<ConversionResult> {
+    ) -> crate::Result<ConversionResult> {
         let mut characteristics = VoiceCharacteristics::new();
         characteristics.timing.speaking_rate = speed_factor;
         let target = ConversionTarget::new(characteristics);
@@ -181,7 +181,7 @@ impl VoiceConverter {
         source_audio: Vec<f32>,
         source_sample_rate: u32,
         target_id: &str,
-    ) -> Result<ConversionResult> {
+    ) -> crate::Result<ConversionResult> {
         let cache = self.target_cache.read().await;
         let target = cache
             .get(target_id)
@@ -196,7 +196,7 @@ impl VoiceConverter {
     }
 
     /// Cache conversion target
-    pub async fn cache_target(&self, target_id: String, target: ConversionTarget) -> Result<()> {
+    pub async fn cache_target(&self, target_id: String, target: ConversionTarget) -> crate::Result<()> {
         let config = self.config.read().await;
         let mut cache = self.target_cache.write().await;
 
@@ -218,21 +218,21 @@ impl VoiceConverter {
     }
 
     /// Remove target from cache
-    pub async fn remove_cached_target(&self, target_id: &str) -> Result<()> {
+    pub async fn remove_cached_target(&self, target_id: &str) -> crate::Result<()> {
         let mut cache = self.target_cache.write().await;
         cache.remove(target_id);
         Ok(())
     }
 
     /// Clear target cache
-    pub async fn clear_cache(&self) -> Result<()> {
+    pub async fn clear_cache(&self) -> crate::Result<()> {
         let mut cache = self.target_cache.write().await;
         cache.clear();
         Ok(())
     }
 
     /// Enable or disable voice conversion
-    pub async fn set_enabled(&self, enabled: bool) -> Result<()> {
+    pub async fn set_enabled(&self, enabled: bool) -> crate::Result<()> {
         let mut config = self.config.write().await;
         config.enabled = enabled;
         Ok(())
@@ -245,7 +245,7 @@ impl VoiceConverter {
     }
 
     /// Set quality level
-    pub async fn set_quality_level(&self, level: f32) -> Result<()> {
+    pub async fn set_quality_level(&self, level: f32) -> crate::Result<()> {
         let mut config = self.config.write().await;
         config.quality_level = level.clamp(0.0, 1.0);
         Ok(())
@@ -258,7 +258,7 @@ impl VoiceConverter {
     }
 
     /// Enable or disable real-time conversion
-    pub async fn set_realtime_enabled(&self, enabled: bool) -> Result<()> {
+    pub async fn set_realtime_enabled(&self, enabled: bool) -> crate::Result<()> {
         let mut config = self.config.write().await;
         config.realtime_enabled = enabled;
         Ok(())
@@ -271,7 +271,7 @@ impl VoiceConverter {
     }
 
     /// Get conversion statistics
-    pub async fn get_statistics(&self) -> Result<ConversionStatistics> {
+    pub async fn get_statistics(&self) -> crate::Result<ConversionStatistics> {
         let cache_size = self.target_cache.read().await.len();
 
         Ok(ConversionStatistics {
@@ -287,7 +287,7 @@ impl VoiceConverter {
         &self,
         audio: &[f32],
         sample_rate: u32,
-    ) -> Result<AudioValidationResult> {
+    ) -> crate::Result<AudioValidationResult> {
         let mut issues = Vec::new();
         let duration = audio.len() as f32 / sample_rate as f32;
 
@@ -415,7 +415,7 @@ impl VoiceConverterBuilder {
     }
 
     /// Build the voice converter
-    pub async fn build(self) -> Result<VoiceConverter> {
+    pub async fn build(self) -> crate::Result<VoiceConverter> {
         let converter = if let Some(conversion_config) = self.conversion_config {
             VoiceConverter::with_config(conversion_config).await?
         } else {

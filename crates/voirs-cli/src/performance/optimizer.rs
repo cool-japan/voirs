@@ -289,8 +289,17 @@ impl PerformanceOptimizer {
             OptimizationCategory::ModelOptimization => {
                 self.apply_model_optimization(recommendation).await?
             }
-            _ => {
-                return Err("Optimization category not implemented".into());
+            OptimizationCategory::Io => {
+                self.apply_io_optimization(recommendation).await?
+            }
+            OptimizationCategory::Network => {
+                self.apply_network_optimization(recommendation).await?
+            }
+            OptimizationCategory::Configuration => {
+                self.apply_configuration_optimization(recommendation).await?
+            }
+            OptimizationCategory::ResourceAllocation => {
+                self.apply_resource_allocation_optimization(recommendation).await?
             }
         };
 
@@ -794,6 +803,119 @@ impl PerformanceOptimizer {
             Ok((key, previous, new_value))
         } else {
             Err("Unknown model optimization".into())
+        }
+    }
+
+    /// Apply I/O optimization
+    async fn apply_io_optimization(
+        &mut self,
+        recommendation: &OptimizationRecommendation,
+    ) -> Result<(String, String, String), Box<dyn std::error::Error>> {
+        if recommendation.description.contains("buffering") {
+            let key = "io_buffer_size".to_string();
+            let previous = self
+                .current_settings
+                .get(&key)
+                .unwrap_or(&"8192".to_string())
+                .clone();
+            let new_value = (previous.parse::<u32>()? * 2).to_string();
+            Ok((key, previous, new_value))
+        } else if recommendation.description.contains("async") {
+            let key = "async_io".to_string();
+            let previous = self
+                .current_settings
+                .get(&key)
+                .unwrap_or(&"false".to_string())
+                .clone();
+            let new_value = "true".to_string();
+            Ok((key, previous, new_value))
+        } else {
+            Err("Unknown I/O optimization".into())
+        }
+    }
+
+    /// Apply network optimization
+    async fn apply_network_optimization(
+        &mut self,
+        recommendation: &OptimizationRecommendation,
+    ) -> Result<(String, String, String), Box<dyn std::error::Error>> {
+        if recommendation.description.contains("compression") {
+            let key = "network_compression".to_string();
+            let previous = self
+                .current_settings
+                .get(&key)
+                .unwrap_or(&"none".to_string())
+                .clone();
+            let new_value = "gzip".to_string();
+            Ok((key, previous, new_value))
+        } else if recommendation.description.contains("connection pool") {
+            let key = "connection_pool_size".to_string();
+            let previous = self
+                .current_settings
+                .get(&key)
+                .unwrap_or(&"10".to_string())
+                .clone();
+            let new_value = (previous.parse::<u32>()? * 2).to_string();
+            Ok((key, previous, new_value))
+        } else {
+            Err("Unknown network optimization".into())
+        }
+    }
+
+    /// Apply configuration optimization
+    async fn apply_configuration_optimization(
+        &mut self,
+        recommendation: &OptimizationRecommendation,
+    ) -> Result<(String, String, String), Box<dyn std::error::Error>> {
+        if recommendation.description.contains("sample rate") {
+            let key = "sample_rate".to_string();
+            let previous = self
+                .current_settings
+                .get(&key)
+                .unwrap_or(&"22050".to_string())
+                .clone();
+            let new_value = "16000".to_string();
+            Ok((key, previous, new_value))
+        } else if recommendation.description.contains("quality") {
+            let key = "quality_preset".to_string();
+            let previous = self
+                .current_settings
+                .get(&key)
+                .unwrap_or(&"high".to_string())
+                .clone();
+            let new_value = "medium".to_string();
+            Ok((key, previous, new_value))
+        } else {
+            Err("Unknown configuration optimization".into())
+        }
+    }
+
+    /// Apply resource allocation optimization
+    async fn apply_resource_allocation_optimization(
+        &mut self,
+        recommendation: &OptimizationRecommendation,
+    ) -> Result<(String, String, String), Box<dyn std::error::Error>> {
+        if recommendation.description.contains("worker threads") {
+            let key = "worker_threads".to_string();
+            let previous = self
+                .current_settings
+                .get(&key)
+                .unwrap_or(&"4".to_string())
+                .clone();
+            let cpu_count = num_cpus::get();
+            let new_value = cpu_count.to_string();
+            Ok((key, previous, new_value))
+        } else if recommendation.description.contains("memory limit") {
+            let key = "memory_limit_mb".to_string();
+            let previous = self
+                .current_settings
+                .get(&key)
+                .unwrap_or(&"1024".to_string())
+                .clone();
+            let new_value = (previous.parse::<u32>()? * 2).to_string();
+            Ok((key, previous, new_value))
+        } else {
+            Err("Unknown resource allocation optimization".into())
         }
     }
 

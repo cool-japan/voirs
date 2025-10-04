@@ -5,7 +5,7 @@
 
 use candle_core::{Device, Result as CandleResult, Tensor};
 use candle_nn::{linear, Linear, Module, Optimizer, VarBuilder, VarMap};
-use ndarray::Array1;
+use scirs2_core::ndarray::Array1;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -419,8 +419,8 @@ impl AiHrtfPersonalizer {
     fn split_training_data(
         &self,
     ) -> Result<(Vec<PersonalizationSample>, Vec<PersonalizationSample>)> {
-        use rand::seq::SliceRandom;
-        let mut rng = rand::thread_rng();
+        use scirs2_core::random::seq::SliceRandom;
+        let mut rng = scirs2_core::random::thread_rng();
         let mut data = self.training_data.clone();
         data.shuffle(&mut rng);
 

@@ -23,6 +23,7 @@ use crate::integration::UnifiedVoirsPipeline;
 
 /// WebSocket connection parameters
 #[derive(Debug, Deserialize)]
+/// Web Socket Params
 pub struct WebSocketParams {
     /// Session ID (optional, will be generated if not provided)
     pub session_id: Option<String>,
@@ -36,12 +37,19 @@ pub struct WebSocketParams {
 
 /// Streaming session state
 #[derive(Debug)]
+/// Streaming Session
 pub struct StreamingSession {
+    /// session id
     pub session_id: String,
+    /// config
     pub config: StreamingRecognitionRequest,
+    /// tx
     pub tx: mpsc::UnboundedSender<WebSocketMessage>,
+    /// active
     pub active: bool,
+    /// created at
     pub created_at: chrono::DateTime<chrono::Utc>,
+    /// last activity
     pub last_activity: chrono::DateTime<chrono::Utc>,
 }
 

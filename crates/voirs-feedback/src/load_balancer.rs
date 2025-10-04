@@ -287,7 +287,7 @@ impl LoadBalancer {
     async fn select_weighted_round_robin(&self, workers: &[&WorkerNode]) -> Result<String, String> {
         let total_weight: f64 = workers.iter().map(|w| w.weight).sum();
         let mut cumulative_weight = 0.0;
-        let target_weight = rand::random::<f64>() * total_weight;
+        let target_weight = scirs2_core::random::random::<f64>() * total_weight;
 
         for worker in workers {
             cumulative_weight += worker.weight;

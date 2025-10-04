@@ -551,8 +551,8 @@ fn generate_noisy_signal(
     duration: f32,
     noise_level: f32,
 ) -> Vec<f32> {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
+    use scirs2_core::random::Rng;
+    let mut rng = scirs2_core::random::thread_rng();
     let samples_count = (sample_rate as f32 * duration) as usize;
 
     (0..samples_count)

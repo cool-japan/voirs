@@ -7,8 +7,8 @@
 //! - Statistical significance testing
 
 use crate::EvaluationError;
-use ndarray::{Array1, Array2};
-use realfft::{RealFftPlanner, RealToComplex};
+use scirs2_core::ndarray::{Array1, Array2};
+use scirs2_fft::{RealFftPlanner, RealToComplex};
 use std::f32::consts::PI;
 use std::sync::Mutex;
 use voirs_sdk::AudioBuffer;
@@ -48,7 +48,7 @@ impl MCDEvaluator {
         // Create DCT matrix
         let dct_matrix = Self::create_dct_matrix(num_mel_filters, num_mfcc);
 
-        let fft_planner = Mutex::new(RealFftPlanner::new());
+        let fft_planner = Mutex::new(RealFftPlanner::<f32>::new());
 
         Ok(Self {
             sample_rate,
@@ -108,8 +108,8 @@ impl MCDEvaluator {
             return Ok(0.0);
         }
 
-        let ref_subset = ref_mfcc.slice(ndarray::s![0..min_frames, ..]);
-        let gen_subset = gen_mfcc.slice(ndarray::s![0..min_frames, ..]);
+        let ref_subset = ref_mfcc.slice(scirs2_core::ndarray::s![0..min_frames, ..]);
+        let gen_subset = gen_mfcc.slice(scirs2_core::ndarray::s![0..min_frames, ..]);
 
         self.calculate_frame_mcd(&ref_subset.to_owned(), &gen_subset.to_owned())
     }
@@ -178,7 +178,7 @@ impl MCDEvaluator {
 
         let mut fft_planner = self.fft_planner.lock().unwrap();
         let fft = fft_planner.plan_fft_forward(self.frame_len);
-        let mut spectrum = fft.make_output_vec();
+        let mut spectrum = vec![scirs2_core::Complex::new(0.0, 0.0); fft.output_len()];
 
         for (frame_idx, frame_start) in (0..signal.len() - self.frame_len + 1)
             .step_by(self.frame_shift)
@@ -207,16 +207,19 @@ impl MCDEvaluator {
             }
 
             // Compute FFT
-            fft.process(frame.as_slice_mut().unwrap(), &mut spectrum)
-                .map_err(|e| EvaluationError::AudioProcessingError {
-                    message: format!("FFT processing failed: {e}"),
-                    source: None,
-                })?;
+            let frame_slice =
+                frame
+                    .as_slice()
+                    .ok_or_else(|| EvaluationError::AudioProcessingError {
+                        message: "Failed to get frame slice".to_string(),
+                        source: None,
+                    })?;
+            fft.process(frame_slice, &mut spectrum);
 
             // Compute power spectrum
             let power_spectrum: Vec<f32> = spectrum
                 .iter()
-                .map(num_complex::Complex::norm_sqr)
+                .map(scirs2_core::Complex::norm_sqr)
                 .collect();
 
             // Apply mel filterbank
@@ -335,8 +338,8 @@ impl MCDEvaluator {
     /// Calculate Euclidean distance between two MFCC vectors
     fn euclidean_distance(
         &self,
-        vec1: &ndarray::ArrayView1<f32>,
-        vec2: &ndarray::ArrayView1<f32>,
+        vec1: &scirs2_core::ndarray::ArrayView1<f32>,
+        vec2: &scirs2_core::ndarray::ArrayView1<f32>,
     ) -> f32 {
         // Use high-precision calculation for better numerical stability
         let vec1_slice: Vec<f32> = vec1.to_vec();

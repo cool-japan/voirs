@@ -4,14 +4,14 @@ use super::types::{GrooveCharacteristics, RhythmResult};
 use crate::score::MusicalScore;
 use crate::Result;
 
-/// Rhythm analysis system
+/// Rhythm analysis system for tempo, groove, and swing detection
 #[derive(Debug, Clone)]
 pub struct RhythmAnalyzer {
-    /// Minimum tempo for detection
+    /// Minimum tempo for detection in BPM (beats per minute)
     min_tempo: f32,
-    /// Maximum tempo for detection
+    /// Maximum tempo for detection in BPM (beats per minute)
     max_tempo: f32,
-    /// Analysis confidence threshold
+    /// Analysis confidence threshold (0.0-1.0) for rhythm pattern recognition
     threshold: f32,
 }
 
@@ -26,6 +26,18 @@ impl RhythmAnalyzer {
     }
 
     /// Analyze rhythm from musical score
+    ///
+    /// # Arguments
+    ///
+    /// * `score` - Musical score with tempo and note timing information
+    ///
+    /// # Returns
+    ///
+    /// Rhythm analysis including tempo, time signature, groove characteristics, and swing ratio
+    ///
+    /// # Errors
+    ///
+    /// Returns error if rhythm analysis fails
     pub async fn analyze_rhythm(&self, score: &MusicalScore) -> Result<RhythmResult> {
         // Extract timing information from score
         let note_onsets = self.extract_note_onsets(score);
@@ -55,7 +67,20 @@ impl RhythmAnalyzer {
         })
     }
 
-    /// Analyze rhythm from audio samples
+    /// Analyze rhythm from audio samples using onset detection
+    ///
+    /// # Arguments
+    ///
+    /// * `audio_samples` - Raw audio samples as f32 values
+    /// * `sample_rate` - Sample rate in Hz
+    ///
+    /// # Returns
+    ///
+    /// Rhythm analysis extracted from audio onsets and energy patterns
+    ///
+    /// # Errors
+    ///
+    /// Returns error if audio rhythm analysis fails
     pub async fn analyze_audio_rhythm(
         &self,
         audio_samples: &[f32],
@@ -87,6 +112,14 @@ impl RhythmAnalyzer {
     }
 
     /// Extract note onset times from musical score
+    ///
+    /// # Arguments
+    ///
+    /// * `score` - Musical score to extract onsets from
+    ///
+    /// # Returns
+    ///
+    /// Vector of onset times in seconds
     fn extract_note_onsets(&self, score: &MusicalScore) -> Vec<f32> {
         let mut onsets = Vec::new();
         let mut current_time = 0.0;
@@ -99,7 +132,16 @@ impl RhythmAnalyzer {
         onsets
     }
 
-    /// Detect tempo from note onsets
+    /// Detect tempo from note onsets using inter-onset intervals
+    ///
+    /// # Arguments
+    ///
+    /// * `onsets` - Note onset times in seconds
+    /// * `score_tempo` - Score tempo as fallback value
+    ///
+    /// # Returns
+    ///
+    /// Detected tempo in BPM
     fn detect_tempo(&self, onsets: &[f32], score_tempo: f32) -> f32 {
         if onsets.len() < 2 {
             return score_tempo.clamp(self.min_tempo, self.max_tempo);
@@ -124,7 +166,17 @@ impl RhythmAnalyzer {
         tempo.clamp(self.min_tempo, self.max_tempo)
     }
 
-    /// Analyze groove characteristics
+    /// Analyze groove characteristics including microtiming and syncopation
+    ///
+    /// # Arguments
+    ///
+    /// * `onsets` - Note onset times in seconds
+    /// * `tempo` - Detected tempo in BPM
+    /// * `time_signature` - Time signature (numerator, denominator)
+    ///
+    /// # Returns
+    ///
+    /// Groove characteristics with timing variations and rhythmic patterns
     fn analyze_groove(
         &self,
         onsets: &[f32],
@@ -159,7 +211,16 @@ impl RhythmAnalyzer {
         }
     }
 
-    /// Calculate microtiming variations
+    /// Calculate microtiming variations from expected beat positions
+    ///
+    /// # Arguments
+    ///
+    /// * `onsets` - Note onset times
+    /// * `beat_duration` - Duration of one beat in seconds
+    ///
+    /// # Returns
+    ///
+    /// Vector of timing deviations from quantized grid in seconds
     fn calculate_microtiming(&self, onsets: &[f32], beat_duration: f32) -> Vec<f32> {
         onsets
             .iter()
@@ -170,7 +231,16 @@ impl RhythmAnalyzer {
             .collect()
     }
 
-    /// Calculate syncopation level
+    /// Calculate syncopation level based on off-beat note placement
+    ///
+    /// # Arguments
+    ///
+    /// * `onsets` - Note onset times
+    /// * `beat_duration` - Duration of one beat in seconds
+    ///
+    /// # Returns
+    ///
+    /// Syncopation level (0.0-1.0, higher means more syncopated)
     fn calculate_syncopation(&self, onsets: &[f32], beat_duration: f32) -> f32 {
         let mut syncopation_count = 0;
         let total_onsets = onsets.len();
@@ -191,7 +261,16 @@ impl RhythmAnalyzer {
         }
     }
 
-    /// Classify groove type based on characteristics
+    /// Classify groove type based on syncopation and microtiming characteristics
+    ///
+    /// # Arguments
+    ///
+    /// * `syncopation` - Syncopation level (0.0-1.0)
+    /// * `microtiming` - Microtiming variation values
+    ///
+    /// # Returns
+    ///
+    /// Groove type classification ("straight", "shuffled", or "syncopated")
     fn classify_groove_type(&self, syncopation: f32, microtiming: &[f32]) -> String {
         if syncopation > 0.4 {
             "syncopated".to_string()
@@ -202,7 +281,16 @@ impl RhythmAnalyzer {
         }
     }
 
-    /// Detect swing ratio
+    /// Detect swing ratio from eighth note timing patterns
+    ///
+    /// # Arguments
+    ///
+    /// * `onsets` - Note onset times
+    /// * `tempo` - Detected tempo in BPM
+    ///
+    /// # Returns
+    ///
+    /// Swing ratio (typically 1.0-1.4) or None if no swing detected
     fn detect_swing(&self, onsets: &[f32], tempo: f32) -> Option<f32> {
         let beat_duration = 60.0 / tempo;
         let eighth_note_duration = beat_duration / 2.0;
@@ -232,7 +320,16 @@ impl RhythmAnalyzer {
         }
     }
 
-    /// Detect onsets from audio (simplified onset detection)
+    /// Detect onsets from audio using energy-based onset detection
+    ///
+    /// # Arguments
+    ///
+    /// * `audio_samples` - Raw audio samples
+    /// * `sample_rate` - Sample rate in Hz
+    ///
+    /// # Returns
+    ///
+    /// Vector of detected onset times in seconds
     fn detect_onsets_from_audio(&self, audio_samples: &[f32], sample_rate: u32) -> Vec<f32> {
         let mut onsets = Vec::new();
         let window_size = sample_rate as usize / 100; // 10ms windows
@@ -260,7 +357,15 @@ impl RhythmAnalyzer {
         onsets
     }
 
-    /// Detect tempo from audio onsets
+    /// Detect tempo from audio onsets using inter-onset interval analysis
+    ///
+    /// # Arguments
+    ///
+    /// * `onsets` - Detected onset times from audio
+    ///
+    /// # Returns
+    ///
+    /// Estimated tempo in BPM
     fn detect_tempo_from_onsets(&self, onsets: &[f32]) -> f32 {
         if onsets.len() < 4 {
             return 120.0; // Default tempo
@@ -296,6 +401,15 @@ impl RhythmAnalyzer {
     }
 
     /// Analyze groove from audio onsets
+    ///
+    /// # Arguments
+    ///
+    /// * `onsets` - Detected onset times from audio
+    /// * `tempo` - Detected tempo in BPM
+    ///
+    /// # Returns
+    ///
+    /// Groove characteristics extracted from audio
     fn analyze_groove_from_audio(&self, onsets: &[f32], tempo: f32) -> GrooveCharacteristics {
         let beat_duration = 60.0 / tempo;
 
@@ -322,17 +436,35 @@ impl RhythmAnalyzer {
     }
 
     /// Detect swing from audio onsets
+    ///
+    /// # Arguments
+    ///
+    /// * `onsets` - Detected onset times
+    /// * `tempo` - Detected tempo in BPM
+    ///
+    /// # Returns
+    ///
+    /// Swing ratio or None if no swing detected
     fn detect_swing_from_onsets(&self, onsets: &[f32], tempo: f32) -> Option<f32> {
         self.detect_swing(onsets, tempo)
     }
 
     /// Set tempo detection range
+    ///
+    /// # Arguments
+    ///
+    /// * `min_tempo` - Minimum tempo in BPM (clamped to 30.0)
+    /// * `max_tempo` - Maximum tempo in BPM (clamped to 300.0)
     pub fn set_tempo_range(&mut self, min_tempo: f32, max_tempo: f32) {
         self.min_tempo = min_tempo.max(30.0);
         self.max_tempo = max_tempo.min(300.0);
     }
 
-    /// Set analysis threshold
+    /// Set analysis threshold for rhythm pattern recognition
+    ///
+    /// # Arguments
+    ///
+    /// * `threshold` - Confidence threshold (0.0-1.0) for rhythm pattern detection
     pub fn set_threshold(&mut self, threshold: f32) {
         self.threshold = threshold.clamp(0.0, 1.0);
     }

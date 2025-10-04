@@ -480,9 +480,13 @@ pub struct AudioIssue {
     pub issue_type: AudioIssueType,
     /// Severity level of the issue
     pub severity: IssueSeverity,
+    /// Location in audio where the issue occurs
     pub location: AudioLocation,
+    /// Description of the issue
     pub description: String,
+    /// Impact score (0.0-1.0) indicating severity of the issue
     pub impact: f32,
+    /// Suggested fixes to resolve the issue
     pub suggested_fixes: Vec<String>,
 }
 
@@ -510,8 +514,11 @@ pub enum AudioIssueType {
 /// Location in audio where issue occurs
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioLocation {
+    /// Start time of the issue in seconds
     pub start_time_sec: f32,
+    /// End time of the issue in seconds
     pub end_time_sec: f32,
+    /// Frequency range where the issue occurs, if applicable
     pub frequency_range: Option<FrequencyRange>,
 }
 
@@ -533,98 +540,146 @@ pub struct ConfigAnalysisResult {
 /// Configuration issue
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigIssue {
+    /// Name of the configuration parameter with the issue
     pub parameter: String,
+    /// Type of configuration issue
     pub issue_type: ConfigIssueType,
+    /// Severity level of the issue
     pub severity: IssueSeverity,
+    /// Description of the configuration issue
     pub description: String,
+    /// Current value of the parameter
     pub current_value: String,
+    /// Suggested value to fix the issue
     pub suggested_value: Option<String>,
 }
 
 /// Types of configuration issues
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ConfigIssueType {
+    /// Parameter has an invalid value
     InvalidValue,
+    /// Parameter value is suboptimal for current use case
     SuboptimalValue,
+    /// Parameter is incompatible with other settings
     Incompatibility,
+    /// Required parameter is missing
     MissingParameter,
+    /// Parameters have conflicting values
     ConflictingParameters,
 }
 
 /// Configuration optimization suggestion
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigOptimization {
+    /// Name of the parameter to optimize
     pub parameter: String,
+    /// Type of optimization being suggested
     pub optimization_type: OptimizationType,
+    /// Current value of the parameter
     pub current_value: String,
+    /// Suggested optimized value
     pub suggested_value: String,
+    /// Expected improvement (0.0-1.0) from applying this optimization
     pub expected_improvement: f32,
+    /// Rationale explaining why this optimization is suggested
     pub rationale: String,
 }
 
 /// Types of optimizations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum OptimizationType {
+    /// Optimization for improved performance
     Performance,
+    /// Optimization for better quality
     Quality,
+    /// Optimization for enhanced compatibility
     Compatibility,
+    /// Optimization for reduced resource usage
     ResourceUsage,
+    /// Optimization for increased stability
     Stability,
 }
 
 /// System compatibility analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompatibilityAnalysis {
+    /// Hardware compatibility assessment
     pub hardware_compatibility: HardwareCompatibility,
+    /// Software compatibility assessment
     pub software_compatibility: SoftwareCompatibility,
+    /// Audio format compatibility assessment
     pub format_compatibility: FormatCompatibility,
+    /// Overall compatibility score (0.0-1.0)
     pub compatibility_score: f32,
 }
 
 /// Hardware compatibility
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HardwareCompatibility {
+    /// Whether CPU meets compatibility requirements
     pub cpu_compatible: bool,
+    /// Whether available memory is sufficient
     pub memory_sufficient: bool,
+    /// GPU compatibility status, if GPU is available
     pub gpu_compatible: Option<bool>,
+    /// List of supported SIMD instruction sets
     pub simd_support: Vec<String>,
+    /// Classified performance tier of the hardware
     pub performance_tier: PerformanceTier,
 }
 
 /// Performance tier classification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PerformanceTier {
+    /// Low performance tier for basic processing
     Low,
+    /// Medium performance tier for standard workloads
     Medium,
+    /// High performance tier for demanding workloads
     High,
+    /// Enterprise-grade performance tier
     Enterprise,
 }
 
 /// Software compatibility
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SoftwareCompatibility {
+    /// Whether operating system is compatible
     pub os_compatible: bool,
+    /// Whether runtime environment is compatible
     pub runtime_compatible: bool,
+    /// List of identified dependency issues
     pub dependency_issues: Vec<String>,
+    /// Version compatibility information for components
     pub version_compatibility: Vec<VersionCompatibility>,
 }
 
 /// Version compatibility information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VersionCompatibility {
+    /// Name of the component being checked
     pub component: String,
+    /// Required version for compatibility
     pub required_version: String,
+    /// Currently installed version
     pub current_version: String,
+    /// Whether the current version is compatible
     pub compatible: bool,
 }
 
 /// Format compatibility
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FormatCompatibility {
+    /// Whether input audio format is supported
     pub input_format_supported: bool,
+    /// Whether output audio format is supported
     pub output_format_supported: bool,
+    /// Whether sample rate is supported
     pub sample_rate_supported: bool,
+    /// Whether bit depth is supported
     pub bit_depth_supported: bool,
+    /// Whether channel configuration is supported
     pub channel_config_supported: bool,
 }
 
@@ -648,44 +703,63 @@ pub struct HealthAssessment {
 /// System status levels
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SystemStatus {
+    /// System is operating normally
     Healthy,
+    /// System is degraded but operational
     Degraded,
+    /// System is in critical state
     Critical,
+    /// System is offline or unavailable
     Offline,
 }
 
 /// Individual health indicator
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthIndicator {
+    /// Name of the health indicator
     pub indicator_name: String,
+    /// Current value of the indicator
     pub value: f32,
+    /// Threshold value for this indicator
     pub threshold: f32,
+    /// Current status of this indicator
     pub status: IndicatorStatus,
+    /// Trend direction of this indicator
     pub trend: IndicatorTrend,
 }
 
 /// Health indicator status
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum IndicatorStatus {
+    /// Indicator is in good state
     Good,
+    /// Indicator shows warning level
     Warning,
+    /// Indicator is in critical state
     Critical,
 }
 
 /// Health indicator trend
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum IndicatorTrend {
+    /// Indicator is improving over time
     Improving,
+    /// Indicator is stable
     Stable,
+    /// Indicator is degrading over time
     Degrading,
 }
 
 /// Health trends over time
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthTrends {
+    /// Performance trend (positive = improving, negative = degrading)
     pub performance_trend: f32,
+    /// Quality trend (positive = improving, negative = degrading)
     pub quality_trend: f32,
+    /// Reliability trend (positive = improving, negative = degrading)
     pub reliability_trend: f32,
+    /// Resource efficiency trend (positive = improving, negative = degrading)
     pub resource_efficiency_trend: f32,
 }
 
@@ -715,92 +789,141 @@ pub struct Recommendation {
 /// Types of recommendations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RecommendationType {
+    /// Recommendation to change configuration settings
     ConfigurationChange,
+    /// Recommendation for system optimization
     SystemOptimization,
+    /// Recommendation to upgrade hardware
     HardwareUpgrade,
+    /// Recommendation to update software
     SoftwareUpdate,
+    /// Recommendation for audio preprocessing
     AudioPreprocessing,
+    /// Recommendation to optimize workflow
     WorkflowOptimization,
+    /// Recommendation for troubleshooting steps
     Troubleshooting,
 }
 
 /// Recommendation priority
 #[derive(Debug, Clone, Serialize, Deserialize, PartialOrd, Ord, PartialEq, Eq)]
 pub enum RecommendationPriority {
+    /// Low priority recommendation
     Low,
+    /// Medium priority recommendation
     Medium,
+    /// High priority recommendation
     High,
+    /// Critical priority recommendation
     Critical,
 }
 
 /// Implementation effort level
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ImplementationEffort {
+    /// Minimal effort required
     Minimal,
+    /// Low effort required
     Low,
+    /// Medium effort required
     Medium,
+    /// High effort required
     High,
+    /// Extensive effort required
     Extensive,
 }
 
 /// Issue pattern for pattern matching
 #[derive(Debug, Clone)]
 pub struct IssuePattern {
+    /// Unique identifier for this pattern
     pub pattern_id: String,
+    /// Descriptive name for this pattern
     pub pattern_name: String,
+    /// Conditions that must be met for pattern match
     pub conditions: Vec<PatternCondition>,
+    /// Minimum confidence threshold for pattern recognition
     pub confidence_threshold: f32,
+    /// List of issue IDs associated with this pattern
     pub associated_issues: Vec<String>,
 }
 
 /// Condition for pattern matching
 #[derive(Debug, Clone)]
 pub struct PatternCondition {
+    /// Name of the metric to evaluate
     pub metric: String,
+    /// Comparison operator to use
     pub operator: ComparisonOperator,
+    /// Threshold value for comparison
     pub threshold: f32,
+    /// Weight of this condition in pattern matching (0.0-1.0)
     pub weight: f32,
 }
 
 /// Comparison operators for pattern matching
 #[derive(Debug, Clone)]
 pub enum ComparisonOperator {
+    /// Greater than comparison
     GreaterThan,
+    /// Less than comparison
     LessThan,
+    /// Equal comparison
     Equal,
+    /// Not equal comparison
     NotEqual,
+    /// Between two values (inclusive)
     Between(f32, f32),
 }
 
 /// Diagnostic rule
 #[derive(Debug, Clone)]
 pub struct DiagnosticRule {
+    /// Unique identifier for this rule
     pub rule_id: String,
+    /// Descriptive name for this rule
     pub rule_name: String,
+    /// Condition that triggers this rule
     pub condition: RuleCondition,
+    /// Actions to execute when rule is triggered
     pub actions: Vec<DiagnosticAction>,
+    /// Priority of this rule (higher values = higher priority)
     pub priority: u32,
 }
 
 /// Rule condition
 #[derive(Debug, Clone)]
 pub enum RuleCondition {
+    /// Condition based on metric threshold
     MetricThreshold {
+        /// Name of the metric to check
         metric: String,
+        /// Comparison operator to use
         operator: ComparisonOperator,
+        /// Threshold value for comparison
         value: f32,
     },
+    /// Condition based on configuration value
     ConfigValue {
+        /// Configuration parameter name
         parameter: String,
+        /// Expected value for the parameter
         expected_value: String,
     },
+    /// Condition based on audio property
     AudioProperty {
+        /// Audio property name
         property: String,
+        /// Comparison operator to use
         operator: ComparisonOperator,
+        /// Threshold value for comparison
         value: f32,
     },
+    /// Composite condition combining multiple conditions
     Composite {
+        /// Logical operator to combine conditions
         operator: LogicalOperator,
+        /// List of conditions to combine
         conditions: Vec<RuleCondition>,
     },
 }
@@ -808,26 +931,40 @@ pub enum RuleCondition {
 /// Logical operators for composite conditions
 #[derive(Debug, Clone)]
 pub enum LogicalOperator {
+    /// Logical AND - all conditions must be true
     And,
+    /// Logical OR - at least one condition must be true
     Or,
+    /// Logical NOT - negates the condition
     Not,
 }
 
 /// Actions to take when diagnostic rule triggers
 #[derive(Debug, Clone)]
 pub enum DiagnosticAction {
+    /// Log a warning message
     LogWarning(String),
+    /// Log an error message
     LogError(String),
+    /// Add an issue to the diagnostic report
     AddIssue {
+        /// Category of the issue
         category: IssueCategory,
+        /// Severity level of the issue
         severity: IssueSeverity,
+        /// Description of the issue
         description: String,
     },
+    /// Add a recommendation to the diagnostic report
     AddRecommendation {
+        /// Title of the recommendation
         title: String,
+        /// Description of the recommendation
         description: String,
+        /// Priority level of the recommendation
         priority: RecommendationPriority,
     },
+    /// Trigger additional analysis with specified name
     TriggerAnalysis(String),
 }
 
@@ -844,192 +981,285 @@ pub trait HealthChecker: Send + Sync + std::fmt::Debug {
 /// Context for health checks
 #[derive(Debug)]
 pub struct HealthCheckContext {
+    /// Current system metrics
     pub system_metrics: SystemMetrics,
+    /// Recent performance measurements
     pub recent_performance: Vec<PerformanceMetrics>,
+    /// Active conversion configuration
     pub configuration: ConversionConfig,
+    /// Number of active conversion sessions
     pub active_sessions: usize,
 }
 
 /// System metrics for health checking
 #[derive(Debug, Default)]
 pub struct SystemMetrics {
+    /// CPU usage as percentage (0.0-100.0)
     pub cpu_usage_percent: f32,
+    /// Memory usage as percentage (0.0-100.0)
     pub memory_usage_percent: f32,
+    /// Disk usage as percentage (0.0-100.0)
     pub disk_usage_percent: f32,
+    /// Network latency in milliseconds
     pub network_latency_ms: f32,
+    /// System uptime in hours
     pub uptime_hours: f64,
+    /// Error rate as percentage (0.0-100.0)
     pub error_rate: f32,
 }
 
 /// Performance metrics for analysis
 #[derive(Debug)]
 pub struct PerformanceMetrics {
+    /// Timestamp when metrics were recorded
     pub timestamp: Instant,
+    /// Processing time for the operation
     pub processing_time: Duration,
+    /// Throughput in samples per second
     pub throughput: f64,
+    /// Number of errors encountered
     pub error_count: u32,
+    /// Resource usage analysis
     pub resource_usage: ResourceUsageAnalysis,
 }
 
 /// Health check result
 #[derive(Debug)]
 pub struct HealthCheckResult {
+    /// Name of the health checker that produced this result
     pub checker_name: String,
+    /// Current health status
     pub status: HealthStatus,
+    /// Health score (0.0-1.0)
     pub score: f32,
+    /// List of identified issues
     pub issues: Vec<String>,
+    /// List of recommendations
     pub recommendations: Vec<String>,
+    /// Additional metrics from the health check
     pub metrics: HashMap<String, f32>,
 }
 
 /// Health status
 #[derive(Debug, Clone)]
 pub enum HealthStatus {
+    /// System is healthy
     Healthy,
+    /// System has warnings but is operational
     Warning,
+    /// System is in critical state
     Critical,
+    /// Health status is unknown
     Unknown,
 }
 
 /// Tracked issue
 #[derive(Debug, Clone)]
 pub struct TrackedIssue {
+    /// Unique identifier for this tracked issue
     pub issue_id: String,
+    /// Timestamp when issue was first seen
     pub first_seen: Instant,
+    /// Timestamp when issue was last seen
     pub last_seen: Instant,
+    /// Number of times this issue has occurred
     pub occurrence_count: u32,
+    /// Detailed issue data
     pub issue_data: IdentifiedIssue,
+    /// Resolution attempts for this issue
     pub resolution_attempts: Vec<ResolutionAttempt>,
+    /// Current status of this issue
     pub status: IssueStatus,
 }
 
 /// Issue status
 #[derive(Debug, Clone)]
 pub enum IssueStatus {
+    /// Issue is newly identified
     New,
+    /// Issue is being worked on
     InProgress,
+    /// Issue has been resolved
     Resolved,
+    /// Issue is being ignored
     Ignored,
+    /// Issue is recurring
     Recurring,
 }
 
 /// Resolution attempt
 #[derive(Debug, Clone)]
 pub struct ResolutionAttempt {
+    /// Timestamp when resolution was attempted
     pub timestamp: Instant,
+    /// Description of the action taken
     pub action_taken: String,
+    /// Whether the resolution attempt was successful
     pub success: bool,
+    /// Additional notes about the resolution attempt
     pub notes: String,
 }
 
 /// Issue record for history
 #[derive(Debug, Clone)]
 pub struct IssueRecord {
+    /// Timestamp when issue was recorded
     pub timestamp: Instant,
+    /// The identified issue
     pub issue: IdentifiedIssue,
+    /// Context information about the issue
     pub context: String,
+    /// Resolution details, if resolved
     pub resolution: Option<String>,
+    /// Time taken to resolve the issue, if resolved
     pub resolution_time: Option<Duration>,
 }
 
 /// Learned pattern from historical issues
 #[derive(Debug, Clone)]
 pub struct LearnedPattern {
+    /// Unique identifier for this learned pattern
     pub pattern_id: String,
+    /// Numerical signature representing the pattern
     pub pattern_signature: Vec<f32>,
+    /// Confidence level of this pattern (0.0-1.0)
     pub confidence: f32,
+    /// Success rate when applying this pattern (0.0-1.0)
     pub success_rate: f32,
+    /// Number of times this pattern has been used
     pub usage_count: u32,
+    /// Timestamp when pattern was last updated
     pub last_updated: Instant,
 }
 
 /// Issue classifier for automatic categorization
 #[derive(Debug, Default)]
 pub struct IssueClassifier {
+    /// Rules used for classifying issues
     classification_rules: Vec<ClassificationRule>,
+    /// Whether machine learning is enabled for classification
     learning_enabled: bool,
 }
 
 /// Classification rule
 #[derive(Debug, Clone)]
 pub struct ClassificationRule {
+    /// Unique identifier for this rule
     pub rule_id: String,
+    /// Patterns to match for classification
     pub patterns: Vec<String>,
+    /// Category to assign when rule matches
     pub category: IssueCategory,
+    /// Confidence level of this classification rule (0.0-1.0)
     pub confidence: f32,
 }
 
 /// Report types
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum ReportType {
+    /// Summary report with high-level overview
     Summary,
+    /// Detailed report with comprehensive information
     Detailed,
+    /// Performance-focused report
     Performance,
+    /// Audio quality and analysis report
     Audio,
+    /// Configuration analysis report
     Configuration,
+    /// System health report
     Health,
+    /// Troubleshooting guide report
     Troubleshooting,
 }
 
 /// Report template
 #[derive(Debug, Clone)]
 pub struct ReportTemplate {
+    /// Name of this report template
     pub template_name: String,
+    /// Sections included in this template
     pub sections: Vec<ReportSection>,
+    /// Formatting options for this template
     pub format_options: Vec<FormatOption>,
 }
 
 /// Report section
 #[derive(Debug, Clone)]
 pub struct ReportSection {
+    /// Name of this section
     pub section_name: String,
+    /// Type of content in this section
     pub section_type: SectionType,
+    /// Whether to include charts in this section
     pub include_charts: bool,
+    /// Whether to include recommendations in this section
     pub include_recommendations: bool,
 }
 
 /// Section types
 #[derive(Debug, Clone)]
 pub enum SectionType {
+    /// Summary section with overview
     Summary,
+    /// Issues section listing identified problems
     Issues,
+    /// Performance analysis section
     Performance,
+    /// Audio analysis section
     Audio,
+    /// Configuration analysis section
     Configuration,
+    /// Recommendations section
     Recommendations,
+    /// Appendix section with supplementary information
     Appendix,
 }
 
 /// Export options for reports
 #[derive(Debug, Clone)]
 pub struct ExportOptions {
+    /// List of supported export formats
     pub supported_formats: Vec<ExportFormat>,
+    /// Whether to include raw data in exports
     pub include_raw_data: bool,
+    /// Whether to include charts in exports
     pub include_charts: bool,
+    /// Whether compression is enabled for exports
     pub compression_enabled: bool,
 }
 
 /// Export formats
 #[derive(Debug, Clone)]
 pub enum ExportFormat {
+    /// JSON format export
     Json,
+    /// YAML format export
     Yaml,
+    /// HTML format export
     Html,
+    /// PDF format export
     Pdf,
+    /// CSV format export
     Csv,
 }
 
 /// Format options for reports
 #[derive(Debug, Clone)]
 pub struct FormatOption {
+    /// Name of the formatting option
     pub option_name: String,
+    /// Value of the formatting option
     pub option_value: String,
 }
 
 /// Report generator trait
 pub trait ReportGenerator: Send + Sync + std::fmt::Debug {
+    /// Returns the name of this report generator
     fn name(&self) -> &str;
+    /// Returns the list of report types supported by this generator
     fn supported_types(&self) -> Vec<ReportType>;
+    /// Generates a report from the diagnostic analysis
     fn generate_report(
         &self,
         analysis: &DiagnosticAnalysis,
@@ -1207,11 +1437,17 @@ impl DiagnosticSystem {
 /// Issue summary for tracking
 #[derive(Debug, Clone)]
 pub struct IssueSummary {
+    /// Total number of tracked issues
     pub total_issues: u32,
+    /// Number of critical severity issues
     pub critical_issues: u32,
+    /// Number of warning severity issues
     pub warning_issues: u32,
+    /// Number of resolved issues
     pub resolved_issues: u32,
+    /// Number of recurring issues
     pub recurring_issues: u32,
+    /// Most common issue categories with their counts
     pub most_common_categories: Vec<(IssueCategory, u32)>,
 }
 

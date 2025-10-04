@@ -21,7 +21,7 @@ pub use vibrato::*;
 use crate::hifigan::HiFiGanVocoder;
 use crate::{MelSpectrogram, Vocoder};
 use anyhow::Result;
-use ndarray::Array2;
+use scirs2_core::ndarray::Array2;
 
 /// Singing voice vocoder for enhanced musical content processing
 pub struct SingingVocoder {

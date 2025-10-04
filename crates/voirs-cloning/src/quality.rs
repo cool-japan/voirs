@@ -14,8 +14,7 @@ use crate::{
     types::VoiceSample,
     Error, Result,
 };
-use ndarray::{s, Array1, Array2};
-use realfft::RealFftPlanner;
+use scirs2_core::ndarray::{s, Array1, Array2};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -133,8 +132,6 @@ pub struct CloningQualityAssessor {
     config: QualityConfig,
     /// Embedding extractor for speaker similarity
     embedding_extractor: Option<SpeakerEmbeddingExtractor>,
-    /// FFT planner for spectral analysis
-    fft_planner: RealFftPlanner<f32>,
     /// Quality metrics cache
     metrics_cache: Arc<RwLock<HashMap<String, QualityMetrics>>>,
     /// Performance statistics
@@ -146,7 +143,6 @@ impl std::fmt::Debug for CloningQualityAssessor {
         f.debug_struct("CloningQualityAssessor")
             .field("config", &self.config)
             .field("embedding_extractor", &self.embedding_extractor)
-            .field("fft_planner", &"<RealFftPlanner>")
             .field("metrics_cache", &"<Arc<RwLock<HashMap>>>")
             .field("performance_stats", &"<Arc<RwLock<AssessmentStats>>>")
             .finish()
@@ -333,7 +329,6 @@ impl CloningQualityAssessor {
         Ok(Self {
             config,
             embedding_extractor,
-            fft_planner: RealFftPlanner::new(),
             metrics_cache: Arc::new(RwLock::new(HashMap::new())),
             performance_stats: Arc::new(RwLock::new(AssessmentStats::new())),
         })
@@ -752,20 +747,20 @@ impl CloningQualityAssessor {
     // Helper methods for various computations
 
     /// Compute spectrum of audio signal
-    fn compute_spectrum(&mut self, audio: &[f32]) -> Result<Array1<f32>> {
+    fn compute_spectrum(&self, audio: &[f32]) -> Result<Array1<f32>> {
         let fft_size = self.config.analysis_window_size;
         let mut input = vec![0.0; fft_size];
         let len = audio.len().min(fft_size);
         input[..len].copy_from_slice(&audio[..len]);
 
-        let fft = self.fft_planner.plan_fft_forward(fft_size);
-        let mut spectrum_complex = fft.make_output_vec();
-        fft.process(&mut input, &mut spectrum_complex)
-            .map_err(|e| Error::Processing(format!("FFT processing failed: {:?}", e)))?;
+        // Convert to f64 for rfft
+        let input_f64: Vec<f64> = input.iter().map(|&x| x as f64).collect();
+        let spectrum_complex = scirs2_fft::rfft(&input_f64, None)
+            .map_err(|e| Error::Processing(format!("FFT processing failed: {e}")))?;
 
         let spectrum: Array1<f32> = spectrum_complex
             .iter()
-            .map(|c| c.norm())
+            .map(|c| (c.re * c.re + c.im * c.im).sqrt() as f32)
             .collect::<Vec<f32>>()
             .into();
 
@@ -1603,7 +1598,6 @@ impl crate::api_standards::StandardApiPattern for CloningQualityAssessor {
         Ok(Self {
             config,
             embedding_extractor,
-            fft_planner: RealFftPlanner::new(),
             metrics_cache: Arc::new(RwLock::new(HashMap::new())),
             performance_stats: Arc::new(RwLock::new(AssessmentStats::new())),
         })

@@ -7,9 +7,9 @@
 //! - Critical band analysis
 
 use crate::{Result, VocoderError};
-use ndarray::{Array1, Array2, s};
-use realfft::RealFftPlanner;
-use rustfft::num_complex::Complex;
+use scirs2_core::ndarray::{Array1, Array2, s};
+use scirs2_fft::{FftPlanner, RealFftPlanner};
+use scirs2_core::Complex;
 use std::f32::consts::PI;
 
 /// Comprehensive perceptual analysis result
@@ -115,7 +115,7 @@ impl PerceptualAnalyzer {
     pub fn new(sample_rate: u32) -> Self {
         Self {
             sample_rate,
-            fft_planner: RealFftPlanner::new(),
+            fft_planner: RealFftPlanner::<f32>::new(),
             bark_filterbank: BarkFilterbank::new(sample_rate),
             critical_bands: CriticalBands::new(sample_rate),
         }
@@ -711,7 +711,7 @@ impl CriticalBands {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::Array1;
+    use scirs2_core::ndarray::Array1;
     
     #[test]
     fn test_perceptual_analyzer_creation() {

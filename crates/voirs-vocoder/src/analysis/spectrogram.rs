@@ -1,9 +1,9 @@
 //! Spectrogram analysis and time-frequency decomposition
 
 use crate::{Result, VocoderError};
-use ndarray::{Array1, Array2, s};
-use realfft::RealFftPlanner;
-use rustfft::num_complex::Complex;
+use scirs2_core::ndarray::{Array1, Array2, s};
+use scirs2_fft::{FftPlanner, RealFftPlanner};
+use scirs2_core::Complex;
 use std::f32::consts::PI;
 
 /// Comprehensive spectrogram analysis result
@@ -136,7 +136,7 @@ impl SpectrogramAnalyzer {
     pub fn new(sample_rate: u32, fft_size: usize, hop_length: usize) -> Self {
         Self {
             sample_rate,
-            fft_planner: RealFftPlanner::new(),
+            fft_planner: RealFftPlanner::<f32>::new(),
             fft_size,
             hop_length,
         }
@@ -609,7 +609,7 @@ impl SpectrogramAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::Array1;
+    use scirs2_core::ndarray::Array1;
     
     #[test]
     fn test_spectrogram_analyzer_creation() {

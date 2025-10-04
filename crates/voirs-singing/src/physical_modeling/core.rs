@@ -10,63 +10,85 @@ use std::collections::HashMap;
 /// Formant target for articulatory control
 #[derive(Debug, Clone, Copy)]
 pub struct FormantTarget {
-    pub frequency: f32, // Target formant frequency (Hz)
-    pub bandwidth: f32, // Target formant bandwidth (Hz)
-    pub amplitude: f32, // Target formant amplitude (dB)
+    /// Target formant frequency in Hz
+    pub frequency: f32,
+    /// Target formant bandwidth in Hz
+    pub bandwidth: f32,
+    /// Target formant amplitude in dB
+    pub amplitude: f32,
 }
 
 /// Physical vocal tract model
 #[derive(Debug, Clone)]
 pub struct VocalTractModel {
+    /// Model name identifier
     pub name: String,
+    /// Runtime parameter storage
     pub parameters: HashMap<String, f32>,
 
-    // Vocal tract geometry
-    pub tract_length: f32,       // Total vocal tract length (cm)
-    pub area_function: Vec<f32>, // Cross-sectional area function
-    pub num_sections: usize,     // Number of tube sections
+    /// Total vocal tract length in cm
+    pub tract_length: f32,
+    /// Cross-sectional area function for each tube section (cm²)
+    pub area_function: Vec<f32>,
+    /// Number of tube sections in the model
+    pub num_sections: usize,
 
-    // Acoustic properties
-    pub sound_speed: f32, // Speed of sound (cm/s)
-    pub sample_rate: f32, // Sampling rate
+    /// Speed of sound in cm/s at body temperature
+    pub sound_speed: f32,
+    /// Audio sampling rate in Hz
+    pub sample_rate: f32,
 
-    // Tube model state
-    pub delay_lines: Vec<DelayLine>,  // Delay lines for each section
-    pub reflectances: Vec<f32>,       // Reflection coefficients
-    pub junction_pressures: Vec<f32>, // Pressures at junctions
-    pub velocities: Vec<f32>,         // Velocities in sections
+    /// Delay lines for each vocal tract section
+    pub delay_lines: Vec<DelayLine>,
+    /// Reflection coefficients at each junction
+    pub reflectances: Vec<f32>,
+    /// Acoustic pressures at tube junctions (Pa)
+    pub junction_pressures: Vec<f32>,
+    /// Air velocities in each section (cm/s)
+    pub velocities: Vec<f32>,
 
-    // Excitation source
-    pub glottal_model: GlottalModel, // Glottal pulse generator
+    /// Glottal pulse generator for excitation
+    pub glottal_model: GlottalModel,
 
-    // Articulatory parameters
-    pub tongue_position: f32, // Tongue position (0-1)
-    pub tongue_shape: f32,    // Tongue curvature
-    pub jaw_opening: f32,     // Jaw aperture (0-1)
-    pub lip_rounding: f32,    // Lip rounding (0-1)
-    pub velum_opening: f32,   // Nasal coupling (0-1)
+    /// Tongue position from front (0) to back (1)
+    pub tongue_position: f32,
+    /// Tongue curvature from concave (-1) to convex (1)
+    pub tongue_shape: f32,
+    /// Jaw aperture from closed (0) to fully open (1)
+    pub jaw_opening: f32,
+    /// Lip rounding from spread (0) to rounded (1)
+    pub lip_rounding: f32,
+    /// Nasal coupling from closed (0) to open (1)
+    pub velum_opening: f32,
 
-    // Formant control
+    /// Target formant frequencies for articulation
     pub formant_targets: Vec<FormantTarget>,
 }
 
 /// Glottal excitation model
 #[derive(Debug, Clone)]
 pub struct GlottalModel {
-    /// Fundamental frequency
+    /// Fundamental frequency in Hz
     pub f0: f32,
-    /// Glottal pulse shape parameters
-    pub open_quotient: f32, // Fraction of period glottis is open
-    pub speed_quotient: f32,  // Speed of opening vs closing
-    pub pulse_amplitude: f32, // Pulse amplitude
-    pub spectral_tilt: f32,   // High frequency rolloff
-    pub shimmer: f32,         // Amplitude variation
-    pub jitter: f32,          // Frequency variation
+    /// Fraction of period glottis is open (0-1)
+    pub open_quotient: f32,
+    /// Speed of opening vs closing (higher = faster closing)
+    pub speed_quotient: f32,
+    /// Pulse amplitude scalar
+    pub pulse_amplitude: f32,
+    /// High frequency rolloff in dB/octave
+    pub spectral_tilt: f32,
+    /// Amplitude variation coefficient (0-1)
+    pub shimmer: f32,
+    /// Frequency variation coefficient (0-1)
+    pub jitter: f32,
 
-    /// Internal state
-    pub phase: f32, // Current phase in glottal cycle
-    pub last_pulse_amplitude: f32, // Previous pulse for shimmer
-    pub rng_state: u64,            // Random state for jitter/shimmer
+    /// Current phase in glottal cycle (0-1)
+    pub phase: f32,
+    /// Previous pulse amplitude for shimmer calculation
+    pub last_pulse_amplitude: f32,
+    /// Random number generator state for jitter/shimmer
+    pub rng_state: u64,
 }
 
 /// Delay line for acoustic tube modeling
@@ -81,26 +103,33 @@ pub struct DelayLine {
 /// Physical modeling configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhysicalModelConfig {
-    /// Vocal tract length in cm (typical: 17.5cm)
+    /// Vocal tract length in cm (typical: 17.5cm for adult male)
     pub tract_length: f32,
-    /// Number of tube sections (8-44 typical)
+    /// Number of tube sections (8-44 typical, more = higher accuracy)
     pub num_sections: usize,
     /// Fundamental frequency in Hz
     pub fundamental_frequency: f32,
-    /// Glottal pulse parameters
+    /// Fraction of glottal cycle when glottis is open (0-1)
     pub open_quotient: f32,
+    /// Ratio of closing speed to opening speed (>1 = faster closing)
     pub speed_quotient: f32,
+    /// High frequency rolloff in dB/octave
     pub spectral_tilt: f32,
-    /// Articulatory parameters (0-1)
+    /// Tongue position from front (0) to back (1)
     pub tongue_position: f32,
+    /// Tongue curvature from concave (-1) to convex (1)
     pub tongue_shape: f32,
+    /// Jaw aperture from closed (0) to fully open (1)
     pub jaw_opening: f32,
+    /// Lip rounding from spread (0) to rounded (1)
     pub lip_rounding: f32,
+    /// Nasal coupling from closed (0) to open (1)
     pub velum_opening: f32,
-    /// Voice quality parameters
+    /// Breathiness amount from none (0) to very breathy (1)
     pub breathiness: f32,
+    /// Voice roughness from smooth (0) to very rough (1)
     pub roughness: f32,
-    /// Control parameters
+    /// Mix between dry signal (0) and physical model (1)
     pub dry_wet_mix: f32,
 }
 
@@ -144,6 +173,14 @@ pub enum VowelPreset {
 
 impl VocalTractModel {
     /// Create new physical vocal tract model
+    ///
+    /// # Arguments
+    /// * `name` - Model identifier name
+    /// * `config` - Physical modeling configuration parameters
+    /// * `sample_rate` - Audio sampling rate in Hz
+    ///
+    /// # Returns
+    /// New vocal tract model instance or error if configuration is invalid
     pub fn new(name: String, config: PhysicalModelConfig, sample_rate: f32) -> crate::Result<Self> {
         let sound_speed = 35000.0; // cm/s at body temperature
         let section_length = config.tract_length / config.num_sections as f32;
@@ -224,12 +261,24 @@ impl VocalTractModel {
         })
     }
 
-    /// Get model name
+    /// Get model name identifier
+    ///
+    /// # Returns
+    /// Model name as string slice
     pub fn name(&self) -> &str {
         &self.name
     }
 
     /// Create neutral area function (uniform tube with slight constriction at glottis)
+    ///
+    /// Generates a baseline vocal tract cross-sectional area function that increases
+    /// from glottis to lips with a slight constriction in the pharynx region.
+    ///
+    /// # Arguments
+    /// * `num_sections` - Number of tube sections to model
+    ///
+    /// # Returns
+    /// Vector of cross-sectional areas in cm² for each section
     pub fn create_neutral_area_function(num_sections: usize) -> Vec<f32> {
         let mut areas = Vec::with_capacity(num_sections);
 
@@ -254,6 +303,15 @@ impl VocalTractModel {
     }
 
     /// Calculate reflection coefficients from area function
+    ///
+    /// Computes acoustic reflection coefficients at each junction between tube sections
+    /// based on the area discontinuities. Uses the standard formula: r = (A2 - A1)/(A2 + A1).
+    ///
+    /// # Arguments
+    /// * `areas` - Cross-sectional areas for each tube section
+    ///
+    /// # Returns
+    /// Reflection coefficients at each junction (-1 to 1)
     pub fn calculate_reflectances(areas: &[f32]) -> Vec<f32> {
         let mut reflectances = Vec::with_capacity(areas.len());
 
@@ -280,7 +338,13 @@ impl VocalTractModel {
         reflectances
     }
 
-    /// Set vowel preset
+    /// Set vowel preset for quick articulation configuration
+    ///
+    /// Configures articulatory parameters (tongue, jaw, lips) to approximate
+    /// standard vowel sounds based on IPA vowel chart positions.
+    ///
+    /// # Arguments
+    /// * `preset` - Vowel preset to apply
     pub fn set_vowel_preset(&mut self, preset: VowelPreset) {
         match preset {
             VowelPreset::OpenCentral => {
@@ -337,6 +401,10 @@ impl VocalTractModel {
     }
 
     /// Update area function based on articulatory parameters
+    ///
+    /// Recalculates the vocal tract cross-sectional area function based on current
+    /// tongue position, jaw opening, and lip rounding settings. Should be called
+    /// after changing any articulatory parameter.
     pub fn update_articulation(&mut self) {
         for i in 0..self.num_sections {
             let position = i as f32 / (self.num_sections - 1) as f32;
@@ -383,7 +451,17 @@ impl VocalTractModel {
         }
     }
 
-    /// Set parameter by name
+    /// Set parameter by name with automatic range clamping
+    ///
+    /// # Arguments
+    /// * `name` - Parameter name (e.g., "fundamental_frequency", "tongue_position")
+    /// * `value` - New parameter value (will be clamped to valid range)
+    ///
+    /// # Returns
+    /// Ok if parameter was set, error if parameter name is unknown
+    ///
+    /// # Errors
+    /// Returns error if parameter name is not recognized
     pub fn set_parameter(&mut self, name: &str, value: f32) -> crate::Result<()> {
         let clamped_value = match name {
             "fundamental_frequency" => value.clamp(50.0, 1000.0),
@@ -428,12 +506,27 @@ impl VocalTractModel {
         Ok(())
     }
 
-    /// Get parameter by name
+    /// Get parameter value by name
+    ///
+    /// # Arguments
+    /// * `name` - Parameter name to retrieve
+    ///
+    /// # Returns
+    /// Some(value) if parameter exists, None otherwise
     pub fn get_parameter(&self, name: &str) -> Option<f32> {
         self.parameters.get(name).copied()
     }
 
     /// Process audio through physical model
+    ///
+    /// Synthesizes audio by generating glottal excitation and propagating it through
+    /// the vocal tract tube model using the Kelly-Lochbaum algorithm.
+    ///
+    /// # Arguments
+    /// * `audio` - Audio buffer to write synthesized samples into (additive)
+    ///
+    /// # Returns
+    /// Ok on success, error if synthesis fails
     pub fn process_physical_model(&mut self, audio: &mut [f32]) -> crate::Result<()> {
         for sample in audio.iter_mut() {
             // Generate glottal excitation
@@ -482,7 +575,10 @@ impl VocalTractModel {
         }
     }
 
-    /// Reset model state
+    /// Reset model state to initial conditions
+    ///
+    /// Clears all delay lines, pressures, velocities, and glottal state.
+    /// Useful for starting fresh synthesis without residual acoustic energy.
     pub fn reset(&mut self) {
         // Clear delay lines
         for delay_line in &mut self.delay_lines {
@@ -499,7 +595,16 @@ impl VocalTractModel {
 }
 
 impl GlottalModel {
-    /// Create new glottal model
+    /// Create new glottal model with specified parameters
+    ///
+    /// # Arguments
+    /// * `f0` - Fundamental frequency in Hz
+    /// * `open_quotient` - Fraction of period glottis is open (0-1)
+    /// * `speed_quotient` - Ratio of closing to opening speed (>1 = faster closing)
+    /// * `spectral_tilt` - High frequency rolloff in dB/octave
+    ///
+    /// # Returns
+    /// New glottal model instance
     pub fn new(f0: f32, open_quotient: f32, speed_quotient: f32, spectral_tilt: f32) -> Self {
         Self {
             f0,
@@ -516,6 +621,12 @@ impl GlottalModel {
     }
 
     /// Generate single sample using Liljencrants-Fant model
+    ///
+    /// Synthesizes one sample of glottal excitation using the Liljencrants-Fant
+    /// pulse shape with jitter and shimmer variations for naturalness.
+    ///
+    /// # Returns
+    /// Glottal flow sample value
     pub fn generate_sample(&mut self) -> f32 {
         let period = 1.0 / self.f0;
         let sample_period = 1.0 / 44100.0; // Assume 44.1kHz for now
@@ -535,8 +646,7 @@ impl GlottalModel {
             // Opening phase
             let denominator = self.open_quotient.max(0.01); // Prevent division by zero
             let t = self.phase / denominator;
-            let opening = 0.5 * (1.0 - (std::f32::consts::PI * t).cos());
-            opening
+            0.5 * (1.0 - (std::f32::consts::PI * t).cos())
         } else {
             // Closing phase
             let denominator = (1.0 - self.open_quotient).max(0.01); // Prevent division by zero
@@ -571,7 +681,9 @@ impl GlottalModel {
         (uniform - 0.5) * 4.0 // Approximate Gaussian with std dev ≈ 1
     }
 
-    /// Reset glottal model state
+    /// Reset glottal model state to initial conditions
+    ///
+    /// Resets phase, amplitude history, and RNG state for deterministic synthesis.
     pub fn reset(&mut self) {
         self.phase = 0.0;
         self.last_pulse_amplitude = 1.0;
@@ -580,7 +692,13 @@ impl GlottalModel {
 }
 
 impl DelayLine {
-    /// Create new delay line
+    /// Create new delay line with specified buffer size
+    ///
+    /// # Arguments
+    /// * `size` - Delay buffer size in samples (minimum 1)
+    ///
+    /// # Returns
+    /// New delay line initialized to zeros
     pub fn new(size: usize) -> Self {
         Self {
             buffer: vec![0.0; size.max(1)],
@@ -590,20 +708,28 @@ impl DelayLine {
         }
     }
 
-    /// Read sample from delay line
+    /// Read sample from delay line and advance read position
+    ///
+    /// # Returns
+    /// Delayed sample value
     pub fn read_sample(&mut self) -> f32 {
         let sample = self.buffer[self.read_pos];
         self.read_pos = (self.read_pos + 1) % self.size;
         sample
     }
 
-    /// Write sample to delay line
+    /// Write sample to delay line and advance write position
+    ///
+    /// # Arguments
+    /// * `sample` - Sample value to write to buffer
     pub fn write_sample(&mut self, sample: f32) {
         self.buffer[self.write_pos] = sample;
         self.write_pos = (self.write_pos + 1) % self.size;
     }
 
-    /// Clear delay line
+    /// Clear delay line buffer and reset positions
+    ///
+    /// Sets all buffer values to zero and resets read/write positions.
     pub fn clear(&mut self) {
         self.buffer.fill(0.0);
         self.read_pos = 0;

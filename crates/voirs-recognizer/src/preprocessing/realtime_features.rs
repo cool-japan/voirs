@@ -334,14 +334,14 @@ impl RealTimeFeatureExtractor {
     }
 
     /// Simple FFT implementation (for demonstration)
-    fn simple_fft(&self, input: &[f32]) -> Vec<num_complex::Complex<f32>> {
+    fn simple_fft(&self, input: &[f32]) -> Vec<scirs2_core::Complex<f32>> {
         // Very simplified FFT - in practice, use a proper FFT library
         input
             .iter()
             .enumerate()
             .map(|(i, &sample)| {
                 let angle = -2.0 * std::f32::consts::PI * i as f32 / input.len() as f32;
-                num_complex::Complex::new(sample * angle.cos(), sample * angle.sin())
+                scirs2_core::Complex::new(sample * angle.cos(), sample * angle.sin())
             })
             .collect()
     }

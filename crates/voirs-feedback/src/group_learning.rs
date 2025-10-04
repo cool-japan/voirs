@@ -25,18 +25,44 @@ pub type GroupLearningResult<T> = Result<T, GroupLearningError>;
 /// Errors that can occur during group learning operations
 #[derive(Debug, thiserror::Error)]
 pub enum GroupLearningError {
+    /// Group not found error
     #[error("Group not found: {group_id}")]
-    GroupNotFound { group_id: String },
+    GroupNotFound {
+        /// Group identifier
+        group_id: String
+    },
+    /// User not found in group error
     #[error("User not found in group: {user_id}")]
-    UserNotInGroup { user_id: String },
+    UserNotInGroup {
+        /// User identifier
+        user_id: String
+    },
+    /// Exercise synchronization failed error
     #[error("Exercise synchronization failed: {reason}")]
-    SynchronizationError { reason: String },
+    SynchronizationError {
+        /// Reason for synchronization failure
+        reason: String
+    },
+    /// Insufficient permissions error
     #[error("Insufficient permissions for operation: {operation}")]
-    InsufficientPermissions { operation: String },
+    InsufficientPermissions {
+        /// Operation name
+        operation: String
+    },
+    /// Group capacity exceeded error
     #[error("Group capacity exceeded: current {current}, max {max}")]
-    GroupCapacityExceeded { current: usize, max: usize },
+    GroupCapacityExceeded {
+        /// Current participant count
+        current: usize,
+        /// Maximum participants allowed
+        max: usize
+    },
+    /// Session conflict error
     #[error("Session conflict: {details}")]
-    SessionConflict { details: String },
+    SessionConflict {
+        /// Conflict details
+        details: String
+    },
 }
 
 /// Group learning orchestrator managing all group activities
@@ -555,37 +581,64 @@ pub struct SynchronizationStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GroupEvent {
     /// Group was created
-    GroupCreated { group_id: String },
+    GroupCreated {
+        /// Group identifier
+        group_id: String
+    },
     /// Participant joined group
-    ParticipantJoined { group_id: String, user_id: String },
+    ParticipantJoined {
+        /// Group identifier
+        group_id: String,
+        /// User identifier
+        user_id: String
+    },
     /// Participant left group
-    ParticipantLeft { group_id: String, user_id: String },
+    ParticipantLeft {
+        /// Group identifier
+        group_id: String,
+        /// User identifier
+        user_id: String
+    },
     /// Session started
     SessionStarted {
+        /// Group identifier
         group_id: String,
+        /// Session identifier
         session_id: String,
     },
     /// Exercise started
     ExerciseStarted {
+        /// Session identifier
         session_id: String,
+        /// Exercise index
         exercise_index: usize,
     },
     /// Exercise completed
     ExerciseCompleted {
+        /// Session identifier
         session_id: String,
+        /// Exercise index
         exercise_index: usize,
     },
     /// Session completed
-    SessionCompleted { session_id: String },
+    SessionCompleted {
+        /// Session identifier
+        session_id: String
+    },
     /// Sync status changed
     SyncStatusChanged {
+        /// Session identifier
         session_id: String,
+        /// Synchronization status
         status: SynchronizationStatus,
     },
     /// Real-time progress update
     ProgressUpdate {
+        /// Session identifier
         session_id: String,
+        /// User identifier
         user_id: String,
+        /// Progress percentage
         progress: f32,
     },
 }

@@ -14,6 +14,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 /// Enhanced error recovery mechanisms
 #[derive(Debug, Clone)]
+/// Error Recovery Manager
 pub struct ErrorRecoveryManager {
     /// Recovery strategies by error category
     recovery_strategies: HashMap<ErrorCategory, Vec<RecoveryStrategy>>,
@@ -29,6 +30,7 @@ pub struct ErrorRecoveryManager {
 
 /// Recovery strategy definition
 #[derive(Debug, Clone)]
+/// Recovery Strategy
 pub struct RecoveryStrategy {
     /// Strategy name
     pub name: String,
@@ -48,71 +50,106 @@ pub struct RecoveryStrategy {
 
 /// Recovery action types
 #[derive(Debug, Clone)]
+/// Recovery Action
 pub enum RecoveryAction {
     /// Retry the operation with backoff
     RetryWithBackoff {
+        /// Usize
         max_attempts: usize,
+        /// U64
         base_delay_ms: u64,
+        /// U64
         max_delay_ms: u64,
+        /// F32
         backoff_multiplier: f32,
     },
     /// Switch to fallback model/method
     SwitchToFallback {
+        /// String
         fallback_target: String,
+        /// Bool
         preserve_state: bool,
     },
     /// Reduce quality/complexity for faster processing
     GracefulDegradation {
+        /// Degradation level
         degradation_level: DegradationLevel,
+        /// Bool
         maintain_core_functionality: bool,
     },
     /// Clear cache and restart component
     ClearAndRestart {
+        /// String
         component: String,
+        /// Bool
         preserve_critical_data: bool,
     },
     /// Resource cleanup and optimization
     ResourceOptimization {
+        /// Cleanup level
         cleanup_level: CleanupLevel,
+        /// Bool
         force_gc: bool,
     },
     /// Dynamic reconfiguration
     Reconfigure {
+        /// String
         config_adjustments: HashMap<String, String>,
+        /// Bool
         temporary: bool,
     },
     /// Warm restart with state preservation
     WarmRestart {
+        /// Bool
         preserve_models: bool,
+        /// Bool
         preserve_cache: bool,
     },
 }
 
 /// Recovery condition types
 #[derive(Debug, Clone)]
+/// Recovery Condition
 pub enum RecoveryCondition {
     /// Error count threshold
     ErrorCount {
+        /// Usize
         threshold: usize,
+        /// U64
         window_seconds: u64,
     },
     /// Memory usage threshold
-    MemoryUsage { threshold_mb: u64 },
+    MemoryUsage {
+        /// Memory threshold in megabytes
+        threshold_mb: u64,
+    },
     /// Processing time threshold
-    ProcessingTime { threshold_seconds: f32 },
+    ProcessingTime {
+        /// Threshold in seconds
+        threshold_seconds: f32,
+    },
     /// Error pattern matching
-    ErrorPattern { pattern: String },
+    ErrorPattern {
+        /// Pattern to match against errors
+        pattern: String,
+    },
     /// System resource availability
     ResourceAvailability {
+        /// Type of resource
         resource_type: String,
+        /// Availability threshold
         threshold: f32,
     },
     /// Model confidence threshold
-    ConfidenceThreshold { threshold: f32 },
+    ConfidenceThreshold {
+        /// Confidence threshold value
+        threshold: f32,
+    },
 }
 
 /// Degradation levels for graceful degradation
 #[derive(Debug, Clone, PartialEq)]
+/// Degradation Level
 pub enum DegradationLevel {
     /// Minimal degradation - slight quality reduction
     Minimal,
@@ -126,6 +163,7 @@ pub enum DegradationLevel {
 
 /// Cleanup levels for resource optimization
 #[derive(Debug, Clone, PartialEq)]
+/// Cleanup Level
 pub enum CleanupLevel {
     /// Light cleanup - temporary data only
     Light,
@@ -143,13 +181,17 @@ pub enum CircuitBreakerState {
     /// Normal operation
     Closed,
     /// Failing fast to prevent cascading failures
-    Open { opened_at: Instant },
+    Open {
+        /// Timestamp when circuit opened
+        opened_at: Instant,
+    },
     /// Testing if service has recovered
     HalfOpen,
 }
 
 /// Retry configuration
 #[derive(Debug, Clone)]
+/// Retry Config
 pub struct RetryConfig {
     /// Default maximum retry attempts
     pub default_max_attempts: usize,
@@ -167,15 +209,21 @@ pub struct RetryConfig {
 
 /// Retry settings for specific error types
 #[derive(Debug, Clone)]
+/// Retry Settings
 pub struct RetrySettings {
+    /// max attempts
     pub max_attempts: usize,
+    /// base delay ms
     pub base_delay_ms: u64,
+    /// backoff multiplier
     pub backoff_multiplier: f32,
+    /// enable jitter
     pub enable_jitter: bool,
 }
 
 /// Self-healing configuration
 #[derive(Debug, Clone)]
+/// Self Healing Config
 pub struct SelfHealingConfig {
     /// Enable automatic recovery attempts
     pub enable_auto_recovery: bool,
@@ -191,6 +239,7 @@ pub struct SelfHealingConfig {
 
 /// Recovery result
 #[derive(Debug, Clone)]
+/// Recovery Result
 pub struct RecoveryResult {
     /// Whether recovery was successful
     pub success: bool,
@@ -208,6 +257,7 @@ pub struct RecoveryResult {
 
 /// Recovery attempt record for learning
 #[derive(Debug, Clone)]
+/// Recovery Attempt
 pub struct RecoveryAttempt {
     /// Timestamp of the attempt
     pub timestamp: SystemTime,
@@ -777,11 +827,17 @@ impl ErrorRecoveryManager {
 
 /// Recovery statistics
 #[derive(Debug, Clone)]
+/// Recovery Stats
 pub struct RecoveryStats {
+    /// total attempts
     pub total_attempts: usize,
+    /// successful attempts
     pub successful_attempts: usize,
+    /// success rate
     pub success_rate: f32,
+    /// average recovery time
     pub average_recovery_time: Duration,
+    /// strategies used
     pub strategies_used: HashMap<String, usize>,
 }
 

@@ -13,10 +13,15 @@ use tokio::sync::{Mutex, RwLock};
 
 /// Recovery manager for handling system failures and automatic recovery
 pub struct RecoveryManager {
+    /// Recovery configuration settings
     config: RecoveryConfig,
+    /// Tracks failure occurrences and patterns
     failure_tracker: Arc<Mutex<FailureTracker>>,
+    /// Maps failure types to recovery strategies
     recovery_strategies: Arc<RwLock<HashMap<FailureType, RecoveryStrategy>>>,
+    /// Circuit breaker for preventing cascade failures
     circuit_breaker: Arc<Mutex<CircuitBreaker>>,
+    /// Monitors system health metrics
     health_monitor: Arc<Mutex<HealthMonitor>>,
 }
 
@@ -489,12 +494,19 @@ impl Default for RecoveryConfig {
 /// Types of failures that can be recovered from
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum FailureType {
+    /// Network connectivity or communication error
     NetworkError,
+    /// Service temporarily unavailable
     ServiceUnavailable,
+    /// System resources (CPU, memory, etc.) exhausted
     ResourceExhaustion,
+    /// Operation exceeded time limit
     ProcessingTimeout,
+    /// Database operation failed
     DatabaseError,
+    /// Invalid configuration detected
     ConfigurationError,
+    /// Unclassified failure type
     Unknown,
 }
 
@@ -502,29 +514,44 @@ pub enum FailureType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RecoveryStrategy {
     /// Simple retry with fixed delay
-    SimpleRetry { max_retries: u32 },
+    SimpleRetry {
+        /// Maximum number of retry attempts
+        max_retries: u32
+    },
     /// Exponential backoff retry
     ExponentialBackoff {
+        /// Initial delay before first retry
         base_delay: Duration,
+        /// Maximum delay between retries
         max_delay: Duration,
+        /// Maximum number of retry attempts
         max_retries: u32,
+        /// Multiplier for exponential backoff
         backoff_multiplier: f64,
     },
     /// Circuit breaker pattern
     CircuitBreaker {
+        /// Number of failures before opening circuit
         failure_threshold: u32,
+        /// How long circuit stays open
         timeout: Duration,
+        /// Maximum calls allowed in half-open state
         half_open_max_calls: u32,
     },
     /// Graceful degradation
     GracefulDegradation {
+        /// Fallback mode to use when degraded
         fallback_mode: DegradationMode,
+        /// Health threshold for recovery
         recovery_threshold: f64,
     },
     /// Timeout escalation
     TimeoutEscalation {
+        /// Initial timeout value
         initial_timeout: Duration,
+        /// Maximum timeout value
         max_timeout: Duration,
+        /// Factor to escalate timeout by
         escalation_factor: f64,
     },
 }
@@ -545,23 +572,33 @@ pub enum DegradationMode {
 /// Circuit breaker states
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CircuitBreakerState {
+    /// Circuit is closed, operations proceed normally
     Closed,
+    /// Circuit is open, operations are rejected
     Open,
+    /// Circuit is testing if service has recovered
     HalfOpen,
 }
 
 /// Circuit breaker implementation
 #[derive(Debug)]
 pub struct CircuitBreaker {
+    /// Current state of the circuit breaker
     state: CircuitBreakerState,
+    /// Number of consecutive failures
     failure_count: u32,
+    /// Number of consecutive successes
     consecutive_successes: u32,
+    /// Timestamp of last failure
     last_failure_time: Option<Instant>,
+    /// Duration circuit stays open
     timeout_duration: Duration,
+    /// Number of calls made in half-open state
     half_open_calls: u32,
 }
 
 impl CircuitBreaker {
+    /// Create a new circuit breaker in closed state
     pub fn new() -> Self {
         Self {
             state: CircuitBreakerState::Closed,
@@ -573,34 +610,40 @@ impl CircuitBreaker {
         }
     }
 
+    /// Record a successful operation
     pub fn record_success(&mut self) {
         self.consecutive_successes += 1;
         self.failure_count = 0;
     }
 
+    /// Record a failed operation
     pub fn record_failure(&mut self) {
         self.failure_count += 1;
         self.consecutive_successes = 0;
         self.last_failure_time = Some(Instant::now());
     }
 
+    /// Open the circuit breaker
     pub fn open(&mut self, timeout: Duration) {
         self.state = CircuitBreakerState::Open;
         self.timeout_duration = timeout;
         self.last_failure_time = Some(Instant::now());
     }
 
+    /// Close the circuit breaker
     pub fn close(&mut self) {
         self.state = CircuitBreakerState::Closed;
         self.failure_count = 0;
         self.half_open_calls = 0;
     }
 
+    /// Set circuit breaker to half-open state
     pub fn half_open(&mut self, max_calls: u32) {
         self.state = CircuitBreakerState::HalfOpen;
         self.half_open_calls = 0;
     }
 
+    /// Check if circuit breaker should attempt to reset
     pub fn should_attempt_reset(&self) -> bool {
         if let Some(last_failure) = self.last_failure_time {
             last_failure.elapsed() >= self.timeout_duration
@@ -609,6 +652,7 @@ impl CircuitBreaker {
         }
     }
 
+    /// Reset circuit breaker to initial state
     pub fn reset(&mut self) {
         self.state = CircuitBreakerState::Closed;
         self.failure_count = 0;
@@ -621,13 +665,18 @@ impl CircuitBreaker {
 /// Health monitoring
 #[derive(Debug)]
 pub struct HealthMonitor {
+    /// Number of successful operations
     success_count: u32,
+    /// Number of failed operations
     failure_count: u32,
+    /// Current degradation mode if any
     degraded_mode: Option<DegradationMode>,
+    /// Timestamp of last health check
     last_health_check: Instant,
 }
 
 impl HealthMonitor {
+    /// Create a new health monitor
     pub fn new() -> Self {
         Self {
             success_count: 0,
@@ -637,14 +686,17 @@ impl HealthMonitor {
         }
     }
 
+    /// Record a successful operation
     pub fn record_success(&mut self) {
         self.success_count += 1;
     }
 
+    /// Record a failed operation
     pub fn record_failure(&mut self) {
         self.failure_count += 1;
     }
 
+    /// Get current health score (0.0 to 1.0)
     pub fn get_health_score(&self) -> f64 {
         let total = self.success_count + self.failure_count;
         if total == 0 {
@@ -654,14 +706,17 @@ impl HealthMonitor {
         self.success_count as f64 / total as f64
     }
 
+    /// Enter degraded mode
     pub fn enter_degraded_mode(&mut self, mode: DegradationMode) {
         self.degraded_mode = Some(mode);
     }
 
+    /// Exit degraded mode
     pub fn exit_degraded_mode(&mut self) {
         self.degraded_mode = None;
     }
 
+    /// Reset health monitor state
     pub fn reset(&mut self) {
         self.success_count = 0;
         self.failure_count = 0;
@@ -673,14 +728,20 @@ impl HealthMonitor {
 /// Failure tracking
 #[derive(Debug)]
 pub struct FailureTracker {
+    /// Total number of failures recorded
     total_failures: u64,
+    /// Total number of successful recoveries
     total_recoveries: u64,
+    /// Failure counts by type
     failure_breakdown: HashMap<FailureType, u32>,
+    /// Recovery counts by failure type
     recovery_breakdown: HashMap<FailureType, u32>,
+    /// Recent failure history with timestamps
     recent_failures: Vec<(Instant, FailureType)>,
 }
 
 impl FailureTracker {
+    /// Create a new failure tracker
     pub fn new() -> Self {
         Self {
             total_failures: 0,
@@ -691,6 +752,7 @@ impl FailureTracker {
         }
     }
 
+    /// Record a failure occurrence
     pub fn record_failure(&mut self, failure_type: FailureType, attempt: u32) {
         self.total_failures += 1;
         *self
@@ -704,11 +766,13 @@ impl FailureTracker {
         self.recent_failures.retain(|(time, _)| *time > cutoff);
     }
 
+    /// Record a successful recovery
     pub fn record_recovery(&mut self, failure_type: FailureType, attempts: u32) {
         self.total_recoveries += 1;
         *self.recovery_breakdown.entry(failure_type).or_insert(0) += 1;
     }
 
+    /// Get overall failure rate
     pub fn get_failure_rate(&self) -> f64 {
         let total_operations = self.total_failures + self.total_recoveries;
         if total_operations == 0 {
@@ -717,6 +781,7 @@ impl FailureTracker {
         self.total_failures as f64 / total_operations as f64
     }
 
+    /// Get overall recovery rate
     pub fn get_recovery_rate(&self) -> f64 {
         if self.total_failures == 0 {
             return 1.0;
@@ -724,6 +789,7 @@ impl FailureTracker {
         self.total_recoveries as f64 / self.total_failures as f64
     }
 
+    /// Reset failure tracker state
     pub fn reset(&mut self) {
         self.total_failures = 0;
         self.total_recoveries = 0;
@@ -736,26 +802,43 @@ impl FailureTracker {
 /// Recovery error types
 #[derive(Debug)]
 pub enum RecoveryError {
+    /// Maximum retry attempts exceeded
     MaxRetriesExceeded {
+        /// Number of attempts made
         attempts: u32,
+        /// Last error encountered
         last_error: FeedbackError,
     },
+    /// Exponential backoff exhausted
     BackoffExhausted {
+        /// Number of attempts made
         attempts: u32,
+        /// Final delay reached
         final_delay: Duration,
+        /// Last error encountered
         last_error: FeedbackError,
     },
+    /// Circuit breaker is open
     CircuitBreakerOpen,
+    /// System is in degraded mode
     DegradedMode {
+        /// Current degradation mode
         mode: DegradationMode,
+        /// Current health score
         health_score: f64,
+        /// Underlying error
         error: FeedbackError,
     },
+    /// Timeout escalation exhausted
     TimeoutEscalationExhausted {
+        /// Number of attempts made
         attempts: u32,
+        /// Final timeout reached
         final_timeout: Duration,
     },
+    /// Operation failed
     OperationFailed(FeedbackError),
+    /// Configuration error
     ConfigurationError(String),
 }
 
@@ -822,13 +905,21 @@ impl std::error::Error for RecoveryError {}
 /// Recovery statistics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecoveryStats {
+    /// Total number of failures
     pub total_failures: u64,
+    /// Total number of recoveries
     pub total_recoveries: u64,
+    /// Current failure rate
     pub failure_rate: f64,
+    /// Current recovery rate
     pub recovery_rate: f64,
+    /// Current circuit breaker state
     pub circuit_breaker_state: CircuitBreakerState,
+    /// Current system health score
     pub current_health_score: f64,
+    /// Current degradation mode if any
     pub degraded_mode: Option<DegradationMode>,
+    /// Breakdown of failures by type
     pub failure_breakdown: HashMap<FailureType, u32>,
 }
 

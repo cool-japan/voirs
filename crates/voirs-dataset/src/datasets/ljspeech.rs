@@ -129,11 +129,14 @@ impl LjSpeechDataset {
         let mut csv_reader = ReaderBuilder::new()
             .has_headers(false)
             .delimiter(b'|')
+            .flexible(true) // Allow variable number of fields
+            .quoting(false) // Disable quote handling (treat quotes as literal)
             .from_path(&metadata_path)?;
 
         for result in csv_reader.records() {
             let record = result?;
             if record.len() < 3 {
+                tracing::debug!("Skipping record with {} fields", record.len());
                 continue;
             }
 
@@ -310,20 +313,22 @@ impl LjSpeechDataset {
 
     /// Create random splits
     fn create_random_splits(&self, config: SplitConfig) -> Result<DatasetSplits> {
-        use rand::seq::SliceRandom;
-        use rand::SeedableRng;
+        use scirs2_core::random::seq::SliceRandom;
+        use scirs2_core::random::SeedableRng;
 
         let mut rng = if let Some(seed) = config.seed {
-            rand::rngs::StdRng::seed_from_u64(seed)
+            scirs2_core::random::Random::seed(seed)
         } else {
-            {
-                use rand::thread_rng;
-                rand::rngs::StdRng::from_rng(&mut thread_rng())
-            }
+            scirs2_core::random::Random::seed(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            )
         };
 
         let mut indices: Vec<usize> = (0..self.samples.len()).collect();
-        indices.shuffle(&mut rng);
+        rng.shuffle(&mut indices);
 
         self.split_by_indices(indices, config)
     }
@@ -336,15 +341,17 @@ impl LjSpeechDataset {
 
     /// Create splits balanced by duration
     fn create_duration_splits(&self, config: SplitConfig) -> Result<DatasetSplits> {
-        use rand::{seq::SliceRandom, SeedableRng};
+        use scirs2_core::random::seq::SliceRandom;
 
         let mut rng = if let Some(seed) = config.seed {
-            rand::rngs::StdRng::seed_from_u64(seed)
+            scirs2_core::random::Random::seed(seed)
         } else {
-            {
-                use rand::thread_rng;
-                rand::rngs::StdRng::from_rng(&mut thread_rng())
-            }
+            scirs2_core::random::Random::seed(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            )
         };
 
         // Sort by duration to ensure balanced distribution
@@ -369,15 +376,17 @@ impl LjSpeechDataset {
 
     /// Create splits balanced by text length
     fn create_text_length_splits(&self, config: SplitConfig) -> Result<DatasetSplits> {
-        use rand::{seq::SliceRandom, SeedableRng};
+        use scirs2_core::random::seq::SliceRandom;
 
         let mut rng = if let Some(seed) = config.seed {
-            rand::rngs::StdRng::seed_from_u64(seed)
+            scirs2_core::random::Random::seed(seed)
         } else {
-            {
-                use rand::thread_rng;
-                rand::rngs::StdRng::from_rng(&mut thread_rng())
-            }
+            scirs2_core::random::Random::seed(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            )
         };
 
         // Sort by text length to ensure balanced distribution

@@ -10,7 +10,7 @@
 //! - Tonality
 
 use crate::{Result, VocoderError};
-use ndarray::{Array1, Array2};
+use scirs2_core::ndarray::{Array1, Array2};
 
 /// Perceptual feature vector
 #[derive(Debug, Clone)]
@@ -168,7 +168,7 @@ impl PerceptualFeatureComputer for crate::analysis::features::FeatureExtractor {
         
         for row in power_spectrogram.rows() {
             let frame_total: f32 = row.sum();
-            let frame_high: f32 = row.slice(ndarray::s![cutoff_bin..]).sum();
+            let frame_high: f32 = row.slice(scirs2_core::ndarray::s![cutoff_bin..]).sum();
             
             total_energy += frame_total;
             high_freq_energy += frame_high;
@@ -190,7 +190,7 @@ impl PerceptualFeatureComputer for crate::analysis::features::FeatureExtractor {
         
         for row in power_spectrogram.rows() {
             let frame_total: f32 = row.sum();
-            let frame_low: f32 = row.slice(ndarray::s![..cutoff_bin]).sum();
+            let frame_low: f32 = row.slice(scirs2_core::ndarray::s![..cutoff_bin]).sum();
             
             total_energy += frame_total;
             low_freq_energy += frame_low;
@@ -217,7 +217,7 @@ impl PerceptualFeatureComputer for crate::analysis::features::FeatureExtractor {
         // Compute amplitude envelope
         for start in (0..samples.len() - window_size).step_by(hop_size) {
             let end = start + window_size;
-            let window = samples.slice(ndarray::s![start..end]);
+            let window = samples.slice(scirs2_core::ndarray::s![start..end]);
             let rms = (window.iter().map(|&x| x * x).sum::<f32>() / window_size as f32).sqrt();
             envelope.push(rms);
         }
@@ -288,7 +288,7 @@ impl PerceptualFeatureComputer for crate::analysis::features::FeatureExtractor {
         // Compute amplitude envelope
         for start in (0..samples.len() - window_size).step_by(hop_size) {
             let end = start + window_size;
-            let window = samples.slice(ndarray::s![start..end]);
+            let window = samples.slice(scirs2_core::ndarray::s![start..end]);
             let rms = (window.iter().map(|&x| x * x).sum::<f32>() / window_size as f32).sqrt();
             envelope.push(rms);
         }
@@ -410,7 +410,7 @@ mod tests {
                 
                 for row in power_spectrogram.rows() {
                     let frame_total: f32 = row.sum();
-                    let frame_high: f32 = row.slice(ndarray::s![cutoff_bin..]).sum();
+                    let frame_high: f32 = row.slice(scirs2_core::ndarray::s![cutoff_bin..]).sum();
                     
                     total_energy += frame_total;
                     high_freq_energy += frame_high;
@@ -432,7 +432,7 @@ mod tests {
                 
                 for row in power_spectrogram.rows() {
                     let frame_total: f32 = row.sum();
-                    let frame_low: f32 = row.slice(ndarray::s![..cutoff_bin]).sum();
+                    let frame_low: f32 = row.slice(scirs2_core::ndarray::s![..cutoff_bin]).sum();
                     
                     total_energy += frame_total;
                     low_freq_energy += frame_low;

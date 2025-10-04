@@ -5,10 +5,10 @@ use crate::GlobalOptions;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use voirs::VoirsPipeline;
-use voirs::{AudioFormat, Result};
 use voirs_sdk::config::AppConfig;
 use voirs_sdk::types::SynthesisConfig;
+use voirs_sdk::VoirsPipeline;
+use voirs_sdk::{AudioFormat, Result};
 
 /// Input item for batch processing
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,7 +50,7 @@ pub async fn process_file(
         "json" => parse_json_file(&batch_config.input_path)?,
         "jsonl" => parse_jsonl_file(&batch_config.input_path)?,
         _ => {
-            return Err(voirs::VoirsError::config_error(&format!(
+            return Err(voirs_sdk::VoirsError::config_error(&format!(
                 "Unsupported file format: {}",
                 extension
             )));
@@ -136,7 +136,7 @@ fn parse_csv_file(path: &PathBuf) -> Result<Vec<BatchInput>> {
     let mut reader = csv::Reader::from_reader(content.as_bytes());
 
     for (i, result) in reader.records().enumerate() {
-        let record = result.map_err(|e| voirs::VoirsError::config_error(&e.to_string()))?;
+        let record = result.map_err(|e| voirs_sdk::VoirsError::config_error(&e.to_string()))?;
 
         // Expect at least text column, optionally id, filename, voice, rate, pitch, volume
         if record.len() == 0 {
@@ -189,7 +189,7 @@ fn parse_csv_file(path: &PathBuf) -> Result<Vec<BatchInput>> {
 fn parse_json_file(path: &PathBuf) -> Result<Vec<BatchInput>> {
     let content = std::fs::read_to_string(path)?;
     let inputs: Vec<BatchInput> = serde_json::from_str(&content)
-        .map_err(|e| voirs::VoirsError::config_error(&e.to_string()))?;
+        .map_err(|e| voirs_sdk::VoirsError::config_error(&e.to_string()))?;
     Ok(inputs)
 }
 

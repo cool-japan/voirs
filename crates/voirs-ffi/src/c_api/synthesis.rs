@@ -16,12 +16,11 @@ use std::{
     time::Instant,
 };
 use tokio;
-use voirs::{
-    create_acoustic, create_g2p, create_vocoder, AcousticBackend, AudioBuffer, AudioFormat,
-    G2pBackend, LanguageCode, QualityLevel, Result as VoirsResult, SynthesisConfig, VocoderBackend,
-    VoirsPipelineBuilder,
-};
 use voirs_sdk::streaming::{StreamingConfig, StreamingPipeline};
+use voirs_sdk::{
+    error::Result as VoirsResult, pipeline::VoirsPipeline, AudioBuffer, AudioFormat, LanguageCode,
+    QualityLevel, SynthesisConfig, VoirsPipelineBuilder,
+};
 
 // Global statistics tracking
 static TOTAL_SYNTHESES: AtomicU64 = AtomicU64::new(0);
@@ -233,17 +232,9 @@ async fn create_pipeline_and_synthesize(
         reverb_level: 0.3,
     };
 
-    // Create components using bridge pattern
-    let g2p = create_g2p(G2pBackend::RuleBased);
-    let acoustic = create_acoustic(AcousticBackend::Vits);
-    let vocoder = create_vocoder(VocoderBackend::HifiGan);
-
-    // Build pipeline and measure creation time
+    // Build pipeline and measure creation time - components are created automatically
     let pipeline_start = Instant::now();
     let pipeline = VoirsPipelineBuilder::new()
-        .with_g2p(g2p)
-        .with_acoustic_model(acoustic)
-        .with_vocoder(vocoder)
         .with_quality(QualityLevel::High)
         .with_enhancement(config.enable_noise_reduction)
         .build()
@@ -680,8 +671,8 @@ pub extern "C" fn voirs_reset_synthesis_stats() -> VoirsErrorCode {
     VoirsErrorCode::Success
 }
 
-/// Simple streaming synthesis callback function type
-pub type VoirsStreamingCallback = extern "C" fn(
+/// Buffered streaming synthesis callback function type (includes audio buffer metadata)
+pub type VoirsBufferedStreamingCallback = extern "C" fn(
     audio_chunk: *const VoirsAudioBuffer,
     chunk_index: c_uint,
     is_final: bool,
@@ -708,7 +699,7 @@ pub type VoirsStreamingCallback = extern "C" fn(
 pub unsafe extern "C" fn voirs_synthesizeing(
     text: *const c_char,
     config: *const VoirsSynthesisConfig,
-    callback: VoirsStreamingCallback,
+    callback: VoirsBufferedStreamingCallback,
     user_data: *mut std::ffi::c_void,
 ) -> VoirsErrorCode {
     if text.is_null() {
@@ -850,7 +841,7 @@ pub unsafe extern "C" fn voirs_synthesizeing(
 pub unsafe extern "C" fn voirs_synthesizeing_realtime(
     text: *const c_char,
     config: *const VoirsSynthesisConfig,
-    chunk_callback: VoirsStreamingCallback,
+    chunk_callback: VoirsBufferedStreamingCallback,
     progress_callback: Option<VoirsSynthesisProgressCallback>,
     user_data: *mut std::ffi::c_void,
 ) -> VoirsErrorCode {
@@ -959,7 +950,7 @@ pub unsafe extern "C" fn voirs_synthesizeing_realtime(
 async fn create_streaming_pipeline_and_synthesize(
     text: &str,
     config: &VoirsAdvancedSynthesisConfig,
-    chunk_callback: VoirsStreamingCallback,
+    chunk_callback: VoirsBufferedStreamingCallback,
     progress_callback: Option<VoirsSynthesisProgressCallback>,
     user_data: *mut std::ffi::c_void,
 ) -> VoirsResult<()> {
@@ -1004,12 +995,10 @@ async fn create_streaming_pipeline_and_synthesize(
             let is_final = chunk_idx == chunk_count - 1;
 
             // Call callbacks
-            unsafe {
-                chunk_callback(&audio_buffer, chunk_idx as u32, is_final, user_data);
-                if let Some(progress_cb) = progress_callback {
-                    let remaining_ms = ((chunk_count - chunk_idx - 1) * chunk_duration_ms) as u64;
-                    progress_cb(progress, remaining_ms, user_data);
-                }
+            chunk_callback(&audio_buffer, chunk_idx as u32, is_final, user_data);
+            if let Some(progress_cb) = progress_callback {
+                let remaining_ms = ((chunk_count - chunk_idx - 1) * chunk_duration_ms) as u64;
+                progress_cb(progress, remaining_ms, user_data);
             }
 
             // Small delay to simulate processing
@@ -1087,16 +1076,8 @@ async fn create_streaming_pipeline_and_synthesize(
         reverb_level: 0.3,
     };
 
-    // Create components and pipeline with streaming support
-    let g2p = create_g2p(G2pBackend::RuleBased);
-    let acoustic = create_acoustic(AcousticBackend::Vits);
-    let vocoder = create_vocoder(VocoderBackend::HifiGan);
-
-    // Build pipeline with streaming optimizations
-    let pipeline = VoirsPipelineBuilder::new()
-        .with_g2p(g2p)
-        .with_acoustic_model(acoustic)
-        .with_vocoder(vocoder)
+    // Build pipeline with streaming optimizations - components are created automatically
+    let pipeline: VoirsPipeline = VoirsPipelineBuilder::new()
         .with_quality(synthesis_config.quality)
         .with_enhancement(synthesis_config.enable_enhancement)
         .build()
@@ -1182,9 +1163,7 @@ async fn create_streaming_pipeline_and_synthesize(
         };
 
         // Call the callback with the complete audio
-        unsafe {
-            chunk_callback(&c_audio_buffer, 0, true, user_data);
-        }
+        chunk_callback(&c_audio_buffer, 0, true, user_data);
 
         // Final progress update
         if let Some(progress_cb) = progress_callback {
@@ -1197,10 +1176,10 @@ async fn create_streaming_pipeline_and_synthesize(
 
 /// Process text with streaming synthesis using the existing pipeline
 async fn process_text_streaming(
-    pipeline: &voirs::VoirsPipeline,
+    pipeline: &VoirsPipeline,
     text: &str,
     config: &SynthesisConfig,
-    callback: VoirsStreamingCallback,
+    callback: VoirsBufferedStreamingCallback,
     user_data: *mut std::ffi::c_void,
 ) -> VoirsResult<()> {
     // Split text into chunks for streaming processing
@@ -1245,9 +1224,7 @@ async fn process_text_streaming(
         let is_final = chunk_index >= chunks.len() - 1;
 
         // Call the callback with this streaming chunk
-        unsafe {
-            callback(&c_audio_buffer, chunk_index as u32, is_final, user_data);
-        }
+        callback(&c_audio_buffer, chunk_index as u32, is_final, user_data);
     }
 
     Ok(())
@@ -1255,11 +1232,11 @@ async fn process_text_streaming(
 
 /// Process text with simple streaming synthesis
 async fn process_text_streaming_simple(
-    pipeline: &voirs::VoirsPipeline,
+    pipeline: &VoirsPipeline,
     text: &str,
-    callback: VoirsStreamingCallback,
+    callback: VoirsBufferedStreamingCallback,
     user_data: *mut std::ffi::c_void,
-) -> voirs::Result<()> {
+) -> VoirsResult<()> {
     // Split text into chunks for streaming processing
     let chunk_size = 50;
     let words: Vec<&str> = text.split_whitespace().collect();
@@ -1302,9 +1279,7 @@ async fn process_text_streaming_simple(
         let is_final = chunk_index >= chunks.len() - 1;
 
         // Call the callback with this streaming chunk
-        unsafe {
-            callback(&c_audio_buffer, chunk_index as u32, is_final, user_data);
-        }
+        callback(&c_audio_buffer, chunk_index as u32, is_final, user_data);
     }
 
     Ok(())
@@ -1433,11 +1408,6 @@ pub unsafe extern "C" fn voirs_synthesize_batch(
                 reverb_level: 0.3,
             };
 
-            // Create components using bridge pattern
-            let g2p = create_g2p(G2pBackend::RuleBased);
-            let acoustic = create_acoustic(AcousticBackend::Vits);
-            let vocoder = create_vocoder(VocoderBackend::HifiGan);
-
             // Check if we should enable test mode for fast testing
             let test_mode = std::env::var("VOIRS_SKIP_SLOW_TESTS").unwrap_or_default() == "1"
                 || std::env::var("VOIRS_SKIP_SYNTHESIS_TESTS").is_ok()
@@ -1450,11 +1420,8 @@ pub unsafe extern "C" fn voirs_synthesize_batch(
                 QualityLevel::High
             };
 
-            // Build pipeline
+            // Build pipeline - components are created automatically
             let pipeline = VoirsPipelineBuilder::new()
-                .with_g2p(g2p)
-                .with_acoustic_model(acoustic)
-                .with_vocoder(vocoder)
                 .with_quality(quality_level)
                 .with_enhancement(!test_mode) // Disable enhancement in test mode for speed
                 .with_test_mode(test_mode)

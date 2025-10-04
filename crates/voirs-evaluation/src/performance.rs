@@ -8,7 +8,7 @@
 //! - Caching mechanisms
 
 use parking_lot::RwLock;
-use rayon::prelude::*;
+use scirs2_core::parallel_ops::*;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::path::Path;
@@ -78,7 +78,7 @@ pub fn parallel_correlation(x: &[f32], y: &[f32]) -> f32 {
 /// Parallel FFT computation for batch processing
 #[must_use]
 pub fn parallel_fft_batch(signals: &[Vec<f32>]) -> Vec<Vec<f32>> {
-    use realfft::{RealFftPlanner, RealToComplex};
+    use scirs2_fft::{RealFftPlanner, RealToComplex};
     use std::sync::Mutex;
 
     let planner = Arc::new(Mutex::new(RealFftPlanner::<f32>::new()));
@@ -95,11 +95,9 @@ pub fn parallel_fft_batch(signals: &[Vec<f32>]) -> Vec<Vec<f32>> {
             drop(planner_guard);
 
             let mut indata = signal.clone();
-            let mut spectrum = fft.make_output_vec();
+            let mut spectrum = vec![scirs2_core::Complex::new(0.0, 0.0); fft.output_len()];
 
-            if fft.process(&mut indata, &mut spectrum).is_err() {
-                return Vec::new();
-            }
+            fft.process(&indata, &mut spectrum);
 
             // Convert to magnitude spectrum
             spectrum.iter().map(|c| c.norm()).collect()
@@ -309,7 +307,7 @@ where
     // Private helper methods
 
     fn cache_key_to_filename(&self, key: &K) -> Result<String, std::io::Error> {
-        let serialized = bincode::serialize(key)
+        let serialized = bincode::serde::encode_to_vec(key, bincode::config::standard())
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let hash = {
             use std::collections::hash_map::DefaultHasher;
@@ -325,7 +323,7 @@ where
         let filename = self.cache_key_to_filename(key)?;
         let filepath = self.cache_dir.join(filename);
 
-        let serialized = bincode::serialize(value)
+        let serialized = bincode::serde::encode_to_vec(value, bincode::config::standard())
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         // Compress the data using flate2
@@ -357,7 +355,8 @@ where
         let mut decompressed = Vec::new();
         std::io::Read::read_to_end(&mut decoder, &mut decompressed)?;
 
-        bincode::deserialize(&decompressed)
+        bincode::serde::decode_from_slice(&decompressed, bincode::config::standard())
+            .map(|(v, _)| v)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 
@@ -430,7 +429,7 @@ where
 
 /// SIMD-accelerated vector operations using hardware-specific instructions
 pub mod simd {
-    use rayon::prelude::*;
+    use scirs2_core::parallel_ops::*;
 
     /// SIMD dot product with hardware acceleration when available
     #[must_use]

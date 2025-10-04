@@ -294,7 +294,7 @@ pub struct StreamingSynthesizer<M: AcousticModel> {
     /// Real-time audio streamer
     audio_streamer: Option<RealtimeAudioStreamer>,
     /// Thread pool for parallel processing
-    _thread_pool: Option<rayon::ThreadPool>,
+    _thread_pool: Option<scirs2_core::parallel_ops::ThreadPool>,
     /// Latency optimizer
     latency_optimizer: LatencyOptimizer,
     /// Processing task handles for async operations
@@ -860,7 +860,7 @@ impl<M: AcousticModel> StreamingSynthesizer<M> {
         // Initialize thread pool for parallel processing
         let thread_pool = if config.num_threads > 1 {
             Some(
-                rayon::ThreadPoolBuilder::new()
+                scirs2_core::parallel_ops::ThreadPoolBuilder::new()
                     .num_threads(config.num_threads)
                     .build()
                     .map_err(|e| {

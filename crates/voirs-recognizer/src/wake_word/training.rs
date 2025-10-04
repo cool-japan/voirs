@@ -9,7 +9,7 @@ use super::{
 };
 use crate::RecognitionError;
 use async_trait::async_trait;
-use rand::{thread_rng, Rng};
+use scirs2_core::random::{thread_rng, Rng};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};

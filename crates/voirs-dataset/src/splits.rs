@@ -393,18 +393,22 @@ fn create_random_indices(
     samples: &[DatasetSample],
     config: &SplitConfig,
 ) -> Result<(Vec<usize>, Vec<usize>, Vec<usize>)> {
-    use rand::seq::SliceRandom;
-    use rand::SeedableRng;
+    use scirs2_core::random::seq::SliceRandom;
+    use scirs2_core::random::SeedableRng;
 
     let mut rng = if let Some(seed) = config.seed {
-        rand::rngs::StdRng::seed_from_u64(seed)
+        scirs2_core::random::Random::seed(seed)
     } else {
-        use rand::thread_rng;
-        rand::rngs::StdRng::from_rng(&mut thread_rng())
+        scirs2_core::random::Random::seed(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        )
     };
 
     let mut indices: Vec<usize> = (0..samples.len()).collect();
-    indices.shuffle(&mut rng);
+    rng.shuffle(&mut indices);
 
     split_indices(indices, config)
 }
@@ -414,13 +418,17 @@ fn create_stratified_indices(
     samples: &[DatasetSample],
     config: &SplitConfig,
 ) -> Result<(Vec<usize>, Vec<usize>, Vec<usize>)> {
-    use rand::{seq::SliceRandom, SeedableRng};
+    use scirs2_core::random::{seq::SliceRandom, SeedableRng};
 
     let mut rng = if let Some(seed) = config.seed {
-        rand::rngs::StdRng::seed_from_u64(seed)
+        scirs2_core::random::Random::seed(seed)
     } else {
-        use rand::thread_rng;
-        rand::rngs::StdRng::from_rng(&mut thread_rng())
+        scirs2_core::random::Random::seed(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        )
     };
 
     // Group samples by speaker ID
@@ -440,7 +448,7 @@ fn create_stratified_indices(
 
     // Split each speaker group proportionally
     for (_, mut group_indices) in speaker_groups {
-        group_indices.shuffle(&mut rng);
+        rng.shuffle(&mut group_indices);
 
         let group_size = group_indices.len();
         let train_size = (group_size as f32 * config.train_ratio) as usize;
@@ -456,9 +464,9 @@ fn create_stratified_indices(
     }
 
     // Shuffle the final indices to avoid grouping by speaker
-    train_indices.shuffle(&mut rng);
-    val_indices.shuffle(&mut rng);
-    test_indices.shuffle(&mut rng);
+    rng.shuffle(&mut train_indices);
+    rng.shuffle(&mut val_indices);
+    rng.shuffle(&mut test_indices);
 
     Ok((train_indices, val_indices, test_indices))
 }
@@ -468,13 +476,17 @@ fn create_duration_indices(
     samples: &[DatasetSample],
     config: &SplitConfig,
 ) -> Result<(Vec<usize>, Vec<usize>, Vec<usize>)> {
-    use rand::{seq::SliceRandom, SeedableRng};
+    use scirs2_core::random::{seq::SliceRandom, SeedableRng};
 
     let mut rng = if let Some(seed) = config.seed {
-        rand::rngs::StdRng::seed_from_u64(seed)
+        scirs2_core::random::Random::seed(seed)
     } else {
-        use rand::thread_rng;
-        rand::rngs::StdRng::from_rng(&mut thread_rng())
+        scirs2_core::random::Random::seed(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        )
     };
 
     // Sort samples by duration and group into balanced buckets
@@ -502,9 +514,9 @@ fn create_duration_indices(
     }
 
     // Shuffle within each split to avoid ordering bias
-    train_indices.shuffle(&mut rng);
-    val_indices.shuffle(&mut rng);
-    test_indices.shuffle(&mut rng);
+    rng.shuffle(&mut train_indices);
+    rng.shuffle(&mut val_indices);
+    rng.shuffle(&mut test_indices);
 
     Ok((train_indices, val_indices, test_indices))
 }
@@ -514,13 +526,17 @@ fn create_text_length_indices(
     samples: &[DatasetSample],
     config: &SplitConfig,
 ) -> Result<(Vec<usize>, Vec<usize>, Vec<usize>)> {
-    use rand::{seq::SliceRandom, SeedableRng};
+    use scirs2_core::random::{seq::SliceRandom, SeedableRng};
 
     let mut rng = if let Some(seed) = config.seed {
-        rand::rngs::StdRng::seed_from_u64(seed)
+        scirs2_core::random::Random::seed(seed)
     } else {
-        use rand::thread_rng;
-        rand::rngs::StdRng::from_rng(&mut thread_rng())
+        scirs2_core::random::Random::seed(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        )
     };
 
     // Sort samples by text length and group into balanced buckets
@@ -548,9 +564,9 @@ fn create_text_length_indices(
     }
 
     // Shuffle within each split to avoid ordering bias
-    train_indices.shuffle(&mut rng);
-    val_indices.shuffle(&mut rng);
-    test_indices.shuffle(&mut rng);
+    rng.shuffle(&mut train_indices);
+    rng.shuffle(&mut val_indices);
+    rng.shuffle(&mut test_indices);
 
     Ok((train_indices, val_indices, test_indices))
 }

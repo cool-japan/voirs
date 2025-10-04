@@ -3249,13 +3249,13 @@ impl TtsPipeline {
         } else if syllable_count == 2 {
             // Two-syllable words: typically first syllable for nouns, second for verbs
             // Since we don't have POS info, default to first syllable
-            return Some(0);
+            Some(0)
         } else if syllable_count == 3 {
             // Three-syllable words: antepenultimate stress is common
-            return Some(0);
+            Some(0)
         } else {
             // Longer words: usually second or third syllable from beginning
-            return Some(1);
+            Some(1)
         }
     }
 

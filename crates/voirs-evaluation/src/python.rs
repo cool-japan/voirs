@@ -630,9 +630,9 @@ pub fn create_sine_wave(frequency: f32, duration: f32, sample_rate: u32) -> PyRe
 #[cfg(feature = "python")]
 #[pyfunction]
 pub fn add_noise(audio: PyReadonlyArray1<f32>, noise_level: f32) -> PyResult<Vec<f32>> {
-    use rand::Rng;
+    use scirs2_core::random::Rng;
     let audio_array = audio.as_array();
-    let mut rng = rand::thread_rng();
+    let mut rng = scirs2_core::random::thread_rng();
 
     let noisy_samples: Vec<f32> = audio_array
         .iter()

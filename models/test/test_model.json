@@ -1,0 +1,10 @@
+{
+  "source_format": "onnx",
+  "source_path": "models/test/test_model.onnx",
+  "model_type": "vocoder",
+  "conversion_tool": "voirs/convert_onnx_to_safetensors.py",
+  "onnx_ir_version": "10",
+  "onnx_producer": "voirs-test ",
+  "tensor_count": "4",
+  "total_parameters": "10336"
+}

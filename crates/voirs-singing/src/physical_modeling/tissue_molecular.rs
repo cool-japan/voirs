@@ -6,42 +6,49 @@
 /// Molecular dynamics effects for micro-scale accuracy
 #[derive(Debug, Clone)]
 pub struct MolecularDynamicsModel {
-    /// Air molecule mean free path
+    /// Air molecule mean free path in meters
     pub mean_free_path: f32,
-    /// Knudsen number (rarefaction effects)
+    /// Knudsen number for rarefaction effects (dimensionless)
     pub knudsen_number: f32,
-    /// Molecular collision frequency
+    /// Molecular collision frequency in Hz
     pub collision_frequency: f32,
-    /// Gas kinetic effects
+    /// Gas kinetic corrections per section (dimensionless)
     pub kinetic_corrections: Vec<f32>,
-    /// Slip boundary conditions
+    /// Slip boundary condition coefficients per section
     pub slip_coefficients: Vec<f32>,
-    /// Temperature jump at walls
+    /// Temperature jump at walls per section in K
     pub temperature_jump: Vec<f32>,
 }
 
 /// Tissue mechanics for realistic vocal tract behavior
 #[derive(Debug, Clone)]
 pub struct TissueMechanicsModel {
-    /// Tissue elastic modulus (Young's modulus)
+    /// Tissue elastic modulus (Young's modulus) per section in Pa
     pub elastic_modulus: Vec<f32>,
-    /// Poisson's ratio
+    /// Poisson's ratio per section (dimensionless, ~0.45 for tissue)
     pub poisson_ratio: Vec<f32>,
-    /// Tissue density
+    /// Tissue density per section in kg/m³
     pub tissue_density: Vec<f32>,
-    /// Viscoelastic relaxation times
+    /// Viscoelastic relaxation times per section in seconds
     pub relaxation_times: Vec<f32>,
-    /// Anisotropic properties (muscle fiber direction)
-    pub fiber_orientation: Vec<[f32; 3]>, // 3D unit vectors
-    /// Muscle activation levels
+    /// Muscle fiber orientation as 3D unit vectors per section
+    pub fiber_orientation: Vec<[f32; 3]>,
+    /// Muscle activation levels per section (0-1)
     pub muscle_activation: Vec<f32>,
-    /// Collagen fiber stiffness
+    /// Collagen fiber stiffness per section in Pa
     pub collagen_stiffness: Vec<f32>,
-    /// Elastin fiber properties
+    /// Elastin fiber elastic modulus per section in Pa
     pub elastin_properties: Vec<f32>,
 }
 
 impl MolecularDynamicsModel {
+    /// Create new molecular dynamics model
+    ///
+    /// # Arguments
+    /// * `num_sections` - Number of vocal tract sections
+    ///
+    /// # Returns
+    /// New model initialized at standard temperature and pressure
     pub fn new(num_sections: usize) -> crate::Result<Self> {
         Ok(Self {
             mean_free_path: 6.8e-8,   // meters at STP
@@ -53,6 +60,12 @@ impl MolecularDynamicsModel {
         })
     }
 
+    /// Update molecular-scale effects based on local conditions
+    ///
+    /// # Arguments
+    /// * `pressures` - Acoustic pressures per section (Pa)
+    /// * `temperatures` - Temperatures per section (°C)
+    /// * `characteristic_length` - Characteristic length scale in meters
     pub fn update_molecular_effects(
         &mut self,
         pressures: &[f32],
@@ -62,8 +75,8 @@ impl MolecularDynamicsModel {
         // Update Knudsen number based on local conditions
         self.knudsen_number = self.mean_free_path / characteristic_length;
 
-        for i in 0..self.kinetic_corrections.len().min(pressures.len()) {
-            let pressure = pressures[i];
+        let len = self.kinetic_corrections.len().min(pressures.len());
+        for (i, &pressure) in pressures.iter().enumerate().take(len) {
             let temperature = temperatures.get(i).unwrap_or(&300.0); // Default 300K
 
             // Update mean free path based on local pressure and temperature
@@ -88,9 +101,16 @@ impl MolecularDynamicsModel {
         }
 
         // Update molecular collision frequency
-        self.collision_frequency = 5e9 * (temperatures.get(0).unwrap_or(&300.0) / 300.0).sqrt();
+        self.collision_frequency = 5e9 * (temperatures.first().unwrap_or(&300.0) / 300.0).sqrt();
     }
 
+    /// Get viscosity correction factor for molecular effects
+    ///
+    /// # Arguments
+    /// * `section` - Vocal tract section index
+    ///
+    /// # Returns
+    /// Viscosity correction factor (1.0 = no correction)
     pub fn get_viscosity_correction(&self, section: usize) -> f32 {
         if section < self.kinetic_corrections.len() {
             self.kinetic_corrections[section]
@@ -99,6 +119,14 @@ impl MolecularDynamicsModel {
         }
     }
 
+    /// Calculate slip velocity at wall boundary
+    ///
+    /// # Arguments
+    /// * `section` - Vocal tract section index
+    /// * `wall_velocity_gradient` - Velocity gradient at wall (1/s)
+    ///
+    /// # Returns
+    /// Slip velocity in m/s
     pub fn get_slip_velocity(&self, section: usize, wall_velocity_gradient: f32) -> f32 {
         if section < self.slip_coefficients.len() {
             self.slip_coefficients[section] * wall_velocity_gradient * self.mean_free_path
@@ -107,6 +135,14 @@ impl MolecularDynamicsModel {
         }
     }
 
+    /// Apply rarefaction effects to velocity
+    ///
+    /// # Arguments
+    /// * `velocity` - Input velocity (m/s)
+    /// * `section` - Vocal tract section index
+    ///
+    /// # Returns
+    /// Corrected velocity with rarefaction effects
     pub fn apply_rarefaction_effects(&self, velocity: f32, section: usize) -> f32 {
         if section < self.kinetic_corrections.len() {
             velocity * self.kinetic_corrections[section]
@@ -117,6 +153,13 @@ impl MolecularDynamicsModel {
 }
 
 impl TissueMechanicsModel {
+    /// Create new tissue mechanics model with typical properties
+    ///
+    /// # Arguments
+    /// * `num_sections` - Number of vocal tract sections
+    ///
+    /// # Returns
+    /// New model with soft tissue mechanical properties
     pub fn new(num_sections: usize) -> crate::Result<Self> {
         // Initialize with typical vocal tract tissue properties
         let mut fiber_orientation = Vec::with_capacity(num_sections);
@@ -138,9 +181,15 @@ impl TissueMechanicsModel {
         })
     }
 
+    /// Update tissue mechanics state based on deformation
+    ///
+    /// # Arguments
+    /// * `strains` - Strain values per section (dimensionless)
+    /// * `strain_rates` - Strain rate per section (1/s)
+    /// * `dt` - Time step in seconds
     pub fn update_tissue_mechanics(&mut self, strains: &[f32], strain_rates: &[f32], dt: f32) {
-        for i in 0..self.elastic_modulus.len().min(strains.len()) {
-            let strain = strains[i];
+        let len = self.elastic_modulus.len().min(strains.len());
+        for (i, &strain) in strains.iter().enumerate().take(len) {
             let strain_rate = strain_rates.get(i).unwrap_or(&0.0);
 
             // Update muscle activation based on strain rate (active response)
@@ -163,6 +212,15 @@ impl TissueMechanicsModel {
         }
     }
 
+    /// Calculate total stress from strain and strain rate
+    ///
+    /// # Arguments
+    /// * `strain` - Strain value (dimensionless)
+    /// * `strain_rate` - Strain rate (1/s)
+    /// * `section` - Vocal tract section index
+    ///
+    /// # Returns
+    /// Total stress in Pa
     pub fn calculate_stress(&self, strain: f32, strain_rate: f32, section: usize) -> f32 {
         if section >= self.elastic_modulus.len() {
             return 0.0;
@@ -181,6 +239,13 @@ impl TissueMechanicsModel {
         elastic_stress + viscous_stress + active_stress
     }
 
+    /// Get effective tissue stiffness combining all components
+    ///
+    /// # Arguments
+    /// * `section` - Vocal tract section index
+    ///
+    /// # Returns
+    /// Effective stiffness (normalized)
     pub fn get_effective_stiffness(&self, section: usize) -> f32 {
         if section < self.elastic_modulus.len() {
             // Combine collagen and elastin contributions
@@ -195,6 +260,14 @@ impl TissueMechanicsModel {
         }
     }
 
+    /// Calculate anisotropic stress response based on fiber orientation
+    ///
+    /// # Arguments
+    /// * `stress_tensor` - Stress tensor [σxx, σyy, σzz, τxy, τxz, τyz]
+    /// * `section` - Vocal tract section index
+    ///
+    /// # Returns
+    /// Modified stress tensor with anisotropic effects
     pub fn calculate_anisotropic_response(
         &self,
         stress_tensor: [f32; 6],
@@ -225,6 +298,11 @@ impl TissueMechanicsModel {
         anisotropic_stress
     }
 
+    /// Update fiber orientation due to large deformations
+    ///
+    /// # Arguments
+    /// * `strain_tensor` - Strain tensor [εxx, εyy, εzz, γxy, γxz, γyz]
+    /// * `section` - Vocal tract section index
     pub fn update_fiber_orientation(&mut self, strain_tensor: [f32; 6], section: usize) {
         // Fiber reorientation due to large deformations
         if section >= self.fiber_orientation.len() {
@@ -245,9 +323,9 @@ impl TissueMechanicsModel {
 
             // Gradually reorient fibers
             let reorientation_rate = 0.1 * strain_magnitude;
-            for i in 0..3 {
-                self.fiber_orientation[section][i] += reorientation_rate
-                    * (principal_strain_dir[i] - self.fiber_orientation[section][i]);
+            for (i, &dir) in principal_strain_dir.iter().enumerate() {
+                self.fiber_orientation[section][i] +=
+                    reorientation_rate * (dir - self.fiber_orientation[section][i]);
             }
 
             // Normalize fiber direction
@@ -257,13 +335,22 @@ impl TissueMechanicsModel {
             .sqrt();
 
             if norm > 0.0 {
-                for i in 0..3 {
-                    self.fiber_orientation[section][i] /= norm;
+                for val in &mut self.fiber_orientation[section] {
+                    *val /= norm;
                 }
             }
         }
     }
 
+    /// Calculate viscoelastic response from strain history
+    ///
+    /// # Arguments
+    /// * `strain_history` - Historical strain values
+    /// * `dt` - Time step in seconds
+    /// * `section` - Vocal tract section index
+    ///
+    /// # Returns
+    /// Viscoelastic stress in Pa
     pub fn get_viscoelastic_response(
         &self,
         strain_history: &[f32],

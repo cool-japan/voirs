@@ -153,8 +153,8 @@ impl ARKitPlatform {
             // - ARConfiguration.isSupported checks
 
             // For simulation, randomly assign a device type
-            use rand::Rng;
-            let mut rng = rand::thread_rng();
+            use scirs2_core::random::Rng;
+            let mut rng = scirs2_core::random::thread_rng();
             match rng.gen_range(0..5) {
                 0 => IOSDeviceModel::IPadPro,
                 1 => IOSDeviceModel::IPhoneModern,

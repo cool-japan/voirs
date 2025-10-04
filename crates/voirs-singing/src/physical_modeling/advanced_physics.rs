@@ -6,19 +6,37 @@
 /// Complex number for viscoelastic modeling
 #[derive(Debug, Clone, Copy)]
 pub struct Complex32 {
+    /// Real component
     pub real: f32,
+    /// Imaginary component
     pub imag: f32,
 }
 
 impl Complex32 {
+    /// Create new complex number
+    ///
+    /// # Arguments
+    /// * `real` - Real component
+    /// * `imag` - Imaginary component
+    ///
+    /// # Returns
+    /// New complex number
     pub fn new(real: f32, imag: f32) -> Self {
         Self { real, imag }
     }
 
+    /// Calculate magnitude (absolute value) of complex number
+    ///
+    /// # Returns
+    /// Magnitude as sqrt(real² + imag²)
     pub fn magnitude(&self) -> f32 {
         (self.real * self.real + self.imag * self.imag).sqrt()
     }
 
+    /// Calculate phase angle of complex number
+    ///
+    /// # Returns
+    /// Phase angle in radians
     pub fn phase(&self) -> f32 {
         self.imag.atan2(self.real)
     }
@@ -27,83 +45,84 @@ impl Complex32 {
 /// Turbulence modeling for realistic flow simulation
 #[derive(Debug, Clone)]
 pub struct TurbulenceModel {
-    /// Reynolds number for flow characterization
+    /// Reynolds number for flow characterization (dimensionless)
     pub reynolds_number: f32,
-    /// Turbulence intensity (0-1)
+    /// Turbulence intensity from laminar (0) to fully turbulent (1)
     pub turbulence_intensity: f32,
-    /// Turbulent kinetic energy per section
+    /// Turbulent kinetic energy per section in m²/s²
     pub kinetic_energy: Vec<f32>,
-    /// Turbulence dissipation rate
+    /// Turbulence dissipation rate per section in m²/s³
     pub dissipation_rate: Vec<f32>,
-    /// Velocity fluctuation history
+    /// Velocity fluctuation history for statistical analysis
     pub velocity_history: Vec<Vec<f32>>,
-    /// Eddy viscosity
+    /// Eddy viscosity per section in m²/s
     pub eddy_viscosity: Vec<f32>,
-    /// Large Eddy Simulation (LES) parameters
+    /// Large Eddy Simulation filter width in meters
     pub les_filter_width: f32,
-    pub sgs_model_constant: f32, // Smagorinsky constant
+    /// Smagorinsky constant for subgrid-scale model (typically ~0.18)
+    pub sgs_model_constant: f32,
 }
 
 /// Wall vibration modeling for tissue compliance
 #[derive(Debug, Clone)]
 pub struct WallVibrationModel {
-    /// Wall mass per unit area (kg/m²)
+    /// Wall mass per unit area in kg/m²
     pub wall_mass: Vec<f32>,
-    /// Wall stiffness (spring constant per unit area)
+    /// Wall stiffness (spring constant per unit area) in N/m³
     pub wall_stiffness: Vec<f32>,
-    /// Wall damping coefficient
+    /// Wall damping coefficient in N·s/m³
     pub wall_damping: Vec<f32>,
-    /// Current wall displacement
+    /// Current wall displacement in meters
     pub wall_displacement: Vec<f32>,
-    /// Wall velocity
+    /// Wall velocity in m/s
     pub wall_velocity: Vec<f32>,
-    /// Wall acceleration
+    /// Wall acceleration in m/s²
     pub wall_acceleration: Vec<f32>,
-    /// Coupling coefficient with acoustic field
+    /// Coupling coefficient with acoustic field (dimensionless)
     pub fluid_structure_coupling: f32,
-    /// Tissue viscoelastic properties
+    /// Tissue viscoelastic properties (complex modulus)
     pub viscoelastic_modulus: Vec<Complex32>,
-    /// Wall thickness
+    /// Wall thickness per section in meters
     pub wall_thickness: Vec<f32>,
 }
 
 /// Thermal effects modeling for temperature-dependent acoustics
 #[derive(Debug, Clone)]
 pub struct ThermalModel {
-    /// Temperature distribution along vocal tract (°C)
+    /// Temperature distribution along vocal tract in °C
     pub temperature_profile: Vec<f32>,
-    /// Thermal conductivity
+    /// Thermal conductivity in W/(m·K)
     pub thermal_conductivity: f32,
-    /// Specific heat capacity
+    /// Specific heat capacity in J/(kg·K)
     pub specific_heat: f32,
-    /// Density-temperature relationship
+    /// Density-temperature coefficient in 1/K
     pub density_temperature_coeff: f32,
-    /// Sound speed temperature coefficient
+    /// Sound speed temperature coefficient in m/(s·K)
     pub sound_speed_temp_coeff: f32,
-    /// Viscosity-temperature relationship
+    /// Viscosity-temperature power law exponent (dimensionless)
     pub viscosity_temperature_coeff: f32,
-    /// Heat transfer coefficient with walls
+    /// Heat transfer coefficient with walls in W/(m²·K)
     pub heat_transfer_coeff: f32,
-    /// Thermal boundary layer thickness
+    /// Thermal boundary layer thickness per section in meters
     pub thermal_boundary_layer: Vec<f32>,
 }
 
 /// Nonlinear dynamics modeling for large amplitude effects
 #[derive(Debug, Clone)]
 pub struct NonlinearDynamicsModel {
-    /// Nonlinear convective terms
+    /// Nonlinear convective acceleration terms in m/s²
     pub convective_acceleration: Vec<f32>,
-    /// Pressure-dependent compressibility
+    /// Pressure-dependent compressibility factor (dimensionless)
     pub compressibility_factor: Vec<f32>,
-    /// Nonlinear wave propagation effects
+    /// Nonlinear wave steepening factor (dimensionless)
     pub wave_steepening_factor: f32,
-    /// Shock formation threshold
+    /// Shock formation threshold (Mach number)
     pub shock_threshold: f32,
-    /// Harmonic distortion coefficients
+    /// Harmonic distortion coefficients for 2nd-5th harmonics
     pub harmonic_distortion: Vec<f32>,
-    /// Amplitude-dependent damping
+    /// Amplitude-dependent damping per section (dimensionless)
     pub amplitude_damping: Vec<f32>,
-    /// Frequency-dependent nonlinearity
+    /// Frequency-dependent nonlinear shift in Hz
     pub nonlinear_frequency_shift: Vec<f32>,
 }
 
@@ -123,41 +142,41 @@ pub enum PhysicsAccuracyLevel {
 /// Real-time adaptable physics parameters
 #[derive(Debug, Clone)]
 pub struct AdaptivePhysicsParameters {
-    /// Dynamic quality adjustment based on CPU load
+    /// Dynamic quality adjustment strategy based on CPU load
     pub quality_adaptation: QualityAdaptation,
-    /// Frequency-dependent resolution
+    /// Frequency-dependent resolution (bins per frequency band)
     pub frequency_resolution: Vec<usize>,
-    /// Spatial resolution adaptation
+    /// Spatial resolution (number of sections per region)
     pub spatial_resolution: Vec<usize>,
-    /// Temporal resolution adaptation
+    /// Temporal resolution (time step size) in seconds
     pub temporal_resolution: f32,
-    /// Error-based mesh refinement
+    /// Error-based mesh refinement strategy
     pub mesh_refinement: MeshRefinement,
 }
 
 /// Quality adaptation strategy
 #[derive(Debug, Clone)]
 pub struct QualityAdaptation {
-    /// CPU load threshold for quality reduction
+    /// CPU load threshold for quality reduction (0-1)
     pub cpu_threshold: f32,
-    /// Memory usage threshold
+    /// Memory usage threshold in bytes
     pub memory_threshold: usize,
-    /// Latency requirements
+    /// Maximum acceptable latency in milliseconds
     pub max_latency_ms: f32,
-    /// Quality reduction steps
+    /// Progressive quality reduction steps
     pub quality_steps: Vec<PhysicsAccuracyLevel>,
 }
 
 /// Mesh refinement for adaptive resolution
 #[derive(Debug, Clone)]
 pub struct MeshRefinement {
-    /// Error estimation method
+    /// Error estimation method selection
     pub error_estimator: ErrorEstimator,
-    /// Refinement threshold
+    /// Error threshold above which mesh is refined
     pub refinement_threshold: f32,
-    /// Coarsening threshold
+    /// Error threshold below which mesh is coarsened
     pub coarsening_threshold: f32,
-    /// Maximum refinement level
+    /// Maximum allowed refinement level (0 = base mesh)
     pub max_refinement_level: usize,
 }
 
@@ -175,6 +194,13 @@ pub enum ErrorEstimator {
 }
 
 impl TurbulenceModel {
+    /// Create new turbulence model for specified number of sections
+    ///
+    /// # Arguments
+    /// * `num_sections` - Number of vocal tract sections to model
+    ///
+    /// # Returns
+    /// New turbulence model with default k-ε parameters
     pub fn new(num_sections: usize) -> crate::Result<Self> {
         Ok(Self {
             reynolds_number: 3000.0,
@@ -188,13 +214,19 @@ impl TurbulenceModel {
         })
     }
 
+    /// Update turbulence state using k-ε model
+    ///
+    /// # Arguments
+    /// * `velocities` - Flow velocities in each section (m/s)
+    /// * `areas` - Cross-sectional areas in each section (m²)
+    /// * `dt` - Time step in seconds
     pub fn update_turbulence(&mut self, velocities: &[f32], areas: &[f32], dt: f32) {
-        for i in 0..self.kinetic_energy.len().min(velocities.len()) {
-            let velocity = velocities[i];
+        let len = self.kinetic_energy.len().min(velocities.len());
+        for (i, &velocity) in velocities.iter().enumerate().take(len) {
             let area = areas.get(i).unwrap_or(&1.0);
 
             // Update Reynolds number based on local conditions
-            let local_reynolds = velocity * area.sqrt() / 1e-5; // kinematic viscosity ≈ 1e-5 m²/s
+            let _local_reynolds = velocity * area.sqrt() / 1e-5; // kinematic viscosity ≈ 1e-5 m²/s
 
             // Update turbulent kinetic energy using k-ε model
             let production = self.eddy_viscosity[i] * velocity * velocity / area;
@@ -223,6 +255,13 @@ impl TurbulenceModel {
 }
 
 impl WallVibrationModel {
+    /// Create new wall vibration model with typical tissue properties
+    ///
+    /// # Arguments
+    /// * `num_sections` - Number of vocal tract sections to model
+    ///
+    /// # Returns
+    /// New wall vibration model with default tissue parameters
     pub fn new(num_sections: usize) -> crate::Result<Self> {
         Ok(Self {
             wall_mass: vec![0.001; num_sections],       // kg/m²
@@ -237,10 +276,14 @@ impl WallVibrationModel {
         })
     }
 
+    /// Update wall dynamics using spring-mass-damper model
+    ///
+    /// # Arguments
+    /// * `pressures` - Acoustic pressures at each section (Pa)
+    /// * `dt` - Time step in seconds
     pub fn update_wall_dynamics(&mut self, pressures: &[f32], dt: f32) {
-        for i in 0..self.wall_displacement.len().min(pressures.len()) {
-            let pressure = pressures[i];
-
+        let len = self.wall_displacement.len().min(pressures.len());
+        for (i, &pressure) in pressures.iter().enumerate().take(len) {
             // Calculate forces on wall element
             let pressure_force = pressure * self.fluid_structure_coupling;
             let spring_force = -self.wall_stiffness[i] * self.wall_displacement[i];
@@ -260,6 +303,13 @@ impl WallVibrationModel {
 }
 
 impl ThermalModel {
+    /// Create new thermal model with body temperature conditions
+    ///
+    /// # Arguments
+    /// * `num_sections` - Number of vocal tract sections to model
+    ///
+    /// # Returns
+    /// New thermal model initialized to 37°C body temperature
     pub fn new(num_sections: usize) -> crate::Result<Self> {
         Ok(Self {
             temperature_profile: vec![37.0; num_sections], // Body temperature in °C
@@ -273,10 +323,14 @@ impl ThermalModel {
         })
     }
 
+    /// Update temperature distribution and thermal effects
+    ///
+    /// # Arguments
+    /// * `velocities` - Flow velocities in each section (m/s)
+    /// * `dt` - Time step in seconds
     pub fn update_temperature_effects(&mut self, velocities: &[f32], dt: f32) {
-        for i in 0..self.temperature_profile.len().min(velocities.len()) {
-            let velocity = velocities[i];
-
+        let len = self.temperature_profile.len().min(velocities.len());
+        for (i, &velocity) in velocities.iter().enumerate().take(len) {
             // Heat generation due to viscous dissipation
             let viscous_heating = velocity * velocity * 1e-5; // Simplified
 
@@ -302,6 +356,13 @@ impl ThermalModel {
         }
     }
 
+    /// Get temperature-dependent sound speed correction factor
+    ///
+    /// # Arguments
+    /// * `section` - Vocal tract section index
+    ///
+    /// # Returns
+    /// Sound speed correction factor (1.0 = no correction)
     pub fn get_sound_speed_correction(&self, section: usize) -> f32 {
         if section < self.temperature_profile.len() {
             let temp_celsius = self.temperature_profile[section];
@@ -313,6 +374,13 @@ impl ThermalModel {
         }
     }
 
+    /// Get temperature-dependent density correction factor
+    ///
+    /// # Arguments
+    /// * `section` - Vocal tract section index
+    ///
+    /// # Returns
+    /// Density correction factor (1.0 = no correction)
     pub fn get_density_correction(&self, section: usize) -> f32 {
         if section < self.temperature_profile.len() {
             let temp_celsius = self.temperature_profile[section];
@@ -326,6 +394,13 @@ impl ThermalModel {
 }
 
 impl NonlinearDynamicsModel {
+    /// Create new nonlinear dynamics model
+    ///
+    /// # Arguments
+    /// * `num_sections` - Number of vocal tract sections to model
+    ///
+    /// # Returns
+    /// New nonlinear dynamics model with default parameters
     pub fn new(num_sections: usize) -> crate::Result<Self> {
         Ok(Self {
             convective_acceleration: vec![0.0; num_sections],
@@ -338,6 +413,12 @@ impl NonlinearDynamicsModel {
         })
     }
 
+    /// Update nonlinear effects including convection and shock formation
+    ///
+    /// # Arguments
+    /// * `velocities` - Flow velocities in each section (m/s)
+    /// * `pressures` - Acoustic pressures in each section (Pa)
+    /// * `dt` - Time step in seconds
     pub fn update_nonlinear_effects(&mut self, velocities: &[f32], pressures: &[f32], dt: f32) {
         for i in 0..self.convective_acceleration.len().min(velocities.len()) {
             let velocity = velocities[i];
@@ -376,6 +457,14 @@ impl NonlinearDynamicsModel {
         }
     }
 
+    /// Apply nonlinear damping correction to velocity
+    ///
+    /// # Arguments
+    /// * `velocity` - Input velocity (m/s)
+    /// * `section` - Vocal tract section index
+    ///
+    /// # Returns
+    /// Corrected velocity with nonlinear damping applied
     pub fn apply_nonlinear_correction(&self, velocity: f32, section: usize) -> f32 {
         if section < self.amplitude_damping.len() {
             let damping = self.amplitude_damping[section];
@@ -385,6 +474,10 @@ impl NonlinearDynamicsModel {
         }
     }
 
+    /// Get harmonic distortion coefficients
+    ///
+    /// # Returns
+    /// Slice of harmonic coefficients (2nd-5th harmonics)
     pub fn get_harmonic_content(&self) -> &[f32] {
         &self.harmonic_distortion
     }
