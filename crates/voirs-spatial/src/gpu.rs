@@ -124,16 +124,24 @@ impl GpuConvolution {
     ) -> Result<Array1<f32>> {
         let device = self.device.device();
 
-        // Convert input to tensor
-        let input_tensor = Tensor::from_slice(input.as_slice().unwrap(), input.len(), device)
+        // Convert input to tensor - handle non-contiguous arrays properly
+        let input_slice = input.as_slice().ok_or_else(|| {
+            Error::LegacyProcessing(
+                "Input array is not contiguous in memory, cannot create tensor efficiently"
+                    .to_string(),
+            )
+        })?;
+        let input_tensor = Tensor::from_slice(input_slice, input.len(), device)
             .map_err(|e| Error::LegacyProcessing(format!("Failed to create input tensor: {e}")))?;
 
-        let ir_tensor = Tensor::from_slice(
-            impulse_response.as_slice().unwrap(),
-            impulse_response.len(),
-            device,
-        )
-        .map_err(|e| Error::LegacyProcessing(format!("Failed to create IR tensor: {e}")))?;
+        let ir_slice = impulse_response.as_slice().ok_or_else(|| {
+            Error::LegacyProcessing(
+                "Impulse response array is not contiguous in memory, cannot create tensor efficiently"
+                    .to_string(),
+            )
+        })?;
+        let ir_tensor = Tensor::from_slice(ir_slice, impulse_response.len(), device)
+            .map_err(|e| Error::LegacyProcessing(format!("Failed to create IR tensor: {e}")))?;
 
         // Perform FFT-based convolution
         let result = self.fft_convolve(&input_tensor, &ir_tensor)?;
@@ -288,20 +296,24 @@ impl GpuSpatialMath {
         let batch_size = vectors_a.shape()[0];
         let vector_len = vectors_a.shape()[1];
 
-        // Convert to tensors
-        let tensor_a = Tensor::from_slice(
-            vectors_a.as_slice().unwrap(),
-            (batch_size, vector_len),
-            device,
-        )
-        .map_err(|e| Error::LegacyProcessing(format!("Failed to create tensor A: {e}")))?;
+        // Convert to tensors - handle non-contiguous arrays properly
+        let slice_a = vectors_a.as_slice().ok_or_else(|| {
+            Error::LegacyProcessing(
+                "Vector array A is not contiguous in memory, cannot create tensor efficiently"
+                    .to_string(),
+            )
+        })?;
+        let tensor_a = Tensor::from_slice(slice_a, (batch_size, vector_len), device)
+            .map_err(|e| Error::LegacyProcessing(format!("Failed to create tensor A: {e}")))?;
 
-        let tensor_b = Tensor::from_slice(
-            vectors_b.as_slice().unwrap(),
-            (batch_size, vector_len),
-            device,
-        )
-        .map_err(|e| Error::LegacyProcessing(format!("Failed to create tensor B: {e}")))?;
+        let slice_b = vectors_b.as_slice().ok_or_else(|| {
+            Error::LegacyProcessing(
+                "Vector array B is not contiguous in memory, cannot create tensor efficiently"
+                    .to_string(),
+            )
+        })?;
+        let tensor_b = Tensor::from_slice(slice_b, (batch_size, vector_len), device)
+            .map_err(|e| Error::LegacyProcessing(format!("Failed to create tensor B: {e}")))?;
 
         // Element-wise multiplication and sum along vector dimension
         let products = (&tensor_a * &tensor_b)?;
@@ -321,13 +333,15 @@ impl GpuSpatialMath {
         let batch_size = vectors.shape()[0];
         let vector_len = vectors.shape()[1];
 
-        // Convert to tensor
-        let tensor = Tensor::from_slice(
-            vectors.as_slice().unwrap(),
-            (batch_size, vector_len),
-            device,
-        )
-        .map_err(|e| Error::LegacyProcessing(format!("Failed to create tensor: {e}")))?;
+        // Convert to tensor - handle non-contiguous arrays properly
+        let slice = vectors.as_slice().ok_or_else(|| {
+            Error::LegacyProcessing(
+                "Vector array is not contiguous in memory, cannot create tensor efficiently"
+                    .to_string(),
+            )
+        })?;
+        let tensor = Tensor::from_slice(slice, (batch_size, vector_len), device)
+            .map_err(|e| Error::LegacyProcessing(format!("Failed to create tensor: {e}")))?;
 
         // Calculate magnitudes
         let squared = tensor.sqr()?;
@@ -439,13 +453,15 @@ impl GpuAmbisonics {
         let num_samples = audio_samples.shape()[1];
         let num_channels = ((self.order + 1) * (self.order + 1)) as usize;
 
-        // Convert audio to tensor
-        let audio_tensor = Tensor::from_slice(
-            audio_samples.as_slice().unwrap(),
-            (num_sources, num_samples),
-            device,
-        )
-        .map_err(|e| Error::LegacyProcessing(format!("Failed to create audio tensor: {e}")))?;
+        // Convert audio to tensor - handle non-contiguous arrays properly
+        let audio_slice = audio_samples.as_slice().ok_or_else(|| {
+            Error::LegacyProcessing(
+                "Audio samples array is not contiguous in memory, cannot create tensor efficiently"
+                    .to_string(),
+            )
+        })?;
+        let audio_tensor = Tensor::from_slice(audio_slice, (num_sources, num_samples), device)
+            .map_err(|e| Error::LegacyProcessing(format!("Failed to create audio tensor: {e}")))?;
 
         // Matrix multiplication: [num_channels, num_sources] × [num_sources, num_samples]
         let encoding_transposed = encoding_matrices.transpose(0, 1)?;
@@ -535,9 +551,9 @@ mod tests {
     #[test]
     fn test_gpu_config() {
         let config = GpuConfig::default();
-        assert_eq!(config.prefer_gpu, true);
+        assert!(config.prefer_gpu);
         assert_eq!(config.batch_size, 32);
-        assert_eq!(config.mixed_precision, true);
+        assert!(config.mixed_precision);
     }
 
     #[test]
@@ -546,8 +562,8 @@ mod tests {
             prefer_gpu: false, // Force CPU for testing
             ..Default::default()
         };
-        let device = GpuDevice::new(config).unwrap();
-        assert_eq!(device.is_gpu(), false);
+        let device = GpuDevice::new(config).expect("Should successfully create GPU device");
+        assert!(!device.is_gpu());
     }
 
     #[test]
@@ -556,7 +572,8 @@ mod tests {
             prefer_gpu: false,
             ..Default::default()
         };
-        let device = Arc::new(GpuDevice::new(config).unwrap());
+        let device =
+            Arc::new(GpuDevice::new(config).expect("Should successfully create GPU device"));
         let math = GpuSpatialMath::new(device);
 
         let listener = Position3D::new(0.0, 0.0, 0.0);
@@ -566,7 +583,9 @@ mod tests {
             Position3D::new(0.0, 0.0, 1.0),
         ];
 
-        let distances = math.calculate_distances(&listener, &sources).unwrap();
+        let distances = math
+            .calculate_distances(&listener, &sources)
+            .expect("Should successfully calculate distances");
         assert_eq!(distances.len(), 3);
 
         // All distances should be approximately 1.0
@@ -581,7 +600,8 @@ mod tests {
             prefer_gpu: false,
             ..Default::default()
         };
-        let device = Arc::new(GpuDevice::new(config).unwrap());
+        let device =
+            Arc::new(GpuDevice::new(config).expect("Should successfully create GPU device"));
         let math = GpuSpatialMath::new(device);
 
         let vectors_a = Array2::from_shape_vec(
@@ -591,7 +611,7 @@ mod tests {
                 0.0, 1.0, 0.0, // Second vector
             ],
         )
-        .unwrap();
+        .expect("Should successfully create Array2 from shape vec");
 
         let vectors_b = Array2::from_shape_vec(
             (2, 3),
@@ -600,9 +620,11 @@ mod tests {
                 0.0, 1.0, 0.0, // Second vector
             ],
         )
-        .unwrap();
+        .expect("Should successfully create Array2 from shape vec");
 
-        let dot_products = math.batch_dot_product(&vectors_a, &vectors_b).unwrap();
+        let dot_products = math
+            .batch_dot_product(&vectors_a, &vectors_b)
+            .expect("Should successfully calculate batch dot product");
         assert_eq!(dot_products.len(), 2);
 
         // Both dot products should be 1.0
@@ -617,7 +639,8 @@ mod tests {
             prefer_gpu: false,
             ..Default::default()
         };
-        let device = Arc::new(GpuDevice::new(config).unwrap());
+        let device =
+            Arc::new(GpuDevice::new(config).expect("Should successfully create GPU device"));
         let math = GpuSpatialMath::new(device);
 
         let vectors = Array2::from_shape_vec(
@@ -627,9 +650,11 @@ mod tests {
                 0.0, 3.0, 0.0, // Second vector
             ],
         )
-        .unwrap();
+        .expect("Should successfully create Array2 from shape vec");
 
-        let normalized = math.normalize_batch(&vectors).unwrap();
+        let normalized = math
+            .normalize_batch(&vectors)
+            .expect("Should successfully normalize batch");
         assert_eq!(normalized.shape(), [2, 3]);
 
         // Check that vectors are normalized
@@ -650,8 +675,10 @@ mod tests {
             prefer_gpu: false,
             ..Default::default()
         };
-        let device = Arc::new(GpuDevice::new(config).unwrap());
-        let convolution = GpuConvolution::new(device, 1024, 256).unwrap();
+        let device =
+            Arc::new(GpuDevice::new(config).expect("Should successfully create GPU device"));
+        let convolution = GpuConvolution::new(device, 1024, 256)
+            .expect("Should successfully create GPU convolution");
         assert_eq!(convolution.fft_size, 1024);
         assert_eq!(convolution.hop_size, 256);
     }
@@ -663,7 +690,8 @@ mod tests {
             ..Default::default()
         }];
 
-        let mut manager = GpuResourceManager::new(configs).unwrap();
+        let mut manager = GpuResourceManager::new(configs)
+            .expect("Should successfully create GPU resource manager");
         assert_eq!(manager.device_count(), 1);
 
         let device = manager.get_optimal_device();
@@ -676,8 +704,10 @@ mod tests {
             prefer_gpu: false,
             ..Default::default()
         };
-        let device = Arc::new(GpuDevice::new(config).unwrap());
-        let ambisonics = GpuAmbisonics::new(device, 1).unwrap();
+        let device =
+            Arc::new(GpuDevice::new(config).expect("Should successfully create GPU device"));
+        let ambisonics =
+            GpuAmbisonics::new(device, 1).expect("Should successfully create GPU ambisonics");
         assert_eq!(ambisonics.order, 1);
     }
 
@@ -687,8 +717,10 @@ mod tests {
             prefer_gpu: false,
             ..Default::default()
         };
-        let device = Arc::new(GpuDevice::new(config).unwrap());
-        let ambisonics = GpuAmbisonics::new(device, 1).unwrap();
+        let device =
+            Arc::new(GpuDevice::new(config).expect("Should successfully create GPU device"));
+        let ambisonics =
+            GpuAmbisonics::new(device, 1).expect("Should successfully create GPU ambisonics");
 
         // Test basic spherical harmonics
         let coeff = ambisonics.spherical_harmonic(0, 0, 0.0, 0.0);

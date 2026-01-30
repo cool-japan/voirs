@@ -179,8 +179,12 @@ impl DistributedCacheCoordinator {
             .filter(|node| Some(node.id.as_str()) != exclude_node)
             .collect();
 
-        // Sort by load factor (ascending) to prefer less loaded nodes
-        candidates.sort_by(|a, b| a.load_factor.partial_cmp(&b.load_factor).unwrap());
+        // Sort by load factor (ascending) to prefer less loaded nodes (handle NaN as highest load)
+        candidates.sort_by(|a, b| {
+            a.load_factor
+                .partial_cmp(&b.load_factor)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         candidates
             .into_iter()

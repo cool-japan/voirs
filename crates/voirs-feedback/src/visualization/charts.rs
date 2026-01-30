@@ -36,6 +36,7 @@ pub struct ProgressChart {
 #[cfg(feature = "ui")]
 impl ProgressChart {
     /// Create a new progress chart
+    #[must_use]
     pub fn new() -> Self {
         Self {
             config: ChartConfig::default(),
@@ -68,7 +69,7 @@ impl ProgressChart {
             let root = backend.into_drawing_area();
             root.fill(&WHITE)
                 .map_err(|e| FeedbackError::ConfigurationError {
-                    message: format!("Failed to create chart background: {}", e),
+                    message: format!("Failed to create chart background: {e}"),
                 })?;
 
             let min_value = self
@@ -92,14 +93,14 @@ impl ProgressChart {
                 .y_label_area_size(50)
                 .build_cartesian_2d(min_time..max_time, min_value..max_value)
                 .map_err(|e| FeedbackError::ConfigurationError {
-                    message: format!("Failed to build chart: {}", e),
+                    message: format!("Failed to build chart: {e}"),
                 })?;
 
             chart
                 .configure_mesh()
                 .draw()
                 .map_err(|e| FeedbackError::ConfigurationError {
-                    message: format!("Failed to draw chart mesh: {}", e),
+                    message: format!("Failed to draw chart mesh: {e}"),
                 })?;
 
             chart
@@ -108,12 +109,12 @@ impl ProgressChart {
                     &BLUE,
                 ))
                 .map_err(|e| FeedbackError::ConfigurationError {
-                    message: format!("Failed to draw chart series: {}", e),
+                    message: format!("Failed to draw chart series: {e}"),
                 })?;
 
             root.present()
                 .map_err(|e| FeedbackError::ConfigurationError {
-                    message: format!("Failed to finalize chart: {}", e),
+                    message: format!("Failed to finalize chart: {e}"),
                 })?;
         }
 
@@ -154,6 +155,7 @@ pub struct EnhancedRadarChart {
 #[cfg(feature = "ui")]
 impl EnhancedRadarChart {
     /// Create a new enhanced radar chart
+    #[must_use]
     pub fn new(skills: Vec<RadarSkill>) -> Self {
         Self {
             skills,
@@ -164,6 +166,7 @@ impl EnhancedRadarChart {
     }
 
     /// Set comparison data for before/after visualization
+    #[must_use]
     pub fn with_comparison(mut self, comparison_data: Vec<RadarSkill>) -> Self {
         self.comparison_data = Some(comparison_data);
         self
@@ -227,7 +230,7 @@ impl EnhancedRadarChart {
             painter.text(
                 Pos2::new(center.x + level_radius + 5.0, center.y),
                 egui::Align2::LEFT_CENTER,
-                format!("{:.0}%", percentage),
+                format!("{percentage:.0}%"),
                 egui::FontId::proportional(10.0),
                 Color32::from_gray(120),
             );
@@ -383,6 +386,7 @@ pub struct InteractiveTimeline {
 #[cfg(feature = "ui")]
 impl InteractiveTimeline {
     /// Create new interactive timeline
+    #[must_use]
     pub fn new() -> Self {
         Self {
             config: TimelineConfig::default(),
@@ -429,6 +433,7 @@ pub struct RichProgressVisualization {
 #[cfg(feature = "ui")]
 impl RichProgressVisualization {
     /// Create new rich progress visualization
+    #[must_use]
     pub fn new() -> Self {
         Self {
             config: ProgressVisualizationConfig::default(),
@@ -617,7 +622,7 @@ impl ProgressChart {
     /// Export data as JSON
     pub fn export_json(&self) -> Result<String, crate::FeedbackError> {
         serde_json::to_string_pretty(&self.data).map_err(|e| {
-            crate::FeedbackError::ProcessingError(format!("Failed to serialize chart data: {}", e))
+            crate::FeedbackError::ProcessingError(format!("Failed to serialize chart data: {e}"))
         })
     }
 
@@ -639,6 +644,7 @@ impl ProgressChart {
     }
 
     /// Get data points in a time range
+    #[must_use]
     pub fn get_data_in_range(
         &self,
         start: chrono::DateTime<chrono::Utc>,
@@ -868,8 +874,7 @@ impl EnhancedRadarChart {
 
         serde_json::to_string_pretty(&export_data).map_err(|e| {
             crate::FeedbackError::ProcessingError(format!(
-                "Failed to serialize radar chart data: {}",
-                e
+                "Failed to serialize radar chart data: {e}"
             ))
         })
     }
@@ -1017,7 +1022,7 @@ impl InteractiveTimeline {
         let g = ((hash >> 8) & 0xFF) as u8;
         let b = (hash & 0xFF) as u8;
 
-        format!("#{:02x}{:02x}{:02x}", r, g, b)
+        format!("#{r:02x}{g:02x}{b:02x}")
     }
 
     /// Update the time range based on events
@@ -1126,10 +1131,7 @@ impl InteractiveTimeline {
         });
 
         serde_json::to_string_pretty(&export_data).map_err(|e| {
-            crate::FeedbackError::ProcessingError(format!(
-                "Failed to serialize timeline data: {}",
-                e
-            ))
+            crate::FeedbackError::ProcessingError(format!("Failed to serialize timeline data: {e}"))
         })
     }
 
@@ -1391,7 +1393,7 @@ impl RichProgressVisualization {
             .iter_mut()
             .find(|g| g.id == goal_id)
             .ok_or_else(|| crate::FeedbackError::InvalidInput {
-                message: format!("Goal with ID '{}' not found", goal_id),
+                message: format!("Goal with ID '{goal_id}' not found"),
             })?;
 
         goal.current_value = current_value;
@@ -1638,8 +1640,7 @@ impl RichProgressVisualization {
         if !declining_skills.is_empty() {
             for (skill, _) in declining_skills.iter().take(3) {
                 recommendations.push(format!(
-                    "Focus additional practice time on improving {}",
-                    skill
+                    "Focus additional practice time on improving {skill}"
                 ));
             }
         }
@@ -1650,8 +1651,7 @@ impl RichProgressVisualization {
             .iter()
             .filter(|g| {
                 matches!(g.status, ProgressGoalStatus::Active)
-                    && g.target_date
-                        .map_or(false, |date| date < chrono::Utc::now())
+                    && g.target_date.is_some_and(|date| date < chrono::Utc::now())
             })
             .collect();
 
@@ -1682,8 +1682,7 @@ impl RichProgressVisualization {
 
         serde_json::to_string_pretty(&export_data).map_err(|e| {
             crate::FeedbackError::ProcessingError(format!(
-                "Failed to serialize progress visualization data: {}",
-                e
+                "Failed to serialize progress visualization data: {e}"
             ))
         })
     }

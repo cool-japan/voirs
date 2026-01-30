@@ -79,8 +79,8 @@ impl NumaTopology {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if name.starts_with("node") {
-                        if let Ok(node_id) = name[4..].parse::<usize>() {
+                    if let Some(stripped) = name.strip_prefix("node") {
+                        if let Ok(node_id) = stripped.parse::<usize>() {
                             let cpu_cores = Self::read_node_cpus(&path);
                             let memory_mb = Self::read_node_memory(&path);
 
@@ -114,7 +114,7 @@ impl NumaTopology {
         let cpulist_path = node_path.join("cpulist");
 
         if let Ok(content) = fs::read_to_string(cpulist_path) {
-            Self::parse_cpu_list(&content.trim())
+            Self::parse_cpu_list(content.trim())
         } else {
             Vec::new()
         }

@@ -575,7 +575,7 @@ impl ABTestingFramework {
         weights: &CriteriaWeights,
     ) -> f32 {
         // Normalize metrics to 0-1 scale and apply weights
-        let normalized_snr = (metrics.snr / 30.0).min(1.0).max(0.0);
+        let normalized_snr = (metrics.snr / 30.0).clamp(0.0, 1.0);
         let normalized_similarity = metrics.speaker_similarity;
         let normalized_quality = metrics.pesq_score.unwrap_or(2.5) / 5.0;
 
@@ -644,7 +644,7 @@ impl ABTestingFramework {
         for evaluation in evaluations {
             condition_scores
                 .entry(evaluation.condition_id.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(evaluation.overall_score);
         }
 
@@ -700,7 +700,7 @@ impl ABTestingFramework {
         for evaluation in evaluations {
             condition_scores
                 .entry(evaluation.condition_id.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(evaluation.overall_score);
         }
 

@@ -3,8 +3,10 @@
 //! This module provides preprocessing, validation, and feature extraction
 //! utilities for speech synthesis datasets.
 
+pub mod deduplication;
 pub mod features;
 pub mod pipeline;
+pub mod quality_gate;
 pub mod validation;
 
 use crate::{DatasetSample, Result};

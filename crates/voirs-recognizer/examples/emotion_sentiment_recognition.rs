@@ -316,7 +316,7 @@ impl EmotionSentimentAnalyzer {
         feature_count += 1;
 
         // Normalize and clamp confidence
-        (confidence_score / feature_count as f32).min(1.0).max(0.0)
+        (confidence_score / feature_count as f32).clamp(0.0, 1.0)
     }
 }
 

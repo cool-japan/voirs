@@ -572,7 +572,7 @@ impl EmotionTransfer {
         let mut spectrum = vec![0.0; frame_size / 2];
 
         // Simple magnitude spectrum calculation (simplified FFT)
-        for i in 0..spectrum.len() {
+        for (i, spectrum_value) in spectrum.iter_mut().enumerate() {
             let freq = i as f32 * sample_rate as f32 / frame_size as f32;
             let mut magnitude = 0.0;
 
@@ -581,7 +581,7 @@ impl EmotionTransfer {
                 magnitude += sample * phase.cos();
             }
 
-            spectrum[i] = magnitude.abs();
+            *spectrum_value = magnitude.abs();
         }
 
         let mut weighted_sum = 0.0;

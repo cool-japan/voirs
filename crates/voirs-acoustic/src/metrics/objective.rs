@@ -85,9 +85,9 @@ impl ObjectiveEvaluator {
     /// Compute Signal-to-Noise Ratio (SNR) in dB
     pub fn compute_snr(&self, mel_data: &[Vec<f32>]) -> Result<f32> {
         if mel_data.is_empty() || mel_data[0].is_empty() {
-            return Err(AcousticError::InputError(
-                "Empty mel spectrogram data".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Empty mel spectrogram data".to_string(),
+            });
         }
 
         let mut signal_power = 0.0f32;
@@ -126,9 +126,9 @@ impl ObjectiveEvaluator {
     /// Compute Total Harmonic Distortion (THD)
     pub fn compute_thd(&self, mel_data: &[Vec<f32>]) -> Result<f32> {
         if mel_data.is_empty() || mel_data[0].is_empty() {
-            return Err(AcousticError::InputError(
-                "Empty mel spectrogram data".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Empty mel spectrogram data".to_string(),
+            });
         }
 
         // Simplified THD computation based on mel spectrogram
@@ -170,10 +170,11 @@ impl ObjectiveEvaluator {
         reference: &[Vec<f32>],
     ) -> Result<f32> {
         if generated.len() != reference.len() {
-            return Err(AcousticError::InputError(
-                "Generated and reference spectrograms must have same number of mel channels"
-                    .to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message:
+                    "Generated and reference spectrograms must have same number of mel channels"
+                        .to_string(),
+            });
         }
 
         let mut total_distortion = 0.0f32;
@@ -206,10 +207,11 @@ impl ObjectiveEvaluator {
         reference: &[Vec<f32>],
     ) -> Result<f32> {
         if generated.len() != reference.len() {
-            return Err(AcousticError::InputError(
-                "Generated and reference spectrograms must have same number of mel channels"
-                    .to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message:
+                    "Generated and reference spectrograms must have same number of mel channels"
+                        .to_string(),
+            });
         }
 
         let mut total_mcd = 0.0f32;
@@ -248,9 +250,9 @@ impl ObjectiveEvaluator {
     /// Compute pitch accuracy correlation
     pub fn compute_pitch_correlation(&self, mel_data: &[Vec<f32>]) -> Result<f32> {
         if mel_data.is_empty() || mel_data[0].is_empty() {
-            return Err(AcousticError::InputError(
-                "Empty mel spectrogram data".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Empty mel spectrogram data".to_string(),
+            });
         }
 
         // Extract pitch contour from mel spectrogram
@@ -265,9 +267,10 @@ impl ObjectiveEvaluator {
     /// Compute Log Spectral Distortion (LSD)
     pub fn compute_lsd(&self, generated: &[Vec<f32>], reference: &[Vec<f32>]) -> Result<f32> {
         if generated.len() != reference.len() {
-            return Err(AcousticError::InputError(
-                "Generated and reference spectrograms must have same dimensions".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Generated and reference spectrograms must have same dimensions"
+                    .to_string(),
+            });
         }
 
         let mut total_lsd = 0.0f32;

@@ -96,13 +96,13 @@ pub struct ModelMetrics {
 /// Audio Quality Level
 pub enum AudioQualityLevel {
     /// Very low
-    VeryLow,  // < 30 dB SNR
+    VeryLow, // < 30 dB SNR
     /// Low
-    Low,      // 30-40 dB SNR
+    Low, // 30-40 dB SNR
     /// Medium
-    Medium,   // 40-50 dB SNR
+    Medium, // 40-50 dB SNR
     /// High
-    High,     // 50-60 dB SNR
+    High, // 50-60 dB SNR
     /// Very high
     VeryHigh, // > 60 dB SNR
 }

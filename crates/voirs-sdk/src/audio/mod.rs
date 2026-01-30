@@ -5,7 +5,12 @@
 //!
 //! - [`buffer`] - Core AudioBuffer struct and basic operations
 //! - [`processing`] - Audio processing functions (gain, normalize, mix, etc.)
+//! - [`enhancement`] - Real-time adaptive audio enhancement with quality optimization
+//! - [`simd_ops`] - SIMD-accelerated audio operations
 //! - [`io`] - Audio I/O operations (save, load, format conversion)
+//! - [`dsp`] - Advanced DSP operations using SciRS2/NumRS2 (filters, windows, spectral analysis)
+//! - [`workflows`] - High-level audio processing workflows for common use cases
+//! - [`effects`] - Professional audio effects (reverb, delay, chorus, compression, EQ)
 //!
 //! # Example
 //!
@@ -26,12 +31,24 @@
 //! ```
 
 pub mod buffer;
+pub mod dsp;
+pub mod effects;
+pub mod enhancement;
 pub mod io;
 pub mod processing;
+pub mod simd_ops;
+mod utilities;
+pub mod workflows;
 
 // Re-export the main types for convenience
 pub use buffer::{AudioBuffer, AudioMetadata, BufferFormat};
+pub use effects::{
+    ChorusEffect, CompressorEffect, DelayEffect, EffectsChain, EqualizerEffect, ReverbEffect,
+};
+pub use enhancement::{AdaptiveEnhancer, EnhancementConfig, PerformanceMetrics};
 pub use io::{AudioInfo, RawFormat};
+pub use simd_ops::{SimdAudioProcessor, SimdCapabilities};
+pub use workflows::{AudioQualityMetrics, VoiceFeatures};
 
 #[cfg(test)]
 mod tests {
@@ -137,7 +154,7 @@ mod tests {
             })
             .unwrap();
 
-        let expected_chunks = (buffer.len() + 1023) / 1024; // Ceiling division
+        let expected_chunks = buffer.len().div_ceil(1024); // Ceiling division
         assert_eq!(chunk_count, expected_chunks);
 
         // Test metadata export

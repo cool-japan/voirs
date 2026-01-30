@@ -60,6 +60,7 @@ pub struct AudioUtilities;
 
 impl AudioUtilities {
     /// Create a new audio utilities instance
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
@@ -95,7 +96,7 @@ impl AudioUtilities {
         // Load audio with the simple load function
         let audio =
             load_audio(path.as_ref()).map_err(|e| RecognitionError::AudioProcessingError {
-                message: format!("Failed to load audio: {}", e),
+                message: format!("Failed to load audio: {e}"),
                 source: Some(Box::new(e)),
             })?;
 
@@ -374,7 +375,10 @@ impl AudioUtilities {
     #[cfg(target_arch = "aarch64")]
     #[target_feature(enable = "neon")]
     unsafe fn calculate_sum_of_squares_neon(samples: &[f32]) -> f32 {
-        use std::arch::aarch64::*;
+        use std::arch::aarch64::{
+            vaddq_f32, vdupq_n_f32, vget_high_f32, vget_lane_f32, vget_low_f32, vld1q_f32,
+            vmulq_f32, vpadd_f32,
+        };
 
         let mut sum = vdupq_n_f32(0.0);
         let chunks = samples.chunks_exact(4);
@@ -506,11 +510,11 @@ impl AudioUtilities {
         audio: AudioBuffer,
     ) -> Result<AudioBuffer, RecognitionError> {
         // For now, just ensure the audio is at the optimal sample rate
-        if audio.sample_rate() != 16000 {
+        if audio.sample_rate() == 16000 {
+            Ok(audio)
+        } else {
             let resampler = AudioResampler::new(ResamplingQuality::High);
             resampler.resample(&audio, 16000)
-        } else {
-            Ok(audio)
         }
     }
 }
@@ -546,6 +550,7 @@ pub struct AudioQualityReport {
 
 impl AudioQualityReport {
     /// Get a human-readable quality assessment
+    #[must_use]
     pub fn quality_assessment(&self) -> &'static str {
         match self.overall_score {
             score if score >= 90.0 => "Excellent",
@@ -558,6 +563,7 @@ impl AudioQualityReport {
     }
 
     /// Get quality-specific recommendations
+    #[must_use]
     pub fn recommendations(&self) -> Vec<String> {
         let mut recommendations = Vec::new();
 
@@ -916,8 +922,8 @@ mod tests {
             total_segments += result.unwrap();
         }
 
-        // All tasks should have completed successfully
-        assert!(total_segments >= 0);
+        // Verify all 5 tasks completed (total_segments may be 0 if no segments found)
+        let _ = total_segments; // All tasks completed successfully
     }
 
     #[test]

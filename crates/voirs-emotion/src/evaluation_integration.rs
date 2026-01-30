@@ -61,27 +61,27 @@ pub struct EmotionAwareQualityEvaluator {
     /// Core emotion processor for analysis
     processor: Arc<EmotionProcessor>,
     /// Internal quality analyzer
-    quality_analyzer: QualityAnalyzer,
+    quality_analyzer: Arc<QualityAnalyzer>,
     /// Evaluation configuration
     config: EmotionEvaluationConfig,
 }
 
 impl EmotionAwareQualityEvaluator {
     /// Create new emotion-aware quality evaluator
-    pub async fn new() -> Result<Self> {
-        let processor = EmotionProcessor::new().await?;
-        let quality_analyzer = QualityAnalyzer::new();
+    pub fn new() -> Result<Self> {
+        let processor = EmotionProcessor::new()?;
+        let quality_analyzer = QualityAnalyzer::new()?;
 
         Ok(Self {
             processor: Arc::new(processor),
-            quality_analyzer,
+            quality_analyzer: Arc::new(quality_analyzer),
             config: EmotionEvaluationConfig::default(),
         })
     }
 
     /// Create with custom configuration
-    pub async fn with_config(config: EmotionEvaluationConfig) -> Result<Self> {
-        let mut evaluator = Self::new().await?;
+    pub fn with_config(config: EmotionEvaluationConfig) -> Result<Self> {
+        let mut evaluator = Self::new()?;
         evaluator.config = config;
         Ok(evaluator)
     }
@@ -600,11 +600,11 @@ pub struct EmotionEvaluationContext {
 /// Standard emotion evaluation plugin implementation
 pub struct StandardEmotionEvaluationPlugin {
     processor: Arc<EmotionProcessor>,
-    quality_analyzer: QualityAnalyzer,
+    quality_analyzer: Arc<QualityAnalyzer>,
 }
 
 impl StandardEmotionEvaluationPlugin {
-    pub fn new(processor: Arc<EmotionProcessor>, quality_analyzer: QualityAnalyzer) -> Self {
+    pub fn new(processor: Arc<EmotionProcessor>, quality_analyzer: Arc<QualityAnalyzer>) -> Self {
         Self {
             processor,
             quality_analyzer,
@@ -618,27 +618,37 @@ impl EmotionEvaluationPlugin for StandardEmotionEvaluationPlugin {
         audio: &[f32],
         context: &EmotionEvaluationContext,
     ) -> Result<EmotionQualityResult> {
-        // Use internal quality analyzer for evaluation
-        let quality_measurement = self.quality_analyzer.analyze_emotion_quality(
-            audio,
-            context.expected_emotion,
-            context.expected_intensity,
-        )?;
+        // Create a simple emotion vector from context
+        let mut emotion_vector = EmotionVector::new();
+        if let Some(emotion) = context.expected_emotion {
+            let intensity = context.expected_intensity.unwrap_or(0.5);
+            emotion_vector.add_emotion(emotion, intensity);
+        }
+
+        // Use tokio runtime to call async analyze method
+        let runtime = tokio::runtime::Runtime::new()
+            .map_err(|e| Error::ProcessingError(format!("Failed to create runtime: {}", e)))?;
+
+        let quality_measurement = runtime.block_on(async {
+            self.quality_analyzer
+                .analyze_emotion_quality(&emotion_vector, audio)
+                .await
+        })?;
 
         // Convert to evaluation result format
         Ok(EmotionQualityResult {
-            overall_quality: quality_measurement.overall_quality,
-            standard_quality: quality_measurement.audio_quality,
-            emotion_accuracy: quality_measurement.emotion_accuracy,
-            intensity_accuracy: quality_measurement.consistency_score, // Using consistency as proxy
-            naturalness_score: quality_measurement.naturalness_score,
-            consistency_score: quality_measurement.consistency_score,
-            appropriateness_score: quality_measurement.user_satisfaction, // Using satisfaction as proxy
-            processing_time_ms: 0, // Not tracked in internal analyzer
+            overall_quality: quality_measurement.overall_quality(),
+            standard_quality: quality_measurement.audio_quality_score,
+            emotion_accuracy: quality_measurement.emotion_accuracy_percent as f32,
+            intensity_accuracy: quality_measurement.consistency_score_percent as f32,
+            naturalness_score: quality_measurement.naturalness_score as f32,
+            consistency_score: quality_measurement.consistency_score_percent as f32,
+            appropriateness_score: quality_measurement.user_satisfaction_percent as f32,
+            processing_time_ms: 0, // Not tracked directly
             metadata: EmotionQualityMetadata {
                 recognized_emotion: context.expected_emotion.unwrap_or(Emotion::Neutral),
                 recognized_intensity: context.expected_intensity.unwrap_or(0.5),
-                confidence: quality_measurement.overall_quality,
+                confidence: quality_measurement.overall_quality() as f32,
                 quality_breakdown: HashMap::new(),
             },
         })
@@ -668,26 +678,26 @@ mod tests {
         assert_eq!(config.confidence_threshold, 0.5);
     }
 
-    #[tokio::test]
-    async fn test_emotion_aware_evaluator_creation() {
-        let evaluator = EmotionAwareQualityEvaluator::new().await;
+    #[test]
+    fn test_emotion_aware_evaluator_creation() {
+        let evaluator = EmotionAwareQualityEvaluator::new();
         assert!(evaluator.is_ok());
     }
 
     #[test]
     fn test_standard_plugin_creation() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let processor = rt.block_on(EmotionProcessor::new()).unwrap();
-        let quality_analyzer = QualityAnalyzer::new();
+        let processor = EmotionProcessor::new().unwrap();
+        let quality_analyzer = QualityAnalyzer::new().unwrap();
 
-        let plugin = StandardEmotionEvaluationPlugin::new(Arc::new(processor), quality_analyzer);
+        let plugin =
+            StandardEmotionEvaluationPlugin::new(Arc::new(processor), Arc::new(quality_analyzer));
         assert_eq!(plugin.name(), "standard-emotion-evaluator");
         assert!(!plugin.version().is_empty());
     }
 
-    #[tokio::test]
-    async fn test_emotion_recognition_basic() {
-        let evaluator = EmotionAwareQualityEvaluator::new().await.unwrap();
+    #[test]
+    fn test_emotion_recognition_basic() {
+        let evaluator = EmotionAwareQualityEvaluator::new().unwrap();
 
         // Test with high energy audio (should be classified as excited)
         let high_energy_audio: Vec<f32> =

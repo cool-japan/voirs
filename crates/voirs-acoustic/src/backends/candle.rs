@@ -253,23 +253,21 @@ impl CandleDevice {
                 DeviceType::Cuda => {
                     let index = config.device_index.unwrap_or(0);
                     Device::cuda_if_available(index as usize).map_err(|e| {
-                        AcousticError::ConfigError(format!(
-                            "CUDA device {index} not available: {e}"
-                        ))
+                        AcousticError::ConfigError {
+                            message: format!("CUDA device {index} not available: {e}"),
+                        }
                     })?
                 }
                 DeviceType::Metal => {
                     let index = config.device_index.unwrap_or(0);
-                    Device::new_metal(index as usize).map_err(|e| {
-                        AcousticError::ConfigError(format!(
-                            "Metal device {index} not available: {e}"
-                        ))
+                    Device::new_metal(index as usize).map_err(|e| AcousticError::ConfigError {
+                        message: format!("Metal device {index} not available: {e}"),
                     })?
                 }
                 DeviceType::OpenCl => {
-                    return Err(AcousticError::ConfigError(
-                        "OpenCL not supported by Candle".to_string(),
-                    ));
+                    return Err(AcousticError::ConfigError {
+                        message: "OpenCL not supported by Candle".to_string(),
+                    });
                 }
             };
 
@@ -346,9 +344,9 @@ impl CandleAcousticModel {
 
         let path = Path::new(model_path);
         if !path.exists() {
-            return Err(AcousticError::ModelError(format!(
-                "Model file not found: {model_path}"
-            )));
+            return Err(AcousticError::ModelError {
+                message: format!("Model file not found: {model_path}"),
+            });
         }
 
         let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
@@ -376,9 +374,9 @@ impl CandleAcousticModel {
                 Self::load_custom_weights(model_path, device.candle_device()).await?
             }
             _ => {
-                return Err(AcousticError::ModelError(format!(
-                    "Unsupported model format: {format:?}"
-                )));
+                return Err(AcousticError::ModelError {
+                    message: format!("Unsupported model format: {format:?}"),
+                });
             }
         };
 
@@ -414,22 +412,27 @@ impl CandleAcousticModel {
         tracing::info!("Loading SafeTensors weights from: {}", model_path);
 
         // Read SafeTensors file
-        let buffer = fs::read(model_path).map_err(|e| {
-            AcousticError::ModelError(format!("Failed to read SafeTensors file: {e}"))
+        let buffer = fs::read(model_path).map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to read SafeTensors file: {e}"),
         })?;
 
         // Parse SafeTensors format
         let safetensors = safetensors::SafeTensors::deserialize(&buffer).map_err(|e| {
-            AcousticError::ModelError(format!("Failed to parse SafeTensors format: {e}"))
+            AcousticError::ModelError {
+                message: format!("Failed to parse SafeTensors format: {e}"),
+            }
         })?;
 
         let mut weights = HashMap::new();
 
         // Convert each tensor from SafeTensors to Candle tensors
         for tensor_name in safetensors.names() {
-            let tensor_view = safetensors.tensor(tensor_name).map_err(|e| {
-                AcousticError::ModelError(format!("Failed to get tensor '{tensor_name}': {e}"))
-            })?;
+            let tensor_view =
+                safetensors
+                    .tensor(tensor_name)
+                    .map_err(|e| AcousticError::ModelError {
+                        message: format!("Failed to get tensor '{tensor_name}': {e}"),
+                    })?;
 
             // Convert SafeTensors tensor to Candle tensor
             let candle_tensor = Self::safetensors_to_candle_tensor(tensor_view, device)?;
@@ -460,7 +463,9 @@ impl CandleAcousticModel {
                 // Cast bytes to f32 slice
                 let float_data = bytemuck::cast_slice::<u8, f32>(data);
                 Tensor::from_slice(float_data, &*shape, device).map_err(|e| {
-                    AcousticError::ModelError(format!("Failed to create F32 tensor: {e}"))
+                    AcousticError::ModelError {
+                        message: format!("Failed to create F32 tensor: {e}"),
+                    }
                 })
             }
             Dtype::F16 => {
@@ -468,7 +473,9 @@ impl CandleAcousticModel {
                 let f16_data = bytemuck::cast_slice::<u8, half::f16>(data);
                 let f32_data: Vec<f32> = f16_data.iter().map(|x| x.to_f32()).collect();
                 Tensor::from_slice(&f32_data, &*shape, device).map_err(|e| {
-                    AcousticError::ModelError(format!("Failed to create F16->F32 tensor: {e}"))
+                    AcousticError::ModelError {
+                        message: format!("Failed to create F16->F32 tensor: {e}"),
+                    }
                 })
             }
             Dtype::I32 => {
@@ -476,18 +483,22 @@ impl CandleAcousticModel {
                 let i32_data = bytemuck::cast_slice::<u8, i32>(data);
                 let i64_data: Vec<i64> = i32_data.iter().map(|&x| x as i64).collect();
                 Tensor::from_slice(&i64_data, &*shape, device).map_err(|e| {
-                    AcousticError::ModelError(format!("Failed to create I32->I64 tensor: {e}"))
+                    AcousticError::ModelError {
+                        message: format!("Failed to create I32->I64 tensor: {e}"),
+                    }
                 })
             }
             Dtype::I64 => {
                 let int_data = bytemuck::cast_slice::<u8, i64>(data);
                 Tensor::from_slice(int_data, &*shape, device).map_err(|e| {
-                    AcousticError::ModelError(format!("Failed to create I64 tensor: {e}"))
+                    AcousticError::ModelError {
+                        message: format!("Failed to create I64 tensor: {e}"),
+                    }
                 })
             }
-            other => Err(AcousticError::ModelError(format!(
-                "Unsupported tensor dtype: {other:?}"
-            ))),
+            other => Err(AcousticError::ModelError {
+                message: format!("Unsupported tensor dtype: {other:?}"),
+            }),
         }
     }
 
@@ -503,30 +514,34 @@ impl CandleAcousticModel {
 
         let path = Path::new(model_path);
         if !path.exists() {
-            return Err(AcousticError::ModelError(format!(
-                "PyTorch model file not found: {model_path}"
-            )));
+            return Err(AcousticError::ModelError {
+                message: format!("PyTorch model file not found: {model_path}"),
+            });
         }
 
         // Check file size for basic validation
-        let metadata = fs::metadata(path)
-            .map_err(|e| AcousticError::ModelError(format!("Failed to read file metadata: {e}")))?;
+        let metadata = fs::metadata(path).map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to read file metadata: {e}"),
+        })?;
 
         if metadata.len() < 16 {
-            return Err(AcousticError::ModelError(
-                "PyTorch file too small to be valid".to_string(),
-            ));
+            return Err(AcousticError::ModelError {
+                message: "PyTorch file too small to be valid".to_string(),
+            });
         }
 
         tracing::info!("Attempting to load PyTorch model from: {}", model_path);
 
         // Enhanced PyTorch pickle format parsing implementation
-        let mut file = fs::File::open(path)
-            .map_err(|e| AcousticError::ModelError(format!("Failed to open PyTorch file: {e}")))?;
+        let mut file = fs::File::open(path).map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to open PyTorch file: {e}"),
+        })?;
 
         let mut buffer = Vec::new();
         file.read_to_end(&mut buffer)
-            .map_err(|e| AcousticError::ModelError(format!("Failed to read PyTorch file: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to read PyTorch file: {e}"),
+            })?;
 
         // Parse PyTorch pickle format with enhanced detection and parsing
         match Self::parse_pytorch_pickle_format(&buffer, device).await {
@@ -561,9 +576,9 @@ impl CandleAcousticModel {
     ) -> Result<HashMap<String, Tensor>> {
         // Check for PyTorch pickle protocol markers
         if buffer.len() < 8 {
-            return Err(AcousticError::ModelError(
-                "File too small for PyTorch pickle format".to_string(),
-            ));
+            return Err(AcousticError::ModelError {
+                message: "File too small for PyTorch pickle format".to_string(),
+            });
         }
 
         // Detect pickle protocol version
@@ -571,9 +586,9 @@ impl CandleAcousticModel {
             buffer[0] == 0x80 && (buffer[1] == 0x02 || buffer[1] == 0x03 || buffer[1] == 0x04);
 
         if !is_pickle {
-            return Err(AcousticError::ModelError(
-                "Not a valid PyTorch pickle file".to_string(),
-            ));
+            return Err(AcousticError::ModelError {
+                message: "Not a valid PyTorch pickle file".to_string(),
+            });
         }
 
         tracing::info!("Detected PyTorch pickle protocol version: {}", buffer[1]);
@@ -663,8 +678,9 @@ impl CandleAcousticModel {
             })
             .collect();
 
-        Tensor::from_vec(data, shape.as_slice(), device)
-            .map_err(|e| AcousticError::ModelError(format!("Failed to create tensor: {e}")))
+        Tensor::from_vec(data, shape.as_slice(), device).map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to create tensor: {e}"),
+        })
     }
 
     /// Create dummy acoustic model tensors for compatibility
@@ -699,7 +715,9 @@ impl CandleAcousticModel {
                 .collect();
 
             let tensor = Tensor::from_vec(data, shape.as_slice(), device).map_err(|e| {
-                AcousticError::ModelError(format!("Failed to create tensor {name}: {e}"))
+                AcousticError::ModelError {
+                    message: format!("Failed to create tensor {name}: {e}"),
+                }
             })?;
 
             weights.insert(name.to_string(), tensor);
@@ -724,27 +742,28 @@ impl CandleAcousticModel {
 
         let path = Path::new(model_path);
         if !path.exists() {
-            return Err(AcousticError::ModelError(format!(
-                "Custom model file not found: {model_path}"
-            )));
+            return Err(AcousticError::ModelError {
+                message: format!("Custom model file not found: {model_path}"),
+            });
         }
 
         tracing::info!("Loading custom binary model from: {}", model_path);
 
         // Read the binary file
-        let mut file = fs::File::open(path).map_err(|e| {
-            AcousticError::ModelError(format!("Failed to open custom model file: {e}"))
+        let mut file = fs::File::open(path).map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to open custom model file: {e}"),
         })?;
 
         let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer).map_err(|e| {
-            AcousticError::ModelError(format!("Failed to read custom model file: {e}"))
-        })?;
+        file.read_to_end(&mut buffer)
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to read custom model file: {e}"),
+            })?;
 
         if buffer.len() < 16 {
-            return Err(AcousticError::ModelError(
-                "Custom model file too small".to_string(),
-            ));
+            return Err(AcousticError::ModelError {
+                message: "Custom model file too small".to_string(),
+            });
         }
 
         // Try to parse as a simple binary format
@@ -912,12 +931,14 @@ impl CandleAcousticModel {
         use std::fs;
 
         // Read SafeTensors file
-        let buffer = fs::read(model_path).map_err(|e| {
-            AcousticError::ModelError(format!("Failed to read SafeTensors file: {e}"))
+        let buffer = fs::read(model_path).map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to read SafeTensors file: {e}"),
         })?;
 
         let _safetensors = safetensors::SafeTensors::deserialize(&buffer).map_err(|e| {
-            AcousticError::ModelError(format!("Failed to parse SafeTensors format: {e}"))
+            AcousticError::ModelError {
+                message: format!("Failed to parse SafeTensors format: {e}"),
+            }
         })?;
 
         // SafeTensors doesn't expose metadata directly - use default values
@@ -1105,8 +1126,9 @@ impl CandleTensorOps {
         let data: Vec<f32> = mel.data.iter().flatten().copied().collect();
         let shape = (mel.n_mels, mel.n_frames);
 
-        Tensor::from_vec(data, shape, device)
-            .map_err(|e| AcousticError::ModelError(format!("Failed to create tensor: {e}")))
+        Tensor::from_vec(data, shape, device).map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to create tensor: {e}"),
+        })
     }
 
     /// Convert Candle tensor to mel spectrogram
@@ -1117,7 +1139,9 @@ impl CandleTensorOps {
     ) -> Result<MelSpectrogram> {
         let shape = tensor.shape();
         if shape.dims().len() != 2 {
-            return Err(AcousticError::ModelError("Tensor must be 2D".to_string()));
+            return Err(AcousticError::ModelError {
+                message: "Tensor must be 2D".to_string(),
+            });
         }
 
         let n_mels = shape.dims()[0];
@@ -1125,9 +1149,13 @@ impl CandleTensorOps {
 
         let data_vec: Vec<f32> = tensor
             .flatten_all()
-            .map_err(|e| AcousticError::ModelError(format!("Failed to flatten tensor: {e}")))?
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to flatten tensor: {e}"),
+            })?
             .to_vec1()
-            .map_err(|e| AcousticError::ModelError(format!("Failed to convert tensor: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to convert tensor: {e}"),
+            })?;
 
         let mut data = vec![vec![0.0; n_frames]; n_mels];
         for (i, chunk) in data_vec.chunks(n_frames).enumerate() {
@@ -1141,21 +1169,27 @@ impl CandleTensorOps {
 
     /// Apply normalization to tensor
     pub fn normalize_tensor(tensor: &Tensor) -> Result<Tensor> {
-        let mean = tensor
-            .mean_all()
-            .map_err(|e| AcousticError::ModelError(format!("Failed to compute mean: {e}")))?;
+        let mean = tensor.mean_all().map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to compute mean: {e}"),
+        })?;
         let variance = tensor
             .var_keepdim(0)
-            .map_err(|e| AcousticError::ModelError(format!("Failed to compute variance: {e}")))?;
-        let std = variance
-            .sqrt()
-            .map_err(|e| AcousticError::ModelError(format!("Failed to compute std: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to compute variance: {e}"),
+            })?;
+        let std = variance.sqrt().map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to compute std: {e}"),
+        })?;
 
         let normalized = tensor
             .broadcast_sub(&mean)
-            .map_err(|e| AcousticError::ModelError(format!("Failed to subtract mean: {e}")))?
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to subtract mean: {e}"),
+            })?
             .broadcast_div(&std)
-            .map_err(|e| AcousticError::ModelError(format!("Failed to divide by std: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to divide by std: {e}"),
+            })?;
 
         Ok(normalized)
     }

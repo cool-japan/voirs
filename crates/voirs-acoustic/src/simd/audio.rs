@@ -15,9 +15,9 @@ impl SimdAudioProcessor {
     /// Apply pre-emphasis filter with SIMD acceleration
     pub fn pre_emphasis(input: &[f32], output: &mut [f32], coefficient: f32) -> Result<()> {
         if input.len() != output.len() {
-            return Err(AcousticError::InputError(
-                "Input and output lengths must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Input and output lengths must match".to_string(),
+            });
         }
 
         if input.is_empty() {
@@ -38,9 +38,9 @@ impl SimdAudioProcessor {
     /// Apply de-emphasis filter with SIMD acceleration
     pub fn de_emphasis(input: &[f32], output: &mut [f32], coefficient: f32) -> Result<()> {
         if input.len() != output.len() {
-            return Err(AcousticError::InputError(
-                "Input and output lengths must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Input and output lengths must match".to_string(),
+            });
         }
 
         if input.is_empty() {
@@ -61,9 +61,9 @@ impl SimdAudioProcessor {
     /// Normalize audio with SIMD acceleration
     pub fn normalize(input: &[f32], output: &mut [f32], target_amplitude: f32) -> Result<()> {
         if input.len() != output.len() {
-            return Err(AcousticError::InputError(
-                "Input and output lengths must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Input and output lengths must match".to_string(),
+            });
         }
 
         if input.is_empty() {
@@ -94,9 +94,9 @@ impl SimdAudioProcessor {
         sample_rate: f32,
     ) -> Result<()> {
         if input.len() != output.len() {
-            return Err(AcousticError::InputError(
-                "Input and output lengths must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Input and output lengths must match".to_string(),
+            });
         }
 
         // Simple first-order highpass filter
@@ -125,9 +125,9 @@ impl SimdAudioProcessor {
         sample_rate: f32,
     ) -> Result<()> {
         if input.len() != output.len() {
-            return Err(AcousticError::InputError(
-                "Input and output lengths must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Input and output lengths must match".to_string(),
+            });
         }
 
         // Simple first-order lowpass filter
@@ -178,9 +178,9 @@ impl SimdAudioProcessor {
         hop_size: usize,
     ) -> Result<Vec<f32>> {
         if frame_size == 0 || hop_size == 0 {
-            return Err(AcousticError::InputError(
-                "Frame size and hop size must be positive".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Frame size and hop size must be positive".to_string(),
+            });
         }
 
         let n_frames = (input.len().saturating_sub(frame_size)) / hop_size + 1;
@@ -206,9 +206,9 @@ impl SimdAudioProcessor {
         hop_size: usize,
     ) -> Result<Vec<f32>> {
         if frame_size == 0 || hop_size == 0 {
-            return Err(AcousticError::InputError(
-                "Frame size and hop size must be positive".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Frame size and hop size must be positive".to_string(),
+            });
         }
 
         let n_frames = (input.len().saturating_sub(frame_size)) / hop_size + 1;
@@ -243,9 +243,9 @@ impl SimdAudioProcessor {
         sample_rate: f32,
     ) -> Result<()> {
         if input.len() != output.len() {
-            return Err(AcousticError::InputError(
-                "Input and output lengths must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Input and output lengths must match".to_string(),
+            });
         }
 
         let attack_coeff = (-1.0 / (attack_time * sample_rate)).exp();
@@ -280,9 +280,9 @@ impl SimdAudioProcessor {
     /// Compute autocorrelation with SIMD acceleration
     pub fn autocorrelation(input: &[f32], max_lag: usize) -> Result<Vec<f32>> {
         if max_lag >= input.len() {
-            return Err(AcousticError::InputError(
-                "Max lag must be less than input length".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Max lag must be less than input length".to_string(),
+            });
         }
 
         let mut autocorr = vec![0.0f32; max_lag + 1];
@@ -316,9 +316,9 @@ impl SimdAudioProcessor {
         let zcr = Self::zero_crossing_rate(input, frame_size, hop_size)?;
 
         if energy.len() != zcr.len() {
-            return Err(AcousticError::Processing(
-                "Energy and ZCR lengths don't match".to_string(),
-            ));
+            return Err(AcousticError::ProcessingError {
+                message: "Energy and ZCR lengths don't match".to_string(),
+            });
         }
 
         let mut vad = vec![false; energy.len()];
@@ -339,9 +339,9 @@ impl SimdAudioProcessor {
         beta: f32,
     ) -> Result<()> {
         if noisy_spectrum.len() != noise_spectrum.len() || noisy_spectrum.len() != output.len() {
-            return Err(AcousticError::InputError(
-                "All arrays must have the same length".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "All arrays must have the same length".to_string(),
+            });
         }
 
         for ((noisy, noise), out) in noisy_spectrum
@@ -359,9 +359,9 @@ impl SimdAudioProcessor {
     /// Mix multiple audio channels with SIMD acceleration
     pub fn mix_channels(channels: &[Vec<f32>], weights: &[f32], output: &mut [f32]) -> Result<()> {
         if channels.len() != weights.len() {
-            return Err(AcousticError::InputError(
-                "Number of channels and weights must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Number of channels and weights must match".to_string(),
+            });
         }
 
         if channels.is_empty() {
@@ -393,9 +393,9 @@ impl SimdAudioProcessor {
         hop_size: usize,
     ) -> Result<Vec<f32>> {
         if stretch_factor <= 0.0 {
-            return Err(AcousticError::InputError(
-                "Stretch factor must be positive".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Stretch factor must be positive".to_string(),
+            });
         }
 
         let output_hop_size = (hop_size as f32 * stretch_factor) as usize;
@@ -446,9 +446,9 @@ impl SimdAudioEffects {
     /// Apply reverb effect using convolution with SIMD acceleration
     pub fn reverb(input: &[f32], impulse_response: &[f32], output: &mut [f32]) -> Result<()> {
         if output.len() < input.len() + impulse_response.len() - 1 {
-            return Err(AcousticError::InputError(
-                "Output buffer too small for convolution".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Output buffer too small for convolution".to_string(),
+            });
         }
 
         // Initialize output
@@ -475,9 +475,9 @@ impl SimdAudioEffects {
         mix: f32,
     ) -> Result<()> {
         if input.len() != output.len() {
-            return Err(AcousticError::InputError(
-                "Input and output lengths must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Input and output lengths must match".to_string(),
+            });
         }
 
         output.copy_from_slice(input);
@@ -503,9 +503,9 @@ impl SimdAudioEffects {
         sample_rate: f32,
     ) -> Result<()> {
         if input.len() != output.len() {
-            return Err(AcousticError::InputError(
-                "Input and output lengths must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Input and output lengths must match".to_string(),
+            });
         }
 
         let delay_samples = (delay_ms * sample_rate / 1000.0) as usize;

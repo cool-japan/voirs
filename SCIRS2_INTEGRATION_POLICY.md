@@ -371,7 +371,7 @@ All commands should return **zero results** ✅
 
 - **Policy Version**: 2.0.0 (Updated for SciRS2 RC.1)
 - **Effective Date**: 2025-10-04
-- **VoiRS Version**: 0.1.0-alpha.2
+- **VoiRS Version**: 0.1.0-alpha.3
 - **SciRS2-Core Version**: 0.1.0-rc.1
 - **Status**: Active - Migration in Progress
 

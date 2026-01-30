@@ -6,8 +6,20 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
+use uuid;
 use voirs_feedback::memory_monitor::{MemoryManager, MemoryMonitor, MemoryMonitorConfig};
-use voirs_feedback::{AudioBuffer, FeedbackSystem};
+use voirs_feedback::{AudioBuffer, FeedbackError, FeedbackSystem, FeedbackSystemConfig};
+
+/// Helper to create FeedbackSystem with test database (in-memory for tests)
+async fn create_test_feedback_system() -> Result<FeedbackSystem, FeedbackError> {
+    let mut config = FeedbackSystemConfig::default();
+    #[cfg(feature = "persistence")]
+    {
+        // Use in-memory database for tests - faster and no file permission issues
+        config.database_path = Some(":memory:".to_string());
+    }
+    FeedbackSystem::with_config(config).await
+}
 
 #[tokio::test]
 async fn test_memory_leak_detection_short_session() {
@@ -85,7 +97,7 @@ async fn test_memory_leak_detection_long_session() {
 #[tokio::test]
 async fn test_memory_leak_with_feedback_system() {
     // Test memory leak detection with actual feedback system usage
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
 
@@ -405,7 +417,7 @@ async fn test_memory_pressure_handling() {
 #[tokio::test]
 async fn test_memory_leak_prevention_integration() {
     // Test integration of memory leak prevention with feedback system
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
 

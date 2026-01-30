@@ -5,9 +5,13 @@
 
 use std::collections::HashMap;
 use tempfile::TempDir;
-use voirs_evaluation::distributed::PerformanceMetrics;
+use voirs_evaluation::distributed::{
+    create_evaluation_task, DistributedConfig, DistributedEvaluator, NetworkMetrics,
+    PerformanceMetrics, TaskParameters, TaskType, WorkerCapabilities, WorkerInfo, WorkerStatus,
+};
+use voirs_evaluation::prelude::*;
+use voirs_evaluation::statistical::StatisticalAnalyzer;
 use voirs_evaluation::*;
-use voirs_sdk::AudioBuffer;
 
 /// Generate a test audio buffer with specific characteristics
 fn generate_test_audio(
@@ -305,6 +309,9 @@ async fn test_distributed_evaluation_framework() {
                 success_rate: 0.0,
                 throughput: 0.0,
             },
+            network_metrics: NetworkMetrics::default(),
+            location: None,
+            is_edge_node: false,
         };
 
         evaluator.register_worker(worker_info).await.unwrap();
@@ -388,11 +395,22 @@ async fn test_statistical_analysis_framework() {
         .correlation_test(&system_a_scores, &system_b_scores)
         .unwrap();
 
+    // test_statistic contains the t-statistic, effect_size contains the correlation coefficient
     assert!(
-        correlation_result.test_statistic >= -1.0 && correlation_result.test_statistic <= 1.0,
-        "Correlation should be valid: {}",
+        correlation_result.test_statistic.is_finite(),
+        "t-statistic should be finite: {}",
         correlation_result.test_statistic
     );
+
+    // Check the actual correlation coefficient (stored in effect_size)
+    if let Some(correlation) = correlation_result.effect_size {
+        assert!(
+            correlation >= -1.0 && correlation <= 1.0,
+            "Correlation coefficient should be valid: {}",
+            correlation
+        );
+    }
+
     assert!(
         correlation_result.p_value >= 0.0 && correlation_result.p_value <= 1.0,
         "Correlation p-value should be valid: {}",

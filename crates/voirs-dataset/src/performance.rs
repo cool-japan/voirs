@@ -319,17 +319,168 @@ impl PerformanceProfiler {
         Ok(())
     }
 
-    /// Get current memory usage (simplified implementation)
+    /// Get current memory usage (platform-specific implementation)
+    ///
+    /// Returns the current resident set size (RSS) in bytes.
+    /// On unsupported platforms, returns 0.
+    #[cfg(target_os = "linux")]
     fn get_memory_usage(&self) -> u64 {
-        // In a real implementation, this would use platform-specific APIs
-        // For now, return a placeholder value
+        use std::fs;
+
+        // Read /proc/self/statm for memory information
+        // Format: size resident shared text lib data dt
+        // We want 'resident' (field 2) in pages
+        if let Ok(content) = fs::read_to_string("/proc/self/statm") {
+            let fields: Vec<&str> = content.split_whitespace().collect();
+            if fields.len() >= 2 {
+                if let Ok(pages) = fields[1].parse::<u64>() {
+                    // Convert pages to bytes (page size is typically 4096)
+                    let page_size = 4096u64; // Standard page size on Linux
+                    return pages * page_size;
+                }
+            }
+        }
         0
     }
 
-    /// Get current CPU utilization (simplified implementation)
+    #[cfg(target_os = "macos")]
+    fn get_memory_usage(&self) -> u64 {
+        use std::mem;
+
+        // Use mach task_info to get memory usage
+        unsafe {
+            let mut info: libc::rusage = mem::zeroed();
+            if libc::getrusage(libc::RUSAGE_SELF, &mut info) == 0 {
+                // ru_maxrss is in kilobytes on macOS
+                return info.ru_maxrss as u64 * 1024;
+            }
+        }
+        0
+    }
+
+    #[cfg(target_os = "windows")]
+    fn get_memory_usage(&self) -> u64 {
+        use windows_sys::Win32::Foundation::HANDLE;
+        use windows_sys::Win32::System::ProcessStatus::{
+            GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+        };
+        use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+        unsafe {
+            let process_handle: HANDLE = GetCurrentProcess();
+            let mut pmc: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
+            pmc.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+
+            if GetProcessMemoryInfo(
+                process_handle,
+                &mut pmc,
+                std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+            ) != 0
+            {
+                // WorkingSetSize represents the current memory usage (RSS equivalent)
+                return pmc.WorkingSetSize as u64;
+            }
+        }
+        0
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    fn get_memory_usage(&self) -> u64 {
+        // Unsupported platform - return 0
+        0
+    }
+
+    /// Get current CPU utilization (platform-specific implementation)
+    ///
+    /// Returns CPU utilization as a value between 0.0 and 1.0 (or higher for multi-core).
+    /// This measures the process's CPU usage, not system-wide.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn get_cpu_utilization(&self) -> f64 {
-        // In a real implementation, this would measure actual CPU usage
-        // For now, return a placeholder value
+        use std::fs;
+        use std::time::SystemTime;
+
+        // On Unix-like systems, use getrusage to get CPU time
+        unsafe {
+            let mut usage: libc::rusage = std::mem::zeroed();
+            if libc::getrusage(libc::RUSAGE_SELF, &mut usage) == 0 {
+                // Calculate total CPU time (user + system)
+                let user_time =
+                    usage.ru_utime.tv_sec as f64 + usage.ru_utime.tv_usec as f64 / 1_000_000.0;
+                let sys_time =
+                    usage.ru_stime.tv_sec as f64 + usage.ru_stime.tv_usec as f64 / 1_000_000.0;
+                let total_cpu_time = user_time + sys_time;
+
+                // Get wall clock time (approximate)
+                if let Ok(elapsed) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+                    let wall_time = elapsed.as_secs_f64();
+
+                    // CPU utilization is total_cpu_time / wall_time
+                    // For multi-threaded apps, this can be > 1.0
+                    if wall_time > 0.0 {
+                        return (total_cpu_time / wall_time).min(num_cpus::get() as f64);
+                    }
+                }
+            }
+        }
+        0.0
+    }
+
+    #[cfg(target_os = "windows")]
+    fn get_cpu_utilization(&self) -> f64 {
+        use windows_sys::Win32::Foundation::{FILETIME, HANDLE};
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
+
+        unsafe {
+            let process_handle: HANDLE = GetCurrentProcess();
+            let mut creation_time: FILETIME = std::mem::zeroed();
+            let mut exit_time: FILETIME = std::mem::zeroed();
+            let mut kernel_time: FILETIME = std::mem::zeroed();
+            let mut user_time: FILETIME = std::mem::zeroed();
+
+            if GetProcessTimes(
+                process_handle,
+                &mut creation_time,
+                &mut exit_time,
+                &mut kernel_time,
+                &mut user_time,
+            ) != 0
+            {
+                // Convert FILETIME to 100-nanosecond intervals
+                let kernel_time_100ns = ((kernel_time.dwHighDateTime as u64) << 32)
+                    | (kernel_time.dwLowDateTime as u64);
+                let user_time_100ns =
+                    ((user_time.dwHighDateTime as u64) << 32) | (user_time.dwLowDateTime as u64);
+                let creation_time_100ns = ((creation_time.dwHighDateTime as u64) << 32)
+                    | (creation_time.dwLowDateTime as u64);
+
+                // Calculate total CPU time in seconds
+                let total_cpu_time = (kernel_time_100ns + user_time_100ns) as f64 / 10_000_000.0;
+
+                // Get current time since epoch
+                if let Ok(now) =
+                    std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH)
+                {
+                    // Convert Windows FILETIME (100-nanosecond intervals since 1601-01-01)
+                    // to Unix epoch (seconds since 1970-01-01)
+                    const FILETIME_TO_UNIX_EPOCH: u64 = 116444736000000000;
+                    let creation_time_unix =
+                        (creation_time_100ns - FILETIME_TO_UNIX_EPOCH) as f64 / 10_000_000.0;
+                    let wall_time = now.as_secs_f64() - creation_time_unix;
+
+                    if wall_time > 0.0 {
+                        // CPU utilization is total_cpu_time / wall_time
+                        // For multi-threaded apps, this can be > 1.0
+                        return (total_cpu_time / wall_time).min(num_cpus::get() as f64);
+                    }
+                }
+            }
+        }
+        0.0
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    fn get_cpu_utilization(&self) -> f64 {
+        // Unsupported platform - return 0.0
         0.0
     }
 }

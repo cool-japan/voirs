@@ -1,0 +1,57 @@
+# Development environment overlay for VoiRS Evaluation
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: voirs-dev
+
+bases:
+- ../../base
+
+namePrefix: dev-
+
+commonLabels:
+  environment: development
+
+patches:
+- target:
+    kind: Deployment
+    name: voirs-evaluation-worker
+  patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 1
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/cpu
+      value: "250m"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/memory
+      value: "512Mi"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/cpu
+      value: "1000m"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/memory
+      value: "2Gi"
+
+- target:
+    kind: HorizontalPodAutoscaler
+    name: voirs-evaluation-worker-hpa
+  patch: |-
+    - op: replace
+      path: /spec/minReplicas
+      value: 1
+    - op: replace
+      path: /spec/maxReplicas
+      value: 5
+
+configMapGenerator:
+- name: voirs-evaluation-env-dev
+  behavior: merge
+  literals:
+  - RUST_LOG=debug
+  - ENABLE_DEBUG=true
+  - MOCK_EVALUATION=true
+
+images:
+- name: voirs/evaluation
+  newTag: latest

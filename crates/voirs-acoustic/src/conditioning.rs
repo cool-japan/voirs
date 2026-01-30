@@ -300,9 +300,9 @@ impl ConditionalLayer {
                 )?)
             }
             _ => {
-                return Err(AcousticError::ConfigError(
-                    "Unsupported conditioning strategy".to_string(),
-                ))
+                return Err(AcousticError::ConfigError {
+                    message: "Unsupported conditioning strategy".to_string(),
+                })
             }
         };
 

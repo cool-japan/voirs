@@ -491,9 +491,9 @@ impl ModelOptimizer {
 
         // For now, return the original model
         // This would be replaced with actual quantization logic
-        Err(AcousticError::Processing(
-            "INT8 quantization not yet implemented".to_string(),
-        ))
+        Err(AcousticError::ProcessingError {
+            message: "INT8 quantization not yet implemented".to_string(),
+        })
     }
 
     /// Apply FP16 quantization
@@ -509,9 +509,9 @@ impl ModelOptimizer {
 
         // For now, return the original model
         // This would be replaced with actual FP16 conversion logic
-        Err(AcousticError::Processing(
-            "FP16 quantization not yet implemented".to_string(),
-        ))
+        Err(AcousticError::ProcessingError {
+            message: "FP16 quantization not yet implemented".to_string(),
+        })
     }
 
     /// Apply mixed precision quantization
@@ -521,9 +521,9 @@ impl ModelOptimizer {
     ) -> Result<Arc<dyn AcousticModel>> {
         // This is a placeholder implementation
         // Mixed precision keeps sensitive layers in FP32 and others in FP16
-        Err(AcousticError::Processing(
-            "Mixed precision not yet implemented".to_string(),
-        ))
+        Err(AcousticError::ProcessingError {
+            message: "Mixed precision not yet implemented".to_string(),
+        })
     }
 
     /// Apply dynamic quantization
@@ -533,9 +533,9 @@ impl ModelOptimizer {
     ) -> Result<Arc<dyn AcousticModel>> {
         // This is a placeholder implementation
         // Dynamic quantization adjusts precision based on layer sensitivity
-        Err(AcousticError::Processing(
-            "Dynamic quantization not yet implemented".to_string(),
-        ))
+        Err(AcousticError::ProcessingError {
+            message: "Dynamic quantization not yet implemented".to_string(),
+        })
     }
 
     /// Apply pruning to remove redundant parameters
@@ -555,9 +555,9 @@ impl ModelOptimizer {
     ) -> Result<Arc<dyn AcousticModel>> {
         // This is a placeholder implementation
         // Magnitude pruning removes weights with smallest absolute values
-        Err(AcousticError::Processing(
-            "Magnitude pruning not yet implemented".to_string(),
-        ))
+        Err(AcousticError::ProcessingError {
+            message: "Magnitude pruning not yet implemented".to_string(),
+        })
     }
 
     /// Apply gradient-based pruning
@@ -567,9 +567,9 @@ impl ModelOptimizer {
     ) -> Result<Arc<dyn AcousticModel>> {
         // This is a placeholder implementation
         // Gradient pruning removes weights with smallest gradients
-        Err(AcousticError::Processing(
-            "Gradient pruning not yet implemented".to_string(),
-        ))
+        Err(AcousticError::ProcessingError {
+            message: "Gradient pruning not yet implemented".to_string(),
+        })
     }
 
     /// Apply Fisher information-based pruning
@@ -579,9 +579,9 @@ impl ModelOptimizer {
     ) -> Result<Arc<dyn AcousticModel>> {
         // This is a placeholder implementation
         // Fisher pruning uses Fisher information to identify important weights
-        Err(AcousticError::Processing(
-            "Fisher pruning not yet implemented".to_string(),
-        ))
+        Err(AcousticError::ProcessingError {
+            message: "Fisher pruning not yet implemented".to_string(),
+        })
     }
 
     /// Apply adaptive pruning
@@ -591,9 +591,9 @@ impl ModelOptimizer {
     ) -> Result<Arc<dyn AcousticModel>> {
         // This is a placeholder implementation
         // Adaptive pruning adjusts sparsity per layer based on sensitivity
-        Err(AcousticError::Processing(
-            "Adaptive pruning not yet implemented".to_string(),
-        ))
+        Err(AcousticError::ProcessingError {
+            message: "Adaptive pruning not yet implemented".to_string(),
+        })
     }
 
     /// Apply knowledge distillation
@@ -603,9 +603,9 @@ impl ModelOptimizer {
     ) -> Result<Arc<dyn AcousticModel>> {
         // This is a placeholder implementation
         // Knowledge distillation trains a smaller student model to mimic a larger teacher
-        Err(AcousticError::Processing(
-            "Knowledge distillation not yet implemented".to_string(),
-        ))
+        Err(AcousticError::ProcessingError {
+            message: "Knowledge distillation not yet implemented".to_string(),
+        })
     }
 
     /// Measure model performance metrics
@@ -737,6 +737,12 @@ impl ModelOptimizer {
     }
 }
 
+// Type aliases for compatibility with existing API
+pub type OptimizationReport = OptimizationResults;
+pub type OptimizationMetrics = ModelMetrics;
+pub type HardwareTarget = TargetDevice;
+pub type DistillationStrategy = DistillationMethod;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -851,9 +857,3 @@ mod tests {
         assert!(metrics.flop_count > 0);
     }
 }
-
-// Type aliases for compatibility with test code
-pub type OptimizationReport = OptimizationResults;
-pub type OptimizationMetrics = ModelMetrics;
-pub type HardwareTarget = TargetDevice;
-pub type DistillationStrategy = DistillationMethod;

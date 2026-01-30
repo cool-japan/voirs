@@ -126,6 +126,7 @@ pub struct MemoryStats {
 
 impl MemoryPool {
     /// Create new memory pool
+    #[must_use]
     pub fn new(max_size_mb: usize) -> Self {
         Self {
             available_blocks: HashMap::new(),
@@ -183,7 +184,7 @@ impl MemoryPool {
 
         self.available_blocks
             .entry(size)
-            .or_insert_with(VecDeque::new)
+            .or_default()
             .push_back(block);
     }
 
@@ -193,7 +194,7 @@ impl MemoryPool {
         let mut freed = 0;
 
         // Remove blocks from largest to smallest
-        let mut sizes: Vec<usize> = self.available_blocks.keys().cloned().collect();
+        let mut sizes: Vec<usize> = self.available_blocks.keys().copied().collect();
         sizes.sort_by(|a, b| b.cmp(a));
 
         for size in sizes {
@@ -202,7 +203,7 @@ impl MemoryPool {
             }
 
             if let Some(blocks) = self.available_blocks.get_mut(&size) {
-                while let Some(_) = blocks.pop_back() {
+                while blocks.pop_back().is_some() {
                     freed += size * 4;
                     self.total_allocated = self.total_allocated.saturating_sub(size * 4);
 
@@ -219,11 +220,13 @@ impl MemoryPool {
     }
 
     /// Get memory statistics
+    #[must_use]
     pub fn stats(&self) -> &MemoryStats {
         &self.stats
     }
 
     /// Get memory utilization percentage
+    #[must_use]
     pub fn utilization(&self) -> f32 {
         (self.total_allocated as f32 / self.max_size as f32) * 100.0
     }
@@ -243,11 +246,13 @@ pub enum MixedPrecisionTensor {
 
 impl MixedPrecisionTensor {
     /// Create FP32 tensor
+    #[must_use]
     pub fn fp32(data: Vec<Vec<f32>>) -> Self {
         MixedPrecisionTensor::FP32(data)
     }
 
     /// Create FP16 tensor
+    #[must_use]
     pub fn fp16(data: Vec<Vec<f32>>) -> Self {
         let fp16_data = data
             .iter()
@@ -257,6 +262,7 @@ impl MixedPrecisionTensor {
     }
 
     /// Create BF16 tensor
+    #[must_use]
     pub fn bf16(data: Vec<Vec<f32>>) -> Self {
         let bf16_data = data
             .iter()
@@ -266,6 +272,7 @@ impl MixedPrecisionTensor {
     }
 
     /// Convert to FP32
+    #[must_use]
     pub fn to_fp32(&self) -> Vec<Vec<f32>> {
         match self {
             MixedPrecisionTensor::FP32(data) => data.clone(),
@@ -300,8 +307,8 @@ impl MixedPrecisionTensor {
     /// Convert FP16 to f32 (simplified)
     fn fp16_to_f32(value: u16) -> f32 {
         let sign = (value >> 15) & 0x1;
-        let exp = ((value >> 10) & 0x1f) as i32;
-        let mantissa = (value & 0x3ff) as u32;
+        let exp = i32::from((value >> 10) & 0x1f);
+        let mantissa = u32::from(value & 0x3ff);
 
         if exp == 0 {
             if mantissa == 0 {
@@ -331,8 +338,7 @@ impl MixedPrecisionTensor {
             }
         } else {
             let exp_bias = exp - 15 + 127;
-            let bits =
-                ((sign as u32) << 31) | ((exp_bias as u32) << 23) | ((mantissa as u32) << 13);
+            let bits = (u32::from(sign) << 31) | ((exp_bias as u32) << 23) | (mantissa << 13);
             f32::from_bits(bits)
         }
     }
@@ -346,10 +352,11 @@ impl MixedPrecisionTensor {
     /// Convert BF16 to f32 (simplified)
     fn bf16_to_f32(value: u16) -> f32 {
         // BF16 to f32: shift left 16 bits
-        f32::from_bits((value as u32) << 16)
+        f32::from_bits(u32::from(value) << 16)
     }
 
     /// Get memory footprint in bytes
+    #[must_use]
     pub fn memory_footprint(&self) -> usize {
         match self {
             MixedPrecisionTensor::FP32(data) => {
@@ -385,8 +392,15 @@ impl std::fmt::Debug for GradientCheckpoint {
     }
 }
 
+impl Default for GradientCheckpoint {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GradientCheckpoint {
     /// Create new gradient checkpointing system
+    #[must_use]
     pub fn new() -> Self {
         Self {
             checkpoints: HashMap::new(),
@@ -408,6 +422,7 @@ impl GradientCheckpoint {
     }
 
     /// Get activations (from checkpoint or recompute)
+    #[must_use]
     pub fn get_activations(&self, name: &str, input: Option<&[Vec<f32>]>) -> Option<Vec<Vec<f32>>> {
         if let Some(activations) = self.checkpoints.get(name) {
             Some(activations.clone())
@@ -424,6 +439,7 @@ impl GradientCheckpoint {
     }
 
     /// Get memory usage of checkpoints
+    #[must_use]
     pub fn memory_usage(&self) -> usize {
         self.checkpoints
             .values()
@@ -438,12 +454,19 @@ impl GradientCheckpoint {
 pub struct SharedParameters {
     /// Shared weight matrices
     shared_weights: HashMap<String, Arc<Vec<Vec<f32>>>>,
-    /// Weight mapping (layer_name -> shared_weight_name)
+    /// Weight mapping (`layer_name` -> `shared_weight_name`)
     weight_mapping: HashMap<String, String>,
+}
+
+impl Default for SharedParameters {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SharedParameters {
     /// Create new parameter sharing system
+    #[must_use]
     pub fn new() -> Self {
         Self {
             shared_weights: HashMap::new(),
@@ -462,6 +485,7 @@ impl SharedParameters {
     }
 
     /// Get weights for layer
+    #[must_use]
     pub fn get_weights(&self, layer_name: &str) -> Option<Arc<Vec<Vec<f32>>>> {
         if let Some(shared_name) = self.weight_mapping.get(layer_name) {
             self.shared_weights.get(shared_name).cloned()
@@ -471,6 +495,7 @@ impl SharedParameters {
     }
 
     /// Calculate memory savings
+    #[must_use]
     pub fn memory_savings(&self) -> (usize, usize) {
         let shared_memory: usize = self
             .shared_weights
@@ -497,6 +522,7 @@ pub struct ActivationCompressor {
 
 impl ActivationCompressor {
     /// Create new activation compressor
+    #[must_use]
     pub fn new(compression_ratio: f32, quantization_levels: u32) -> Self {
         Self {
             compression_ratio,
@@ -505,6 +531,7 @@ impl ActivationCompressor {
     }
 
     /// Compress activations
+    #[must_use]
     pub fn compress(&self, activations: &[Vec<f32>]) -> CompressedActivations {
         let mut compressed_data = Vec::new();
         let mut min_val = f32::INFINITY;
@@ -540,12 +567,13 @@ impl ActivationCompressor {
             quantization_levels: self.quantization_levels,
             original_shape: (
                 activations.len(),
-                activations.get(0).map_or(0, |row| row.len()),
+                activations.first().map_or(0, std::vec::Vec::len),
             ),
         }
     }
 
     /// Decompress activations
+    #[must_use]
     pub fn decompress(&self, compressed: &CompressedActivations) -> Vec<Vec<f32>> {
         let range = compressed.max_val - compressed.min_val;
         let scale = range / (compressed.quantization_levels - 1) as f32;
@@ -555,7 +583,7 @@ impl ActivationCompressor {
             .iter()
             .map(|row| {
                 row.iter()
-                    .map(|&quantized| compressed.min_val + (quantized as f32) * scale)
+                    .map(|&quantized| compressed.min_val + f32::from(quantized) * scale)
                     .collect()
             })
             .collect()
@@ -575,15 +603,17 @@ pub struct CompressedActivations {
 
 impl CompressedActivations {
     /// Get compression ratio achieved
+    #[must_use]
     pub fn compression_ratio(&self) -> f32 {
-        let compressed_size = self.data.iter().map(|row| row.len()).sum::<usize>();
+        let compressed_size = self.data.iter().map(std::vec::Vec::len).sum::<usize>();
         let original_size = self.original_shape.0 * self.original_shape.1 * 4; // 4 bytes per f32
         original_size as f32 / compressed_size as f32
     }
 
     /// Get memory footprint
+    #[must_use]
     pub fn memory_footprint(&self) -> usize {
-        self.data.iter().map(|row| row.len()).sum::<usize>() +
+        self.data.iter().map(std::vec::Vec::len).sum::<usize>() +
         std::mem::size_of::<f32>() * 2 + // min_val, max_val
         std::mem::size_of::<u32>() + // quantization_levels
         std::mem::size_of::<(usize, usize)>() // original_shape
@@ -608,6 +638,7 @@ pub struct MemoryEfficientLayer {
 
 impl MemoryEfficientLayer {
     /// Create memory-efficient layer
+    #[must_use]
     pub fn new(config: MemoryOptimizationConfig) -> Self {
         let memory_pool = Arc::new(Mutex::new(MemoryPool::new(config.memory_pool_size_mb)));
         let checkpointing = GradientCheckpoint::new();
@@ -624,6 +655,7 @@ impl MemoryEfficientLayer {
     }
 
     /// Allocate memory through pool
+    #[must_use]
     pub fn allocate_memory(&self, size: usize) -> Option<Vec<f32>> {
         self.memory_pool.lock().unwrap().allocate(size)
     }
@@ -634,11 +666,13 @@ impl MemoryEfficientLayer {
     }
 
     /// Get memory statistics
+    #[must_use]
     pub fn memory_stats(&self) -> MemoryStats {
         self.memory_pool.lock().unwrap().stats().clone()
     }
 
     /// Check if memory usage is within threshold
+    #[must_use]
     pub fn within_memory_threshold(&self) -> bool {
         let stats = self.memory_stats();
         let usage_mb = stats.current_usage / (1024 * 1024);
@@ -646,6 +680,7 @@ impl MemoryEfficientLayer {
     }
 
     /// Apply mixed precision to tensor
+    #[must_use]
     pub fn apply_mixed_precision(&self, data: Vec<Vec<f32>>) -> MixedPrecisionTensor {
         match self.config.mixed_precision {
             MixedPrecisionMode::FP32 => MixedPrecisionTensor::fp32(data),

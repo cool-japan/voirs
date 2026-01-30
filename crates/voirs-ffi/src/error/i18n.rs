@@ -237,6 +237,12 @@ pub struct I18nManager {
     fallback_locale: Locale,
 }
 
+impl Default for I18nManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl I18nManager {
     pub fn new() -> Self {
         let mut manager = Self {
@@ -649,6 +655,9 @@ pub fn format_currency(amount: f64, currency: &str) -> String {
 }
 
 /// C API functions for internationalization
+///
+/// # Safety
+/// The `locale_code` pointer must be valid and point to a null-terminated C string.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_set_locale(
     locale_code: *const std::os::raw::c_char,
@@ -671,6 +680,10 @@ pub unsafe extern "C" fn voirs_set_locale(
     }
 }
 
+/// Get the current locale setting
+///
+/// # Safety
+/// The `buffer` pointer must be valid and point to a writable buffer of at least `buffer_size` bytes.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_get_locale(
     buffer: *mut std::os::raw::c_char,
@@ -695,6 +708,10 @@ pub unsafe extern "C" fn voirs_get_locale(
     crate::VoirsErrorCode::Success
 }
 
+/// Get a localized error message with context
+///
+/// # Safety
+/// The `context_keys` and `context_values` pointers, if not null, must point to arrays of `context_count` valid null-terminated C string pointers.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_get_localized_message(
     category: VoirsErrorCategory,

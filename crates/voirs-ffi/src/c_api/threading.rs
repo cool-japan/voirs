@@ -189,6 +189,10 @@ pub extern "C" fn voirs_is_thread_pool_enabled() -> c_int {
 }
 
 /// Register callbacks for a pipeline
+///
+/// # Safety
+/// The `user_data` pointer, if not null, must be valid for the lifetime of the callbacks.
+/// All callback function pointers must be valid and callable from any thread.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_register_callbacks(
     pipeline_id: c_uint,
@@ -219,6 +223,10 @@ pub extern "C" fn voirs_unregister_callbacks(pipeline_id: c_uint) -> VoirsErrorC
 }
 
 /// Start asynchronous synthesis with callbacks
+///
+/// # Safety
+/// The `text` pointer must be valid and point to a null-terminated C string.
+/// The `_config` pointer, if not null, must be valid and point to a properly initialized VoirsSynthesisConfig.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_synthesize_async(
     pipeline_id: c_uint,
@@ -294,7 +302,7 @@ pub unsafe extern "C" fn voirs_synthesize_async(
             ACTIVE_OPERATIONS.fetch_sub(1, Ordering::Relaxed);
         });
 
-        return VoirsErrorCode::Success;
+        VoirsErrorCode::Success
     }
 
     #[cfg(not(test))]
@@ -359,12 +367,11 @@ pub unsafe extern "C" fn voirs_synthesize_async(
                 // Operation was cancelled before it could start
                 if let Some(ref callbacks) = callback_info {
                     if let Some(error_cb) = callbacks.error_callback {
-                        let msg = std::ffi::CString::new("Operation cancelled").unwrap_or_else(
-                            |_| {
+                        let msg =
+                            std::ffi::CString::new("Operation cancelled").unwrap_or_else(|_| {
                                 std::ffi::CString::new("Operation cancelled (encoding error)")
                                     .unwrap()
-                            },
-                        );
+                            });
                         error_cb(
                             pipeline_id,
                             VoirsErrorCode::OperationCancelled,
@@ -541,6 +548,13 @@ pub extern "C" fn voirs_get_active_operations() -> c_uint {
 }
 
 /// Thread-safe synthesis with automatic load balancing
+///
+/// # Safety
+/// The `pipeline_ids` pointer must be valid and point to an array of at least `count` c_uint values.
+/// The `texts` pointer must be valid and point to an array of at least `count` pointers to null-terminated C strings.
+/// The `configs` pointer, if not null, must be valid and point to an array of at least `count` VoirsSynthesisConfig structs.
+/// The `results` pointer, if not null, must be valid and point to a writable buffer of at least `count` VoirsErrorCode values.
+/// The `audio_buffers` pointer, if not null, must be valid and point to a writable buffer of at least `count` pointers.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_synthesize_parallel(
     pipeline_ids: *const c_uint,
@@ -724,6 +738,9 @@ pub unsafe extern "C" fn voirs_synthesize_parallel(
 }
 
 /// Get thread pool statistics
+///
+/// # Safety
+/// The `active_threads`, `queued_tasks`, and `completed_tasks` pointers must be valid and point to writable c_uint values.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_get_thread_stats(
     active_threads: *mut c_uint,

@@ -156,6 +156,7 @@ pub fn handle_error(error: VoirsError, message: &str) -> VoirsError {
 }
 
 /// Macro for handling errors with automatic message generation
+#[allow(unused_macros)]
 macro_rules! handle_error_with_message {
     ($error:expr, $message:expr) => {
         crate::c_api::error::handle_error($error, $message)

@@ -319,12 +319,13 @@ impl LjSpeechDataset {
         let mut rng = if let Some(seed) = config.seed {
             scirs2_core::random::Random::seed(seed)
         } else {
-            scirs2_core::random::Random::seed(
-                std::time::SystemTime::now()
+            {
+                let seed = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
-            )
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                scirs2_core::random::Random::seed(seed)
+            }
         };
 
         let mut indices: Vec<usize> = (0..self.samples.len()).collect();
@@ -346,12 +347,13 @@ impl LjSpeechDataset {
         let mut rng = if let Some(seed) = config.seed {
             scirs2_core::random::Random::seed(seed)
         } else {
-            scirs2_core::random::Random::seed(
-                std::time::SystemTime::now()
+            {
+                let seed = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
-            )
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                scirs2_core::random::Random::seed(seed)
+            }
         };
 
         // Sort by duration to ensure balanced distribution
@@ -362,7 +364,7 @@ impl LjSpeechDataset {
             .map(|(i, sample)| (i, sample.audio.duration()))
             .collect();
 
-        indexed_samples.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        indexed_samples.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
         // Group into buckets and shuffle within buckets for better distribution
         let bucket_size = indexed_samples.len() / 10; // 10 buckets
@@ -381,12 +383,13 @@ impl LjSpeechDataset {
         let mut rng = if let Some(seed) = config.seed {
             scirs2_core::random::Random::seed(seed)
         } else {
-            scirs2_core::random::Random::seed(
-                std::time::SystemTime::now()
+            {
+                let seed = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
-            )
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                scirs2_core::random::Random::seed(seed)
+            }
         };
 
         // Sort by text length to ensure balanced distribution
@@ -546,7 +549,7 @@ impl Dataset for LjSpeechDataset {
             }
         } else {
             let mut sorted_durations = durations.clone();
-            sorted_durations.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            sorted_durations.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
             let min = sorted_durations[0];
             let max = sorted_durations[sorted_durations.len() - 1];

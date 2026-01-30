@@ -586,8 +586,7 @@ impl PerformanceMonitor {
                 feature_metrics.memory_stats.peak_memory = memory_usage;
             }
             feature_metrics.memory_stats.average_memory =
-                (feature_metrics.memory_stats.average_memory
-                    * (feature_metrics.usage_count - 1) as u64
+                (feature_metrics.memory_stats.average_memory * (feature_metrics.usage_count - 1)
                     + memory_usage)
                     / feature_metrics.usage_count;
 
@@ -617,7 +616,11 @@ impl PerformanceMonitor {
         }
 
         // Update overall feature stats with cloned metrics to avoid borrow issues
-        let feature_metrics_clone = metrics.feature_metrics.get(&feature).unwrap().clone();
+        let feature_metrics_clone = metrics
+            .feature_metrics
+            .get(&feature)
+            .ok_or_else(|| VoirsError::internal("PerformanceMonitor", "Feature metrics not found"))?
+            .clone();
         self.update_feature_stats(&mut metrics.feature_stats, feature, &feature_metrics_clone)?;
 
         Ok(())

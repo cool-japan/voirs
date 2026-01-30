@@ -34,8 +34,10 @@
 
 pub mod cloning;
 pub mod emotion;
+pub mod input_detector;
 pub mod multimodal;
 
 pub use cloning::*;
 pub use emotion::*;
+pub use input_detector::*;
 pub use multimodal::*;

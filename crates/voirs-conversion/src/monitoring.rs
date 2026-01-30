@@ -619,9 +619,12 @@ impl QualityMonitor {
 
     /// Get current dashboard data
     pub async fn get_dashboard(&self) -> Result<QualityDashboard> {
-        let collector = self.collector.lock().unwrap();
-        let alerter = self.alerter.lock().unwrap();
-        let performance_tracker = self.performance_tracker.lock().unwrap();
+        let collector = self.collector.lock().expect("Collector lock poisoned");
+        let alerter = self.alerter.lock().expect("Alerter lock poisoned");
+        let performance_tracker = self
+            .performance_tracker
+            .lock()
+            .expect("Performance tracker lock poisoned");
 
         let mut current_sessions = HashMap::new();
 
@@ -767,7 +770,7 @@ impl QualityMonitor {
             } => {
                 // Update collector and check for new session
                 let is_new_session = {
-                    let mut collector_guard = collector.lock().unwrap();
+                    let mut collector_guard = collector.lock().expect("Collector lock poisoned");
                     let data_point = QualityDataPoint {
                         timestamp,
                         session_id: session_id.clone(),
@@ -785,7 +788,9 @@ impl QualityMonitor {
 
                 // Update active session count if this is a new session
                 if is_new_session {
-                    let mut tracker_guard = performance_tracker.lock().unwrap();
+                    let mut tracker_guard = performance_tracker
+                        .lock()
+                        .expect("Performance tracker lock poisoned");
                     tracker_guard.active_sessions += 1;
                     tracker_guard.total_sessions += 1;
                 }
@@ -808,7 +813,7 @@ impl QualityMonitor {
                         metadata: HashMap::new(),
                     };
 
-                    let mut alerter_guard = alerter.lock().unwrap();
+                    let mut alerter_guard = alerter.lock().expect("Alerter lock poisoned");
                     alerter_guard.add_alert(alert);
                 }
 
@@ -826,7 +831,7 @@ impl QualityMonitor {
                         metadata: HashMap::new(),
                     };
 
-                    let mut alerter_guard = alerter.lock().unwrap();
+                    let mut alerter_guard = alerter.lock().expect("Alerter lock poisoned");
                     alerter_guard.add_alert(alert);
                 }
             }
@@ -839,7 +844,9 @@ impl QualityMonitor {
                 throughput_samples_per_sec,
                 queue_length,
             } => {
-                let mut tracker_guard = performance_tracker.lock().unwrap();
+                let mut tracker_guard = performance_tracker
+                    .lock()
+                    .expect("Performance tracker lock poisoned");
                 tracker_guard.update_performance_metrics(
                     cpu_usage_percent,
                     memory_usage_mb,
@@ -863,8 +870,10 @@ impl QualityMonitor {
         performance_tracker: &Arc<Mutex<PerformanceTracker>>,
     ) -> Result<()> {
         let (stats, performance_stats) = {
-            let collector_guard = collector.lock().unwrap();
-            let tracker_guard = performance_tracker.lock().unwrap();
+            let collector_guard = collector.lock().expect("Collector lock poisoned");
+            let tracker_guard = performance_tracker
+                .lock()
+                .expect("Performance tracker lock poisoned");
             (
                 collector_guard.aggregate_stats.clone(),
                 tracker_guard.system_resources.clone(),

@@ -121,11 +121,9 @@ impl VoiceSearch {
 
                 if voice_quality_score < min_quality_score {
                     matches = false;
-                } else {
-                    if voice_quality_score >= min_quality_score {
-                        reasons.push("Meets quality requirements".to_string());
-                        score += 0.2;
-                    }
+                } else if voice_quality_score >= min_quality_score {
+                    reasons.push("Meets quality requirements".to_string());
+                    score += 0.2;
                 }
             }
 
@@ -361,45 +359,97 @@ pub struct VoiceStatistics {
     pub emotion_support_count: usize,
 }
 
+/// Configuration for voice search command
+///
+/// Consolidates all search parameters for finding voices in the VoiRS voice
+/// registry. Supports text-based search, filtering by characteristics, and
+/// voice statistics display.
+///
+/// # Examples
+///
+/// Basic text search:
+/// ```no_run
+/// use voirs_cli::commands::voice_search::VoiceSearchCommandConfig;
+///
+/// let config = VoiceSearchCommandConfig {
+///     query: Some("friendly female voice"),
+///     language: None,
+///     gender: None,
+///     age: None,
+///     style: None,
+///     min_quality: None,
+///     emotion_support: false,
+///     show_stats: false,
+/// };
+/// ```
+///
+/// Filtered search:
+/// ```no_run
+/// use voirs_cli::commands::voice_search::VoiceSearchCommandConfig;
+///
+/// let config = VoiceSearchCommandConfig {
+///     query: Some("professional"),
+///     language: Some("en-US"),
+///     gender: Some("female"),
+///     age: Some("young-adult"),
+///     style: Some("formal"),
+///     min_quality: Some("high"),
+///     emotion_support: true,
+///     show_stats: false,
+/// };
+/// ```
+#[derive(Debug)]
+pub struct VoiceSearchCommandConfig<'a> {
+    /// Optional search query text (searches in name, description, tags)
+    pub query: Option<&'a str>,
+    /// Filter by language code (e.g., "en-US", "ja-JP")
+    pub language: Option<&'a str>,
+    /// Filter by gender ("male", "female", "neutral")
+    pub gender: Option<&'a str>,
+    /// Filter by age range ("child", "young-adult", "adult", "senior")
+    pub age: Option<&'a str>,
+    /// Filter by voice style (e.g., "casual", "formal", "energetic")
+    pub style: Option<&'a str>,
+    /// Minimum quality level ("low", "medium", "high", "ultra")
+    pub min_quality: Option<&'a str>,
+    /// Filter to only voices with emotion support
+    pub emotion_support: bool,
+    /// Show voice statistics instead of search results
+    pub show_stats: bool,
+}
+
 /// Run voice search command
 pub async fn run_voice_search(
-    query: Option<&str>,
-    language: Option<&str>,
-    gender: Option<&str>,
-    age: Option<&str>,
-    style: Option<&str>,
-    min_quality: Option<&str>,
-    emotion_support: bool,
-    show_stats: bool,
+    search_config: VoiceSearchCommandConfig<'_>,
     config: &AppConfig,
 ) -> Result<()> {
     let search = VoiceSearch::new(config).await?;
 
-    if show_stats {
+    if search_config.show_stats {
         print_voice_statistics(&search.get_statistics());
         return Ok(());
     }
 
-    let results = if let Some(query) = query {
+    let results = if let Some(query) = search_config.query {
         search.search(query)
     } else {
         let criteria = VoiceSearchCriteria {
-            language: language.map(|s| s.to_string()),
-            gender: gender.map(|s| s.to_string()),
-            age: age.map(|s| s.to_string()),
-            style: style.map(|s| s.to_string()),
-            min_quality: min_quality.map(|s| s.to_string()),
-            emotion_support,
-            require_gender: gender.is_some(),
-            require_age: age.is_some(),
-            require_emotion_support: emotion_support,
+            language: search_config.language.map(|s| s.to_string()),
+            gender: search_config.gender.map(|s| s.to_string()),
+            age: search_config.age.map(|s| s.to_string()),
+            style: search_config.style.map(|s| s.to_string()),
+            min_quality: search_config.min_quality.map(|s| s.to_string()),
+            emotion_support: search_config.emotion_support,
+            require_gender: search_config.gender.is_some(),
+            require_age: search_config.age.is_some(),
+            require_emotion_support: search_config.emotion_support,
         };
         search.search_by_criteria(&criteria)
     };
 
     if results.is_empty() {
         println!("No voices found matching your criteria.");
-        if let Some(query) = query {
+        if let Some(query) = search_config.query {
             println!("Try using broader search terms or check the available voices with 'voirs voices list'.");
         }
         return Ok(());

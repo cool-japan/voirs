@@ -192,10 +192,10 @@ impl ParallelMultiHeadAttention {
         vs: &candle_nn::VarBuilder,
     ) -> Result<Self> {
         let _head_dim = config.hidden_dim / config.num_heads;
-        if config.hidden_dim % config.num_heads != 0 {
-            return Err(AcousticError::ConfigError(
-                "Hidden dimension must be divisible by number of heads".to_string(),
-            ));
+        if !config.hidden_dim.is_multiple_of(config.num_heads) {
+            return Err(AcousticError::ConfigError {
+                message: "Hidden dimension must be divisible by number of heads".to_string(),
+            });
         }
 
         let query_proj = candle_nn::linear(config.hidden_dim, config.hidden_dim, vs.pp("query"))?;
@@ -1078,7 +1078,10 @@ impl ParallelMultiHeadAttention {
 
     /// Get current performance statistics
     pub fn get_stats(&self) -> AttentionStats {
-        self.stats.lock().unwrap().clone()
+        self.stats
+            .lock()
+            .expect("ParallelAttention stats mutex poisoned")
+            .clone()
     }
 
     /// Reset performance statistics
@@ -1295,15 +1298,19 @@ impl EmotionAwareMultiHeadAttention {
             *current_emotion = Some(emotion);
             Ok(())
         } else {
-            Err(AcousticError::InferenceError(
-                "Failed to set emotion".to_string(),
-            ))
+            Err(AcousticError::InferenceError {
+                message: "Failed to set emotion".to_string(),
+            })
         }
     }
 
     /// Forward pass with emotion conditioning
     pub fn forward(&self, input: &Tensor, attention_mask: Option<&Tensor>) -> CandleResult<Tensor> {
-        let emotion_vector = self.current_emotion.lock().unwrap().clone();
+        let emotion_vector = self
+            .current_emotion
+            .lock()
+            .expect("EmotionAwareAttention current_emotion mutex poisoned")
+            .clone();
 
         match emotion_vector {
             Some(emotion) => self.forward_with_emotion(input, attention_mask, &emotion),

@@ -227,14 +227,14 @@ mod tests {
         let mut kahan = KahanSum::new();
 
         // Add many small values that would normally lose precision
-        for _ in 0..1000000 {
+        for _ in 0..1_000_000 {
             let value = 1e-10;
             basic_sum += value;
             kahan.add(value);
         }
 
         // Kahan sum should be more accurate
-        let expected = 1000000.0 * 1e-10;
+        let expected = 1_000_000.0 * 1e-10;
         assert!((kahan.sum() - expected).abs() < (basic_sum - expected).abs());
     }
 

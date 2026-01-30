@@ -888,7 +888,7 @@ impl EnhancedPerformanceMonitor {
         // Calculate median
         let mut sorted_latencies = latencies.clone();
         sorted_latencies.sort_unstable();
-        tracker.stats.median_latency_ms = if sorted_latencies.len() % 2 == 0 {
+        tracker.stats.median_latency_ms = if sorted_latencies.len().is_multiple_of(2) {
             let mid = sorted_latencies.len() / 2;
             (sorted_latencies[mid - 1] + sorted_latencies[mid]) as f32 / 2.0
         } else {

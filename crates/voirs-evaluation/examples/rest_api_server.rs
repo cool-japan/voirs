@@ -4,7 +4,6 @@
 //! with all the enhanced endpoints for speech synthesis quality evaluation.
 
 use std::collections::HashMap;
-use tokio;
 use voirs_evaluation::rest_api::{
     ApiAudioData, ApiAuthentication, ApiServiceConfig, BatchEvaluationRequest,
     DatasetValidationRequest, EvaluationApiService, ModelComparisonRequest, PronunciationRequest,
@@ -278,13 +277,17 @@ fn create_sample_audio_data() -> ApiAudioData {
 }
 
 /// Example client functions to demonstrate API usage
-#[cfg(feature = "client_examples")]
+/// Note: To use these client examples, add `reqwest = { version = "0.12", features = ["json"] }`
+/// to your dependencies and uncomment the code below.
+#[allow(dead_code)]
 mod client_examples {
     use super::*;
-    use reqwest;
 
     /// Example client function to call the quality evaluation endpoint
+    /// To enable this, add reqwest to your Cargo.toml dependencies.
     pub async fn call_quality_evaluation_api() -> Result<(), Box<dyn std::error::Error>> {
+        // Uncomment the following when reqwest is available:
+        /*
         let client = reqwest::Client::new();
 
         let auth = ApiAuthentication {
@@ -319,12 +322,18 @@ mod client_examples {
             let error_text = response.text().await?;
             println!("Error details: {}", error_text);
         }
+        */
 
+        // Placeholder implementation
+        println!("Client example - add reqwest dependency to enable");
         Ok(())
     }
 
     /// Example client function to get metrics information
+    /// To enable this, add reqwest to your Cargo.toml dependencies.
     pub async fn get_metrics_info() -> Result<(), Box<dyn std::error::Error>> {
+        // Uncomment the following when reqwest is available:
+        /*
         let client = reqwest::Client::new();
 
         let response = client
@@ -341,7 +350,10 @@ mod client_examples {
         } else {
             println!("Failed to get metrics info: {}", response.status());
         }
+        */
 
+        // Placeholder implementation
+        println!("Client example - add reqwest dependency to enable");
         Ok(())
     }
 }

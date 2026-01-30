@@ -1,0 +1,272 @@
+# VoiRS Evaluation Service Deployment
+# Base Kubernetes deployment configuration for distributed evaluation workers
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: voirs-evaluation-worker
+  labels:
+    app: voirs-evaluation
+    component: worker
+    version: v0.1.0-alpha.3
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: voirs-evaluation
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: voirs-evaluation
+        component: worker
+        version: v0.1.0-alpha.3
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: voirs-evaluation
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: evaluation-worker
+        image: voirs/evaluation:v0.1.0-alpha.3
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: grpc
+          containerPort: 9000
+          protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+        env:
+        - name: RUST_LOG
+          value: "info,voirs_evaluation=debug"
+        - name: WORKER_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: COORDINATOR_URL
+          value: "http://voirs-evaluation-coordinator:8080"
+        - name: MAX_CONCURRENT_TASKS
+          value: "10"
+        - name: TASK_TIMEOUT_SECONDS
+          value: "300"
+        - name: HEARTBEAT_INTERVAL_SECONDS
+          value: "30"
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+            ephemeral-storage: "2Gi"
+          limits:
+            cpu: "2000m"
+            memory: "4Gi"
+            ephemeral-storage: "10Gi"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 0
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 30
+        volumeMounts:
+        - name: cache
+          mountPath: /cache
+        - name: tmp
+          mountPath: /tmp
+        - name: config
+          mountPath: /etc/voirs
+          readOnly: true
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+      volumes:
+      - name: cache
+        emptyDir:
+          sizeLimit: 5Gi
+      - name: tmp
+        emptyDir:
+          sizeLimit: 1Gi
+      - name: config
+        configMap:
+          name: voirs-evaluation-config
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - voirs-evaluation
+                - key: component
+                  operator: In
+                  values:
+                  - worker
+              topologyKey: kubernetes.io/hostname
+      tolerations:
+      - key: "workload"
+        operator: "Equal"
+        value: "evaluation"
+        effect: "NoSchedule"
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app: voirs-evaluation
+            component: worker
+---
+# VoiRS Evaluation Coordinator Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: voirs-evaluation-coordinator
+  labels:
+    app: voirs-evaluation
+    component: coordinator
+    version: v0.1.0-alpha.3
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # Coordinator maintains state, so use Recreate strategy
+  selector:
+    matchLabels:
+      app: voirs-evaluation
+      component: coordinator
+  template:
+    metadata:
+      labels:
+        app: voirs-evaluation
+        component: coordinator
+        version: v0.1.0-alpha.3
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: voirs-evaluation
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: coordinator
+        image: voirs/evaluation:v0.1.0-alpha.3
+        imagePullPolicy: IfNotPresent
+        command: ["/voirs-eval"]
+        args: ["coordinator", "--port=8080"]
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: grpc
+          containerPort: 9000
+          protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+        env:
+        - name: RUST_LOG
+          value: "info,voirs_evaluation=debug"
+        - name: COORDINATOR_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: MIN_WORKERS
+          value: "1"
+        - name: MAX_WORKERS
+          value: "20"
+        - name: AUTO_SCALING_ENABLED
+          value: "true"
+        - name: TARGET_CPU_UTILIZATION
+          value: "70"
+        - name: TARGET_QUEUE_DEPTH
+          value: "20"
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "2Gi"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: state
+          mountPath: /state
+        - name: config
+          mountPath: /etc/voirs
+          readOnly: true
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+      volumes:
+      - name: state
+        persistentVolumeClaim:
+          claimName: voirs-coordinator-state
+      - name: config
+        configMap:
+          name: voirs-evaluation-config

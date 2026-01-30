@@ -23,7 +23,7 @@ pub async fn run_config(
         // Save configuration to file
         let config_json = serde_json::to_string_pretty(config)
             .map_err(|e| VoirsError::config_error(format!("Failed to serialize config: {}", e)))?;
-        std::fs::write(config_path, config_json).map_err(|e| VoirsError::from(e))?;
+        std::fs::write(config_path, config_json).map_err(VoirsError::from)?;
         println!("Configuration initialized at: {}", config_path.display());
     } else {
         println!("Use --show to display configuration or --init to create default config file");

@@ -287,39 +287,55 @@ impl Default for SpatialConversionAdapter {
 /// 3D position in space
 #[derive(Debug, Clone, Default)]
 pub struct SpatialPosition {
+    /// X coordinate in meters
     pub x: f32,
+    /// Y coordinate in meters
     pub y: f32,
+    /// Z coordinate in meters
     pub z: f32,
+    /// Azimuth angle in radians
     pub azimuth: f32,
+    /// Elevation angle in radians
     pub elevation: f32,
+    /// Distance from origin in meters
     pub distance: f32,
 }
 
 /// Spatial direction information
 #[derive(Debug, Clone)]
 pub struct SpatialDirection {
+    /// Azimuth angle in radians
     pub azimuth: f32,
+    /// Elevation angle in radians
     pub elevation: f32,
+    /// Distance from listener in meters
     pub distance: f32,
 }
 
 /// Voice source with spatial information
 #[derive(Debug, Clone)]
 pub struct SpatialVoiceSource {
+    /// Audio samples (mono)
     pub audio: Vec<f32>,
+    /// 3D position of the voice source
     pub position: SpatialPosition,
+    /// Target voice characteristics for conversion
     pub target_characteristics: crate::types::VoiceCharacteristics,
 }
 
 /// Spatial audio output with multiple channels
 #[derive(Debug, Clone)]
 pub struct SpatialAudioOutput {
+    /// Audio samples for each channel
     pub channels: Vec<Vec<f32>>,
+    /// Sample rate in Hz
     pub sample_rate: u32,
+    /// Optional position metadata for the audio source
     pub position_metadata: Option<SpatialPosition>,
 }
 
 impl SpatialAudioOutput {
+    /// Creates a new spatial audio output with the specified number of channels and length
     pub fn new(num_channels: usize, length: usize) -> Self {
         Self {
             channels: vec![vec![0.0; length]; num_channels],
@@ -332,25 +348,35 @@ impl SpatialAudioOutput {
 /// Binaural audio output (stereo with HRTF processing)
 #[derive(Debug, Clone)]
 pub struct BinauralAudioOutput {
+    /// Left ear audio samples
     pub left_channel: Vec<f32>,
+    /// Right ear audio samples
     pub right_channel: Vec<f32>,
+    /// Sample rate in Hz
     pub sample_rate: u32,
+    /// Optional HRTF metadata for spatial positioning
     pub hrtf_metadata: Option<HrtfMetadata>,
 }
 
 /// HRTF metadata for binaural processing
 #[derive(Debug, Clone)]
 pub struct HrtfMetadata {
+    /// Azimuth angle in radians
     pub azimuth: f32,
+    /// Elevation angle in radians
     pub elevation: f32,
+    /// Distance from listener in meters
     pub distance: f32,
 }
 
 /// Ambisonics output for 360-degree audio
 #[derive(Debug, Clone)]
 pub struct AmbisonicsOutput {
+    /// Ambisonics channel samples (number depends on order)
     pub channels: Vec<Vec<f32>>,
+    /// Ambisonics order (0=mono, 1=4ch, 2=9ch, 3=16ch, etc.)
     pub order: u8,
+    /// Sample rate in Hz
     pub sample_rate: u32,
 }
 

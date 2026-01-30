@@ -1,7 +1,115 @@
 //! # VoiRS FFI (Foreign Function Interface)
 //!
-//! C-compatible bindings for VoiRS speech synthesis framework.
-//! Allows integration with C/C++, Python, and other languages.
+//! C-compatible bindings for VoiRS speech synthesis framework with comprehensive
+//! language support for C/C++, Python, Node.js, and WebAssembly.
+//!
+//! ## Features
+//!
+//! - **C API**: Complete C-compatible interface for maximum portability
+//! - **Python Bindings**: PyO3-based Python integration with NumPy support
+//! - **Node.js Bindings**: N-API bindings for JavaScript/TypeScript
+//! - **WebAssembly**: WASM bindings for browser-based synthesis
+//! - **Zero-Copy Operations**: Efficient memory management across FFI boundaries
+//! - **Thread Safety**: Comprehensive threading support with work-stealing schedulers
+//! - **Platform Integration**: Native integration with Windows, macOS, and Linux
+//!
+//! ## Module Organization
+//!
+//! - [`c_api`]: Core C API functions for synthesis, audio, and voice management
+//! - [`python`]: PyO3 bindings for Python integration (requires `python` feature)
+//! - [`nodejs`]: N-API bindings for Node.js (requires `nodejs` feature)
+//! - [`wasm`]: WebAssembly bindings (requires `wasm` feature)
+//! - [`memory`]: Advanced memory management with custom allocators and zero-copy operations
+//! - [`threading`]: Thread pools, synchronization primitives, and callback management
+//! - [`error`]: Comprehensive error handling with i18n support
+//! - [`performance`]: Performance monitoring and optimization utilities
+//! - [`platform`]: Platform-specific integrations (Windows, macOS, Linux)
+//! - [`utils`]: Utility functions for audio processing, string conversion, and performance analysis
+//!
+//! ## Quick Start (C API)
+//!
+//! ```c
+//! #include "voirs_ffi.h"
+//!
+//! // Initialize pipeline
+//! VoirsPipelineHandle* pipeline = voirs_create_pipeline();
+//!
+//! // Synthesize speech
+//! VoirsAudioBuffer* buffer = NULL;
+//! VoirsErrorCode result = voirs_synthesize(
+//!     pipeline,
+//!     "Hello, world!",
+//!     &buffer
+//! );
+//!
+//! if (result == VOIRS_SUCCESS) {
+//!     // Process audio...
+//!     voirs_free_audio_buffer(buffer);
+//! }
+//!
+//! voirs_destroy_pipeline(pipeline);
+//! ```
+//!
+//! ## Quick Start (Python)
+//!
+//! ```python
+//! from voirs_ffi import VoirsPipeline
+//!
+//! # Create pipeline
+//! pipeline = VoirsPipeline()
+//!
+//! # Synthesize speech
+//! result = pipeline.synthesize("Hello, world!")
+//! audio_data = result.audio_data  # NumPy array
+//! ```
+//!
+//! ## Safety
+//!
+//! All FFI functions are marked as `unsafe` and require careful handling:
+//! - Null pointer checks for all pointer parameters
+//! - Proper memory management (use provided free functions)
+//! - Thread safety guarantees where documented
+//! - No undefined behavior when contracts are followed
+//!
+//! ## Performance
+//!
+//! The FFI layer is designed for minimal overhead:
+//! - Zero-copy operations where possible
+//! - Efficient memory pooling
+//! - SIMD-optimized audio processing
+//! - Work-stealing thread pools for parallelism
+
+// Allow pedantic lints that are acceptable for audio/DSP processing code
+#![allow(clippy::cast_precision_loss)] // Acceptable for audio sample conversions
+#![allow(clippy::cast_possible_truncation)] // Controlled truncation in audio processing
+#![allow(clippy::cast_sign_loss)] // Intentional in index calculations
+#![allow(clippy::missing_errors_doc)] // Many internal functions with self-documenting error types
+#![allow(clippy::missing_panics_doc)] // Panics are documented where relevant
+#![allow(clippy::unused_self)] // Some trait implementations require &self for consistency
+#![allow(clippy::must_use_candidate)] // Not all return values need must_use annotation
+#![allow(clippy::doc_markdown)] // Technical terms don't all need backticks
+#![allow(clippy::unnecessary_wraps)] // Result wrappers maintained for API consistency
+#![allow(clippy::float_cmp)] // Exact float comparisons are intentional in some contexts
+#![allow(clippy::match_same_arms)] // Pattern matching clarity sometimes requires duplication
+#![allow(clippy::module_name_repetitions)] // Type names often repeat module names
+#![allow(clippy::struct_excessive_bools)] // Config structs naturally have many boolean flags
+#![allow(clippy::too_many_lines)] // Some functions are inherently complex
+#![allow(clippy::needless_pass_by_value)] // Some functions designed for ownership transfer
+#![allow(clippy::similar_names)] // Many similar variable names in algorithms
+#![allow(clippy::unused_async)] // Public API functions may need async for consistency
+#![allow(clippy::needless_range_loop)] // Range loops sometimes clearer than iterators
+#![allow(clippy::uninlined_format_args)] // Explicit argument names can improve clarity
+#![allow(clippy::manual_clamp)] // Manual clamping sometimes clearer
+#![allow(clippy::return_self_not_must_use)] // Not all builder methods need must_use
+#![allow(clippy::cast_possible_wrap)] // Controlled wrapping in processing code
+#![allow(clippy::cast_lossless)] // Explicit casts preferred for clarity
+#![allow(clippy::wildcard_imports)] // Prelude imports are convenient and standard
+#![allow(clippy::format_push_string)] // Sometimes more readable than alternative
+#![allow(clippy::redundant_closure_for_method_calls)] // Closures sometimes needed for type inference
+#![allow(clippy::too_many_arguments)] // Some functions naturally need many parameters
+#![allow(clippy::field_reassign_with_default)] // Sometimes clearer than builder pattern
+#![allow(clippy::trivially_copy_pass_by_ref)] // API consistency more important
+#![allow(clippy::await_holding_lock)] // Controlled lock holding in async contexts
 
 use parking_lot::Mutex;
 use std::{
@@ -15,21 +123,27 @@ use voirs_sdk::{
     audio::AudioBuffer,
     error::{Result, VoirsError},
     types::{AudioFormat, LanguageCode, QualityLevel, SynthesisConfig},
-    VoirsPipeline,
+    VoirsPipeline as SdkPipeline,
 };
 
 pub mod c_api;
 pub mod config;
 pub mod error;
 pub mod memory;
+#[cfg(feature = "nodejs")]
 pub mod nodejs;
 pub mod performance;
 pub mod platform;
+#[cfg(feature = "python")]
 pub mod python;
 pub mod threading;
 pub mod types;
 pub mod utils;
+#[cfg(feature = "wasm")]
 pub mod wasm;
+
+// Note: perf module contains x86_64-specific optimizations
+// and is not compiled by default. See src/perf/ for implementation details.
 
 // Re-export for convenience
 pub use c_api::*;
@@ -39,8 +153,9 @@ pub use types::*;
 pub use utils::audio::VoirsAudioAnalysis;
 
 // Export Python module when feature is enabled
+// Python types are exported directly from the python module
 #[cfg(feature = "python")]
-pub use python::pyo3_bindings::*;
+pub use python::{PyAudioBuffer, PySynthesisConfig, PyVoiceInfo, VoirsPipeline as PyVoirsPipeline};
 
 // Export Node.js module when feature is enabled
 #[cfg(feature = "nodejs")]
@@ -259,7 +374,7 @@ impl VoirsAudioBuffer {
         if !self.samples.is_null() {
             // Reconstruct the original boxed slice that was forgotten during creation
             // This is safe because we know the samples pointer came from into_boxed_slice()
-            let boxed_slice = Box::from_raw(std::slice::from_raw_parts_mut(
+            let boxed_slice = Box::from_raw(std::ptr::slice_from_raw_parts_mut(
                 self.samples,
                 self.length as usize,
             ));
@@ -274,7 +389,7 @@ use once_cell::sync::Lazy;
 
 /// Global pipeline manager for FFI
 struct PipelineManager {
-    pipelines: HashMap<u32, Arc<VoirsPipeline>>,
+    pipelines: HashMap<u32, Arc<SdkPipeline>>,
     placeholder_pipelines: std::collections::HashSet<u32>, // Track placeholder IDs for benchmarking
     next_id: u32,
 }
@@ -288,7 +403,7 @@ impl PipelineManager {
         }
     }
 
-    fn add_pipeline(&mut self, pipeline: VoirsPipeline) -> u32 {
+    fn add_pipeline(&mut self, pipeline: SdkPipeline) -> u32 {
         let id = self.next_id;
         self.pipelines.insert(id, Arc::new(pipeline));
         self.next_id = self.next_id.wrapping_add(1);
@@ -309,7 +424,7 @@ impl PipelineManager {
         id
     }
 
-    fn get_pipeline(&self, id: u32) -> Option<Arc<VoirsPipeline>> {
+    fn get_pipeline(&self, id: u32) -> Option<Arc<SdkPipeline>> {
         self.pipelines.get(&id).cloned()
     }
 

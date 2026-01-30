@@ -126,8 +126,15 @@ impl StoiCalculator {
 
         // Prepare input
         let mut input = vec![0.0f64; next_power_of_2];
-        for (i, &val) in signal.as_slice().unwrap().iter().enumerate() {
-            input[i] = val as f64;
+        if let Some(slice) = signal.as_slice() {
+            for (i, &val) in slice.iter().enumerate() {
+                input[i] = val as f64;
+            }
+        } else {
+            // Handle non-contiguous array
+            for (i, &val) in signal.iter().enumerate().take(n) {
+                input[i] = val as f64;
+            }
         }
 
         // Forward FFT using scirs2_fft

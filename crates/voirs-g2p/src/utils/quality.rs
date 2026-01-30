@@ -785,7 +785,7 @@ fn identify_quality_factors_optimized(
     // Language-specific factors
     if language == LanguageCode::Ja {
         // Check for proper mora structure
-        if phonemes.len() % 2 != 0 {
+        if !phonemes.len().is_multiple_of(2) {
             factors.push("Irregular mora structure for Japanese".to_string());
         }
     }

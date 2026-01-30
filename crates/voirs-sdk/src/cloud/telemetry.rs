@@ -319,69 +319,113 @@ struct DashboardManager {
     real_time_updates: Arc<RealTimeUpdater>,
 }
 
+/// Telemetry dashboard configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct Dashboard {
-    id: String,
-    name: String,
-    description: String,
-    widgets: Vec<Widget>,
-    layout: DashboardLayout,
-    permissions: DashboardPermissions,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
+pub struct Dashboard {
+    /// Unique dashboard identifier
+    pub id: String,
+    /// Dashboard name
+    pub name: String,
+    /// Dashboard description
+    pub description: String,
+    /// List of widgets in the dashboard
+    pub widgets: Vec<Widget>,
+    /// Dashboard layout configuration
+    pub layout: DashboardLayout,
+    /// Dashboard access permissions
+    pub permissions: DashboardPermissions,
+    /// Dashboard creation timestamp
+    pub created_at: DateTime<Utc>,
+    /// Dashboard last update timestamp
+    pub updated_at: DateTime<Utc>,
 }
 
+/// Dashboard widget configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct Widget {
-    id: String,
-    widget_type: WidgetType,
-    title: String,
-    query: AnalyticsQuery,
-    visualization: VisualizationSettings,
-    position: WidgetPosition,
-    refresh_interval: Option<Duration>,
+pub struct Widget {
+    /// Widget identifier
+    pub id: String,
+    /// Type of widget
+    pub widget_type: WidgetType,
+    /// Widget title
+    pub title: String,
+    /// Data query for the widget
+    pub query: AnalyticsQuery,
+    /// Visualization settings
+    pub visualization: VisualizationSettings,
+    /// Widget position in the dashboard
+    pub position: WidgetPosition,
+    /// Auto-refresh interval
+    pub refresh_interval: Option<Duration>,
 }
 
+/// Type of dashboard widget
 #[derive(Debug, Clone, Serialize, Deserialize)]
-enum WidgetType {
+pub enum WidgetType {
+    /// Line chart visualization
     LineChart,
+    /// Bar chart visualization
     BarChart,
+    /// Pie chart visualization
     PieChart,
+    /// Counter/metric display
     Counter,
+    /// Table view
     Table,
+    /// Heatmap visualization
     Heatmap,
+    /// Gauge/dial display
     Gauge,
 }
 
+/// Visualization settings for widgets
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct VisualizationSettings {
-    color_scheme: String,
-    show_legend: bool,
-    show_grid: bool,
-    animation_enabled: bool,
-    custom_settings: HashMap<String, Value>,
+pub struct VisualizationSettings {
+    /// Color scheme for the visualization
+    pub color_scheme: String,
+    /// Whether to show legend
+    pub show_legend: bool,
+    /// Whether to show grid
+    pub show_grid: bool,
+    /// Whether animation is enabled
+    pub animation_enabled: bool,
+    /// Custom visualization settings
+    pub custom_settings: HashMap<String, Value>,
 }
 
+/// Position and size of a widget in the dashboard
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct WidgetPosition {
-    x: u32,
-    y: u32,
-    width: u32,
-    height: u32,
+pub struct WidgetPosition {
+    /// X coordinate
+    pub x: u32,
+    /// Y coordinate
+    pub y: u32,
+    /// Widget width
+    pub width: u32,
+    /// Widget height
+    pub height: u32,
 }
 
+/// Dashboard layout configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct DashboardLayout {
-    grid_size: (u32, u32),
-    responsive: bool,
-    theme: String,
+pub struct DashboardLayout {
+    /// Grid size (columns, rows)
+    pub grid_size: (u32, u32),
+    /// Whether layout is responsive
+    pub responsive: bool,
+    /// Theme name
+    pub theme: String,
 }
 
+/// Dashboard access permissions
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct DashboardPermissions {
-    viewers: Vec<String>,
-    editors: Vec<String>,
-    public: bool,
+pub struct DashboardPermissions {
+    /// List of users with view permission
+    pub viewers: Vec<String>,
+    /// List of users with edit permission
+    pub editors: Vec<String>,
+    /// Whether dashboard is publicly accessible
+    pub public: bool,
 }
 
 trait DashboardStorage: Send + Sync {
@@ -509,7 +553,7 @@ enum TrendModelType {
     Linear,
     Exponential,
     Seasonal,
-    ARIMA,
+    Arima,
 }
 
 struct ABTestingManager {
@@ -518,41 +562,70 @@ struct ABTestingManager {
     statistical_engine: Arc<StatisticalEngine>,
 }
 
-struct Experiment {
-    id: String,
-    name: String,
-    description: String,
-    status: ExperimentStatus,
-    variants: Vec<Variant>,
-    allocation: AllocationStrategy,
-    start_date: DateTime<Utc>,
-    end_date: Option<DateTime<Utc>>,
-    success_metrics: Vec<String>,
-    sample_size: u32,
-    confidence_level: f64,
+/// A/B testing experiment configuration
+pub struct Experiment {
+    /// Unique experiment identifier
+    pub id: String,
+    /// Human-readable experiment name
+    pub name: String,
+    /// Experiment description
+    pub description: String,
+    /// Current status of the experiment
+    pub status: ExperimentStatus,
+    /// List of experiment variants
+    pub variants: Vec<Variant>,
+    /// Strategy for allocating users to variants
+    pub allocation: AllocationStrategy,
+    /// Experiment start date
+    pub start_date: DateTime<Utc>,
+    /// Optional experiment end date
+    pub end_date: Option<DateTime<Utc>>,
+    /// Metrics used to measure success
+    pub success_metrics: Vec<String>,
+    /// Required sample size
+    pub sample_size: u32,
+    /// Statistical confidence level
+    pub confidence_level: f64,
 }
 
+/// Status of an A/B testing experiment
 #[derive(Debug, Clone)]
-enum ExperimentStatus {
+pub enum ExperimentStatus {
+    /// Experiment is being prepared
     Draft,
+    /// Experiment is currently running
     Running,
+    /// Experiment has been temporarily paused
     Paused,
+    /// Experiment has finished
     Completed,
+    /// Experiment was cancelled
     Cancelled,
 }
 
-struct Variant {
-    id: String,
-    name: String,
-    description: String,
-    allocation_percentage: f32,
-    configuration: HashMap<String, Value>,
+/// A variant in an A/B test
+#[derive(Debug, Clone)]
+pub struct Variant {
+    /// Variant identifier
+    pub id: String,
+    /// Variant name
+    pub name: String,
+    /// Variant description
+    pub description: String,
+    /// Percentage of users allocated to this variant
+    pub allocation_percentage: f32,
+    /// Variant-specific configuration
+    pub configuration: HashMap<String, Value>,
 }
 
+/// Strategy for allocating users to experiment variants
 #[derive(Debug, Clone)]
-enum AllocationStrategy {
+pub enum AllocationStrategy {
+    /// Random allocation
     Random,
+    /// Allocate based on user property
     UserProperty(String),
+    /// Deterministic allocation based on hash
     Deterministic(String),
 }
 
@@ -1010,7 +1083,7 @@ impl DashboardManager {
 
             // Populate widget data for each widget in the dashboard
             for widget in &dashboard.widgets {
-                let data = self.get_widget_data(&widget).await?;
+                let data = self.get_widget_data(widget).await?;
                 widget_data.insert(widget.id.clone(), data);
             }
 

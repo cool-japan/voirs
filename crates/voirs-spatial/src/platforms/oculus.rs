@@ -23,6 +23,8 @@ pub struct OculusPlatform {
 
     // Simulated device state (in real implementation, this would connect to Oculus Runtime)
     simulated_head_pose: PoseData,
+    simulated_left_controller: Option<PoseData>,
+    simulated_right_controller: Option<PoseData>,
     last_update: Option<Instant>,
 }
 
@@ -54,6 +56,14 @@ impl OculusPlatform {
                 Position3D::new(0.0, 1.7, 0.0),
                 (0.0, 0.0, 0.0, 1.0),
             ),
+            simulated_left_controller: Some(PoseData::new(
+                Position3D::new(-0.3, 1.3, -0.3),
+                (0.0, 0.0, 0.0, 1.0),
+            )),
+            simulated_right_controller: Some(PoseData::new(
+                Position3D::new(0.3, 1.3, -0.3),
+                (0.0, 0.0, 0.0, 1.0),
+            )),
             last_update: None,
         }
     }
@@ -173,10 +183,23 @@ impl PlatformIntegration for OculusPlatform {
         }
 
         // In a real implementation, this would get actual tracking data from Oculus Runtime
+        // For now, provide simulated controller poses if controllers are supported
+        let left_controller = if self.capabilities.controller_tracking {
+            self.simulated_left_controller.clone()
+        } else {
+            None
+        };
+
+        let right_controller = if self.capabilities.controller_tracking {
+            self.simulated_right_controller.clone()
+        } else {
+            None
+        };
+
         Ok(PlatformTrackingData {
             head_pose: self.simulated_head_pose.clone(),
-            left_controller: None, // TODO: Implement controller tracking
-            right_controller: None,
+            left_controller,
+            right_controller,
             quality: TrackingQuality {
                 overall_quality: 0.95,
                 position_quality: 0.95,

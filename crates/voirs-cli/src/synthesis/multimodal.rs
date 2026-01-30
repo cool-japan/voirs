@@ -346,6 +346,6 @@ mod tests {
 
         assert_eq!(deserialized.weight, 0.8);
         assert_eq!(deserialized.synchronization_offset_ms, 100);
-        assert_eq!(deserialized.adaptive_weighting, true);
+        assert!(deserialized.adaptive_weighting);
     }
 }

@@ -2,12 +2,27 @@
 
 // Re-export most commonly used types and traits
 pub use crate::{
-    audio::{AudioBuffer, AudioMetadata},
+    adaptive::{
+        AdaptationStats, AdaptiveConfig, AdaptiveController, AlertSeverity, AlertThreshold,
+        DashboardData, MetricBaseline, MetricRegression, MetricStatistics, MonitorConfig,
+        PerformanceBaseline, PerformanceSnapshot, PredictionInput, PredictorStats, QualityAlert,
+        QualityMetricSample, QualityMonitor, QualityPrediction, QualityPredictor, QualityTarget,
+        RegressionConfig, RegressionDetector, RegressionReport, SystemMetrics,
+        TextComplexityAnalyzer, TrainingSample, TrendDirection,
+    },
+    audio::{
+        AdaptiveEnhancer, AudioBuffer, AudioMetadata, AudioQualityMetrics, ChorusEffect,
+        CompressorEffect, DelayEffect, EffectsChain, EnhancementConfig, EqualizerEffect,
+        PerformanceMetrics as EnhancementPerformanceMetrics, ReverbEffect, SimdAudioProcessor,
+        SimdCapabilities, VoiceFeatures,
+    },
+    batch::{BatchConfig, BatchProcessor, BatchRequest, BatchResult, BatchStatistics},
     capabilities::{CapabilityManager, FeatureDetector},
     config::PipelineConfig,
     error::{Result, VoirsError},
     performance::{PerformanceMetrics, PerformanceMonitor},
     pipeline::{VoirsPipeline, VoirsPipelineBuilder},
+    profiling::{PerformanceReport, ProfileSession, Profiler, ProfilerConfig},
     traits::{AcousticModel, G2p, Vocoder},
     types::{
         AdvancedFeature, AudioFormat, CapabilityNegotiation, CapabilityRequest,

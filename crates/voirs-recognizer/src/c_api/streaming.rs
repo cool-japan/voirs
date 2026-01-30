@@ -89,9 +89,10 @@ pub extern "C" fn voirs_start_streaming(
         VoirsError::Success
     });
 
-    match catch_result {
-        Ok(error) => error,
-        Err(_) => VoirsError::InternalError,
+    if let Ok(error) = catch_result {
+        error
+    } else {
+        VoirsError::InternalError
     }
 }
 
@@ -125,9 +126,10 @@ pub extern "C" fn voirs_stop_streaming(recognizer: *mut VoirsRecognizer) -> Voir
         VoirsError::Success
     });
 
-    match catch_result {
-        Ok(error) => error,
-        Err(_) => VoirsError::InternalError,
+    if let Ok(error) = catch_result {
+        error
+    } else {
+        VoirsError::InternalError
     }
 }
 
@@ -215,8 +217,289 @@ pub extern "C" fn voirs_stream_audio(
                 internal.metrics.peak_processing_time_ms = processing_time;
             }
 
-            match recognition_result {
-                Ok(result) => {
+            if let Ok(result) = recognition_result {
+                // Convert to C API result format
+                let segments: Vec<VoirsSegment> = result
+                    .transcription
+                    .as_ref()
+                    .map(|t| {
+                        t.word_timestamps
+                            .iter()
+                            .map(|word| VoirsSegment {
+                                start_time: word.start_time as f64,
+                                end_time: word.end_time as f64,
+                                text: internal.memory_manager.store_string(&word.word),
+                                confidence: word.confidence,
+                                no_speech_prob: 1.0 - word.confidence,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                let c_result = VoirsRecognitionResult {
+                    text: internal.memory_manager.store_string(
+                        &result
+                            .transcription
+                            .as_ref()
+                            .map(|t| &t.text)
+                            .unwrap_or(&String::new()),
+                    ),
+                    confidence: result
+                        .transcription
+                        .as_ref()
+                        .map(|t| t.confidence)
+                        .unwrap_or(0.0),
+                    language: result
+                        .transcription
+                        .as_ref()
+                        .map(|t| {
+                            internal
+                                .memory_manager
+                                .store_string(&t.language.to_string())
+                        })
+                        .unwrap_or(std::ptr::null()),
+                    processing_time_ms: processing_time,
+                    audio_duration_s: result
+                        .transcription
+                        .as_ref()
+                        .and_then(|t| t.processing_duration)
+                        .unwrap_or_default()
+                        .as_secs_f64(),
+                    segment_count: segments.len(),
+                    segments: if segments.is_empty() {
+                        std::ptr::null()
+                    } else {
+                        internal.memory_manager.store_segments(&segments)
+                    },
+                };
+
+                // Call the registered callback with the result
+                if let Some(callback) = callback_opt {
+                    callback(&c_result, user_data);
+                }
+
+                // Update latency measurements
+                {
+                    let mut context = streaming_context.lock().unwrap();
+                    context.latency_measurements.push_back(processing_time);
+                    if context.latency_measurements.len() > 100 {
+                        context.latency_measurements.pop_front();
+                    }
+                    context.average_latency = context.latency_measurements.iter().sum::<f64>()
+                        / context.latency_measurements.len() as f64;
+                    context.total_audio_duration += result
+                        .transcription
+                        .as_ref()
+                        .and_then(|t| t.processing_duration)
+                        .unwrap_or_default()
+                        .as_secs_f64();
+                }
+
+                VoirsError::Success
+            } else {
+                internal.metrics.failed_recognitions += 1;
+                VoirsError::RecognitionFailed
+            }
+        } else {
+            // Buffer is not full yet, just accumulate data
+            VoirsError::Success
+        }
+    });
+
+    if let Ok(error) = catch_result {
+        error
+    } else {
+        VoirsError::InternalError
+    }
+}
+
+/// Check if streaming mode is active
+///
+/// # Arguments
+/// * `recognizer` - Pointer to the recognizer instance
+///
+/// # Returns
+/// true if streaming is active, false otherwise
+#[no_mangle]
+/// Item
+pub extern "C" fn voirs_is_streaming_active(recognizer: *mut VoirsRecognizer) -> bool {
+    if recognizer.is_null() {
+        return false;
+    }
+
+    let catch_result = std::panic::catch_unwind(|| {
+        let internal = unsafe { &*(recognizer as *const VoirsRecognizerInternal) };
+
+        // Return actual streaming status
+        if let Some(context_arc) = &internal.streaming_context {
+            if let Ok(context) = context_arc.lock() {
+                return context.is_active;
+            }
+        }
+        false
+    });
+
+    if let Ok(is_active) = catch_result {
+        is_active
+    } else {
+        false
+    }
+}
+
+/// Get streaming buffer information
+///
+/// # Arguments
+/// * `recognizer` - Pointer to the recognizer instance
+/// * `buffer_size` - Output pointer for current buffer size in bytes
+/// * `buffer_duration` - Output pointer for buffer duration in seconds
+///
+/// # Returns
+/// VoirsError::Success on success, or an error code on failure.
+#[no_mangle]
+pub extern "C" fn voirs_get_streaming_buffer_info(
+    recognizer: *mut VoirsRecognizer,
+    buffer_size: *mut usize,
+    buffer_duration: *mut f64,
+) -> VoirsError {
+    if recognizer.is_null() || buffer_size.is_null() || buffer_duration.is_null() {
+        return VoirsError::NullPointer;
+    }
+
+    let catch_result = std::panic::catch_unwind(|| {
+        let internal = unsafe { &*(recognizer as *const VoirsRecognizerInternal) };
+
+        // Get actual buffer information
+        if let Some(context_arc) = &internal.streaming_context {
+            if let Ok(context) = context_arc.lock() {
+                let size = context.audio_buffer.len();
+                let duration = size as f64 / (internal.config.sample_rate as f64 * 2.0); // 2 bytes per sample
+
+                unsafe {
+                    *buffer_size = size;
+                    *buffer_duration = duration;
+                }
+
+                return VoirsError::Success;
+            }
+        }
+
+        unsafe {
+            *buffer_size = 0;
+            *buffer_duration = 0.0;
+        }
+
+        VoirsError::StreamingNotStarted
+    });
+
+    if let Ok(error) = catch_result {
+        error
+    } else {
+        VoirsError::InternalError
+    }
+}
+
+/// Configure streaming parameters during active streaming
+///
+/// # Arguments
+/// * `recognizer` - Pointer to the recognizer instance
+/// * `config` - New streaming configuration
+///
+/// # Returns
+/// VoirsError::Success on success, or an error code on failure.
+#[no_mangle]
+pub extern "C" fn voirs_configure_streaming(
+    recognizer: *mut VoirsRecognizer,
+    config: *const VoirsStreamingConfig,
+) -> VoirsError {
+    if recognizer.is_null() || config.is_null() {
+        return VoirsError::NullPointer;
+    }
+
+    let catch_result = std::panic::catch_unwind(|| {
+        let internal = unsafe { &mut *(recognizer as *mut VoirsRecognizerInternal) };
+
+        let new_config = unsafe { (*config).clone() };
+
+        // Validate configuration
+        if new_config.chunk_duration <= 0.0 || new_config.chunk_duration > 10.0 {
+            return VoirsError::InvalidConfiguration;
+        }
+
+        if new_config.overlap_duration < 0.0
+            || new_config.overlap_duration >= new_config.chunk_duration
+        {
+            return VoirsError::InvalidConfiguration;
+        }
+
+        if new_config.vad_threshold < 0.0 || new_config.vad_threshold > 1.0 {
+            return VoirsError::InvalidConfiguration;
+        }
+
+        // Update streaming configuration
+        if let Some(context_arc) = &internal.streaming_context {
+            if let Ok(mut context) = context_arc.lock() {
+                context.config = new_config;
+                return VoirsError::Success;
+            }
+        }
+
+        VoirsError::StreamingNotStarted
+    });
+
+    if let Ok(error) = catch_result {
+        error
+    } else {
+        VoirsError::InternalError
+    }
+}
+
+/// Flush any remaining audio in the streaming buffer
+///
+/// # Arguments
+/// * `recognizer` - Pointer to the recognizer instance
+///
+/// # Returns
+/// VoirsError::Success on success, or an error code on failure.
+/// Final results are delivered via the callback function.
+#[no_mangle]
+/// Item
+pub extern "C" fn voirs_flush_streaming_buffer(recognizer: *mut VoirsRecognizer) -> VoirsError {
+    if recognizer.is_null() {
+        return VoirsError::NullPointer;
+    }
+
+    let catch_result = std::panic::catch_unwind(|| {
+        let internal = unsafe { &mut *(recognizer as *mut VoirsRecognizerInternal) };
+
+        // Process any remaining audio in the buffer
+        if let Some(context_arc) = &internal.streaming_context {
+            let mut context = context_arc.lock().unwrap();
+            if !context.is_active {
+                return VoirsError::StreamingNotStarted;
+            }
+
+            if !context.audio_buffer.is_empty() {
+                // Process remaining audio data
+                let remaining_data: Vec<u8> = context.audio_buffer.drain(..).collect();
+                let callback_data = (context.callback, context.user_data);
+
+                // Drop the lock before processing
+                drop(context);
+
+                let start_time = Instant::now();
+                let recognition_result = internal
+                    .runtime
+                    .block_on(async { internal.pipeline.recognize_bytes(&remaining_data).await });
+
+                let processing_time = start_time.elapsed().as_millis() as f64;
+
+                // Update metrics
+                internal.metrics.processed_chunks += 1;
+                internal.metrics.total_processing_time_ms += processing_time;
+                internal.metrics.total_audio_duration_s +=
+                    remaining_data.len() as f64 / (internal.config.sample_rate as f64 * 2.0);
+
+                if let Ok(result) = recognition_result {
                     // Convert to C API result format
                     let segments: Vec<VoirsSegment> = result
                         .transcription
@@ -272,298 +555,15 @@ pub extern "C" fn voirs_stream_audio(
                         },
                     };
 
-                    // Call the registered callback with the result
-                    if let Some(callback) = callback_opt {
+                    // Call the callback if available
+                    if let (Some(callback), user_data) = callback_data {
                         callback(&c_result, user_data);
                     }
 
-                    // Update latency measurements
-                    {
-                        let mut context = streaming_context.lock().unwrap();
-                        context.latency_measurements.push_back(processing_time);
-                        if context.latency_measurements.len() > 100 {
-                            context.latency_measurements.pop_front();
-                        }
-                        context.average_latency = context.latency_measurements.iter().sum::<f64>()
-                            / context.latency_measurements.len() as f64;
-                        context.total_audio_duration += result
-                            .transcription
-                            .as_ref()
-                            .and_then(|t| t.processing_duration)
-                            .unwrap_or_default()
-                            .as_secs_f64();
-                    }
-
                     VoirsError::Success
-                }
-                Err(_) => {
+                } else {
                     internal.metrics.failed_recognitions += 1;
                     VoirsError::RecognitionFailed
-                }
-            }
-        } else {
-            // Buffer is not full yet, just accumulate data
-            VoirsError::Success
-        }
-    });
-
-    match catch_result {
-        Ok(error) => error,
-        Err(_) => VoirsError::InternalError,
-    }
-}
-
-/// Check if streaming mode is active
-///
-/// # Arguments
-/// * `recognizer` - Pointer to the recognizer instance
-///
-/// # Returns
-/// true if streaming is active, false otherwise
-#[no_mangle]
-/// Item
-pub extern "C" fn voirs_is_streaming_active(recognizer: *mut VoirsRecognizer) -> bool {
-    if recognizer.is_null() {
-        return false;
-    }
-
-    let catch_result = std::panic::catch_unwind(|| {
-        let internal = unsafe { &*(recognizer as *const VoirsRecognizerInternal) };
-
-        // Return actual streaming status
-        if let Some(context_arc) = &internal.streaming_context {
-            if let Ok(context) = context_arc.lock() {
-                return context.is_active;
-            }
-        }
-        false
-    });
-
-    match catch_result {
-        Ok(is_active) => is_active,
-        Err(_) => false,
-    }
-}
-
-/// Get streaming buffer information
-///
-/// # Arguments
-/// * `recognizer` - Pointer to the recognizer instance
-/// * `buffer_size` - Output pointer for current buffer size in bytes
-/// * `buffer_duration` - Output pointer for buffer duration in seconds
-///
-/// # Returns
-/// VoirsError::Success on success, or an error code on failure.
-#[no_mangle]
-pub extern "C" fn voirs_get_streaming_buffer_info(
-    recognizer: *mut VoirsRecognizer,
-    buffer_size: *mut usize,
-    buffer_duration: *mut f64,
-) -> VoirsError {
-    if recognizer.is_null() || buffer_size.is_null() || buffer_duration.is_null() {
-        return VoirsError::NullPointer;
-    }
-
-    let catch_result = std::panic::catch_unwind(|| {
-        let internal = unsafe { &*(recognizer as *const VoirsRecognizerInternal) };
-
-        // Get actual buffer information
-        if let Some(context_arc) = &internal.streaming_context {
-            if let Ok(context) = context_arc.lock() {
-                let size = context.audio_buffer.len();
-                let duration = size as f64 / (internal.config.sample_rate as f64 * 2.0); // 2 bytes per sample
-
-                unsafe {
-                    *buffer_size = size;
-                    *buffer_duration = duration;
-                }
-
-                return VoirsError::Success;
-            }
-        }
-
-        unsafe {
-            *buffer_size = 0;
-            *buffer_duration = 0.0;
-        }
-
-        VoirsError::StreamingNotStarted
-    });
-
-    match catch_result {
-        Ok(error) => error,
-        Err(_) => VoirsError::InternalError,
-    }
-}
-
-/// Configure streaming parameters during active streaming
-///
-/// # Arguments
-/// * `recognizer` - Pointer to the recognizer instance
-/// * `config` - New streaming configuration
-///
-/// # Returns
-/// VoirsError::Success on success, or an error code on failure.
-#[no_mangle]
-pub extern "C" fn voirs_configure_streaming(
-    recognizer: *mut VoirsRecognizer,
-    config: *const VoirsStreamingConfig,
-) -> VoirsError {
-    if recognizer.is_null() || config.is_null() {
-        return VoirsError::NullPointer;
-    }
-
-    let catch_result = std::panic::catch_unwind(|| {
-        let internal = unsafe { &mut *(recognizer as *mut VoirsRecognizerInternal) };
-
-        let new_config = unsafe { (*config).clone() };
-
-        // Validate configuration
-        if new_config.chunk_duration <= 0.0 || new_config.chunk_duration > 10.0 {
-            return VoirsError::InvalidConfiguration;
-        }
-
-        if new_config.overlap_duration < 0.0
-            || new_config.overlap_duration >= new_config.chunk_duration
-        {
-            return VoirsError::InvalidConfiguration;
-        }
-
-        if new_config.vad_threshold < 0.0 || new_config.vad_threshold > 1.0 {
-            return VoirsError::InvalidConfiguration;
-        }
-
-        // Update streaming configuration
-        if let Some(context_arc) = &internal.streaming_context {
-            if let Ok(mut context) = context_arc.lock() {
-                context.config = new_config;
-                return VoirsError::Success;
-            }
-        }
-
-        VoirsError::StreamingNotStarted
-    });
-
-    match catch_result {
-        Ok(error) => error,
-        Err(_) => VoirsError::InternalError,
-    }
-}
-
-/// Flush any remaining audio in the streaming buffer
-///
-/// # Arguments
-/// * `recognizer` - Pointer to the recognizer instance
-///
-/// # Returns
-/// VoirsError::Success on success, or an error code on failure.
-/// Final results are delivered via the callback function.
-#[no_mangle]
-/// Item
-pub extern "C" fn voirs_flush_streaming_buffer(recognizer: *mut VoirsRecognizer) -> VoirsError {
-    if recognizer.is_null() {
-        return VoirsError::NullPointer;
-    }
-
-    let catch_result = std::panic::catch_unwind(|| {
-        let internal = unsafe { &mut *(recognizer as *mut VoirsRecognizerInternal) };
-
-        // Process any remaining audio in the buffer
-        if let Some(context_arc) = &internal.streaming_context {
-            let mut context = context_arc.lock().unwrap();
-            if !context.is_active {
-                return VoirsError::StreamingNotStarted;
-            }
-
-            if !context.audio_buffer.is_empty() {
-                // Process remaining audio data
-                let remaining_data: Vec<u8> = context.audio_buffer.drain(..).collect();
-                let callback_data = (context.callback, context.user_data);
-
-                // Drop the lock before processing
-                drop(context);
-
-                let start_time = Instant::now();
-                let recognition_result = internal
-                    .runtime
-                    .block_on(async { internal.pipeline.recognize_bytes(&remaining_data).await });
-
-                let processing_time = start_time.elapsed().as_millis() as f64;
-
-                // Update metrics
-                internal.metrics.processed_chunks += 1;
-                internal.metrics.total_processing_time_ms += processing_time;
-                internal.metrics.total_audio_duration_s +=
-                    remaining_data.len() as f64 / (internal.config.sample_rate as f64 * 2.0);
-
-                match recognition_result {
-                    Ok(result) => {
-                        // Convert to C API result format
-                        let segments: Vec<VoirsSegment> = result
-                            .transcription
-                            .as_ref()
-                            .map(|t| {
-                                t.word_timestamps
-                                    .iter()
-                                    .map(|word| VoirsSegment {
-                                        start_time: word.start_time as f64,
-                                        end_time: word.end_time as f64,
-                                        text: internal.memory_manager.store_string(&word.word),
-                                        confidence: word.confidence,
-                                        no_speech_prob: 1.0 - word.confidence,
-                                    })
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-
-                        let c_result = VoirsRecognitionResult {
-                            text: internal.memory_manager.store_string(
-                                &result
-                                    .transcription
-                                    .as_ref()
-                                    .map(|t| &t.text)
-                                    .unwrap_or(&String::new()),
-                            ),
-                            confidence: result
-                                .transcription
-                                .as_ref()
-                                .map(|t| t.confidence)
-                                .unwrap_or(0.0),
-                            language: result
-                                .transcription
-                                .as_ref()
-                                .map(|t| {
-                                    internal
-                                        .memory_manager
-                                        .store_string(&t.language.to_string())
-                                })
-                                .unwrap_or(std::ptr::null()),
-                            processing_time_ms: processing_time,
-                            audio_duration_s: result
-                                .transcription
-                                .as_ref()
-                                .and_then(|t| t.processing_duration)
-                                .unwrap_or_default()
-                                .as_secs_f64(),
-                            segment_count: segments.len(),
-                            segments: if segments.is_empty() {
-                                std::ptr::null()
-                            } else {
-                                internal.memory_manager.store_segments(&segments)
-                            },
-                        };
-
-                        // Call the callback if available
-                        if let (Some(callback), user_data) = callback_data {
-                            callback(&c_result, user_data);
-                        }
-
-                        VoirsError::Success
-                    }
-                    Err(_) => {
-                        internal.metrics.failed_recognitions += 1;
-                        VoirsError::RecognitionFailed
-                    }
                 }
             } else {
                 VoirsError::Success
@@ -573,9 +573,10 @@ pub extern "C" fn voirs_flush_streaming_buffer(recognizer: *mut VoirsRecognizer)
         }
     });
 
-    match catch_result {
-        Ok(error) => error,
-        Err(_) => VoirsError::InternalError,
+    if let Ok(error) = catch_result {
+        error
+    } else {
+        VoirsError::InternalError
     }
 }
 
@@ -650,8 +651,9 @@ pub extern "C" fn voirs_get_streaming_stats(
         VoirsError::StreamingNotStarted
     });
 
-    match catch_result {
-        Ok(error) => error,
-        Err(_) => VoirsError::InternalError,
+    if let Ok(error) = catch_result {
+        error
+    } else {
+        VoirsError::InternalError
     }
 }

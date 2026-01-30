@@ -237,7 +237,9 @@ impl ProcessingBatch {
     /// Convert phoneme sequences to tensor format
     pub fn create_tensors(&mut self, device: &Device, config: &DynamicBatchConfig) -> Result<()> {
         if self.sequences.is_empty() {
-            return Err(AcousticError::InputError("Empty batch".to_string()));
+            return Err(AcousticError::InputError {
+                message: "Empty batch".to_string(),
+            });
         }
 
         let batch_size = self.size();
@@ -342,11 +344,13 @@ impl DynamicBatcher {
     pub fn add_sequence(&mut self, sequence: PendingSequence) -> Result<()> {
         // Validate sequence length
         if sequence.len() > self.config.max_sequence_length {
-            return Err(AcousticError::InputError(format!(
-                "Sequence length {} exceeds maximum {}",
-                sequence.len(),
-                self.config.max_sequence_length
-            )));
+            return Err(AcousticError::InputError {
+                message: format!(
+                    "Sequence length {} exceeds maximum {}",
+                    sequence.len(),
+                    self.config.max_sequence_length
+                ),
+            });
         }
 
         // Add to length-based queue if enabled

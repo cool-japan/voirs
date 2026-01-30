@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 87739fcb8ae19e846fc9f220f8793928da470813dad603fc6343af04c8bf9fd2 # shrinks to pos1 = Position3D { x: 0.0, y: 0.0, z: 821.4051 }, pos2 = Position3D { x: 0.0, y: 0.0, z: 690.8034 }, pos3 = Position3D { x: 0.0, y: 0.0, z: 199.84055 }
+cc 9efde327a4a62ac45b8673fc2809a2da9056f7094c2b7cb5ac6620ee5d50eb63 # shrinks to pos1 = Position3D { x: 0.0, y: 741.57855, z: -395.5488 }, pos2 = Position3D { x: 800.84174, y: 0.0, z: 0.0 }
+cc 62cc1d283a36c1e1138a92f01580c0167bbc0e8c45eb2ece654623e2ce9c6a2e # shrinks to pos1 = Position3D { x: 0.0, y: 906.72723, z: 77.10729 }, pos2 = Position3D { x: 411.48065, y: -834.2106, z: 970.71954 }
+cc e4ccc959871c38b5db223177afc3d1396ec3791a6e784236c4340a12f3a94886 # shrinks to pos1 = Position3D { x: -828.7787, y: -330.24973, z: 988.0108 }, pos2 = Position3D { x: 442.12665, y: -570.9867, z: 470.27725 }, pos3 = Position3D { x: -863.8616, y: 500.17435, z: -847.5854 }

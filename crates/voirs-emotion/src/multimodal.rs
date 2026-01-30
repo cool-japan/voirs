@@ -470,7 +470,7 @@ impl PhysiologicalData {
 
     /// Set heart rate
     pub fn with_heart_rate(mut self, bpm: f32) -> Self {
-        self.heart_rate = bpm.max(30.0).min(200.0); // Reasonable bounds
+        self.heart_rate = bpm.clamp(30.0, 200.0); // Reasonable bounds
         self
     }
 

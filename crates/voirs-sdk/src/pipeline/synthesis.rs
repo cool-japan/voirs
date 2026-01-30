@@ -812,7 +812,11 @@ impl SynthesisOrchestrator {
                 chars.next(); // consume the >
                 break;
             }
-            tag_content.push(chars.next().unwrap());
+            // Get next character or break if end of string
+            let Some(next_ch) = chars.next() else {
+                break;
+            };
+            tag_content.push(next_ch);
         }
 
         if tag_content.is_empty() {

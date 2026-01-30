@@ -1,0 +1,31 @@
+# Simple Synthesis Workflow Example
+#
+# This workflow demonstrates basic text-to-speech synthesis
+# Usage: voirs workflow execute examples/workflows/simple_synthesis.yaml
+
+name: "simple-synthesis"
+version: "1.0"
+description: "Basic text-to-speech synthesis workflow"
+
+variables:
+  text: "Hello, this is a simple synthesis example."
+  voice: "en-US-neural-1"
+  output: "output.wav"
+  quality: "high"
+
+config:
+  max_parallel: 2
+  timeout_seconds: 300
+
+steps:
+  - name: "synthesize"
+    type: "synthesize"
+    description: "Synthesize text to speech"
+    parameters:
+      text: "${text}"
+      voice: "${voice}"
+      output: "${output}"
+      quality: "${quality}"
+      rate: 1.0
+      pitch: 0.0
+      volume: 0.0

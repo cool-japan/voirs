@@ -130,8 +130,7 @@ impl CryptoConsentVerifier {
             legal_basis: format!("{:?}", consent.legal_info.legal_basis),
         };
 
-        let serialized =
-            serde_json::to_string(&consent_data).map_err(|e| Error::Serialization(e))?;
+        let serialized = serde_json::to_string(&consent_data).map_err(Error::Serialization)?;
 
         // Create HMAC for integrity
         let hmac_key = self
@@ -164,8 +163,7 @@ impl CryptoConsentVerifier {
             legal_basis: format!("{:?}", consent.legal_info.legal_basis),
         };
 
-        let serialized =
-            serde_json::to_string(&consent_data).map_err(|e| Error::Serialization(e))?;
+        let serialized = serde_json::to_string(&consent_data).map_err(Error::Serialization)?;
 
         // Decode proof
         let signature_bytes = general_purpose::STANDARD
@@ -334,8 +332,7 @@ impl DigitalSigningService for Ed25519SigningService {
             timestamps: consent.timestamps.clone(),
         };
 
-        let data_to_sign =
-            serde_json::to_vec(&consent_data).map_err(|e| Error::Serialization(e))?;
+        let data_to_sign = serde_json::to_vec(&consent_data).map_err(Error::Serialization)?;
 
         // Sign the data
         let signature = signing_key.sign(&data_to_sign);
@@ -363,14 +360,12 @@ impl DigitalSigningService for Ed25519SigningService {
             let keys = self.verification_keys.read().map_err(|_| {
                 Error::Verification("Failed to acquire verification keys lock".to_string())
             })?;
-            keys.get(&signature.signer_identity)
-                .ok_or_else(|| {
-                    Error::Verification(format!(
-                        "No verification key found for signer: {}",
-                        signature.signer_identity
-                    ))
-                })?
-                .clone()
+            *keys.get(&signature.signer_identity).ok_or_else(|| {
+                Error::Verification(format!(
+                    "No verification key found for signer: {}",
+                    signature.signer_identity
+                ))
+            })?
         };
 
         // Convert signature bytes
@@ -408,7 +403,7 @@ impl DigitalSigningService for Ed25519SigningService {
 
 impl Ed25519SigningService {
     fn hash_permissions(&self, permissions: &crate::consent::ConsentPermissions) -> Result<String> {
-        let serialized = serde_json::to_string(permissions).map_err(|e| Error::Serialization(e))?;
+        let serialized = serde_json::to_string(permissions).map_err(Error::Serialization)?;
 
         let mut hasher = Sha256::new();
         hasher.update(serialized.as_bytes());
@@ -483,7 +478,7 @@ impl SecureAuditLogger {
         let cipher = Aes256Gcm::new(key);
         let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
 
-        let plaintext = serde_json::to_vec(entry).map_err(|e| Error::Serialization(e))?;
+        let plaintext = serde_json::to_vec(entry).map_err(Error::Serialization)?;
 
         let ciphertext = cipher
             .encrypt(&nonce, plaintext.as_ref())

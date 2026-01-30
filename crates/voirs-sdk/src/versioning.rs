@@ -235,7 +235,12 @@ impl VersionManager {
 
 impl Default for VersionManager {
     fn default() -> Self {
-        Self::new().unwrap()
+        Self::new().unwrap_or_else(|_| VersionManager {
+            current_version: Version::new(0, 1, 0),
+            compatibility_matrix: CompatibilityMatrix::default(),
+            deprecation_tracker: DeprecationTracker::new(),
+            stability_policies: StabilityPolicies::default(),
+        })
     }
 }
 
@@ -246,6 +251,12 @@ pub struct CompatibilityMatrix {
     incompatible_pairs: HashMap<String, Vec<String>>,
     /// Compatibility rules
     rules: Vec<CompatibilityRule>,
+}
+
+impl Default for CompatibilityMatrix {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CompatibilityMatrix {
@@ -360,6 +371,12 @@ pub struct DeprecationTracker {
     deprecations: Vec<DeprecatedApi>,
 }
 
+impl Default for DeprecationTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DeprecationTracker {
     pub fn new() -> Self {
         Self {
@@ -368,7 +385,7 @@ impl DeprecationTracker {
                 DeprecatedApi {
                     api_name: "old_synthesis_method".to_string(),
                     reason: "Replaced with more efficient implementation".to_string(),
-                    deprecated_since: Version::parse("0.1.0").unwrap(),
+                    deprecated_since: Version::new(0, 1, 0),
                     removal_version: Some("1.0.0".to_string()),
                     replacement: Some("new_synthesis_method".to_string()),
                     migration_guide: Some(

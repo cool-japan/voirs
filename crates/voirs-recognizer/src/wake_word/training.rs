@@ -110,6 +110,7 @@ pub struct FeatureExtractor {
 
 impl FeatureExtractor {
     /// Create new feature extractor
+    #[must_use]
     pub fn new(sample_rate: u32) -> Self {
         Self {
             sample_rate,
@@ -203,6 +204,7 @@ pub struct DataAugmenter {
 
 impl DataAugmenter {
     /// Create new data augmenter
+    #[must_use]
     pub fn new() -> Self {
         Self {
             noise_levels: vec![0.01, 0.02, 0.05],
@@ -211,6 +213,7 @@ impl DataAugmenter {
     }
 
     /// Augment audio data
+    #[must_use]
     pub fn augment_audio(&self, audio: &AudioBuffer) -> Vec<AudioBuffer> {
         let mut augmented = vec![audio.clone()]; // Original
 
@@ -254,6 +257,7 @@ impl Default for DataAugmenter {
 
 impl WakeWordTrainerImpl {
     /// Create new wake word trainer
+    #[must_use]
     pub fn new(config: TrainingConfig, output_dir: PathBuf) -> Self {
         let progress = TrainingProgress {
             phase: TrainingPhase::Preprocessing,
@@ -432,14 +436,14 @@ impl WakeWordTrainerImpl {
         tokio::fs::create_dir_all(&self.output_dir)
             .await
             .map_err(|e| RecognitionError::ModelError {
-                message: format!("Failed to create output directory: {}", e),
+                message: format!("Failed to create output directory: {e}"),
                 source: Some(Box::new(e)),
             })?;
 
         tokio::fs::write(&model_path, b"dummy_model_data")
             .await
             .map_err(|e| RecognitionError::ModelError {
-                message: format!("Failed to save model: {}", e),
+                message: format!("Failed to save model: {e}"),
                 source: Some(Box::new(e)),
             })?;
 
@@ -530,7 +534,7 @@ impl WakeWordTrainer for WakeWordTrainerImpl {
 
         // Check data balance
         let ratio = positive_count as f32 / negative_count.max(1) as f32;
-        if ratio < 0.2 || ratio > 0.8 {
+        if !(0.2..=0.8).contains(&ratio) {
             quality_issues.push("Imbalanced training data".to_string());
             recommendations.push(
                 "Balance positive and negative examples (recommended ratio 1:2 to 1:4)".to_string(),
@@ -538,11 +542,11 @@ impl WakeWordTrainer for WakeWordTrainerImpl {
         }
 
         // Check audio quality (simplified)
-        let mut total_duration = 0.0;
+        let mut _total_duration = 0.0;
         let mut silence_ratio = 0.0;
 
         for audio in &training_data.positive_examples {
-            total_duration += audio.samples().len() as f32 / audio.sample_rate() as f32;
+            _total_duration += audio.samples().len() as f32 / audio.sample_rate() as f32;
             let samples = audio.samples();
             let silent_samples = samples.iter().filter(|&&x| x.abs() < 0.01).count();
             silence_ratio += silent_samples as f32 / samples.len() as f32;
@@ -568,7 +572,7 @@ impl WakeWordTrainer for WakeWordTrainerImpl {
         }
 
         // Penalize for imbalance
-        if ratio < 0.2 || ratio > 0.8 {
+        if !(0.2..=0.8).contains(&ratio) {
             quality_score -= 0.2;
         }
 
@@ -612,7 +616,7 @@ mod tests {
         let progress = trainer.get_training_progress().await.unwrap();
 
         assert_eq!(progress.phase, TrainingPhase::Preprocessing);
-        assert_eq!(progress.progress, 0.0);
+        assert!((progress.progress - 0.0).abs() < f32::EPSILON);
     }
 
     #[tokio::test]
@@ -646,6 +650,7 @@ mod tests {
     #[test]
     fn test_feature_extractor() {
         let extractor = FeatureExtractor::new(16000);
+        #[allow(clippy::cast_precision_loss)]
         let samples: Vec<f32> = (0..1600).map(|i| (i as f32 * 0.01).sin()).collect();
         let audio = AudioBuffer::mono(samples, 16000);
 

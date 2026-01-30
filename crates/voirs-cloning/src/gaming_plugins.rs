@@ -702,6 +702,12 @@ impl GamingPluginManager {
 #[derive(Debug)]
 pub struct UnityAudioSystem;
 
+impl Default for UnityAudioSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UnityAudioSystem {
     pub fn new() -> Self {
         Self
@@ -710,6 +716,12 @@ impl UnityAudioSystem {
 
 #[derive(Debug)]
 pub struct UnityGameObjectManager;
+
+impl Default for UnityGameObjectManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl UnityGameObjectManager {
     pub fn new() -> Self {
@@ -727,6 +739,12 @@ impl UnityGameObjectManager {
 #[derive(Debug)]
 pub struct UnityScriptInterface;
 
+impl Default for UnityScriptInterface {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UnityScriptInterface {
     pub fn new() -> Self {
         Self
@@ -735,6 +753,12 @@ impl UnityScriptInterface {
 
 #[derive(Debug)]
 pub struct UnrealAudioComponents;
+
+impl Default for UnrealAudioComponents {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl UnrealAudioComponents {
     pub fn new() -> Self {
@@ -748,6 +772,12 @@ impl UnrealAudioComponents {
 #[derive(Debug)]
 pub struct UnrealBlueprintInterface;
 
+impl Default for UnrealBlueprintInterface {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UnrealBlueprintInterface {
     pub fn new() -> Self {
         Self
@@ -756,6 +786,12 @@ impl UnrealBlueprintInterface {
 
 #[derive(Debug)]
 pub struct NiagaraVoiceIntegration;
+
+impl Default for NiagaraVoiceIntegration {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl NiagaraVoiceIntegration {
     pub fn new() -> Self {

@@ -1,8 +1,146 @@
 //! Prosody control for natural speech synthesis.
+//!
+//! This module provides comprehensive prosody control capabilities for manipulating
+//! the timing, pitch, and energy characteristics of synthesized speech. Prosody is
+//! crucial for creating natural-sounding, expressive speech.
+//!
+//! # Features
+//!
+//! ## Duration Control
+//!
+//! - Global speaking rate adjustment (speed factor)
+//! - Phoneme-specific duration multipliers
+//! - Stress-based duration modifications
+//! - Rhythm patterns (Natural, Uniform, Accelerando, Ritardando)
+//! - Pause duration configuration
+//! - Position-based timing adjustments
+//!
+//! ## Pitch Control
+//!
+//! - Base frequency configuration
+//! - Pitch range adjustment (semitones)
+//! - Intonation patterns (Natural, Flat, Rising, Falling, Expressive)
+//! - Phoneme-specific pitch adjustments
+//! - Stress-based pitch modulation
+//! - Natural declination over time
+//! - Vibrato support with configurable parameters
+//!
+//! ## Energy Control
+//!
+//! - Base energy level adjustment
+//! - Dynamic range control
+//! - Phoneme-specific energy modifications
+//! - Stress-based energy modulation
+//! - Energy contour patterns (Natural, Crescendo, Diminuendo, Dramatic)
+//! - Voice quality modeling (breathiness, creakiness, etc.)
+//! - Spectral tilt control
+//!
+//! # Examples
+//!
+//! ## Basic Prosody Control
+//!
+//! ```ignore
+//! use voirs_acoustic::prosody::{ProsodyConfig, DurationConfig, PitchConfig, EnergyConfig};
+//!
+//! fn basic_prosody() -> ProsodyConfig {
+//!     ProsodyConfig {
+//!         duration: DurationConfig {
+//!             speed_factor: 1.2,  // 20% faster
+//!             ..Default::default()
+//!         },
+//!         pitch: PitchConfig {
+//!             base_frequency: 220.0,  // A3
+//!             pitch_range_semitones: 12.0,
+//!             ..Default::default()
+//!         },
+//!         energy: EnergyConfig {
+//!             base_energy: 0.8,
+//!             ..Default::default()
+//!         },
+//!         strength: 1.0,
+//!         variation: 0.1,
+//!     }
+//! }
+//! ```
+//!
+//! ## Expressive Speech with Intonation
+//!
+//! ```ignore
+//! use voirs_acoustic::prosody::{PitchConfig, IntonationPattern};
+//!
+//! fn expressive_pitch() -> PitchConfig {
+//!     PitchConfig {
+//!         base_frequency: 200.0,
+//!         pitch_range_semitones: 18.0,  // Wide expressive range
+//!         intonation: IntonationPattern::Expressive,
+//!         declination_rate: 3.0,  // Stronger declination
+//!         ..Default::default()
+//!     }
+//! }
+//! ```
+//!
+//! ## Rhythmic Variation
+//!
+//! ```ignore
+//! use voirs_acoustic::prosody::{DurationConfig, RhythmPattern};
+//!
+//! fn rhythmic_speech() -> DurationConfig {
+//!     DurationConfig {
+//!         speed_factor: 1.0,
+//!         rhythm: RhythmPattern::Accelerando,  // Gradually speed up
+//!         ..Default::default()
+//!     }
+//! }
+//! ```
+//!
+//! ## Emotional Prosody
+//!
+//! ```ignore
+//! use voirs_acoustic::prosody::{ProsodyConfig, PitchConfig, EnergyConfig};
+//!
+//! fn angry_prosody() -> ProsodyConfig {
+//!     ProsodyConfig {
+//!         duration: DurationConfig {
+//!             speed_factor: 1.3,  // Faster speech
+//!             ..Default::default()
+//!         },
+//!         pitch: PitchConfig {
+//!             base_frequency: 250.0,  // Higher base pitch
+//!             pitch_range_semitones: 20.0,  // More variation
+//!             ..Default::default()
+//!         },
+//!         energy: EnergyConfig {
+//!             base_energy: 1.2,  // Louder
+//!             dynamic_range_db: 30.0,  // More dynamics
+//!             ..Default::default()
+//!         },
+//!         strength: 1.0,
+//!         variation: 0.15,
+//!     }
+//! }
+//! ```
+//!
+//! ## Whispering Effect
+//!
+//! ```ignore
+//! use voirs_acoustic::prosody::{EnergyConfig, VoiceQualityConfig};
+//!
+//! fn whisper_energy() -> EnergyConfig {
+//!     EnergyConfig {
+//!         base_energy: 0.3,  // Much quieter
+//!         voice_quality: VoiceQualityConfig {
+//!             breathiness: 0.8,  // Very breathy
+//!             ..Default::default()
+//!         },
+//!         ..Default::default()
+//!     }
+//! }
+//! ```
 
 pub mod duration;
 pub mod energy;
 pub mod pitch;
+pub mod simd_ops;
 
 pub use duration::{DurationConfig, DurationContext, PauseDurations, RhythmPattern};
 pub use energy::{EnergyConfig, EnergyContext, EnergyContourPattern, VoiceQualityConfig};
@@ -87,17 +225,21 @@ impl ProsodyConfig {
         self.energy.validate()?;
 
         if !(0.0..=1.0).contains(&self.strength) {
-            return Err(crate::AcousticError::ConfigError(format!(
-                "Prosody strength must be between 0.0 and 1.0, got {}",
-                self.strength
-            )));
+            return Err(crate::AcousticError::ConfigError {
+                message: format!(
+                    "Prosody strength must be between 0.0 and 1.0, got {}",
+                    self.strength
+                ),
+            });
         }
 
         if !(0.0..=1.0).contains(&self.variation) {
-            return Err(crate::AcousticError::ConfigError(format!(
-                "Prosody variation must be between 0.0 and 1.0, got {}",
-                self.variation
-            )));
+            return Err(crate::AcousticError::ConfigError {
+                message: format!(
+                    "Prosody variation must be between 0.0 and 1.0, got {}",
+                    self.variation
+                ),
+            });
         }
 
         Ok(())

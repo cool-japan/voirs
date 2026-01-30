@@ -223,9 +223,9 @@ impl ShiftDetector {
 
     fn calculate_median(&self, data: &[f32]) -> f32 {
         let mut sorted = data.to_vec();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let len = sorted.len();
-        if len % 2 == 0 {
+        if len.is_multiple_of(2) {
             (sorted[len / 2 - 1] + sorted[len / 2]) / 2.0
         } else {
             sorted[len / 2]
@@ -281,8 +281,8 @@ impl ShiftDetector {
         // Simplified 1D Wasserstein distance
         let mut source_sorted = source.to_vec();
         let mut target_sorted = target.to_vec();
-        source_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        target_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        source_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        target_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let min_len = source_sorted.len().min(target_sorted.len());
         let distance = (0..min_len)

@@ -1,7 +1,7 @@
 //! # Integrated Performance Monitoring
 //!
 //! This module provides performance monitoring capabilities that integrate
-//! with the VoiRS ecosystem for comprehensive performance tracking and
+//! with the `VoiRS` ecosystem for comprehensive performance tracking and
 //! optimization.
 
 use crate::RecognitionError;
@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
-/// Integrated performance monitor for VoiRS ecosystem
+/// Integrated performance monitor for `VoiRS` ecosystem
 #[derive(Debug)]
 pub struct IntegratedPerformanceMonitor {
     /// Performance metrics
@@ -228,7 +228,7 @@ impl IntegratedPerformanceMonitor {
         {
             // Fallback for other platforms using ps command
             if let Ok(output) = std::process::Command::new("ps")
-                .args(&["-o", "rss=", "-p"])
+                .args(["-o", "rss=", "-p"])
                 .arg(std::process::id().to_string())
                 .output()
             {

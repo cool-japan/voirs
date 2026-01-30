@@ -51,31 +51,49 @@ struct VersionManager {
     current_versions: Arc<Mutex<BTreeMap<String, String>>>,
 }
 
+/// Type of synchronization operation
 #[derive(Debug, Clone)]
-enum SyncOperation {
+pub enum SyncOperation {
+    /// Upload operation
     Upload(String),
+    /// Download operation
     Download(String),
+    /// Delete operation
     Delete(String),
+    /// Verify operation
     Verify(String),
 }
 
+/// Status of cloud synchronization operations
 #[derive(Debug, Clone)]
-struct SyncStatus {
-    in_progress: bool,
-    last_sync: Option<DateTime<Utc>>,
-    pending_operations: usize,
-    errors: Vec<SyncError>,
-    models_synced: u32,
-    models_updated: u32,
-    models_deleted: u32,
+pub struct SyncStatus {
+    /// Whether synchronization is currently in progress
+    pub in_progress: bool,
+    /// Timestamp of the last successful sync
+    pub last_sync: Option<DateTime<Utc>>,
+    /// Number of pending sync operations
+    pub pending_operations: usize,
+    /// List of errors encountered during sync
+    pub errors: Vec<SyncError>,
+    /// Number of models synchronized
+    pub models_synced: u32,
+    /// Number of models updated
+    pub models_updated: u32,
+    /// Number of models deleted
+    pub models_deleted: u32,
 }
 
+/// Error that occurred during synchronization
 #[derive(Debug, Clone)]
-struct SyncError {
-    operation: SyncOperation,
-    error: String,
-    timestamp: DateTime<Utc>,
-    retry_count: u32,
+pub struct SyncError {
+    /// The operation that failed
+    pub operation: SyncOperation,
+    /// Error message
+    pub error: String,
+    /// When the error occurred
+    pub timestamp: DateTime<Utc>,
+    /// Number of retry attempts
+    pub retry_count: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -205,7 +223,7 @@ impl VoirsCloudStorage {
             VoirsError::config_error(format!("Failed to read directory entry: {}", e))
         })? {
             let path = entry.path();
-            if path.extension().map_or(false, |ext| ext == "model") {
+            if path.extension().is_some_and(|ext| ext == "model") {
                 if let Ok(metadata) = self.load_model_metadata(&path).await {
                     let file_size = entry
                         .metadata()
@@ -495,14 +513,16 @@ impl VoirsCloudStorage {
                 .cache_dir
                 .join("cloud_mirror")
                 .join(format!("{}.cloud", model_id));
-            fs::create_dir_all(cloud_path.parent().unwrap())
-                .await
-                .map_err(|e| {
+
+            // Create parent directory
+            if let Some(parent_dir) = cloud_path.parent() {
+                fs::create_dir_all(parent_dir).await.map_err(|e| {
                     VoirsError::config_error(format!(
                         "Failed to create cloud mirror directory: {}",
                         e
                     ))
                 })?;
+            }
 
             // Write compressed data and metadata
             fs::write(&cloud_path, &compressed_data)
@@ -976,30 +996,35 @@ impl BackupStorage for LocalBackupStorage {
             VoirsError::config_error(format!("Failed to read directory entry: {}", e))
         })? {
             let path = entry.path();
-            if path.extension().map_or(false, |ext| ext == "backup") {
-                if let Ok(backup) = self
-                    .retrieve_backup(path.file_stem().unwrap().to_str().unwrap())
-                    .await
-                {
-                    // Get creation time from file metadata if available
-                    let created_at = if let Ok(metadata) = fs::metadata(&path).await {
-                        if let Ok(created) = metadata.created() {
-                            DateTime::<Utc>::from(created)
+            if path.extension().is_some_and(|ext| ext == "backup") {
+                // Get file stem as string
+                let backup_id = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.to_string());
+
+                if let Some(id) = backup_id {
+                    if let Ok(backup) = self.retrieve_backup(&id).await {
+                        // Get creation time from file metadata if available
+                        let created_at = if let Ok(metadata) = fs::metadata(&path).await {
+                            if let Ok(created) = metadata.created() {
+                                DateTime::<Utc>::from(created)
+                            } else {
+                                Utc::now()
+                            }
                         } else {
                             Utc::now()
-                        }
-                    } else {
-                        Utc::now()
-                    };
+                        };
 
-                    backups.push(BackupInfo {
-                        id: backup.id,
-                        name: format!("Backup"),
-                        size_bytes: backup.data.len() as u64,
-                        created_at,
-                        models_count: backup.models.len() as u32,
-                        checksum: Self::calculate_backup_checksum(&backup.data),
-                    });
+                        backups.push(BackupInfo {
+                            id: backup.id,
+                            name: "Backup".to_string(),
+                            size_bytes: backup.data.len() as u64,
+                            created_at,
+                            models_count: backup.models.len() as u32,
+                            checksum: Self::calculate_backup_checksum(&backup.data),
+                        });
+                    }
                 }
             }
         }
@@ -1128,7 +1153,10 @@ mod tests {
     #[cfg(feature = "cloud")]
     #[test]
     fn test_zstd_compression_decompression() {
-        let data = b"test data for zstd compression - this should compress well with zstd";
+        // Create larger, repetitive data that compresses well
+        let data_str =
+            "test data for zstd compression - this should compress well with zstd. ".repeat(100);
+        let data = data_str.as_bytes();
         let compressed =
             VoirsCloudStorage::compress_data_with_type(data, CompressionType::Zstd).unwrap();
         let decompressed =
@@ -1136,7 +1164,7 @@ mod tests {
                 .unwrap();
         assert_eq!(data, decompressed.as_slice());
 
-        // Zstd should achieve some compression
+        // Zstd should achieve significant compression on repetitive data
         assert!(compressed.len() < data.len());
     }
 

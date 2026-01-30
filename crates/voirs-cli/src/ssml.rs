@@ -1,13 +1,52 @@
 //! SSML (Speech Synthesis Markup Language) support for VoiRS CLI.
 
 use crate::error::{CliError, Result};
+use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashMap;
+
+// Static regex patterns compiled once at first use
+static RE_SPEAK: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"<speak[^>]*>.*</speak>").expect("Invalid SPEAK regex pattern"));
+static RE_VOICE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"<voice[^>]*>.*</voice>").expect("Invalid VOICE regex pattern"));
+static RE_PROSODY: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"<prosody[^>]*>.*</prosody>").expect("Invalid PROSODY regex pattern"));
+static RE_BREAK: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"<break[^/>]*/>").expect("Invalid BREAK regex pattern"));
+static RE_EMPHASIS: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"<emphasis[^>]*>.*</emphasis>").expect("Invalid EMPHASIS regex pattern")
+});
+static RE_SAY_AS: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"<say-as[^>]*>.*</say-as>").expect("Invalid SAY-AS regex pattern"));
+static RE_PHONEME: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"<phoneme[^>]*>.*</phoneme>").expect("Invalid PHONEME regex pattern"));
+static RE_SUB: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"<sub[^>]*>.*</sub>").expect("Invalid SUB regex pattern"));
+static RE_TAG: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"<(/?)(\w+)(?:[^>]*)>").expect("Invalid TAG regex pattern"));
+static RE_TAG_REMOVE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"<[^>]*>").expect("Invalid TAG_REMOVE regex pattern"));
+static RE_WHITESPACE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\s+").expect("Invalid WHITESPACE regex pattern"));
+static RE_PROSODY_TAG: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"<prosody\s+([^>]+)>"#).expect("Invalid PROSODY_TAG regex pattern"));
+static RE_RATE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"rate\s*=\s*["']([^"']+)["']"#).expect("Invalid RATE regex pattern"));
+static RE_PITCH: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"pitch\s*=\s*["']([^"']+)["']"#).expect("Invalid PITCH regex pattern")
+});
+static RE_VOLUME: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"volume\s*=\s*["']([^"']+)["']"#).expect("Invalid VOLUME regex pattern")
+});
+static RE_VOICE_NAME: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"<voice\s+name\s*=\s*["']([^"']+)["']"#).expect("Invalid VOICE_NAME regex pattern")
+});
 
 /// SSML validation and processing utilities
 pub struct SsmlProcessor {
     /// Regex patterns for SSML validation
-    patterns: HashMap<String, Regex>,
+    patterns: HashMap<String, &'static Lazy<Regex>>,
 }
 
 impl Default for SsmlProcessor {
@@ -21,36 +60,15 @@ impl SsmlProcessor {
     pub fn new() -> Self {
         let mut patterns = HashMap::new();
 
-        // Basic SSML tag patterns
-        patterns.insert(
-            "speak".to_string(),
-            Regex::new(r"<speak[^>]*>.*</speak>").unwrap(),
-        );
-        patterns.insert(
-            "voice".to_string(),
-            Regex::new(r"<voice[^>]*>.*</voice>").unwrap(),
-        );
-        patterns.insert(
-            "prosody".to_string(),
-            Regex::new(r"<prosody[^>]*>.*</prosody>").unwrap(),
-        );
-        patterns.insert("break".to_string(), Regex::new(r"<break[^/>]*/>").unwrap());
-        patterns.insert(
-            "emphasis".to_string(),
-            Regex::new(r"<emphasis[^>]*>.*</emphasis>").unwrap(),
-        );
-        patterns.insert(
-            "say-as".to_string(),
-            Regex::new(r"<say-as[^>]*>.*</say-as>").unwrap(),
-        );
-        patterns.insert(
-            "phoneme".to_string(),
-            Regex::new(r"<phoneme[^>]*>.*</phoneme>").unwrap(),
-        );
-        patterns.insert(
-            "sub".to_string(),
-            Regex::new(r"<sub[^>]*>.*</sub>").unwrap(),
-        );
+        // Reference static regex patterns
+        patterns.insert("speak".to_string(), &RE_SPEAK);
+        patterns.insert("voice".to_string(), &RE_VOICE);
+        patterns.insert("prosody".to_string(), &RE_PROSODY);
+        patterns.insert("break".to_string(), &RE_BREAK);
+        patterns.insert("emphasis".to_string(), &RE_EMPHASIS);
+        patterns.insert("say-as".to_string(), &RE_SAY_AS);
+        patterns.insert("phoneme".to_string(), &RE_PHONEME);
+        patterns.insert("sub".to_string(), &RE_SUB);
 
         Self { patterns }
     }
@@ -76,11 +94,14 @@ impl SsmlProcessor {
         }
 
         if !ssml.trim().ends_with("</speak>") {
+            let line_count = ssml.lines().count();
+            let last_line_len = ssml.lines().last().map(|l| l.len()).unwrap_or(0);
+
             issues.push(SsmlValidationIssue {
                 issue_type: SsmlIssueType::Error,
                 message: "SSML must end with </speak> tag".to_string(),
-                line: ssml.lines().count(),
-                column: ssml.lines().last().unwrap_or("").len(),
+                line: line_count,
+                column: last_line_len,
                 suggestion: Some("Add closing </speak> tag".to_string()),
             });
         }
@@ -99,11 +120,8 @@ impl SsmlProcessor {
         let mut issues = Vec::new();
         let mut tag_stack = Vec::new();
 
-        // Simple tag matching regex
-        let tag_regex = Regex::new(r"<(/?)(\w+)(?:[^>]*)>").unwrap();
-
         for (line_num, line) in ssml.lines().enumerate() {
-            for cap in tag_regex.captures_iter(line) {
+            for cap in RE_TAG.captures_iter(line) {
                 let is_closing = !cap[1].is_empty();
                 let tag_name = &cap[2];
 
@@ -144,12 +162,15 @@ impl SsmlProcessor {
         }
 
         // Check for unclosed tags
+        let line_count = ssml.lines().count();
+        let last_line_len = ssml.lines().last().map(|l| l.len()).unwrap_or(0);
+
         for unclosed_tag in tag_stack {
             issues.push(SsmlValidationIssue {
                 issue_type: SsmlIssueType::Error,
                 message: format!("Unclosed tag: <{}>", unclosed_tag),
-                line: ssml.lines().count(),
-                column: ssml.lines().last().unwrap_or("").len(),
+                line: line_count,
+                column: last_line_len,
                 suggestion: Some(format!("Add closing tag: </{}>", unclosed_tag)),
             });
         }
@@ -161,22 +182,17 @@ impl SsmlProcessor {
     fn validate_attributes(&self, ssml: &str) -> Result<Vec<SsmlValidationIssue>> {
         let mut issues = Vec::new();
 
-        // Prosody attribute validation
-        let prosody_regex = Regex::new(r#"<prosody\s+([^>]+)>"#).unwrap();
         for (line_num, line) in ssml.lines().enumerate() {
-            if let Some(cap) = prosody_regex.captures(line) {
+            if let Some(cap) = RE_PROSODY_TAG.captures(line) {
                 let attributes = &cap[1];
 
                 // Validate rate attribute
-                if let Some(rate_match) = Regex::new(r#"rate\s*=\s*["']([^"']+)["']"#)
-                    .unwrap()
-                    .captures(attributes)
-                {
+                if let Some(rate_match) = RE_RATE.captures(attributes) {
                     let rate_value = &rate_match[1];
                     if !self.is_valid_prosody_rate(rate_value) {
                         issues.push(SsmlValidationIssue {
                             issue_type: SsmlIssueType::Warning,
-                            message: format!("Invalid prosody rate: '{}'", rate_value),
+                            message: format!("Invalid prosody rate: '{rate_value}'"),
                             line: line_num + 1,
                             column: line.find(rate_value).unwrap_or(0) + 1,
                             suggestion: Some("Use values like: x-slow, slow, medium, fast, x-fast, or percentage/Hz values".to_string()),
@@ -185,15 +201,12 @@ impl SsmlProcessor {
                 }
 
                 // Validate pitch attribute
-                if let Some(pitch_match) = Regex::new(r#"pitch\s*=\s*["']([^"']+)["']"#)
-                    .unwrap()
-                    .captures(attributes)
-                {
+                if let Some(pitch_match) = RE_PITCH.captures(attributes) {
                     let pitch_value = &pitch_match[1];
                     if !self.is_valid_prosody_pitch(pitch_value) {
                         issues.push(SsmlValidationIssue {
                             issue_type: SsmlIssueType::Warning,
-                            message: format!("Invalid prosody pitch: '{}'", pitch_value),
+                            message: format!("Invalid prosody pitch: '{pitch_value}'"),
                             line: line_num + 1,
                             column: line.find(pitch_value).unwrap_or(0) + 1,
                             suggestion: Some("Use values like: x-low, low, medium, high, x-high, or Hz/semitone values".to_string()),
@@ -202,15 +215,12 @@ impl SsmlProcessor {
                 }
 
                 // Validate volume attribute
-                if let Some(volume_match) = Regex::new(r#"volume\s*=\s*["']([^"']+)["']"#)
-                    .unwrap()
-                    .captures(attributes)
-                {
+                if let Some(volume_match) = RE_VOLUME.captures(attributes) {
                     let volume_value = &volume_match[1];
                     if !self.is_valid_prosody_volume(volume_value) {
                         issues.push(SsmlValidationIssue {
                             issue_type: SsmlIssueType::Warning,
-                            message: format!("Invalid prosody volume: '{}'", volume_value),
+                            message: format!("Invalid prosody volume: '{volume_value}'"),
                             line: line_num + 1,
                             column: line.find(volume_value).unwrap_or(0) + 1,
                             suggestion: Some("Use values like: silent, x-soft, soft, medium, loud, x-loud, or dB values".to_string()),
@@ -254,15 +264,11 @@ impl SsmlProcessor {
 
     /// Convert SSML to plain text (remove markup)
     pub fn to_plain_text(&self, ssml: &str) -> String {
-        let mut text = ssml.to_string();
-
         // Remove SSML tags but keep their content
-        let tag_regex = Regex::new(r"<[^>]*>").unwrap();
-        text = tag_regex.replace_all(&text, "").to_string();
+        let text = RE_TAG_REMOVE.replace_all(ssml, "");
 
         // Clean up extra whitespace
-        let whitespace_regex = Regex::new(r"\s+").unwrap();
-        text = whitespace_regex.replace_all(&text, " ").to_string();
+        let text = RE_WHITESPACE.replace_all(&text, " ");
 
         text.trim().to_string()
     }
@@ -272,35 +278,23 @@ impl SsmlProcessor {
         let mut params = SsmlSynthesisParams::default();
 
         // Extract voice parameter
-        if let Some(voice_match) = Regex::new(r#"<voice\s+name\s*=\s*["']([^"']+)["']"#)
-            .unwrap()
-            .captures(ssml)
-        {
+        if let Some(voice_match) = RE_VOICE_NAME.captures(ssml) {
             params.voice = Some(voice_match[1].to_string());
         }
 
         // Extract prosody parameters (use the first occurrence)
-        if let Some(prosody_match) = Regex::new(r#"<prosody\s+([^>]+)>"#).unwrap().captures(ssml) {
+        if let Some(prosody_match) = RE_PROSODY_TAG.captures(ssml) {
             let attributes = &prosody_match[1];
 
-            if let Some(rate_match) = Regex::new(r#"rate\s*=\s*["']([^"']+)["']"#)
-                .unwrap()
-                .captures(attributes)
-            {
+            if let Some(rate_match) = RE_RATE.captures(attributes) {
                 params.speaking_rate = self.parse_rate_value(&rate_match[1]);
             }
 
-            if let Some(pitch_match) = Regex::new(r#"pitch\s*=\s*["']([^"']+)["']"#)
-                .unwrap()
-                .captures(attributes)
-            {
+            if let Some(pitch_match) = RE_PITCH.captures(attributes) {
                 params.pitch_shift = self.parse_pitch_value(&pitch_match[1]);
             }
 
-            if let Some(volume_match) = Regex::new(r#"volume\s*=\s*["']([^"']+)["']"#)
-                .unwrap()
-                .captures(attributes)
-            {
+            if let Some(volume_match) = RE_VOLUME.captures(attributes) {
                 params.volume_gain = self.parse_volume_value(&volume_match[1]);
             }
         }

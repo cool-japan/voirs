@@ -1,14 +1,17 @@
-//! Enhanced error recovery mechanisms for VoiRS Recognizer
+//! Enhanced error recovery mechanisms for `VoiRS` Recognizer
 //!
 //! This module provides comprehensive error recovery functionality including:
-//! - Automatic retry with exponential backoff
+//! - Automatic retry with exponential backoff and jitter
 //! - Circuit breaker patterns for error recovery
 //! - Graceful degradation mechanisms
 //! - Context-aware recovery strategies
 //! - Self-healing capabilities
+//! - Adaptive learning from recovery history
+//! - Distributed systems-aware retry policies
 
 use crate::error_enhancement::{ErrorCategory, ErrorEnhancer};
 use crate::RecognitionError;
+use scirs2_core::random::*;
 use std::collections::HashMap;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -273,8 +276,15 @@ pub struct RecoveryAttempt {
     pub context: HashMap<String, String>,
 }
 
+impl Default for ErrorRecoveryManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ErrorRecoveryManager {
     /// Create a new error recovery manager
+    #[must_use]
     pub fn new() -> Self {
         let mut manager = Self {
             recovery_strategies: HashMap::new(),
@@ -375,7 +385,7 @@ impl ErrorRecoveryManager {
     pub fn add_strategy(&mut self, category: ErrorCategory, strategy: RecoveryStrategy) {
         self.recovery_strategies
             .entry(category)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(strategy);
     }
 
@@ -524,7 +534,7 @@ impl ErrorRecoveryManager {
                     threshold,
                 } => {
                     if let Some(availability_str) =
-                        context.get(&format!("{}_availability", resource_type))
+                        context.get(&format!("{resource_type}_availability"))
                     {
                         if let Ok(availability) = availability_str.parse::<f32>() {
                             if availability > *threshold {
@@ -572,7 +582,7 @@ impl ErrorRecoveryManager {
                             success: true,
                             strategy_used: strategy.name.clone(),
                             recovery_time: start_time.elapsed(),
-                            details: format!("Succeeded on retry attempt {}", attempt),
+                            details: format!("Succeeded on retry attempt {attempt}"),
                             confidence: 0.8,
                             prevention_recommendations: vec![
                                 "Consider increasing timeout values".to_string(),
@@ -596,7 +606,7 @@ impl ErrorRecoveryManager {
                     success: true,
                     strategy_used: strategy.name.clone(),
                     recovery_time: start_time.elapsed(),
-                    details: format!("Successfully switched to fallback: {}", fallback_target),
+                    details: format!("Successfully switched to fallback: {fallback_target}"),
                     confidence: 0.9,
                     prevention_recommendations: vec![
                         "Monitor primary model health".to_string(),
@@ -617,7 +627,7 @@ impl ErrorRecoveryManager {
                     success: true,
                     strategy_used: strategy.name.clone(),
                     recovery_time: start_time.elapsed(),
-                    details: format!("Applied degradation level: {:?}", degradation_level),
+                    details: format!("Applied degradation level: {degradation_level:?}"),
                     confidence: 0.7,
                     prevention_recommendations: vec![
                         "Optimize processing pipeline".to_string(),
@@ -638,7 +648,7 @@ impl ErrorRecoveryManager {
                     success: true,
                     strategy_used: strategy.name.clone(),
                     recovery_time: start_time.elapsed(),
-                    details: format!("Component {} restarted successfully", component),
+                    details: format!("Component {component} restarted successfully"),
                     confidence: 0.85,
                     prevention_recommendations: vec![
                         "Implement better error handling".to_string(),
@@ -659,7 +669,7 @@ impl ErrorRecoveryManager {
                     success: true,
                     strategy_used: strategy.name.clone(),
                     recovery_time: start_time.elapsed(),
-                    details: format!("Resource optimization completed: {:?}", cleanup_level),
+                    details: format!("Resource optimization completed: {cleanup_level:?}"),
                     confidence: 0.75,
                     prevention_recommendations: vec![
                         "Implement better memory management".to_string(),
@@ -789,6 +799,7 @@ impl ErrorRecoveryManager {
     }
 
     /// Get recovery statistics
+    #[must_use]
     pub fn get_recovery_stats(&self) -> RecoveryStats {
         let total_attempts = self.recovery_history.len();
         let successful_attempts = self.recovery_history.iter().filter(|a| a.success).count();
@@ -799,11 +810,11 @@ impl ErrorRecoveryManager {
             0.0
         };
 
-        let average_recovery_time = if !self.recovery_history.is_empty() {
+        let average_recovery_time = if self.recovery_history.is_empty() {
+            Duration::from_secs(0)
+        } else {
             let total_time: Duration = self.recovery_history.iter().map(|a| a.recovery_time).sum();
             total_time / self.recovery_history.len() as u32
-        } else {
-            Duration::from_secs(0)
         };
 
         RecoveryStats {
@@ -822,6 +833,224 @@ impl ErrorRecoveryManager {
             *usage.entry(attempt.strategy.clone()).or_insert(0) += 1;
         }
         usage
+    }
+
+    /// Calculate retry delay with exponential backoff and jitter
+    ///
+    /// Uses decorrelated jitter algorithm for better distributed systems behavior.
+    /// This prevents thundering herd problems in distributed deployments.
+    ///
+    /// # Arguments
+    /// * `attempt` - Current retry attempt number (0-indexed)
+    /// * `base_delay_ms` - Base delay in milliseconds
+    /// * `max_delay_ms` - Maximum delay cap in milliseconds
+    /// * `backoff_multiplier` - Exponential backoff multiplier
+    ///
+    /// # Returns
+    /// Delay duration with jitter applied
+    pub fn calculate_retry_delay_with_jitter(
+        attempt: usize,
+        base_delay_ms: u64,
+        max_delay_ms: u64,
+        backoff_multiplier: f32,
+    ) -> Duration {
+        use scirs2_core::random::Rng;
+
+        // Calculate exponential backoff
+        let exp_backoff = (base_delay_ms as f32 * backoff_multiplier.powi(attempt as i32))
+            .min(max_delay_ms as f32);
+
+        // Apply decorrelated jitter (between base_delay and exp_backoff)
+        let mut rng = thread_rng();
+        let min_delay = base_delay_ms as f32;
+        let jitter_delay = rng.gen_range(min_delay..=exp_backoff.max(min_delay));
+
+        Duration::from_millis(jitter_delay as u64)
+    }
+
+    /// Adaptive retry strategy that learns from recovery history
+    ///
+    /// This method analyzes past recovery attempts to determine the optimal
+    /// retry strategy for the current error category.
+    ///
+    /// # Arguments
+    /// * `error_category` - Category of the error being recovered from
+    ///
+    /// # Returns
+    /// Recommended retry configuration based on historical success rates
+    pub fn get_adaptive_retry_config(&self, error_category: &ErrorCategory) -> (usize, u64, f32) {
+        // Analyze history for this error category
+        let relevant_attempts: Vec<_> = self
+            .recovery_history
+            .iter()
+            .filter(|a| &a.error_category == error_category)
+            .collect();
+
+        if relevant_attempts.is_empty() {
+            // No history, use conservative defaults
+            return (
+                self.retry_config.default_max_attempts,
+                self.retry_config.default_base_delay_ms,
+                self.retry_config.backoff_multiplier,
+            );
+        }
+
+        // Calculate success rate for this category
+        let success_count = relevant_attempts.iter().filter(|a| a.success).count();
+        let success_rate = success_count as f32 / relevant_attempts.len() as f32;
+
+        // Adapt parameters based on success rate
+        let max_attempts = if success_rate > 0.8 {
+            // High success rate: be more aggressive
+            self.retry_config.default_max_attempts + 2
+        } else if success_rate > 0.5 {
+            // Moderate success rate: use defaults
+            self.retry_config.default_max_attempts
+        } else {
+            // Low success rate: reduce attempts to fail faster
+            (self.retry_config.default_max_attempts / 2).max(2)
+        };
+
+        // Adapt delay based on historical recovery times
+        let avg_recovery_ms = if !relevant_attempts.is_empty() {
+            let total_ms: u128 = relevant_attempts
+                .iter()
+                .map(|a| a.recovery_time.as_millis())
+                .sum();
+            (total_ms / relevant_attempts.len() as u128) as u64
+        } else {
+            self.retry_config.default_base_delay_ms
+        };
+
+        let base_delay = avg_recovery_ms.max(self.retry_config.default_base_delay_ms / 2);
+
+        // Adapt backoff multiplier based on volatility
+        let backoff = if success_rate > 0.7 {
+            self.retry_config.backoff_multiplier * 0.9 // More gradual backoff
+        } else {
+            self.retry_config.backoff_multiplier * 1.2 // Steeper backoff
+        };
+
+        (max_attempts, base_delay, backoff)
+    }
+
+    /// Context-aware strategy selection using historical data
+    ///
+    /// Selects the most appropriate recovery strategy based on:
+    /// - Error category
+    /// - Historical success rates
+    /// - Current system context
+    /// - Strategy performance metrics
+    ///
+    /// # Arguments
+    /// * `error_category` - Category of error to recover from
+    /// * `context` - Current system context
+    ///
+    /// # Returns
+    /// Best strategy based on adaptive learning, or None if no suitable strategy found
+    pub fn select_best_strategy_adaptive(
+        &self,
+        error_category: &ErrorCategory,
+        context: &HashMap<String, String>,
+    ) -> Option<RecoveryStrategy> {
+        let strategies = self.recovery_strategies.get(error_category)?;
+
+        if strategies.is_empty() {
+            return None;
+        }
+
+        // Calculate adaptive scores for each strategy
+        let mut scored_strategies: Vec<(f32, &RecoveryStrategy)> = strategies
+            .iter()
+            .map(|strategy| {
+                let score = self.calculate_strategy_score(strategy, error_category, context);
+                (score, strategy)
+            })
+            .collect();
+
+        // Sort by score (descending)
+        scored_strategies
+            .sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Return best strategy
+        scored_strategies
+            .first()
+            .map(|(_, strategy)| (*strategy).clone())
+    }
+
+    /// Calculate adaptive score for a recovery strategy
+    ///
+    /// Combines multiple factors:
+    /// - Historical success rate for this strategy
+    /// - Estimated success probability
+    /// - Strategy priority
+    /// - Recent performance trend
+    ///
+    /// # Arguments
+    /// * `strategy` - Strategy to score
+    /// * `error_category` - Error category context
+    /// * `_context` - System context (reserved for future use)
+    ///
+    /// # Returns
+    /// Adaptive score (higher is better)
+    fn calculate_strategy_score(
+        &self,
+        strategy: &RecoveryStrategy,
+        error_category: &ErrorCategory,
+        _context: &HashMap<String, String>,
+    ) -> f32 {
+        // Base score from strategy's estimated probability
+        let mut score = strategy.success_probability;
+
+        // Adjust based on historical performance
+        let historical_success =
+            self.get_strategy_historical_success(&strategy.name, error_category);
+        score = score * 0.6 + historical_success * 0.4;
+
+        // Factor in priority (inverse - lower priority number = higher score)
+        let priority_boost = 1.0 / (strategy.priority as f32 + 1.0);
+        score += priority_boost * 0.1;
+
+        // Penalize slow recovery strategies slightly
+        if strategy.estimated_recovery_time > 5.0 {
+            score *= 0.95;
+        }
+
+        // Boost recent successful strategies
+        if self.was_recently_successful(&strategy.name, 5) {
+            score *= 1.1;
+        }
+
+        score.min(1.0) // Cap at 1.0
+    }
+
+    /// Get historical success rate for a specific strategy
+    fn get_strategy_historical_success(
+        &self,
+        strategy_name: &str,
+        error_category: &ErrorCategory,
+    ) -> f32 {
+        let relevant_attempts: Vec<_> = self
+            .recovery_history
+            .iter()
+            .filter(|a| &a.error_category == error_category && a.strategy == strategy_name)
+            .collect();
+
+        if relevant_attempts.is_empty() {
+            return 0.5; // Neutral when no history
+        }
+
+        let success_count = relevant_attempts.iter().filter(|a| a.success).count();
+        success_count as f32 / relevant_attempts.len() as f32
+    }
+
+    /// Check if a strategy was recently successful
+    fn was_recently_successful(&self, strategy_name: &str, lookback_attempts: usize) -> bool {
+        self.recovery_history
+            .iter()
+            .rev()
+            .take(lookback_attempts)
+            .any(|a| a.strategy == strategy_name && a.success)
     }
 }
 

@@ -1,7 +1,12 @@
 use super::eye_tracking::EyeTrackingAnalyzer;
 use super::facial::FacialAnalyzer;
 use super::gesture::GesturePostureAnalyzer;
-use super::types::*;
+use super::types::{
+    BoundingBox, CombinedLandmarks, ComputerVisionAnalyzer, ExpressionType, EyeGazeTracking,
+    FacialExpression, FacialLandmarks, FingerPositions, GesturePattern, HandPosition,
+    ImprovementTrends, LandmarkDetector, LipMovementAnalysis, MultiModalAnalysis, Point2D,
+    PostureAnalysis, VideoFrame,
+};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -16,8 +21,15 @@ pub struct MLComputerVisionAnalyzer {
     analysis_history: Arc<RwLock<Vec<MultiModalAnalysis>>>,
 }
 
+impl Default for MLComputerVisionAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MLComputerVisionAnalyzer {
     /// Description
+    #[must_use]
     pub fn new() -> Self {
         Self {
             facial_analyzer: Arc::new(RwLock::new(FacialAnalyzer::new())),
@@ -272,8 +284,15 @@ pub struct SimpleLandmarkDetector {
     detection_confidence: f32,
 }
 
+impl Default for SimpleLandmarkDetector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SimpleLandmarkDetector {
     /// Description
+    #[must_use]
     pub fn new() -> Self {
         Self {
             detection_confidence: 0.8,
@@ -349,8 +368,15 @@ pub struct ComputerVisionSystem {
     analysis_history: Arc<RwLock<Vec<MultiModalAnalysis>>>,
 }
 
+impl Default for ComputerVisionSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ComputerVisionSystem {
     /// Description
+    #[must_use]
     pub fn new() -> Self {
         Self {
             analyzer: Arc::new(MLComputerVisionAnalyzer::new()),
@@ -636,6 +662,7 @@ impl ComputerVisionSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::computer_vision::types::VideoFormat;
 
     #[tokio::test]
     async fn test_facial_landmark_detection() {

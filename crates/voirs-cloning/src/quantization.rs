@@ -326,7 +326,7 @@ impl ModelQuantizer {
         let stats = self
             .stats_collector
             .entry(layer_name.to_string())
-            .or_insert_with(QuantizationStats::new);
+            .or_default();
 
         stats.update(tensor)?;
         Ok(())
@@ -610,7 +610,7 @@ impl QuantizedTensor {
         };
 
         if self.precision == QuantizationPrecision::Int4 {
-            (num_elements + 1) / 2 // Ceiling division for packed 4-bit
+            num_elements.div_ceil(2) // Ceiling division for packed 4-bit
         } else {
             num_elements * bytes_per_element
         }

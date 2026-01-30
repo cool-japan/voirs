@@ -323,12 +323,12 @@ impl CloningIntegration {
             source_audio.iter().map(|x| x * x).sum::<f32>() / source_audio.len() as f32;
 
         // Compare with target embedding
-        let target_mean = target_profile.embedding.get(0).unwrap_or(&0.0);
+        let target_mean = target_profile.embedding.first().unwrap_or(&0.0);
         let target_energy = target_profile.embedding.get(1).unwrap_or(&0.0);
 
         // Calculate simple similarity based on energy difference
         let energy_diff = (source_energy.sqrt() - target_energy).abs();
-        let similarity = (1.0 - energy_diff).max(0.0).min(1.0);
+        let similarity = (1.0 - energy_diff).clamp(0.0, 1.0);
 
         Ok(similarity)
     }
@@ -444,9 +444,9 @@ impl CloningIntegration {
         };
 
         metrics.insert("snr".to_string(), snr);
-        metrics.insert("similarity".to_string(), (snr / 40.0).min(1.0).max(0.0));
+        metrics.insert("similarity".to_string(), (snr / 40.0).clamp(0.0, 1.0));
         metrics.insert("naturalness".to_string(), 0.8); // Placeholder
-        metrics.insert("quality".to_string(), (snr / 30.0).min(1.0).max(0.0));
+        metrics.insert("quality".to_string(), (snr / 30.0).clamp(0.0, 1.0));
 
         Ok(metrics)
     }

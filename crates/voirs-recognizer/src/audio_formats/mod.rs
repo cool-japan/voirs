@@ -1,6 +1,6 @@
 //! # Audio Format Support
 //!
-//! Comprehensive audio format handling and conversion utilities for the VoiRS recognition system.
+//! Comprehensive audio format handling and conversion utilities for the `VoiRS` recognition system.
 //! This module provides unified loading capabilities for various audio formats with automatic
 //! format detection, high-quality resampling, and intelligent preprocessing.
 //!

@@ -232,12 +232,11 @@ impl ForcedAlignModel {
             return self.load_default_dictionary().await;
         }
 
-        let file = std::fs::File::open(dict_path).map_err(|e| {
-            RecognitionError::ModelLoadError {
+        let file =
+            std::fs::File::open(dict_path).map_err(|e| RecognitionError::ModelLoadError {
                 message: format!("Failed to open dictionary file: {}", e),
                 source: Some(Box::new(e)),
-            }
-        })?;
+            })?;
 
         let reader = BufReader::new(file);
         let mut dictionary = HashMap::new();
@@ -275,9 +274,7 @@ impl ForcedAlignModel {
                 .iter()
                 .map(|p| {
                     // Remove stress markers (0, 1, 2) from vowels
-                    p.chars()
-                        .filter(|c| !c.is_numeric())
-                        .collect::<String>()
+                    p.chars().filter(|c| !c.is_numeric()).collect::<String>()
                 })
                 .collect();
 
@@ -309,16 +306,57 @@ impl ForcedAlignModel {
 
         // Add common English words with ARPAbet phonemes
         // Vowels
-        dictionary.insert("HELLO".to_string(), vec!["HH".into(), "AH".into(), "L".into(), "OW".into()]);
-        dictionary.insert("WORLD".to_string(), vec!["W".into(), "ER".into(), "L".into(), "D".into()]);
-        dictionary.insert("TEST".to_string(), vec!["T".into(), "EH".into(), "S".into(), "T".into()]);
-        dictionary.insert("SPEECH".to_string(), vec!["S".into(), "P".into(), "IY".into(), "CH".into()]);
-        dictionary.insert("VOICE".to_string(), vec!["V".into(), "OY".into(), "S".into()]);
-        dictionary.insert("RECOGNITION".to_string(), vec!["R".into(), "EH".into(), "K".into(), "AH".into(), "G".into(), "N".into(), "IH".into(), "SH".into(), "AH".into(), "N".into()]);
-        dictionary.insert("PHONEME".to_string(), vec!["F".into(), "OW".into(), "N".into(), "IY".into(), "M".into()]);
-        dictionary.insert("ALIGN".to_string(), vec!["AH".into(), "L".into(), "AY".into(), "N".into()]);
-        dictionary.insert("FORCED".to_string(), vec!["F".into(), "AO".into(), "R".into(), "S".into(), "T".into()]);
-        dictionary.insert("AUDIO".to_string(), vec!["AO".into(), "D".into(), "IY".into(), "OW".into()]);
+        dictionary.insert(
+            "HELLO".to_string(),
+            vec!["HH".into(), "AH".into(), "L".into(), "OW".into()],
+        );
+        dictionary.insert(
+            "WORLD".to_string(),
+            vec!["W".into(), "ER".into(), "L".into(), "D".into()],
+        );
+        dictionary.insert(
+            "TEST".to_string(),
+            vec!["T".into(), "EH".into(), "S".into(), "T".into()],
+        );
+        dictionary.insert(
+            "SPEECH".to_string(),
+            vec!["S".into(), "P".into(), "IY".into(), "CH".into()],
+        );
+        dictionary.insert(
+            "VOICE".to_string(),
+            vec!["V".into(), "OY".into(), "S".into()],
+        );
+        dictionary.insert(
+            "RECOGNITION".to_string(),
+            vec![
+                "R".into(),
+                "EH".into(),
+                "K".into(),
+                "AH".into(),
+                "G".into(),
+                "N".into(),
+                "IH".into(),
+                "SH".into(),
+                "AH".into(),
+                "N".into(),
+            ],
+        );
+        dictionary.insert(
+            "PHONEME".to_string(),
+            vec!["F".into(), "OW".into(), "N".into(), "IY".into(), "M".into()],
+        );
+        dictionary.insert(
+            "ALIGN".to_string(),
+            vec!["AH".into(), "L".into(), "AY".into(), "N".into()],
+        );
+        dictionary.insert(
+            "FORCED".to_string(),
+            vec!["F".into(), "AO".into(), "R".into(), "S".into(), "T".into()],
+        );
+        dictionary.insert(
+            "AUDIO".to_string(),
+            vec!["AO".into(), "D".into(), "IY".into(), "OW".into()],
+        );
 
         // Common words
         dictionary.insert("THE".to_string(), vec!["DH".into(), "AH".into()]);
@@ -329,17 +367,32 @@ impl ForcedAlignModel {
         dictionary.insert("OF".to_string(), vec!["AH".into(), "V".into()]);
         dictionary.insert("IN".to_string(), vec!["IH".into(), "N".into()]);
         dictionary.insert("FOR".to_string(), vec!["F".into(), "AO".into(), "R".into()]);
-        dictionary.insert("WITH".to_string(), vec!["W".into(), "IH".into(), "DH".into()]);
+        dictionary.insert(
+            "WITH".to_string(),
+            vec!["W".into(), "IH".into(), "DH".into()],
+        );
         dictionary.insert("ON".to_string(), vec!["AA".into(), "N".into()]);
 
         // Numbers
         dictionary.insert("ONE".to_string(), vec!["W".into(), "AH".into(), "N".into()]);
         dictionary.insert("TWO".to_string(), vec!["T".into(), "UW".into()]);
-        dictionary.insert("THREE".to_string(), vec!["TH".into(), "R".into(), "IY".into()]);
-        dictionary.insert("FOUR".to_string(), vec!["F".into(), "AO".into(), "R".into()]);
-        dictionary.insert("FIVE".to_string(), vec!["F".into(), "AY".into(), "V".into()]);
+        dictionary.insert(
+            "THREE".to_string(),
+            vec!["TH".into(), "R".into(), "IY".into()],
+        );
+        dictionary.insert(
+            "FOUR".to_string(),
+            vec!["F".into(), "AO".into(), "R".into()],
+        );
+        dictionary.insert(
+            "FIVE".to_string(),
+            vec!["F".into(), "AY".into(), "V".into()],
+        );
 
-        tracing::info!("Loaded default pronunciation dictionary with {} words", dictionary.len());
+        tracing::info!(
+            "Loaded default pronunciation dictionary with {} words",
+            dictionary.len()
+        );
 
         Ok(dictionary)
     }
@@ -413,7 +466,9 @@ impl ForcedAlignModel {
             .iter()
             .enumerate()
             .map(|(i, &sample)| {
-                let window = 0.54 - 0.46 * (2.0 * std::f32::consts::PI * i as f32 / (frame.len() - 1) as f32).cos();
+                let window = 0.54
+                    - 0.46
+                        * (2.0 * std::f32::consts::PI * i as f32 / (frame.len() - 1) as f32).cos();
                 sample * window
             })
             .collect();
@@ -425,11 +480,12 @@ impl ForcedAlignModel {
             fft_input[i] = val as f64;
         }
 
-        let spectrum = rfft(&fft_input, Some(fft_size))
-            .map_err(|e| RecognitionError::PhonemeRecognitionError {
+        let spectrum = rfft(&fft_input, Some(fft_size)).map_err(|e| {
+            RecognitionError::PhonemeRecognitionError {
                 message: format!("FFT failed: {:?}", e),
                 source: None,
-            })?;
+            }
+        })?;
 
         // Compute power spectrum
         let power_spectrum: Vec<f32> = spectrum
@@ -444,10 +500,8 @@ impl ForcedAlignModel {
         let mel_energies = self.apply_mel_filterbank(&power_spectrum, sample_rate, fft_size)?;
 
         // Compute log energies
-        let log_mel_energies: Vec<f32> = mel_energies
-            .iter()
-            .map(|&e| (e.max(1e-10)).ln())
-            .collect();
+        let log_mel_energies: Vec<f32> =
+            mel_energies.iter().map(|&e| (e.max(1e-10)).ln()).collect();
 
         // Apply DCT to get MFCC coefficients
         let mfcc = self.apply_dct(&log_mel_energies, NUM_MFCC)?;
@@ -531,7 +585,8 @@ impl ForcedAlignModel {
         for k in 0..num_coeffs {
             let mut sum = 0.0;
             for (i, &val) in input.iter().enumerate() {
-                sum += val * ((std::f32::consts::PI * k as f32 * (i as f32 + 0.5)) / n as f32).cos();
+                sum +=
+                    val * ((std::f32::consts::PI * k as f32 * (i as f32 + 0.5)) / n as f32).cos();
             }
             output[k] = sum;
         }
@@ -729,8 +784,25 @@ impl ForcedAlignModel {
         // Adjust first coefficient based on phoneme type (vowel vs consonant)
         let is_vowel = matches!(
             symbol.to_uppercase().as_str(),
-            "A" | "E" | "I" | "O" | "U" | "AH" | "EH" | "IH" | "OH" | "UH" | "AA" | "AE"
-                | "AO" | "AW" | "AY" | "EY" | "IY" | "OW" | "OY" | "UW"
+            "A" | "E"
+                | "I"
+                | "O"
+                | "U"
+                | "AH"
+                | "EH"
+                | "IH"
+                | "OH"
+                | "UH"
+                | "AA"
+                | "AE"
+                | "AO"
+                | "AW"
+                | "AY"
+                | "EY"
+                | "IY"
+                | "OW"
+                | "OY"
+                | "UW"
         );
 
         if is_vowel {

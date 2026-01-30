@@ -1,7 +1,7 @@
 //! Basic types and data structures for visualization
 
 #[cfg(feature = "ui")]
-use crate::traits::*;
+use crate::traits::FeedbackProvider;
 #[cfg(feature = "ui")]
 use chrono::{DateTime, Utc};
 #[cfg(feature = "ui")]
@@ -757,6 +757,7 @@ pub enum PerformanceMode {
 #[cfg(feature = "ui")]
 impl FrameLimiter {
     /// Create a new frame limiter with target FPS
+    #[must_use]
     pub fn new(target_fps: f32) -> Self {
         Self {
             target_fps,
@@ -793,6 +794,7 @@ impl FrameLimiter {
     }
 
     /// Get current performance mode
+    #[must_use]
     pub fn get_performance_mode(&self) -> PerformanceMode {
         self.performance_mode
     }

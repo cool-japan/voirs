@@ -59,8 +59,9 @@ once_cell.workspace = true
 parking_lot.workspace = true
 chrono.workspace = true
 flate2.workspace = true
-uuid = { version = "1.18", features = ["v4", "serde"] }
+uuid = { version = "1.20", features = ["v4", "serde"] }
 base64 = "0.22"
+md5 = "0.7"
 
 # Machine learning
 candle-core.workspace = true
@@ -80,10 +81,14 @@ tokio-tungstenite = "0.28"
 crossbeam-utils.workspace = true
 num_cpus.workspace = true
 libc.workspace = true
+fastrand.workspace = true
 
 # Python bindings (optional)
 pyo3 = { workspace = true, features = ["extension-module"], optional = true }
 numpy = { workspace = true, optional = true }
+
+# CLI dependencies
+clap = { version = "4.5", features = ["derive"] }
 
 # Audio metrics
 # Note: In a real implementation, you might add specialized audio quality libraries
@@ -131,5 +136,11 @@ harness = false
 [[bench]]
 name = "performance_standards"
 harness = false
+
+[[bin]]
+name = "voirs-eval"
+path = "src/bin/voirs-eval.rs"
+required-features = []
+
 [lints]
 workspace = true

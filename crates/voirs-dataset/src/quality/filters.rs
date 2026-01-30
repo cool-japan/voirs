@@ -527,9 +527,9 @@ impl AdaptiveQualityFilter {
             .collect();
         let mut durations: Vec<f32> = self.adaptation_history.iter().map(|m| m.duration).collect();
 
-        snr_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        quality_scores.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        durations.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        snr_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        quality_scores.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        durations.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         // Adapt thresholds based on data distribution
         if let Some(p10) = self.percentile(&snr_values, 10.0) {

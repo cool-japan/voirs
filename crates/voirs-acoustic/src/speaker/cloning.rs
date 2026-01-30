@@ -142,32 +142,38 @@ impl FewShotSpeakerAdaptation {
         references: &[AudioReference],
     ) -> Result<SpeakerEmbedding> {
         if references.len() < self.config.min_reference_samples {
-            return Err(AcousticError::InputError(format!(
-                "Need at least {} reference samples, got {}",
-                self.config.min_reference_samples,
-                references.len()
-            )));
+            return Err(AcousticError::InputError {
+                message: format!(
+                    "Need at least {} reference samples, got {}",
+                    self.config.min_reference_samples,
+                    references.len()
+                ),
+            });
         }
 
         // Validate reference samples
         for reference in references {
             if reference.quality_score < self.config.quality_threshold {
-                return Err(AcousticError::InputError(format!(
-                    "Reference sample {} has quality score {:.2}, minimum required: {:.2}",
-                    reference.id, reference.quality_score, self.config.quality_threshold
-                )));
+                return Err(AcousticError::InputError {
+                    message: format!(
+                        "Reference sample {} has quality score {:.2}, minimum required: {:.2}",
+                        reference.id, reference.quality_score, self.config.quality_threshold
+                    ),
+                });
             }
 
             if reference.duration < self.config.min_sample_duration
                 || reference.duration > self.config.max_sample_duration
             {
-                return Err(AcousticError::InputError(format!(
-                    "Reference sample {} duration {:.2}s is outside valid range [{:.2}s, {:.2}s]",
-                    reference.id,
-                    reference.duration,
-                    self.config.min_sample_duration,
-                    self.config.max_sample_duration
-                )));
+                return Err(AcousticError::InputError {
+                    message: format!(
+                        "Reference sample {} duration {:.2}s is outside valid range [{:.2}s, {:.2}s]",
+                        reference.id,
+                        reference.duration,
+                        self.config.min_sample_duration,
+                        self.config.max_sample_duration
+                    ),
+                });
             }
         }
 
@@ -271,9 +277,9 @@ impl FewShotSpeakerAdaptation {
         if let Some(speaker_id) = best_speaker_id {
             Ok((speaker_id, best_similarity))
         } else {
-            Err(AcousticError::InputError(
-                "No base speakers available for adaptation".to_string(),
-            ))
+            Err(AcousticError::InputError {
+                message: "No base speakers available for adaptation".to_string(),
+            })
         }
     }
 
@@ -343,9 +349,9 @@ impl SpeakerVerifier {
         test_embedding: &SpeakerEmbedding,
     ) -> Result<SpeakerVerificationResult> {
         if reference_embedding.dimension != test_embedding.dimension {
-            return Err(AcousticError::InputError(
-                "Speaker embeddings must have the same dimension".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Speaker embeddings must have the same dimension".to_string(),
+            });
         }
 
         let cosine_similarity =
@@ -609,11 +615,12 @@ impl CrossLanguageSpeakerAdapter {
         base_embedding: &SpeakerEmbedding,
         target_language: &str,
     ) -> Result<SpeakerEmbedding> {
-        let language_model = self.language_models.get(target_language).ok_or_else(|| {
-            AcousticError::InputError(format!(
-                "No adaptation model for language: {target_language}"
-            ))
-        })?;
+        let language_model =
+            self.language_models
+                .get(target_language)
+                .ok_or_else(|| AcousticError::InputError {
+                    message: format!("No adaptation model for language: {target_language}"),
+                })?;
 
         let mut adapted_embedding = base_embedding.embedding.clone();
 

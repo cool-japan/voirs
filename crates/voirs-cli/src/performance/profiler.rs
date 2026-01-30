@@ -364,7 +364,7 @@ impl SystemProfiler {
             use std::process::Command;
 
             let output = Command::new("iostat")
-                .args(&["-d", "-I", "-c", "1"])
+                .args(["-d", "-I", "-c", "1"])
                 .output()?;
 
             if output.status.success() {
@@ -428,9 +428,7 @@ impl SystemProfiler {
             // Use sysctl to get network interface statistics on macOS
             use std::process::Command;
 
-            let output = Command::new("netstat")
-                .args(&["-ib"])
-                .output()?;
+            let output = Command::new("netstat").args(["-ib"]).output()?;
 
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
@@ -735,7 +733,8 @@ impl SystemProfiler {
                     }
                 }
 
-                let total_pages = pages_free + pages_active + pages_inactive + pages_speculative + pages_wired;
+                let total_pages =
+                    pages_free + pages_active + pages_inactive + pages_speculative + pages_wired;
                 if total_pages > 0 {
                     // Fragmentation estimate: speculative and inactive pages suggest fragmentation
                     let fragmented = pages_speculative + (pages_inactive / 2);
@@ -835,7 +834,8 @@ impl SystemProfiler {
 
                 if total_memory_activity > 0 {
                     // Cache hit rate estimate: ratio of cached memory to total activity
-                    let cache_hit_rate = (total_cache as f64 / total_memory_activity as f64) * 100.0;
+                    let cache_hit_rate =
+                        (total_cache as f64 / total_memory_activity as f64) * 100.0;
                     return Ok(cache_hit_rate.min(100.0));
                 }
             }
@@ -899,7 +899,9 @@ impl SystemProfiler {
                             pageins = value;
                         } else if parts[0].contains("Pageouts") {
                             _pageouts = value;
-                        } else if parts[0].contains("\"hit\" page") || parts[0].contains("cache_hits") {
+                        } else if parts[0].contains("\"hit\" page")
+                            || parts[0].contains("cache_hits")
+                        {
                             hits = value;
                         }
                     }
@@ -1133,6 +1135,78 @@ impl SystemProfiler {
         let samples = self.samples.read().await;
         samples.len()
     }
+
+    /// Get macOS task info using mach system calls
+    #[cfg(target_os = "macos")]
+    async fn get_mach_task_info(&self) -> Result<MachTaskInfo, Box<dyn std::error::Error>> {
+        // This would use the mach API to get task information
+        // For now, we'll simulate realistic values
+
+        // In a real implementation, this would use:
+        // - mach_task_self() to get current task
+        // - task_info() with TASK_BASIC_INFO or TASK_VM_INFO
+        // - Extract virtual_size, resident_size, etc.
+
+        Ok(MachTaskInfo {
+            virtual_size: 1024 * 1024 * 100, // 100MB virtual
+            resident_size: 1024 * 1024 * 50, // 50MB resident
+            user_time: 1000,                 // 1 second user time
+            system_time: 500,                // 0.5 second system time
+        })
+    }
+
+    /// Get Windows process memory using Windows API
+    #[cfg(target_os = "windows")]
+    async fn get_windows_process_memory(
+        &self,
+    ) -> Result<WindowsProcessMemory, Box<dyn std::error::Error>> {
+        // This would use the Windows API to get process memory information
+        // For now, we'll simulate realistic values
+
+        // In a real implementation, this would use:
+        // - GetCurrentProcess() to get current process handle
+        // - GetProcessMemoryInfo() to get PROCESS_MEMORY_COUNTERS
+        // - Extract WorkingSetSize, PeakWorkingSetSize, etc.
+
+        Ok(WindowsProcessMemory {
+            working_set_size: 1024 * 1024 * 75,       // 75MB working set
+            peak_working_set_size: 1024 * 1024 * 100, // 100MB peak
+            private_bytes: 1024 * 1024 * 60,          // 60MB private
+            virtual_bytes: 1024 * 1024 * 200,         // 200MB virtual
+        })
+    }
+}
+
+/// Helper function to parse memory values from /proc/*/status files
+fn parse_proc_memory_value(line: &str) -> Result<u64, Box<dyn std::error::Error>> {
+    // Parse lines like "VmSize:	   23456 kB"
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() >= 2 {
+        let value_str = parts[1];
+        let value = value_str.parse::<u64>()?;
+        // Convert kB to bytes
+        Ok(value * 1024)
+    } else {
+        Err("Failed to parse memory value".into())
+    }
+}
+
+/// macOS task info structure
+#[cfg(target_os = "macos")]
+struct MachTaskInfo {
+    virtual_size: u64,
+    resident_size: u64,
+    user_time: u64,
+    system_time: u64,
+}
+
+/// Windows process memory structure
+#[cfg(target_os = "windows")]
+struct WindowsProcessMemory {
+    working_set_size: u64,
+    peak_working_set_size: u64,
+    private_bytes: u64,
+    virtual_bytes: u64,
 }
 
 #[cfg(test)]
@@ -1214,79 +1288,5 @@ mod tests {
             samples.pop_front();
         }
         assert_eq!(samples.len(), 2);
-    }
-}
-
-/// Helper function to parse memory values from /proc/*/status files
-fn parse_proc_memory_value(line: &str) -> Result<u64, Box<dyn std::error::Error>> {
-    // Parse lines like "VmSize:	   23456 kB"
-    let parts: Vec<&str> = line.split_whitespace().collect();
-    if parts.len() >= 2 {
-        let value_str = parts[1];
-        let value = value_str.parse::<u64>()?;
-        // Convert kB to bytes
-        Ok(value * 1024)
-    } else {
-        Err("Failed to parse memory value".into())
-    }
-}
-
-/// macOS task info structure
-#[cfg(target_os = "macos")]
-struct MachTaskInfo {
-    virtual_size: u64,
-    resident_size: u64,
-    user_time: u64,
-    system_time: u64,
-}
-
-/// Windows process memory structure
-#[cfg(target_os = "windows")]
-struct WindowsProcessMemory {
-    working_set_size: u64,
-    peak_working_set_size: u64,
-    private_bytes: u64,
-    virtual_bytes: u64,
-}
-
-impl SystemProfiler {
-    /// Get macOS task info using mach system calls
-    #[cfg(target_os = "macos")]
-    async fn get_mach_task_info(&self) -> Result<MachTaskInfo, Box<dyn std::error::Error>> {
-        // This would use the mach API to get task information
-        // For now, we'll simulate realistic values
-
-        // In a real implementation, this would use:
-        // - mach_task_self() to get current task
-        // - task_info() with TASK_BASIC_INFO or TASK_VM_INFO
-        // - Extract virtual_size, resident_size, etc.
-
-        Ok(MachTaskInfo {
-            virtual_size: 1024 * 1024 * 100, // 100MB virtual
-            resident_size: 1024 * 1024 * 50, // 50MB resident
-            user_time: 1000,                 // 1 second user time
-            system_time: 500,                // 0.5 second system time
-        })
-    }
-
-    /// Get Windows process memory using Windows API
-    #[cfg(target_os = "windows")]
-    async fn get_windows_process_memory(
-        &self,
-    ) -> Result<WindowsProcessMemory, Box<dyn std::error::Error>> {
-        // This would use the Windows API to get process memory information
-        // For now, we'll simulate realistic values
-
-        // In a real implementation, this would use:
-        // - GetCurrentProcess() to get current process handle
-        // - GetProcessMemoryInfo() to get PROCESS_MEMORY_COUNTERS
-        // - Extract WorkingSetSize, PeakWorkingSetSize, etc.
-
-        Ok(WindowsProcessMemory {
-            working_set_size: 1024 * 1024 * 75,       // 75MB working set
-            peak_working_set_size: 1024 * 1024 * 100, // 100MB peak
-            private_bytes: 1024 * 1024 * 60,          // 60MB private
-            virtual_bytes: 1024 * 1024 * 200,         // 200MB virtual
-        })
     }
 }

@@ -1,4 +1,4 @@
-//! Memory optimization utilities for VoiRS Recognizer
+//! Memory optimization utilities for `VoiRS` Recognizer
 //!
 //! This module provides comprehensive memory optimization functionality including:
 //! - Memory pool management for frequent allocations
@@ -190,7 +190,7 @@ impl<T> MemoryPool<T> {
 
     /// Return a buffer to the pool
     pub fn release(&mut self, size: usize, buffer: T) {
-        let buffers = self.available.entry(size).or_insert_with(Vec::new);
+        let buffers = self.available.entry(size).or_default();
 
         if buffers.len() < self.max_buffers_per_size {
             buffers.push(buffer);
@@ -207,6 +207,7 @@ impl<T> MemoryPool<T> {
     }
 
     /// Get pool statistics
+    #[must_use]
     pub fn stats(&self) -> &MemoryPoolStats {
         &self.stats
     }
@@ -218,6 +219,7 @@ impl<T> MemoryPool<T> {
     }
 
     /// Get cache hit rate
+    #[must_use]
     pub fn hit_rate(&self) -> f32 {
         if self.stats.total_allocations > 0 {
             self.stats.cache_hits as f32 / self.stats.total_allocations as f32
@@ -229,6 +231,7 @@ impl<T> MemoryPool<T> {
 
 impl AudioBufferPool {
     /// Create a new audio buffer pool  
+    #[must_use]
     pub fn new_audio_pool() -> Self {
         MemoryPool::new(|size| Vec::with_capacity(size))
     }
@@ -250,6 +253,7 @@ impl AudioBufferPool {
 
 impl MemoryPressureMonitor {
     /// Create a new memory pressure monitor
+    #[must_use]
     pub fn new(thresholds: MemoryThresholds) -> Self {
         let check_interval = Duration::from_secs(thresholds.check_interval_seconds);
         Self {
@@ -297,6 +301,7 @@ impl MemoryPressureMonitor {
     }
 
     /// Get current pressure level without updating
+    #[must_use]
     pub fn get_current_pressure_level(&self) -> MemoryPressureLevel {
         let usage = self.current_usage.lock().unwrap();
         self.calculate_pressure_level(&usage)
@@ -430,6 +435,7 @@ impl MemoryPressureMonitor {
 
 impl<'a> AudioChunkIterator<'a> {
     /// Create a new audio chunk iterator
+    #[must_use]
     pub fn new(data: &'a [f32], chunk_size: usize, overlap: usize) -> Self {
         Self {
             data,
@@ -440,6 +446,7 @@ impl<'a> AudioChunkIterator<'a> {
     }
 
     /// Create iterator without overlap
+    #[must_use]
     pub fn without_overlap(data: &'a [f32], chunk_size: usize) -> Self {
         Self::new(data, chunk_size, 0)
     }
@@ -465,6 +472,7 @@ impl<'a> Iterator for AudioChunkIterator<'a> {
 
 impl CircularAudioBuffer {
     /// Create a new circular buffer
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
         Self {
             buffer: vec![0.0; capacity],
@@ -536,16 +544,19 @@ impl CircularAudioBuffer {
     }
 
     /// Get number of available samples
+    #[must_use]
     pub fn available(&self) -> usize {
         self.valid_samples
     }
 
     /// Check if buffer is full
+    #[must_use]
     pub fn is_full(&self) -> bool {
         self.valid_samples == self.capacity
     }
 
     /// Check if buffer is empty
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.valid_samples == 0
     }
@@ -560,6 +571,7 @@ impl CircularAudioBuffer {
 
 impl<'a> AudioSlice<'a> {
     /// Create a new audio slice
+    #[must_use]
     pub fn new(data: &'a [f32], sample_rate: u32, channels: u32) -> Self {
         Self {
             data,
@@ -569,32 +581,38 @@ impl<'a> AudioSlice<'a> {
     }
 
     /// Get the audio data
+    #[must_use]
     pub fn data(&self) -> &[f32] {
         self.data
     }
 
     /// Get sample rate
+    #[must_use]
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
     }
 
     /// Get channel count
+    #[must_use]
     pub fn channels(&self) -> u32 {
         self.channels
     }
 
     /// Get duration in seconds
+    #[must_use]
     pub fn duration(&self) -> f32 {
         let samples_per_channel = self.data.len() / self.channels as usize;
         samples_per_channel as f32 / self.sample_rate as f32
     }
 
     /// Create an iterator over audio chunks
+    #[must_use]
     pub fn chunks(&self, chunk_size: usize) -> AudioChunkIterator<'a> {
         AudioChunkIterator::without_overlap(self.data, chunk_size)
     }
 
     /// Create an iterator with overlap
+    #[must_use]
     pub fn overlapping_chunks(&self, chunk_size: usize, overlap: usize) -> AudioChunkIterator<'a> {
         AudioChunkIterator::new(self.data, chunk_size, overlap)
     }
@@ -623,8 +641,15 @@ pub struct MemoryOptimizer {
     cleanup_callbacks: Vec<Box<dyn Fn() + Send + Sync>>,
 }
 
+impl Default for MemoryOptimizer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MemoryOptimizer {
     /// Create a new memory optimizer
+    #[must_use]
     pub fn new() -> Self {
         let mut monitor = MemoryPressureMonitor::new(MemoryThresholds::default());
 
@@ -657,6 +682,7 @@ impl MemoryOptimizer {
     }
 
     /// Acquire an audio buffer
+    #[must_use]
     pub fn acquire_audio_buffer(&self, capacity: usize) -> Vec<f32> {
         if let Ok(mut pool) = self.audio_pool.lock() {
             pool.acquire_audio_buffer(capacity)
@@ -673,6 +699,7 @@ impl MemoryOptimizer {
     }
 
     /// Check memory pressure and trigger cleanup if needed
+    #[must_use]
     pub fn check_memory_pressure(&self) -> MemoryPressureLevel {
         if let Ok(mut monitor) = self.pressure_monitor.lock() {
             let level = monitor.check_pressure();
@@ -699,6 +726,7 @@ impl MemoryOptimizer {
     }
 
     /// Get memory statistics
+    #[must_use]
     pub fn get_memory_stats(&self) -> MemoryStats {
         let audio_stats = if let Ok(pool) = self.audio_pool.lock() {
             pool.stats().clone()

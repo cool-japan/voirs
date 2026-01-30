@@ -97,7 +97,6 @@ fn test_alternative_text_for_audio_output() {
     // Test synthesis with clear feedback about what was created
     cmd.arg("synthesize")
         .arg("This is an accessibility test")
-        .arg("--output")
         .arg(output_file.to_str().unwrap())
         .timeout(Duration::from_secs(120))
         .assert()
@@ -322,7 +321,6 @@ fn test_audio_alternatives() {
     // For users who can't hear audio, file output should be clearly indicated
     cmd.arg("synthesize")
         .arg("Testing audio alternatives for accessibility")
-        .arg("--output")
         .arg(output_file.to_str().unwrap())
         .timeout(Duration::from_secs(120))
         .assert()

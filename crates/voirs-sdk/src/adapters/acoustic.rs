@@ -140,9 +140,12 @@ impl AcousticAdapter {
         }
 
         // Determine the primary style name
-        let style_name = if config.enable_emotion && config.emotion_type.is_some() {
-            let emotion = config.emotion_type.as_ref().unwrap();
-            format!("emotional_{}", emotion)
+        let style_name = if config.enable_emotion {
+            if let Some(emotion) = config.emotion_type.as_ref() {
+                format!("emotional_{}", emotion)
+            } else {
+                "natural".to_string()
+            }
         } else if config.speaking_rate > 1.3 {
             "fast_speaking".to_string()
         } else if config.speaking_rate < 0.7 {
@@ -234,6 +237,25 @@ impl AcousticAdapter {
             voirs_acoustic::LanguageCode::ZhCn => SdkLanguageCode::ZhCn,
             voirs_acoustic::LanguageCode::KoKr => SdkLanguageCode::Ko,
             voirs_acoustic::LanguageCode::ItIt => SdkLanguageCode::It,
+            voirs_acoustic::LanguageCode::PtBr => SdkLanguageCode::PtBr,
+            voirs_acoustic::LanguageCode::PtPt => SdkLanguageCode::Pt,
+            voirs_acoustic::LanguageCode::RuRu => SdkLanguageCode::RuRu,
+            voirs_acoustic::LanguageCode::NlNl => SdkLanguageCode::NlNl,
+            voirs_acoustic::LanguageCode::PlPl => SdkLanguageCode::Pl,
+            voirs_acoustic::LanguageCode::TrTr => SdkLanguageCode::Tr,
+            voirs_acoustic::LanguageCode::ArSa => SdkLanguageCode::Ar,
+            voirs_acoustic::LanguageCode::HiIn => SdkLanguageCode::Hi,
+            voirs_acoustic::LanguageCode::SvSe => SdkLanguageCode::SvSe,
+            voirs_acoustic::LanguageCode::NoNo => SdkLanguageCode::NoNo,
+            voirs_acoustic::LanguageCode::FiFi => SdkLanguageCode::Fi,
+            voirs_acoustic::LanguageCode::DaDk => SdkLanguageCode::DaDk,
+            voirs_acoustic::LanguageCode::CsCz => SdkLanguageCode::Cs,
+            voirs_acoustic::LanguageCode::ElGr => SdkLanguageCode::El,
+            voirs_acoustic::LanguageCode::HeIl => SdkLanguageCode::He,
+            voirs_acoustic::LanguageCode::ThTh => SdkLanguageCode::Th,
+            voirs_acoustic::LanguageCode::ViVn => SdkLanguageCode::Vi,
+            voirs_acoustic::LanguageCode::IdId => SdkLanguageCode::Id,
+            voirs_acoustic::LanguageCode::MsMy => SdkLanguageCode::Ms,
         }
     }
 }

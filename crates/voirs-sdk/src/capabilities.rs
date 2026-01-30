@@ -162,7 +162,7 @@ impl CapabilityManager {
         #[cfg(target_os = "linux")]
         {
             if let Ok(output) = std::process::Command::new("nvidia-smi")
-                .args(&["--query-gpu=memory.total", "--format=csv,noheader,nounits"])
+                .args(["--query-gpu=memory.total", "--format=csv,noheader,nounits"])
                 .output()
             {
                 if let Ok(memory_str) = String::from_utf8(output.stdout) {
@@ -183,7 +183,7 @@ impl CapabilityManager {
         #[cfg(target_os = "linux")]
         {
             if let Ok(output) = std::process::Command::new("lsblk")
-                .args(&["-d", "-o", "ROTA"])
+                .args(["-d", "-o", "ROTA"])
                 .output()
             {
                 if let Ok(rota_str) = String::from_utf8(output.stdout) {
@@ -201,11 +201,11 @@ impl CapabilityManager {
     fn detect_available_features(
         hardware: &HardwareCapabilities,
     ) -> VoirsResult<Vec<AdvancedFeature>> {
-        let mut features = Vec::new();
-
         // Always available features
-        features.push(AdvancedFeature::StreamingSynthesis);
-        features.push(AdvancedFeature::RealtimeProcessing);
+        let mut features = vec![
+            AdvancedFeature::StreamingSynthesis,
+            AdvancedFeature::RealtimeProcessing,
+        ];
 
         // Conditional features based on compilation flags
         #[cfg(feature = "emotion")]

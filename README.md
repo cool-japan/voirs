@@ -8,7 +8,7 @@
 
 VoiRS is a cutting-edge Text-to-Speech (TTS) framework that unifies high-performance crates from the cool-japan ecosystem (SciRS2, NumRS2, PandRS, TrustformeRS) into a cohesive neural speech synthesis solution.
 
-> **🚀 Alpha Release (0.1.0-alpha.2 — 2025-10-04)**: Core TTS functionality is working and production-ready. **NEW**: Complete DiffWave vocoder training pipeline now functional with real parameter saving and gradient-based learning! Perfect for researchers and early adopters who want to train custom vocoders.
+> **🚀 Alpha Release (0.1.0-alpha.3 — 2026-01-29)**: Core TTS functionality is working and production-ready. **NEW**: Enhanced CUDA GPU acceleration, SciRS2-Core 0.1.3 integration with improved SIMD optimizations, and comprehensive code quality improvements following strict no-unwrap policy!
 
 ## 🎯 Key Features
 
@@ -104,7 +104,7 @@ voirs synth --stream "Long text content..." output.wav
 voirs voices list
 ```
 
-### Model Training (NEW in v0.1.0-alpha.2!)
+### Model Training
 
 ```bash
 # Train DiffWave vocoder on LJSpeech dataset
@@ -210,7 +210,7 @@ cargo bench
 cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --check
 
-# Train a model (NEW in v0.1.0-alpha.2!)
+# Train a model
 voirs train vocoder --data /path/to/dataset --output checkpoints/my-model --model-type diffwave
 
 # Monitor training
@@ -335,6 +335,13 @@ cargo run --example kokoro_espeak_auto_demo --features onnx --release
 - **🎓 Research & Training** — 🆕 Custom vocoder training for domain-specific voices and languages
 
 ## 🗺️ Roadmap
+
+### Q1 2026 — Alpha 0.1.0-alpha.3 ✅
+- [x] Enhanced CUDA GPU acceleration across pipeline
+- [x] SciRS2-Core 0.1.3 integration with improved SIMD
+- [x] Comprehensive code refactoring (2000-line policy compliance)
+- [x] No-unwrap policy enforcement across codebase
+- [x] Performance optimizations for real-time synthesis
 
 ### Q4 2025 — Alpha 0.1.0-alpha.2 ✅
 - [x] Project structure and workspace

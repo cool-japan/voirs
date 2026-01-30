@@ -182,6 +182,7 @@ pub struct LoadBalancer {
 
 impl LoadBalancer {
     /// Create a new load balancer
+    #[must_use]
     pub fn new(config: LoadBalancerConfig) -> Self {
         let max_concurrent = config.max_queue_size * 2; // Allow some overhead
         Self {
@@ -231,7 +232,7 @@ impl LoadBalancer {
         }; // Release the lock before calling update_stats
 
         if removed.is_none() {
-            return Err(format!("Worker with ID {} not found", worker_id));
+            return Err(format!("Worker with ID {worker_id} not found"));
         }
 
         self.update_stats().await;
@@ -400,7 +401,7 @@ impl LoadBalancer {
 
             // Update average response time (exponential moving average)
             let alpha = 0.1; // Smoothing factor
-            worker.avg_response_time_ms = alpha * response.processing_time_ms as f64
+            worker.avg_response_time_ms = alpha * f64::from(response.processing_time_ms)
                 + (1.0 - alpha) * worker.avg_response_time_ms;
 
             // Update current load
@@ -443,7 +444,7 @@ impl LoadBalancer {
             stats.failed_requests = history.iter().filter(|r| r.result.is_err()).count() as u64;
 
             let total_time: u32 = history.iter().map(|r| r.processing_time_ms).sum();
-            stats.avg_response_time_ms = total_time as f64 / history.len() as f64;
+            stats.avg_response_time_ms = f64::from(total_time) / history.len() as f64;
         }
 
         // Calculate worker utilization
@@ -478,7 +479,7 @@ impl LoadBalancer {
             worker.last_health_check = Utc::now();
             Ok(())
         } else {
-            Err(format!("Worker with ID {} not found", worker_id))
+            Err(format!("Worker with ID {worker_id} not found"))
         }
     }
 
@@ -489,9 +490,9 @@ impl LoadBalancer {
 
         tokio::spawn(async move {
             loop {
-                sleep(Duration::from_secs(
-                    config.health_check_interval_seconds as u64,
-                ))
+                sleep(Duration::from_secs(u64::from(
+                    config.health_check_interval_seconds,
+                )))
                 .await;
 
                 let mut workers_guard = workers.write().await;
@@ -502,7 +503,7 @@ impl LoadBalancer {
 
                     // Mark as unknown if no health check for too long
                     if time_since_check.num_seconds()
-                        > config.health_check_interval_seconds as i64 * 2
+                        > i64::from(config.health_check_interval_seconds) * 2
                     {
                         worker.health_status = WorkerHealth::Unknown;
                     }

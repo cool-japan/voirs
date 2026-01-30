@@ -29,7 +29,7 @@ pub enum MetricValue {
 #[derive(Debug, Clone, PartialEq)]
 /// Histogram Data
 pub struct HistogramData {
-    /// Bucket counts (bucket_upper_bound, count)
+    /// Bucket counts (`bucket_upper_bound`, count)
     pub buckets: Vec<(f64, u64)>,
     /// Total count of observations
     pub count: u64,
@@ -115,7 +115,7 @@ pub trait MetricsCollector: Send + Sync {
 #[derive(Debug)]
 /// In Memory Metrics Collector
 pub struct InMemoryMetricsCollector {
-    /// Stored metrics (metric_name -> data_points)
+    /// Stored metrics (`metric_name` -> `data_points`)
     metrics: Arc<RwLock<HashMap<String, Vec<DataPoint>>>>,
     /// Metric metadata
     metadata: Arc<RwLock<HashMap<String, MetricMetadata>>>,
@@ -125,8 +125,15 @@ pub struct InMemoryMetricsCollector {
     summary_quantiles: Vec<f64>,
 }
 
+impl Default for InMemoryMetricsCollector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InMemoryMetricsCollector {
     /// Create a new in-memory collector
+    #[must_use]
     pub fn new() -> Self {
         Self {
             metrics: Arc::new(RwLock::new(HashMap::new())),
@@ -159,11 +166,13 @@ impl InMemoryMetricsCollector {
     }
 
     /// Get metric metadata
+    #[must_use]
     pub fn get_metadata(&self, name: &str) -> Option<MetricMetadata> {
         self.metadata.read().unwrap().get(name).cloned()
     }
 
     /// Get all metric names
+    #[must_use]
     pub fn get_metric_names(&self) -> Vec<String> {
         self.metrics.read().unwrap().keys().cloned().collect()
     }
@@ -172,7 +181,7 @@ impl InMemoryMetricsCollector {
 impl MetricsCollector for InMemoryMetricsCollector {
     fn increment_counter(&self, name: &str, value: u64, labels: HashMap<String, String>) {
         let mut metrics = self.metrics.write().unwrap();
-        let data_points = metrics.entry(name.to_string()).or_insert_with(Vec::new);
+        let data_points = metrics.entry(name.to_string()).or_default();
 
         // Find existing counter with same labels or create new one
         if let Some(last_point) = data_points.last_mut() {
@@ -195,7 +204,7 @@ impl MetricsCollector for InMemoryMetricsCollector {
 
     fn set_gauge(&self, name: &str, value: f64, labels: HashMap<String, String>) {
         let mut metrics = self.metrics.write().unwrap();
-        let data_points = metrics.entry(name.to_string()).or_insert_with(Vec::new);
+        let data_points = metrics.entry(name.to_string()).or_default();
 
         data_points.push(DataPoint {
             timestamp: SystemTime::now(),
@@ -206,7 +215,7 @@ impl MetricsCollector for InMemoryMetricsCollector {
 
     fn observe_histogram(&self, name: &str, value: f64, labels: HashMap<String, String>) {
         let mut metrics = self.metrics.write().unwrap();
-        let data_points = metrics.entry(name.to_string()).or_insert_with(Vec::new);
+        let data_points = metrics.entry(name.to_string()).or_default();
 
         // Find existing histogram with same labels or create new one
         if let Some(last_point) = data_points.last_mut() {
@@ -241,7 +250,7 @@ impl MetricsCollector for InMemoryMetricsCollector {
         // Create new histogram
         let mut buckets = Vec::new();
         for &bucket_bound in &self.histogram_buckets {
-            let count = if value <= bucket_bound { 1 } else { 0 };
+            let count = u64::from(value <= bucket_bound);
             buckets.push((bucket_bound, count));
         }
 
@@ -260,7 +269,7 @@ impl MetricsCollector for InMemoryMetricsCollector {
 
     fn observe_summary(&self, name: &str, value: f64, labels: HashMap<String, String>) {
         let mut metrics = self.metrics.write().unwrap();
-        let data_points = metrics.entry(name.to_string()).or_insert_with(Vec::new);
+        let data_points = metrics.entry(name.to_string()).or_default();
 
         // For simplicity, we'll store individual observations and calculate quantiles on read
         // In production, you'd use a more efficient streaming quantile algorithm
@@ -469,6 +478,7 @@ impl PerformanceMetrics {
     }
 
     /// Get current performance statistics
+    #[must_use]
     pub fn get_statistics(&self) -> PerformanceStatistics {
         let counters = self.counters.lock().unwrap();
 
@@ -743,8 +753,15 @@ impl AlertHandler for ConsoleAlertHandler {
     }
 }
 
+impl Default for AlertManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AlertManager {
     /// Create new alert manager
+    #[must_use]
     pub fn new() -> Self {
         Self {
             rules: Arc::new(RwLock::new(Vec::new())),
@@ -838,8 +855,7 @@ impl AlertManager {
                 .quantiles
                 .iter()
                 .find(|(q, _)| *q == 0.5)
-                .map(|(_, v)| *v)
-                .unwrap_or(0.0), // Median
+                .map_or(0.0, |(_, v)| *v), // Median
         }
     }
 
@@ -864,6 +880,7 @@ impl AlertManager {
     }
 
     /// Get active alerts
+    #[must_use]
     pub fn get_active_alerts(&self) -> Vec<ActiveAlert> {
         self.active_alerts
             .read()
@@ -952,6 +969,7 @@ pub enum AnomalyType {
 
 impl TimeSeriesAnalyzer {
     /// Create new time-series analyzer
+    #[must_use]
     pub fn new(max_points: usize) -> Self {
         Self {
             data_store: Arc::new(RwLock::new(HashMap::new())),
@@ -962,7 +980,7 @@ impl TimeSeriesAnalyzer {
     /// Add data point
     pub fn add_point(&self, metric_name: String, point: TimeSeriesPoint) {
         let mut store = self.data_store.write().unwrap();
-        let series = store.entry(metric_name).or_insert_with(VecDeque::new);
+        let series = store.entry(metric_name).or_default();
 
         series.push_back(point);
 
@@ -973,6 +991,7 @@ impl TimeSeriesAnalyzer {
     }
 
     /// Analyze trends for a metric
+    #[must_use]
     pub fn analyze_trends(&self, metric_name: &str) -> Option<TrendAnalysis> {
         let store = self.data_store.read().unwrap();
         let series = store.get(metric_name)?;
@@ -1085,7 +1104,9 @@ impl TimeSeriesAnalyzer {
         }
 
         if count > 0 {
-            correlation_sum / count as f64 / values.iter().map(|x| x.powi(2)).sum::<f64>().sqrt()
+            correlation_sum
+                / f64::from(count)
+                / values.iter().map(|x| x.powi(2)).sum::<f64>().sqrt()
         } else {
             0.0
         }
@@ -1137,11 +1158,13 @@ impl TimeSeriesAnalyzer {
     }
 
     /// Get all metric names being tracked
+    #[must_use]
     pub fn get_tracked_metrics(&self) -> Vec<String> {
         self.data_store.read().unwrap().keys().cloned().collect()
     }
 
     /// Get recent data points for a metric
+    #[must_use]
     pub fn get_recent_data(&self, metric_name: &str, limit: usize) -> Vec<TimeSeriesPoint> {
         let store = self.data_store.read().unwrap();
         if let Some(series) = store.get(metric_name) {

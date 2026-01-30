@@ -163,7 +163,9 @@ impl PosteriorEncoder {
             pre_conv_config,
             vb.pp("pre_conv"),
         )
-        .map_err(|e| AcousticError::ModelError(format!("Failed to create pre_conv: {e}")))?;
+        .map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to create pre_conv: {e}"),
+        })?;
 
         // Residual blocks
         let mut blocks = Vec::new();
@@ -175,7 +177,9 @@ impl PosteriorEncoder {
                 config.dropout,
                 vb.pp(format!("block_{i}")),
             )
-            .map_err(|e| AcousticError::ModelError(format!("Failed to create block {i}: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to create block {i}: {e}"),
+            })?;
             blocks.push(block);
         }
 
@@ -187,14 +191,22 @@ impl PosteriorEncoder {
             pre_conv_config,
             vb.pp("post_conv"),
         )
-        .map_err(|e| AcousticError::ModelError(format!("Failed to create post_conv: {e}")))?;
+        .map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to create post_conv: {e}"),
+        })?;
 
         // Output projections
-        let mean_proj = linear(config.latent_dim, config.latent_dim, vb.pp("mean_proj"))
-            .map_err(|e| AcousticError::ModelError(format!("Failed to create mean_proj: {e}")))?;
+        let mean_proj =
+            linear(config.latent_dim, config.latent_dim, vb.pp("mean_proj")).map_err(|e| {
+                AcousticError::ModelError {
+                    message: format!("Failed to create mean_proj: {e}"),
+                }
+            })?;
 
         let logvar_proj = linear(config.latent_dim, config.latent_dim, vb.pp("logvar_proj"))
-            .map_err(|e| AcousticError::ModelError(format!("Failed to create logvar_proj: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to create logvar_proj: {e}"),
+            })?;
 
         Ok(Self {
             config,
@@ -218,20 +230,25 @@ impl PosteriorEncoder {
         // Validate input shape
         let input_shape = mel.dims();
         if input_shape.len() != 3 {
-            return Err(AcousticError::InputError(format!(
-                "Expected 3D tensor [batch, mel_channels, frames], got {input_shape:?}"
-            )));
+            return Err(AcousticError::InputError {
+                message: format!(
+                    "Expected 3D tensor [batch, mel_channels, frames], got {input_shape:?}"
+                ),
+            });
         }
 
-        let (batch_size, n_mel_channels, n_frames) = mel.dims3().map_err(|e| {
-            AcousticError::ModelError(format!("Failed to get tensor dimensions: {e}"))
-        })?;
+        let (batch_size, n_mel_channels, n_frames) =
+            mel.dims3().map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to get tensor dimensions: {e}"),
+            })?;
 
         if n_mel_channels != self.config.n_mel_channels {
-            return Err(AcousticError::InputError(format!(
-                "Expected {} mel channels, got {}",
-                self.config.n_mel_channels, n_mel_channels
-            )));
+            return Err(AcousticError::InputError {
+                message: format!(
+                    "Expected {} mel channels, got {}",
+                    self.config.n_mel_channels, n_mel_channels
+                ),
+            });
         }
 
         tracing::debug!(
@@ -245,15 +262,17 @@ impl PosteriorEncoder {
         let mut x = self
             .pre_conv
             .forward(mel)
-            .map_err(|e| AcousticError::ModelError(format!("Pre-convolution failed: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Pre-convolution failed: {e}"),
+            })?;
 
         tracing::debug!("After pre_conv: {:?}", x.dims());
 
         // Apply residual blocks
         for (i, block) in self.blocks.iter().enumerate() {
-            x = block
-                .forward(&x)
-                .map_err(|e| AcousticError::ModelError(format!("Block {i} failed: {e}")))?;
+            x = block.forward(&x).map_err(|e| AcousticError::ModelError {
+                message: format!("Block {i} failed: {e}"),
+            })?;
         }
 
         tracing::debug!("After residual blocks: {:?}", x.dims());
@@ -262,18 +281,20 @@ impl PosteriorEncoder {
         x = self
             .post_conv
             .forward(&x)
-            .map_err(|e| AcousticError::ModelError(format!("Post-convolution failed: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Post-convolution failed: {e}"),
+            })?;
 
         tracing::debug!("After post_conv: {:?}", x.dims());
 
         // Apply activation
-        x = x
-            .relu()
-            .map_err(|e| AcousticError::ModelError(format!("Activation failed: {e}")))?;
+        x = x.relu().map_err(|e| AcousticError::ModelError {
+            message: format!("Activation failed: {e}"),
+        })?;
 
         // Global average pooling over time dimension
-        let x = x.mean(2).map_err(|e| {
-            AcousticError::ModelError(format!("Global average pooling failed: {e}"))
+        let x = x.mean(2).map_err(|e| AcousticError::ModelError {
+            message: format!("Global average pooling failed: {e}"),
         })?;
 
         tracing::debug!("After global pooling: {:?}", x.dims());
@@ -282,11 +303,16 @@ impl PosteriorEncoder {
         let mean = self
             .mean_proj
             .forward(&x)
-            .map_err(|e| AcousticError::ModelError(format!("Mean projection failed: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Mean projection failed: {e}"),
+            })?;
 
-        let logvar = self.logvar_proj.forward(&x).map_err(|e| {
-            AcousticError::ModelError(format!("Log variance projection failed: {e}"))
-        })?;
+        let logvar = self
+            .logvar_proj
+            .forward(&x)
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Log variance projection failed: {e}"),
+            })?;
 
         tracing::debug!(
             "Output shapes - mean: {:?}, logvar: {:?}",
@@ -308,20 +334,28 @@ impl PosteriorEncoder {
     /// * Sampled latent tensor
     pub fn sample(&self, mean: &Tensor, logvar: &Tensor, device: &Device) -> Result<Tensor> {
         let std = (logvar * 0.5)
-            .map_err(|e| AcousticError::ModelError(format!("Log variance processing failed: {e}")))?
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Log variance processing failed: {e}"),
+            })?
             .exp()
-            .map_err(|e| AcousticError::ModelError(format!("Exponential failed: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Exponential failed: {e}"),
+            })?;
 
         // Sample from standard normal distribution
         let shape = mean.dims();
-        let eps = Tensor::randn(0f32, 1f32, shape, device)
-            .map_err(|e| AcousticError::ModelError(format!("Random sampling failed: {e}")))?;
+        let eps =
+            Tensor::randn(0f32, 1f32, shape, device).map_err(|e| AcousticError::ModelError {
+                message: format!("Random sampling failed: {e}"),
+            })?;
 
         // Reparameterization trick: z = mean + std * eps
-        let mult_result = (&std * &eps)
-            .map_err(|e| AcousticError::ModelError(format!("Multiplication failed: {e}")))?;
-        let z = (mean + mult_result)
-            .map_err(|e| AcousticError::ModelError(format!("Reparameterization failed: {e}")))?;
+        let mult_result = (&std * &eps).map_err(|e| AcousticError::ModelError {
+            message: format!("Multiplication failed: {e}"),
+        })?;
+        let z = (mean + mult_result).map_err(|e| AcousticError::ModelError {
+            message: format!("Reparameterization failed: {e}"),
+        })?;
 
         Ok(z)
     }
@@ -336,24 +370,30 @@ impl PosteriorEncoder {
     /// * KL divergence scalar
     pub fn kl_divergence(&self, mean: &Tensor, logvar: &Tensor) -> Result<Tensor> {
         // KL(q(z|x) || p(z)) = -0.5 * sum(1 + logvar - mean^2 - exp(logvar))
-        let mean_sq = mean
-            .sqr()
-            .map_err(|e| AcousticError::ModelError(format!("Mean squared failed: {e}")))?;
+        let mean_sq = mean.sqr().map_err(|e| AcousticError::ModelError {
+            message: format!("Mean squared failed: {e}"),
+        })?;
 
-        let exp_logvar = logvar
-            .exp()
-            .map_err(|e| AcousticError::ModelError(format!("Exponential failed: {e}")))?;
+        let exp_logvar = logvar.exp().map_err(|e| AcousticError::ModelError {
+            message: format!("Exponential failed: {e}"),
+        })?;
 
-        let ones = Tensor::ones(logvar.dims(), DType::F32, &self.device)
-            .map_err(|e| AcousticError::ModelError(format!("Ones tensor creation failed: {e}")))?;
+        let ones = Tensor::ones(logvar.dims(), DType::F32, &self.device).map_err(|e| {
+            AcousticError::ModelError {
+                message: format!("Ones tensor creation failed: {e}"),
+            }
+        })?;
 
-        let kl = (&ones + logvar - &mean_sq - &exp_logvar)
-            .map_err(|e| AcousticError::ModelError(format!("KL computation failed: {e}")))?;
-        let kl = (kl
-            .sum_all()
-            .map_err(|e| AcousticError::ModelError(format!("Sum failed: {e}")))?
-            * (-0.5))
-            .map_err(|e| AcousticError::ModelError(format!("Multiplication failed: {e}")))?;
+        let kl =
+            (&ones + logvar - &mean_sq - &exp_logvar).map_err(|e| AcousticError::ModelError {
+                message: format!("KL computation failed: {e}"),
+            })?;
+        let kl = (kl.sum_all().map_err(|e| AcousticError::ModelError {
+            message: format!("Sum failed: {e}"),
+        })? * (-0.5))
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Multiplication failed: {e}"),
+            })?;
 
         Ok(kl)
     }

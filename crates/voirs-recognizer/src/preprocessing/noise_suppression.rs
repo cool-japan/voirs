@@ -253,10 +253,11 @@ impl NoiseSuppressionProcessor {
             let n_minus_1_vec = _mm256_set1_ps(n_minus_1);
 
             // Process 8 samples at a time with AVX2
-            let chunks = chunk.chunks_exact_mut(8);
-            let remainder = chunks.remainder();
+            let chunk_len = chunk.len();
+            let simd_len = chunk_len - (chunk_len % 8);
+            let (simd_part, remainder) = chunk.split_at_mut(simd_len);
 
-            for (chunk_idx, simd_chunk) in chunks.enumerate() {
+            for (chunk_idx, simd_chunk) in simd_part.chunks_exact_mut(8).enumerate() {
                 let base_idx = chunk_idx * 8;
                 let indices = _mm256_set_ps(
                     (base_idx + 7) as f32,
@@ -282,7 +283,7 @@ impl NoiseSuppressionProcessor {
 
             // Process remaining samples
             for (i, sample) in remainder.iter_mut().enumerate() {
-                let idx = chunk.len() - remainder.len() + i;
+                let idx = simd_len + i;
                 let window_val = 0.5 * (1.0 - f32::cos(pi_2 * idx as f32 / n_minus_1));
                 *sample *= window_val;
             }
@@ -305,7 +306,7 @@ impl NoiseSuppressionProcessor {
         let mut spectrum = Vec::new();
         let n = chunk.len();
 
-        for k in 0..n / 2 + 1 {
+        for k in 0..=(n / 2) {
             let mut real_part = 0.0;
             let mut imag_part = 0.0;
 

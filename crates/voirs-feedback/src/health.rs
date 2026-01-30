@@ -92,6 +92,7 @@ pub struct HealthMonitor {
 
 impl HealthMonitor {
     /// Create a new health monitor
+    #[must_use]
     pub fn new(config: HealthConfig, version: String) -> Self {
         Self {
             config,
@@ -179,11 +180,11 @@ impl HealthMonitor {
         )
         .await
         {
-            Ok(Ok(_)) => {
+            Ok(Ok(())) => {
                 details.insert("connectivity".to_string(), "ok".to_string());
             }
             Ok(Err(e)) => {
-                details.insert("connectivity".to_string(), format!("error: {}", e));
+                details.insert("connectivity".to_string(), format!("error: {e}"));
                 status = HealthStatus::Critical;
             }
             Err(_) => {
@@ -226,11 +227,11 @@ impl HealthMonitor {
         )
         .await
         {
-            Ok(Ok(_)) => {
+            Ok(Ok(())) => {
                 details.insert("connectivity".to_string(), "ok".to_string());
             }
             Ok(Err(e)) => {
-                details.insert("connectivity".to_string(), format!("error: {}", e));
+                details.insert("connectivity".to_string(), format!("error: {e}"));
                 status = HealthStatus::Critical;
             }
             Err(_) => {
@@ -291,11 +292,13 @@ impl HealthMonitor {
     }
 
     /// Get current system version
+    #[must_use]
     pub fn get_version(&self) -> &str {
         &self.version
     }
 
     /// Get system uptime
+    #[must_use]
     pub fn get_uptime(&self) -> Duration {
         self.start_time.elapsed()
     }

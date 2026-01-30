@@ -1349,7 +1349,13 @@ impl MultiRoomEnvironment {
         });
 
         while let Some(current_path) = queue.pop_front() {
-            let current_room = current_path.room_sequence.last().unwrap();
+            // Get current room - room_sequence is guaranteed non-empty by algorithm invariant
+            // (initialized with source_room and always extended, never truncated)
+            let current_room = current_path.room_sequence.last().ok_or_else(|| {
+                crate::Error::LegacyProcessing(
+                    "Internal error: room sequence unexpectedly empty in path finding".to_string(),
+                )
+            })?;
 
             if current_room == target_room {
                 paths.push(current_path.clone());
@@ -1578,7 +1584,8 @@ mod tests {
 
     #[test]
     fn test_delay_line() {
-        let mut delay_line = DelayLine::new(0.001, 44100.0).unwrap(); // 1ms delay
+        let mut delay_line =
+            DelayLine::new(0.001, 44100.0).expect("Should successfully create delay line"); // 1ms delay
 
         // Feed impulse
         let output1 = delay_line.process(1.0);
@@ -1595,13 +1602,14 @@ mod tests {
 
     #[test]
     fn test_reflection_path_calculation() {
-        let simulator = RoomSimulator::new((10.0, 8.0, 3.0), 1.2).unwrap();
+        let simulator = RoomSimulator::new((10.0, 8.0, 3.0), 1.2)
+            .expect("Should successfully create room simulator");
         let source = Position3D::new(2.0, 1.0, 1.0);
         let listener = Position3D::new(8.0, 1.0, 2.0);
 
         let paths = simulator
             .calculate_reflection_paths(source, listener, 1)
-            .unwrap();
+            .expect("Should successfully calculate reflection paths");
         assert!(!paths.is_empty());
 
         // Should have direct path plus wall reflections
@@ -1623,7 +1631,7 @@ mod tests {
             1.2,
             Position3D::new(0.0, 0.0, 0.0),
         )
-        .unwrap();
+        .expect("Should successfully create room");
 
         assert_eq!(room.id, "living_room");
         assert_eq!(room.position, Position3D::new(0.0, 0.0, 0.0));
@@ -1639,9 +1647,10 @@ mod tests {
             0.8,
             Position3D::new(5.0, 0.0, 0.0),
         )
-        .unwrap();
+        .expect("Should successfully create kitchen");
 
-        env.add_room(room).unwrap();
+        env.add_room(room)
+            .expect("Should successfully add room to environment");
         assert_eq!(env.rooms.len(), 1);
         assert!(env.get_room("kitchen").is_some());
     }
@@ -1657,7 +1666,7 @@ mod tests {
             1.2,
             Position3D::new(0.0, 0.0, 0.0),
         )
-        .unwrap();
+        .expect("Should successfully create living room");
 
         let kitchen = Room::new(
             "kitchen".to_string(),
@@ -1665,10 +1674,12 @@ mod tests {
             0.8,
             Position3D::new(5.0, 0.0, 0.0),
         )
-        .unwrap();
+        .expect("Should successfully create kitchen");
 
-        env.add_room(living_room).unwrap();
-        env.add_room(kitchen).unwrap();
+        env.add_room(living_room)
+            .expect("Should successfully add living room");
+        env.add_room(kitchen)
+            .expect("Should successfully add kitchen");
 
         // Create connection between rooms
         let connection = RoomConnection {
@@ -1683,7 +1694,8 @@ mod tests {
             state: ConnectionState::Open,
         };
 
-        env.add_connection(connection).unwrap();
+        env.add_connection(connection)
+            .expect("Should successfully add connection");
         assert_eq!(env.connections.len(), 1);
     }
 
@@ -1698,17 +1710,19 @@ mod tests {
             1.2,
             Position3D::new(0.0, 0.0, 0.0),
         )
-        .unwrap();
+        .expect("Should successfully create living room");
         let kitchen = Room::new(
             "kitchen".to_string(),
             (4.0, 3.0, 2.5),
             0.8,
             Position3D::new(5.0, 0.0, 0.0),
         )
-        .unwrap();
+        .expect("Should successfully create kitchen");
 
-        env.add_room(living_room).unwrap();
-        env.add_room(kitchen).unwrap();
+        env.add_room(living_room)
+            .expect("Should successfully add living room");
+        env.add_room(kitchen)
+            .expect("Should successfully add kitchen");
 
         let connection = RoomConnection {
             id: "door_1".to_string(),
@@ -1722,15 +1736,16 @@ mod tests {
             state: ConnectionState::Open,
         };
 
-        env.add_connection(connection).unwrap();
+        env.add_connection(connection)
+            .expect("Should successfully add connection");
 
         // Test state changes
         env.set_connection_state("door_1", ConnectionState::Closed)
-            .unwrap();
+            .expect("Should successfully set connection state to closed");
         assert_eq!(env.connections[0].state, ConnectionState::Closed);
 
         env.set_connection_state("door_1", ConnectionState::PartiallyOpen(0.5))
-            .unwrap();
+            .expect("Should successfully set connection state to partially open");
         assert_eq!(
             env.connections[0].state,
             ConnectionState::PartiallyOpen(0.5)
@@ -1748,17 +1763,19 @@ mod tests {
             1.2,
             Position3D::new(0.0, 0.0, 0.0),
         )
-        .unwrap();
+        .expect("Should successfully create living room");
         let kitchen = Room::new(
             "kitchen".to_string(),
             (4.0, 3.0, 2.5),
             0.8,
             Position3D::new(5.0, 0.0, 0.0),
         )
-        .unwrap();
+        .expect("Should successfully create kitchen");
 
-        env.add_room(living_room).unwrap();
-        env.add_room(kitchen).unwrap();
+        env.add_room(living_room)
+            .expect("Should successfully add living room");
+        env.add_room(kitchen)
+            .expect("Should successfully add kitchen");
 
         // Add connection
         let connection = RoomConnection {
@@ -1773,7 +1790,8 @@ mod tests {
             state: ConnectionState::Open,
         };
 
-        env.add_connection(connection).unwrap();
+        env.add_connection(connection)
+            .expect("Should successfully add connection");
 
         // Test audio processing
         let input_audio = Array1::from_vec(vec![0.5; 1000]);
@@ -1793,7 +1811,7 @@ mod tests {
             .await;
 
         assert!(result.is_ok());
-        let (left, right) = result.unwrap();
+        let (left, right) = result.expect("Should successfully process multi-room audio");
         assert_eq!(left.len(), input_audio.len());
         assert_eq!(right.len(), input_audio.len());
     }

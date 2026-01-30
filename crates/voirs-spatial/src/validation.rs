@@ -1236,7 +1236,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_perceptual_test_suite() {
-        let hrtf_processor = HrtfProcessor::new_default().await.unwrap();
+        let hrtf_processor = HrtfProcessor::new_default()
+            .await
+            .expect("Failed to create HRTF processor");
         let mut suite = PerceptualTestSuite::new(hrtf_processor);
 
         // Add test configurations
@@ -1253,7 +1255,10 @@ mod tests {
 
         // Run a single test (to avoid long test times)
         if let (Some(config), Some(subject)) = (suite.configs.first(), suite.subjects.first()) {
-            let result = suite.run_test(config, subject).await.unwrap();
+            let result = suite
+                .run_test(config, subject)
+                .await
+                .expect("Test run should succeed");
             assert!(result.outcomes.len() > 0);
             assert!(result.statistics.mean_accuracy >= 0.0);
         }
@@ -1261,11 +1266,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_stimulus_generation() {
-        let hrtf_processor = HrtfProcessor::new_default().await.unwrap();
+        let hrtf_processor = HrtfProcessor::new_default()
+            .await
+            .expect("Failed to create HRTF processor");
         let suite = PerceptualTestSuite::new(hrtf_processor);
 
         let config = &create_standard_test_configs()[0];
-        let stimulus = suite.generate_stimulus(config, 0).unwrap();
+        let stimulus = suite
+            .generate_stimulus(config, 0)
+            .expect("Stimulus generation should succeed");
 
         assert!(stimulus.frequency > 0.0);
         assert!(stimulus.level > 0.0);
@@ -1274,7 +1283,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_accuracy_calculation() {
-        let hrtf_processor = HrtfProcessor::new_default().await.unwrap();
+        let hrtf_processor = HrtfProcessor::new_default()
+            .await
+            .expect("Failed to create HRTF processor");
         let suite = PerceptualTestSuite::new(hrtf_processor);
 
         let stimulus = StimulusData {
@@ -1292,7 +1303,9 @@ mod tests {
             additional_data: HashMap::new(),
         };
 
-        let accuracy = suite.calculate_accuracy(&stimulus, &response).unwrap();
+        let accuracy = suite
+            .calculate_accuracy(&stimulus, &response)
+            .expect("Accuracy calculation should succeed");
         assert!(accuracy.angular_error < 10.0); // Small error for close positions
         assert!(accuracy.distance_error < 0.5);
         assert!(accuracy.overall_accuracy > 0.8);
@@ -1306,7 +1319,7 @@ mod tests {
         let localization_test = configs
             .iter()
             .find(|c| c.test_type == ValidationTestType::LocalizationAccuracy)
-            .unwrap();
+            .expect("Localization test should exist");
         assert!(localization_test.trial_count > 0);
         assert!(localization_test.success_criteria.min_accuracy > 0.0);
     }

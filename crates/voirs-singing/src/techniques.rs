@@ -888,47 +888,6 @@ impl SingingTechnique {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_technique_styles() {
-        let classical = SingingTechnique::classical();
-        let pop = SingingTechnique::pop();
-        let jazz = SingingTechnique::jazz();
-
-        assert!(classical.breath_control.support > pop.breath_control.support);
-        assert!(jazz.legato.strength > pop.legato.strength);
-        assert!(pop.vocal_fry.amount > classical.vocal_fry.amount);
-    }
-
-    #[test]
-    fn test_vibrato_processor() {
-        let settings = VibratoSettings::default();
-        let mut processor = VibratoProcessor::new(settings);
-
-        let sample = 0.5;
-        let processed = processor.process_sample(sample, 44100.0);
-
-        // Should be close to original during onset
-        assert!((processed - sample).abs() < 0.1);
-    }
-
-    #[test]
-    fn test_technique_application() {
-        let technique = SingingTechnique::pop();
-        let mut note = crate::types::NoteEvent::new("C".to_string(), 4, 1.0, 0.8);
-
-        let _original_frequency = note.frequency;
-        technique.apply_to_note(&mut note);
-
-        // Note should be modified
-        assert!(note.velocity <= 1.0);
-        assert!(note.breath_before >= 0.0);
-    }
-}
-
 // ===== ADVANCED VOCAL TECHNIQUES =====
 
 /// Belting vocal technique processor
@@ -1108,5 +1067,46 @@ impl WhistleRegisterProcessor {
                 note.frequency *= 1.02;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_technique_styles() {
+        let classical = SingingTechnique::classical();
+        let pop = SingingTechnique::pop();
+        let jazz = SingingTechnique::jazz();
+
+        assert!(classical.breath_control.support > pop.breath_control.support);
+        assert!(jazz.legato.strength > pop.legato.strength);
+        assert!(pop.vocal_fry.amount > classical.vocal_fry.amount);
+    }
+
+    #[test]
+    fn test_vibrato_processor() {
+        let settings = VibratoSettings::default();
+        let mut processor = VibratoProcessor::new(settings);
+
+        let sample = 0.5;
+        let processed = processor.process_sample(sample, 44100.0);
+
+        // Should be close to original during onset
+        assert!((processed - sample).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_technique_application() {
+        let technique = SingingTechnique::pop();
+        let mut note = crate::types::NoteEvent::new("C".to_string(), 4, 1.0, 0.8);
+
+        let _original_frequency = note.frequency;
+        technique.apply_to_note(&mut note);
+
+        // Note should be modified
+        assert!(note.velocity <= 1.0);
+        assert!(note.breath_before >= 0.0);
     }
 }

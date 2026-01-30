@@ -1,6 +1,6 @@
 //! Phoneme analysis and processing
 
-use super::types::*;
+use super::types::PhonemeInfo;
 use crate::FeedbackError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -113,6 +113,7 @@ pub struct DetectedPhoneme {
 
 impl PhonemeAnalyzer {
     /// Create a new phoneme analyzer
+    #[must_use]
     pub fn new(config: PhonemeAnalysisConfig) -> Self {
         let mut analyzer = Self {
             config,
@@ -612,7 +613,7 @@ impl PhonemeAnalyzer {
                     self.calculate_formant_accuracy(formants[0], reference.formant_ranges.f1_range);
                 let f2_accuracy =
                     self.calculate_formant_accuracy(formants[1], reference.formant_ranges.f2_range);
-                (f1_accuracy + f2_accuracy) / 2.0
+                f32::midpoint(f1_accuracy, f2_accuracy)
             } else {
                 // For consonants, use a simulated accuracy
                 0.8 + (scirs2_core::random::random::<f64>() * 0.2) as f32
@@ -624,7 +625,7 @@ impl PhonemeAnalyzer {
 
     /// Calculate formant accuracy
     fn calculate_formant_accuracy(&self, detected: f32, expected_range: (f32, f32)) -> f32 {
-        let center = (expected_range.0 + expected_range.1) / 2.0;
+        let center = f32::midpoint(expected_range.0, expected_range.1);
         let tolerance = (expected_range.1 - expected_range.0) / 2.0;
         let distance = (detected - center).abs();
 
@@ -643,24 +644,20 @@ impl PhonemeAnalyzer {
         if accuracy < 0.7 {
             if let Some(reference) = self.reference_phonemes.get(symbol) {
                 if reference.features.vowel {
-                    feedback.push(format!("Focus on mouth position for '{}' sound", symbol));
+                    feedback.push(format!("Focus on mouth position for '{symbol}' sound"));
                     feedback.push("Pay attention to tongue placement".to_string());
                     feedback.push("Practice vowel clarity".to_string());
                 } else if reference.features.consonant {
                     if reference.features.stop {
                         feedback.push(format!(
-                            "Work on stop consonant '{}' - ensure complete closure",
-                            symbol
+                            "Work on stop consonant '{symbol}' - ensure complete closure"
                         ));
                     }
                     if reference.features.fricative {
-                        feedback.push(format!(
-                            "Practice fricative '{}' - maintain airflow",
-                            symbol
-                        ));
+                        feedback.push(format!("Practice fricative '{symbol}' - maintain airflow"));
                     }
                     if reference.features.nasal {
-                        feedback.push(format!("Ensure nasal resonance for '{}'", symbol));
+                        feedback.push(format!("Ensure nasal resonance for '{symbol}'"));
                     }
                 }
             }
@@ -700,11 +697,13 @@ impl PhonemeAnalyzer {
     }
 
     /// Get phoneme reference data
+    #[must_use]
     pub fn get_phoneme_reference(&self, symbol: &str) -> Option<&PhonemeReference> {
         self.reference_phonemes.get(symbol)
     }
 
     /// Get all supported phonemes
+    #[must_use]
     pub fn get_supported_phonemes(&self) -> Vec<String> {
         self.reference_phonemes.keys().cloned().collect()
     }
@@ -728,7 +727,7 @@ mod rand {
     use std::cell::Cell;
 
     thread_local! {
-        static SEED: Cell<u64> = Cell::new(1);
+        static SEED: Cell<u64> = const { Cell::new(1) };
     }
 
     pub fn random<T>() -> T

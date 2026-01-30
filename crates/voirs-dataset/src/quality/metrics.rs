@@ -732,7 +732,7 @@ impl QualityMetricsCalculator {
         }
 
         // Sort energies and use top 25% as signal, bottom 25% as noise
-        energy_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        energy_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let quarter = energy_values.len() / 4;
 
         let noise_energy: f32 = energy_values[..quarter].iter().sum::<f32>() / quarter as f32;

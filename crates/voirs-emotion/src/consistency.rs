@@ -599,7 +599,7 @@ impl EmotionConsistencyManager {
 
         // Calculate overall coherence (inverse of average transition distance)
         let overall_coherence = if avg_transition_distance > 0.0 {
-            (1.0 / (1.0 + avg_transition_distance)).max(0.0).min(1.0)
+            (1.0 / (1.0 + avg_transition_distance)).clamp(0.0, 1.0)
         } else {
             1.0
         };
@@ -660,7 +660,7 @@ impl EmotionConsistencyManager {
         // Normalize entropy to 0-1 scale (assuming max entropy is around 3.0 for diverse contexts)
         let max_entropy = 3.0;
         let consistency = (max_entropy - entropy) / max_entropy;
-        consistency.max(0.0).min(1.0)
+        consistency.clamp(0.0, 1.0)
     }
 
     /// Get recent segment history
@@ -692,7 +692,7 @@ impl EmotionConsistencyManager {
                 .as_secs()
         });
 
-        serde_json::to_string_pretty(&report_data).map_err(|e| Error::Serialization(e))
+        serde_json::to_string_pretty(&report_data).map_err(Error::Serialization)
     }
 }
 
@@ -841,7 +841,7 @@ mod tests {
         let metrics = manager.calculate_coherence_metrics();
         assert!(metrics.overall_coherence > 0.0);
         assert!(metrics.overall_coherence <= 1.0);
-        assert!(metrics.abrupt_transitions >= 0); // May have some abrupt transitions in the test sequence
+        // abrupt_transitions is usize, so no need to check >= 0 (always true)
         assert!(metrics.narrative_consistency > 0.0);
     }
 

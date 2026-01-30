@@ -18,6 +18,89 @@ use voirs_sdk::error::IoOperation;
 use voirs_sdk::types::SynthesisConfig;
 use voirs_sdk::{AudioFormat, QualityLevel, Result, VoirsError, VoirsPipeline};
 
+/// Configuration for basic synthesis command
+///
+/// Consolidates parameters for the `run_synthesize` function to improve
+/// maintainability and reduce parameter count.
+///
+/// # Example
+///
+/// ```no_run
+/// # use voirs_cli::commands::synthesize::SynthesizeArgs;
+/// # use voirs_sdk::QualityLevel;
+/// # use std::path::Path;
+/// let args = SynthesizeArgs {
+///     text: "Hello, world!",
+///     output: Some(Path::new("output.wav")),
+///     rate: 1.0,
+///     pitch: 0.0,
+///     volume: 0.0,
+///     quality: QualityLevel::High,
+///     enhance: false,
+///     play: false,
+///     auto_detect: false,
+/// };
+/// ```
+#[derive(Debug, Clone)]
+pub struct SynthesizeArgs<'a> {
+    /// Text to synthesize
+    pub text: &'a str,
+    /// Output file path
+    pub output: Option<&'a Path>,
+    /// Speaking rate (0.25 - 4.0)
+    pub rate: f32,
+    /// Pitch shift in semitones (-24.0 - 24.0)
+    pub pitch: f32,
+    /// Volume gain in dB (-40.0 - 20.0)
+    pub volume: f32,
+    /// Quality level
+    pub quality: QualityLevel,
+    /// Enable audio enhancement
+    pub enhance: bool,
+    /// Play audio after synthesis
+    pub play: bool,
+    /// Auto-detect input format
+    pub auto_detect: bool,
+}
+
+/// Configuration for streaming synthesis command
+///
+/// Consolidates parameters for the `run_streaming_synthesis` function.
+///
+/// # Example
+///
+/// ```no_run
+/// # use voirs_cli::commands::synthesize::StreamingSynthesisArgs;
+/// # use voirs_sdk::QualityLevel;
+/// # use std::path::Path;
+/// let args = StreamingSynthesisArgs {
+///     text: "Streaming output test",
+///     output: None,
+///     rate: 1.0,
+///     pitch: 0.0,
+///     volume: 0.0,
+///     quality: QualityLevel::Medium,
+///     buffer_size: 4096,
+/// };
+/// ```
+#[derive(Debug, Clone)]
+pub struct StreamingSynthesisArgs<'a> {
+    /// Text to synthesize
+    pub text: &'a str,
+    /// Output file path (optional for streaming)
+    pub output: Option<&'a Path>,
+    /// Speaking rate (0.25 - 4.0)
+    pub rate: f32,
+    /// Pitch shift in semitones (-24.0 - 24.0)
+    pub pitch: f32,
+    /// Volume gain in dB (-40.0 - 20.0)
+    pub volume: f32,
+    /// Quality level
+    pub quality: QualityLevel,
+    /// Buffer size for streaming
+    pub buffer_size: usize,
+}
+
 /// Enhanced synthesis options with validation
 #[derive(Debug, Clone)]
 pub struct EnhancedSynthesisOptions {
@@ -395,7 +478,7 @@ async fn run_enhanced_streaming_synthesis(
         if let Some(latency_ms) = options.target_latency_ms {
             // Adjust chunk size based on target latency
             streaming_config.max_chunk_size = ((latency_ms / 1000.0) * 150.0) as usize; // ~150 chars per second
-            streaming_config.max_chunk_size = streaming_config.max_chunk_size.max(100).min(2000);
+            streaming_config.max_chunk_size = streaming_config.max_chunk_size.clamp(100, 2000);
         }
     }
 
@@ -530,35 +613,105 @@ async fn build_enhanced_pipeline(
 }
 
 /// Run text synthesis command (legacy interface for backwards compatibility)
+///
+/// # Arguments
+///
+/// * `args` - Synthesis arguments (text, output path, audio parameters)
+/// * `config` - Application configuration
+/// * `global` - Global CLI options
+///
+/// # Example
+///
+/// ```no_run
+/// # use voirs_cli::commands::synthesize::{run_synthesize, SynthesizeArgs};
+/// # use voirs_sdk::{QualityLevel, config::AppConfig};
+/// # use voirs_cli::GlobalOptions;
+/// # use std::path::Path;
+/// # async fn example() -> voirs_sdk::Result<()> {
+/// let args = SynthesizeArgs {
+///     text: "Hello, world!",
+///     output: Some(Path::new("output.wav")),
+///     rate: 1.0,
+///     pitch: 0.0,
+///     volume: 0.0,
+///     quality: QualityLevel::High,
+///     enhance: false,
+///     play: false,
+/// };
+/// let config = AppConfig::default();
+/// let global = GlobalOptions::default();
+/// run_synthesize(args, &config, &global).await?;
+/// # Ok(())
+/// # }
+/// ```
 pub async fn run_synthesize(
-    text: &str,
-    output: Option<&Path>,
-    rate: f32,
-    pitch: f32,
-    volume: f32,
-    quality: QualityLevel,
-    enhance: bool,
-    play: bool,
+    args: SynthesizeArgs<'_>,
     config: &AppConfig,
     global: &GlobalOptions,
 ) -> Result<()> {
-    let output_path = output.map(|p| p.to_path_buf());
+    use crate::synthesis::input_detector::{detect_format, parse_input, InputFormat};
+
+    let output_path = args.output.map(|p| p.to_path_buf());
+
+    // Perform smart input detection if enabled
+    let (text, rate, pitch, volume) = if args.auto_detect {
+        let parsed = parse_input(args.text)?;
+
+        // Show detected format
+        if !global.quiet {
+            println!("📝 Detected format: {:?}", parsed.format);
+            if parsed.format != InputFormat::PlainText {
+                println!(
+                    "   Extracted text: \"{}...\"",
+                    parsed.content.chars().take(50).collect::<String>()
+                );
+            }
+        }
+
+        // Use extracted parameters, falling back to CLI args
+        let rate = parsed.parameters.rate.unwrap_or(args.rate);
+        let pitch = parsed.parameters.pitch.unwrap_or(args.pitch);
+        let volume = parsed.parameters.volume.unwrap_or(args.volume);
+
+        // Show extracted parameters if any
+        if !global.quiet {
+            if parsed.parameters.voice.is_some() {
+                println!("   Voice: {}", parsed.parameters.voice.as_ref().unwrap());
+            }
+            if parsed.parameters.rate.is_some() {
+                println!("   Rate: {}", rate);
+            }
+            if parsed.parameters.pitch.is_some() {
+                println!("   Pitch: {}", pitch);
+            }
+            if parsed.parameters.emotion.is_some() {
+                println!(
+                    "   Emotion: {}",
+                    parsed.parameters.emotion.as_ref().unwrap()
+                );
+            }
+        }
+
+        (parsed.content, rate, pitch, volume)
+    } else {
+        (args.text.to_string(), args.rate, args.pitch, args.volume)
+    };
 
     let options = EnhancedSynthesisOptions {
-        text: text.to_string(),
+        text,
         output: output_path.clone(),
         rate,
         pitch,
         volume,
-        quality,
-        enhance,
+        quality: args.quality,
+        enhance: args.enhance,
         ..Default::default()
     };
 
     run_enhanced_synthesize(options, config, global).await?;
 
     // Play audio if requested and we have an output path that's not stdout
-    if play {
+    if args.play {
         if let Some(ref path) = output_path {
             if path.to_str() != Some("-") {
                 use crate::audio::playback::play_audio_file_simple;
@@ -571,20 +724,20 @@ pub async fn run_synthesize(
 }
 
 /// Run streaming synthesis for long texts
+///
+/// # Arguments
+///
+/// * `args` - Streaming synthesis arguments
+/// * `config` - Application configuration
+/// * `global` - Global CLI options
 pub async fn run_streaming_synthesis(
-    text: &str,
-    output: Option<&Path>,
-    rate: f32,
-    pitch: f32,
-    volume: f32,
-    quality: QualityLevel,
-    enhance: bool,
+    args: StreamingSynthesisArgs<'_>,
     config: &AppConfig,
     global: &GlobalOptions,
 ) -> Result<()> {
     tracing::info!(
         "Running streaming synthesis for text of length: {}",
-        text.len()
+        args.text.len()
     );
 
     let streaming_config = StreamingConfig::default();
@@ -592,12 +745,12 @@ pub async fn run_streaming_synthesis(
     if !global.quiet {
         println!(
             "Processing long text ({} characters) with streaming synthesis...",
-            text.len()
+            args.text.len()
         );
     }
 
     // Split text into chunks
-    let chunks = split_text_into_chunks(text, &streaming_config)?;
+    let chunks = split_text_into_chunks(args.text, &streaming_config)?;
 
     if !global.quiet {
         println!("Split into {} chunks for processing", chunks.len());
@@ -606,7 +759,7 @@ pub async fn run_streaming_synthesis(
     // Build pipeline
     let pipeline = Arc::new(
         VoirsPipeline::builder()
-            .with_quality(quality)
+            .with_quality(args.quality)
             .with_gpu_acceleration(config.pipeline.use_gpu || global.gpu)
             .build()
             .await?,
@@ -614,20 +767,20 @@ pub async fn run_streaming_synthesis(
 
     // Create synthesis config
     let synth_config = SynthesisConfig {
-        speaking_rate: rate,
-        pitch_shift: pitch,
-        volume_gain: volume,
-        enable_enhancement: enhance,
-        quality,
+        speaking_rate: args.rate,
+        pitch_shift: args.pitch,
+        volume_gain: args.volume,
+        enable_enhancement: false, // streaming doesn't use enhance from args
+        quality: args.quality,
         ..Default::default()
     };
 
     // Determine output path
-    let output_path = if let Some(path) = output {
+    let output_path = if let Some(path) = args.output {
         path.to_path_buf()
     } else {
         let format: AudioFormat = global.format.map(|f| f.into()).unwrap_or_default();
-        let filename = utils::generate_output_filename(text, format);
+        let filename = utils::generate_output_filename(args.text, format);
         std::env::current_dir()?.join(filename)
     };
 
@@ -676,7 +829,7 @@ pub async fn run_synthesize_file(
     tracing::info!("Synthesizing file: {}", input.display());
 
     // Read input file
-    let content = std::fs::read_to_string(input).map_err(|e| voirs_sdk::VoirsError::from(e))?;
+    let content = std::fs::read_to_string(input).map_err(voirs_sdk::VoirsError::from)?;
 
     // Determine output directory
     let output_dir = if let Some(dir) = output_dir {
@@ -689,7 +842,7 @@ pub async fn run_synthesize_file(
     };
 
     // Ensure output directory exists
-    std::fs::create_dir_all(&output_dir).map_err(|e| voirs_sdk::VoirsError::from(e))?;
+    std::fs::create_dir_all(&output_dir).map_err(voirs_sdk::VoirsError::from)?;
 
     // Process file content
     // If file has multiple lines, treat each line as separate synthesis

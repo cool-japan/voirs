@@ -811,7 +811,7 @@ rm -f /usr/lib64/libvoirs_ffi.so.0
             spec_content.push_str(&format!("BuildRequires:  {}\n", build_req));
         }
 
-        spec_content.push_str("\n");
+        spec_content.push('\n');
 
         // Description
         spec_content.push_str("%description\n");
@@ -846,7 +846,7 @@ rm -f /usr/lib64/libvoirs_ffi.so.0
         for file in &rpm.install_files {
             spec_content.push_str(&format!("{}\n", file.destination));
         }
-        spec_content.push_str("\n");
+        spec_content.push('\n');
 
         // Scripts
         if let Some(post) = &rpm.scripts.post {
@@ -1184,6 +1184,11 @@ pub extern "C" fn voirs_package_create_manager() -> *mut PackageManager {
     Box::into_raw(Box::new(PackageManager::new()))
 }
 
+/// Destroy a package manager
+///
+/// # Safety
+/// The `manager` pointer must be a valid handle previously returned by `voirs_package_create_manager`.
+/// After calling this function, the manager handle becomes invalid and must not be used.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_package_destroy_manager(manager: *mut PackageManager) {
     if !manager.is_null() {
@@ -1193,6 +1198,11 @@ pub unsafe extern "C" fn voirs_package_destroy_manager(manager: *mut PackageMana
     }
 }
 
+/// Build a Debian package
+///
+/// # Safety
+/// The `manager` pointer must be a valid handle previously returned by `voirs_package_create_manager`.
+/// The `output_path` pointer must be valid and point to a null-terminated C string.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_package_build_debian(
     manager: *mut PackageManager,
@@ -1213,6 +1223,11 @@ pub unsafe extern "C" fn voirs_package_build_debian(
     }
 }
 
+/// Build all supported package formats
+///
+/// # Safety
+/// The `manager` pointer must be a valid handle previously returned by `voirs_package_create_manager`.
+/// The `output_path` pointer must be valid and point to a null-terminated C string.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_package_build_all(
     manager: *mut PackageManager,

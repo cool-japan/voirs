@@ -1,4 +1,4 @@
-//! Horizontal scaling management for distributed VoiRS feedback system
+//! Horizontal scaling management for distributed `VoiRS` feedback system
 //!
 //! This module provides automatic scaling capabilities, load monitoring,
 //! and dynamic resource allocation across multiple instances.
@@ -330,7 +330,7 @@ impl HorizontalScalingManager {
                     Self::make_scaling_decision(&instances, &config, &last_scaling_action).await
                 {
                     if decision.action != ScalingAction::NoChange {
-                        log::info!("Scaling decision: {:?}", decision);
+                        log::info!("Scaling decision: {decision:?}");
 
                         // Record scaling event
                         let event = ScalingEvent {
@@ -417,23 +417,23 @@ impl HorizontalScalingManager {
         let mut scale_down_reasons = Vec::new();
 
         if avg_cpu > config.cpu_scale_up_threshold {
-            scale_up_reasons.push(format!("High CPU utilization: {:.2}", avg_cpu));
+            scale_up_reasons.push(format!("High CPU utilization: {avg_cpu:.2}"));
         } else if avg_cpu < config.cpu_scale_down_threshold {
-            scale_down_reasons.push(format!("Low CPU utilization: {:.2}", avg_cpu));
+            scale_down_reasons.push(format!("Low CPU utilization: {avg_cpu:.2}"));
         }
 
         if avg_memory > config.memory_scale_up_threshold {
-            scale_up_reasons.push(format!("High memory utilization: {:.2}", avg_memory));
+            scale_up_reasons.push(format!("High memory utilization: {avg_memory:.2}"));
         } else if avg_memory < config.memory_scale_down_threshold {
-            scale_down_reasons.push(format!("Low memory utilization: {:.2}", avg_memory));
+            scale_down_reasons.push(format!("Low memory utilization: {avg_memory:.2}"));
         }
 
         if avg_response_time > config.target_response_time_ms as f32 {
-            scale_up_reasons.push(format!("High response time: {:.2}ms", avg_response_time));
+            scale_up_reasons.push(format!("High response time: {avg_response_time:.2}ms"));
         }
 
         if avg_request_rate > config.request_rate_threshold {
-            scale_up_reasons.push(format!("High request rate: {:.2} req/s", avg_request_rate));
+            scale_up_reasons.push(format!("High request rate: {avg_request_rate:.2} req/s"));
         }
 
         // Make decision

@@ -5,8 +5,12 @@
 
 #[cfg(feature = "python")]
 mod python_tests {
+    use pyo3::ffi::c_str;
     use pyo3::prelude::*;
+    use pyo3::types::PyDictMethods;
+    use pyo3::types::PyListMethods;
     use pyo3::types::*;
+    use pyo3::IntoPyObject;
     use std::sync::Arc;
     use voirs_ffi::python::*;
 
@@ -21,7 +25,11 @@ mod python_tests {
             assert!(!module.is_none());
 
             // Test basic Python integration
-            let result: i32 = py.eval("2 + 2", None, None).unwrap().extract().unwrap();
+            let result: i32 = py
+                .eval(c_str!("2 + 2"), None, None)
+                .unwrap()
+                .extract()
+                .unwrap();
             assert_eq!(result, 4);
         });
     }
@@ -48,17 +56,17 @@ mod python_tests {
         Python::with_gil(|py| {
             // Test basic type conversions
             let int_val = 42i32;
-            let py_int = int_val.to_object(py);
+            let py_int = int_val.into_pyobject(py).unwrap().into_any().unbind();
             let back_int: i32 = py_int.extract(py).unwrap();
             assert_eq!(int_val, back_int);
 
-            let float_val = 3.14f64;
-            let py_float = float_val.to_object(py);
+            let float_val = 2.5f64; // Arbitrary value to avoid clippy::approx_constant
+            let py_float = float_val.into_pyobject(py).unwrap().into_any().unbind();
             let back_float: f64 = py_float.extract(py).unwrap();
             assert!((float_val - back_float).abs() < 1e-10);
 
             let str_val = "Hello, Python!";
-            let py_str = str_val.to_object(py);
+            let py_str = str_val.into_pyobject(py).unwrap().into_any().unbind();
             let back_str: String = py_str.extract(py).unwrap();
             assert_eq!(str_val, back_str);
         });
@@ -70,7 +78,7 @@ mod python_tests {
 
         Python::with_gil(|py| {
             // Test list creation and manipulation
-            let list = PyList::new(py, &[1, 2, 3, 4, 5]);
+            let list = PyList::new(py, [1, 2, 3, 4, 5]).unwrap();
             assert_eq!(list.len(), 5);
 
             // Test list access
@@ -115,7 +123,7 @@ mod python_tests {
                 .unwrap()
                 .extract()
                 .unwrap();
-            assert_eq!(enabled, true);
+            assert!(enabled);
         });
     }
 
@@ -125,15 +133,21 @@ mod python_tests {
 
         Python::with_gil(|py| {
             // Test function definition and calling
-            let code = "
+            let module = PyModule::from_code(
+                py,
+                c_str!(
+                    "
 def add_numbers(a, b):
     return a + b
 
 def multiply_numbers(a, b):
     return a * b
-            ";
-
-            let module = PyModule::from_code(py, code, "test_module.py", "test_module").unwrap();
+"
+                ),
+                c_str!("test_module.py"),
+                c_str!("test_module"),
+            )
+            .unwrap();
 
             // Test function calls
             let add_func = module.getattr("add_numbers").unwrap();
@@ -152,19 +166,25 @@ def multiply_numbers(a, b):
 
         Python::with_gil(|py| {
             // Test class creation
-            let code = "
+            let module = PyModule::from_code(
+                py,
+                c_str!(
+                    "
 class TestClass:
     def __init__(self, value):
         self.value = value
-    
+
     def get_value(self):
         return self.value
-    
+
     def set_value(self, new_value):
         self.value = new_value
-            ";
-
-            let module = PyModule::from_code(py, code, "test_class.py", "test_class").unwrap();
+"
+                ),
+                c_str!("test_class.py"),
+                c_str!("test_class"),
+            )
+            .unwrap();
             let class = module.getattr("TestClass").unwrap();
 
             // Test instance creation
@@ -189,7 +209,10 @@ class TestClass:
 
         Python::with_gil(|py| {
             // Test async function support
-            let code = "
+            let module = PyModule::from_code(
+                py,
+                c_str!(
+                    "
 import asyncio
 
 async def async_add(a, b):
@@ -203,9 +226,12 @@ def run_async_add(a, b):
         return loop.run_until_complete(async_add(a, b))
     finally:
         loop.close()
-            ";
-
-            let module = PyModule::from_code(py, code, "test_async.py", "test_async").unwrap();
+"
+                ),
+                c_str!("test_async.py"),
+                c_str!("test_async"),
+            )
+            .unwrap();
             let async_func = module.getattr("run_async_add").unwrap();
 
             let result: i32 = async_func.call1((15, 25)).unwrap().extract().unwrap();
@@ -219,15 +245,20 @@ def run_async_add(a, b):
 
         Python::with_gil(|py| {
             // Test exception handling
-            let code = "
+            let module = PyModule::from_code(
+                py,
+                c_str!(
+                    "
 def divide_numbers(a, b):
     if b == 0:
         raise ValueError('Cannot divide by zero')
     return a / b
-            ";
-
-            let module =
-                PyModule::from_code(py, code, "test_exceptions.py", "test_exceptions").unwrap();
+"
+                ),
+                c_str!("test_exceptions.py"),
+                c_str!("test_exceptions"),
+            )
+            .unwrap();
             let divide_func = module.getattr("divide_numbers").unwrap();
 
             // Test normal operation
@@ -249,7 +280,7 @@ def divide_numbers(a, b):
 
         Python::with_gil(|py| {
             // Test memory management with large objects
-            let large_list = PyList::new(py, &(0..10000).collect::<Vec<i32>>());
+            let large_list = PyList::new(py, (0..10000).collect::<Vec<i32>>()).unwrap();
             assert_eq!(large_list.len(), 10000);
 
             // Test that memory is properly managed
@@ -266,8 +297,13 @@ def divide_numbers(a, b):
         pyo3::prepare_freethreaded_python();
 
         Python::with_gil(|py| {
-            // Test NumPy array creation and manipulation
-            let numpy_code = "
+            // Only run if NumPy is available
+            let numpy_available = py.import("numpy").is_ok();
+            if numpy_available {
+                let module = PyModule::from_code(
+                    py,
+                    c_str!(
+                        "
 import numpy as np
 
 def create_array():
@@ -282,13 +318,12 @@ def array_info(arr):
         'dtype': str(arr.dtype),
         'size': arr.size
     }
-            ";
-
-            // Only run if NumPy is available
-            let numpy_available = py.import("numpy").is_ok();
-            if numpy_available {
-                let module =
-                    PyModule::from_code(py, numpy_code, "test_numpy.py", "test_numpy").unwrap();
+"
+                    ),
+                    c_str!("test_numpy.py"),
+                    c_str!("test_numpy"),
+                )
+                .unwrap();
 
                 let create_func = module.getattr("create_array").unwrap();
                 let array = create_func.call0().unwrap();
@@ -311,7 +346,10 @@ def array_info(arr):
 
         Python::with_gil(|py| {
             // Test callback function support
-            let code = "
+            let module = PyModule::from_code(
+                py,
+                c_str!(
+                    "
 def apply_callback(data, callback):
     return [callback(item) for item in data]
 
@@ -320,19 +358,21 @@ def square(x):
 
 def double(x):
     return x * 2
-            ";
-
-            let module =
-                PyModule::from_code(py, code, "test_callbacks.py", "test_callbacks").unwrap();
+"
+                ),
+                c_str!("test_callbacks.py"),
+                c_str!("test_callbacks"),
+            )
+            .unwrap();
             let apply_func = module.getattr("apply_callback").unwrap();
             let square_func = module.getattr("square").unwrap();
             let double_func = module.getattr("double").unwrap();
 
-            let data = PyList::new(py, &[1, 2, 3, 4, 5]);
+            let data = PyList::new(py, [1, 2, 3, 4, 5]).unwrap();
 
             // Test square callback
             let squared: Vec<i32> = apply_func
-                .call1((data, square_func))
+                .call1((&data, square_func))
                 .unwrap()
                 .extract()
                 .unwrap();
@@ -340,7 +380,7 @@ def double(x):
 
             // Test double callback
             let doubled: Vec<i32> = apply_func
-                .call1((data, double_func))
+                .call1((&data, double_func))
                 .unwrap()
                 .extract()
                 .unwrap();
@@ -354,7 +394,10 @@ def double(x):
 
         Python::with_gil(|py| {
             // Test threading support
-            let code = "
+            let module = PyModule::from_code(
+                py,
+                c_str!(
+                    "
 import threading
 import time
 
@@ -365,31 +408,39 @@ def thread_worker(name, delay):
 def run_threads():
     threads = []
     results = []
-    
+
     def worker(name, delay):
         result = thread_worker(name, delay)
         results.append(result)
-    
+
     for i in range(3):
         t = threading.Thread(target=worker, args=(i, 0.001))
         threads.append(t)
         t.start()
-    
+
     for t in threads:
         t.join()
-    
-    return results
-            ";
 
-            let module =
-                PyModule::from_code(py, code, "test_threading.py", "test_threading").unwrap();
+    return results
+"
+                ),
+                c_str!("test_threading.py"),
+                c_str!("test_threading"),
+            )
+            .unwrap();
             let run_func = module.getattr("run_threads").unwrap();
 
             let results: Vec<String> = run_func.call0().unwrap().extract().unwrap();
             assert_eq!(results.len(), 3);
 
-            for (i, result) in results.iter().enumerate() {
-                assert!(result.contains(&format!("Thread {} completed", i)));
+            // Check that all threads completed (order may vary due to race conditions)
+            for i in 0..3 {
+                let expected = format!("Thread {} completed", i);
+                assert!(
+                    results.iter().any(|r| r.contains(&expected)),
+                    "Expected '{}' to be present in results",
+                    expected
+                );
             }
         });
     }
@@ -400,7 +451,10 @@ def run_threads():
 
         Python::with_gil(|py| {
             // Test garbage collection interaction
-            let code = "
+            let module = PyModule::from_code(
+                py,
+                c_str!(
+                    "
 import gc
 
 def create_large_objects():
@@ -412,9 +466,12 @@ def create_large_objects():
 
 def force_gc():
     return gc.collect()
-            ";
-
-            let module = PyModule::from_code(py, code, "test_gc.py", "test_gc").unwrap();
+"
+                ),
+                c_str!("test_gc.py"),
+                c_str!("test_gc"),
+            )
+            .unwrap();
             let create_func = module.getattr("create_large_objects").unwrap();
             let gc_func = module.getattr("force_gc").unwrap();
 

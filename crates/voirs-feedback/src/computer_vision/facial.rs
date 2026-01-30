@@ -1,4 +1,7 @@
-use super::types::*;
+use super::types::{
+    EmotionIndicators, ExpressionType, FacialExpression, FacialLandmarks, LipMovementAnalysis,
+    Point2D, VideoFrame,
+};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -24,8 +27,15 @@ pub struct MovementData {
     pub sync_score: f32,
 }
 
+impl Default for LipMovementModel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LipMovementModel {
     /// Description
+    #[must_use]
     pub fn new() -> Self {
         Self {
             previous_lip_state: None,
@@ -126,8 +136,7 @@ impl LipMovementModel {
             .sum::<f32>()
             / recent_velocities.len() as f32;
 
-        let consistency = 1.0 - (variance.sqrt() / (mean_velocity + 0.1)).min(1.0);
-        consistency
+        1.0 - (variance.sqrt() / (mean_velocity + 0.1)).min(1.0)
     }
 }
 
@@ -136,8 +145,15 @@ pub struct ExpressionClassifier {
     expression_models: HashMap<ExpressionType, Vec<f32>>,
 }
 
+impl Default for ExpressionClassifier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ExpressionClassifier {
     /// Description
+    #[must_use]
     pub fn new() -> Self {
         Self {
             expression_models: Self::initialize_models(),
@@ -198,7 +214,7 @@ impl ExpressionClassifier {
         let norm2: f32 = features2.iter().map(|x| x * x).sum::<f32>().sqrt();
 
         if norm1 > 0.0 && norm2 > 0.0 {
-            (dot_product / (norm1 * norm2) + 1.0) / 2.0
+            f32::midpoint(dot_product / (norm1 * norm2), 1.0)
         } else {
             0.0
         }
@@ -211,8 +227,15 @@ pub struct FacialAnalyzer {
     expression_classifier: ExpressionClassifier,
 }
 
+impl Default for FacialAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FacialAnalyzer {
     /// Description
+    #[must_use]
     pub fn new() -> Self {
         Self {
             lip_movement_model: LipMovementModel::new(),
@@ -397,7 +420,7 @@ impl FacialAnalyzer {
         let left_distance = left_eye_y - left_eyebrow_y;
         let right_distance = right_eye_y - right_eyebrow_y;
 
-        ((left_distance + right_distance) / 2.0) / 50.0
+        f32::midpoint(left_distance, right_distance) / 50.0
     }
 
     fn calculate_eye_openness(points: &[Point2D]) -> f32 {
@@ -409,7 +432,7 @@ impl FacialAnalyzer {
         let right_height =
             (right_eye[4].y - right_eye[1].y).abs() + (right_eye[5].y - right_eye[2].y).abs();
 
-        ((left_height + right_height) / 2.0) / 20.0
+        f32::midpoint(left_height, right_height) / 20.0
     }
 
     fn calculate_mouth_curvature(points: &[Point2D]) -> f32 {
@@ -419,7 +442,7 @@ impl FacialAnalyzer {
         let left_curve = mouth_corners[0].y - mouth_center.y;
         let right_curve = mouth_corners[1].y - mouth_center.y;
 
-        ((left_curve + right_curve) / 2.0) / 10.0 + 0.5
+        f32::midpoint(left_curve, right_curve) / 10.0 + 0.5
     }
 
     fn calculate_cheek_tension(points: &[Point2D]) -> f32 {
@@ -434,7 +457,7 @@ impl FacialAnalyzer {
             + (nose_base.y - right_mouth_corner.y).powi(2))
         .sqrt();
 
-        ((left_cheek_distance + right_cheek_distance) / 2.0) / 100.0
+        f32::midpoint(left_cheek_distance, right_cheek_distance) / 100.0
     }
 
     fn calculate_forehead_lines(points: &[Point2D]) -> f32 {

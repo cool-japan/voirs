@@ -3,8 +3,12 @@
 //! This module contains all analytics related to user sessions and behavior patterns,
 //! including detailed session tracking, behavior analysis, and user journey mapping.
 
-use super::types::*;
-use crate::traits::*;
+use super::types::{
+    ActivityContext, ActivityType, BottleneckSeverity, DeviceInfo, EngagementLevel,
+    ImplementationDifficulty, InsightPriority, LearningPreferences, NetworkConditions,
+    SessionCompletionStatus, TrendDirection, UserState,
+};
+use crate::traits::FocusArea;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};

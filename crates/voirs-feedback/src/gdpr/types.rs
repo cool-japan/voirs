@@ -16,56 +16,56 @@ pub enum GdprError {
     #[error("Data subject {subject_id} not found")]
     DataSubjectNotFound {
         /// Subject identifier
-        subject_id: String
+        subject_id: String,
     },
 
     /// Consent validation failed
     #[error("Consent validation failed: {reason}")]
     ConsentValidationFailed {
         /// Reason for validation failure
-        reason: String
+        reason: String,
     },
 
     /// Data retention policy violation
     #[error("Data retention policy violation: {details}")]
     RetentionPolicyViolation {
         /// Violation details
-        details: String
+        details: String,
     },
 
     /// Anonymization failed
     #[error("Data anonymization failed: {message}")]
     AnonymizationFailed {
         /// Error message
-        message: String
+        message: String,
     },
 
     /// Data export failed
     #[error("Data export failed: {message}")]
     DataExportFailed {
         /// Error message
-        message: String
+        message: String,
     },
 
     /// Data deletion failed
     #[error("Data deletion failed: {message}")]
     DataDeletionFailed {
         /// Error message
-        message: String
+        message: String,
     },
 
     /// Privacy policy violation
     #[error("Privacy policy violation: {violation}")]
     PrivacyPolicyViolation {
         /// Violation description
-        violation: String
+        violation: String,
     },
 
     /// Insufficient consent
     #[error("Insufficient consent for operation: {operation}")]
     InsufficientConsent {
         /// Operation name
-        operation: String
+        operation: String,
     },
 }
 
@@ -107,7 +107,7 @@ pub enum LegalBasis {
     /// Legitimate interests pursued by controller
     LegitimateInterests {
         /// Description of legitimate interest
-        interest: String
+        interest: String,
     },
 }
 
@@ -262,12 +262,12 @@ pub enum RequestStatus {
     /// Request rejected with reason
     Rejected {
         /// Rejection reason
-        reason: String
+        reason: String,
     },
     /// Request requires additional information
     RequiresInfo {
         /// Details of required information
-        details: String
+        details: String,
     },
 }
 
@@ -371,12 +371,12 @@ pub enum NotificationStatus {
     /// Supervisory authority notified
     AuthorityNotified {
         /// Timestamp of authority notification
-        notified_at: DateTime<Utc>
+        notified_at: DateTime<Utc>,
     },
     /// Data subjects notified
     SubjectsNotified {
         /// Timestamp of subject notification
-        notified_at: DateTime<Utc>
+        notified_at: DateTime<Utc>,
     },
     /// Both authority and subjects notified
     FullyNotified {

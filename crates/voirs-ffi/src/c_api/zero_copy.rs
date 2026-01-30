@@ -34,6 +34,10 @@ pub extern "C" fn voirs_zero_copy_buffer_create(capacity: c_uint) -> VoirsZeroCo
 }
 
 /// Destroy a zero-copy buffer
+///
+/// # Safety
+/// The `buffer` pointer must be a valid handle previously returned by `voirs_zero_copy_buffer_create`.
+/// After calling this function, the buffer handle becomes invalid and must not be used.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_zero_copy_buffer_destroy(buffer: VoirsZeroCopyBuffer) {
     if !buffer.is_null() {
@@ -42,6 +46,9 @@ pub unsafe extern "C" fn voirs_zero_copy_buffer_destroy(buffer: VoirsZeroCopyBuf
 }
 
 /// Get the length of valid data in the buffer
+///
+/// # Safety
+/// The `buffer` pointer must be a valid handle previously returned by `voirs_zero_copy_buffer_create`.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_zero_copy_buffer_len(buffer: VoirsZeroCopyBuffer) -> c_uint {
     if buffer.is_null() {
@@ -52,6 +59,9 @@ pub unsafe extern "C" fn voirs_zero_copy_buffer_len(buffer: VoirsZeroCopyBuffer)
 }
 
 /// Get the capacity of the buffer
+///
+/// # Safety
+/// The `buffer` pointer must be a valid handle previously returned by `voirs_zero_copy_buffer_create`.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_zero_copy_buffer_capacity(buffer: VoirsZeroCopyBuffer) -> c_uint {
     if buffer.is_null() {
@@ -79,6 +89,10 @@ pub unsafe extern "C" fn voirs_zero_copy_buffer_set_len(
 }
 
 /// Get a pointer to the buffer data
+///
+/// # Safety
+/// The `buffer` pointer must be a valid handle previously returned by `voirs_zero_copy_buffer_create`.
+/// The returned pointer is valid only while the buffer is alive and not being mutated.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_zero_copy_buffer_data(
     buffer: VoirsZeroCopyBuffer,
@@ -91,6 +105,10 @@ pub unsafe extern "C" fn voirs_zero_copy_buffer_data(
 }
 
 /// Get a mutable pointer to the buffer data
+///
+/// # Safety
+/// The `buffer` pointer must be a valid handle previously returned by `voirs_zero_copy_buffer_create`.
+/// The caller must ensure exclusive access to the buffer while using the returned mutable pointer.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_zero_copy_buffer_data_mut(
     buffer: VoirsZeroCopyBuffer,
@@ -103,6 +121,10 @@ pub unsafe extern "C" fn voirs_zero_copy_buffer_data_mut(
 }
 
 /// Clone a zero-copy buffer handle (increases reference count)
+///
+/// # Safety
+/// The `buffer` pointer must be a valid handle previously returned by `voirs_zero_copy_buffer_create`.
+/// The returned handle must be destroyed with `voirs_zero_copy_buffer_destroy` when no longer needed.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_zero_copy_buffer_clone(
     buffer: VoirsZeroCopyBuffer,
@@ -116,6 +138,9 @@ pub unsafe extern "C" fn voirs_zero_copy_buffer_clone(
 }
 
 /// Get the reference count of a zero-copy buffer
+///
+/// # Safety
+/// The `buffer` pointer must be a valid handle previously returned by `voirs_zero_copy_buffer_create`.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_zero_copy_buffer_ref_count(buffer: VoirsZeroCopyBuffer) -> c_uint {
     if buffer.is_null() {
@@ -126,6 +151,10 @@ pub unsafe extern "C" fn voirs_zero_copy_buffer_ref_count(buffer: VoirsZeroCopyB
 }
 
 /// Create a zero-copy view of a buffer slice
+///
+/// # Safety
+/// The `buffer` pointer must be a valid handle previously returned by `voirs_zero_copy_buffer_create`.
+/// The `start` and `end` indices must be valid within the buffer's length.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_zero_copy_buffer_slice(
     buffer: VoirsZeroCopyBuffer,
@@ -143,6 +172,10 @@ pub unsafe extern "C" fn voirs_zero_copy_buffer_slice(
 }
 
 /// Destroy a zero-copy view
+///
+/// # Safety
+/// The `view` pointer must be a valid handle previously returned by `voirs_zero_copy_buffer_slice`.
+/// After calling this function, the view handle becomes invalid and must not be used.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_zero_copy_view_destroy(view: VoirsZeroCopyView) {
     if !view.is_null() {
@@ -151,6 +184,9 @@ pub unsafe extern "C" fn voirs_zero_copy_view_destroy(view: VoirsZeroCopyView) {
 }
 
 /// Get the length of a zero-copy view
+///
+/// # Safety
+/// The `view` pointer must be a valid handle previously returned by `voirs_zero_copy_buffer_slice`.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_zero_copy_view_len(view: VoirsZeroCopyView) -> c_uint {
     if view.is_null() {
@@ -161,6 +197,10 @@ pub unsafe extern "C" fn voirs_zero_copy_view_len(view: VoirsZeroCopyView) -> c_
 }
 
 /// Get a pointer to the view data
+///
+/// # Safety
+/// The `view` pointer must be a valid handle previously returned by `voirs_zero_copy_buffer_slice`.
+/// The returned pointer is valid only while the view is alive and the underlying buffer is not being mutated.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_zero_copy_view_data(view: VoirsZeroCopyView) -> *const c_float {
     if view.is_null() {
@@ -184,6 +224,10 @@ pub extern "C" fn voirs_zero_copy_ring_create(capacity: c_uint) -> VoirsZeroCopy
 }
 
 /// Destroy a zero-copy ring buffer
+///
+/// # Safety
+/// The `ring` pointer must be a valid handle previously returned by `voirs_zero_copy_ring_create`.
+/// After calling this function, the ring handle becomes invalid and must not be used.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_zero_copy_ring_destroy(ring: VoirsZeroCopyRingBuffer) {
     if !ring.is_null() {
@@ -192,6 +236,10 @@ pub unsafe extern "C" fn voirs_zero_copy_ring_destroy(ring: VoirsZeroCopyRingBuf
 }
 
 /// Write data to a zero-copy ring buffer
+///
+/// # Safety
+/// The `ring` pointer must be a valid handle previously returned by `voirs_zero_copy_ring_create`.
+/// The `data` pointer must be valid and point to an array of at least `len` floats.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_zero_copy_ring_write(
     ring: VoirsZeroCopyRingBuffer,
@@ -207,6 +255,10 @@ pub unsafe extern "C" fn voirs_zero_copy_ring_write(
 }
 
 /// Read data from a zero-copy ring buffer
+///
+/// # Safety
+/// The `ring` pointer must be a valid handle previously returned by `voirs_zero_copy_ring_create`.
+/// The `data` pointer must be valid and point to a writable buffer of at least `len` floats.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_zero_copy_ring_read(
     ring: VoirsZeroCopyRingBuffer,
@@ -222,6 +274,9 @@ pub unsafe extern "C" fn voirs_zero_copy_ring_read(
 }
 
 /// Get available data for reading in ring buffer
+///
+/// # Safety
+/// The `ring` pointer must be a valid handle previously returned by `voirs_zero_copy_ring_create`.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_zero_copy_ring_available_read(
     ring: VoirsZeroCopyRingBuffer,
@@ -234,6 +289,9 @@ pub unsafe extern "C" fn voirs_zero_copy_ring_available_read(
 }
 
 /// Get available space for writing in ring buffer
+///
+/// # Safety
+/// The `ring` pointer must be a valid handle previously returned by `voirs_zero_copy_ring_create`.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_zero_copy_ring_available_write(
     ring: VoirsZeroCopyRingBuffer,
@@ -246,6 +304,9 @@ pub unsafe extern "C" fn voirs_zero_copy_ring_available_write(
 }
 
 /// Get capacity of ring buffer
+///
+/// # Safety
+/// The `ring` pointer must be a valid handle previously returned by `voirs_zero_copy_ring_create`.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_zero_copy_ring_capacity(ring: VoirsZeroCopyRingBuffer) -> c_uint {
     if ring.is_null() {
@@ -256,6 +317,9 @@ pub unsafe extern "C" fn voirs_zero_copy_ring_capacity(ring: VoirsZeroCopyRingBu
 }
 
 /// Open a memory mapped file for reading
+///
+/// # Safety
+/// The `path` pointer must be valid and point to a null-terminated C string representing a valid file path.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_memory_map_open_read(path: *const c_char) -> VoirsMemoryMappedFile {
     if path.is_null() {
@@ -274,6 +338,9 @@ pub unsafe extern "C" fn voirs_memory_map_open_read(path: *const c_char) -> Voir
 }
 
 /// Open a memory mapped file for reading and writing
+///
+/// # Safety
+/// The `path` pointer must be valid and point to a null-terminated C string representing a valid file path.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_memory_map_open_write(
     path: *const c_char,
@@ -295,6 +362,10 @@ pub unsafe extern "C" fn voirs_memory_map_open_write(
 }
 
 /// Destroy a memory mapped file
+///
+/// # Safety
+/// The `mmap` pointer must be a valid handle previously returned by `voirs_memory_map_open_read` or `voirs_memory_map_open_write`.
+/// After calling this function, the mmap handle becomes invalid and must not be used.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_memory_map_destroy(mmap: VoirsMemoryMappedFile) {
     if !mmap.is_null() {
@@ -303,6 +374,9 @@ pub unsafe extern "C" fn voirs_memory_map_destroy(mmap: VoirsMemoryMappedFile) {
 }
 
 /// Get the size of a memory mapped file
+///
+/// # Safety
+/// The `mmap` pointer must be a valid handle previously returned by `voirs_memory_map_open_read` or `voirs_memory_map_open_write`.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_memory_map_size(mmap: VoirsMemoryMappedFile) -> c_uint {
     if mmap.is_null() {
@@ -313,6 +387,10 @@ pub unsafe extern "C" fn voirs_memory_map_size(mmap: VoirsMemoryMappedFile) -> c
 }
 
 /// Get a pointer to the memory mapped data
+///
+/// # Safety
+/// The `mmap` pointer must be a valid handle previously returned by `voirs_memory_map_open_read` or `voirs_memory_map_open_write`.
+/// The returned pointer is valid only while the memory mapping is alive.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_memory_map_data(mmap: VoirsMemoryMappedFile) -> *const c_void {
     if mmap.is_null() {
@@ -323,6 +401,10 @@ pub unsafe extern "C" fn voirs_memory_map_data(mmap: VoirsMemoryMappedFile) -> *
 }
 
 /// Get a mutable pointer to the memory mapped data
+///
+/// # Safety
+/// The `mmap` pointer must be a valid handle previously returned by `voirs_memory_map_open_write`.
+/// The caller must ensure exclusive access to the memory mapping while using the returned mutable pointer.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_memory_map_data_mut(mmap: VoirsMemoryMappedFile) -> *mut c_void {
     if mmap.is_null() {
@@ -336,6 +418,9 @@ pub unsafe extern "C" fn voirs_memory_map_data_mut(mmap: VoirsMemoryMappedFile) 
 }
 
 /// Synchronize memory mapped file changes to disk
+///
+/// # Safety
+/// The `mmap` pointer must be a valid handle previously returned by `voirs_memory_map_open_write`.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_memory_map_sync(mmap: VoirsMemoryMappedFile) -> VoirsErrorCode {
     if mmap.is_null() {
@@ -349,6 +434,9 @@ pub unsafe extern "C" fn voirs_memory_map_sync(mmap: VoirsMemoryMappedFile) -> V
 }
 
 /// Set memory access pattern advice for memory mapped file
+///
+/// # Safety
+/// The `mmap` pointer must be a valid handle previously returned by `voirs_memory_map_open_read` or `voirs_memory_map_open_write`.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_memory_map_advise_sequential(
     mmap: VoirsMemoryMappedFile,
@@ -364,6 +452,9 @@ pub unsafe extern "C" fn voirs_memory_map_advise_sequential(
 }
 
 /// Set random access pattern advice for memory mapped file
+///
+/// # Safety
+/// The `mmap` pointer must be a valid handle previously returned by `voirs_memory_map_open_read` or `voirs_memory_map_open_write`.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_memory_map_advise_random(
     mmap: VoirsMemoryMappedFile,
@@ -379,6 +470,12 @@ pub unsafe extern "C" fn voirs_memory_map_advise_random(
 }
 
 /// Batch copy operation using zero-copy optimization where possible
+///
+/// # Safety
+/// The `sources` pointer must point to an array of `count` valid read-only float pointers.
+/// The `destinations` pointer must point to an array of `count` valid mutable float pointers.
+/// The `sizes` pointer must point to an array of `count` valid size values.
+/// Each source[i] must point to at least sizes[i] floats, and each destination[i] must have space for sizes[i] floats.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_zero_copy_batch_copy(
     sources: *const *const c_float,
@@ -410,6 +507,11 @@ pub unsafe extern "C" fn voirs_zero_copy_batch_copy(
 }
 
 /// Zero-copy audio buffer interleaving
+///
+/// # Safety
+/// The `channels` pointer must point to an array of `channel_count` valid float pointers.
+/// Each channel pointer must point to an array of at least `frame_count` floats.
+/// The `output` pointer must point to a writable buffer of at least `channel_count * frame_count` floats.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_zero_copy_interleave(
     channels: *const *const c_float,
@@ -445,6 +547,11 @@ pub unsafe extern "C" fn voirs_zero_copy_interleave(
 }
 
 /// Zero-copy audio buffer deinterleaving
+///
+/// # Safety
+/// The `input` pointer must point to an array of at least `channel_count * frame_count` floats in interleaved format.
+/// The `channels` pointer must point to an array of `channel_count` valid mutable float pointers.
+/// Each channel pointer must point to a writable buffer of at least `frame_count` floats.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_zero_copy_deinterleave(
     input: *const c_float,

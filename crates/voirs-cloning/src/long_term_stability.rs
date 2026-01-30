@@ -888,15 +888,8 @@ mod tests {
             StabilityAssessment::Critical,
         ];
 
-        for assessment in assessments {
-            match assessment {
-                StabilityAssessment::Excellent => assert!(true),
-                StabilityAssessment::Good => assert!(true),
-                StabilityAssessment::Moderate => assert!(true),
-                StabilityAssessment::Poor => assert!(true),
-                StabilityAssessment::Critical => assert!(true),
-            }
-        }
+        // Test that all enum variants exist and are valid
+        assert_eq!(assessments.len(), 5);
     }
 
     #[test]

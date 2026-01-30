@@ -1,6 +1,6 @@
 //! Desktop platform adapter implementation
 //!
-//! This module provides desktop-specific implementations for VoiRS feedback system
+//! This module provides desktop-specific implementations for `VoiRS` feedback system
 //! including Windows, macOS, and Linux support.
 
 use super::{AudioDeviceInfo, PlatformAdapter, PlatformError, PlatformResult};
@@ -13,6 +13,7 @@ pub struct DesktopAdapter {
 
 impl DesktopAdapter {
     /// Create a new desktop adapter
+    #[must_use]
     pub fn new() -> Self {
         Self { initialized: false }
     }
@@ -209,7 +210,7 @@ impl PlatformAdapter for DesktopAdapter {
         {
             // macOS User Notifications
             // This would typically use NSUserNotification or UserNotifications framework
-            println!("macOS Notification: {} - {}", title, message);
+            println!("macOS Notification: {title} - {message}");
         }
 
         #[cfg(target_os = "linux")]
@@ -326,6 +327,7 @@ pub struct DesktopUtils;
 
 impl DesktopUtils {
     /// Check if running with administrator/root privileges
+    #[must_use]
     pub fn is_elevated() -> bool {
         #[cfg(target_os = "windows")]
         {
@@ -359,6 +361,7 @@ impl DesktopUtils {
     }
 
     /// Check if system supports specific audio features
+    #[must_use]
     pub fn supports_audio_feature(feature: &str) -> bool {
         match feature {
             "low_latency" => true,

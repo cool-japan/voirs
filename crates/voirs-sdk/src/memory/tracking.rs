@@ -811,8 +811,8 @@ impl fmt::Display for ResourceReport {
             "Resource Report - {}",
             self.report_time
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
+                .map(|d| d.as_secs())
+                .unwrap_or(0)
         )?;
         writeln!(f, "==================")?;
         writeln!(

@@ -5,7 +5,7 @@ use voirs_evaluation::prelude::*;
 use voirs_sdk::AudioBuffer;
 
 fn generate_test_audio(length: usize, sample_rate: u32) -> AudioBuffer {
-    let samples: Vec<f32> = (0..length).map(|i| ((i as f32 * 0.001).sin())).collect();
+    let samples: Vec<f32> = (0..length).map(|i| (i as f32 * 0.001).sin()).collect();
     AudioBuffer::mono(samples, sample_rate)
 }
 

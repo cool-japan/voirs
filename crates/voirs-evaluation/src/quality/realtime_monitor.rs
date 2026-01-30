@@ -917,7 +917,7 @@ mod tests {
                 .map(|i| (i as f32 * 0.01).sin())
                 .collect::<Vec<f32>>(), // Sine wave
             (0..1024)
-                .map(|i| ((i as f32 * 0.037).sin() * 0.05))
+                .map(|i| (i as f32 * 0.037).sin() * 0.05)
                 .collect::<Vec<f32>>(), // Pseudo-noise
         ];
 

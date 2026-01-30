@@ -3,7 +3,7 @@
 //! This module provides browser extension integration capabilities for Chrome,
 //! Firefox, Safari, and other browsers. It supports real-time pronunciation help,
 //! web page content coaching, video call enhancement, and online learning platform
-//! integration for the VoiRS feedback system.
+//! integration for the `VoiRS` feedback system.
 
 use crate::realtime::types::RealtimeConfig;
 use crate::traits::{FeedbackSession, UserProgress};
@@ -46,28 +46,28 @@ impl fmt::Display for BrowserExtensionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             BrowserExtensionError::ExtensionNotInstalled(browser) => {
-                write!(f, "Extension not installed in {}", browser)
+                write!(f, "Extension not installed in {browser}")
             }
             BrowserExtensionError::BrowserNotSupported(browser) => {
-                write!(f, "Browser not supported: {}", browser)
+                write!(f, "Browser not supported: {browser}")
             }
             BrowserExtensionError::PermissionDenied(permission) => {
-                write!(f, "Permission denied: {}", permission)
+                write!(f, "Permission denied: {permission}")
             }
             BrowserExtensionError::CommunicationError(msg) => {
-                write!(f, "Communication error: {}", msg)
+                write!(f, "Communication error: {msg}")
             }
             BrowserExtensionError::ScriptInjectionFailed(msg) => {
-                write!(f, "Script injection failed: {}", msg)
+                write!(f, "Script injection failed: {msg}")
             }
             BrowserExtensionError::ContentSecurityPolicyError(msg) => {
-                write!(f, "Content Security Policy error: {}", msg)
+                write!(f, "Content Security Policy error: {msg}")
             }
-            BrowserExtensionError::ManifestError(msg) => write!(f, "Manifest error: {}", msg),
-            BrowserExtensionError::StorageError(msg) => write!(f, "Storage error: {}", msg),
-            BrowserExtensionError::NetworkError(msg) => write!(f, "Network error: {}", msg),
+            BrowserExtensionError::ManifestError(msg) => write!(f, "Manifest error: {msg}"),
+            BrowserExtensionError::StorageError(msg) => write!(f, "Storage error: {msg}"),
+            BrowserExtensionError::NetworkError(msg) => write!(f, "Network error: {msg}"),
             BrowserExtensionError::ConfigurationError(msg) => {
-                write!(f, "Configuration error: {}", msg)
+                write!(f, "Configuration error: {msg}")
             }
             BrowserExtensionError::ApiLimitExceeded => write!(f, "API limit exceeded"),
             BrowserExtensionError::UnauthorizedAccess => write!(f, "Unauthorized access"),
@@ -105,7 +105,7 @@ impl fmt::Display for BrowserType {
             BrowserType::Edge => write!(f, "Microsoft Edge"),
             BrowserType::Opera => write!(f, "Opera"),
             BrowserType::Brave => write!(f, "Brave"),
-            BrowserType::Custom(name) => write!(f, "Custom: {}", name),
+            BrowserType::Custom(name) => write!(f, "Custom: {name}"),
         }
     }
 }
@@ -556,6 +556,7 @@ struct ExtensionSession {
 
 impl BrowserExtensionManager {
     /// Create a new browser extension manager
+    #[must_use]
     pub fn new(config: ExtensionConfig, realtime_config: RealtimeConfig) -> Self {
         Self {
             config,
@@ -582,11 +583,11 @@ impl BrowserExtensionManager {
     }
 
     /// Check if extension is installed and active
+    #[must_use]
     pub fn is_extension_active(&self, browser: &BrowserType) -> bool {
         self.installed_extensions
             .get(browser)
-            .map(|info| info.enabled)
-            .unwrap_or(false)
+            .is_some_and(|info| info.enabled)
     }
 
     /// Analyze web page content for learning opportunities
@@ -614,7 +615,7 @@ impl BrowserExtensionManager {
         })
     }
 
-    /// Inject VoiRS functionality into a web page
+    /// Inject `VoiRS` functionality into a web page
     pub async fn inject_into_page(
         &mut self,
         tab_id: &str,
@@ -676,8 +677,7 @@ impl BrowserExtensionManager {
             Ok(hints)
         } else {
             Err(BrowserExtensionError::CommunicationError(format!(
-                "Session not found: {}",
-                session_id
+                "Session not found: {session_id}"
             )))
         }
     }
@@ -690,13 +690,13 @@ impl BrowserExtensionManager {
             Ok(())
         } else {
             Err(BrowserExtensionError::CommunicationError(format!(
-                "Session not found: {}",
-                session_id
+                "Session not found: {session_id}"
             )))
         }
     }
 
     /// Get extension statistics
+    #[must_use]
     pub fn get_extension_stats(&self) -> ExtensionStats {
         let total_sessions = self.active_sessions.len();
         let total_feedback = self
@@ -851,9 +851,9 @@ impl BrowserExtensionManager {
                         element_type: "text".to_string(),
                     },
                     phonetic_transcription: self.get_phonetic_transcription(&clean_word),
-                    definition: Some(format!("Definition of {}", clean_word)),
+                    definition: Some(format!("Definition of {clean_word}")),
                     usage_examples: vec![format!("Example usage of {}", clean_word)],
-                    audio_url: Some(format!("https://api.voirs.com/audio/{}", clean_word)),
+                    audio_url: Some(format!("https://api.voirs.com/audio/{clean_word}")),
                 });
             }
         }
@@ -928,7 +928,7 @@ impl BrowserExtensionManager {
                 hints.push(PronunciationHint {
                     text: clean_word.clone(),
                     phonetic: self.get_phonetic_transcription(&clean_word),
-                    audio_url: Some(format!("https://api.voirs.com/audio/{}", clean_word)),
+                    audio_url: Some(format!("https://api.voirs.com/audio/{clean_word}")),
                     position: TextPosition {
                         start_offset: i * 5,
                         end_offset: i * 5 + word.len(),

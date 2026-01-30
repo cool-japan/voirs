@@ -4,7 +4,6 @@
 //! speech synthesis quality evaluation with streaming audio processing.
 
 use std::collections::HashMap;
-use tokio;
 use voirs_evaluation::websocket::{
     AudioFormat, ProcessingOptions, QualityThresholds, SessionConfig, WebSocketConfig,
     WebSocketMessage, WebSocketSessionManager,
@@ -300,7 +299,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Helper function to demonstrate client-side WebSocket connection
-#[cfg(feature = "client_demo")]
+#[allow(dead_code)]
 async fn demonstrate_websocket_client() -> Result<(), Box<dyn std::error::Error>> {
     use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
@@ -319,15 +318,12 @@ async fn demonstrate_websocket_client() -> Result<(), Box<dyn std::error::Error>
     };
 
     let auth_json = serde_json::to_string(&auth_msg)?;
-    write.send(Message::Text(auth_json)).await?;
+    write.send(Message::Text(auth_json.into())).await?;
 
     // Wait for authentication response
     if let Some(msg) = read.next().await {
-        match msg? {
-            Message::Text(text) => {
-                println!("📨 Server response: {}", text);
-            }
-            _ => {}
+        if let Message::Text(text) = msg? {
+            println!("📨 Server response: {}", text);
         }
     }
 
@@ -338,7 +334,7 @@ async fn demonstrate_websocket_client() -> Result<(), Box<dyn std::error::Error>
     };
 
     let start_json = serde_json::to_string(&start_msg)?;
-    write.send(Message::Text(start_json)).await?;
+    write.send(Message::Text(start_json.into())).await?;
 
     // Generate and send test audio chunk
     let test_audio = vec![0.1, 0.2, 0.3, 0.4, 0.5]; // Simple test data
@@ -362,15 +358,12 @@ async fn demonstrate_websocket_client() -> Result<(), Box<dyn std::error::Error>
     };
 
     let chunk_json = serde_json::to_string(&chunk_msg)?;
-    write.send(Message::Text(chunk_json)).await?;
+    write.send(Message::Text(chunk_json.into())).await?;
 
     // Wait for evaluation result
     if let Some(msg) = read.next().await {
-        match msg? {
-            Message::Text(text) => {
-                println!("📊 Evaluation result: {}", text);
-            }
-            _ => {}
+        if let Message::Text(text) = msg? {
+            println!("📊 Evaluation result: {}", text);
         }
     }
 

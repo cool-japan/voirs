@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
 /// Voice cloning methods
@@ -37,18 +38,10 @@ impl CloningMethod {
         }
     }
 
-    /// Parse from string
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "few_shot" | "few-shot" => Some(CloningMethod::FewShot),
-            "zero_shot" | "zero-shot" => Some(CloningMethod::ZeroShot),
-            "one_shot" | "one-shot" => Some(CloningMethod::OneShot),
-            "fine_tuning" | "fine-tuning" => Some(CloningMethod::FineTuning),
-            "voice_conversion" | "voice-conversion" => Some(CloningMethod::VoiceConversion),
-            "hybrid" => Some(CloningMethod::Hybrid),
-            "cross_lingual" | "cross-lingual" => Some(CloningMethod::CrossLingual),
-            _ => None,
-        }
+    /// Parse from string (deprecated, use FromStr trait instead)
+    #[deprecated(since = "0.1.0", note = "Use std::str::FromStr::from_str instead")]
+    pub fn parse_from_str(s: &str) -> Option<Self> {
+        s.parse().ok()
     }
 
     /// Get recommended minimum samples for this method
@@ -81,6 +74,23 @@ impl CloningMethod {
 impl Default for CloningMethod {
     fn default() -> Self {
         CloningMethod::FewShot
+    }
+}
+
+impl FromStr for CloningMethod {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "few_shot" | "few-shot" => Ok(CloningMethod::FewShot),
+            "zero_shot" | "zero-shot" => Ok(CloningMethod::ZeroShot),
+            "one_shot" | "one-shot" => Ok(CloningMethod::OneShot),
+            "fine_tuning" | "fine-tuning" => Ok(CloningMethod::FineTuning),
+            "voice_conversion" | "voice-conversion" => Ok(CloningMethod::VoiceConversion),
+            "hybrid" => Ok(CloningMethod::Hybrid),
+            "cross_lingual" | "cross-lingual" => Ok(CloningMethod::CrossLingual),
+            _ => Err(format!("Unknown cloning method: {}", s)),
+        }
     }
 }
 
@@ -865,7 +875,7 @@ mod tests {
 
         assert_eq!(
             CloningMethod::from_str("few-shot"),
-            Some(CloningMethod::FewShot)
+            Ok(CloningMethod::FewShot)
         );
         assert_eq!(CloningMethod::FewShot.as_str(), "few_shot");
     }

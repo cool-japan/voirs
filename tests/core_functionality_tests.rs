@@ -17,8 +17,8 @@ use voirs_g2p::{
     DummyG2p, G2p, LanguageCode,
 };
 use voirs_vocoder::{
-    AudioBuffer, DummyVocoder, MelSpectrogram as VocoderMel,
-    SynthesisConfig as VocoderConfig, Vocoder,
+    AudioBuffer, DummyVocoder, MelSpectrogram as VocoderMel, SynthesisConfig as VocoderConfig,
+    Vocoder,
 };
 
 /// Comprehensive core functionality test suite
@@ -456,6 +456,12 @@ pub struct CoreTestResults {
     pub pipeline_results: PipelineTestResults,
 }
 
+impl Default for CoreTestResults {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CoreTestResults {
     pub fn new() -> Self {
         Self {
@@ -513,6 +519,12 @@ pub struct G2pTestResults {
     pub rule_better_than_dummy: bool,
 }
 
+impl Default for G2pTestResults {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl G2pTestResults {
     pub fn new() -> Self {
         Self {
@@ -531,6 +543,12 @@ pub struct AcousticTestResults {
     pub mel_dimensions: (usize, usize),
     pub mel_duration: f32,
     pub generation_time: std::time::Duration,
+}
+
+impl Default for AcousticTestResults {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AcousticTestResults {
@@ -556,6 +574,12 @@ pub struct VocoderTestResults {
     pub zero_crossings: usize,
 }
 
+impl Default for VocoderTestResults {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VocoderTestResults {
     pub fn new() -> Self {
         Self {
@@ -575,6 +599,12 @@ impl VocoderTestResults {
 pub struct PipelineTestResults {
     pub pipeline_results: Vec<PipelineResult>,
     pub average_processing_time: std::time::Duration,
+}
+
+impl Default for PipelineTestResults {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PipelineTestResults {

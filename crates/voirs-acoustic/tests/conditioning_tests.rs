@@ -341,7 +341,7 @@ async fn test_emotion_intensity_levels() -> Result<()> {
     for intensity in intensity_levels {
         let emotion_config = EmotionConfig {
             emotion_type: EmotionType::Happy,
-            intensity: intensity.clone(),
+            intensity,
             secondary_emotions: Vec::new(),
             custom_params: HashMap::new(),
         };

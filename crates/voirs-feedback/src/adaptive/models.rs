@@ -3,7 +3,10 @@
 //! This module contains the core data structures used for user modeling,
 //! learning algorithms, and adaptive state management.
 
-use super::types::*;
+use super::types::{
+    AdjustmentDirection, FeedbackTone, InterventionStrategy, MetricType, RecommendationType,
+    StrategyType, TransferStrategy,
+};
 use crate::progress::TrendDirection;
 use crate::traits::{AdaptiveState, FocusArea, PerformanceData, UserInteraction};
 use crate::FeedbackError;
@@ -295,6 +298,7 @@ impl LearningAlgorithm {
 
 impl UserModel {
     /// Create a new user model with default values
+    #[must_use]
     pub fn new(user_id: String) -> Self {
         let mut skill_breakdown = HashMap::new();
         skill_breakdown.insert(FocusArea::Pronunciation, 0.5);

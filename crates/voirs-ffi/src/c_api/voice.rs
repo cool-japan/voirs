@@ -138,7 +138,7 @@ pub unsafe extern "C" fn voirs_free_voice_list(voice_list: *mut VoirsVoiceListDe
         for voice in voices {
             free_voice_info(voice);
         }
-        let _ = Box::from_raw(std::slice::from_raw_parts_mut(
+        let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(
             list.voices,
             list.count as usize,
         ));

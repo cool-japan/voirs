@@ -24,19 +24,19 @@ pub struct WhisperTokenizer {
 /// Special Tokens
 pub struct SpecialTokens {
     /// sot
-    pub sot: u32,             // Start of transcript
+    pub sot: u32, // Start of transcript
     /// eot
-    pub eot: u32,             // End of transcript
+    pub eot: u32, // End of transcript
     /// sot prev
-    pub sot_prev: u32,        // Start of previous segment
+    pub sot_prev: u32, // Start of previous segment
     /// no speech
-    pub no_speech: u32,       // No speech
+    pub no_speech: u32, // No speech
     /// no timestamps
-    pub no_timestamps: u32,   // No timestamps
+    pub no_timestamps: u32, // No timestamps
     /// timestamp begin
     pub timestamp_begin: u32, // Beginning of timestamp tokens
     /// language begin
-    pub language_begin: u32,  // Beginning of language tokens
+    pub language_begin: u32, // Beginning of language tokens
 }
 
 /// Byte-pair encoding implementation

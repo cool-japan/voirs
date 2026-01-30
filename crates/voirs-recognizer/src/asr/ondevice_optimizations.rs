@@ -162,7 +162,7 @@ pub enum NpuVendor {
     Apple,
     /// Qualcomm NPU
     Qualcomm,
-    /// MediaTek NPU
+    /// `MediaTek` NPU
     MediaTek,
     /// Samsung NPU
     Samsung,
@@ -610,6 +610,7 @@ pub struct ResourceUsage {
 
 impl OnDeviceOptimizer {
     /// Create new on-device optimizer
+    #[must_use]
     pub fn new(config: OnDeviceConfig) -> Self {
         let metrics = Arc::new(Mutex::new(PerformanceMetrics::default()));
         let mut model_variants = HashMap::new();
@@ -683,9 +684,9 @@ impl OnDeviceOptimizer {
             postprocessing: PostprocessingOptimizer::new(&config),
         };
 
-        let resource_monitor = ResourceMonitor::new(Duration::from_millis(
-            config.adaptive_inference.monitoring_interval_ms as u64,
-        ));
+        let resource_monitor = ResourceMonitor::new(Duration::from_millis(u64::from(
+            config.adaptive_inference.monitoring_interval_ms,
+        )));
 
         Self {
             config,
@@ -810,7 +811,8 @@ impl OnDeviceOptimizer {
         self.update_metrics(processing_time);
 
         // Check if deadline was met
-        if processing_time.as_millis() > self.config.realtime_constraints.max_latency_ms as u128 {
+        if processing_time.as_millis() > u128::from(self.config.realtime_constraints.max_latency_ms)
+        {
             self.handle_deadline_miss();
         }
 
@@ -875,7 +877,7 @@ impl OnDeviceOptimizer {
                 .device_profile
                 .battery_info
                 .as_ref()
-                .map_or(false, |b| b.level < thresholds.battery_threshold * 100.0)
+                .is_some_and(|b| b.level < thresholds.battery_threshold * 100.0)
     }
 
     /// Adapt quality based on current conditions
@@ -972,11 +974,13 @@ impl OnDeviceOptimizer {
     }
 
     /// Get current performance metrics
+    #[must_use]
     pub fn get_metrics(&self) -> PerformanceMetrics {
         self.metrics.lock().unwrap().clone()
     }
 
     /// Get current model quality level
+    #[must_use]
     pub fn get_current_quality(&self) -> QualityLevel {
         self.current_model.clone()
     }
@@ -1065,7 +1069,7 @@ impl ProcessingPipeline {
 impl FeatureExtractionOptimizer {
     fn new(config: &OnDeviceConfig) -> Self {
         Self {
-            simd_fft: config.device_profile.cpu_info.simd_support.len() > 0,
+            simd_fft: !config.device_profile.cpu_info.simd_support.is_empty(),
             gpu_mel_spectrogram: config.device_profile.gpu_info.is_some(),
             cached_filterbanks: HashMap::new(),
             feature_compression: config.compression.quantization.dynamic,
@@ -1154,7 +1158,7 @@ impl PostprocessingOptimizer {
         _config: &OnDeviceConfig,
     ) -> Result<String, OnDeviceError> {
         // Simple greedy decoding for demonstration
-        let vocab = vec![
+        let vocab = [
             "hello",
             "world",
             "this",

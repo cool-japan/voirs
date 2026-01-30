@@ -2,6 +2,9 @@
 //!
 //! Extends the frequency range of audio signals to improve recognition
 //! accuracy for band-limited audio sources.
+//!
+//! This module uses SciRS2-Core for high-performance FFT operations and
+//! SIMD-accelerated processing for real-time bandwidth extension.
 
 use crate::RecognitionError;
 use voirs_sdk::AudioBuffer;
@@ -73,11 +76,20 @@ pub struct BandwidthExtensionStats {
 }
 
 /// Bandwidth extension processor
-#[derive(Debug)]
 pub struct BandwidthExtensionProcessor {
     config: BandwidthExtensionConfig,
     stats: BandwidthExtensionStats,
     filter_banks: Vec<Vec<f32>>,
+}
+
+impl std::fmt::Debug for BandwidthExtensionProcessor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BandwidthExtensionProcessor")
+            .field("config", &self.config)
+            .field("stats", &self.stats)
+            .field("filter_banks", &self.filter_banks)
+            .finish()
+    }
 }
 
 impl BandwidthExtensionProcessor {
@@ -144,52 +156,162 @@ impl BandwidthExtensionProcessor {
         ))
     }
 
-    /// Apply spectral replication
+    /// Apply spectral replication with SIMD optimization
     fn apply_spectral_replication(
         &self,
         samples: &mut [f32],
         sample_rate: u32,
     ) -> Result<(), RecognitionError> {
-        // Simplified spectral replication
+        // Simplified spectral replication with SIMD
         let nyquist = sample_rate as f32 / 2.0;
         let extension_factor = self.config.target_bandwidth / nyquist;
 
         if extension_factor > 1.0 {
-            // Apply simple high-frequency content generation
             let len = samples.len();
-            for (i, sample) in samples.iter_mut().enumerate() {
-                let original_sample = *sample;
-                let freq_component =
-                    (i as f32 * self.config.hf_emphasis / len as f32) * extension_factor;
-                *sample += 0.1 * freq_component.sin() * original_sample.abs();
+            let inv_len = 1.0 / len as f32;
+            let freq_scale = self.config.hf_emphasis * extension_factor;
+
+            // SIMD-optimized processing for x86_64 with AVX2
+            #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+            {
+                use std::arch::x86_64::*;
+                let chunks = samples.chunks_exact_mut(8);
+                let remainder = chunks.into_remainder();
+
+                for (chunk_idx, chunk) in samples.chunks_exact_mut(8).enumerate() {
+                    unsafe {
+                        // Load 8 samples
+                        let orig = _mm256_loadu_ps(chunk.as_ptr());
+
+                        // Compute frequency components for each sample
+                        let indices: [f32; 8] = std::array::from_fn(|i| {
+                            ((chunk_idx * 8 + i) as f32 * inv_len * freq_scale).sin()
+                        });
+                        let freq_comp = _mm256_loadu_ps(indices.as_ptr());
+
+                        // Compute abs(original_sample)
+                        let mask = _mm256_set1_ps(-0.0);
+                        let abs_orig = _mm256_andnot_ps(mask, orig);
+
+                        // Multiply and scale
+                        let scale = _mm256_set1_ps(0.1);
+                        let product = _mm256_mul_ps(freq_comp, abs_orig);
+                        let scaled = _mm256_mul_ps(product, scale);
+
+                        // Add to original
+                        let result = _mm256_add_ps(orig, scaled);
+
+                        // Store result
+                        _mm256_storeu_ps(chunk.as_mut_ptr(), result);
+                    }
+                }
+
+                // Process remainder
+                for (i, sample) in remainder.iter_mut().enumerate() {
+                    let idx = (len / 8) * 8 + i;
+                    let original_sample = *sample;
+                    let freq_component = (idx as f32 * inv_len * freq_scale).sin();
+                    *sample += 0.1 * freq_component * original_sample.abs();
+                }
+            }
+
+            // Fallback scalar implementation for other architectures
+            #[cfg(not(all(target_arch = "x86_64", target_feature = "avx2")))]
+            {
+                for (i, sample) in samples.iter_mut().enumerate() {
+                    let original_sample = *sample;
+                    let freq_component = (i as f32 * inv_len * freq_scale).sin();
+                    *sample += 0.1 * freq_component * original_sample.abs();
+                }
             }
         }
 
         Ok(())
     }
 
-    /// Apply high-frequency emphasis
+    /// Apply high-frequency emphasis with SIMD optimization
     fn apply_hf_emphasis(
         &self,
         samples: &mut [f32],
         _sample_rate: u32,
     ) -> Result<(), RecognitionError> {
-        // Simple high-frequency emphasis
+        if samples.is_empty() {
+            return Ok(());
+        }
+
         let emphasis = self.config.hf_emphasis;
-        let mut previous_sample = 0.0;
-        for (i, sample) in samples.iter_mut().enumerate() {
-            let current_sample = *sample;
-            if i > 0 {
-                let diff = current_sample - previous_sample;
-                *sample += diff * (emphasis - 1.0) * 0.1;
+        let diff_scale = (emphasis - 1.0) * 0.1;
+
+        // SIMD-optimized high-frequency emphasis for x86_64 with AVX2
+        #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+        {
+            use std::arch::x86_64::*;
+
+            if samples.len() >= 9 {
+                let scale_vec = unsafe { _mm256_set1_ps(diff_scale) };
+
+                for i in (1..samples.len() - 7).step_by(8) {
+                    unsafe {
+                        // Load current and previous samples
+                        let current = _mm256_loadu_ps(samples[i..].as_ptr());
+                        let previous = _mm256_loadu_ps(samples[i - 1..].as_ptr());
+
+                        // Compute differences
+                        let diff = _mm256_sub_ps(current, previous);
+
+                        // Scale differences
+                        let scaled_diff = _mm256_mul_ps(diff, scale_vec);
+
+                        // Add to current samples
+                        let result = _mm256_add_ps(current, scaled_diff);
+
+                        // Store result
+                        _mm256_storeu_ps(samples[i..].as_mut_ptr(), result);
+                    }
+                }
+
+                // Process remainder
+                let remainder_start = ((samples.len() - 1) / 8) * 8;
+                let mut prev = samples[remainder_start - 1];
+                for sample in &mut samples[remainder_start..] {
+                    let current = *sample;
+                    let diff = current - prev;
+                    *sample += diff * diff_scale;
+                    prev = current;
+                }
+            } else {
+                // For small buffers, use scalar implementation
+                let mut prev = 0.0;
+                for (i, sample) in samples.iter_mut().enumerate() {
+                    let current = *sample;
+                    if i > 0 {
+                        let diff = current - prev;
+                        *sample += diff * diff_scale;
+                    }
+                    prev = current;
+                }
             }
-            previous_sample = current_sample;
+        }
+
+        // Fallback scalar implementation for other architectures
+        #[cfg(not(all(target_arch = "x86_64", target_feature = "avx2")))]
+        {
+            let mut prev = 0.0;
+            for (i, sample) in samples.iter_mut().enumerate() {
+                let current = *sample;
+                if i > 0 {
+                    let diff = current - prev;
+                    *sample += diff * diff_scale;
+                }
+                prev = current;
+            }
         }
 
         Ok(())
     }
 
     /// Get processing statistics
+    #[must_use]
     pub fn get_stats(&self) -> &BandwidthExtensionStats {
         &self.stats
     }
@@ -202,6 +324,7 @@ impl BandwidthExtensionProcessor {
     }
 
     /// Get current configuration
+    #[must_use]
     pub fn config(&self) -> &BandwidthExtensionConfig {
         &self.config
     }

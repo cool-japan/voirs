@@ -863,7 +863,8 @@ mod tests {
                 (2.0 * PI * 200.0 * t).sin() * 0.5
             } else {
                 // Unvoiced: pseudo-random noise-like signal
-                let pseudo_random = ((i * 1103515245 + 12345) % 2147483648) as f32 / 2147483648.0;
+                let pseudo_random =
+                    ((i * 1_103_515_245 + 12345) % 2_147_483_648) as f32 / 2_147_483_648.0;
                 (pseudo_random - 0.5) * 0.2
             };
             samples.push(sample);

@@ -2,7 +2,7 @@
 
 use crate::{error::CliError, output::OutputFormatter};
 use clap::{Args, Subcommand};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 #[cfg(feature = "spatial")]
 use voirs_spatial::{
     position::{AttenuationModel, AttenuationParams, DirectivityPattern, SourceType},
@@ -205,7 +205,7 @@ async fn execute_synth_command(
     }
 
     // Create sound source
-    let source = SoundSource::new_point("main_source".to_string(), args.position.clone());
+    let source = SoundSource::new_point("main_source".to_string(), args.position);
 
     // Mock 3D audio synthesis result
     let binaural_audio = BinauraAudio::new(
@@ -656,7 +656,7 @@ fn save_stereo_audio(audio: &[f32], path: &PathBuf, sample_rate: u32) -> Result<
 
     // Convert to interleaved stereo
     for chunk in audio.chunks(2) {
-        let left = chunk.get(0).unwrap_or(&0.0);
+        let left = chunk.first().unwrap_or(&0.0);
         let right = chunk.get(1).unwrap_or(&0.0);
 
         let left_i16 = (left * 32767.0) as i16;
@@ -683,7 +683,7 @@ struct MovementPoint {
     time: f32,
 }
 
-fn load_movement_path(path: &PathBuf) -> Result<Vec<MovementPoint>, CliError> {
+fn load_movement_path(path: &Path) -> Result<Vec<MovementPoint>, CliError> {
     // Mock implementation - in reality would load JSON movement path
     Ok(vec![
         MovementPoint {

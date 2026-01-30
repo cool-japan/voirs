@@ -235,7 +235,7 @@ pub async fn execute_train_command(command: TrainCommands, global: &GlobalOption
                 save_frequency,
             };
 
-            vocoder::run_train_vocoder(
+            let args = vocoder::VocoderTrainingArgs {
                 model_type,
                 data,
                 output,
@@ -244,11 +244,11 @@ pub async fn execute_train_command(command: TrainCommands, global: &GlobalOption
                 batch_size,
                 lr,
                 resume,
-                gpu || global.gpu,
+                use_gpu: gpu || global.gpu,
                 training_config,
-                global,
-            )
-            .await
+            };
+
+            vocoder::run_train_vocoder(args, global).await
         }
         TrainCommands::Acoustic {
             model_type,
@@ -261,19 +261,18 @@ pub async fn execute_train_command(command: TrainCommands, global: &GlobalOption
             resume,
             gpu,
         } => {
-            acoustic::run_train_acoustic(
-                model_type,
-                data,
-                output,
-                config,
+            let args = acoustic::AcousticModelTrainingArgs {
+                model_type: model_type.clone(),
+                data: data.clone(),
+                output: output.clone(),
+                config: config.clone(),
                 epochs,
                 batch_size,
                 lr,
-                resume,
-                gpu || global.gpu,
-                global,
-            )
-            .await
+                resume: resume.clone(),
+                use_gpu: gpu || global.gpu,
+            };
+            acoustic::run_train_acoustic(args, global).await
         }
         TrainCommands::G2p {
             language,

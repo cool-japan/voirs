@@ -1,0 +1,308 @@
+//! Core voice conversion benchmarks
+//!
+//! Benchmarks for fundamental voice conversion operations including:
+//! - Speaker-to-speaker conversion
+//! - Age transformation
+//! - Gender conversion
+//! - Pitch and speed modification
+
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use std::time::Duration;
+use voirs_conversion::{
+    ConversionConfig, ConversionRequest, ConversionTarget, ConversionType, VoiceCharacteristics,
+    VoiceConverter, VoiceConverterBuilder,
+};
+
+/// Generate sample audio for benchmarking
+fn generate_audio(f0: f32, duration_samples: usize) -> Vec<f32> {
+    use std::f32::consts::PI;
+    (0..duration_samples)
+        .map(|i| {
+            let t = i as f32 / 16000.0;
+            let fundamental = (2.0 * PI * f0 * t).sin() * 0.5;
+            let harmonic2 = (2.0 * PI * f0 * 2.0 * t).sin() * 0.25;
+            let harmonic3 = (2.0 * PI * f0 * 3.0 * t).sin() * 0.15;
+            fundamental + harmonic2 + harmonic3
+        })
+        .collect()
+}
+
+/// Benchmark speaker-to-speaker conversion
+fn bench_speaker_conversion(c: &mut Criterion) {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+
+    let mut group = c.benchmark_group("speaker_conversion");
+
+    // Test different audio durations
+    for duration_ms in [100, 500, 1000, 2000].iter() {
+        let sample_count = (16000 * duration_ms) / 1000;
+        group.throughput(Throughput::Elements(sample_count as u64));
+
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("{}ms", duration_ms)),
+            duration_ms,
+            |b, &duration_ms| {
+                let sample_count = (16000 * duration_ms) / 1000;
+                let audio = generate_audio(180.0, sample_count);
+
+                let converter = VoiceConverterBuilder::new().build().unwrap();
+
+                let target = ConversionTarget::VoiceCharacteristics(VoiceCharacteristics {
+                    gender: Some("female".to_string()),
+                    age: Some(30.0),
+                    pitch_mean: 220.0,
+                    pitch_std: 30.0,
+                    energy_mean: 0.75,
+                    speaking_rate: 1.0,
+                });
+
+                let config = ConversionConfig {
+                    conversion_type: ConversionType::SpeakerConversion,
+                    quality_level: 0.85,
+                    preserve_prosody: true,
+                    preserve_emotion: true,
+                    ..Default::default()
+                };
+
+                b.iter(|| {
+                    let request = ConversionRequest {
+                        source_audio: audio.clone(),
+                        target: target.clone(),
+                        config: config.clone(),
+                        request_id: Some(format!("bench_{}", duration_ms)),
+                    };
+
+                    runtime.block_on(async {
+                        black_box(converter.convert(request).await.unwrap());
+                    });
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Benchmark age transformation
+fn bench_age_transformation(c: &mut Criterion) {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut group = c.benchmark_group("age_transformation");
+
+    let audio = generate_audio(180.0, 16000); // 1 second
+    group.throughput(Throughput::Elements(audio.len() as u64));
+
+    // Test different target ages
+    for age in [20.0, 40.0, 60.0, 80.0].iter() {
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("age_{}", age as i32)),
+            age,
+            |b, &age| {
+                let converter = VoiceConverterBuilder::new().build().unwrap();
+
+                let target = ConversionTarget::VoiceCharacteristics(VoiceCharacteristics {
+                    gender: None,
+                    age: Some(age),
+                    pitch_mean: 180.0,
+                    pitch_std: 25.0,
+                    energy_mean: 0.7,
+                    speaking_rate: 1.0,
+                });
+
+                let config = ConversionConfig {
+                    conversion_type: ConversionType::AgeTransformation,
+                    quality_level: 0.8,
+                    preserve_prosody: true,
+                    preserve_emotion: true,
+                    ..Default::default()
+                };
+
+                b.iter(|| {
+                    let request = ConversionRequest {
+                        source_audio: audio.clone(),
+                        target: target.clone(),
+                        config: config.clone(),
+                        request_id: Some(format!("age_bench_{}", age as i32)),
+                    };
+
+                    runtime.block_on(async {
+                        black_box(converter.convert(request).await.unwrap());
+                    });
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Benchmark gender conversion
+fn bench_gender_conversion(c: &mut Criterion) {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut group = c.benchmark_group("gender_conversion");
+
+    let audio = generate_audio(180.0, 16000);
+    group.throughput(Throughput::Elements(audio.len() as u64));
+
+    for gender in ["male", "female"].iter() {
+        group.bench_with_input(
+            BenchmarkId::from_parameter(*gender),
+            gender,
+            |b, &gender| {
+                let converter = VoiceConverterBuilder::new().build().unwrap();
+
+                let pitch_mean = if gender == "male" { 120.0 } else { 220.0 };
+
+                let target = ConversionTarget::VoiceCharacteristics(VoiceCharacteristics {
+                    gender: Some(gender.to_string()),
+                    age: Some(30.0),
+                    pitch_mean,
+                    pitch_std: 30.0,
+                    energy_mean: 0.75,
+                    speaking_rate: 1.0,
+                });
+
+                let config = ConversionConfig {
+                    conversion_type: ConversionType::GenderConversion,
+                    quality_level: 0.85,
+                    preserve_prosody: true,
+                    preserve_emotion: true,
+                    ..Default::default()
+                };
+
+                b.iter(|| {
+                    let request = ConversionRequest {
+                        source_audio: audio.clone(),
+                        target: target.clone(),
+                        config: config.clone(),
+                        request_id: Some(format!("gender_bench_{}", gender)),
+                    };
+
+                    runtime.block_on(async {
+                        black_box(converter.convert(request).await.unwrap());
+                    });
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Benchmark pitch modification
+fn bench_pitch_modification(c: &mut Criterion) {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut group = c.benchmark_group("pitch_modification");
+
+    let audio = generate_audio(180.0, 16000);
+    group.throughput(Throughput::Elements(audio.len() as u64));
+
+    // Test different pitch shift factors
+    for factor in [0.5, 0.75, 1.0, 1.25, 1.5, 2.0].iter() {
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("{:.2}x", factor)),
+            factor,
+            |b, &factor| {
+                let converter = VoiceConverterBuilder::new().build().unwrap();
+
+                let config = ConversionConfig {
+                    conversion_type: ConversionType::PitchShift { factor },
+                    quality_level: 0.85,
+                    preserve_prosody: true,
+                    preserve_emotion: true,
+                    ..Default::default()
+                };
+
+                let target = ConversionTarget::VoiceCharacteristics(VoiceCharacteristics {
+                    gender: None,
+                    age: None,
+                    pitch_mean: 180.0 * factor,
+                    pitch_std: 25.0,
+                    energy_mean: 0.75,
+                    speaking_rate: 1.0,
+                });
+
+                b.iter(|| {
+                    let request = ConversionRequest {
+                        source_audio: audio.clone(),
+                        target: target.clone(),
+                        config: config.clone(),
+                        request_id: Some(format!("pitch_bench_{:.2}", factor)),
+                    };
+
+                    runtime.block_on(async {
+                        black_box(converter.convert(request).await.unwrap());
+                    });
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Benchmark quality levels
+fn bench_quality_levels(c: &mut Criterion) {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut group = c.benchmark_group("quality_levels");
+
+    let audio = generate_audio(180.0, 16000);
+    group.throughput(Throughput::Elements(audio.len() as u64));
+
+    for quality in [0.5, 0.7, 0.85, 0.95].iter() {
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("q{:.0}", quality * 100.0)),
+            quality,
+            |b, &quality| {
+                let converter = VoiceConverterBuilder::new().build().unwrap();
+
+                let target = ConversionTarget::VoiceCharacteristics(VoiceCharacteristics {
+                    gender: Some("female".to_string()),
+                    age: Some(30.0),
+                    pitch_mean: 220.0,
+                    pitch_std: 30.0,
+                    energy_mean: 0.75,
+                    speaking_rate: 1.0,
+                });
+
+                let config = ConversionConfig {
+                    conversion_type: ConversionType::SpeakerConversion,
+                    quality_level: quality,
+                    preserve_prosody: true,
+                    preserve_emotion: true,
+                    ..Default::default()
+                };
+
+                b.iter(|| {
+                    let request = ConversionRequest {
+                        source_audio: audio.clone(),
+                        target: target.clone(),
+                        config: config.clone(),
+                        request_id: Some(format!("quality_bench_{:.2}", quality)),
+                    };
+
+                    runtime.block_on(async {
+                        black_box(converter.convert(request).await.unwrap());
+                    });
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+criterion_group! {
+    name = benches;
+    config = Criterion::default()
+        .sample_size(20)
+        .measurement_time(Duration::from_secs(10))
+        .warm_up_time(Duration::from_secs(3));
+    targets =
+        bench_speaker_conversion,
+        bench_age_transformation,
+        bench_gender_conversion,
+        bench_pitch_modification,
+        bench_quality_levels
+}
+
+criterion_main!(benches);

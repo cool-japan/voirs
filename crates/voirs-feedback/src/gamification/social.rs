@@ -30,6 +30,7 @@ pub struct SocialSystem {
 
 impl SocialSystem {
     /// Create a new social system
+    #[must_use]
     pub fn new() -> Self {
         Self {
             peer_groups: HashMap::new(),
@@ -79,6 +80,7 @@ impl SocialSystem {
     }
 
     /// Get peer comparison for user
+    #[must_use]
     pub fn get_peer_comparison(
         &self,
         user_id: Uuid,
@@ -147,6 +149,7 @@ impl SocialSystem {
     }
 
     /// Find mentorship matches
+    #[must_use]
     pub fn find_mentorship_matches(
         &self,
         mentee_id: Uuid,
@@ -207,7 +210,7 @@ impl SocialSystem {
 
         self.mentorships
             .entry(mentor_id)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(mentorship);
 
         mentorship_id
@@ -236,6 +239,7 @@ impl SocialSystem {
     }
 
     /// Get social learning recommendations
+    #[must_use]
     pub fn get_social_learning_recommendations(
         &self,
         user_id: Uuid,

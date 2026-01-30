@@ -134,7 +134,7 @@ pub struct ConfigManager {
 impl ConfigManager {
     /// Create a new configuration manager
     pub fn new() -> Result<Self> {
-        let config_path = Self::find_config_file().unwrap_or_else(|| Self::default_config_path());
+        let config_path = Self::find_config_file().unwrap_or_else(Self::default_config_path);
 
         let config = if config_path.exists() {
             Self::load_from_file(&config_path)?
@@ -392,7 +392,12 @@ impl ConfigManager {
             if let Ok(xdg_data_home) = std::env::var("XDG_DATA_HOME") {
                 dirs.push(PathBuf::from(xdg_data_home).join("voirs").join("voices"));
             } else if let Some(home) = dirs::home_dir() {
-                dirs.push(home.join(".local").join("share").join("voirs").join("voices"));
+                dirs.push(
+                    home.join(".local")
+                        .join("share")
+                        .join("voirs")
+                        .join("voices"),
+                );
             }
         }
 
@@ -400,7 +405,12 @@ impl ConfigManager {
         #[cfg(target_os = "macos")]
         {
             if let Some(home) = dirs::home_dir() {
-                dirs.push(home.join("Library").join("Application Support").join("voirs").join("voices"));
+                dirs.push(
+                    home.join("Library")
+                        .join("Application Support")
+                        .join("voirs")
+                        .join("voices"),
+                );
             }
         }
 
@@ -448,13 +458,10 @@ impl ConfigManager {
             env::var("VOIRS_CONFIG").ok().map(PathBuf::from),
         ];
 
-        for path in possible_paths.into_iter().flatten() {
-            if path.exists() {
-                return Some(path);
-            }
-        }
-
-        None
+        possible_paths
+            .into_iter()
+            .flatten()
+            .find(|path| path.exists())
     }
 
     /// Get default configuration path
@@ -470,10 +477,8 @@ impl ConfigManager {
             Some(PathBuf::from(config_dir).join("voirs"))
         } else if let Some(home_dir) = env::var_os("HOME") {
             Some(PathBuf::from(home_dir).join(".config").join("voirs"))
-        } else if let Some(app_data) = env::var_os("APPDATA") {
-            Some(PathBuf::from(app_data).join("voirs"))
         } else {
-            None
+            env::var_os("APPDATA").map(|app_data| PathBuf::from(app_data).join("voirs"))
         }
     }
 }
@@ -777,10 +782,103 @@ pub mod validation {
 
     /// Validate core configuration
     fn validate_core_config(config: &AppConfig, report: &mut ValidationReport) -> Result<()> {
-        // Add core configuration validation here
-        // This is a placeholder for future core config validation
-        if config.pipeline.device == "gpu" {
-            report.add_info("GPU acceleration enabled - ensure CUDA/ROCm is available".to_string());
+        // Validate device configuration
+        match config.pipeline.device.as_str() {
+            "cpu" => {
+                report.add_info("Using CPU device - synthesis will be slower than GPU".to_string());
+            }
+            "gpu" | "cuda" => {
+                report.add_info("GPU acceleration enabled - ensure CUDA is available".to_string());
+                #[cfg(not(feature = "cuda"))]
+                report.add_warning(
+                    "GPU device specified but CUDA feature not enabled in build".to_string(),
+                );
+            }
+            "metal" => {
+                report.add_info("Metal acceleration enabled - macOS only".to_string());
+                #[cfg(not(target_os = "macos"))]
+                report.add_error("Metal device is only available on macOS".to_string());
+                #[cfg(not(feature = "metal"))]
+                report.add_warning(
+                    "Metal device specified but metal feature not enabled in build".to_string(),
+                );
+            }
+            other => {
+                report.add_error(format!(
+                    "Invalid device '{}' - must be 'cpu', 'gpu', 'cuda', or 'metal'",
+                    other
+                ));
+            }
+        }
+
+        // Validate threads configuration
+        if let Some(threads) = config.pipeline.num_threads {
+            if threads == 0 {
+                report.add_error("num_threads must be greater than 0".to_string());
+            } else if threads > num_cpus::get() * 2 {
+                report.add_warning(format!(
+                    "num_threads ({}) exceeds 2x CPU count ({}) - may cause overhead",
+                    threads,
+                    num_cpus::get()
+                ));
+            }
+        }
+
+        // Validate sample rate from default synthesis config
+        let sample_rate = config.pipeline.default_synthesis.sample_rate;
+        match sample_rate {
+            8000 | 16000 | 22050 | 24000 | 32000 | 44100 | 48000 => {
+                // Standard sample rates are ok
+            }
+            rate if rate < 8000 => {
+                report.add_error(format!("sample_rate {} is too low - minimum 8000 Hz", rate));
+            }
+            rate if rate > 48000 => {
+                report.add_warning(format!(
+                    "sample_rate {} is very high - may increase processing time",
+                    rate
+                ));
+            }
+            rate => {
+                report.add_warning(format!(
+                    "non-standard sample_rate {} - common rates: 16000, 22050, 44100, 48000",
+                    rate
+                ));
+            }
+        }
+
+        // Check cache directory if specified
+        if let Some(cache_dir) = &config.pipeline.cache_dir {
+            if !cache_dir.exists() {
+                report.add_warning(format!(
+                    "cache directory does not exist: {}",
+                    cache_dir.display()
+                ));
+            } else if !cache_dir.is_dir() {
+                report.add_error(format!(
+                    "cache path exists but is not a directory: {}",
+                    cache_dir.display()
+                ));
+            }
+        }
+
+        // Validate cache size
+        let max_cache_size_mb = config.pipeline.max_cache_size_mb;
+        if max_cache_size_mb == 0 {
+            report.add_warning("cache disabled (max_cache_size_mb = 0)".to_string());
+        } else if max_cache_size_mb > 10240 {
+            report.add_warning(format!(
+                "very large cache size ({} MB) may consume excessive memory",
+                max_cache_size_mb
+            ));
+        }
+
+        // Validate GPU usage consistency
+        if config.pipeline.use_gpu && config.pipeline.device == "cpu" {
+            report.add_warning(
+                "use_gpu is true but device is set to 'cpu' - inconsistent configuration"
+                    .to_string(),
+            );
         }
 
         Ok(())

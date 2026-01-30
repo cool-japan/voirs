@@ -37,9 +37,7 @@ mod encryption_impl {
                 ));
             }
 
-            let key: &Key<Aes256Gcm> = key
-                .try_into()
-                .map_err(|_| VoirsError::config_error("Invalid encryption key format"))?;
+            let key: &Key<Aes256Gcm> = key.into();
             let cipher = Aes256Gcm::new(key);
 
             Ok(Self { cipher })
@@ -77,7 +75,7 @@ mod encryption_impl {
 
             let decrypted_data = self
                 .cipher
-                .decrypt(&nonce, encrypted_data.data.as_slice())
+                .decrypt(nonce, encrypted_data.data.as_slice())
                 .map_err(|e| VoirsError::cache_error(format!("Decryption failed: {e}")))?;
 
             // Verify data integrity

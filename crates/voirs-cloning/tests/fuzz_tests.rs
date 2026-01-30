@@ -7,7 +7,6 @@
 use proptest::prelude::*;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
-use tokio;
 use voirs_cloning::{
     prelude::*, types::SpeakerCharacteristics, CloningConfig, CloningConfigBuilder, CloningMethod,
     Result, SpeakerData, SpeakerEmbedding, SpeakerProfile, VoiceCloneRequest, VoiceCloner,
@@ -94,7 +93,7 @@ mod voice_sample_fuzzing {
 
                 // Test embedding operations
                 let _ = embedding.similarity(&embedding);
-                let _ = embedding.normalize();
+                embedding.normalize();
             }
         }
 
@@ -121,7 +120,7 @@ mod voice_sample_fuzzing {
             let serialization_result = std::panic::catch_unwind(|| {
                 let serialized = serde_json::to_string(&characteristics);
                 if let Ok(json) = serialized {
-                    let _: Result<SpeakerCharacteristics> = serde_json::from_str(&json).map_err(|e| voirs_cloning::Error::Serialization(e));
+                    let _: Result<SpeakerCharacteristics> = serde_json::from_str(&json).map_err(voirs_cloning::Error::Serialization);
                 }
             });
 
@@ -274,15 +273,13 @@ mod audio_processing_fuzzing {
 
             assert!(resampling_result.is_ok(), "Resampling panicked: {}Hz -> {}Hz", original_rate, target_rate);
 
-            if let Ok(result) = resampling_result {
-                if let Ok(resampled) = result {
-                    assert_eq!(resampled.sample_rate, target_rate);
-                    // Duration should be approximately preserved
-                    let original_duration = sample.duration;
-                    let resampled_duration = resampled.duration;
-                    let duration_diff = (original_duration - resampled_duration).abs();
-                    assert!(duration_diff < 0.1, "Duration changed too much: {} -> {}", original_duration, resampled_duration);
-                }
+            if let Ok(Ok(resampled)) = resampling_result {
+                assert_eq!(resampled.sample_rate, target_rate);
+                // Duration should be approximately preserved
+                let original_duration = sample.duration;
+                let resampled_duration = resampled.duration;
+                let duration_diff = (original_duration - resampled_duration).abs();
+                assert!(duration_diff < 0.1, "Duration changed too much: {} -> {}", original_duration, resampled_duration);
             }
         }
     }
@@ -305,7 +302,7 @@ mod audio_processing_fuzzing {
         // Apply basic high-pass filter to remove DC component
         if processed.len() > 1 {
             for i in 1..processed.len() {
-                processed[i] = processed[i] - 0.95 * processed[i - 1];
+                processed[i] -= 0.95 * processed[i - 1];
             }
         }
 
@@ -559,7 +556,7 @@ mod integration_fuzzing {
             }
 
             let mut speaker_embedding = SpeakerEmbedding::new(embedding_data);
-            let _ = speaker_embedding.normalize();
+            speaker_embedding.normalize();
         }
 
         println!("✅ End-to-end fuzzing test completed successfully");
@@ -640,7 +637,7 @@ mod regression_fuzzing {
         // Test edge case: Maximum embedding size
         let max_embedding = vec![1.0; 8192]; // Large but reasonable embedding
         let mut large_embedding = SpeakerEmbedding::new(max_embedding);
-        let _ = large_embedding.normalize();
+        large_embedding.normalize();
         println!("Large embedding created successfully");
 
         // Test edge case: Empty speaker profile

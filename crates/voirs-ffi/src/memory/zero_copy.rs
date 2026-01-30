@@ -60,6 +60,11 @@ impl<T> ZeroCopyBuffer<T> {
     }
 
     /// Create a zero-copy buffer from existing memory (takes ownership)
+    ///
+    /// # Safety
+    /// The `ptr` must point to valid memory allocated with the correct layout for `capacity` elements of type T.
+    /// The caller must ensure that `len <= capacity` and that the first `len` elements are properly initialized.
+    /// This function takes ownership of the memory, which will be deallocated when the buffer is dropped.
     pub unsafe fn from_raw_parts(
         ptr: *mut T,
         capacity: usize,
@@ -104,6 +109,10 @@ impl<T> ZeroCopyBuffer<T> {
     }
 
     /// Set the length of valid data (unsafe - caller must ensure data is initialized)
+    ///
+    /// # Safety
+    /// The caller must ensure that all data up to `new_len` is properly initialized.
+    /// `new_len` must not exceed the buffer's capacity.
     pub unsafe fn set_len(&mut self, new_len: usize) {
         if new_len <= self.capacity {
             self.len = new_len;
@@ -632,6 +641,7 @@ impl<T> ZeroCopyRingBuffer<T> {
 
         unsafe {
             let buffer_slice = self.buffer.as_full_slice();
+            #[allow(clippy::needless_range_loop)]
             for i in 0..to_write {
                 let idx = (write_pos + i) & self.mask;
                 // Safety: We're writing to uninitialized memory, but T: Copy ensures it's safe
@@ -660,6 +670,7 @@ impl<T> ZeroCopyRingBuffer<T> {
         }
 
         let buffer_slice = self.buffer.as_full_slice();
+        #[allow(clippy::needless_range_loop)]
         for i in 0..to_read {
             let idx = (read_pos + i) & self.mask;
             output[i] = buffer_slice[idx];

@@ -102,6 +102,8 @@ pub struct WasmStreamingConfig {
     pub silence_duration: Option<f32>,
     /// Maximum chunk size in bytes
     pub max_chunk_size: Option<usize>,
+    /// Enable adaptive quality adjustment
+    pub quality_adaptive: Option<bool>,
 }
 
 /// WASM speech recognizer

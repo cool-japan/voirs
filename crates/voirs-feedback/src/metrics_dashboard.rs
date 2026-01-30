@@ -1,10 +1,10 @@
 //! Enhanced Metrics Dashboard for Critical Success Factors
 //!
 //! This module implements comprehensive tracking and monitoring of the critical success factors
-//! defined in the TODO.md file for VoiRS 0.1.0 release, including engagement metrics,
+//! defined in the TODO.md file for `VoiRS` 0.1.0 release, including engagement metrics,
 //! learning effectiveness, technical performance, and accessibility compliance.
 
-use crate::traits::*;
+use crate::traits::FocusArea;
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -595,6 +595,7 @@ impl Default for AccessibilityMetrics {
 
 impl MetricsDashboard {
     /// Create a new metrics dashboard
+    #[must_use]
     pub fn new(config: DashboardConfig) -> Self {
         Self {
             engagement: Arc::new(RwLock::new(EngagementMetrics::default())),

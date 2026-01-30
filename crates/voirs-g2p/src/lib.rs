@@ -3,6 +3,38 @@
 //! Converts text to phonemes using various backends including rule-based,
 //! neural, and hybrid approaches for multiple languages.
 
+// Allow pedantic lints that are acceptable for audio/DSP processing code
+#![allow(clippy::cast_precision_loss)] // Acceptable for audio sample conversions
+#![allow(clippy::cast_possible_truncation)] // Controlled truncation in audio processing
+#![allow(clippy::cast_sign_loss)] // Intentional in index calculations
+#![allow(clippy::missing_errors_doc)] // Many internal functions with self-documenting error types
+#![allow(clippy::missing_panics_doc)] // Panics are documented where relevant
+#![allow(clippy::unused_self)] // Some trait implementations require &self for consistency
+#![allow(clippy::must_use_candidate)] // Not all return values need must_use annotation
+#![allow(clippy::doc_markdown)] // Technical terms don't all need backticks
+#![allow(clippy::unnecessary_wraps)] // Result wrappers maintained for API consistency
+#![allow(clippy::float_cmp)] // Exact float comparisons are intentional in some contexts
+#![allow(clippy::match_same_arms)] // Pattern matching clarity sometimes requires duplication
+#![allow(clippy::module_name_repetitions)] // Type names often repeat module names
+#![allow(clippy::struct_excessive_bools)] // Config structs naturally have many boolean flags
+#![allow(clippy::too_many_lines)] // Some functions are inherently complex
+#![allow(clippy::needless_pass_by_value)] // Some functions designed for ownership transfer
+#![allow(clippy::similar_names)] // Many similar variable names in algorithms
+#![allow(clippy::unused_async)] // Public API functions may need async for consistency
+#![allow(clippy::needless_range_loop)] // Range loops sometimes clearer than iterators
+#![allow(clippy::uninlined_format_args)] // Explicit argument names can improve clarity
+#![allow(clippy::manual_clamp)] // Manual clamping sometimes clearer
+#![allow(clippy::return_self_not_must_use)] // Not all builder methods need must_use
+#![allow(clippy::cast_possible_wrap)] // Controlled wrapping in processing code
+#![allow(clippy::cast_lossless)] // Explicit casts preferred for clarity
+#![allow(clippy::wildcard_imports)] // Prelude imports are convenient and standard
+#![allow(clippy::format_push_string)] // Sometimes more readable than alternative
+#![allow(clippy::redundant_closure_for_method_calls)] // Closures sometimes needed for type inference
+#![allow(clippy::too_many_arguments)] // Some functions naturally need many parameters
+#![allow(clippy::field_reassign_with_default)] // Sometimes clearer than builder pattern
+#![allow(clippy::trivially_copy_pass_by_ref)] // API consistency more important
+#![allow(clippy::await_holding_lock)] // Controlled lock holding in async contexts
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -14,33 +46,48 @@ pub type Result<T> = std::result::Result<T, G2pError>;
 /// G2P-specific error types
 #[derive(Error, Debug)]
 pub enum G2pError {
+    /// G2P conversion failed during phoneme generation
     #[error("G2P conversion failed: {0}")]
     ConversionError(String),
 
+    /// Specified language is not supported by the current backend
     #[error("Unsupported language: {0:?}")]
     UnsupportedLanguage(LanguageCode),
 
+    /// Failed to load or initialize a G2P model
     #[error("Model loading failed: {0}")]
     ModelError(String),
 
+    /// Configuration file or parameters are invalid
     #[error("Configuration error: {0}")]
     ConfigError(String),
 
+    /// Input text is malformed or empty
     #[error("Invalid input: {0}")]
     InvalidInput(String),
 
+    /// IO operation failed (file read/write, network, etc.)
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 
+    /// Phoneme validation constraints were violated
     #[error("Phoneme validation failed: {0}")]
     PhonemeValidationError(String),
 
+    /// Backend-specific error occurred during processing
     #[error("Backend error: {backend} - {message}")]
-    BackendError { backend: String, message: String },
+    BackendError {
+        /// Name of the backend that encountered the error
+        backend: String,
+        /// Detailed error message from the backend
+        message: String,
+    },
 
+    /// Text preprocessing stage failed
     #[error("Preprocessing error: {0}")]
     PreprocessingError(String),
 
+    /// Performance optimization operations failed
     #[error("Performance optimization failed: {0}")]
     OptimizationError(String),
 }
@@ -148,6 +195,10 @@ pub enum LanguageCode {
     It,
     /// Portuguese
     Pt,
+    /// Russian
+    Ru,
+    /// Arabic
+    Ar,
 }
 
 impl LanguageCode {
@@ -164,6 +215,49 @@ impl LanguageCode {
             LanguageCode::Es => "es",
             LanguageCode::It => "it",
             LanguageCode::Pt => "pt",
+            LanguageCode::Ru => "ru",
+            LanguageCode::Ar => "ar",
+        }
+    }
+
+    /// Get the full language name
+    pub fn full_name(&self) -> &'static str {
+        match self {
+            LanguageCode::EnUs => "English (United States)",
+            LanguageCode::EnGb => "English (United Kingdom)",
+            LanguageCode::Ja => "Japanese",
+            LanguageCode::ZhCn => "Mandarin Chinese",
+            LanguageCode::Ko => "Korean",
+            LanguageCode::De => "German",
+            LanguageCode::Fr => "French",
+            LanguageCode::Es => "Spanish",
+            LanguageCode::It => "Italian",
+            LanguageCode::Pt => "Portuguese",
+            LanguageCode::Ru => "Russian",
+            LanguageCode::Ar => "Arabic",
+        }
+    }
+
+    /// Check if language uses right-to-left script
+    pub fn is_rtl(&self) -> bool {
+        matches!(self, LanguageCode::Ar)
+    }
+
+    /// Get the script type for this language
+    pub fn script_type(&self) -> &'static str {
+        match self {
+            LanguageCode::EnUs
+            | LanguageCode::EnGb
+            | LanguageCode::De
+            | LanguageCode::Fr
+            | LanguageCode::Es
+            | LanguageCode::It
+            | LanguageCode::Pt => "Latin",
+            LanguageCode::Ru => "Cyrillic",
+            LanguageCode::Ar => "Arabic",
+            LanguageCode::Ja => "Japanese (Kanji/Hiragana/Katakana)",
+            LanguageCode::ZhCn => "Chinese (Simplified)",
+            LanguageCode::Ko => "Hangul",
         }
     }
 }
@@ -583,13 +677,16 @@ pub mod backends;
 pub mod config;
 pub mod detection;
 pub mod english;
+pub mod languages;
 pub mod models;
 pub mod optimization;
 pub mod performance;
+pub mod phonology;
 pub mod preprocessing;
 pub mod rules;
 pub mod ssml;
 pub mod ssml_legacy;
+pub mod streaming;
 pub mod training;
 pub mod utils;
 
@@ -695,7 +792,7 @@ impl G2p for G2pConverter {
                     | LanguageCode::Es
                     | LanguageCode::It
                     | LanguageCode::Pt => 0.80, // European languages
-                    LanguageCode::Ja => 0.75,                        // Japanese G2P is complex
+                    LanguageCode::Ja | LanguageCode::Ru | LanguageCode::Ar => 0.75, // Complex phonology
                     LanguageCode::ZhCn | LanguageCode::Ko => 0.70, // CJK languages are challenging
                 }
             });

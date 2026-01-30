@@ -292,9 +292,9 @@ impl CandleOptions {
     pub fn validate(&self) -> Result<()> {
         if let Some(pool_size) = self.cuda_memory_pool_mb {
             if pool_size == 0 {
-                return Err(AcousticError::ConfigError(
-                    "CUDA memory pool size must be > 0".to_string(),
-                ));
+                return Err(AcousticError::ConfigError {
+                    message: "CUDA memory pool size must be > 0".to_string(),
+                });
             }
         }
         Ok(())
@@ -356,9 +356,9 @@ impl OnnxOptions {
     /// Validate ONNX options
     pub fn validate(&self) -> Result<()> {
         if self.execution_providers.is_empty() {
-            return Err(AcousticError::ConfigError(
-                "At least one execution provider must be specified".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "At least one execution provider must be specified".to_string(),
+            });
         }
         self.session_options.validate()?;
         Ok(())
@@ -402,23 +402,23 @@ impl OnnxSessionOptions {
     pub fn validate(&self) -> Result<()> {
         if let Some(threads) = self.intra_op_num_threads {
             if threads == 0 {
-                return Err(AcousticError::ConfigError(
-                    "Intra-op threads must be > 0".to_string(),
-                ));
+                return Err(AcousticError::ConfigError {
+                    message: "Intra-op threads must be > 0".to_string(),
+                });
             }
         }
         if let Some(threads) = self.inter_op_num_threads {
             if threads == 0 {
-                return Err(AcousticError::ConfigError(
-                    "Inter-op threads must be > 0".to_string(),
-                ));
+                return Err(AcousticError::ConfigError {
+                    message: "Inter-op threads must be > 0".to_string(),
+                });
             }
         }
         if let Some(arena_size) = self.memory_arena_size_mb {
             if arena_size == 0 {
-                return Err(AcousticError::ConfigError(
-                    "Memory arena size must be > 0".to_string(),
-                ));
+                return Err(AcousticError::ConfigError {
+                    message: "Memory arena size must be > 0".to_string(),
+                });
             }
         }
         Ok(())
@@ -502,20 +502,20 @@ impl MemoryConfig {
     pub fn validate(&self) -> Result<()> {
         if let Some(pool_size) = self.memory_pool_size_mb {
             if pool_size == 0 {
-                return Err(AcousticError::ConfigError(
-                    "Memory pool size must be > 0".to_string(),
-                ));
+                return Err(AcousticError::ConfigError {
+                    message: "Memory pool size must be > 0".to_string(),
+                });
             }
         }
         if self.cleanup_interval_seconds == 0 {
-            return Err(AcousticError::ConfigError(
-                "Cleanup interval must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Cleanup interval must be > 0".to_string(),
+            });
         }
         if self.pressure_threshold < 0.0 || self.pressure_threshold > 1.0 {
-            return Err(AcousticError::ConfigError(
-                "Pressure threshold must be between 0.0 and 1.0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Pressure threshold must be between 0.0 and 1.0".to_string(),
+            });
         }
         Ok(())
     }
@@ -593,23 +593,23 @@ impl PerformanceConfig {
     pub fn validate(&self) -> Result<()> {
         if let Some(threads) = self.num_threads {
             if threads == 0 {
-                return Err(AcousticError::ConfigError(
-                    "Number of threads must be > 0".to_string(),
-                ));
+                return Err(AcousticError::ConfigError {
+                    message: "Number of threads must be > 0".to_string(),
+                });
             }
         }
         if let Some(batch_size) = self.batch_size {
             if batch_size == 0 {
-                return Err(AcousticError::ConfigError(
-                    "Batch size must be > 0".to_string(),
-                ));
+                return Err(AcousticError::ConfigError {
+                    message: "Batch size must be > 0".to_string(),
+                });
             }
         }
         if let Some(timeout) = self.inference_timeout_ms {
             if timeout == 0 {
-                return Err(AcousticError::ConfigError(
-                    "Inference timeout must be > 0".to_string(),
-                ));
+                return Err(AcousticError::ConfigError {
+                    message: "Inference timeout must be > 0".to_string(),
+                });
             }
         }
         Ok(())
@@ -713,9 +713,9 @@ impl LoggingConfig {
     /// Validate logging configuration
     pub fn validate(&self) -> Result<()> {
         if self.log_to_file && self.log_file_path.is_none() {
-            return Err(AcousticError::ConfigError(
-                "Log file path must be specified when logging to file".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Log file path must be specified when logging to file".to_string(),
+            });
         }
         Ok(())
     }
@@ -812,14 +812,14 @@ impl DebugConfig {
     /// Validate debug configuration
     pub fn validate(&self) -> Result<()> {
         if self.save_intermediate_results && self.intermediate_results_dir.is_none() {
-            return Err(AcousticError::ConfigError(
-                "Intermediate results directory must be specified".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Intermediate results directory must be specified".to_string(),
+            });
         }
         if self.enable_profiling && self.profile_output_dir.is_none() {
-            return Err(AcousticError::ConfigError(
-                "Profile output directory must be specified".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Profile output directory must be specified".to_string(),
+            });
         }
         Ok(())
     }
@@ -852,9 +852,9 @@ impl DeviceConfig {
     pub fn validate(&self) -> Result<()> {
         if let Some(max_memory) = self.max_memory_mb {
             if max_memory == 0 {
-                return Err(AcousticError::ConfigError(
-                    "Max memory must be > 0".to_string(),
-                ));
+                return Err(AcousticError::ConfigError {
+                    message: "Max memory must be > 0".to_string(),
+                });
             }
         }
         Ok(())

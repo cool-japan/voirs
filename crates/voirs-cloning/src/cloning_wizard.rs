@@ -512,7 +512,7 @@ impl CloningWizard {
         let category = sample
             .metadata
             .get("category")
-            .and_then(|v| Some(v.as_str()))
+            .map(|v| v.as_str())
             .unwrap_or("general")
             .to_string();
 
@@ -588,21 +588,24 @@ impl CloningWizard {
 
     /// Validate current wizard step
     pub async fn validate_current_step(&self, session_id: &str) -> Result<Vec<ValidationResult>> {
-        let sessions = self.sessions.read().unwrap();
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| Error::Validation(format!("Session not found: {session_id}")))?;
+        let session = {
+            let sessions = self.sessions.read().unwrap();
+            sessions
+                .get(session_id)
+                .ok_or_else(|| Error::Validation(format!("Session not found: {session_id}")))?
+                .clone()
+        }; // Lock is dropped here
 
         match session.current_step {
-            WizardStep::ProjectSetup => self.validate_project_setup(session).await,
-            WizardStep::DataCollection => self.validate_data_collection(session).await,
-            WizardStep::QualityAssessment => self.validate_quality_assessment(session).await,
-            WizardStep::ConsentManagement => self.validate_consent_management(session).await,
-            WizardStep::MethodSelection => self.validate_method_selection(session).await,
-            WizardStep::ModelTraining => self.validate_model_training(session).await,
-            WizardStep::TestingValidation => self.validate_testing_validation(session).await,
-            WizardStep::FinalSynthesis => self.validate_final_synthesis(session).await,
-            WizardStep::Completion => self.validate_completion(session).await,
+            WizardStep::ProjectSetup => self.validate_project_setup(&session).await,
+            WizardStep::DataCollection => self.validate_data_collection(&session).await,
+            WizardStep::QualityAssessment => self.validate_quality_assessment(&session).await,
+            WizardStep::ConsentManagement => self.validate_consent_management(&session).await,
+            WizardStep::MethodSelection => self.validate_method_selection(&session).await,
+            WizardStep::ModelTraining => self.validate_model_training(&session).await,
+            WizardStep::TestingValidation => self.validate_testing_validation(&session).await,
+            WizardStep::FinalSynthesis => self.validate_final_synthesis(&session).await,
+            WizardStep::Completion => self.validate_completion(&session).await,
         }
     }
 
@@ -823,18 +826,16 @@ impl CloningWizard {
         &self,
         _session: &WizardSession,
     ) -> Result<Vec<ValidationResult>> {
-        let mut results = Vec::new();
-
         // For now, assume consent is always properly handled
         // In a real implementation, this would check consent records
-        results.push(ValidationResult {
+        let results = vec![ValidationResult {
             rule_id: "consent_verified".to_string(),
             rule_description: "Consent verification".to_string(),
             passed: true,
             message: "Consent and ethical considerations have been addressed".to_string(),
             severity: ValidationSeverity::Info,
             suggestions: Vec::new(),
-        });
+        }];
 
         Ok(results)
     }
@@ -876,17 +877,15 @@ impl CloningWizard {
         &self,
         _session: &WizardSession,
     ) -> Result<Vec<ValidationResult>> {
-        let mut results = Vec::new();
-
         // Mock validation - in real implementation would check training progress
-        results.push(ValidationResult {
+        let results = vec![ValidationResult {
             rule_id: "training_completed".to_string(),
             rule_description: "Model training completion".to_string(),
             passed: true,
             message: "Model training completed successfully".to_string(),
             severity: ValidationSeverity::Info,
             suggestions: Vec::new(),
-        });
+        }];
 
         Ok(results)
     }
@@ -896,17 +895,15 @@ impl CloningWizard {
         &self,
         _session: &WizardSession,
     ) -> Result<Vec<ValidationResult>> {
-        let mut results = Vec::new();
-
         // Mock validation - in real implementation would run actual tests
-        results.push(ValidationResult {
+        let results = vec![ValidationResult {
             rule_id: "validation_tests_passed".to_string(),
             rule_description: "Validation tests completion".to_string(),
             passed: true,
             message: "All validation tests passed".to_string(),
             severity: ValidationSeverity::Info,
             suggestions: Vec::new(),
-        });
+        }];
 
         Ok(results)
     }
@@ -916,26 +913,22 @@ impl CloningWizard {
         &self,
         _session: &WizardSession,
     ) -> Result<Vec<ValidationResult>> {
-        let mut results = Vec::new();
-
         // Mock validation - in real implementation would check synthesis results
-        results.push(ValidationResult {
+        let results = vec![ValidationResult {
             rule_id: "synthesis_completed".to_string(),
             rule_description: "Final synthesis completion".to_string(),
             passed: true,
             message: "Final synthesis completed successfully".to_string(),
             severity: ValidationSeverity::Info,
             suggestions: Vec::new(),
-        });
+        }];
 
         Ok(results)
     }
 
     /// Validate completion step
     async fn validate_completion(&self, _session: &WizardSession) -> Result<Vec<ValidationResult>> {
-        let mut results = Vec::new();
-
-        results.push(ValidationResult {
+        let results = vec![ValidationResult {
             rule_id: "project_completed".to_string(),
             rule_description: "Project completion".to_string(),
             passed: true,
@@ -945,7 +938,7 @@ impl CloningWizard {
                 "Consider creating backups of your voice models".to_string(),
                 "Test the cloned voice with different texts".to_string(),
             ],
-        });
+        }];
 
         Ok(results)
     }
@@ -1031,9 +1024,9 @@ impl CloningWizard {
         );
 
         // Determine recommended method
-        let recommended_method = if sample_count >= 10 && total_duration >= 60.0 {
-            CloningMethod::FewShot
-        } else if sample_count >= 5 && total_duration >= 15.0 {
+        let recommended_method = if (sample_count >= 10 && total_duration >= 60.0)
+            || (sample_count >= 5 && total_duration >= 15.0)
+        {
             CloningMethod::FewShot
         } else {
             CloningMethod::ZeroShot
@@ -1065,16 +1058,17 @@ impl CloningWizard {
 
     /// Save wizard session to file
     pub async fn save_session(&self, session_id: &str, file_path: &str) -> Result<()> {
-        let sessions = self.sessions.read().unwrap();
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| Error::Validation(format!("Session not found: {session_id}")))?;
+        let session = {
+            let sessions = self.sessions.read().unwrap();
+            sessions
+                .get(session_id)
+                .ok_or_else(|| Error::Validation(format!("Session not found: {session_id}")))?
+                .clone()
+        }; // Lock is dropped here
 
-        let json = serde_json::to_string_pretty(session).map_err(|e| Error::Serialization(e))?;
+        let json = serde_json::to_string_pretty(&session).map_err(Error::Serialization)?;
 
-        tokio::fs::write(file_path, json)
-            .await
-            .map_err(|e| Error::Io(e))?;
+        tokio::fs::write(file_path, json).await.map_err(Error::Io)?;
 
         Ok(())
     }
@@ -1083,10 +1077,9 @@ impl CloningWizard {
     pub async fn load_session(&self, file_path: &str) -> Result<String> {
         let json = tokio::fs::read_to_string(file_path)
             .await
-            .map_err(|e| Error::Io(e))?;
+            .map_err(Error::Io)?;
 
-        let session: WizardSession =
-            serde_json::from_str(&json).map_err(|e| Error::Serialization(e))?;
+        let session: WizardSession = serde_json::from_str(&json).map_err(Error::Serialization)?;
 
         let session_id = session.session_id.clone();
 

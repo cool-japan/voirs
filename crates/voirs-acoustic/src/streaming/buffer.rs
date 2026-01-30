@@ -20,9 +20,9 @@ impl<T: Clone> CircularBuffer<T> {
     /// Create new circular buffer with given capacity
     pub fn new(capacity: usize) -> Result<Self> {
         if capacity == 0 {
-            return Err(AcousticError::InvalidConfiguration(
-                "Buffer capacity must be greater than 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Buffer capacity must be greater than 0".to_string(),
+            });
         }
 
         Ok(Self {
@@ -38,13 +38,18 @@ impl<T: Clone> CircularBuffer<T> {
         let mut buffer = self
             .buffer
             .lock()
-            .map_err(|_| AcousticError::Processing("Buffer lock poisoned".to_string()))?;
+            .map_err(|_| AcousticError::ProcessingError {
+                message: "Buffer lock poisoned".to_string(),
+            })?;
 
         // Wait for space if buffer is full
         while buffer.len() >= self.capacity {
-            buffer = self.not_full.wait(buffer).map_err(|_| {
-                AcousticError::Processing("Buffer condition variable failed".to_string())
-            })?;
+            buffer = self
+                .not_full
+                .wait(buffer)
+                .map_err(|_| AcousticError::ProcessingError {
+                    message: "Buffer condition variable failed".to_string(),
+                })?;
         }
 
         buffer.push_back(item);
@@ -58,7 +63,9 @@ impl<T: Clone> CircularBuffer<T> {
         let mut buffer = self
             .buffer
             .lock()
-            .map_err(|_| AcousticError::Processing("Buffer lock poisoned".to_string()))?;
+            .map_err(|_| AcousticError::ProcessingError {
+                message: "Buffer lock poisoned".to_string(),
+            })?;
 
         if buffer.len() >= self.capacity {
             return Ok(false);
@@ -74,7 +81,9 @@ impl<T: Clone> CircularBuffer<T> {
         let mut buffer = self
             .buffer
             .lock()
-            .map_err(|_| AcousticError::Processing("Buffer lock poisoned".to_string()))?;
+            .map_err(|_| AcousticError::ProcessingError {
+                message: "Buffer lock poisoned".to_string(),
+            })?;
 
         let deadline = std::time::Instant::now() + timeout;
 
@@ -85,7 +94,9 @@ impl<T: Clone> CircularBuffer<T> {
             }
 
             let result = self.not_full.wait_timeout(buffer, remaining).map_err(|_| {
-                AcousticError::Processing("Buffer condition variable failed".to_string())
+                AcousticError::ProcessingError {
+                    message: "Buffer condition variable failed".to_string(),
+                }
             })?;
 
             buffer = result.0;

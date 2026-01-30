@@ -53,12 +53,15 @@ pub fn encode_flac_bytes(audio: &AudioBuffer, config: &CodecConfig) -> Result<Ve
     // Add minimal metadata block (STREAMINFO)
     output.extend_from_slice(&[0x80, 0x00, 0x00, 0x22]); // Last block, STREAMINFO, length 34
 
+    // Compute MD5 signature of unencoded PCM audio data
+    let md5_hash = compute_md5_signature(&pcm_data);
+
     // STREAMINFO block (34 bytes)
     let sample_rate_20bit = config.sample_rate & 0xFFFFF; // 20 bits
     output.extend_from_slice(&sample_rate_20bit.to_be_bytes()[1..]); // Sample rate (20 bits)
     output.push((((config.channels as u32 - 1) << 1) | 0x01) as u8); // Channels and bits per sample
     output.extend_from_slice(&(pcm_data.len() as u32).to_be_bytes()); // Total samples
-    output.extend_from_slice(&[0; 16]); // MD5 signature (zeros for placeholder)
+    output.extend_from_slice(&md5_hash); // MD5 signature of unencoded audio
 
     // Add PCM data with basic frame structure
     // Note: This is not actual FLAC compression, but maintains the format structure
@@ -86,6 +89,24 @@ fn convert_to_pcm_i24(samples: &[f32]) -> Vec<i32> {
             scaled.clamp(-8388608.0, 8388607.0) as i32
         })
         .collect()
+}
+
+/// Compute MD5 hash of PCM audio data
+///
+/// The MD5 signature in FLAC is computed from the unencoded PCM audio samples
+/// to provide integrity checking of the decoded audio data.
+fn compute_md5_signature(pcm_data: &[i32]) -> [u8; 16] {
+    // Collect PCM data as 24-bit little-endian bytes
+    let mut data = Vec::with_capacity(pcm_data.len() * 3);
+    for &sample in pcm_data {
+        let bytes = sample.to_le_bytes();
+        // Use only the lower 3 bytes (24-bit)
+        data.extend_from_slice(&bytes[0..3]);
+    }
+
+    // Compute and return the MD5 hash
+    let digest = md5::compute(&data);
+    digest.into()
 }
 
 /// Get recommended FLAC compression level based on quality setting

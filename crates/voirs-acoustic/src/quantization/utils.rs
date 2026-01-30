@@ -25,9 +25,9 @@ impl TensorStatistics {
     /// Calculate statistics from tensor data
     pub fn from_data(data: &[f32]) -> Result<Self> {
         if data.is_empty() {
-            return Err(AcousticError::Processing(
-                "Cannot calculate statistics from empty data".to_string(),
-            ));
+            return Err(AcousticError::ProcessingError {
+                message: "Cannot calculate statistics from empty data".to_string(),
+            });
         }
 
         let min = data.iter().copied().fold(f32::INFINITY, f32::min);
@@ -103,17 +103,19 @@ impl TensorUtils {
     pub fn reshape(data: &[f32], shape: &[usize]) -> Result<Vec<Vec<f32>>> {
         let total_elements: usize = shape.iter().product();
         if data.len() != total_elements {
-            return Err(AcousticError::Processing(format!(
-                "Data length {} doesn't match shape dimensions {}",
-                data.len(),
-                total_elements
-            )));
+            return Err(AcousticError::ProcessingError {
+                message: format!(
+                    "Data length {} doesn't match shape dimensions {}",
+                    data.len(),
+                    total_elements
+                ),
+            });
         }
 
         if shape.len() != 2 {
-            return Err(AcousticError::Processing(
-                "Only 2D reshaping is currently supported".to_string(),
-            ));
+            return Err(AcousticError::ProcessingError {
+                message: "Only 2D reshaping is currently supported".to_string(),
+            });
         }
 
         let rows = shape[0];
@@ -151,9 +153,9 @@ impl QuantizationAnalysis {
         params: &crate::quantization::QuantizationParams,
     ) -> Result<QuantizationErrorMetrics> {
         if original.is_empty() {
-            return Err(AcousticError::Processing(
-                "Cannot analyze empty tensor".to_string(),
-            ));
+            return Err(AcousticError::ProcessingError {
+                message: "Cannot analyze empty tensor".to_string(),
+            });
         }
 
         let quantized = params.quantize_tensor(original);

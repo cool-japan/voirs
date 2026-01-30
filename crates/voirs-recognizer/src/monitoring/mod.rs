@@ -1,4 +1,4 @@
-//! Monitoring and observability infrastructure for VoiRS Recognition
+//! Monitoring and observability infrastructure for `VoiRS` Recognition
 //!
 //! This module provides comprehensive monitoring capabilities including distributed
 //! tracing, metrics collection, performance analysis, and system observability

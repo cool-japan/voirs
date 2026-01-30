@@ -128,10 +128,7 @@ async fn execute_list(
 
     match args.format.as_str() {
         "table" => {
-            println!(
-                "{:<12} {:<30} {}",
-                "Emotion", "Description", "Default Intensity"
-            );
+            println!("{:<12} {:<30} Default Intensity", "Emotion", "Description");
             println!("{}", "-".repeat(60));
             for (name, desc, intensity) in emotions {
                 println!("{:<12} {:<30} {}", name, desc, intensity);
@@ -367,7 +364,7 @@ async fn execute_create_preset(
     }
 
     // Read configuration file
-    let config_content = std::fs::read_to_string(&args.config).map_err(|e| CliError::Io(e))?;
+    let config_content = std::fs::read_to_string(&args.config).map_err(CliError::Io)?;
 
     // Parse configuration
     let emotion_config: EmotionConfig = serde_json::from_str(&config_content)
@@ -378,7 +375,7 @@ async fn execute_create_preset(
 
     // Get the preset directory (create if it doesn't exist)
     let preset_dir = get_preset_directory()?;
-    fs::create_dir_all(&preset_dir).map_err(|e| CliError::Io(e))?;
+    fs::create_dir_all(&preset_dir).map_err(CliError::Io)?;
 
     // Save the preset file
     let preset_path = preset_dir.join(format!("{}.json", args.name));
@@ -397,7 +394,7 @@ async fn execute_create_preset(
     let preset_json = serde_json::to_string_pretty(&preset_data)
         .map_err(|e| CliError::config(format!("Failed to serialize preset: {}", e)))?;
 
-    fs::write(&preset_path, preset_json).map_err(|e| CliError::Io(e))?;
+    fs::write(&preset_path, preset_json).map_err(CliError::Io)?;
 
     output_formatter.success(&format!(
         "Emotion preset '{}' created successfully at: {}",
@@ -490,7 +487,7 @@ async fn execute_validate(
 
     match args.format.as_str() {
         "table" => {
-            println!("{:<20} {}", "Parameter", "Status");
+            println!("{:<20} Status", "Parameter");
             println!("{}", "-".repeat(40));
             for (param, status) in validation_results {
                 println!("{:<20} {}", param, status);
@@ -603,7 +600,7 @@ fn load_emotion_preset(name: &str) -> std::result::Result<EmotionConfig, CliErro
     if let Ok(preset_dir) = get_preset_directory() {
         let preset_path = preset_dir.join(format!("{}.json", name));
         if preset_path.exists() {
-            let content = fs::read_to_string(&preset_path).map_err(|e| CliError::Io(e))?;
+            let content = fs::read_to_string(&preset_path).map_err(CliError::Io)?;
             let preset_data: serde_json::Value = serde_json::from_str(&content)
                 .map_err(|e| CliError::config(format!("Invalid preset format: {}", e)))?;
 
@@ -711,12 +708,12 @@ fn calculate_audio_quality_score(audio: &AudioBuffer) -> f32 {
     score -= if silence_ratio > 0.8 { 4.0 } else { 0.0 }; // Penalize excessive silence
     score -= if rms < 0.1 { 3.0 } else { 0.0 }; // Penalize very low energy
 
-    score.max(0.0).min(10.0)
+    score.clamp(0.0, 10.0)
 }
 
 /// Calculate naturalness score from quality score
 fn calculate_naturalness_score(quality_score: f32) -> f32 {
     // Convert quality score to naturalness with some variation
     let base_naturalness = quality_score * 0.8 + 1.0; // Slightly lower than quality
-    base_naturalness.max(0.0).min(10.0)
+    base_naturalness.clamp(0.0, 10.0)
 }

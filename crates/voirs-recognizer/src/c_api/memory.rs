@@ -228,15 +228,18 @@ mod tests {
 
     #[test]
     fn test_memory_manager_struct_storage() {
-        let mut manager = VoirsMemoryManager::new();
-
         #[derive(Debug, PartialEq)]
         struct TestStruct {
             a: i32,
             b: f64,
         }
 
-        let test_data = TestStruct { a: 42, b: 3.14 };
+        let mut manager = VoirsMemoryManager::new();
+
+        let test_data = TestStruct {
+            a: 42,
+            b: std::f64::consts::PI,
+        };
         let ptr = manager.store_struct(test_data);
 
         assert!(!ptr.is_null());
@@ -244,7 +247,7 @@ mod tests {
         // Verify the struct can be read back
         let read_back = unsafe { &*ptr };
         assert_eq!(read_back.a, 42);
-        assert_eq!(read_back.b, 3.14);
+        assert!((read_back.b - std::f64::consts::PI).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -258,7 +261,7 @@ mod tests {
         assert_eq!(converted_back, test_str);
 
         // Clean up
-        unsafe { free_c_string(c_str as *mut c_char) };
+        unsafe { free_c_string(c_str.cast_mut()) };
     }
 
     #[test]

@@ -267,7 +267,10 @@ impl MobileEmotionProcessor {
     pub async fn with_config(config: MobileOptimizationConfig) -> Result<Self> {
         let processor = EmotionProcessor::new()?;
         let device_info = Arc::new(std::sync::RwLock::new(MobileDeviceInfo::detect()));
-        let recommended_power = device_info.read().unwrap().recommend_power_mode();
+        let recommended_power = device_info
+            .read()
+            .expect("Failed to acquire read lock on device_info")
+            .recommend_power_mode();
 
         Ok(Self {
             processor,
@@ -281,7 +284,10 @@ impl MobileEmotionProcessor {
 
     /// Set power management mode
     pub async fn set_power_mode(&self, mode: PowerMode) -> Result<()> {
-        *self.power_mode.write().unwrap() = mode;
+        *self
+            .power_mode
+            .write()
+            .expect("Failed to acquire write lock on power_mode") = mode;
         self.stats.record_power_mode_change(mode);
 
         // Adjust processor settings based on power mode
@@ -292,7 +298,10 @@ impl MobileEmotionProcessor {
 
     /// Get current power mode
     pub fn get_power_mode(&self) -> PowerMode {
-        *self.power_mode.read().unwrap()
+        *self
+            .power_mode
+            .read()
+            .expect("Failed to acquire read lock on power_mode")
     }
 
     /// Process emotion with mobile optimizations
@@ -325,7 +334,11 @@ impl MobileEmotionProcessor {
         &self,
         emotion: &EmotionVector,
     ) -> Result<EmotionParameters> {
-        let thermal_state = self.device_info.read().unwrap().get_thermal_state();
+        let thermal_state = self
+            .device_info
+            .read()
+            .expect("Failed to acquire read lock on device_info")
+            .get_thermal_state();
 
         match thermal_state {
             ThermalState::Critical => {
@@ -350,10 +363,17 @@ impl MobileEmotionProcessor {
     /// Update device information
     pub async fn update_device_info(&self) -> Result<()> {
         let new_info = MobileDeviceInfo::detect();
-        *self.device_info.write().unwrap() = new_info;
+        *self
+            .device_info
+            .write()
+            .expect("Failed to acquire write lock on device_info") = new_info;
 
         // Auto-adjust power mode if needed
-        let recommended_power = self.device_info.read().unwrap().recommend_power_mode();
+        let recommended_power = self
+            .device_info
+            .read()
+            .expect("Failed to acquire read lock on device_info")
+            .recommend_power_mode();
         let current_power = self.get_power_mode();
 
         if recommended_power != current_power {
@@ -388,10 +408,15 @@ impl MobileEmotionProcessor {
                 if thermal_monitoring.load(Ordering::Relaxed) {
                     // Update device information
                     let new_info = MobileDeviceInfo::detect();
-                    *device_info.write().unwrap() = new_info;
+                    *device_info
+                        .write()
+                        .expect("Failed to acquire write lock on device_info") = new_info;
 
                     // Record thermal state
-                    let thermal_state = device_info.read().unwrap().get_thermal_state();
+                    let thermal_state = device_info
+                        .read()
+                        .expect("Failed to acquire read lock on device_info")
+                        .get_thermal_state();
                     stats.record_thermal_state(thermal_state);
                 }
             }
@@ -422,7 +447,11 @@ impl MobileEmotionProcessor {
     }
 
     async fn check_thermal_state(&self) -> Result<()> {
-        let thermal_state = self.device_info.read().unwrap().get_thermal_state();
+        let thermal_state = self
+            .device_info
+            .read()
+            .expect("Failed to acquire read lock on device_info")
+            .get_thermal_state();
 
         match thermal_state {
             ThermalState::Critical => {
@@ -446,8 +475,16 @@ impl MobileEmotionProcessor {
 
     async fn get_processing_quality(&self) -> ProcessingQuality {
         let power_mode = self.get_power_mode();
-        let thermal_state = self.device_info.read().unwrap().get_thermal_state();
-        let battery_level = self.device_info.read().unwrap().battery_percent;
+        let thermal_state = self
+            .device_info
+            .read()
+            .expect("Failed to acquire read lock on device_info")
+            .get_thermal_state();
+        let battery_level = self
+            .device_info
+            .read()
+            .expect("Failed to acquire read lock on device_info")
+            .battery_percent;
 
         match (power_mode, thermal_state, battery_level) {
             (PowerMode::UltraPowerSaver, _, _) => ProcessingQuality::Minimal,
@@ -476,25 +513,31 @@ impl MobileEmotionProcessor {
             }
             ProcessingQuality::Reduced => {
                 // Reduced complexity processing
+                let (dominant_emotion, intensity) = emotion
+                    .dominant_emotion()
+                    .unwrap_or((Emotion::Calm, EmotionIntensity::MEDIUM));
+
+                // Reduce intensity for power savings
+                let reduced_intensity =
+                    EmotionIntensity::new((intensity.value() * 0.5).clamp(0.0, 1.0));
+
                 self.processor
-                    .set_emotion(
-                        emotion
-                            .dominant_emotion()
-                            .unwrap_or((Emotion::Calm, EmotionIntensity::MEDIUM))
-                            .0,
-                        Some(0.5),
-                    )
+                    .set_emotion(dominant_emotion.clone(), Some(reduced_intensity.value()))
                     .await?;
-                Ok(EmotionParameters::neutral()) // Simplified
+
+                Ok(self.create_simple_params(&dominant_emotion, reduced_intensity))
             }
             ProcessingQuality::Standard => {
                 // Standard processing
                 if let Some((dominant_emotion, intensity)) = emotion.dominant_emotion() {
                     self.processor
-                        .set_emotion(dominant_emotion, Some(intensity.value()))
+                        .set_emotion(dominant_emotion.clone(), Some(intensity.value()))
                         .await?;
+
+                    Ok(self.create_simple_params(&dominant_emotion, intensity))
+                } else {
+                    Ok(EmotionParameters::neutral())
                 }
-                Ok(EmotionParameters::neutral()) // Placeholder
             }
         }
     }
@@ -502,9 +545,8 @@ impl MobileEmotionProcessor {
     async fn process_minimal(&self, emotion: &EmotionVector) -> Result<EmotionParameters> {
         // Absolute minimal processing for critical thermal states
         let params = if let Some((_, intensity)) = emotion.dominant_emotion() {
-            let mut p = EmotionParameters::neutral();
             // Only adjust the most basic parameter
-            p
+            EmotionParameters::neutral()
         } else {
             EmotionParameters::neutral()
         };
@@ -532,8 +574,86 @@ impl MobileEmotionProcessor {
         emotion: &Emotion,
         intensity: EmotionIntensity,
     ) -> EmotionParameters {
-        // Very simplified parameter creation for minimal processing
-        EmotionParameters::neutral() // Placeholder implementation
+        // Create simplified emotion parameters optimized for mobile devices
+        // Using reduced prosody changes to minimize CPU usage
+
+        let intensity_val = intensity.value();
+
+        // Create emotion vector
+        let mut emotion_vector = EmotionVector::new();
+        // Add the emotion with the given intensity
+        // EmotionVector doesn't have a `set` method, so we'll create the params differently
+
+        // Calculate basic prosody adjustments based on emotion type
+        // Use simplified mappings to reduce computation
+        let (pitch_shift, tempo_scale, energy_scale, breathiness, roughness) = match emotion {
+            Emotion::Happy | Emotion::Excited => (
+                1.0 + (0.15 * intensity_val), // Slightly higher pitch
+                1.0 + (0.1 * intensity_val),  // Slightly faster
+                1.0 + (0.2 * intensity_val),  // More energetic
+                0.05 * intensity_val,         // Minimal breathiness
+                0.0,                          // No roughness
+            ),
+            Emotion::Sad | Emotion::Melancholic => (
+                1.0 - (0.1 * intensity_val),  // Lower pitch
+                1.0 - (0.15 * intensity_val), // Slower
+                1.0 - (0.2 * intensity_val),  // Less energy
+                0.15 * intensity_val,         // Some breathiness
+                0.05 * intensity_val,         // Slight roughness
+            ),
+            Emotion::Angry | Emotion::Disgust => (
+                1.0 + (0.1 * intensity_val),  // Higher pitch
+                1.0 + (0.15 * intensity_val), // Faster
+                1.0 + (0.3 * intensity_val),  // Much more energy
+                0.0,                          // No breathiness
+                0.2 * intensity_val,          // Significant roughness
+            ),
+            Emotion::Fear | Emotion::Surprise => (
+                1.0 + (0.2 * intensity_val),  // Much higher pitch
+                1.0 + (0.2 * intensity_val),  // Much faster
+                1.0 + (0.15 * intensity_val), // Somewhat more energy
+                0.1 * intensity_val,          // Some breathiness
+                0.1 * intensity_val,          // Some roughness
+            ),
+            Emotion::Calm | Emotion::Tender => (
+                1.0 - (0.05 * intensity_val), // Slightly lower pitch
+                1.0 - (0.05 * intensity_val), // Slightly slower
+                1.0 - (0.1 * intensity_val),  // Somewhat less energy
+                0.05 * intensity_val,         // Minimal breathiness
+                0.0,                          // No roughness
+            ),
+            Emotion::Neutral => (
+                1.0, // No pitch change
+                1.0, // Normal tempo
+                1.0, // Normal energy
+                0.0, // No breathiness
+                0.0, // No roughness
+            ),
+            _ => {
+                // Default adjustments for other emotions
+                (
+                    1.0 + (0.05 * intensity_val),
+                    1.0,
+                    1.0 + (0.1 * intensity_val),
+                    0.05 * intensity_val,
+                    0.0,
+                )
+            }
+        };
+
+        // Create parameters with mobile-optimized settings
+        EmotionParameters {
+            emotion_vector,
+            duration_ms: None,     // No fixed duration
+            fade_in_ms: Some(50),  // Quick fade-in for responsiveness
+            fade_out_ms: Some(50), // Quick fade-out
+            pitch_shift,
+            tempo_scale,
+            energy_scale,
+            breathiness,
+            roughness,
+            custom_params: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -570,7 +690,10 @@ impl MobileProcessingStats {
 
     fn record_processing_time(&self, duration: Duration) {
         self.total_processed.fetch_add(1, Ordering::Relaxed);
-        *self.total_processing_time.lock().unwrap() += duration;
+        *self
+            .total_processing_time
+            .lock()
+            .expect("Failed to acquire lock on total_processing_time") += duration;
     }
 
     fn record_power_mode_change(&self, _mode: PowerMode) {
@@ -578,13 +701,19 @@ impl MobileProcessingStats {
     }
 
     fn record_thermal_state(&self, state: ThermalState) {
-        let mut events = self.thermal_events.lock().unwrap();
+        let mut events = self
+            .thermal_events
+            .lock()
+            .expect("Failed to acquire lock on thermal_events");
         *events.entry(state).or_insert(0) += 1;
     }
 
     fn get_statistics(&self) -> MobileProcessingStatistics {
         let total_processed = self.total_processed.load(Ordering::Relaxed);
-        let total_time = *self.total_processing_time.lock().unwrap();
+        let total_time = *self
+            .total_processing_time
+            .lock()
+            .expect("Failed to acquire lock on total_processing_time");
         let avg_processing_time = if total_processed > 0 {
             total_time / total_processed
         } else {
@@ -595,7 +724,11 @@ impl MobileProcessingStats {
             total_processed,
             average_processing_time_ms: avg_processing_time.as_secs_f64() * 1000.0,
             power_mode_changes: self.power_mode_changes.load(Ordering::Relaxed),
-            thermal_events: self.thermal_events.lock().unwrap().clone(),
+            thermal_events: self
+                .thermal_events
+                .lock()
+                .expect("Failed to acquire lock on thermal_events")
+                .clone(),
         }
     }
 }
@@ -613,13 +746,18 @@ pub struct MobileProcessingStatistics {
     pub thermal_events: HashMap<ThermalState, u32>,
 }
 
-/// ARM NEON optimized operations
 #[cfg(target_arch = "aarch64")]
 pub mod neon {
     //! ARM NEON SIMD optimizations for emotion processing
 
     /// NEON-optimized vector operations
     pub struct NeonOptimizer;
+
+    impl Default for NeonOptimizer {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
 
     impl NeonOptimizer {
         /// Create new NEON optimizer
@@ -655,23 +793,34 @@ pub mod neon {
 pub mod neon {
     //! Fallback implementations for non-ARM platforms
 
+    /// NEON optimizer fallback for non-ARM platforms
     pub struct NeonOptimizer;
 
+    impl Default for NeonOptimizer {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     impl NeonOptimizer {
+        /// Create a new NEON optimizer (fallback implementation)
         pub fn new() -> Self {
             Self
         }
 
+        /// Process audio with NEON (fallback scalar implementation)
         pub fn process_audio_neon(&self, audio_data: &mut [f32], gain: f32) {
             for sample in audio_data.iter_mut() {
                 *sample *= gain;
             }
         }
 
+        /// Calculate emotion parameters (fallback scalar implementation)
         pub fn calculate_emotion_params_neon(&self, values: &[f32]) -> f32 {
             values.iter().sum::<f32>() / values.len() as f32
         }
 
+        /// Check if NEON is available (always false on non-ARM)
         pub fn is_available() -> bool {
             false
         }
@@ -830,8 +979,7 @@ mod tests {
         // Test passes if we can start monitoring successfully
         handle.abort();
 
-        // Just verify the monitoring can be started - don't check finished state
-        // as it's timing-dependent
-        assert!(true); // Test succeeds if we get here
+        // Test succeeds if we get here without panicking
+        // (monitoring started successfully)
     }
 }

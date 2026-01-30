@@ -1,8 +1,8 @@
 //! Adaptive quality controller for intelligent quality adjustment and strategy management
 
-use crate::{Error, Result};
-use crate::quality::artifact_detection::{DetectedArtifacts, ArtifactType, AdjustmentType};
+use crate::quality::artifact_detection::{AdjustmentType, ArtifactType, DetectedArtifacts};
 use crate::quality::metrics::ObjectiveQualityMetrics;
+use crate::{Error, Result};
 use std::collections::HashMap;
 use tracing::{debug, info};
 
@@ -71,99 +71,97 @@ pub struct QualityStrategyAdjustment {
 impl AdaptiveQualityController {
     /// Create new adaptive quality controller
     pub fn new(quality_target: f32) -> Self {
-        let mut strategies = Vec::new();
-
         // Add default quality improvement strategies
-        strategies.push(QualityStrategy {
-            name: "reduce_conversion_strength".to_string(),
-            trigger: QualityTrigger::OverallQualityBelow(0.6),
-            adjustment: QualityStrategyAdjustment {
-                adjustment_type: AdjustmentType::ReduceConversion,
-                parameter_changes: [("conversion_strength".to_string(), -0.2)].into(),
-                processing_mode_change: None,
-                preferred_model: None,
+        let strategies = vec![
+            QualityStrategy {
+                name: "reduce_conversion_strength".to_string(),
+                trigger: QualityTrigger::OverallQualityBelow(0.6),
+                adjustment: QualityStrategyAdjustment {
+                    adjustment_type: AdjustmentType::ReduceConversion,
+                    parameter_changes: [("conversion_strength".to_string(), -0.2)].into(),
+                    processing_mode_change: None,
+                    preferred_model: None,
+                },
+                effectiveness: 0.7,
+                usage_count: 0,
+                success_rate: 0.7,
             },
-            effectiveness: 0.7,
-            usage_count: 0,
-            success_rate: 0.7,
-        });
-
-        strategies.push(QualityStrategy {
-            name: "enable_noise_reduction".to_string(),
-            trigger: QualityTrigger::SpecificArtifact(ArtifactType::Buzzing, 0.2),
-            adjustment: QualityStrategyAdjustment {
-                adjustment_type: AdjustmentType::NoiseReduction,
-                parameter_changes: [("noise_reduction_strength".to_string(), 0.8)].into(),
-                processing_mode_change: Some("high_quality".to_string()),
-                preferred_model: None,
+            QualityStrategy {
+                name: "enable_noise_reduction".to_string(),
+                trigger: QualityTrigger::SpecificArtifact(ArtifactType::Buzzing, 0.2),
+                adjustment: QualityStrategyAdjustment {
+                    adjustment_type: AdjustmentType::NoiseReduction,
+                    parameter_changes: [("noise_reduction_strength".to_string(), 0.8)].into(),
+                    processing_mode_change: Some("high_quality".to_string()),
+                    preferred_model: None,
+                },
+                effectiveness: 0.8,
+                usage_count: 0,
+                success_rate: 0.75,
             },
-            effectiveness: 0.8,
-            usage_count: 0,
-            success_rate: 0.75,
-        });
-
-        strategies.push(QualityStrategy {
-            name: "spectral_smoothing".to_string(),
-            trigger: QualityTrigger::SpecificArtifact(ArtifactType::SpectralDiscontinuity, 0.15),
-            adjustment: QualityStrategyAdjustment {
-                adjustment_type: AdjustmentType::SpectralSmoothing,
-                parameter_changes: [("smoothing_factor".to_string(), 0.6)].into(),
-                processing_mode_change: None,
-                preferred_model: None,
+            QualityStrategy {
+                name: "spectral_smoothing".to_string(),
+                trigger: QualityTrigger::SpecificArtifact(
+                    ArtifactType::SpectralDiscontinuity,
+                    0.15,
+                ),
+                adjustment: QualityStrategyAdjustment {
+                    adjustment_type: AdjustmentType::SpectralSmoothing,
+                    parameter_changes: [("smoothing_factor".to_string(), 0.6)].into(),
+                    processing_mode_change: None,
+                    preferred_model: None,
+                },
+                effectiveness: 0.6,
+                usage_count: 0,
+                success_rate: 0.65,
             },
-            effectiveness: 0.6,
-            usage_count: 0,
-            success_rate: 0.65,
-        });
-
-        strategies.push(QualityStrategy {
-            name: "pitch_stabilization".to_string(),
-            trigger: QualityTrigger::SpecificArtifact(ArtifactType::PitchVariation, 0.25),
-            adjustment: QualityStrategyAdjustment {
-                adjustment_type: AdjustmentType::PitchStabilization,
-                parameter_changes: [("pitch_smoothing".to_string(), 0.7)].into(),
-                processing_mode_change: None,
-                preferred_model: None,
+            QualityStrategy {
+                name: "pitch_stabilization".to_string(),
+                trigger: QualityTrigger::SpecificArtifact(ArtifactType::PitchVariation, 0.25),
+                adjustment: QualityStrategyAdjustment {
+                    adjustment_type: AdjustmentType::PitchStabilization,
+                    parameter_changes: [("pitch_smoothing".to_string(), 0.7)].into(),
+                    processing_mode_change: None,
+                    preferred_model: None,
+                },
+                effectiveness: 0.75,
+                usage_count: 0,
+                success_rate: 0.8,
             },
-            effectiveness: 0.75,
-            usage_count: 0,
-            success_rate: 0.8,
-        });
-
-        strategies.push(QualityStrategy {
-            name: "formant_preservation".to_string(),
-            trigger: QualityTrigger::SpecificArtifact(ArtifactType::Metallic, 0.2),
-            adjustment: QualityStrategyAdjustment {
-                adjustment_type: AdjustmentType::FormantPreservation,
-                parameter_changes: [("formant_preservation".to_string(), 0.9)].into(),
-                processing_mode_change: None,
-                preferred_model: None,
+            QualityStrategy {
+                name: "formant_preservation".to_string(),
+                trigger: QualityTrigger::SpecificArtifact(ArtifactType::Metallic, 0.2),
+                adjustment: QualityStrategyAdjustment {
+                    adjustment_type: AdjustmentType::FormantPreservation,
+                    parameter_changes: [("formant_preservation".to_string(), 0.9)].into(),
+                    processing_mode_change: None,
+                    preferred_model: None,
+                },
+                effectiveness: 0.65,
+                usage_count: 0,
+                success_rate: 0.7,
             },
-            effectiveness: 0.65,
-            usage_count: 0,
-            success_rate: 0.7,
-        });
-
-        strategies.push(QualityStrategy {
-            name: "low_latency_fallback".to_string(),
-            trigger: QualityTrigger::Combined(vec![
-                QualityTrigger::OverallQualityBelow(0.4),
-                QualityTrigger::ArtifactScoreAbove(0.8),
-            ]),
-            adjustment: QualityStrategyAdjustment {
-                adjustment_type: AdjustmentType::ReduceConversion,
-                parameter_changes: [
-                    ("conversion_strength".to_string(), -0.4),
-                    ("processing_quality".to_string(), -0.3),
-                ]
-                .into(),
-                processing_mode_change: Some("low_latency".to_string()),
-                preferred_model: Some("lightweight".to_string()),
+            QualityStrategy {
+                name: "low_latency_fallback".to_string(),
+                trigger: QualityTrigger::Combined(vec![
+                    QualityTrigger::OverallQualityBelow(0.4),
+                    QualityTrigger::ArtifactScoreAbove(0.8),
+                ]),
+                adjustment: QualityStrategyAdjustment {
+                    adjustment_type: AdjustmentType::ReduceConversion,
+                    parameter_changes: [
+                        ("conversion_strength".to_string(), -0.4),
+                        ("processing_quality".to_string(), -0.3),
+                    ]
+                    .into(),
+                    processing_mode_change: Some("low_latency".to_string()),
+                    preferred_model: Some("lightweight".to_string()),
+                },
+                effectiveness: 0.5,
+                usage_count: 0,
+                success_rate: 0.6,
             },
-            effectiveness: 0.5,
-            usage_count: 0,
-            success_rate: 0.6,
-        });
+        ];
 
         Self {
             quality_target: quality_target.clamp(0.0, 1.0),
@@ -258,6 +256,7 @@ impl AdaptiveQualityController {
     }
 
     /// Evaluate if a trigger condition is met
+    #[allow(clippy::only_used_in_recursion)]
     fn evaluate_trigger(
         &self,
         trigger: &QualityTrigger,

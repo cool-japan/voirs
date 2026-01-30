@@ -603,6 +603,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore] // Requires actual audio hardware, can segfault in CI/test environments
     async fn test_get_output_devices() {
         // This test might fail in CI environments without audio devices
         match AudioPlayer::get_output_devices() {

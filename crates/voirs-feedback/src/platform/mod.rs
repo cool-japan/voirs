@@ -1,4 +1,4 @@
-//! Multi-platform compatibility support for VoiRS feedback system
+//! Multi-platform compatibility support for `VoiRS` feedback system
 //!
 //! This module provides abstractions and implementations for different platforms
 //! including desktop applications, web browsers, mobile apps, and cross-platform
@@ -18,7 +18,7 @@ pub mod reliable_notifications;
 pub mod sync;
 pub mod web;
 
-/// Supported platforms for VoiRS feedback system
+/// Supported platforms for `VoiRS` feedback system
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Platform {
     /// Desktop application (Windows, macOS, Linux)
@@ -56,6 +56,7 @@ pub struct PlatformCapabilities {
 
 impl PlatformCapabilities {
     /// Get default capabilities for desktop platform
+    #[must_use]
     pub fn desktop() -> Self {
         Self {
             platform: Platform::Desktop,
@@ -71,6 +72,7 @@ impl PlatformCapabilities {
     }
 
     /// Get default capabilities for web platform
+    #[must_use]
     pub fn web() -> Self {
         Self {
             platform: Platform::Web,
@@ -86,6 +88,7 @@ impl PlatformCapabilities {
     }
 
     /// Get default capabilities for mobile platform
+    #[must_use]
     pub fn mobile() -> Self {
         Self {
             platform: Platform::Mobile,
@@ -101,6 +104,7 @@ impl PlatformCapabilities {
     }
 
     /// Get default capabilities for embedded platform
+    #[must_use]
     pub fn embedded() -> Self {
         Self {
             platform: Platform::Embedded,
@@ -135,6 +139,7 @@ pub struct PlatformConfig {
 
 impl PlatformConfig {
     /// Create configuration for desktop platform
+    #[must_use]
     pub fn desktop() -> Self {
         Self {
             platform: Platform::Desktop,
@@ -147,6 +152,7 @@ impl PlatformConfig {
     }
 
     /// Create configuration for web platform
+    #[must_use]
     pub fn web() -> Self {
         Self {
             platform: Platform::Web,
@@ -159,6 +165,7 @@ impl PlatformConfig {
     }
 
     /// Create configuration for mobile platform
+    #[must_use]
     pub fn mobile() -> Self {
         Self {
             platform: Platform::Mobile,
@@ -190,6 +197,7 @@ pub struct StorageConfig {
 
 impl StorageConfig {
     /// Desktop storage configuration
+    #[must_use]
     pub fn desktop() -> Self {
         Self {
             base_dir: PathBuf::from("./data"),
@@ -202,6 +210,7 @@ impl StorageConfig {
     }
 
     /// Web storage configuration
+    #[must_use]
     pub fn web() -> Self {
         Self {
             base_dir: PathBuf::from("./web_data"),
@@ -214,6 +223,7 @@ impl StorageConfig {
     }
 
     /// Mobile storage configuration
+    #[must_use]
     pub fn mobile() -> Self {
         Self {
             base_dir: PathBuf::from("./mobile_data"),
@@ -243,6 +253,7 @@ pub struct BackupConfig {
 
 impl BackupConfig {
     /// Desktop backup configuration
+    #[must_use]
     pub fn desktop() -> Self {
         Self {
             enable_backup: true,
@@ -254,6 +265,7 @@ impl BackupConfig {
     }
 
     /// Web backup configuration
+    #[must_use]
     pub fn web() -> Self {
         Self {
             enable_backup: true,
@@ -265,6 +277,7 @@ impl BackupConfig {
     }
 
     /// Mobile backup configuration
+    #[must_use]
     pub fn mobile() -> Self {
         Self {
             enable_backup: true,
@@ -332,6 +345,7 @@ pub struct AudioConfig {
 
 impl AudioConfig {
     /// Desktop audio configuration
+    #[must_use]
     pub fn desktop() -> Self {
         Self {
             sample_rate: 44100,
@@ -346,6 +360,7 @@ impl AudioConfig {
     }
 
     /// Web audio configuration
+    #[must_use]
     pub fn web() -> Self {
         Self {
             sample_rate: 44100,
@@ -360,6 +375,7 @@ impl AudioConfig {
     }
 
     /// Mobile audio configuration
+    #[must_use]
     pub fn mobile() -> Self {
         Self {
             sample_rate: 44100,
@@ -395,6 +411,7 @@ pub struct UIConfig {
 
 impl UIConfig {
     /// Desktop UI configuration
+    #[must_use]
     pub fn desktop() -> Self {
         Self {
             theme: "light".to_string(),
@@ -408,6 +425,7 @@ impl UIConfig {
     }
 
     /// Web UI configuration
+    #[must_use]
     pub fn web() -> Self {
         Self {
             theme: "auto".to_string(),
@@ -421,6 +439,7 @@ impl UIConfig {
     }
 
     /// Mobile UI configuration
+    #[must_use]
     pub fn mobile() -> Self {
         Self {
             theme: "auto".to_string(),
@@ -484,7 +503,7 @@ pub struct PlatformInfo {
 /// Network connection type
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NetworkType {
-    /// WiFi connection
+    /// `WiFi` connection
     WiFi,
     /// Cellular connection
     Cellular,
@@ -560,6 +579,7 @@ pub struct PlatformResourceLimits {
 
 impl PlatformResourceLimits {
     /// Get default resource limits for platform
+    #[must_use]
     pub fn for_platform(platform: Platform) -> Self {
         match platform {
             Platform::Desktop => Self {
@@ -608,6 +628,7 @@ pub struct PlatformManager {
 
 impl PlatformManager {
     /// Create a new platform manager
+    #[must_use]
     pub fn new(config: PlatformConfig) -> Self {
         let mut adapters: HashMap<Platform, Box<dyn PlatformAdapter>> = HashMap::new();
 
@@ -620,6 +641,7 @@ impl PlatformManager {
     }
 
     /// Enhanced platform detection with system information
+    #[must_use]
     pub fn detect_platform_with_info() -> PlatformInfo {
         let platform = Self::detect_platform();
 
@@ -842,6 +864,7 @@ impl PlatformManager {
     }
 
     /// Get platform performance metrics
+    #[must_use]
     pub fn get_performance_metrics(&self) -> PlatformPerformanceMetrics {
         PlatformPerformanceMetrics {
             cpu_usage: self.get_cpu_usage(),
@@ -894,6 +917,7 @@ impl PlatformManager {
     }
 
     /// Check if platform supports specific feature with detailed information
+    #[must_use]
     pub fn check_feature_support(&self, feature: &str) -> FeatureSupport {
         let capabilities = &self.config.capabilities;
 
@@ -929,10 +953,10 @@ impl PlatformManager {
             "haptic" => FeatureSupport {
                 supported: capabilities.supports_haptic,
                 version: Some("1.0".to_string()),
-                limitations: if !capabilities.supports_haptic {
-                    vec!["Haptic hardware not available".to_string()]
-                } else {
+                limitations: if capabilities.supports_haptic {
                     vec![]
+                } else {
+                    vec!["Haptic hardware not available".to_string()]
                 },
                 fallback_available: true,
             },
@@ -952,6 +976,7 @@ impl PlatformManager {
     }
 
     /// Get current platform configuration
+    #[must_use]
     pub fn get_config(&self) -> &PlatformConfig {
         &self.config
     }
@@ -962,13 +987,15 @@ impl PlatformManager {
     }
 
     /// Get platform adapter for current platform
+    #[must_use]
     pub fn get_adapter(&self) -> Option<&dyn PlatformAdapter> {
         self.adapters
             .get(&self.config.platform)
-            .map(|adapter| adapter.as_ref())
+            .map(std::convert::AsRef::as_ref)
     }
 
     /// Detect current platform automatically
+    #[must_use]
     pub fn detect_platform() -> Platform {
         #[cfg(target_os = "windows")]
         return Platform::Desktop;
@@ -1000,6 +1027,7 @@ impl PlatformManager {
     }
 
     /// Create platform manager with auto-detected platform
+    #[must_use]
     pub fn auto_detect() -> Self {
         let platform = Self::detect_platform();
         let config = match platform {
@@ -1020,11 +1048,13 @@ impl PlatformManager {
     }
 
     /// Get platform resource limits
+    #[must_use]
     pub fn get_resource_limits(&self) -> PlatformResourceLimits {
         PlatformResourceLimits::for_platform(self.config.platform.clone())
     }
 
     /// Check if resource usage is within limits
+    #[must_use]
     pub fn check_resource_usage(&self) -> ResourceUsageStatus {
         let limits = self.get_resource_limits();
         let metrics = self.get_performance_metrics();
@@ -1080,6 +1110,7 @@ impl PlatformManager {
     }
 
     /// Get platform-specific recommendations
+    #[must_use]
     pub fn get_recommendations(&self) -> Vec<PlatformRecommendation> {
         let mut recommendations = Vec::new();
         let metrics = self.get_performance_metrics();
@@ -1189,49 +1220,49 @@ pub enum PlatformError {
     #[error("Platform not supported: {platform:?}")]
     UnsupportedPlatform {
         /// The unsupported platform
-        platform: Platform
+        platform: Platform,
     },
 
     /// Feature not available error
     #[error("Feature not available: {feature}")]
     FeatureNotAvailable {
         /// The feature name
-        feature: String
+        feature: String,
     },
 
     /// Storage error
     #[error("Storage error: {message}")]
     StorageError {
         /// Error message
-        message: String
+        message: String,
     },
 
     /// Audio device error
     #[error("Audio device error: {message}")]
     AudioDeviceError {
         /// Error message
-        message: String
+        message: String,
     },
 
     /// Network error
     #[error("Network error: {message}")]
     NetworkError {
         /// Error message
-        message: String
+        message: String,
     },
 
     /// Configuration error
     #[error("Configuration error: {message}")]
     ConfigurationError {
         /// Error message
-        message: String
+        message: String,
     },
 
     /// Initialization error
     #[error("Initialization error: {message}")]
     InitializationError {
         /// Error message
-        message: String
+        message: String,
     },
 
     /// Capacity exceeded error
@@ -1240,28 +1271,28 @@ pub enum PlatformError {
         /// Current size
         current: usize,
         /// Maximum size
-        max: usize
+        max: usize,
     },
 
     /// Operation timed out error
     #[error("Operation timed out")]
     Timeout {
         /// Timeout message
-        message: String
+        message: String,
     },
 
     /// Rate limited error
     #[error("Rate limited: {reason}")]
     RateLimited {
         /// Rate limit reason
-        reason: String
+        reason: String,
     },
 
     /// Permission denied error
     #[error("Permission denied: {permission}")]
     PermissionDenied {
         /// Permission name
-        permission: String
+        permission: String,
     },
 
     /// Resource limit exceeded error
@@ -1270,7 +1301,7 @@ pub enum PlatformError {
         /// Resource name
         resource: String,
         /// Resource limit
-        limit: usize
+        limit: usize,
     },
 }
 

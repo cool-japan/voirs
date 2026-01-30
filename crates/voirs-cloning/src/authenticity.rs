@@ -217,6 +217,7 @@ struct StatisticalFeatures {
 }
 
 /// Main authenticity detector
+#[derive(Clone)]
 pub struct AuthenticityDetector {
     config: AuthenticityConfig,
     model: Arc<RwLock<Option<AuthenticityModel>>>,
@@ -1153,11 +1154,11 @@ mod tests {
         let mut audio = vec![0.0; samples];
 
         // Add abrupt change (artifact)
-        for i in 0..samples / 2 {
-            audio[i] = 0.5;
+        for item in audio.iter_mut().take(samples / 2) {
+            *item = 0.5;
         }
-        for i in samples / 2..samples {
-            audio[i] = -0.5;
+        for item in audio.iter_mut().skip(samples / 2) {
+            *item = -0.5;
         }
 
         let result = detector
@@ -1185,16 +1186,14 @@ mod tests {
         let result = detector.analyze_authenticity(&empty_audio, 22050).await;
 
         // Should handle empty audio gracefully (might return an error or neutral score)
-        match result {
-            Ok(r) => {
-                // Allow some tolerance around neutral score for empty audio
-                assert!(
-                    (r.authenticity_score - 0.5).abs() < 0.1,
-                    "Empty audio should have near-neutral authenticity score: {}",
-                    r.authenticity_score
-                );
-            }
-            Err(_) => {} // Or it might return an error, which is also acceptable
+        if let Ok(r) = result {
+            // Allow some tolerance around neutral score for empty audio
+            assert!(
+                (r.authenticity_score - 0.5).abs() < 0.1,
+                "Empty audio should have near-neutral authenticity score: {}",
+                r.authenticity_score
+            );
         }
+        // Or it might return an error, which is also acceptable
     }
 }

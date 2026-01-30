@@ -18,7 +18,9 @@ pub mod listening_simulation;
 pub mod mcd;
 pub mod multilingual_speaker_models;
 pub mod neural;
+pub mod p56_loudness;
 pub mod pesq;
+pub mod polqa;
 pub mod psychoacoustic;
 pub mod realtime_monitor;
 pub mod si_sdr;
@@ -130,6 +132,7 @@ pub use neural::{
     NeuralConfig, NeuralEvaluator, NeuralQualityAssessment, QualityPredictor, SelfSupervisedResult,
 };
 pub use pesq::PESQEvaluator;
+pub use polqa::{PolqaBandwidth, PolqaEvaluator};
 pub use psychoacoustic::{
     CriticalBand, PsychoacousticAnalysis, PsychoacousticConfig, PsychoacousticEvaluator,
     TemporalMaskingAnalysis,
@@ -2329,6 +2332,7 @@ mod tests {
 // Ecosystem Integration Implementation
 // ============================================================================
 
+#[allow(clippy::items_after_test_module)]
 #[async_trait]
 impl EcosystemEvaluator for QualityEvaluator {
     async fn initialize_with_ecosystem(

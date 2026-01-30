@@ -252,8 +252,8 @@ impl fmt::Display for VoirsStructuredError {
 impl std::error::Error for VoirsStructuredError {}
 
 /// Global error aggregator for collecting and analyzing errors
-static ERROR_AGGREGATOR: std::sync::LazyLock<Mutex<ErrorAggregator>> =
-    std::sync::LazyLock::new(|| Mutex::new(ErrorAggregator::new()));
+static ERROR_AGGREGATOR: once_cell::sync::Lazy<Mutex<ErrorAggregator>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(ErrorAggregator::new()));
 
 /// Error aggregation system
 pub struct ErrorAggregator {
@@ -357,6 +357,10 @@ pub fn clear_error_aggregator() {
 }
 
 /// C API functions for structured error handling
+///
+/// # Safety
+/// The `stats` pointer must point to a writable array of at least `max_entries` VoirsErrorCategory values.
+/// The `counts` pointer must point to a writable array of at least `max_entries` u64 values.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_get_error_stats(
     stats: *mut VoirsErrorCategory,
@@ -381,6 +385,10 @@ pub unsafe extern "C" fn voirs_get_error_stats(
     written
 }
 
+/// Get recent error IDs
+///
+/// # Safety
+/// The `error_ids` pointer must point to a writable array of at least `max_entries` pointer values.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_get_recent_errors(
     error_ids: *mut *const u8,

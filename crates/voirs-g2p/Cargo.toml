@@ -72,6 +72,9 @@ md5.workspace = true
 clap.workspace = true
 tracing-subscriber.workspace = true
 
+# Utilities
+once_cell.workspace = true
+
 [dev-dependencies]
 criterion.workspace = true
 tempfile.workspace = true
@@ -89,5 +92,18 @@ harness = false
 [[bench]]
 name = "memory_profiling"
 harness = false
+
+[[bench]]
+name = "transformer_benchmarks"
+harness = false
+
+[[bench]]
+name = "phonology_benchmarks"
+harness = false
+
+[[bench]]
+name = "parallel_processing_benchmarks"
+harness = false
+
 [lints]
 workspace = true

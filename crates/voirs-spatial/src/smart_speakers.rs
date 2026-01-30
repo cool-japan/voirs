@@ -1681,7 +1681,9 @@ mod tests {
             },
         };
 
-        manager.add_speaker(speaker).unwrap();
+        manager
+            .add_speaker(speaker)
+            .expect("Should successfully add speaker to manager");
         assert_eq!(manager.speakers.len(), 1);
     }
 
@@ -1692,7 +1694,7 @@ mod tests {
             .room_dimensions(5.0, 3.0, 4.0)
             .topology(ArrayTopology::Stereo { separation_m: 2.0 })
             .build()
-            .unwrap();
+            .expect("Should successfully build speaker array config");
 
         assert_eq!(config.name, "test_array");
         assert_eq!(config.room_dimensions, (5.0, 3.0, 4.0));
@@ -1705,8 +1707,10 @@ mod tests {
     #[test]
     fn test_directivity_pattern_serialization() {
         let pattern = DirectivityPattern::Custom(vec![(0.0, 0.0), (90.0, -3.0), (180.0, -20.0)]);
-        let serialized = serde_json::to_string(&pattern).unwrap();
-        let deserialized: DirectivityPattern = serde_json::from_str(&serialized).unwrap();
+        let serialized = serde_json::to_string(&pattern)
+            .expect("Should successfully serialize directivity pattern");
+        let deserialized: DirectivityPattern = serde_json::from_str(&serialized)
+            .expect("Should successfully deserialize directivity pattern");
 
         match deserialized {
             DirectivityPattern::Custom(angles) => {

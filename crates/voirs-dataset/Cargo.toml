@@ -84,6 +84,15 @@ tracing.workspace = true
 # System information
 num_cpus.workspace = true
 
+# Platform APIs
+libc.workspace = true
+
+# Simple random generation
+fastrand.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
 [dev-dependencies]
 criterion.workspace = true
 tempfile.workspace = true
@@ -100,6 +109,10 @@ harness = false
 
 [[bench]]
 name = "scalability"
+harness = false
+
+[[bench]]
+name = "augmentation"
 harness = false
 
 [features]

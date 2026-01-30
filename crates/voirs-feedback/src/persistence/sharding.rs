@@ -270,7 +270,7 @@ impl ShardingManager {
         // Simple alphabetical range partitioning
         let first_char = user_id.chars().next().unwrap_or('a').to_ascii_lowercase();
         let partition =
-            ((first_char as u8 - b'a') as f32 / 26.0 * self.config.shards.len() as f32) as usize;
+            (f32::from(first_char as u8 - b'a') / 26.0 * self.config.shards.len() as f32) as usize;
         let shard_index = partition.min(self.config.shards.len() - 1);
 
         let primary_shard = &self.config.shards[shard_index];
@@ -313,11 +313,12 @@ impl ShardingManager {
         Ok(ShardRoute {
             primary_shard: primary_shard.shard_id.clone(),
             read_replicas: primary_shard.read_replicas.clone(),
-            routing_hash: hour as u64,
+            routing_hash: u64::from(hour),
         })
     }
 
     /// Get shard manager for a specific shard
+    #[must_use]
     pub fn get_shard_manager(&self, shard_id: &str) -> Option<Arc<dyn PersistenceManager>> {
         self.shard_managers.get(shard_id).cloned()
     }
@@ -346,6 +347,7 @@ impl ShardingManager {
     }
 
     /// Get migration status
+    #[must_use]
     pub fn get_migration_status(&self) -> Option<&MigrationState> {
         self.migration_state.as_ref()
     }
@@ -384,7 +386,7 @@ impl ShardingManager {
             .iter()
             .position(|s| s.shard_id == shard_id)
             .ok_or_else(|| PersistenceError::ConfigError {
-                message: format!("Shard {} not found", shard_id),
+                message: format!("Shard {shard_id} not found"),
             })?;
 
         // Mark shard as offline first
@@ -406,6 +408,7 @@ impl ShardingManager {
     }
 
     /// Get cluster health status
+    #[must_use]
     pub fn get_cluster_health(&self) -> ClusterHealth {
         let total_shards = self.config.shards.len();
         let active_shards = self
@@ -492,6 +495,7 @@ pub struct ShardHealth {
 
 impl ConsistentHashRing {
     /// Create a new consistent hash ring
+    #[must_use]
     pub fn new(shards: &[ShardConfig], virtual_nodes: usize) -> Self {
         let mut nodes = Vec::new();
 
@@ -545,7 +549,7 @@ impl ConsistentHashRing {
     }
 }
 
-/// Sharded persistence manager that implements the PersistenceManager trait
+/// Sharded persistence manager that implements the `PersistenceManager` trait
 pub struct ShardedPersistenceManager {
     /// Sharding manager
     sharding_manager: Arc<ShardingManager>,
@@ -563,6 +567,7 @@ impl ShardedPersistenceManager {
     }
 
     /// Get the sharding manager
+    #[must_use]
     pub fn get_sharding_manager(&self) -> Arc<ShardingManager> {
         self.sharding_manager.clone()
     }
@@ -777,7 +782,7 @@ impl PersistenceManager for ShardedPersistenceManager {
                     total_bytes_reclaimed += cleanup_result.bytes_reclaimed;
                 }
                 Err(e) => {
-                    log::warn!("Shard cleanup failed: {}", e);
+                    log::warn!("Shard cleanup failed: {e}");
                 }
             }
         }

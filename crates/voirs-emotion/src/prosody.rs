@@ -12,6 +12,7 @@
 //! - **SSML Integration**: Speech Synthesis Markup Language prosody control
 //! - **Template System**: Reusable prosody templates for different speaking styles
 //! - **Context Awareness**: Prosody adaptation based on linguistic and emotional context
+//! - **Fujisaki Model**: Advanced F0 contour generation using the Fujisaki prosody model
 //!
 //! ## Example Usage
 //!
@@ -31,9 +32,14 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
+pub mod fujisaki;
+
 use crate::{
     types::{Emotion, EmotionDimensions, EmotionIntensity, EmotionParameters, EmotionVector},
     Error, Result,
+};
+pub use fujisaki::{
+    AccentCommand, EmotionFujisakiConfig, FujisakiModel, FujisakiModelBuilder, PhraseCommand,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

@@ -1,11 +1,11 @@
 //! Operation Graph Representation for Kernel Fusion
-//! 
+//!
 //! This module provides data structures and algorithms for representing
 //! and manipulating computational graphs for kernel fusion optimization.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use crate::AcousticError;
 use candle_core::{DType, Shape};
-use crate::error::AcousticError;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Represents a single operation node in the computation graph
 #[derive(Debug, Clone, PartialEq)]
@@ -88,18 +88,24 @@ impl OpNode {
 
     /// Check if this operation is element-wise
     pub fn is_elementwise(&self) -> bool {
-        matches!(self.op_type.as_str(), "add" | "mul" | "sub" | "div" | "relu" | "tanh" | "sigmoid" | "gelu")
+        matches!(
+            self.op_type.as_str(),
+            "add" | "mul" | "sub" | "div" | "relu" | "tanh" | "sigmoid" | "gelu"
+        )
     }
 
     /// Check if this operation is a reduction
     pub fn is_reduction(&self) -> bool {
-        matches!(self.op_type.as_str(), "sum" | "mean" | "max" | "min" | "argmax" | "argmin")
+        matches!(
+            self.op_type.as_str(),
+            "sum" | "mean" | "max" | "min" | "argmax" | "argmin"
+        )
     }
 
     /// Estimate computational cost
     pub fn compute_cost(&self) -> f32 {
         let output_size = self.output_shape.elem_count() as f32;
-        
+
         match self.op_type.as_str() {
             "add" | "sub" | "mul" | "div" => output_size,
             "relu" | "tanh" | "sigmoid" => output_size * 2.0,
@@ -109,9 +115,9 @@ impl OpNode {
                     let a_shape = &self.input_shapes[0];
                     let b_shape = &self.input_shapes[1];
                     if a_shape.dims().len() >= 2 && b_shape.dims().len() >= 2 {
-                        let m = a_shape.dims()[a_shape.dims().len()-2] as f32;
-                        let k = a_shape.dims()[a_shape.dims().len()-1] as f32;
-                        let n = b_shape.dims()[b_shape.dims().len()-1] as f32;
+                        let m = a_shape.dims()[a_shape.dims().len() - 2] as f32;
+                        let k = a_shape.dims()[a_shape.dims().len() - 1] as f32;
+                        let n = b_shape.dims()[b_shape.dims().len() - 1] as f32;
                         2.0 * m * k * n
                     } else {
                         output_size * 2.0
@@ -119,11 +125,11 @@ impl OpNode {
                 } else {
                     output_size * 2.0
                 }
-            },
+            }
             "conv1d" => {
                 // Simplified cost estimation for 1D convolution
                 output_size * 10.0
-            },
+            }
             _ => output_size * 1.5,
         }
     }
@@ -166,18 +172,18 @@ impl OpGraph {
     pub fn add_node(&mut self, mut node: OpNode) -> usize {
         let id = self.next_id;
         self.next_id += 1;
-        
+
         node.id = id;
         self.nodes.insert(id, node);
         self.edges.insert(id, Vec::new());
-        
+
         id
     }
 
     /// Add an edge between two nodes
     pub fn add_edge(&mut self, from: usize, to: usize) -> Result<(), AcousticError> {
         if !self.nodes.contains_key(&from) || !self.nodes.contains_key(&to) {
-            return Err(AcousticError::GraphError {
+            return Err(AcousticError::ProcessingError {
                 message: "Node not found in graph".to_string(),
             });
         }
@@ -246,7 +252,9 @@ impl OpGraph {
 
         for edges in self.edges.values() {
             for &to in edges {
-                *in_degree.get_mut(&to).unwrap() += 1;
+                *in_degree
+                    .get_mut(&to)
+                    .expect("Node must exist in in_degree map (internal consistency)") += 1;
             }
         }
 
@@ -263,7 +271,9 @@ impl OpGraph {
 
             if let Some(successors) = self.edges.get(&node_id) {
                 for &successor in successors {
-                    let degree = in_degree.get_mut(&successor).unwrap();
+                    let degree = in_degree
+                        .get_mut(&successor)
+                        .expect("Successor must exist in in_degree map (internal consistency)");
                     *degree -= 1;
                     if *degree == 0 {
                         queue.push_back(successor);
@@ -273,7 +283,7 @@ impl OpGraph {
         }
 
         if result.len() != self.nodes.len() {
-            return Err(AcousticError::GraphError {
+            return Err(AcousticError::ProcessingError {
                 message: "Graph contains cycles".to_string(),
             });
         }
@@ -289,7 +299,13 @@ impl OpGraph {
 
         for &node_id in self.nodes.keys() {
             if !visited.contains(&node_id) {
-                self.dfs_cycles(node_id, &mut visited, &mut rec_stack, &mut cycles, &mut Vec::new());
+                self.dfs_cycles(
+                    node_id,
+                    &mut visited,
+                    &mut rec_stack,
+                    &mut cycles,
+                    &mut Vec::new(),
+                );
             }
         }
 
@@ -374,7 +390,8 @@ impl FusionGraph {
 
     /// Calculate total estimated speedup
     pub fn total_speedup(&self) -> f32 {
-        self.fusion_groups.iter()
+        self.fusion_groups
+            .iter()
             .map(|group| group.estimated_speedup)
             .sum::<f32>()
             .max(1.0)
@@ -418,7 +435,7 @@ mod tests {
     fn test_op_node_creation() {
         let shape = Shape::from_dims(&[10, 20]);
         let node = OpNode::new(0, "add".to_string(), shape.clone(), DType::F32);
-        
+
         assert_eq!(node.id(), 0);
         assert_eq!(node.op_type(), "add");
         assert_eq!(node.output_shape(), &shape);
@@ -433,7 +450,7 @@ mod tests {
         let node = OpNode::new(0, "conv1d".to_string(), shape, DType::F32)
             .with_parameter("kernel_size".to_string(), OpParameter::Int(3))
             .with_parameter("stride".to_string(), OpParameter::Int(1));
-        
+
         assert_eq!(node.parameter("kernel_size"), Some(&OpParameter::Int(3)));
         assert_eq!(node.parameter("stride"), Some(&OpParameter::Int(1)));
         assert_eq!(node.parameter("nonexistent"), None);
@@ -442,14 +459,14 @@ mod tests {
     #[test]
     fn test_op_graph_creation() {
         let mut graph = OpGraph::new();
-        
+
         let shape = Shape::from_dims(&[10, 20]);
         let node1 = OpNode::new(0, "input".to_string(), shape.clone(), DType::F32);
         let node2 = OpNode::new(1, "relu".to_string(), shape, DType::F32);
-        
+
         let id1 = graph.add_node(node1);
         let id2 = graph.add_node(node2);
-        
+
         assert!(graph.add_edge(id1, id2).is_ok());
         assert_eq!(graph.nodes().len(), 2);
     }
@@ -457,27 +474,27 @@ mod tests {
     #[test]
     fn test_topological_sort() {
         let mut graph = OpGraph::new();
-        
+
         let shape = Shape::from_dims(&[10]);
         let node1 = OpNode::new(0, "input".to_string(), shape.clone(), DType::F32);
         let node2 = OpNode::new(1, "relu".to_string(), shape.clone(), DType::F32);
         let node3 = OpNode::new(2, "output".to_string(), shape, DType::F32);
-        
+
         let id1 = graph.add_node(node1);
         let id2 = graph.add_node(node2);
         let id3 = graph.add_node(node3);
-        
+
         graph.add_edge(id1, id2).unwrap();
         graph.add_edge(id2, id3).unwrap();
-        
+
         let sorted = graph.topological_sort().unwrap();
         assert_eq!(sorted.len(), 3);
-        
+
         // Check that dependencies come before their dependents
         let pos1 = sorted.iter().position(|&x| x == id1).unwrap();
         let pos2 = sorted.iter().position(|&x| x == id2).unwrap();
         let pos3 = sorted.iter().position(|&x| x == id3).unwrap();
-        
+
         assert!(pos1 < pos2);
         assert!(pos2 < pos3);
     }
@@ -486,7 +503,7 @@ mod tests {
     fn test_fusion_graph() {
         let op_graph = OpGraph::new();
         let fusion_graph = FusionGraph::from_op_graph(op_graph);
-        
+
         assert_eq!(fusion_graph.fusion_groups().len(), 0);
         assert_eq!(fusion_graph.total_speedup(), 1.0);
     }
@@ -494,12 +511,17 @@ mod tests {
     #[test]
     fn test_compute_cost() {
         let shape = Shape::from_dims(&[1000]);
-        
+
         let add_node = OpNode::new(0, "add".to_string(), shape.clone(), DType::F32);
         let matmul_shapes = vec![Shape::from_dims(&[100, 200]), Shape::from_dims(&[200, 300])];
-        let matmul_node = OpNode::new(1, "matmul".to_string(), Shape::from_dims(&[100, 300]), DType::F32)
-            .with_input_shapes(matmul_shapes);
-        
+        let matmul_node = OpNode::new(
+            1,
+            "matmul".to_string(),
+            Shape::from_dims(&[100, 300]),
+            DType::F32,
+        )
+        .with_input_shapes(matmul_shapes);
+
         assert_eq!(add_node.compute_cost(), 1000.0);
         assert_eq!(matmul_node.compute_cost(), 2.0 * 100.0 * 200.0 * 300.0);
     }

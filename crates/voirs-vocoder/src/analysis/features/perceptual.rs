@@ -390,15 +390,31 @@ mod tests {
         
         impl PerceptualFeatureComputer for MockExtractor {
             fn compute_perceptual_features(&self, _audio: &[f32]) -> Result<PerceptualFeatureVector> {
-                unimplemented!()
+                Ok(PerceptualFeatureVector {
+                    loudness_lufs: -23.0,
+                    brightness: 0.5,
+                    warmth: 0.5,
+                    roughness: 0.0,
+                    sharpness: 0.0,
+                    fluctuation_strength: 0.0,
+                    tonality: 0.5,
+                })
             }
-            
+
             fn extract_perceptual_features(&self, _samples: &Array1<f32>) -> Result<PerceptualFeatureVector> {
-                unimplemented!()
+                Ok(PerceptualFeatureVector {
+                    loudness_lufs: -23.0,
+                    brightness: 0.5,
+                    warmth: 0.5,
+                    roughness: 0.0,
+                    sharpness: 0.0,
+                    fluctuation_strength: 0.0,
+                    tonality: 0.5,
+                })
             }
-            
+
             fn compute_loudness(&self, _samples: &Array1<f32>) -> f32 {
-                unimplemented!()
+                -23.0 // Standard reference loudness (LUFS)
             }
             
             fn compute_brightness(&self, power_spectrogram: &Array2<f32>) -> f32 {
@@ -445,10 +461,21 @@ mod tests {
                 }
             }
             
-            fn compute_roughness(&self, _samples: &Array1<f32>) -> f32 { unimplemented!() }
-            fn compute_sharpness(&self, _power_spectrogram: &Array2<f32>) -> f32 { unimplemented!() }
-            fn compute_fluctuation_strength(&self, _samples: &Array1<f32>) -> f32 { unimplemented!() }
-            fn compute_tonality(&self, _power_spectrogram: &Array2<f32>) -> f32 { unimplemented!() }
+            fn compute_roughness(&self, _samples: &Array1<f32>) -> f32 {
+                0.0 // Mock: no roughness for test data
+            }
+
+            fn compute_sharpness(&self, _power_spectrogram: &Array2<f32>) -> f32 {
+                0.0 // Mock: neutral sharpness for test data
+            }
+
+            fn compute_fluctuation_strength(&self, _samples: &Array1<f32>) -> f32 {
+                0.0 // Mock: no fluctuation for test data
+            }
+
+            fn compute_tonality(&self, _power_spectrogram: &Array2<f32>) -> f32 {
+                0.5 // Mock: neutral tonality for test data
+            }
         }
         
         let extractor = MockExtractor {

@@ -350,8 +350,7 @@ impl VisualStudioIntegration {
         &self,
         target: &MSBuildTarget,
     ) -> Result<String, Box<dyn std::error::Error>> {
-        let xml = format!(
-            r#"<?xml version="1.0" encoding="utf-8"?>
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   
   <PropertyGroup>
@@ -375,7 +374,7 @@ impl VisualStudioIntegration {
   </PropertyGroup>
 
 </Project>"#
-        );
+            .to_string();
 
         Ok(xml)
     }
@@ -991,6 +990,11 @@ pub extern "C" fn voirs_vs_create_integration() -> *mut VisualStudioIntegration 
     Box::into_raw(Box::new(VisualStudioIntegration::new()))
 }
 
+/// Destroy Visual Studio integration instance
+///
+/// # Safety
+/// The `integration` pointer must be a valid handle previously returned by `voirs_vs_create_integration`.
+/// After calling this function, the handle becomes invalid and must not be used.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_vs_destroy_integration(integration: *mut VisualStudioIntegration) {
     if !integration.is_null() {
@@ -1000,6 +1004,10 @@ pub unsafe extern "C" fn voirs_vs_destroy_integration(integration: *mut VisualSt
     }
 }
 
+/// Install Visual Studio integration
+///
+/// # Safety
+/// The `integration` pointer must be a valid handle previously returned by `voirs_vs_create_integration`.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_vs_install_integration(
     integration: *mut VisualStudioIntegration,
@@ -1011,6 +1019,10 @@ pub unsafe extern "C" fn voirs_vs_install_integration(
     unsafe { (*integration).install_integration().is_ok() }
 }
 
+/// Verify Visual Studio installation
+///
+/// # Safety
+/// The `integration` pointer must be a valid handle previously returned by `voirs_vs_create_integration`.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_vs_verify_installation(
     integration: *mut VisualStudioIntegration,
@@ -1022,6 +1034,10 @@ pub unsafe extern "C" fn voirs_vs_verify_installation(
     unsafe { (*integration).verify_installation().unwrap_or(false) }
 }
 
+/// Get Visual Studio version
+///
+/// # Safety
+/// The `integration` pointer must be a valid handle previously returned by `voirs_vs_create_integration`.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_vs_get_version(integration: *mut VisualStudioIntegration) -> u32 {
     if integration.is_null() {

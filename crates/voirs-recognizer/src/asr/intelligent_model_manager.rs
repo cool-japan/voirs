@@ -316,7 +316,7 @@ impl IntelligentModelManager {
                 (AudioContentType::Silence, 0.9),
             ]
             .iter()
-            .cloned()
+            .copied()
             .collect(),
             quality_level_thresholds: [
                 (AudioQualityLevel::Poor, 0.6),
@@ -350,7 +350,7 @@ impl IntelligentModelManager {
         let adaptive_processor = Arc::new(Mutex::new(
             AdaptiveProcessor::new(adaptive_config).map_err(|e| {
                 RecognitionError::AudioProcessingError {
-                    message: format!("Failed to initialize adaptive processor: {}", e),
+                    message: format!("Failed to initialize adaptive processor: {e}"),
                     source: Some(Box::new(e)),
                 }
             })?,
@@ -734,7 +734,7 @@ impl IntelligentModelManager {
             memory_mb: base_memory * quality_multiplier * duration_factor,
             cpu_intensity: 0.7 * quality_multiplier,
             gpu_requirement: Some(0.5 * quality_multiplier),
-            warmup_time_ms: 500.0 * quality_multiplier as f64,
+            warmup_time_ms: 500.0 * f64::from(quality_multiplier),
         }
     }
 
@@ -882,7 +882,7 @@ impl IntelligentModelManager {
             (AudioContentType::Silence, 0.9),
         ]
         .iter()
-        .cloned()
+        .copied()
         .collect();
 
         Ok(())

@@ -9,6 +9,7 @@
 pub mod diffusion;
 pub mod legacy;
 pub mod sampling;
+pub mod sampling_utils;
 pub mod schedule;
 // pub mod trainer;  // Has Candle API compatibility issues, implementing simplified training directly
 pub mod unet;
@@ -743,7 +744,7 @@ impl DiffWaveVocoder {
         // Clean up cache periodically (use a simple deterministic approach instead of rand)
         if self.cache_enabled {
             let stats = self.stats.lock().unwrap();
-            if stats.total_inferences % 100 == 0 {
+            if stats.total_inferences.is_multiple_of(100) {
                 drop(stats);
                 self.cleanup_cache();
             }

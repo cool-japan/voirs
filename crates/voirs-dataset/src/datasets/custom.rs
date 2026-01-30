@@ -186,7 +186,9 @@ impl CustomSample {
             let audio = load_audio(&self.audio_path)?;
             self.cached_audio = Some(audio);
         }
-        Ok(self.cached_audio.as_ref().unwrap())
+        self.cached_audio
+            .as_ref()
+            .ok_or_else(|| DatasetError::FormatError("Failed to load audio data".to_string()))
     }
 
     /// Get audio data (load if not cached)
@@ -302,31 +304,34 @@ impl CustomDataset {
             if let Some(ext) = path.extension() {
                 match ext.to_str() {
                     Some("csv") => {
-                        self.config.transcript_path =
-                            Some(path.strip_prefix(root).unwrap().to_path_buf());
-                        return self.load_from_csv().await;
+                        if let Ok(relative_path) = path.strip_prefix(root) {
+                            self.config.transcript_path = Some(relative_path.to_path_buf());
+                            return self.load_from_csv().await;
+                        }
                     }
                     Some("json") => {
-                        self.config.transcript_path =
-                            Some(path.strip_prefix(root).unwrap().to_path_buf());
-                        return self.load_from_json().await;
+                        if let Ok(relative_path) = path.strip_prefix(root) {
+                            self.config.transcript_path = Some(relative_path.to_path_buf());
+                            return self.load_from_json().await;
+                        }
                     }
                     Some("jsonl") | Some("jsonlines") => {
-                        self.config.transcript_path =
-                            Some(path.strip_prefix(root).unwrap().to_path_buf());
-                        return self.load_from_jsonlines().await;
+                        if let Ok(relative_path) = path.strip_prefix(root) {
+                            self.config.transcript_path = Some(relative_path.to_path_buf());
+                            return self.load_from_jsonlines().await;
+                        }
                     }
                     Some("txt")
                         if path
                             .file_name()
-                            .unwrap()
-                            .to_str()
-                            .unwrap()
-                            .contains("manifest") =>
+                            .and_then(|n| n.to_str())
+                            .map(|s| s.contains("manifest"))
+                            .unwrap_or(false) =>
                     {
-                        self.config.transcript_path =
-                            Some(path.strip_prefix(root).unwrap().to_path_buf());
-                        return self.load_from_manifest().await;
+                        if let Ok(relative_path) = path.strip_prefix(root) {
+                            self.config.transcript_path = Some(relative_path.to_path_buf());
+                            return self.load_from_manifest().await;
+                        }
                     }
                     _ => {}
                 }

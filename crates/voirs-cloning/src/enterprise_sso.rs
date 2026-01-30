@@ -391,6 +391,12 @@ impl EnterpriseSSOManager {
     }
 }
 
+impl Default for RBACManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RBACManager {
     /// Create a new RBAC manager
     pub fn new() -> Self {
@@ -488,7 +494,7 @@ impl RBACManager {
 
         self.user_roles
             .entry(user_id.to_string())
-            .or_insert_with(HashSet::new)
+            .or_default()
             .insert(role_name.to_string());
 
         Ok(())

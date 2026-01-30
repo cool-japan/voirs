@@ -94,6 +94,7 @@ pub struct SIMDSpatialOps;
 impl SIMDSpatialOps {
     /// Calculate distances from one position to multiple positions using SIMD
     #[cfg(target_feature = "sse2")]
+    #[allow(unsafe_code)]
     pub fn distances_simd(from: Position3D, positions: &[Position3D]) -> Vec<f32> {
         let mut distances = Vec::with_capacity(positions.len());
 
@@ -142,9 +143,7 @@ impl SIMDSpatialOps {
                 let mut result = [0.0f32; 4];
                 _mm_storeu_ps(result.as_mut_ptr(), sqrt_vals);
 
-                for j in 0..4 {
-                    distances.push(result[j]);
-                }
+                distances.extend_from_slice(&result);
 
                 i += 4;
             }
@@ -177,6 +176,7 @@ impl SIMDSpatialOps {
 
     /// SIMD-optimized vector normalization for multiple positions
     #[cfg(target_feature = "sse2")]
+    #[allow(unsafe_code)]
     pub fn normalize_batch_simd(positions: &mut [Position3D]) {
         unsafe {
             let mut i = 0;
@@ -270,6 +270,7 @@ impl SIMDSpatialOps {
 
     /// SIMD-optimized dot product calculations
     #[cfg(target_feature = "sse2")]
+    #[allow(unsafe_code)]
     pub fn dot_products_simd(a_positions: &[Position3D], b_positions: &[Position3D]) -> Vec<f32> {
         assert_eq!(a_positions.len(), b_positions.len());
         let mut results = Vec::with_capacity(a_positions.len());
@@ -327,9 +328,7 @@ impl SIMDSpatialOps {
                 let mut result = [0.0f32; 4];
                 _mm_storeu_ps(result.as_mut_ptr(), dots);
 
-                for j in 0..4 {
-                    results.push(result[j]);
-                }
+                results.extend_from_slice(&result);
 
                 i += 4;
             }

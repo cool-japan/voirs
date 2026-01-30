@@ -1,4 +1,4 @@
-//! Data persistence system for VoiRS feedback
+//! Data persistence system for `VoiRS` feedback
 //!
 //! This module provides robust data persistence capabilities for user progress,
 //! feedback history, and system state management with support for multiple backends.
@@ -230,9 +230,9 @@ impl Default for PersistenceConfig {
 /// Supported persistence backends
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PersistenceBackend {
-    /// SQLite file database
+    /// `SQLite` file database
     SQLite,
-    /// PostgreSQL database
+    /// `PostgreSQL` database
     PostgreSQL,
     /// In-memory storage (for testing)
     Memory,

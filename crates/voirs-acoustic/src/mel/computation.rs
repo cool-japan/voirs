@@ -53,7 +53,9 @@ impl MelComputer {
     /// Compute mel spectrogram from audio
     pub fn compute(&self, audio: &[f32]) -> Result<MelSpectrogram> {
         if audio.is_empty() {
-            return Err(AcousticError::InputError("Empty audio signal".to_string()));
+            return Err(AcousticError::InputError {
+                message: "Empty audio signal".to_string(),
+            });
         }
 
         // Compute STFT
@@ -80,7 +82,9 @@ impl MelComputer {
     /// Compute mel spectrogram from audio with SciRS2 optimizations
     pub fn compute_optimized(&self, audio: &[f32]) -> Result<MelSpectrogram> {
         if audio.is_empty() {
-            return Err(AcousticError::InputError("Empty audio signal".to_string()));
+            return Err(AcousticError::InputError {
+                message: "Empty audio signal".to_string(),
+            });
         }
 
         // Compute STFT with optimized FFT
@@ -225,8 +229,10 @@ impl MelComputer {
         }
 
         // Use SciRS2's real-to-complex FFT for better performance
-        let spectrum = rfft(signal, Some(self.fft_size))
-            .map_err(|e| AcousticError::ModelError(format!("SciRS2 FFT failed: {e:?}")))?;
+        let spectrum =
+            rfft(signal, Some(self.fft_size)).map_err(|e| AcousticError::ModelError {
+                message: format!("SciRS2 FFT failed: {e:?}"),
+            })?;
 
         // Convert to our Complex32 format
         let result: Vec<Complex32> = spectrum
@@ -352,6 +358,7 @@ impl MelComputer {
         let mut linear_spec = vec![vec![0.0; n_frames]; n_freqs];
 
         // Apply pseudo-inverse of mel filterbank
+        #[allow(clippy::needless_range_loop)]
         for frame_idx in 0..n_frames {
             for freq_idx in 0..n_freqs {
                 let mut linear_value = 0.0;
@@ -450,6 +457,7 @@ impl MelComputer {
 
         let mut stft_result = vec![vec![Complex32::new(0.0, 0.0); n_frames]; n_fft / 2 + 1];
 
+        #[allow(clippy::needless_range_loop)]
         for frame_idx in 0..n_frames {
             let start = frame_idx * hop_length;
             let end = (start + win_length).min(audio.len());

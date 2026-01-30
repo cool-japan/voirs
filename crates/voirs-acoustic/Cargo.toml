@@ -79,10 +79,66 @@ voirs-vocoder.workspace = true
 tracing-subscriber.workspace = true
 criterion = { workspace = true }
 tokio-test.workspace = true
+proptest.workspace = true
 
 [[bench]]
 name = "simple_benchmarks"
 harness = false
+
+[[bench]]
+name = "performance_validation"
+harness = false
+
+[[bench]]
+name = "advanced_features_benchmarks"
+harness = false
+
+[[bench]]
+name = "profiling_benchmarks"
+harness = false
+
+[[bench]]
+name = "scirs2_benchmarks"
+harness = false
+
+[[bench]]
+name = "fusion_benchmarks"
+harness = false
+
+[[bench]]
+name = "production_benchmarks"
+harness = false
+
+[[bench]]
+name = "simd_operations_benchmarks"
+harness = false
+
+[[example]]
+name = "advanced_features_demo"
+required-features = ["candle"]
+
+[[example]]
+name = "scirs2_optimization_demo"
+
+[[example]]
+name = "fusion_optimization_demo"
+
+[[example]]
+name = "profiling_demo"
+
+[[example]]
+name = "production_monitoring_demo"
+
+[[example]]
+name = "simple_synthesis_demo"
+
+[[example]]
+name = "model_optimization"
+required-features = ["candle"]
+
+[[example]]
+name = "pretrained_models"
+required-features = ["candle"]
 
 [features]
 default = ["candle"]
@@ -90,7 +146,11 @@ candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers"]
 onnx = ["dep:ort"]
 gpu = ["metal"]  # On macOS, use Metal; on Linux/Windows would use cuda
 cuda = ["candle-core?/cuda", "ort?/cuda"]
-metal = ["candle-core?/metal"]
+metal = ["dep:metal-rs"]  # Only available on macOS
 coreml = ["ort?/coreml"]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+metal-rs = { version = "0.27", optional = true, package = "metal" }
+
 [lints]
 workspace = true

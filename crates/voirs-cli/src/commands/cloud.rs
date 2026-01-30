@@ -6,7 +6,7 @@ use crate::cloud::{
     StorageProvider, SyncDirection, TranslationQuality, TranslationRequest,
 };
 use crate::{CloudCommands, GlobalOptions};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use voirs_sdk::config::AppConfig;
 use voirs_sdk::types::SynthesisConfig;
 use voirs_sdk::QualityLevel;
@@ -99,14 +99,14 @@ async fn execute_sync(
     let storage_config = get_storage_config(config)?;
     let cache_dir = get_cache_directory()?;
     let mut storage_manager = CloudStorageManager::new(storage_config, cache_dir).map_err(|e| {
-        VoirsError::config_error(&format!("Failed to initialize storage manager: {}", e))
+        VoirsError::config_error(format!("Failed to initialize storage manager: {}", e))
     })?;
 
     // Perform sync
     let sync_result = storage_manager
         .sync()
         .await
-        .map_err(|e| VoirsError::config_error(&format!("Sync failed: {}", e)))?;
+        .map_err(|e| VoirsError::config_error(format!("Sync failed: {}", e)))?;
 
     if !global.quiet {
         println!("✅ Sync completed successfully!");
@@ -126,7 +126,7 @@ async fn execute_sync(
 
 /// Execute add to sync command
 async fn execute_add_to_sync(
-    local_path: &PathBuf,
+    local_path: &Path,
     remote_path: &str,
     direction: &str,
     config: &AppConfig,
@@ -154,14 +154,18 @@ async fn execute_add_to_sync(
     let storage_config = get_storage_config(config)?;
     let cache_dir = get_cache_directory()?;
     let mut storage_manager = CloudStorageManager::new(storage_config, cache_dir).map_err(|e| {
-        VoirsError::config_error(&format!("Failed to initialize storage manager: {}", e))
+        VoirsError::config_error(format!("Failed to initialize storage manager: {}", e))
     })?;
 
     // Add to sync
     storage_manager
-        .add_to_sync(local_path.clone(), remote_path.to_string(), sync_direction)
+        .add_to_sync(
+            local_path.to_path_buf(),
+            remote_path.to_string(),
+            sync_direction,
+        )
         .await
-        .map_err(|e| VoirsError::config_error(&format!("Failed to add to sync: {}", e)))?;
+        .map_err(|e| VoirsError::config_error(format!("Failed to add to sync: {}", e)))?;
 
     if !global.quiet {
         println!(
@@ -183,13 +187,13 @@ async fn execute_storage_stats(config: &AppConfig, global: &GlobalOptions) -> Re
     let storage_config = get_storage_config(config)?;
     let cache_dir = get_cache_directory()?;
     let storage_manager = CloudStorageManager::new(storage_config, cache_dir).map_err(|e| {
-        VoirsError::config_error(&format!("Failed to initialize storage manager: {}", e))
+        VoirsError::config_error(format!("Failed to initialize storage manager: {}", e))
     })?;
 
     let stats = storage_manager
         .get_storage_stats()
         .await
-        .map_err(|e| VoirsError::config_error(&format!("Failed to get storage stats: {}", e)))?;
+        .map_err(|e| VoirsError::config_error(format!("Failed to get storage stats: {}", e)))?;
 
     println!("☁️  Cloud Storage Statistics");
     println!("═══════════════════════════");
@@ -225,13 +229,13 @@ async fn execute_cleanup_cache(
     let storage_config = get_storage_config(config)?;
     let cache_dir = get_cache_directory()?;
     let mut storage_manager = CloudStorageManager::new(storage_config, cache_dir).map_err(|e| {
-        VoirsError::config_error(&format!("Failed to initialize storage manager: {}", e))
+        VoirsError::config_error(format!("Failed to initialize storage manager: {}", e))
     })?;
 
     let cleanup_result = storage_manager
         .cleanup_cache(max_age_days)
         .await
-        .map_err(|e| VoirsError::config_error(&format!("Failed to cleanup cache: {}", e)))?;
+        .map_err(|e| VoirsError::config_error(format!("Failed to cleanup cache: {}", e)))?;
 
     if !global.quiet {
         println!("✅ Cache cleanup completed!");
@@ -259,9 +263,8 @@ async fn execute_translate(
     }
 
     let api_config = get_api_config(config)?;
-    let mut api_client = CloudApiClient::new(api_config).map_err(|e| {
-        VoirsError::config_error(&format!("Failed to initialize API client: {}", e))
-    })?;
+    let mut api_client = CloudApiClient::new(api_config)
+        .map_err(|e| VoirsError::config_error(format!("Failed to initialize API client: {}", e)))?;
 
     let translation_quality = match quality.to_lowercase().as_str() {
         "fast" => TranslationQuality::Fast,
@@ -281,7 +284,7 @@ async fn execute_translate(
     let response = api_client
         .translate_text(request)
         .await
-        .map_err(|e| VoirsError::config_error(&format!("Translation failed: {}", e)))?;
+        .map_err(|e| VoirsError::config_error(format!("Translation failed: {}", e)))?;
 
     println!("📝 Translation Result:");
     println!("═══════════════════");
@@ -307,9 +310,8 @@ async fn execute_analyze_content(
     }
 
     let api_config = get_api_config(config)?;
-    let mut api_client = CloudApiClient::new(api_config).map_err(|e| {
-        VoirsError::config_error(&format!("Failed to initialize API client: {}", e))
-    })?;
+    let mut api_client = CloudApiClient::new(api_config)
+        .map_err(|e| VoirsError::config_error(format!("Failed to initialize API client: {}", e)))?;
 
     let request = ContentAnalysisRequest {
         content: text.to_string(),
@@ -322,13 +324,13 @@ async fn execute_analyze_content(
                 _ => AnalysisType::Sentiment,
             })
             .collect(),
-        language: language.map(|s| s.clone()),
+        language: language.cloned(),
     };
 
     let response = api_client
         .analyze_content(request)
         .await
-        .map_err(|e| VoirsError::config_error(&format!("Content analysis failed: {}", e)))?;
+        .map_err(|e| VoirsError::config_error(format!("Content analysis failed: {}", e)))?;
 
     println!("🔍 Content Analysis Results:");
     println!("════════════════════════════");
@@ -381,9 +383,8 @@ async fn execute_assess_quality(
     }
 
     let api_config = get_api_config(config)?;
-    let mut api_client = CloudApiClient::new(api_config).map_err(|e| {
-        VoirsError::config_error(&format!("Failed to initialize API client: {}", e))
-    })?;
+    let mut api_client = CloudApiClient::new(api_config)
+        .map_err(|e| VoirsError::config_error(format!("Failed to initialize API client: {}", e)))?;
 
     // Read audio file (in a real implementation, you'd convert to the expected format)
     let audio_data = std::fs::read(audio_file).map_err(|e| VoirsError::IoError {
@@ -412,7 +413,7 @@ async fn execute_assess_quality(
     let response = api_client
         .assess_quality(request)
         .await
-        .map_err(|e| VoirsError::config_error(&format!("Quality assessment failed: {}", e)))?;
+        .map_err(|e| VoirsError::config_error(format!("Quality assessment failed: {}", e)))?;
 
     println!("🎧 Audio Quality Assessment:");
     println!("═══════════════════════════");
@@ -438,14 +439,13 @@ async fn execute_health_check(config: &AppConfig, global: &GlobalOptions) -> Res
     }
 
     let api_config = get_api_config(config)?;
-    let mut api_client = CloudApiClient::new(api_config).map_err(|e| {
-        VoirsError::config_error(&format!("Failed to initialize API client: {}", e))
-    })?;
+    let mut api_client = CloudApiClient::new(api_config)
+        .map_err(|e| VoirsError::config_error(format!("Failed to initialize API client: {}", e)))?;
 
     let health = api_client
         .get_service_health()
         .await
-        .map_err(|e| VoirsError::config_error(&format!("Health check failed: {}", e)))?;
+        .map_err(|e| VoirsError::config_error(format!("Health check failed: {}", e)))?;
 
     println!("🏥 Cloud Service Health Status:");
     println!("══════════════════════════════");
@@ -517,19 +517,63 @@ async fn execute_configure(
             println!("   Provider:       {:?}", storage_config.provider);
             println!("   Bucket:         {}", storage_config.bucket_name);
             println!("   Region:         {}", storage_config.region);
-            println!("   Access Key:     {}", if storage_config.access_key.is_some() { "***configured***" } else { "<not set>" });
-            println!("   Secret Key:     {}", if storage_config.secret_key.is_some() { "***configured***" } else { "<not set>" });
-            println!("   Endpoint:       {}", storage_config.endpoint.as_deref().unwrap_or("<default>"));
-            println!("   Encryption:     {}", if storage_config.encryption_enabled { "Enabled" } else { "Disabled" });
-            println!("   Compression:    {}", if storage_config.compression_enabled { "Enabled" } else { "Disabled" });
-            println!("   Sync interval:  {}s", storage_config.sync_interval_seconds);
+            println!(
+                "   Access Key:     {}",
+                if storage_config.access_key.is_some() {
+                    "***configured***"
+                } else {
+                    "<not set>"
+                }
+            );
+            println!(
+                "   Secret Key:     {}",
+                if storage_config.secret_key.is_some() {
+                    "***configured***"
+                } else {
+                    "<not set>"
+                }
+            );
+            println!(
+                "   Endpoint:       {}",
+                storage_config.endpoint.as_deref().unwrap_or("<default>")
+            );
+            println!(
+                "   Encryption:     {}",
+                if storage_config.encryption_enabled {
+                    "Enabled"
+                } else {
+                    "Disabled"
+                }
+            );
+            println!(
+                "   Compression:    {}",
+                if storage_config.compression_enabled {
+                    "Enabled"
+                } else {
+                    "Disabled"
+                }
+            );
+            println!(
+                "   Sync interval:  {}s",
+                storage_config.sync_interval_seconds
+            );
 
             println!("\n🌐 API Configuration:");
             println!("   Base URL:       {}", api_config.base_url);
-            println!("   API Key:        {}", if api_config.api_key.is_some() { "***configured***" } else { "<not set>" });
+            println!(
+                "   API Key:        {}",
+                if api_config.api_key.is_some() {
+                    "***configured***"
+                } else {
+                    "<not set>"
+                }
+            );
             println!("   Timeout:        {}s", api_config.timeout_seconds);
             println!("   Retry attempts: {}", api_config.retry_attempts);
-            println!("   Rate limit:     {}/min", api_config.rate_limit_requests_per_minute);
+            println!(
+                "   Rate limit:     {}/min",
+                api_config.rate_limit_requests_per_minute
+            );
             println!("   Enabled services:");
             for service in &api_config.enabled_services {
                 println!("     - {:?}", service);
@@ -596,7 +640,7 @@ async fn execute_configure(
         };
 
         std::fs::create_dir_all(&config_dir).map_err(|e| {
-            VoirsError::config_error(&format!("Failed to create config directory: {}", e))
+            VoirsError::config_error(format!("Failed to create config directory: {}", e))
         })?;
 
         let config_file = config_dir.join("cloud_config.toml");
@@ -642,9 +686,8 @@ enabled_services = ["Translation", "ContentManagement", "QualityAssurance"]
             default_api.rate_limit_requests_per_minute,
         );
 
-        std::fs::write(&config_file, config_content).map_err(|e| {
-            VoirsError::config_error(&format!("Failed to write config file: {}", e))
-        })?;
+        std::fs::write(&config_file, config_content)
+            .map_err(|e| VoirsError::config_error(format!("Failed to write config file: {}", e)))?;
 
         if !global.quiet {
             println!("✅ Cloud configuration initialized!");

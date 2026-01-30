@@ -665,6 +665,12 @@ pub struct PatternAnalysisResult {
     pub average_co_occurrence_strength: f32,
 }
 
+impl Default for ModelMemoryManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ModelMemoryManager {
     /// Create new model memory manager
     pub fn new() -> Self {

@@ -946,7 +946,7 @@ impl VoirsPipelineBuilder {
 
             // Log progress for large files
             if let Some(total) = total_bytes {
-                if total > 10_000_000 && bytes_downloaded % 5_000_000 == 0 {
+                if total > 10_000_000 && bytes_downloaded.is_multiple_of(5_000_000) {
                     // Log every 5MB for files larger than 10MB
                     debug!(
                         "Download progress: {} / {} bytes ({:.1}%)",

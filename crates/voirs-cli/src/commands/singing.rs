@@ -2,7 +2,7 @@
 
 use crate::{error::CliError, output::OutputFormatter};
 use clap::{Args, Subcommand};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 #[cfg(feature = "singing")]
 use voirs_singing::{
     score::{
@@ -562,7 +562,7 @@ fn create_singing_technique(technique: &str) -> Result<SingingTechnique, CliErro
     }
 }
 
-fn load_musical_score(path: &PathBuf) -> Result<MusicalScore, CliError> {
+fn load_musical_score(path: &Path) -> Result<MusicalScore, CliError> {
     // Mock implementation - in reality would parse MusicXML
     let notes = vec![
         MusicalNote {
@@ -674,8 +674,8 @@ fn load_musical_score(path: &PathBuf) -> Result<MusicalScore, CliError> {
 }
 
 fn load_midi_with_lyrics(
-    midi_path: &PathBuf,
-    lyrics_path: &PathBuf,
+    midi_path: &Path,
+    lyrics_path: &Path,
 ) -> Result<(MusicalScore, String), CliError> {
     // Mock implementation - in reality would parse MIDI and lyrics
     let lyrics =
@@ -698,7 +698,7 @@ fn analyze_note_range(notes: &[MusicalNote]) -> (f32, f32) {
     (min_freq, max_freq)
 }
 
-fn load_audio(path: &PathBuf) -> Result<Vec<f32>, CliError> {
+fn load_audio(path: &Path) -> Result<Vec<f32>, CliError> {
     // Mock implementation - in reality would load audio file
     Ok(vec![0.0; 44100]) // 1 second of silence
 }
@@ -708,7 +708,7 @@ fn apply_singing_effects(audio: Vec<f32>, args: &EffectsArgs) -> Result<Vec<f32>
     Ok(audio)
 }
 
-fn save_audio(audio: &[f32], path: &PathBuf, sample_rate: u32) -> Result<(), CliError> {
+fn save_audio(audio: &[f32], path: &Path, sample_rate: u32) -> Result<(), CliError> {
     let spec = hound::WavSpec {
         channels: 1,
         sample_rate,

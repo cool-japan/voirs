@@ -4,7 +4,7 @@
 //! desktop, web, mobile integration, cross-platform synchronization,
 //! and offline capability support.
 
-use crate::traits::*;
+use crate::traits::{Achievement, TrainingResult, UserPreferences, UserProgress};
 use crate::FeedbackError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
-/// Platform types supported by VoiRS
+/// Platform types supported by `VoiRS`
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Platform {
     /// Desktop application (Windows, macOS, Linux)
@@ -21,7 +21,7 @@ pub enum Platform {
     Web,
     /// Mobile application (iOS, Android)
     Mobile,
-    /// Smart device (IoT, embedded systems)
+    /// Smart device (`IoT`, embedded systems)
     SmartDevice,
     /// Server/Cloud deployment
     Server,
@@ -280,6 +280,7 @@ impl PlatformManager {
     }
 
     /// Check platform compatibility
+    #[must_use]
     pub fn is_compatible(&self, required_features: &[PlatformFeature]) -> bool {
         required_features
             .iter()
@@ -287,6 +288,7 @@ impl PlatformManager {
     }
 
     /// Check if platform supports specific feature
+    #[must_use]
     pub fn supports_feature(&self, feature: &PlatformFeature) -> bool {
         match feature {
             PlatformFeature::AudioRecording => self.capabilities.audio_recording,
@@ -413,11 +415,13 @@ impl PlatformManager {
     }
 
     /// Get platform configuration
+    #[must_use]
     pub fn get_config(&self) -> &PlatformConfig {
         &self.config
     }
 
     /// Get platform capabilities
+    #[must_use]
     pub fn get_capabilities(&self) -> &PlatformCapabilities {
         &self.capabilities
     }

@@ -1,4 +1,4 @@
-//! Automatic recovery mechanisms for long-running VoiRS feedback sessions
+//! Automatic recovery mechanisms for long-running `VoiRS` feedback sessions
 //!
 //! This module provides comprehensive error recovery, retry logic, and graceful
 //! degradation mechanisms to ensure system reliability and continuity of service.
@@ -27,6 +27,7 @@ pub struct RecoveryManager {
 
 impl RecoveryManager {
     /// Create a new recovery manager
+    #[must_use]
     pub fn new(config: RecoveryConfig) -> Self {
         let mut strategies = HashMap::new();
 
@@ -516,7 +517,7 @@ pub enum RecoveryStrategy {
     /// Simple retry with fixed delay
     SimpleRetry {
         /// Maximum number of retry attempts
-        max_retries: u32
+        max_retries: u32,
     },
     /// Exponential backoff retry
     ExponentialBackoff {
@@ -597,8 +598,15 @@ pub struct CircuitBreaker {
     half_open_calls: u32,
 }
 
+impl Default for CircuitBreaker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CircuitBreaker {
     /// Create a new circuit breaker in closed state
+    #[must_use]
     pub fn new() -> Self {
         Self {
             state: CircuitBreakerState::Closed,
@@ -644,6 +652,7 @@ impl CircuitBreaker {
     }
 
     /// Check if circuit breaker should attempt to reset
+    #[must_use]
     pub fn should_attempt_reset(&self) -> bool {
         if let Some(last_failure) = self.last_failure_time {
             last_failure.elapsed() >= self.timeout_duration
@@ -675,8 +684,15 @@ pub struct HealthMonitor {
     last_health_check: Instant,
 }
 
+impl Default for HealthMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HealthMonitor {
     /// Create a new health monitor
+    #[must_use]
     pub fn new() -> Self {
         Self {
             success_count: 0,
@@ -697,13 +713,14 @@ impl HealthMonitor {
     }
 
     /// Get current health score (0.0 to 1.0)
+    #[must_use]
     pub fn get_health_score(&self) -> f64 {
         let total = self.success_count + self.failure_count;
         if total == 0 {
             return 1.0; // No data means healthy
         }
 
-        self.success_count as f64 / total as f64
+        f64::from(self.success_count) / f64::from(total)
     }
 
     /// Enter degraded mode
@@ -740,8 +757,15 @@ pub struct FailureTracker {
     recent_failures: Vec<(Instant, FailureType)>,
 }
 
+impl Default for FailureTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FailureTracker {
     /// Create a new failure tracker
+    #[must_use]
     pub fn new() -> Self {
         Self {
             total_failures: 0,
@@ -762,7 +786,9 @@ impl FailureTracker {
         self.recent_failures.push((Instant::now(), failure_type));
 
         // Keep only recent failures (last hour)
-        let cutoff = Instant::now() - Duration::from_secs(3600);
+        let cutoff = Instant::now()
+            .checked_sub(Duration::from_secs(3600))
+            .unwrap();
         self.recent_failures.retain(|(time, _)| *time > cutoff);
     }
 
@@ -773,6 +799,7 @@ impl FailureTracker {
     }
 
     /// Get overall failure rate
+    #[must_use]
     pub fn get_failure_rate(&self) -> f64 {
         let total_operations = self.total_failures + self.total_recoveries;
         if total_operations == 0 {
@@ -782,6 +809,7 @@ impl FailureTracker {
     }
 
     /// Get overall recovery rate
+    #[must_use]
     pub fn get_recovery_rate(&self) -> f64 {
         if self.total_failures == 0 {
             return 1.0;
@@ -851,8 +879,7 @@ impl fmt::Display for RecoveryError {
             } => {
                 write!(
                     f,
-                    "Maximum retries ({}) exceeded. Last error: {}",
-                    attempts, last_error
+                    "Maximum retries ({attempts}) exceeded. Last error: {last_error}"
                 )
             }
             RecoveryError::BackoffExhausted {
@@ -860,8 +887,7 @@ impl fmt::Display for RecoveryError {
                 final_delay,
                 last_error,
             } => {
-                write!(f, "Exponential backoff exhausted after {} attempts (final delay: {:?}). Last error: {}", 
-                       attempts, final_delay, last_error)
+                write!(f, "Exponential backoff exhausted after {attempts} attempts (final delay: {final_delay:?}). Last error: {last_error}")
             }
             RecoveryError::CircuitBreakerOpen => {
                 write!(
@@ -876,8 +902,7 @@ impl fmt::Display for RecoveryError {
             } => {
                 write!(
                     f,
-                    "Operating in degraded mode ({:?}) with health score {:.2}. Error: {}",
-                    mode, health_score, error
+                    "Operating in degraded mode ({mode:?}) with health score {health_score:.2}. Error: {error}"
                 )
             }
             RecoveryError::TimeoutEscalationExhausted {
@@ -886,15 +911,14 @@ impl fmt::Display for RecoveryError {
             } => {
                 write!(
                     f,
-                    "Timeout escalation exhausted after {} attempts (final timeout: {:?})",
-                    attempts, final_timeout
+                    "Timeout escalation exhausted after {attempts} attempts (final timeout: {final_timeout:?})"
                 )
             }
             RecoveryError::OperationFailed(error) => {
-                write!(f, "Operation failed: {}", error)
+                write!(f, "Operation failed: {error}")
             }
             RecoveryError::ConfigurationError(msg) => {
-                write!(f, "Configuration error: {}", msg)
+                write!(f, "Configuration error: {msg}")
             }
         }
     }

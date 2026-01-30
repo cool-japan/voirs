@@ -444,7 +444,7 @@ impl SpatialAudioController {
 
     // Private helper methods
 
-    /// Render binaural audio from sources
+    /// Render binaural audio from sources with HRTF simulation
     async fn render_binaural_audio(
         &self,
         audio: &crate::audio::AudioBuffer,
@@ -452,27 +452,62 @@ impl SpatialAudioController {
         listener: &AudioListener3D,
         config: &SpatialAudioConfig,
     ) -> Result<crate::audio::AudioBuffer> {
-        // Mock implementation - in reality would use HRTF convolution
-        let mut processed_samples = audio.samples().to_vec();
+        // Create stereo output (binaural)
+        let mono_samples = audio.samples();
+        let sample_count = mono_samples.len();
 
-        // Apply distance attenuation and directivity
+        let mut left_channel = vec![0.0f32; sample_count];
+        let mut right_channel = vec![0.0f32; sample_count];
+
+        // Process each source with spatial audio
         for source in sources {
             let distance = self.calculate_distance(&source.position, &listener.position);
             let attenuation = self.calculate_attenuation(distance, &config.distance_model);
 
-            // Apply attenuation to all samples
-            for sample in &mut processed_samples {
-                *sample *= attenuation * source.volume;
+            // Calculate azimuth and elevation for HRTF
+            let (azimuth, elevation) = self.calculate_direction(&source.position, listener);
+
+            // Apply HRTF-based panning and filtering
+            let (left_gain, right_gain, left_delay, right_delay) =
+                self.calculate_hrtf_parameters(azimuth, elevation, &config.binaural.hrtf);
+
+            // Apply spatializationto each sample
+            for (i, &sample) in mono_samples.iter().enumerate() {
+                let spatialized_sample = sample * attenuation * source.volume;
+
+                // Apply ITD (Interaural Time Difference) through delay
+                let left_idx = i.saturating_sub(left_delay);
+                let right_idx = i.saturating_sub(right_delay);
+
+                if left_idx < sample_count {
+                    left_channel[left_idx] += spatialized_sample * left_gain;
+                }
+                if right_idx < sample_count {
+                    right_channel[right_idx] += spatialized_sample * right_gain;
+                }
             }
         }
 
-        // Apply HRTF processing (mock)
-        self.apply_hrtf_processing(&mut processed_samples, &config.binaural.hrtf)
-            .await?;
+        // Apply crossfeed if enabled (for headphone listening)
+        if config.binaural.hrtf.crossfeed_enabled {
+            self.apply_crossfeed(
+                &mut left_channel,
+                &mut right_channel,
+                config.binaural.hrtf.crossfeed_strength,
+            );
+        }
 
-        Ok(crate::audio::AudioBuffer::mono(
-            processed_samples,
+        // Interleave stereo channels
+        let mut stereo_samples = Vec::with_capacity(sample_count * 2);
+        for i in 0..sample_count {
+            stereo_samples.push(left_channel[i].clamp(-1.0, 1.0));
+            stereo_samples.push(right_channel[i].clamp(-1.0, 1.0));
+        }
+
+        Ok(crate::audio::AudioBuffer::new(
+            stereo_samples,
             audio.sample_rate(),
+            2, // stereo
         ))
     }
 
@@ -494,13 +529,86 @@ impl SpatialAudioController {
         }
     }
 
-    /// Apply HRTF processing (mock implementation)
-    async fn apply_hrtf_processing(&self, samples: &mut [f32], _hrtf: &HrtfConfig) -> Result<()> {
-        // Mock HRTF processing - in reality would use complex convolution
-        for sample in samples {
-            *sample *= 0.9; // Slight attenuation to simulate processing
+    /// Calculate direction from listener to source (azimuth and elevation in radians)
+    fn calculate_direction(
+        &self,
+        source_pos: &Position3D,
+        listener: &AudioListener3D,
+    ) -> (f32, f32) {
+        use std::f32::consts::PI;
+
+        // Calculate relative position
+        let dx = source_pos.x - listener.position.x;
+        let dy = source_pos.y - listener.position.y;
+        let dz = source_pos.z - listener.position.z;
+
+        // Rotate relative position by listener orientation (yaw is horizontal rotation)
+        let forward_angle = listener.orientation.yaw;
+        let rotated_x = dx * forward_angle.cos() - dz * forward_angle.sin();
+        let rotated_z = dx * forward_angle.sin() + dz * forward_angle.cos();
+
+        // Calculate azimuth (horizontal angle)
+        let azimuth = rotated_z.atan2(rotated_x);
+
+        // Calculate elevation (vertical angle)
+        let horizontal_dist = (rotated_x * rotated_x + rotated_z * rotated_z).sqrt();
+        let elevation = dy.atan2(horizontal_dist);
+
+        (azimuth, elevation)
+    }
+
+    /// Calculate HRTF parameters based on direction
+    fn calculate_hrtf_parameters(
+        &self,
+        azimuth: f32,
+        elevation: f32,
+        hrtf_config: &HrtfConfig,
+    ) -> (f32, f32, usize, usize) {
+        use std::f32::consts::PI;
+
+        // Simplified HRTF model based on spherical head approximation
+        let head_radius = hrtf_config.head_circumference / (2.0 * PI);
+
+        // Calculate ILD (Interaural Level Difference)
+        // Source on the left (-π/2) will be louder in left ear
+        let azimuth_normalized = azimuth / PI; // Normalize to -1 to 1
+        let left_gain = (0.5 + 0.5 * (-azimuth_normalized)).powf(0.7); // Smoother curve
+        let right_gain = (0.5 + 0.5 * azimuth_normalized).powf(0.7);
+
+        // Elevation affects both ears similarly (reduces overall level)
+        let elevation_factor = (1.0 - elevation.abs() / (PI / 2.0)) * 0.5 + 0.5;
+        let left_gain = left_gain * elevation_factor;
+        let right_gain = right_gain * elevation_factor;
+
+        // Calculate ITD (Interaural Time Difference) in samples at 44.1kHz
+        // Maximum ITD is about 0.66ms (29 samples at 44.1kHz)
+        let speed_of_sound = 343.0; // m/s
+        let max_itd_seconds = head_radius / speed_of_sound * 3.0; // Woodworth formula approximation
+        let max_itd_samples = (max_itd_seconds * 44100.0) as usize;
+
+        let itd = (azimuth.sin() * max_itd_samples as f32) as i32;
+        let (left_delay, right_delay) = if itd > 0 {
+            (0, itd as usize) // Sound from right reaches right ear first
+        } else {
+            ((-itd) as usize, 0) // Sound from left reaches left ear first
+        };
+
+        (left_gain, right_gain, left_delay, right_delay)
+    }
+
+    /// Apply crossfeed for natural headphone listening
+    fn apply_crossfeed(&self, left: &mut [f32], right: &mut [f32], strength: f32) {
+        let crossfeed_gain = strength * 0.3;
+        let delay_samples = 4; // Small delay for crossfeed
+
+        for i in delay_samples..left.len() {
+            let left_original = left[i];
+            let right_original = right[i];
+
+            // Mix delayed opposite channel
+            left[i] += right[i - delay_samples] * crossfeed_gain;
+            right[i] += left_original * crossfeed_gain;
         }
-        Ok(())
     }
 }
 

@@ -33,6 +33,7 @@ pub struct AtomicContext {
 
 impl AtomicContext {
     /// Create a new atomic context
+    #[must_use]
     pub fn new(timeout_ms: u64) -> Self {
         Self {
             active_operations: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -48,16 +49,12 @@ impl AtomicContext {
         // Check if there's already an operation for this user
         if operations.contains_key(user_id) {
             return Err(PersistenceError::IntegrityError {
-                message: format!("Atomic operation already in progress for user: {}", user_id),
+                message: format!("Atomic operation already in progress for user: {user_id}"),
             });
         }
 
         operations.insert(user_id.to_string(), operation_id);
-        log::debug!(
-            "Started atomic operation {} for user {}",
-            operation_id,
-            user_id
-        );
+        log::debug!("Started atomic operation {operation_id} for user {user_id}");
         Ok(operation_id)
     }
 
@@ -69,20 +66,17 @@ impl AtomicContext {
             Some(current_id) if *current_id == operation_id => {
                 operations.remove(user_id);
                 log::debug!(
-                    "Completed atomic operation {} for user {}",
-                    operation_id,
-                    user_id
+                    "Completed atomic operation {operation_id} for user {user_id}"
                 );
                 Ok(())
             }
             Some(other_id) => Err(PersistenceError::IntegrityError {
                 message: format!(
-                    "Operation ID mismatch for user {}: expected {}, got {}",
-                    user_id, other_id, operation_id
+                    "Operation ID mismatch for user {user_id}: expected {other_id}, got {operation_id}"
                 ),
             }),
             None => Err(PersistenceError::IntegrityError {
-                message: format!("No active operation found for user: {}", user_id),
+                message: format!("No active operation found for user: {user_id}"),
             }),
         }
     }
@@ -105,6 +99,7 @@ pub struct AtomicFeedbackStorage {
 
 impl AtomicFeedbackStorage {
     /// Create a new atomic feedback storage
+    #[must_use]
     pub fn new() -> Self {
         Self {
             storage: Arc::new(RwLock::new(std::collections::HashMap::new())),
@@ -143,7 +138,7 @@ impl AtomicFeedbackStorage {
         // Check for active write operations
         if self.context.is_operation_active(user_id).await {
             return Err(PersistenceError::IntegrityError {
-                message: format!("Write operation in progress for user: {}", user_id),
+                message: format!("Write operation in progress for user: {user_id}"),
             });
         }
 
@@ -199,7 +194,7 @@ impl AtomicFeedbackStorage {
     pub async fn get_stats(&self) -> (usize, usize) {
         let storage = self.storage.read().await;
         let user_count = storage.len();
-        let total_feedback = storage.values().map(|v| v.len()).sum();
+        let total_feedback = storage.values().map(std::vec::Vec::len).sum();
         (user_count, total_feedback)
     }
 }
@@ -212,7 +207,7 @@ impl Default for AtomicFeedbackStorage {
 
 /// Validation utilities for data consistency
 pub mod validation {
-    use super::*;
+    use super::{FeedbackResponse, PersistenceResult, SessionState, UserProgress};
     use crate::persistence::PersistenceError;
 
     /// Validate session state consistency
@@ -265,8 +260,7 @@ pub mod validation {
             if *level < 0.0 || *level > 1.0 {
                 return Err(PersistenceError::IntegrityError {
                     message: format!(
-                        "Skill level for '{}' must be between 0.0 and 1.0, got: {}",
-                        skill, level
+                        "Skill level for '{skill}' must be between 0.0 and 1.0, got: {level}"
                     ),
                 });
             }

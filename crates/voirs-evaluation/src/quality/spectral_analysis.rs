@@ -1597,9 +1597,11 @@ mod tests {
 
     #[test]
     fn test_cochlear_implant_simulation() {
-        let mut config = SpectralAnalysisConfig::default();
-        config.enable_ci_simulation = true;
-        config.ci_num_electrodes = 16;
+        let config = SpectralAnalysisConfig {
+            enable_ci_simulation: true,
+            ci_num_electrodes: 16,
+            ..Default::default()
+        };
 
         let analyzer = SpectralAnalyzer::with_config(config);
         let samples = vec![0.1; 1024];
@@ -1619,9 +1621,11 @@ mod tests {
 
     #[test]
     fn test_hearing_aid_simulation() {
-        let mut config = SpectralAnalysisConfig::default();
-        config.enable_hearing_aid = true;
-        config.hearing_aid_type = HearingAidType::WDRC;
+        let config = SpectralAnalysisConfig {
+            enable_hearing_aid: true,
+            hearing_aid_type: HearingAidType::WDRC,
+            ..Default::default()
+        };
 
         let analyzer = SpectralAnalyzer::with_config(config);
         let samples = vec![0.1; 1024];

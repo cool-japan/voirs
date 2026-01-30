@@ -11,8 +11,7 @@ use voirs_acoustic::{
 };
 use voirs_g2p::{DummyG2p, G2p, LanguageCode};
 use voirs_vocoder::{
-    DummyVocoder, MelSpectrogram as VocoderMel, SynthesisConfig as VocoderConfig,
-    Vocoder,
+    DummyVocoder, MelSpectrogram as VocoderMel, SynthesisConfig as VocoderConfig, Vocoder,
 };
 
 /// Performance benchmark suite for VoiRS
@@ -23,6 +22,12 @@ pub struct PerformanceBenchmarks {
     warmup_iterations: usize,
     /// Number of measurement iterations
     measurement_iterations: usize,
+}
+
+impl Default for PerformanceBenchmarks {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PerformanceBenchmarks {
@@ -751,6 +756,12 @@ pub struct BenchmarkResults {
     pub throughput_benchmarks: ThroughputBenchmarks,
 }
 
+impl Default for BenchmarkResults {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BenchmarkResults {
     pub fn new() -> Self {
         Self {
@@ -862,6 +873,12 @@ pub struct G2pBenchmarks {
     pub results: HashMap<String, G2pBenchmark>,
 }
 
+impl Default for G2pBenchmarks {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl G2pBenchmarks {
     pub fn new() -> Self {
         Self {
@@ -884,6 +901,12 @@ pub struct G2pBenchmark {
 #[derive(Debug)]
 pub struct AcousticBenchmarks {
     pub results: HashMap<String, AcousticBenchmark>,
+}
+
+impl Default for AcousticBenchmarks {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AcousticBenchmarks {
@@ -912,6 +935,12 @@ pub struct VocoderBenchmarks {
     pub results: HashMap<String, VocoderBenchmark>,
 }
 
+impl Default for VocoderBenchmarks {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VocoderBenchmarks {
     pub fn new() -> Self {
         Self {
@@ -936,6 +965,12 @@ pub struct VocoderBenchmark {
 #[derive(Debug)]
 pub struct PipelineBenchmarks {
     pub results: HashMap<String, PipelineBenchmark>,
+}
+
+impl Default for PipelineBenchmarks {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PipelineBenchmarks {
@@ -965,6 +1000,12 @@ pub struct MemoryBenchmarks {
     pub results: HashMap<String, MemoryBenchmark>,
 }
 
+impl Default for MemoryBenchmarks {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MemoryBenchmarks {
     pub fn new() -> Self {
         Self {
@@ -987,6 +1028,12 @@ pub struct MemoryBenchmark {
 #[derive(Debug)]
 pub struct ThroughputBenchmarks {
     pub results: HashMap<String, ThroughputBenchmark>,
+}
+
+impl Default for ThroughputBenchmarks {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ThroughputBenchmarks {

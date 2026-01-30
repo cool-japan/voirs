@@ -407,7 +407,7 @@ impl AiHrtfPersonalizer {
         self.add_training_sample(sample);
 
         // Retrain if we have enough new samples
-        if self.training_data.len() % 50 == 0 {
+        if self.training_data.len().is_multiple_of(50) {
             let _ = self.train_model()?;
         }
 
@@ -774,12 +774,12 @@ impl PersonalizationModel {
         }
 
         // Create output layer
-        let output_layer = linear(
-            *config.hidden_dims.last().unwrap(),
-            config.output_dim,
-            vb.pp("output"),
-        )
-        .map_err(|e| Error::processing(&format!("Failed to create output layer: {e}")))?;
+        let last_hidden_dim = config
+            .hidden_dims
+            .last()
+            .ok_or_else(|| Error::processing("No hidden dimensions defined for neural model"))?;
+        let output_layer = linear(*last_hidden_dim, config.output_dim, vb.pp("output"))
+            .map_err(|e| Error::processing(&format!("Failed to create output layer: {e}")))?;
 
         Ok(Self {
             input_layer,
@@ -879,7 +879,8 @@ mod tests {
     #[test]
     fn test_measurements_to_vec() {
         let config = PersonalizationConfig::default();
-        let personalizer = AiHrtfPersonalizer::new(config).unwrap();
+        let personalizer =
+            AiHrtfPersonalizer::new(config).expect("Should successfully create HRTF personalizer");
         let measurements = AnthropometricMeasurements::default();
 
         let vec = personalizer.measurements_to_vec(&measurements);
@@ -891,7 +892,8 @@ mod tests {
     #[test]
     fn test_feedback_to_modifications() {
         let config = PersonalizationConfig::default();
-        let personalizer = AiHrtfPersonalizer::new(config).unwrap();
+        let personalizer =
+            AiHrtfPersonalizer::new(config).expect("Should successfully create HRTF personalizer");
 
         let feedback = PerceptualFeedback {
             test_positions: vec![(1.0, 0.0, 0.0)],
@@ -902,7 +904,9 @@ mod tests {
             comments: vec!["Good localization".to_string()],
         };
 
-        let modifications = personalizer.feedback_to_modifications(&feedback).unwrap();
+        let modifications = personalizer
+            .feedback_to_modifications(&feedback)
+            .expect("Should successfully convert feedback to modifications");
         assert_eq!(modifications.confidence, 0.7);
         assert!(modifications.time_delay_adjustments.abs() > 0.0); // Should have some adjustment
     }

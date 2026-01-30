@@ -1,20 +1,20 @@
 //! Kernel Fusion Optimization Module
-//! 
+//!
 //! This module provides kernel fusion capabilities for optimizing neural network
 //! operations by combining multiple operations into single, more efficient kernels.
 //! This reduces memory bandwidth requirements and improves computational efficiency.
 
+use crate::AcousticError;
+use candle_core::{DType, Device, Tensor};
 use std::collections::HashMap;
-use candle_core::{Device, Tensor, DType};
-use crate::error::AcousticError;
 
+pub mod codegen;
 pub mod graph;
 pub mod patterns;
-pub mod codegen;
 
-pub use graph::{OpGraph, OpNode, FusionGraph};
-pub use patterns::{FusionPattern, PatternMatcher, FusionRule};
-pub use codegen::{KernelGenerator, FusedKernel, CodegenTarget};
+pub use codegen::{CodegenTarget, FusedKernel, KernelGenerator};
+pub use graph::{FusionGraph, OpGraph, OpNode};
+pub use patterns::{FusionPattern, FusionRule, PatternMatcher};
 
 /// Main kernel fusion optimizer
 #[derive(Debug)]
@@ -64,12 +64,12 @@ impl KernelFusion {
 
         let mut fusion_graph = FusionGraph::from_op_graph(graph);
         let matcher = PatternMatcher::new(&self.patterns);
-        
+
         // Apply fusion patterns iteratively until no more matches found
         let mut changed = true;
         while changed {
             changed = false;
-            
+
             if let Some(matches) = matcher.find_matches(&fusion_graph)? {
                 for fusion_match in matches {
                     fusion_graph.apply_fusion(fusion_match)?;
@@ -84,14 +84,14 @@ impl KernelFusion {
     /// Generate fused kernel from a fusion group
     pub fn generate_kernel(&mut self, nodes: &[OpNode]) -> Result<FusedKernel, AcousticError> {
         let cache_key = self.compute_cache_key(nodes)?;
-        
+
         if let Some(cached_kernel) = self.cache.get(&cache_key) {
             return Ok(cached_kernel.clone());
         }
 
         let generator = KernelGenerator::new(&self.device);
         let kernel = generator.generate_fused_kernel(nodes)?;
-        
+
         self.cache.insert(cache_key, kernel.clone());
         Ok(kernel)
     }
@@ -116,26 +116,25 @@ impl KernelFusion {
             FusionPattern::new("add_mul", vec!["add", "mul"])
                 .with_rule(FusionRule::ElementWise)
                 .with_priority(10),
-            
             // Activation function fusion
             FusionPattern::new("linear_relu", vec!["linear", "relu"])
                 .with_rule(FusionRule::Pointwise)
                 .with_priority(15),
-            
             // Convolution + bias + activation
             FusionPattern::new("conv_bias_activation", vec!["conv1d", "add", "relu"])
                 .with_rule(FusionRule::ConvolutionBased)
                 .with_priority(20),
-            
             // Matrix multiplication chains
             FusionPattern::new("matmul_chain", vec!["matmul", "matmul"])
                 .with_rule(FusionRule::LinearAlgebra)
                 .with_priority(12),
-            
             // Normalization patterns
-            FusionPattern::new("layer_norm", vec!["mean", "sub", "pow", "mean", "add", "sqrt", "div"])
-                .with_rule(FusionRule::Normalization)
-                .with_priority(25),
+            FusionPattern::new(
+                "layer_norm",
+                vec!["mean", "sub", "pow", "mean", "add", "sqrt", "div"],
+            )
+            .with_rule(FusionRule::Normalization)
+            .with_priority(25),
         ]
     }
 
@@ -145,19 +144,23 @@ impl KernelFusion {
         use std::hash::{Hash, Hasher};
 
         let mut hasher = DefaultHasher::new();
-        
+
         for node in nodes {
             node.op_type().hash(&mut hasher);
-            node.input_shapes().hash(&mut hasher);
-            node.output_shape().hash(&mut hasher);
+            // Hash dimensions instead of Shape objects
+            for shape in node.input_shapes() {
+                shape.dims().hash(&mut hasher);
+            }
+            node.output_shape().dims().hash(&mut hasher);
         }
-        
+
         Ok(format!("{:x}", hasher.finish()))
     }
 
     /// Estimate memory usage of cached kernels
     fn estimate_cache_memory(&self) -> usize {
-        self.cache.iter()
+        self.cache
+            .iter()
             .map(|(key, kernel)| key.len() + kernel.estimated_size())
             .sum()
     }
@@ -175,16 +178,16 @@ pub struct CacheStats {
 pub struct FusionConfig {
     /// Maximum number of operations to fuse together
     pub max_fusion_size: usize,
-    
+
     /// Minimum expected speedup to apply fusion
     pub min_speedup_ratio: f32,
-    
+
     /// Maximum memory overhead allowed for fusion
     pub max_memory_overhead: f32,
-    
+
     /// Enable aggressive fusion optimizations
     pub aggressive_fusion: bool,
-    
+
     /// Target platform for code generation
     pub target: CodegenTarget,
 }
@@ -233,23 +236,20 @@ impl FusionConfig {
     /// Validate configuration parameters
     pub fn validate(&self) -> Result<(), AcousticError> {
         if self.max_fusion_size == 0 {
-            return Err(AcousticError::ConfigurationError {
-                field: "max_fusion_size".to_string(),
-                message: "Must be greater than 0".to_string(),
+            return Err(AcousticError::ConfigError {
+                message: "max_fusion_size must be greater than 0".to_string(),
             });
         }
 
         if self.min_speedup_ratio < 1.0 {
-            return Err(AcousticError::ConfigurationError {
-                field: "min_speedup_ratio".to_string(),
-                message: "Must be at least 1.0".to_string(),
+            return Err(AcousticError::ConfigError {
+                message: "min_speedup_ratio must be at least 1.0".to_string(),
             });
         }
 
         if self.max_memory_overhead < 0.0 {
-            return Err(AcousticError::ConfigurationError {
-                field: "max_memory_overhead".to_string(),
-                message: "Must be non-negative".to_string(),
+            return Err(AcousticError::ConfigError {
+                message: "max_memory_overhead must be non-negative".to_string(),
             });
         }
 
@@ -266,7 +266,7 @@ mod tests {
     fn test_kernel_fusion_creation() {
         let device = Device::Cpu;
         let fusion = KernelFusion::new(device);
-        
+
         assert!(fusion.is_enabled());
         assert_eq!(fusion.cache_stats().size, 0);
     }
@@ -299,12 +299,12 @@ mod tests {
     fn test_kernel_fusion_enable_disable() {
         let device = Device::Cpu;
         let mut fusion = KernelFusion::new(device);
-        
+
         assert!(fusion.is_enabled());
-        
+
         fusion.set_enabled(false);
         assert!(!fusion.is_enabled());
-        
+
         fusion.set_enabled(true);
         assert!(fusion.is_enabled());
     }
@@ -313,10 +313,10 @@ mod tests {
     fn test_cache_operations() {
         let device = Device::Cpu;
         let mut fusion = KernelFusion::new(device);
-        
+
         let initial_stats = fusion.cache_stats();
         assert_eq!(initial_stats.size, 0);
-        
+
         fusion.clear_cache();
         let cleared_stats = fusion.cache_stats();
         assert_eq!(cleared_stats.size, 0);

@@ -1068,9 +1068,9 @@ mod tests {
         assert!(config.enable_cross_platform_testing);
         assert!(config.enable_precision_verification);
         assert!(config.enable_edge_case_testing);
-        assert_eq!(config.numerical_tolerance, 1e-6);
+        assert!((config.numerical_tolerance - 1e-6).abs() < 1e-9);
         assert_eq!(config.test_iterations, 10);
-        assert_eq!(config.confidence_level, 0.95);
+        assert!((config.confidence_level - 0.95).abs() < 0.001);
     }
 
     #[test]

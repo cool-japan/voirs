@@ -616,6 +616,7 @@ pub mod cache_optimization {
 
     /// Prefetch data for cache optimization
     #[cfg(target_arch = "x86_64")]
+    #[allow(unsafe_code)]
     pub fn prefetch_data<T>(data: *const T) {
         #[cfg(target_feature = "sse")]
         unsafe {
@@ -678,7 +679,7 @@ mod tests {
         let cached = manager.get_cached_hrtf((45, 0, 2.0)).await;
         assert!(cached.is_some());
 
-        let (cached_left, cached_right) = cached.unwrap();
+        let (cached_left, cached_right) = cached.expect("Cached HRTF should be available");
         assert_eq!(cached_left.len(), 256);
         assert_eq!(cached_right.len(), 256);
     }
@@ -729,7 +730,7 @@ mod tests {
 
         assert_eq!(positions.len(), 2);
 
-        let pos = positions.get(0).unwrap();
+        let pos = positions.get(0).expect("First position should exist");
         assert_eq!(pos.x, 1.0);
         assert_eq!(pos.y, 2.0);
         assert_eq!(pos.z, 3.0);

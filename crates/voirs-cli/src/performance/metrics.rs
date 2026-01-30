@@ -681,14 +681,12 @@ impl MetricsCollector {
             } else {
                 TrendDirection::Stable
             }
+        } else if abs_slope > threshold_strong {
+            TrendDirection::StronglyDegrading
+        } else if abs_slope > threshold_weak {
+            TrendDirection::Degrading
         } else {
-            if abs_slope > threshold_strong {
-                TrendDirection::StronglyDegrading
-            } else if abs_slope > threshold_weak {
-                TrendDirection::Degrading
-            } else {
-                TrendDirection::Stable
-            }
+            TrendDirection::Stable
         }
     }
 

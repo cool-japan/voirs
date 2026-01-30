@@ -1,7 +1,7 @@
 //! Core real-time feedback system
 
 use super::stream::FeedbackStream;
-use super::types::*;
+use super::types::{RealtimeConfig, RealtimeStats};
 use crate::traits::{FeedbackResponse, SessionState};
 use crate::FeedbackError;
 use std::collections::HashMap;

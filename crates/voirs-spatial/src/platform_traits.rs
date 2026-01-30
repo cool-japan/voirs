@@ -395,7 +395,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_platform_factory() {
-        let platform = PlatformFactory::create_platform(PlatformType::Generic).unwrap();
+        let platform = PlatformFactory::create_platform(PlatformType::Generic)
+            .expect("Should successfully create generic platform");
         let capabilities = platform.get_capabilities();
         assert!(capabilities.head_tracking_6dof);
     }

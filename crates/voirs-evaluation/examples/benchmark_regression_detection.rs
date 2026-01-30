@@ -4,7 +4,6 @@
 //! run benchmarks, detect performance regressions, and generate reports.
 
 use std::time::Duration;
-use tokio;
 use voirs_evaluation::{
     benchmark_runner::{BenchmarkConfig, BenchmarkRunner},
     regression_detector::{RegressionConfig, RegressionDetector, RegressionSeverity},

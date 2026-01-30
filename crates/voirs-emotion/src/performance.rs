@@ -468,7 +468,9 @@ impl PerformanceValidator {
             };
 
             let handle = tokio::spawn(async move {
-                let _permit = sem.acquire().await.unwrap();
+                let _permit = sem.acquire().await.map_err(|e| {
+                    Error::Processing(format!("Failed to acquire semaphore: {}", e))
+                })?;
 
                 while Instant::now() < end_time {
                     processor.set_emotion(emotion.clone(), Some(0.8)).await?;

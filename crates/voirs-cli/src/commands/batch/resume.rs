@@ -3,7 +3,7 @@
 use super::files::BatchInput;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use voirs_sdk::Result;
 
 /// State file for tracking batch processing progress
@@ -76,8 +76,8 @@ impl BatchState {
     }
 
     /// Get the state file path for a given input
-    pub fn get_state_file_path(input_path: &PathBuf) -> PathBuf {
-        let mut state_path = input_path.clone();
+    pub fn get_state_file_path(input_path: &Path) -> PathBuf {
+        let mut state_path = input_path.to_path_buf();
         if let Some(stem) = input_path.file_stem() {
             let mut filename = stem.to_string_lossy().to_string();
             filename.push_str(".voirs_state.json");
@@ -96,7 +96,7 @@ impl BatchState {
 
         let content = std::fs::read_to_string(path)?;
         let state: BatchState = serde_json::from_str(&content)
-            .map_err(|e| voirs_sdk::VoirsError::config_error(&e.to_string()))?;
+            .map_err(|e| voirs_sdk::VoirsError::config_error(e.to_string()))?;
 
         Ok(Some(state))
     }
@@ -104,7 +104,7 @@ impl BatchState {
     /// Save state to file
     pub fn save_to_file(&self, path: &PathBuf) -> Result<()> {
         let content = serde_json::to_string_pretty(self)
-            .map_err(|e| voirs_sdk::VoirsError::config_error(&e.to_string()))?;
+            .map_err(|e| voirs_sdk::VoirsError::config_error(e.to_string()))?;
 
         // Create parent directory if it doesn't exist
         if let Some(parent) = path.parent() {
@@ -240,7 +240,7 @@ pub fn calculate_config_hash(
 
 /// Resume batch processing from saved state
 pub async fn resume_batch_processing(
-    input_path: &PathBuf,
+    input_path: &Path,
     all_items: &[BatchInput],
     batch_config: &super::BatchConfig,
 ) -> Result<Option<BatchState>> {

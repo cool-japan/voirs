@@ -443,7 +443,7 @@ impl ConversionModel {
                 let feature_size = input_shape[1];
                 let time_steps = audio.len() / feature_size;
 
-                if audio.len() % feature_size != 0 {
+                if !audio.len().is_multiple_of(feature_size) {
                     // Pad audio to match feature size
                     let mut padded_audio = audio.to_vec();
                     let padding_needed = feature_size - (audio.len() % feature_size);
@@ -461,7 +461,7 @@ impl ConversionModel {
                 let feature_size = input_shape[2];
                 let time_steps = audio.len() / feature_size;
 
-                if audio.len() % feature_size != 0 {
+                if !audio.len().is_multiple_of(feature_size) {
                     let mut padded_audio = audio.to_vec();
                     let padding_needed = feature_size - (audio.len() % feature_size);
                     padded_audio.extend(vec![0.0; padding_needed]);

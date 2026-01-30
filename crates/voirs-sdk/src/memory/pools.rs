@@ -116,11 +116,18 @@ impl AudioBufferPool {
 
     /// Get a buffer of specified size
     pub fn get_buffer(&self, size: usize) -> Vec<f32> {
-        let mut buffers = self.buffers.lock().unwrap();
+        let Ok(mut buffers) = self.buffers.lock() else {
+            // If lock is poisoned, return a new buffer
+            return vec![0.0; size];
+        };
 
         // Try to find a buffer of suitable size
         if let Some(pos) = buffers.iter().position(|buf| buf.data.len() >= size) {
-            let mut pooled_buf = buffers.remove(pos).unwrap();
+            // Get buffer from pool (remove returns Option for VecDeque)
+            let Some(mut pooled_buf) = buffers.remove(pos) else {
+                // Should not happen since position guarantees existence, but handle it
+                return vec![0.0; size];
+            };
             pooled_buf.last_used = Instant::now();
 
             // Update statistics
@@ -162,7 +169,10 @@ impl AudioBufferPool {
 
     /// Return a buffer to the pool
     pub fn return_buffer(&self, mut buffer: Vec<f32>) {
-        let mut buffers = self.buffers.lock().unwrap();
+        let Ok(mut buffers) = self.buffers.lock() else {
+            // If lock is poisoned, just drop the buffer
+            return;
+        };
 
         // Don't keep buffers that exceed max size limit
         if buffers.len() >= self.config.max_size {
@@ -198,7 +208,10 @@ impl AudioBufferPool {
 
     /// Clean up expired buffers
     pub fn cleanup_expired(&self) {
-        let mut buffers = self.buffers.lock().unwrap();
+        let Ok(mut buffers) = self.buffers.lock() else {
+            // If lock is poisoned, skip cleanup
+            return;
+        };
         let now = Instant::now();
 
         let initial_len = buffers.len();
@@ -215,7 +228,10 @@ impl AudioBufferPool {
 
     /// Pre-allocate initial buffers
     fn preallocate(&self) {
-        let mut buffers = self.buffers.lock().unwrap();
+        let Ok(mut buffers) = self.buffers.lock() else {
+            // If lock is poisoned, skip preallocation
+            return;
+        };
 
         for _ in 0..self.config.initial_size {
             let buffer = PooledBuffer {
@@ -245,11 +261,17 @@ impl MemoryPool<Vec<f32>> for AudioBufferPool {
     }
 
     fn size(&self) -> usize {
-        self.buffers.lock().unwrap().len()
+        self.buffers
+            .lock()
+            .map(|buffers| buffers.len())
+            .unwrap_or(0)
     }
 
     fn clear(&self) {
-        let mut buffers = self.buffers.lock().unwrap();
+        let Ok(mut buffers) = self.buffers.lock() else {
+            // If lock is poisoned, skip clear
+            return;
+        };
         let cleared_count = buffers.len();
         buffers.clear();
 
@@ -262,7 +284,10 @@ impl MemoryPool<Vec<f32>> for AudioBufferPool {
     }
 
     fn stats(&self) -> PoolStats {
-        self.stats.read().unwrap().clone()
+        self.stats
+            .read()
+            .map(|stats| stats.clone())
+            .unwrap_or_default()
     }
 }
 
@@ -307,11 +332,12 @@ impl TensorPool {
 
     /// Allocate aligned memory for tensor
     pub fn allocate(&self, size: usize) -> Option<NonNull<u8>> {
-        let mut tensors = self.tensors.lock().unwrap();
+        let mut tensors = self.tensors.lock().ok()?;
 
         // Try to find a suitable tensor
         if let Some(pos) = tensors.iter().position(|tensor| tensor.size >= size) {
-            let mut pooled_tensor = tensors.remove(pos).unwrap();
+            // Get tensor from pool (remove returns Option for VecDeque)
+            let mut pooled_tensor = tensors.remove(pos)?;
             pooled_tensor.last_used = Instant::now();
 
             // Update statistics
@@ -347,13 +373,22 @@ impl TensorPool {
 
     /// Return allocated memory to the pool
     pub fn deallocate(&self, ptr: NonNull<u8>, size: usize) {
-        let mut tensors = self.tensors.lock().unwrap();
+        let Ok(mut tensors) = self.tensors.lock() else {
+            // If lock is poisoned, deallocate directly
+            if let Ok(layout) = Layout::from_size_align(size, self.config.alignment) {
+                unsafe {
+                    dealloc(ptr.as_ptr(), layout);
+                }
+            }
+            return;
+        };
 
         // Don't keep tensors that exceed max size limit
         if tensors.len() >= self.config.max_size {
             unsafe {
-                let layout = Layout::from_size_align(size, self.config.alignment).unwrap();
-                dealloc(ptr.as_ptr(), layout);
+                if let Ok(layout) = Layout::from_size_align(size, self.config.alignment) {
+                    dealloc(ptr.as_ptr(), layout);
+                }
             }
 
             if self.config.enable_stats {
@@ -364,7 +399,10 @@ impl TensorPool {
             return;
         }
 
-        let layout = Layout::from_size_align(size, self.config.alignment).unwrap();
+        let Ok(layout) = Layout::from_size_align(size, self.config.alignment) else {
+            // If layout creation fails, just deallocate directly without pooling
+            return;
+        };
         let pooled_tensor = PooledTensor {
             ptr,
             layout,
@@ -388,7 +426,10 @@ impl TensorPool {
 
     /// Clean up expired tensors
     pub fn cleanup_expired(&self) {
-        let mut tensors = self.tensors.lock().unwrap();
+        let Ok(mut tensors) = self.tensors.lock() else {
+            // If lock is poisoned, skip cleanup
+            return;
+        };
         let now = Instant::now();
 
         let initial_len = tensors.len();
@@ -424,7 +465,10 @@ impl TensorPool {
 
     /// Get pool statistics
     pub fn stats(&self) -> PoolStats {
-        self.stats.read().unwrap().clone()
+        self.stats
+            .read()
+            .map(|stats| stats.clone())
+            .unwrap_or_default()
     }
 }
 
@@ -437,7 +481,10 @@ impl Default for AudioBufferPool {
 impl Drop for TensorPool {
     fn drop(&mut self) {
         // Clean up all remaining tensors
-        let mut tensors = self.tensors.lock().unwrap();
+        let Ok(mut tensors) = self.tensors.lock() else {
+            // If lock is poisoned, we can't safely clean up
+            return;
+        };
         for tensor in tensors.drain(..) {
             unsafe {
                 dealloc(tensor.ptr.as_ptr(), tensor.layout);

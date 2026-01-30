@@ -74,9 +74,9 @@ impl SimdFft {
     /// Create new SIMD FFT processor
     pub fn new(size: usize) -> Result<Self> {
         if !size.is_power_of_two() {
-            return Err(AcousticError::ConfigError(
-                "FFT size must be a power of 2".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "FFT size must be a power of 2".to_string(),
+            });
         }
 
         let mut fft = Self {
@@ -94,11 +94,13 @@ impl SimdFft {
     /// Compute forward FFT with SIMD acceleration
     pub fn forward(&self, input: &[f32]) -> Result<Vec<Complex>> {
         if input.len() != self.size {
-            return Err(AcousticError::InputError(format!(
-                "Input length {} doesn't match FFT size {}",
-                input.len(),
-                self.size
-            )));
+            return Err(AcousticError::InputError {
+                message: format!(
+                    "Input length {} doesn't match FFT size {}",
+                    input.len(),
+                    self.size
+                ),
+            });
         }
 
         // Convert to complex and apply bit-reversal
@@ -115,11 +117,13 @@ impl SimdFft {
     /// Compute inverse FFT with SIMD acceleration
     pub fn inverse(&self, input: &[Complex]) -> Result<Vec<f32>> {
         if input.len() != self.size {
-            return Err(AcousticError::InputError(format!(
-                "Input length {} doesn't match FFT size {}",
-                input.len(),
-                self.size
-            )));
+            return Err(AcousticError::InputError {
+                message: format!(
+                    "Input length {} doesn't match FFT size {}",
+                    input.len(),
+                    self.size
+                ),
+            });
         }
 
         let mut data = input.to_vec();
@@ -181,11 +185,13 @@ impl SimdFft {
     pub fn irfft(&self, input: &[Complex]) -> Result<Vec<f32>> {
         let expected_len = self.size / 2 + 1;
         if input.len() != expected_len {
-            return Err(AcousticError::InputError(format!(
-                "Input length {} doesn't match expected {}",
-                input.len(),
-                expected_len
-            )));
+            return Err(AcousticError::InputError {
+                message: format!(
+                    "Input length {} doesn't match expected {}",
+                    input.len(),
+                    expected_len
+                ),
+            });
         }
 
         // Reconstruct full complex spectrum using Hermitian symmetry
@@ -207,9 +213,9 @@ impl SimdFft {
     /// Overlap-and-add convolution using FFT
     pub fn ola_convolution(&self, signal: &[f32], kernel: &[f32]) -> Result<Vec<f32>> {
         if kernel.len() > self.size {
-            return Err(AcousticError::InputError(
-                "Kernel too large for FFT size".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Kernel too large for FFT size".to_string(),
+            });
         }
 
         // Pad kernel to FFT size
@@ -220,7 +226,7 @@ impl SimdFft {
         let kernel_fft = self.forward(&padded_kernel)?;
 
         let hop_size = self.size - kernel.len() + 1;
-        let n_frames = (signal.len() + hop_size - 1) / hop_size;
+        let n_frames = signal.len().div_ceil(hop_size);
         let output_len = signal.len() + kernel.len() - 1;
         let mut output = vec![0.0f32; output_len];
 
@@ -422,9 +428,9 @@ impl FftWindow {
     /// Apply window to signal with SIMD acceleration
     pub fn apply_window(signal: &[f32], window: &[f32], output: &mut [f32]) -> Result<()> {
         if signal.len() != window.len() || signal.len() != output.len() {
-            return Err(AcousticError::InputError(
-                "Signal, window, and output lengths must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Signal, window, and output lengths must match".to_string(),
+            });
         }
 
         simd().mul_f32(signal, window, output)?;

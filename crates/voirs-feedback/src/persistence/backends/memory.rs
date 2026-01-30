@@ -15,23 +15,12 @@ use crate::persistence::{
 use crate::traits::{FeedbackResponse, SessionState, UserPreferences, UserProgress};
 
 /// In-memory storage structure with atomic operations
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct MemoryStorage {
     sessions: HashMap<Uuid, SessionState>,
     user_progress: HashMap<String, UserProgress>,
     user_preferences: HashMap<String, UserPreferences>,
     metadata: HashMap<String, String>,
-}
-
-impl Default for MemoryStorage {
-    fn default() -> Self {
-        Self {
-            sessions: HashMap::new(),
-            user_progress: HashMap::new(),
-            user_preferences: HashMap::new(),
-            metadata: HashMap::new(),
-        }
-    }
 }
 
 /// In-memory persistence manager with atomic operations
@@ -94,7 +83,7 @@ impl PersistenceManager for MemoryPersistenceManager {
         storage
             .user_progress
             .insert(user_id.to_string(), progress.clone());
-        log::debug!("Saved progress for user: {}", user_id);
+        log::debug!("Saved progress for user: {user_id}");
         Ok(())
     }
 
@@ -122,7 +111,7 @@ impl PersistenceManager for MemoryPersistenceManager {
         self.feedback_storage
             .add_feedback(user_id, feedback.clone())
             .await?;
-        log::debug!("Saved feedback for user: {}", user_id);
+        log::debug!("Saved feedback for user: {user_id}");
         Ok(())
     }
 
@@ -147,7 +136,7 @@ impl PersistenceManager for MemoryPersistenceManager {
         storage
             .user_preferences
             .insert(user_id.to_string(), preferences.clone());
-        log::debug!("Saved preferences for user: {}", user_id);
+        log::debug!("Saved preferences for user: {user_id}");
         Ok(())
     }
 
@@ -181,7 +170,7 @@ impl PersistenceManager for MemoryPersistenceManager {
             .sessions
             .retain(|_, session| session.user_id != user_id);
 
-        log::info!("Deleted all data for user: {}", user_id);
+        log::info!("Deleted all data for user: {user_id}");
         Ok(())
     }
 
@@ -273,10 +262,7 @@ impl PersistenceManager for MemoryPersistenceManager {
         let cleanup_duration = start_time.elapsed();
 
         log::info!(
-            "Memory cleanup completed: {} sessions, {} feedback records cleaned in {:?}",
-            sessions_cleaned,
-            feedback_records_cleaned,
-            cleanup_duration
+            "Memory cleanup completed: {sessions_cleaned} sessions, {feedback_records_cleaned} feedback records cleaned in {cleanup_duration:?}"
         );
 
         Ok(CleanupResult {

@@ -339,7 +339,7 @@ impl VoiceActivityDetector {
         }
 
         // Convert input to f64 for FFT computation
-        let input_f64: Vec<f64> = input.iter().map(|&x| x as f64).collect();
+        let input_f64: Vec<f64> = input.iter().map(|&x| f64::from(x)).collect();
 
         // Perform FFT using functional API
         let spectrum = scirs2_fft::rfft(&input_f64, None).map_err(|e| {

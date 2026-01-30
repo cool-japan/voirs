@@ -56,51 +56,63 @@ impl AudioBufferPool {
 
         match category {
             BufferCategory::Small => {
-                let mut buffers = self.small_buffers.lock().unwrap();
+                let mut buffers = self
+                    .small_buffers
+                    .lock()
+                    .expect("Small buffers lock poisoned");
                 if let Some(mut buffer) = buffers.pop() {
                     if buffer.capacity() >= min_size {
                         buffer.clear();
                         buffer.resize(min_size, 0.0);
-                        self.stats.lock().unwrap().small_hits += 1;
+                        self.stats.lock().expect("Stats lock poisoned").small_hits += 1;
                         return buffer;
                     } else {
                         // Buffer too small, return it and create new one
                         buffers.push(buffer);
                     }
                 }
-                self.stats.lock().unwrap().small_misses += 1;
+                self.stats.lock().expect("Stats lock poisoned").small_misses += 1;
                 let mut buffer = Vec::with_capacity(std::cmp::max(min_size, 22050)); // 1 second at 22kHz
                 buffer.resize(min_size, 0.0);
                 buffer
             }
             BufferCategory::Medium => {
-                let mut buffers = self.medium_buffers.lock().unwrap();
+                let mut buffers = self
+                    .medium_buffers
+                    .lock()
+                    .expect("Medium buffers lock poisoned");
                 if let Some(mut buffer) = buffers.pop() {
                     if buffer.capacity() >= min_size {
                         buffer.clear();
                         buffer.resize(min_size, 0.0);
-                        self.stats.lock().unwrap().medium_hits += 1;
+                        self.stats.lock().expect("Stats lock poisoned").medium_hits += 1;
                         return buffer;
                     } else {
                         buffers.push(buffer);
                     }
                 }
-                self.stats.lock().unwrap().medium_misses += 1;
+                self.stats
+                    .lock()
+                    .expect("Stats lock poisoned")
+                    .medium_misses += 1;
                 Vec::with_capacity(std::cmp::max(min_size, 110250)) // 5 seconds at 22kHz
             }
             BufferCategory::Large => {
-                let mut buffers = self.large_buffers.lock().unwrap();
+                let mut buffers = self
+                    .large_buffers
+                    .lock()
+                    .expect("Large buffers lock poisoned");
                 if let Some(mut buffer) = buffers.pop() {
                     if buffer.capacity() >= min_size {
                         buffer.clear();
                         buffer.resize(min_size, 0.0);
-                        self.stats.lock().unwrap().large_hits += 1;
+                        self.stats.lock().expect("Stats lock poisoned").large_hits += 1;
                         return buffer;
                     } else {
                         buffers.push(buffer);
                     }
                 }
-                self.stats.lock().unwrap().large_misses += 1;
+                self.stats.lock().expect("Stats lock poisoned").large_misses += 1;
                 Vec::with_capacity(min_size)
             }
         }
@@ -112,20 +124,29 @@ impl AudioBufferPool {
 
         match category {
             BufferCategory::Small => {
-                let mut buffers = self.small_buffers.lock().unwrap();
+                let mut buffers = self
+                    .small_buffers
+                    .lock()
+                    .expect("Small buffers lock poisoned");
                 if buffers.len() < 10 {
                     // Limit pool size
                     buffers.push(buffer);
                 }
             }
             BufferCategory::Medium => {
-                let mut buffers = self.medium_buffers.lock().unwrap();
+                let mut buffers = self
+                    .medium_buffers
+                    .lock()
+                    .expect("Medium buffers lock poisoned");
                 if buffers.len() < 5 {
                     buffers.push(buffer);
                 }
             }
             BufferCategory::Large => {
-                let mut buffers = self.large_buffers.lock().unwrap();
+                let mut buffers = self
+                    .large_buffers
+                    .lock()
+                    .expect("Large buffers lock poisoned");
                 if buffers.len() < 2 {
                     buffers.push(buffer);
                 }
@@ -147,7 +168,7 @@ impl AudioBufferPool {
 
     /// Get buffer pool statistics including hit rates and cache performance
     pub fn get_stats(&self) -> PoolStats {
-        self.stats.lock().unwrap().clone()
+        self.stats.lock().expect("Stats lock poisoned").clone()
     }
 }
 
@@ -289,7 +310,10 @@ impl SmallAudioOptimizer {
     }
 
     fn get_cached_result(&self, key: &str) -> Option<Vec<f32>> {
-        let mut cache = self.small_sample_cache.lock().unwrap();
+        let mut cache = self
+            .small_sample_cache
+            .lock()
+            .expect("Sample cache lock poisoned");
 
         if let Some(cached) = cache.get_mut(key) {
             // Check if cache entry is still valid (5 minutes)
@@ -305,7 +329,10 @@ impl SmallAudioOptimizer {
     }
 
     fn cache_result(&self, key: String, result: Vec<f32>) {
-        let mut cache = self.small_sample_cache.lock().unwrap();
+        let mut cache = self
+            .small_sample_cache
+            .lock()
+            .expect("Sample cache lock poisoned");
 
         // Limit cache size to prevent memory bloat
         if cache.len() >= 100 {
@@ -378,7 +405,10 @@ impl SmallAudioOptimizer {
 
     /// Clear cache to free memory
     pub fn clear_cache(&self) {
-        self.small_sample_cache.lock().unwrap().clear();
+        self.small_sample_cache
+            .lock()
+            .expect("Sample cache lock poisoned")
+            .clear();
     }
 }
 
@@ -415,18 +445,27 @@ impl ConversionPerformanceMonitor {
     pub fn end_timing(&mut self) {
         if let Some(start) = self.start_time.take() {
             let duration = start.elapsed();
-            self.conversion_times.lock().unwrap().push(duration);
+            self.conversion_times
+                .lock()
+                .expect("Conversion times lock poisoned")
+                .push(duration);
         }
     }
 
     /// Record memory usage in bytes for performance analysis
     pub fn record_memory_usage(&self, bytes: usize) {
-        self.memory_usage.lock().unwrap().push(bytes);
+        self.memory_usage
+            .lock()
+            .expect("Memory usage lock poisoned")
+            .push(bytes);
     }
 
     /// Get average conversion time across all recorded operations
     pub fn get_average_conversion_time(&self) -> Duration {
-        let times = self.conversion_times.lock().unwrap();
+        let times = self
+            .conversion_times
+            .lock()
+            .expect("Conversion times lock poisoned");
         if times.is_empty() {
             Duration::from_millis(0)
         } else {
@@ -437,12 +476,15 @@ impl ConversionPerformanceMonitor {
 
     /// Get memory statistics including minimum, maximum, and average usage in bytes
     pub fn get_memory_stats(&self) -> (usize, usize, f64) {
-        let usage = self.memory_usage.lock().unwrap();
+        let usage = self
+            .memory_usage
+            .lock()
+            .expect("Memory usage lock poisoned");
         if usage.is_empty() {
             (0, 0, 0.0)
         } else {
-            let min = *usage.iter().min().unwrap();
-            let max = *usage.iter().max().unwrap();
+            let min = *usage.iter().min().expect("Memory usage is not empty");
+            let max = *usage.iter().max().expect("Memory usage is not empty");
             let avg = usage.iter().sum::<usize>() as f64 / usage.len() as f64;
             (min, max, avg)
         }

@@ -3,7 +3,10 @@
 use super::data::DataCollector;
 use super::memory_optimization::OptimizedDataCollector;
 use super::reports::ReportGenerator;
-use super::types::*;
+use super::types::{
+    AnalyticsConfig, AnalyticsQuery, AnalyticsReport, AnalyticsResult, DashboardData, ExportFormat,
+    PerformanceMetrics, StringPoolStats, UsagePatterns, UserAnalytics, UserInteractionEvent,
+};
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -23,7 +26,7 @@ impl AnalyticsManager {
     /// Create new analytics manager
     pub async fn new(config: AnalyticsConfig) -> AnalyticsResult<Self> {
         let data_collector = Arc::new(RwLock::new(DataCollector::new(&config).await?));
-        let report_generator = Arc::new(RwLock::new(ReportGenerator::new(&config).await?));
+        let report_generator = Arc::new(RwLock::new(ReportGenerator::new(&config)?));
 
         Ok(Self {
             data_collector,
@@ -95,6 +98,7 @@ impl AnalyticsManager {
     }
 
     /// Get configuration
+    #[must_use]
     pub fn config(&self) -> &AnalyticsConfig {
         &self.config
     }
@@ -115,7 +119,7 @@ impl OptimizedAnalyticsManager {
     /// Create new memory-optimized analytics manager
     pub async fn new(config: AnalyticsConfig) -> AnalyticsResult<Self> {
         let data_collector = Arc::new(RwLock::new(OptimizedDataCollector::new(&config)?));
-        let report_generator = Arc::new(RwLock::new(ReportGenerator::new(&config).await?));
+        let report_generator = Arc::new(RwLock::new(ReportGenerator::new(&config)?));
 
         Ok(Self {
             data_collector,
@@ -198,6 +202,7 @@ impl OptimizedAnalyticsManager {
     }
 
     /// Get configuration
+    #[must_use]
     pub fn config(&self) -> &AnalyticsConfig {
         &self.config
     }
@@ -327,7 +332,7 @@ impl AnalyticsManagerTrait for OptimizedAnalyticsManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analytics::types::{InteractionType, UserInteractionEvent};
+    use crate::analytics::types::{AggregationLevel, InteractionType, UserInteractionEvent};
     use chrono::{Duration, Utc};
     use std::collections::HashMap;
 

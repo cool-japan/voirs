@@ -1,12 +1,17 @@
 //! Dataset implementations for various speech synthesis datasets
 //!
 //! This module provides implementations for popular speech synthesis datasets
-//! including LJSpeech, VCTK, JVS, and others.
+//! including LJSpeech, VCTK, JVS, JSUT, LibriTTS, CommonVoice, and others.
 
+pub mod commonvoice;
 pub mod custom;
 pub mod dummy;
+pub mod jsut;
 pub mod jvs;
+pub mod libritts;
 pub mod ljspeech;
+pub mod merger;
+pub mod statistics;
 pub mod vctk;
 
 use crate::{DatasetError, DatasetSample, Result};
@@ -22,6 +27,12 @@ enum DetectedDatasetType {
     Vctk,
     /// JVS dataset (multi-speaker Japanese)
     Jvs,
+    /// JSUT dataset (single speaker Japanese)
+    Jsut,
+    /// LibriTTS dataset (multi-speaker English for TTS)
+    LibriTts,
+    /// CommonVoice dataset (multilingual crowd-sourced)
+    CommonVoice,
     /// Custom dataset format
     Custom,
     /// Unknown or unsupported dataset format
@@ -93,6 +104,21 @@ impl DatasetRegistry {
                 let dataset = jvs::JvsDataset::load(path).await?;
                 Ok(Box::new(dataset))
             }
+            DetectedDatasetType::Jsut => {
+                // For JSUT, load all available subsets by default
+                let dataset = jsut::JsutDataset::new(path, None).await?;
+                Ok(Box::new(dataset))
+            }
+            DetectedDatasetType::LibriTts => {
+                // For LibriTTS, load all available splits by default
+                let dataset = libritts::LibriTtsDataset::load(path, None).await?;
+                Ok(Box::new(dataset))
+            }
+            DetectedDatasetType::CommonVoice => {
+                // For CommonVoice, try to load the train split by default
+                let dataset = commonvoice::CommonVoiceDataset::load(path, "train").await?;
+                Ok(Box::new(dataset))
+            }
             DetectedDatasetType::Custom => {
                 let dataset = custom::CustomDataset::new(path).await?;
                 Ok(Box::new(dataset))
@@ -121,6 +147,21 @@ impl DatasetRegistry {
         // Check for JVS dataset
         if self.is_jvs_dataset(path).await? {
             return Ok(DetectedDatasetType::Jvs);
+        }
+
+        // Check for JSUT dataset
+        if self.is_jsut_dataset(path).await? {
+            return Ok(DetectedDatasetType::Jsut);
+        }
+
+        // Check for LibriTTS dataset
+        if self.is_libritts_dataset(path).await? {
+            return Ok(DetectedDatasetType::LibriTts);
+        }
+
+        // Check for CommonVoice dataset
+        if self.is_commonvoice_dataset(path).await? {
+            return Ok(DetectedDatasetType::CommonVoice);
         }
 
         // Check for custom dataset structure
@@ -197,6 +238,88 @@ impl DatasetRegistry {
 
         // Consider it JVS if we found at least 2 valid speaker directories
         Ok(jvs_speaker_count >= 2)
+    }
+
+    /// Check if path contains JSUT dataset
+    async fn is_jsut_dataset<P: AsRef<Path>>(&self, path: P) -> Result<bool> {
+        let path = path.as_ref();
+
+        // JSUT characteristics:
+        // - Subset directories (basic5000, onomatopeia300, travel1000, etc.)
+        // - Each subset has wav/ directory and transcript_utf8.txt
+        let expected_subsets = [
+            "basic5000",
+            "onomatopeia300",
+            "loanword128",
+            "countersuffix26",
+            "precedent130",
+            "repeat500",
+            "travel1000",
+            "voiceactress100",
+            "utparaphrase512",
+        ];
+
+        let mut found_subsets = 0;
+        for subset in expected_subsets {
+            let subset_path = path.join(subset);
+            if subset_path.exists() && subset_path.is_dir() {
+                let wav_dir = subset_path.join("wav");
+                let transcript = subset_path.join("transcript_utf8.txt");
+                if wav_dir.exists() && transcript.exists() {
+                    found_subsets += 1;
+                }
+            }
+        }
+
+        // Consider it JSUT if at least 2 recognized subset directories exist
+        Ok(found_subsets >= 2)
+    }
+
+    /// Check if path contains LibriTTS dataset
+    async fn is_libritts_dataset<P: AsRef<Path>>(&self, path: P) -> Result<bool> {
+        let path = path.as_ref();
+
+        // LibriTTS characteristics:
+        // - Directories like train-clean-100, train-clean-360, dev-clean, test-clean
+        // - Each split has speaker_id/chapter_id/*.wav structure
+        // - Files have .normalized.txt and .original.txt alongside .wav files
+        let expected_splits = [
+            "train-clean-100",
+            "train-clean-360",
+            "train-other-500",
+            "dev-clean",
+            "dev-other",
+            "test-clean",
+            "test-other",
+        ];
+
+        let mut found_splits = 0;
+        for split in expected_splits {
+            if path.join(split).exists() {
+                found_splits += 1;
+            }
+        }
+
+        // Consider it LibriTTS if at least 2 recognized split directories exist
+        Ok(found_splits >= 2)
+    }
+
+    /// Check if path contains CommonVoice dataset
+    async fn is_commonvoice_dataset<P: AsRef<Path>>(&self, path: P) -> Result<bool> {
+        let path = path.as_ref();
+
+        // CommonVoice characteristics:
+        // - clips/ directory containing MP3 files
+        // - TSV files: train.tsv, dev.tsv, test.tsv, validated.tsv
+        let clips_dir = path.join("clips");
+        let train_tsv = path.join("train.tsv");
+        let dev_tsv = path.join("dev.tsv");
+        let validated_tsv = path.join("validated.tsv");
+
+        let has_clips_dir = clips_dir.exists() && clips_dir.is_dir();
+        let has_tsv_files = train_tsv.exists() || dev_tsv.exists() || validated_tsv.exists();
+
+        Ok(has_clips_dir && has_tsv_files)
     }
 
     /// Check if path contains custom dataset

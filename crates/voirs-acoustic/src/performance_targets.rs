@@ -447,7 +447,8 @@ impl PerformanceTargetsMonitor {
         }
 
         let mut latencies: Vec<f32> = measurements.iter().map(|m| m.latency_ms).collect();
-        latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        // Sort with NaN handling for latency percentile calculation
+        latencies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let memories: Vec<f32> = measurements.iter().map(|m| m.memory_mb).collect();
         let throughputs: Vec<f32> = measurements.iter().map(|m| m.throughput_ops).collect();

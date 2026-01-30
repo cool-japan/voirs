@@ -546,7 +546,7 @@ impl Default for DesktopIntegration {
 }
 
 /// Convenience functions for common notifications
-
+///
 /// Show synthesis started notification
 pub fn notify_synthesis_started(
     integration: &DesktopIntegration,

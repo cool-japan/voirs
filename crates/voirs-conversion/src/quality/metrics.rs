@@ -261,6 +261,7 @@ impl QualityMetricsSystem {
         let window_size = 512;
         let mut spectrum = vec![0.0; window_size / 2];
 
+        #[allow(clippy::needless_range_loop)]
         for i in 0..window_size.min(audio.len()) {
             let real = audio[i];
             let bin = i / 2; // Simplified frequency mapping
@@ -328,10 +329,12 @@ impl QualityMetricsSystem {
         let mut band_energies = vec![0.0; num_bands];
         let band_size = spectrum.len() / num_bands;
 
+        #[allow(clippy::needless_range_loop)]
         for band in 0..num_bands {
             let start = band * band_size;
             let end = ((band + 1) * band_size).min(spectrum.len());
 
+            #[allow(clippy::needless_range_loop)]
             for i in start..end {
                 band_energies[band] += spectrum[i];
             }

@@ -271,6 +271,7 @@ impl RegressionTests {
     }
 
     /// Compare current output with golden sample
+    #[allow(clippy::too_many_arguments)]
     async fn compare_with_golden(
         &self,
         current: &SynthesisOutput,
@@ -383,16 +384,14 @@ impl RegressionTests {
 
     /// Save synthesis output as golden reference
     fn save_as_golden(&self, output: &SynthesisOutput, path: &Path) -> std::io::Result<()> {
-        write_wav(&output.audio, path)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        write_wav(&output.audio, path).map_err(std::io::Error::other)?;
         println!("  💾 Saved golden reference: {:?}", path);
         Ok(())
     }
 
     /// Save current output for inspection
     fn save_current_output(&self, output: &SynthesisOutput, path: &Path) -> std::io::Result<()> {
-        write_wav(&output.audio, path)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        write_wav(&output.audio, path).map_err(std::io::Error::other)?;
         Ok(())
     }
 
@@ -465,7 +464,7 @@ impl RegressionTests {
         }
 
         // SI-SDR check
-        if let Some(_) = result.si_sdr_score {
+        if result.si_sdr_score.is_some() {
             total_checks += 1;
             if result.meets_si_sdr_threshold {
                 score += 1;
@@ -473,7 +472,7 @@ impl RegressionTests {
         }
 
         // STOI check
-        if let Some(_) = result.stoi_score {
+        if result.stoi_score.is_some() {
             total_checks += 1;
             if result.meets_stoi_threshold {
                 score += 1;
@@ -634,6 +633,12 @@ pub struct RegressionResults {
     pub comparisons: HashMap<String, ComparisonResult>,
 }
 
+impl Default for RegressionResults {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RegressionResults {
     pub fn new() -> Self {
         Self {
@@ -730,6 +735,12 @@ pub struct ComparisonResult {
 
     // Performance
     pub processing_time: std::time::Duration,
+}
+
+impl Default for ComparisonResult {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ComparisonResult {

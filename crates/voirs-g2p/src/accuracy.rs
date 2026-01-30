@@ -66,10 +66,7 @@ impl AccuracyBenchmark {
     /// Load test cases from a reference file
     pub fn load_from_file<P: AsRef<Path>>(&mut self, path: P) -> Result<(), G2pError> {
         let content = fs::read_to_string(path).map_err(|e| {
-            G2pError::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to read test file: {e}"),
-            ))
+            G2pError::IoError(std::io::Error::other(format!("Failed to read test file: {e}")))
         })?;
 
         for line in content.lines() {
@@ -352,8 +349,8 @@ fn calculate_edit_distance(predicted: &[String], expected: &[String]) -> f64 {
     for (i, row) in dp.iter_mut().enumerate().take(m + 1) {
         row[0] = i;
     }
-    for j in 0..=n {
-        dp[0][j] = j;
+    for (j, cell) in dp[0].iter_mut().enumerate().take(n + 1) {
+        *cell = j;
     }
 
     // Fill the DP table

@@ -4,7 +4,6 @@
 
 use std::collections::HashMap;
 use std::time::Duration;
-use tokio;
 use voirs_cloning::{enterprise_sso::*, gaming_plugins::*, realtime_streaming::*, Result};
 
 #[test]

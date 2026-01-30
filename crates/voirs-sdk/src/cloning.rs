@@ -163,7 +163,11 @@ impl VoiceCloner {
     }
 
     /// Add speaker to cache
-    pub async fn cache_speaker(&self, speaker_id: String, profile: SpeakerProfile) -> crate::Result<()> {
+    pub async fn cache_speaker(
+        &self,
+        speaker_id: String,
+        profile: SpeakerProfile,
+    ) -> crate::Result<()> {
         let config = self.config.read().await;
         let mut cache = self.speaker_cache.write().await;
 

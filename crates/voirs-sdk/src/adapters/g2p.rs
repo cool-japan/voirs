@@ -34,6 +34,8 @@ impl G2pAdapter {
             SdkLanguageCode::Ja | SdkLanguageCode::JaJp => voirs_g2p::LanguageCode::Ja,
             SdkLanguageCode::ZhCn => voirs_g2p::LanguageCode::ZhCn,
             SdkLanguageCode::Ko | SdkLanguageCode::KoKr => voirs_g2p::LanguageCode::Ko,
+            SdkLanguageCode::Ru | SdkLanguageCode::RuRu => voirs_g2p::LanguageCode::Ru,
+            SdkLanguageCode::Ar => voirs_g2p::LanguageCode::Ar,
 
             // Unsupported languages - default to English
             _ => voirs_g2p::LanguageCode::EnUs,
@@ -53,6 +55,8 @@ impl G2pAdapter {
             voirs_g2p::LanguageCode::Ja => SdkLanguageCode::Ja,
             voirs_g2p::LanguageCode::ZhCn => SdkLanguageCode::ZhCn,
             voirs_g2p::LanguageCode::Ko => SdkLanguageCode::Ko,
+            voirs_g2p::LanguageCode::Ru => SdkLanguageCode::Ru,
+            voirs_g2p::LanguageCode::Ar => SdkLanguageCode::Ar,
         }
     }
 

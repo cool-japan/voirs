@@ -1,13 +1,27 @@
 //! Core UX Analytics Implementation
 //!
-//! This module contains the main UxAnalyticsTracker implementation along with
+//! This module contains the main `UxAnalyticsTracker` implementation along with
 //! retention analytics, progress analytics, insights engine, and comprehensive reporting.
 
-use super::engagement::*;
-use super::sessions::*;
-use super::types::*;
+use super::engagement::{
+    EngagementAnalytics, EngagementPatterns, EngagementPredictions, EngagementTrends,
+    FeedbackAnalysis, SatisfactionAnalytics, SatisfactionDrivers, SatisfactionPredictions,
+    SatisfactionTrends, SentimentAnalysis, SessionEngagementMetrics, UserLifecycleEngagement,
+};
+use super::sessions::{
+    BehaviorAnalytics, BehaviorPredictions, BehaviorSegmentation, CrossSegmentAnalysis,
+    DetailedSessionRecord, IntensityDistribution, QualityFactors, QualityTrends, SessionActivity,
+    SessionAnalytics, SessionContext, SessionFlowAnalysis, SessionOutcomes, SessionQualityAnalysis,
+    UsagePatterns, UserJourneyAnalysis, UxSessionStatistics,
+};
+use super::types::{
+    ActivityContext, ActivityType, AudioCapabilities, ChurnRiskLevel, CsfComplianceStatus,
+    CsfMetric, DeviceInfo, ExperienceLevel, ImplementationCost, ImplementationDifficulty,
+    InsightCategory, NetworkConditions, RecommendationPriority, RecommendationType,
+    ResourceRequirements, SessionCompletionStatus, TrendDirection, UserState, UxAnalyticsConfig,
+};
 use crate::metrics_dashboard::{SatisfactionRecord, SessionCompletionRecord, UserRetentionRecord};
-use crate::traits::*;
+use crate::traits::FocusArea;
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -720,8 +734,10 @@ impl UxAnalyticsTracker {
 
         // Update engagement score based on session quality
         let session_engagement_score = calculate_session_engagement_score(session_record);
-        engagement.overall_engagement_score =
-            (engagement.overall_engagement_score + session_engagement_score) / 2.0;
+        engagement.overall_engagement_score = f32::midpoint(
+            engagement.overall_engagement_score,
+            session_engagement_score,
+        );
     }
 
     /// Get comprehensive UX analytics report
@@ -872,6 +888,7 @@ impl UxAnalyticsTracker {
 }
 
 /// Helper function to calculate session engagement score
+#[must_use]
 pub fn calculate_session_engagement_score(session: &DetailedSessionRecord) -> f32 {
     let completion_score = match session.completion_status {
         SessionCompletionStatus::Completed => 1.0,
@@ -881,15 +898,15 @@ pub fn calculate_session_engagement_score(session: &DetailedSessionRecord) -> f3
         SessionCompletionStatus::Failed => 0.0,
     };
 
-    let activity_score = if !session.activities.is_empty() {
+    let activity_score = if session.activities.is_empty() {
+        0.0
+    } else {
         session
             .activities
             .iter()
             .map(|a| a.engagement_score)
             .sum::<f32>()
             / session.activities.len() as f32
-    } else {
-        0.0
     };
 
     let duration_score = if session.duration_seconds >= 900 {

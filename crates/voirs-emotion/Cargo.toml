@@ -15,6 +15,7 @@ description = "Emotion expression control system for VoiRS voice synthesis"
 [dependencies]
 # SciRS2 - Scientific computing abstractions
 scirs2-core = { workspace = true }
+scirs2-fft = { workspace = true }
 
 # Async and concurrency
 tokio = { workspace = true }
@@ -62,6 +63,7 @@ tokio-test = { workspace = true }
 criterion = { workspace = true }
 futures = { workspace = true }
 wasm-bindgen-test = { workspace = true }
+proptest = { workspace = true }
 
 [features]
 default = ["acoustic-integration"]

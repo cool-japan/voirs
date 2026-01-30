@@ -457,7 +457,7 @@ impl TrainingSession {
             )
         };
 
-        let total_batches = (self.train_dataset.examples.len() + batch_size - 1) / batch_size;
+        let total_batches = self.train_dataset.examples.len().div_ceil(batch_size);
         let mut total_loss = 0.0;
         let mut correct_predictions = 0;
         let mut total_predictions = 0;
@@ -741,7 +741,7 @@ impl ProgressTracker {
 
         // Update best validation score
         if let Some(val_accuracy) = progress.val_accuracy {
-            if self.best_val_score.map_or(true, |best| val_accuracy > best) {
+            if self.best_val_score.is_none_or(|best| val_accuracy > best) {
                 self.best_val_score = Some(val_accuracy);
             }
         }
@@ -837,7 +837,7 @@ impl EarlyStopping {
 
 impl LearningRateScheduler for StepLRScheduler {
     fn get_lr(&self, epoch: usize, current_lr: f32) -> f32 {
-        if epoch % self.step_size == 0 && epoch > 0 {
+        if epoch.is_multiple_of(self.step_size) && epoch > 0 {
             current_lr * self.gamma
         } else {
             current_lr

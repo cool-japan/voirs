@@ -1,7 +1,7 @@
 //! Memory monitoring and leak detection for long-running sessions
 //!
 //! This module provides comprehensive memory monitoring capabilities to detect
-//! and prevent memory leaks in long-running VoiRS feedback sessions.
+//! and prevent memory leaks in long-running `VoiRS` feedback sessions.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -22,6 +22,7 @@ pub struct MemoryMonitor {
 
 impl MemoryMonitor {
     /// Create a new memory monitor
+    #[must_use]
     pub fn new(config: MemoryMonitorConfig) -> Self {
         Self {
             memory_samples: Arc::new(Mutex::new(Vec::new())),
@@ -79,7 +80,7 @@ impl MemoryMonitor {
 
                 // Check for memory leaks
                 if let Some(leak_info) = Self::detect_memory_leak(&samples, &config) {
-                    println!("Memory leak detected: {:?}", leak_info);
+                    println!("Memory leak detected: {leak_info:?}");
 
                     // Trigger garbage collection if needed
                     if leak_info.severity >= LeakSeverity::High {
@@ -132,6 +133,7 @@ impl MemoryMonitor {
     }
 
     /// Get memory statistics
+    #[must_use]
     pub fn get_memory_statistics(&self) -> MemoryStatistics {
         let samples = self.memory_samples.lock().unwrap();
         let session_memory = self.session_memory.lock().unwrap();
@@ -299,12 +301,14 @@ impl MemoryMonitor {
     }
 
     /// Get session memory information
+    #[must_use]
     pub fn get_session_memory_info(&self, session_id: &str) -> Option<SessionMemoryInfo> {
         let session_memory = self.session_memory.lock().unwrap();
         session_memory.get(session_id).cloned()
     }
 
     /// Get all session memory information
+    #[must_use]
     pub fn get_all_session_memory_info(&self) -> HashMap<String, SessionMemoryInfo> {
         let session_memory = self.session_memory.lock().unwrap();
         session_memory.clone()
@@ -346,6 +350,7 @@ impl Default for MemoryMonitorConfig {
 
 impl MemoryMonitorConfig {
     /// Create a test configuration with fast intervals for testing
+    #[must_use]
     pub fn test_config() -> Self {
         Self {
             enabled: true,
@@ -443,6 +448,7 @@ pub struct MemoryManager {
 
 impl MemoryManager {
     /// Create a new memory manager
+    #[must_use]
     pub fn new(config: MemoryMonitorConfig) -> Self {
         Self {
             monitor: MemoryMonitor::new(config),
@@ -494,6 +500,7 @@ impl MemoryManager {
     }
 
     /// Get memory monitor
+    #[must_use]
     pub fn get_monitor(&self) -> &MemoryMonitor {
         &self.monitor
     }

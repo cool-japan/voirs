@@ -103,7 +103,7 @@ impl MemoryLayout {
     pub fn calculate_optimal_alignment(&self, size: usize) -> usize {
         // Find the largest power of 2 that divides size and is <= cache_line_size
         let mut alignment = 1;
-        while alignment <= self.config.cache_line_size && alignment <= size && size % alignment == 0
+        while alignment <= self.config.cache_line_size && alignment <= size && size.is_multiple_of(alignment)
         {
             alignment *= 2;
         }
@@ -161,7 +161,10 @@ impl MemoryLayout {
 
     /// Get optimization statistics
     pub fn get_stats(&self) -> OptimizationStats {
-        self.optimization_stats.read().unwrap().clone()
+        self.optimization_stats
+            .read()
+            .map(|stats| stats.clone())
+            .unwrap_or_default()
     }
 
     // Helper methods
@@ -190,7 +193,7 @@ impl MemoryLayout {
 
         let total_bytes = accesses.iter().map(|a| a.size).sum::<usize>();
         let cache_lines_needed =
-            (total_bytes + self.config.cache_line_size - 1) / self.config.cache_line_size;
+            total_bytes.div_ceil(self.config.cache_line_size);
 
         if cache_lines_needed > 0 {
             cache_lines_accessed.len() as f64 / cache_lines_needed as f64
@@ -509,7 +512,11 @@ impl MemoryOptimizer {
     /// Get comprehensive optimization report
     pub fn get_optimization_report(&self) -> OptimizationReport {
         let layout_stats = self.layout.get_stats();
-        let mapped_files_count = self.mapped_files.read().unwrap().len();
+        let mapped_files_count = self
+            .mapped_files
+            .read()
+            .map(|files| files.len())
+            .unwrap_or(0);
 
         OptimizationReport {
             strategy: self.strategy,

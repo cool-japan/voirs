@@ -240,8 +240,15 @@ pub struct MLEmotionRecognizer {
     emotion_history: Arc<RwLock<Vec<EmotionRecognitionResult>>>,
 }
 
+impl Default for MLEmotionRecognizer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MLEmotionRecognizer {
     /// Description
+    #[must_use]
     pub fn new() -> Self {
         Self {
             model_weights: Arc::new(RwLock::new(Self::initialize_weights())),
@@ -280,7 +287,7 @@ impl MLEmotionRecognizer {
                 .take(13)
                 .map(|&x| x / 100.0),
         );
-        features.extend(audio_features.energy_distribution.iter().take(10).cloned());
+        features.extend(audio_features.energy_distribution.iter().take(10).copied());
         features.extend(
             audio_features
                 .formant_frequencies
@@ -584,8 +591,15 @@ pub struct AdaptiveResponseGenerator {
     user_profiles: Arc<RwLock<HashMap<String, UserEmotionalProfile>>>,
 }
 
+impl Default for AdaptiveResponseGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AdaptiveResponseGenerator {
     /// Description
+    #[must_use]
     pub fn new() -> Self {
         Self {
             response_templates: Arc::new(RwLock::new(Self::initialize_templates())),
@@ -799,8 +813,15 @@ pub struct EmotionalIntelligenceSystem {
     user_sessions: Arc<RwLock<HashMap<String, Vec<EmotionRecognitionResult>>>>,
 }
 
+impl Default for EmotionalIntelligenceSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EmotionalIntelligenceSystem {
     /// Description
+    #[must_use]
     pub fn new() -> Self {
         Self {
             emotion_recognizer: Arc::new(MLEmotionRecognizer::new()),
@@ -860,11 +881,9 @@ impl EmotionalIntelligenceSystem {
     /// Description
     pub async fn get_emotional_analytics(&self, user_id: &str) -> Option<EmotionalAnalytics> {
         let sessions = self.user_sessions.read().await;
-        if let Some(history) = sessions.get(user_id) {
-            Some(Self::compute_analytics(history))
-        } else {
-            None
-        }
+        sessions
+            .get(user_id)
+            .map(|history| Self::compute_analytics(history))
     }
 
     fn compute_analytics(history: &[EmotionRecognitionResult]) -> EmotionalAnalytics {

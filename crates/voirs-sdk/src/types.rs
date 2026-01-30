@@ -68,6 +68,10 @@ pub enum LanguageCode {
     Th,
     /// Vietnamese
     Vi,
+    /// Indonesian
+    Id,
+    /// Malay
+    Ms,
     /// Dutch (short code)
     Nl,
     /// Swedish (short code)
@@ -168,6 +172,8 @@ impl LanguageCode {
             Self::Hi => "hi",
             Self::Th => "th",
             Self::Vi => "vi",
+            Self::Id => "id",
+            Self::Ms => "ms",
             Self::Nl => "nl",
             Self::Sv => "sv",
             Self::No => "no",
@@ -236,6 +242,8 @@ impl LanguageCode {
             "hi" => Some(Self::Hi),
             "th" => Some(Self::Th),
             "vi" => Some(Self::Vi),
+            "id" => Some(Self::Id),
+            "ms" => Some(Self::Ms),
             "nl" => Some(Self::Nl),
             "sv" => Some(Self::Sv),
             "no" => Some(Self::No),

@@ -1,7 +1,7 @@
 //! WebSocket-based real-time communication for cross-platform synchronization
 //!
 //! This module provides WebSocket client and server functionality for real-time
-//! communication between different platform instances of the VoiRS feedback system.
+//! communication between different platform instances of the `VoiRS` feedback system.
 
 use crate::traits::{FeedbackResponse, SessionState, UserProgress};
 use chrono::{DateTime, Utc};
@@ -63,12 +63,12 @@ pub enum WebSocketMessage {
     /// Ping for connection keep-alive
     Ping {
         /// Ping timestamp
-        timestamp: DateTime<Utc>
+        timestamp: DateTime<Utc>,
     },
     /// Pong response to ping
     Pong {
         /// Pong timestamp
-        timestamp: DateTime<Utc>
+        timestamp: DateTime<Utc>,
     },
     /// Error message
     Error {
@@ -106,6 +106,7 @@ pub struct WebSocketClient {
 
 impl WebSocketClient {
     /// Create a new WebSocket client
+    #[must_use]
     pub fn new(config: WebSocketClientConfig) -> Self {
         Self {
             config,
@@ -390,6 +391,7 @@ impl WebSocketClient {
     }
 
     /// Check if client is connected
+    #[must_use]
     pub fn is_connected(&self) -> bool {
         if let Ok(state) = self.connection_state.read() {
             matches!(*state, ConnectionState::Connected { .. })
@@ -399,6 +401,7 @@ impl WebSocketClient {
     }
 
     /// Get pending message count
+    #[must_use]
     pub fn get_pending_message_count(&self) -> usize {
         if let Ok(queue) = self.outbound_queue.read() {
             queue.len()
@@ -482,17 +485,17 @@ pub enum ConnectionState {
     /// Connected with session ID
     Connected {
         /// Session identifier
-        session_id: String
+        session_id: String,
     },
     /// Connection error
     Error {
         /// Error message
-        message: String
+        message: String,
     },
 }
 
 /// Connection statistics
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ConnectionStats {
     /// Number of successful connections
     pub connections_established: u64,
@@ -518,25 +521,6 @@ pub struct ConnectionStats {
     pub message_tasks_started: u32,
     /// Queue processing tasks started count
     pub queue_tasks_started: u32,
-}
-
-impl Default for ConnectionStats {
-    fn default() -> Self {
-        Self {
-            connections_established: 0,
-            disconnections: 0,
-            messages_sent: 0,
-            messages_received: 0,
-            messages_dropped: 0,
-            connection_errors: 0,
-            active_subscriptions: 0,
-            last_connect_time: None,
-            last_disconnect_time: None,
-            ping_tasks_started: 0,
-            message_tasks_started: 0,
-            queue_tasks_started: 0,
-        }
-    }
 }
 
 /// Message handler trait
@@ -570,28 +554,28 @@ pub enum WebSocketError {
     #[error("Connection failed: {message}")]
     ConnectionFailed {
         /// Error message
-        message: String
+        message: String,
     },
 
     /// Message serialization error
     #[error("Message serialization error: {message}")]
     SerializationError {
         /// Error message
-        message: String
+        message: String,
     },
 
     /// Protocol error
     #[error("Protocol error: {message}")]
     ProtocolError {
         /// Error message
-        message: String
+        message: String,
     },
 
     /// Authentication error
     #[error("Authentication error: {message}")]
     AuthError {
         /// Error message
-        message: String
+        message: String,
     },
 
     /// Queue full error
@@ -606,14 +590,14 @@ pub enum WebSocketError {
     #[error("Subscription error: {message}")]
     SubscriptionError {
         /// Error message
-        message: String
+        message: String,
     },
 
     /// Invalid message type error
     #[error("Invalid message type: {message_type}")]
     InvalidMessageType {
         /// Message type
-        message_type: String
+        message_type: String,
     },
 }
 
@@ -629,6 +613,7 @@ pub struct RealtimeCommunicationManager {
 
 impl RealtimeCommunicationManager {
     /// Create a new real-time communication manager
+    #[must_use]
     pub fn new(ws_config: WebSocketClientConfig, rt_config: RealtimeConfig) -> Self {
         Self {
             client: WebSocketClient::new(ws_config),

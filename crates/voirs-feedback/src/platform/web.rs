@@ -1,6 +1,6 @@
 //! Web platform adapter implementation
 //!
-//! This module provides web browser-specific implementations for VoiRS feedback system
+//! This module provides web browser-specific implementations for `VoiRS` feedback system
 //! including support for Chrome, Firefox, Safari, and Edge browsers.
 
 use super::{AudioDeviceInfo, PlatformAdapter, PlatformError, PlatformResult};
@@ -13,11 +13,13 @@ pub struct WebAdapter {
 
 impl WebAdapter {
     /// Create a new web adapter
+    #[must_use]
     pub fn new() -> Self {
         Self { initialized: false }
     }
 
     /// Check if running in a secure context (HTTPS)
+    #[must_use]
     pub fn is_secure_context() -> bool {
         // In WASM environment, we would check window.isSecureContext
         // For now, assume secure context in tests
@@ -36,6 +38,7 @@ impl WebAdapter {
     }
 
     /// Get browser information
+    #[must_use]
     pub fn get_browser_info() -> BrowserInfo {
         #[cfg(target_arch = "wasm32")]
         {
@@ -70,6 +73,7 @@ impl WebAdapter {
     }
 
     /// Check if specific web API is available
+    #[must_use]
     pub fn supports_web_api(api: &str) -> bool {
         match api {
             "WebAudio" => true,
@@ -120,7 +124,7 @@ impl WebAdapter {
         }
     }
 
-    /// Request microphone permission with enhanced MediaDevices API support
+    /// Request microphone permission with enhanced `MediaDevices` API support
     pub async fn request_microphone_permission() -> Result<bool, PlatformError> {
         #[cfg(target_arch = "wasm32")]
         {
@@ -329,7 +333,7 @@ impl PlatformAdapter for WebAdapter {
         #[cfg(not(target_arch = "wasm32"))]
         {
             // In test environment, just print
-            println!("Web Notification: {} - {}", title, message);
+            println!("Web Notification: {title} - {message}");
         }
 
         Ok(())
@@ -439,6 +443,7 @@ pub struct WebUtils;
 
 impl WebUtils {
     /// Check if browser supports specific audio feature
+    #[must_use]
     pub fn supports_audio_feature(feature: &str) -> bool {
         match feature {
             "low_latency" => true,
@@ -452,6 +457,7 @@ impl WebUtils {
     }
 
     /// Get recommended audio settings for web
+    #[must_use]
     pub fn get_recommended_audio_settings() -> WebAudioSettings {
         WebAudioSettings {
             sample_rate: 44100,
@@ -465,16 +471,19 @@ impl WebUtils {
     }
 
     /// Check if browser supports WebRTC
+    #[must_use]
     pub fn supports_webrtc() -> bool {
         WebAdapter::supports_web_api("WebRTC")
     }
 
     /// Check if browser supports WebAssembly
+    #[must_use]
     pub fn supports_webassembly() -> bool {
         WebAdapter::supports_web_api("WebAssembly")
     }
 
     /// Get browser capabilities
+    #[must_use]
     pub fn get_browser_capabilities() -> BrowserCapabilities {
         BrowserCapabilities {
             max_audio_channels: 2,
@@ -489,6 +498,7 @@ impl WebUtils {
     }
 
     /// Check if feature requires user gesture
+    #[must_use]
     pub fn requires_user_gesture(feature: &str) -> bool {
         match feature {
             "audio_playback" => true,
@@ -544,25 +554,25 @@ pub struct BrowserCapabilities {
 pub struct WebStorageManager;
 
 impl WebStorageManager {
-    /// Initialize IndexedDB database
+    /// Initialize `IndexedDB` database
     pub fn initialize_indexeddb() -> Result<(), PlatformError> {
         // This would initialize IndexedDB database
         Ok(())
     }
 
-    /// Store data in IndexedDB
+    /// Store data in `IndexedDB`
     pub fn store_data(_key: &str, _data: &[u8]) -> Result<(), PlatformError> {
         // This would store data in IndexedDB
         Ok(())
     }
 
-    /// Retrieve data from IndexedDB
+    /// Retrieve data from `IndexedDB`
     pub fn retrieve_data(_key: &str) -> Result<Vec<u8>, PlatformError> {
         // This would retrieve data from IndexedDB
         Ok(vec![])
     }
 
-    /// Clear IndexedDB data
+    /// Clear `IndexedDB` data
     pub fn clear_data() -> Result<(), PlatformError> {
         // This would clear IndexedDB data
         Ok(())

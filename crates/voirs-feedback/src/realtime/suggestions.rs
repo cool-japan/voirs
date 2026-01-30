@@ -298,6 +298,7 @@ pub struct SuggestionResult {
 
 impl SuggestionEngine {
     /// Create a new suggestion engine
+    #[must_use]
     pub fn new(config: SuggestionConfig) -> Self {
         Self {
             config,
@@ -1560,7 +1561,7 @@ mod uuid {
     use std::cell::Cell;
 
     thread_local! {
-        static COUNTER: Cell<u64> = Cell::new(0);
+        static COUNTER: Cell<u64> = const { Cell::new(0) };
     }
 
     pub struct Uuid(u64);

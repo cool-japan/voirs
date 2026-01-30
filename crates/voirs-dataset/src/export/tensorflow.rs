@@ -445,7 +445,7 @@ impl TensorFlowExporter {
 
         // Determine number of shards (split large datasets into multiple files)
         let samples_per_shard = 1000; // Configurable shard size
-        let total_shards = (dataset.samples.len() + samples_per_shard - 1) / samples_per_shard;
+        let total_shards = dataset.samples.len().div_ceil(samples_per_shard);
 
         for shard_idx in 0..total_shards {
             let start_idx = shard_idx * samples_per_shard;

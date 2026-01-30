@@ -282,6 +282,12 @@ pub struct ModelTrainingStats {
     pub complexity_score: f32,
 }
 
+impl Default for AgeGenderAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AgeGenderAdapter {
     /// Create new age/gender adapter with default configuration
     pub fn new() -> Self {

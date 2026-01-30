@@ -351,14 +351,17 @@ impl EdgeDeploymentOptimizer {
                 / (stats.successful_requests + 1) as f32;
 
             match processing_result {
-                Ok(ref result) => {
+                Ok(_) => {
                     stats.successful_requests += 1;
-                    // Cache successful result if enabled
-                    if self.config.enable_local_cache {
-                        let _ = self.cache_result(request, result.clone()).await;
-                    }
                 }
                 Err(_) => stats.failed_requests += 1,
+            }
+        }
+
+        // Cache successful result after releasing the lock
+        if let Ok(ref result) = processing_result {
+            if self.config.enable_local_cache {
+                let _ = self.cache_result(request, result.clone()).await;
             }
         }
 
@@ -493,10 +496,12 @@ impl EdgeDeploymentOptimizer {
 
     async fn process_distributed(&self, request: &VoiceCloneRequest) -> Result<VoiceCloneResult> {
         // Distribute processing across available edge nodes
-        let nodes = self.distributed_nodes.read().unwrap();
-        let available_nodes: Vec<_> = nodes.iter().filter(|n| n.available).collect();
+        let has_available_nodes = {
+            let nodes = self.distributed_nodes.read().unwrap();
+            nodes.iter().any(|n| n.available)
+        };
 
-        if available_nodes.is_empty() {
+        if !has_available_nodes {
             return self.process_local(request).await;
         }
 

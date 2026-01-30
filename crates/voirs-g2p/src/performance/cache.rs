@@ -12,9 +12,13 @@ use serde::Serialize;
 /// Cache statistics for monitoring performance
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct CacheStats {
+    /// Number of successful cache hits
     pub hits: u64,
+    /// Number of cache misses (entry not found)
     pub misses: u64,
+    /// Number of entries evicted from cache
     pub evictions: u64,
+    /// Current total number of entries in cache
     pub total_size: usize,
 }
 
@@ -59,11 +63,17 @@ pub enum EvictionStrategy {
 /// Advanced cache configuration
 #[derive(Debug, Clone)]
 pub struct AdvancedCacheConfig {
+    /// Maximum number of entries allowed in cache
     pub max_size: usize,
+    /// Optional time-to-live for cache entries
     pub ttl: Option<Duration>,
+    /// Strategy for evicting entries when cache is full
     pub eviction_strategy: EvictionStrategy,
+    /// Preload popular entries on initialization
     pub preload_popular: bool,
+    /// Automatically adjust cache size based on usage patterns
     pub adaptive_sizing: bool,
+    /// Collect detailed cache statistics
     pub stats_collection: bool,
 }
 

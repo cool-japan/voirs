@@ -91,7 +91,7 @@ g2p-integration = ["voirs-g2p"]
 vocoder-integration = []  # Marker feature for vocoder integration code paths
 gpu = []
 cuda = ["candle-core/cuda"]
-metal = ["candle-core/metal"]
+metal = ["dep:metal-rs"]
 emotion-integration = []
 wasm = [
     "wasm-bindgen",
@@ -103,10 +103,20 @@ wasm = [
 ]
 onnx = []
 
+[target.'cfg(target_os = "macos")'.dependencies]
+metal-rs = { version = "0.27", optional = true, package = "metal" }
+
 [[bench]]
 name = "performance_benchmarks"
 harness = false
 
+[[bench]]
+name = "embedding_benchmarks"
+harness = false
+
+[[bench]]
+name = "simd_performance_benchmarks"
+harness = false
 
 [lints]
 workspace = true

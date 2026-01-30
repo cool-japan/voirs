@@ -1,7 +1,12 @@
 //! Data collection and user interaction tracking functionality
 
 use super::metrics::{MemoryStats, SystemMetrics};
-use super::types::*;
+use super::types::{
+    AnalyticsConfig, AnalyticsError, AnalyticsResult, ConversionFunnel, DashboardData,
+    InteractionSummary, InteractionType, JourneyStep, PerformanceMetrics, RetentionRates,
+    SessionData, StringPool, TrendPoint, UsagePatterns, UserAnalytics, UserInteractionEvent,
+    UserJourney,
+};
 use chrono::{DateTime, Duration, Timelike, Utc};
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
@@ -151,7 +156,7 @@ impl DataCollector {
             self.sessions
                 .get(user_id)
                 .ok_or_else(|| AnalyticsError::InsufficientDataError {
-                    message: format!("No data found for user: {}", user_id),
+                    message: format!("No data found for user: {user_id}"),
                 })?;
 
         let user_interactions = self
@@ -163,7 +168,7 @@ impl DataCollector {
 
         if user_interactions.is_empty() {
             return Err(AnalyticsError::InsufficientDataError {
-                message: format!("No interactions found for user: {}", user_id),
+                message: format!("No interactions found for user: {user_id}"),
             });
         }
 
@@ -171,7 +176,7 @@ impl DataCollector {
             user_id: user_id.to_string(),
             total_sessions: session.session_count,
             total_interactions: user_interactions.len(),
-            average_session_duration: session.total_duration / session.session_count as i64,
+            average_session_duration: session.total_duration / i64::from(session.session_count),
             improvement_trend: self.calculate_improvement_trend(&user_interactions),
             preferred_features: self.analyze_feature_usage(&user_interactions),
             learning_velocity: self.calculate_learning_velocity(&user_interactions),
@@ -212,16 +217,19 @@ impl DataCollector {
     }
 
     /// Get memory statistics for monitoring
+    #[must_use]
     pub fn get_memory_stats(&self) -> &MemoryStats {
         &self.memory_stats
     }
 
     /// Get interactions for report generation
+    #[must_use]
     pub fn get_interactions(&self) -> &VecDeque<UserInteractionEvent> {
         &self.interactions
     }
 
     /// Get performance history for report generation
+    #[must_use]
     pub fn get_performance_history(&self) -> &VecDeque<PerformanceMetrics> {
         &self.performance_history
     }
@@ -389,7 +397,7 @@ impl DataCollector {
             }
         }
 
-        log::debug!("Deduplicated {} interaction entries", removed_count);
+        log::debug!("Deduplicated {removed_count} interaction entries");
     }
 
     /// Update memory usage statistics
@@ -466,7 +474,7 @@ impl DataCollector {
         let latency_score = (200.0 - avg_latency.min(200.0)) / 200.0;
         let error_score = 1.0 - error_rate;
 
-        (latency_score + error_score) / 2.0
+        f32::midpoint(latency_score, error_score)
     }
 
     fn calculate_performance_trends(&self) -> Vec<TrendPoint> {
@@ -477,10 +485,7 @@ impl DataCollector {
 
         for metric in &self.performance_history {
             let hour = metric.timestamp.timestamp() / 3600;
-            hourly_data
-                .entry(hour)
-                .or_insert_with(Vec::new)
-                .push(metric);
+            hourly_data.entry(hour).or_default().push(metric);
         }
 
         // Calculate trends for each hour
@@ -624,11 +629,11 @@ impl DataCollector {
         let frequency_score = interactions.len() as f32 / 30.0; // Normalize to 30 interactions
         let duration_score = avg_duration / 600.0; // Normalize to 10 minutes
 
-        (frequency_score.min(1.0) + duration_score.min(1.0)) / 2.0
+        f32::midpoint(frequency_score.min(1.0), duration_score.min(1.0))
     }
 
     fn analyze_peak_usage_hours(&self) -> Vec<u8> {
-        let mut hourly_counts = vec![0u32; 24];
+        let mut hourly_counts = [0u32; 24];
 
         for interaction in &self.interactions {
             let hour = interaction.timestamp.hour() as usize;
@@ -655,7 +660,7 @@ impl DataCollector {
         }
 
         // Convert to percentages
-        for (_, count) in usage.iter_mut() {
+        for count in usage.values_mut() {
             *count = (*count / total) * 100.0;
         }
 
@@ -670,7 +675,7 @@ impl DataCollector {
         for interaction in &self.interactions {
             user_paths
                 .entry(interaction.user_id.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(interaction);
         }
 
@@ -750,7 +755,7 @@ impl DataCollector {
         // In a real implementation, this would use IP geolocation or user settings
         let hash = user_id
             .bytes()
-            .fold(0u32, |acc, b| acc.wrapping_add(b as u32));
+            .fold(0u32, |acc, b| acc.wrapping_add(u32::from(b)));
 
         match hash % 6 {
             0 => "North America".to_string(),
@@ -789,7 +794,7 @@ impl DataCollector {
         // In a real implementation, this would use user agent or device info
         let hash = user_id
             .bytes()
-            .fold(0u32, |acc, b| acc.wrapping_add(b as u32));
+            .fold(0u32, |acc, b| acc.wrapping_add(u32::from(b)));
         let time_factor = timestamp.timestamp() as u32;
         let combined_hash = hash.wrapping_add(time_factor);
 

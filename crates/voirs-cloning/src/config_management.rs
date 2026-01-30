@@ -392,7 +392,7 @@ impl UnifiedConfigManager {
 
         // Create backup if backup directory is configured
         if let Some(backup_dir) = &self.manager_config.backup_directory {
-            self.create_backup(&*config, backup_dir).await?;
+            self.create_backup(&config, backup_dir).await?;
         }
 
         fs::write(path, content)
@@ -424,12 +424,12 @@ impl UnifiedConfigManager {
         .await?;
 
         let mut config = self.config.write().await;
-        let previous_config = self.get_section_value(&*config, section)?;
+        let previous_config = self.get_section_value(&config, section)?;
 
         // Update the specific section
-        self.set_section_value(&mut *config, section, new_value.clone())?;
+        self.set_section_value(&mut config, section, new_value.clone())?;
         config.metadata.modified_at = SystemTime::now();
-        config.metadata.checksum = self.calculate_checksum(&*config).await?;
+        config.metadata.checksum = self.calculate_checksum(&config).await?;
 
         // Broadcast change event
         let change_event = ConfigChangeEvent {

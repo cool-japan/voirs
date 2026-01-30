@@ -1,7 +1,7 @@
 //! Stream management and processing
 
 use super::audio_processing::{AudioProcessor, AudioProcessorConfig};
-use super::types::*;
+use super::types::RealtimeConfig;
 use crate::traits::{FeedbackResponse, SessionState};
 use crate::FeedbackError;
 use std::collections::HashMap;
@@ -29,6 +29,7 @@ pub struct FeedbackStream {
 
 impl FeedbackStream {
     /// Create a new feedback stream
+    #[must_use]
     pub fn new(user_id: String, config: RealtimeConfig, session_state: SessionState) -> Self {
         // Create optimized audio processor configuration for low latency
         let audio_config = AudioProcessorConfig {
@@ -258,8 +259,15 @@ pub struct LatencyOptimizer {
     total_requests: u64,
 }
 
+impl Default for LatencyOptimizer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LatencyOptimizer {
     /// Create a new latency optimizer
+    #[must_use]
     pub fn new() -> Self {
         Self {
             response_cache: HashMap::new(),
@@ -286,10 +294,9 @@ impl LatencyOptimizer {
                 response.timestamp = chrono::Utc::now();
 
                 return Some(response);
-            } else {
-                // Remove expired entry
-                self.response_cache.remove(&cache_key);
             }
+            // Remove expired entry
+            self.response_cache.remove(&cache_key);
         }
 
         None
@@ -327,6 +334,7 @@ impl LatencyOptimizer {
     }
 
     /// Get latency statistics
+    #[must_use]
     pub fn get_stats(&self) -> LatencyStats {
         let avg_latency = if self.latency_measurements.is_empty() {
             Duration::from_millis(0)

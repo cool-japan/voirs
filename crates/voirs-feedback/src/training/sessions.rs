@@ -20,7 +20,7 @@ use voirs_sdk::AudioBuffer;
 
 impl InteractiveTrainer {
     /// Start a new training session
-    pub async fn start_session(
+    pub fn start_session(
         &self,
         user_id: &str,
         session_config: Option<TrainingSessionConfig>,
@@ -56,7 +56,7 @@ impl InteractiveTrainer {
     }
 
     /// Start an exercise in a training session
-    pub async fn start_exercise(
+    pub fn start_exercise(
         &self,
         session_id: &str,
         exercise_id: &str,
@@ -184,8 +184,10 @@ impl InteractiveTrainer {
             pronunciation_score: pronunciation_score.overall_score.min(1.0).max(0.0),
             evaluation_time,
             feedback: AttemptFeedback {
-                overall_score: (quality_score.overall_score + pronunciation_score.overall_score)
-                    / 2.0,
+                overall_score: f32::midpoint(
+                    quality_score.overall_score,
+                    pronunciation_score.overall_score,
+                ),
                 quality_score: quality_score.overall_score,
                 pronunciation_score: pronunciation_score.overall_score,
                 strengths: quality_score.recommendations.clone(),
@@ -371,9 +373,7 @@ impl InteractiveTrainer {
         };
 
         // Process achievements and recommendations (async operations)
-        let achievements = self
-            .check_session_achievements(&completed_exercises)
-            .await?;
+        let achievements = self.check_session_achievements(&completed_exercises)?;
         let recommendations = self.generate_session_recommendations(&completed_exercises);
         let next_learning_path = self.suggest_next_learning_path(&completed_exercises);
 

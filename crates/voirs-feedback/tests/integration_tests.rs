@@ -13,11 +13,22 @@ use voirs_feedback::*;
 use voirs_feedback::{FeedbackSystem, FeedbackSystemConfig};
 use voirs_sdk::{AudioBuffer, LanguageCode};
 
+/// Helper to create FeedbackSystem with test database (in-memory for tests)
+async fn create_test_feedback_system() -> Result<FeedbackSystem, FeedbackError> {
+    let mut config = FeedbackSystemConfig::default();
+    #[cfg(feature = "persistence")]
+    {
+        // Use in-memory database for tests - faster and no file permission issues
+        config.database_path = Some(":memory:".to_string());
+    }
+    FeedbackSystem::with_config(config).await
+}
+
 /// Test basic feedback system creation and configuration
 #[tokio::test]
 async fn test_feedback_system_creation() {
-    // Test default configuration
-    let result = FeedbackSystem::new().await;
+    // Test with test configuration
+    let result = create_test_feedback_system().await;
     assert!(
         result.is_ok(),
         "Failed to create default feedback system: {:?}",
@@ -25,7 +36,7 @@ async fn test_feedback_system_creation() {
     );
 
     // Test custom configuration
-    let config = FeedbackSystemConfig {
+    let mut config = FeedbackSystemConfig {
         enable_realtime: true,
         enable_adaptive: true,
         enable_progress_tracking: true,
@@ -33,6 +44,10 @@ async fn test_feedback_system_creation() {
         max_concurrent_sessions: 10,
         ..Default::default()
     };
+    #[cfg(feature = "persistence")]
+    {
+        config.database_path = Some(":memory:".to_string());
+    }
 
     let result = FeedbackSystem::with_config(config).await;
     assert!(
@@ -45,7 +60,7 @@ async fn test_feedback_system_creation() {
 /// Test session creation and basic operations
 #[tokio::test]
 async fn test_session_creation() {
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
 
@@ -68,7 +83,7 @@ async fn test_session_creation() {
 /// Test feedback processing with audio and text
 #[tokio::test]
 async fn test_feedback_processing() {
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
 
@@ -137,7 +152,7 @@ async fn test_feedback_processing() {
 /// Test concurrent session processing
 #[tokio::test]
 async fn test_concurrent_sessions() {
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
 
@@ -183,7 +198,7 @@ async fn test_concurrent_sessions() {
 /// Test user model and adaptive learning
 #[tokio::test]
 async fn test_user_model_integration() {
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
 
@@ -244,7 +259,7 @@ async fn test_user_model_integration() {
 /// Test training exercises
 #[tokio::test]
 async fn test_training_exercises() {
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
 
@@ -301,7 +316,7 @@ async fn test_training_exercises() {
 /// Test progress tracking
 #[tokio::test]
 async fn test_progress_tracking() {
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
 
@@ -357,7 +372,7 @@ async fn test_progress_tracking() {
 /// Test error handling
 #[tokio::test]
 async fn test_error_handling() {
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
 
@@ -432,7 +447,7 @@ async fn test_feedback_configuration() {
 /// Test system statistics
 #[tokio::test]
 async fn test_system_statistics() {
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
 
@@ -471,7 +486,7 @@ async fn test_system_statistics() {
 /// Test system functionality
 #[tokio::test]
 async fn test_system_functionality() {
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
 
@@ -489,7 +504,7 @@ async fn test_system_functionality() {
 /// Test resource cleanup
 #[tokio::test]
 async fn test_resource_cleanup() {
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
 

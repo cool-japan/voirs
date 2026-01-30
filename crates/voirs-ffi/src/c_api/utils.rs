@@ -84,6 +84,9 @@ pub type VoirsLogCallback = extern "C" fn(
 );
 
 /// Get library version information
+///
+/// # Safety
+/// The `buffer` pointer must be valid and point to a writable buffer of at least `buffer_size` bytes.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_get_version_string(
     buffer: *mut c_char,
@@ -106,6 +109,9 @@ pub unsafe extern "C" fn voirs_get_version_string(
 }
 
 /// Get detailed build information
+///
+/// # Safety
+/// The `buffer` pointer must be valid and point to a writable buffer of at least `buffer_size` bytes.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_get_build_info(
     buffer: *mut c_char,
@@ -137,6 +143,9 @@ pub unsafe extern "C" fn voirs_get_build_info(
 }
 
 /// Get system information
+///
+/// # Safety
+/// The `info` pointer must be valid and point to properly allocated memory for a VoirsSystemInfo structure.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_get_system_info(info: *mut VoirsSystemInfo) -> VoirsErrorCode {
     if info.is_null() {
@@ -192,6 +201,9 @@ pub unsafe extern "C" fn voirs_get_system_info(info: *mut VoirsSystemInfo) -> Vo
 }
 
 /// Get memory statistics
+///
+/// # Safety
+/// The `stats` pointer must be valid and point to properly allocated memory for a VoirsMemoryStats structure.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_get_memory_stats(stats: *mut VoirsMemoryStats) -> VoirsErrorCode {
     if stats.is_null() {
@@ -222,6 +234,10 @@ pub unsafe extern "C" fn voirs_get_memory_stats(stats: *mut VoirsMemoryStats) ->
 }
 
 /// Set log callback function
+///
+/// # Safety
+/// The `user_data` pointer, if not null, must be valid for the lifetime of the logging system.
+/// The `callback` function pointer, if provided, must be valid and callable from any thread.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_set_log_callback(
     callback: Option<VoirsLogCallback>,
@@ -242,6 +258,10 @@ pub unsafe extern "C" fn voirs_set_log_callback(
 }
 
 /// Log a message with specified level
+///
+/// # Safety
+/// The `message` pointer must be valid and point to a null-terminated C string.
+/// The `file` pointer, if not null, must point to a valid null-terminated C string.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_log_message(
     level: VoirsLogLevel,
@@ -268,6 +288,9 @@ pub unsafe extern "C" fn voirs_log_message(
 }
 
 /// Validate pointer and size parameters
+///
+/// # Safety
+/// The `buffer` pointer, if not null, must point to valid memory of at least `size` bytes.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_validate_buffer(
     buffer: *const c_void,
@@ -287,6 +310,9 @@ pub unsafe extern "C" fn voirs_validate_buffer(
 }
 
 /// Calculate alignment for memory allocation
+///
+/// # Safety
+/// This function performs arithmetic calculations and is safe to call with any input values.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_calculate_aligned_size(size: c_uint, alignment: c_uint) -> c_uint {
     if alignment == 0 || (alignment & (alignment - 1)) != 0 {
@@ -297,6 +323,9 @@ pub unsafe extern "C" fn voirs_calculate_aligned_size(size: c_uint, alignment: c
 }
 
 /// Check if a value is within specified range
+///
+/// # Safety
+/// This function performs value comparisons and is safe to call with any input values.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_validate_range_float(
     value: c_float,
@@ -311,6 +340,9 @@ pub unsafe extern "C" fn voirs_validate_range_float(
 }
 
 /// Check if a value is within specified range
+///
+/// # Safety
+/// This function performs value comparisons and is safe to call with any input values.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_validate_range_uint(
     value: c_uint,
@@ -325,6 +357,9 @@ pub unsafe extern "C" fn voirs_validate_range_uint(
 }
 
 /// Get error code description
+///
+/// # Safety
+/// The `buffer` pointer must be valid and point to a writable buffer of at least `buffer_size` bytes.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_get_error_description(
     error_code: VoirsErrorCode,
@@ -429,12 +464,18 @@ fn estimate_current_memory_usage() -> c_uint {
 }
 
 /// Get current process memory usage
+///
+/// # Safety
+/// This function queries system memory statistics and is safe to call at any time.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_get_process_memory_usage() -> c_uint {
     estimate_current_memory_usage()
 }
 
 /// Check if logging is enabled for a given level
+///
+/// # Safety
+/// This function checks logging configuration and is safe to call at any time.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_is_log_level_enabled(level: VoirsLogLevel) -> c_int {
     static mut LOG_MIN_LEVEL: VoirsLogLevel = VoirsLogLevel::Info;
@@ -446,6 +487,9 @@ pub unsafe extern "C" fn voirs_is_log_level_enabled(level: VoirsLogLevel) -> c_i
 }
 
 /// Reset memory statistics counters
+///
+/// # Safety
+/// This function resets internal memory tracking counters and is safe to call at any time.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_reset_memory_stats() -> VoirsErrorCode {
     // This would reset the global memory tracking counters
@@ -454,6 +498,9 @@ pub unsafe extern "C" fn voirs_reset_memory_stats() -> VoirsErrorCode {
 }
 
 /// Validate audio format parameters
+///
+/// # Safety
+/// This function validates audio format parameters and is safe to call with any input values.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_validate_audio_format(
     sample_rate: c_uint,
@@ -479,6 +526,9 @@ pub unsafe extern "C" fn voirs_validate_audio_format(
 }
 
 /// Get recommended buffer size for given audio format
+///
+/// # Safety
+/// This function performs buffer size calculations and is safe to call with any input values.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_get_recommended_buffer_size(
     sample_rate: c_uint,

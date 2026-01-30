@@ -44,18 +44,18 @@ pub enum LMSError {
 impl fmt::Display for LMSError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LMSError::AuthenticationFailed(msg) => write!(f, "Authentication failed: {}", msg),
+            LMSError::AuthenticationFailed(msg) => write!(f, "Authentication failed: {msg}"),
             LMSError::ConnectionTimeout => write!(f, "Connection timeout"),
             LMSError::InvalidApiKey => write!(f, "Invalid API key"),
-            LMSError::GradePassbackFailed(msg) => write!(f, "Grade passback failed: {}", msg),
-            LMSError::AssignmentNotFound(id) => write!(f, "Assignment not found: {}", id),
-            LMSError::StudentNotFound(id) => write!(f, "Student not found: {}", id),
-            LMSError::CourseNotFound(id) => write!(f, "Course not found: {}", id),
-            LMSError::NetworkError(msg) => write!(f, "Network error: {}", msg),
-            LMSError::ConfigurationError(msg) => write!(f, "Configuration error: {}", msg),
+            LMSError::GradePassbackFailed(msg) => write!(f, "Grade passback failed: {msg}"),
+            LMSError::AssignmentNotFound(id) => write!(f, "Assignment not found: {id}"),
+            LMSError::StudentNotFound(id) => write!(f, "Student not found: {id}"),
+            LMSError::CourseNotFound(id) => write!(f, "Course not found: {id}"),
+            LMSError::NetworkError(msg) => write!(f, "Network error: {msg}"),
+            LMSError::ConfigurationError(msg) => write!(f, "Configuration error: {msg}"),
             LMSError::RateLimitExceeded => write!(f, "Rate limit exceeded"),
             LMSError::UnauthorizedAccess => write!(f, "Unauthorized access"),
-            LMSError::DataValidationError(msg) => write!(f, "Data validation error: {}", msg),
+            LMSError::DataValidationError(msg) => write!(f, "Data validation error: {msg}"),
         }
     }
 }
@@ -90,7 +90,7 @@ impl fmt::Display for LMSPlatform {
             LMSPlatform::D2L => write!(f, "D2L/Brightspace"),
             LMSPlatform::Schoology => write!(f, "Schoology"),
             LMSPlatform::Sakai => write!(f, "Sakai"),
-            LMSPlatform::Custom(name) => write!(f, "Custom: {}", name),
+            LMSPlatform::Custom(name) => write!(f, "Custom: {name}"),
         }
     }
 }
@@ -303,6 +303,7 @@ pub struct LMSIntegrationManager {
 
 impl LMSIntegrationManager {
     /// Create a new LMS integration manager
+    #[must_use]
     pub fn new(config: LMSAuthConfig) -> Self {
         Self {
             config,
@@ -418,7 +419,7 @@ impl LMSIntegrationManager {
         Ok(report)
     }
 
-    /// Convert VoiRS session to LMS grade submission
+    /// Convert `VoiRS` session to LMS grade submission
     pub fn session_to_grade_submission(
         &self,
         student_id: &str,
@@ -684,7 +685,7 @@ impl LMSIntegrationManager {
     // Utility methods
     fn calculate_overall_score(&self, session: &LMSSession) -> f64 {
         match &session.score {
-            Some(score) => score.overall_score as f64,
+            Some(score) => f64::from(score.overall_score),
             None => 0.0,
         }
     }
@@ -699,10 +700,10 @@ impl LMSIntegrationManager {
         if let Some(score) = &session.score {
             for criterion in &assignment.grading_criteria {
                 let score_value = match criterion.focus_area {
-                    Some(FocusArea::Pronunciation) => score.average_pronunciation as f64,
-                    Some(FocusArea::Fluency) => score.average_fluency as f64,
-                    Some(FocusArea::Intonation) => score.average_quality as f64, // Use quality as proxy for intonation
-                    _ => score.overall_score as f64,
+                    Some(FocusArea::Pronunciation) => f64::from(score.average_pronunciation),
+                    Some(FocusArea::Fluency) => f64::from(score.average_fluency),
+                    Some(FocusArea::Intonation) => f64::from(score.average_quality), // Use quality as proxy for intonation
+                    _ => f64::from(score.overall_score),
                 };
 
                 feedback.push(DetailedFeedback {
@@ -795,28 +796,31 @@ impl LMSIntegrationManager {
 
             for session in sessions {
                 if let Some(score) = &session.score {
-                    pronunciation_sum += score.average_pronunciation as f64;
-                    fluency_sum += score.average_fluency as f64;
-                    intonation_sum += score.average_quality as f64; // Use quality as proxy for intonation
+                    pronunciation_sum += f64::from(score.average_pronunciation);
+                    fluency_sum += f64::from(score.average_fluency);
+                    intonation_sum += f64::from(score.average_quality); // Use quality as proxy for intonation
                     count += 1;
                 }
             }
 
             if count > 0 {
-                skill_breakdown.insert(FocusArea::Pronunciation, pronunciation_sum / count as f64);
-                skill_breakdown.insert(FocusArea::Fluency, fluency_sum / count as f64);
-                skill_breakdown.insert(FocusArea::Intonation, intonation_sum / count as f64);
+                skill_breakdown.insert(
+                    FocusArea::Pronunciation,
+                    pronunciation_sum / f64::from(count),
+                );
+                skill_breakdown.insert(FocusArea::Fluency, fluency_sum / f64::from(count));
+                skill_breakdown.insert(FocusArea::Intonation, intonation_sum / f64::from(count));
             }
         }
 
         Ok(LMSProgressReport {
             student_id: student_id.to_string(),
             course_id: "unknown".to_string(), // Would need to be provided
-            overall_progress: user_progress.overall_skill_level as f64, // Use actual skill level
+            overall_progress: f64::from(user_progress.overall_skill_level), // Use actual skill level
             completion_percentage: if total_sessions >= 10 {
                 100.0
             } else {
-                total_sessions as f64 * 10.0
+                f64::from(total_sessions) * 10.0
             },
             sessions_completed: total_sessions,
             time_spent_minutes: time_spent,

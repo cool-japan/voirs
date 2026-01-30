@@ -1,4 +1,4 @@
-//! Performance Profiling Tools for VoiRS Recognition
+//! Performance Profiling Tools for `VoiRS` Recognition
 //!
 //! This module provides comprehensive performance profiling capabilities including
 //! CPU profiling, memory analysis, GPU monitoring, network profiling, custom
@@ -89,6 +89,7 @@ pub struct ProfilingSession {
 
 impl PerformanceProfiler {
     /// Create new performance profiler
+    #[must_use]
     pub fn new(config: ProfilingConfig) -> Self {
         Self {
             cpu_profiler: Arc::new(Mutex::new(CpuProfiler::new(config.clone()))),
@@ -102,6 +103,7 @@ impl PerformanceProfiler {
     }
 
     /// Start profiling session
+    #[must_use]
     pub fn start_session(&self, description: String, tags: HashMap<String, String>) -> String {
         let session_id = uuid::Uuid::new_v4().to_string();
         let session = ProfilingSession {
@@ -132,6 +134,7 @@ impl PerformanceProfiler {
     }
 
     /// Stop profiling session
+    #[must_use]
     pub fn stop_session(&self) -> Option<ProfilingReport> {
         let mut session_guard = self.session.write().unwrap();
         if let Some(ref mut session) = *session_guard {
@@ -236,6 +239,7 @@ impl PerformanceProfiler {
     }
 
     /// Get current session info
+    #[must_use]
     pub fn get_current_session(&self) -> Option<ProfilingSession> {
         self.session.read().unwrap().clone()
     }
@@ -285,7 +289,7 @@ pub struct CpuProfiler {
     samples: VecDeque<CpuSample>,
     /// Function call stack
     call_stack: Vec<FunctionCall>,
-    /// Hot spots map (function_name -> total_time)
+    /// Hot spots map (`function_name` -> `total_time`)
     hot_spots: HashMap<String, Duration>,
 }
 
@@ -322,7 +326,7 @@ pub struct CpuProfilingReport {
     pub average_cpu_usage: f64,
     /// Peak CPU usage
     pub peak_cpu_usage: f64,
-    /// Hot spots (function_name -> total_time_ms)
+    /// Hot spots (`function_name` -> `total_time_ms`)
     pub hot_spots: HashMap<String, u64>,
     /// Call graph data
     pub call_graph: CallGraph,
@@ -400,10 +404,10 @@ impl CpuProfiler {
                 Duration::from_secs(0)
             };
 
-        let average_cpu_usage = if !self.samples.is_empty() {
-            self.samples.iter().map(|s| s.cpu_usage).sum::<f64>() / self.samples.len() as f64
-        } else {
+        let average_cpu_usage = if self.samples.is_empty() {
             0.0
+        } else {
+            self.samples.iter().map(|s| s.cpu_usage).sum::<f64>() / self.samples.len() as f64
         };
 
         let peak_cpu_usage = self.samples.iter().map(|s| s.cpu_usage).fold(0.0, f64::max);
@@ -497,7 +501,7 @@ impl CpuProfiler {
 
         if let Some(call) = self.call_stack.pop() {
             if call.name == name {
-                let duration = Instant::now() - call.start_time;
+                let duration = call.start_time.elapsed();
                 *self
                     .hot_spots
                     .entry(name.to_string())
@@ -617,14 +621,14 @@ impl MemoryProfiler {
             .max()
             .unwrap_or(0);
 
-        let average_memory_usage = if !self.timeline.is_empty() {
+        let average_memory_usage = if self.timeline.is_empty() {
+            0
+        } else {
             self.timeline
                 .iter()
                 .map(|p| p.total_allocated)
                 .sum::<usize>()
                 / self.timeline.len()
-        } else {
-            0
         };
 
         let allocation_hot_spots = self.calculate_allocation_hot_spots();
@@ -645,7 +649,7 @@ impl MemoryProfiler {
         let now = Instant::now();
         let leak_threshold = Duration::from_secs(300); // 5 minutes
 
-        for (_, allocation) in &self.allocations {
+        for allocation in self.allocations.values() {
             if now.duration_since(allocation.timestamp) > leak_threshold {
                 let leak = MemoryLeak {
                     size: allocation.size,
@@ -852,14 +856,14 @@ impl GpuProfiler {
     fn stop(&mut self) -> GpuProfilingReport {
         self.active = false;
 
-        let average_gpu_utilization = if !self.utilization_samples.is_empty() {
+        let average_gpu_utilization = if self.utilization_samples.is_empty() {
+            0.0
+        } else {
             self.utilization_samples
                 .iter()
                 .map(|s| s.gpu_utilization)
                 .sum::<f64>()
                 / self.utilization_samples.len() as f64
-        } else {
-            0.0
         };
 
         let peak_gpu_utilization = self
@@ -868,14 +872,14 @@ impl GpuProfiler {
             .map(|s| s.gpu_utilization)
             .fold(0.0, f64::max);
 
-        let average_memory_utilization = if !self.utilization_samples.is_empty() {
+        let average_memory_utilization = if self.utilization_samples.is_empty() {
+            0.0
+        } else {
             self.utilization_samples
                 .iter()
                 .map(|s| s.memory_utilization)
                 .sum::<f64>()
                 / self.utilization_samples.len() as f64
-        } else {
-            0.0
         };
 
         let total_memory_transfers = self.memory_transfers.len();
@@ -1108,24 +1112,24 @@ impl NetworkProfiler {
 
         let total_requests = self.requests.len();
 
-        let average_request_duration = if !self.requests.is_empty() {
+        let average_request_duration = if self.requests.is_empty() {
+            Duration::from_secs(0)
+        } else {
             let total_duration: Duration = self.requests.iter().map(|r| r.duration).sum();
             total_duration / self.requests.len() as u32
-        } else {
-            Duration::from_secs(0)
         };
 
         let total_bytes_sent = self.requests.iter().map(|r| r.request_size).sum();
         let total_bytes_received = self.requests.iter().map(|r| r.response_size).sum();
 
-        let average_bandwidth = if !self.bandwidth_samples.is_empty() {
+        let average_bandwidth = if self.bandwidth_samples.is_empty() {
+            0.0
+        } else {
             self.bandwidth_samples
                 .iter()
                 .map(|s| s.download_bandwidth)
                 .sum::<f64>()
                 / self.bandwidth_samples.len() as f64
-        } else {
-            0.0
         };
 
         let endpoint_stats = self.calculate_endpoint_statistics();
@@ -1315,6 +1319,7 @@ impl CustomProfiler {
     }
 
     /// Get profiling report
+    #[must_use]
     pub fn get_report(&self) -> CustomProfilingReport {
         let mut event_frequency = HashMap::new();
         for event in &self.events {

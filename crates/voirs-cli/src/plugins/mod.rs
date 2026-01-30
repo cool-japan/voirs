@@ -53,6 +53,9 @@ pub mod loader;
 pub mod registry;
 pub mod voices;
 
+/// Type alias for the plugin storage map
+type PluginMap = RwLock<HashMap<String, Arc<RwLock<Box<dyn Plugin>>>>>;
+
 #[derive(Debug, Error)]
 pub enum PluginError {
     #[error("Plugin not found: {0}")]
@@ -146,7 +149,7 @@ pub trait Plugin: Send + Sync {
 }
 
 pub struct PluginManager {
-    plugins: RwLock<HashMap<String, Arc<RwLock<Box<dyn Plugin>>>>>,
+    plugins: PluginMap,
     plugin_info: RwLock<HashMap<String, PluginInfo>>,
     plugin_directories: Vec<PathBuf>,
     api_version: String,

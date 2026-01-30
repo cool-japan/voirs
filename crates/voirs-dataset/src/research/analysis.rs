@@ -336,7 +336,8 @@ impl StatisticalAnalyzer {
         }
 
         let mut sorted_durations = self.durations.clone();
-        sorted_durations.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        // Use total_cmp for NaN-safe sorting (NaN will sort at the end)
+        sorted_durations.sort_by(|a, b| a.total_cmp(b));
 
         let mean = self.durations.iter().sum::<f64>() / self.durations.len() as f64;
         let median = self.percentile(&sorted_durations, 50.0);
@@ -490,7 +491,8 @@ impl StatisticalAnalyzer {
         }
 
         let mut sorted_data = data.to_vec();
-        sorted_data.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        // Use total_cmp for NaN-safe sorting (NaN will sort at the end)
+        sorted_data.sort_by(|a, b| a.total_cmp(b));
 
         let q1 = self.percentile(&sorted_data, 25.0);
         let q3 = self.percentile(&sorted_data, 75.0);

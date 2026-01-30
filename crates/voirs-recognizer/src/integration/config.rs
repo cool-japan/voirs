@@ -1,14 +1,14 @@
 //! # Unified Configuration System
 //!
 //! This module provides a unified configuration system that integrates
-//! recognition-specific configurations with the VoiRS SDK's hierarchical
+//! recognition-specific configurations with the `VoiRS` SDK's hierarchical
 //! configuration management system.
 
 use crate::traits::{ASRConfig, AudioAnalysisConfig, PhonemeRecognitionConfig};
 use serde::{Deserialize, Serialize};
 use voirs_sdk::LanguageCode;
 
-/// Unified configuration for the entire VoiRS ecosystem
+/// Unified configuration for the entire `VoiRS` ecosystem
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnifiedVoirsConfig {
     /// Recognition configuration
@@ -24,7 +24,7 @@ pub struct UnifiedVoirsConfig {
 }
 
 /// Recognition-specific configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RecognitionConfig {
     /// ASR configuration
     pub asr: ASRConfig,
@@ -118,7 +118,7 @@ pub struct PerformanceConfig {
 }
 
 /// GPU configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GpuConfig {
     /// Enable GPU acceleration
     pub enabled: bool,
@@ -142,7 +142,7 @@ pub struct BatchConfig {
 }
 
 /// Integration configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct IntegrationConfig {
     /// Component coordination
     pub coordination: CoordinationConfig,
@@ -220,7 +220,7 @@ pub enum LatencyMode {
     Balanced,
     /// High accuracy
     HighAccuracy,
-    /// Accurate mode (alias for HighAccuracy)
+    /// Accurate mode (alias for `HighAccuracy`)
     Accurate,
 }
 
@@ -231,6 +231,7 @@ pub struct UnifiedConfigBuilder {
 
 impl UnifiedConfigBuilder {
     /// Create new unified config builder
+    #[must_use]
     pub fn new() -> Self {
         Self {
             config: UnifiedVoirsConfig {
@@ -244,36 +245,42 @@ impl UnifiedConfigBuilder {
     }
 
     /// Set recognition configuration
+    #[must_use]
     pub fn with_recognition(mut self, recognition: RecognitionConfig) -> Self {
         self.config.recognition = recognition;
         self
     }
 
     /// Set synthesis configuration
+    #[must_use]
     pub fn with_synthesis(mut self, synthesis: SynthesisConfig) -> Self {
         self.config.synthesis = Some(synthesis);
         self
     }
 
     /// Set global configuration
+    #[must_use]
     pub fn with_global(mut self, global: GlobalConfig) -> Self {
         self.config.global = global;
         self
     }
 
     /// Set performance configuration
+    #[must_use]
     pub fn with_performance(mut self, performance: PerformanceConfig) -> Self {
         self.config.performance = performance;
         self
     }
 
     /// Set integration configuration
+    #[must_use]
     pub fn with_integration(mut self, integration: IntegrationConfig) -> Self {
         self.config.integration = integration;
         self
     }
 
     /// Build the unified configuration
+    #[must_use]
     pub fn build(self) -> UnifiedVoirsConfig {
         self.config
     }
@@ -290,6 +297,7 @@ pub struct ConfigPresets;
 
 impl ConfigPresets {
     /// Development preset
+    #[must_use]
     pub fn development() -> UnifiedVoirsConfig {
         UnifiedConfigBuilder::new()
             .with_global(GlobalConfig {
@@ -318,6 +326,7 @@ impl ConfigPresets {
     }
 
     /// Production preset
+    #[must_use]
     pub fn production() -> UnifiedVoirsConfig {
         UnifiedConfigBuilder::new()
             .with_global(GlobalConfig {
@@ -346,6 +355,7 @@ impl ConfigPresets {
     }
 
     /// High performance preset
+    #[must_use]
     pub fn high_performance() -> UnifiedVoirsConfig {
         UnifiedConfigBuilder::new()
             .with_global(GlobalConfig {
@@ -374,6 +384,7 @@ impl ConfigPresets {
     }
 
     /// Low resource preset
+    #[must_use]
     pub fn low_resource() -> UnifiedVoirsConfig {
         UnifiedConfigBuilder::new()
             .with_global(GlobalConfig {
@@ -406,17 +417,6 @@ impl ConfigPresets {
 impl Default for UnifiedVoirsConfig {
     fn default() -> Self {
         ConfigPresets::development()
-    }
-}
-
-impl Default for RecognitionConfig {
-    fn default() -> Self {
-        Self {
-            asr: ASRConfig::default(),
-            phoneme: PhonemeRecognitionConfig::default(),
-            analysis: AudioAnalysisConfig::default(),
-            streaming: StreamingConfig::default(),
-        }
     }
 }
 
@@ -454,33 +454,12 @@ impl Default for PerformanceConfig {
     }
 }
 
-impl Default for GpuConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            device_id: None,
-            max_memory_mb: None,
-            mixed_precision: false,
-        }
-    }
-}
-
 impl Default for BatchConfig {
     fn default() -> Self {
         Self {
             default_batch_size: 4,
             max_batch_size: 16,
             timeout_seconds: 60,
-        }
-    }
-}
-
-impl Default for IntegrationConfig {
-    fn default() -> Self {
-        Self {
-            coordination: CoordinationConfig::default(),
-            pipeline: PipelineConfig::default(),
-            monitoring: MonitoringConfig::default(),
         }
     }
 }

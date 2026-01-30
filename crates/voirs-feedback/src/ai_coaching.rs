@@ -11,8 +11,8 @@ use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use crate::traits::{FeedbackContext, FocusArea, SessionScores};
 use crate::adaptive::models::UserModel;
+use crate::traits::{FeedbackContext, FocusArea, SessionScores};
 
 /// Virtual coach personality types
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -659,8 +659,15 @@ pub struct EmotionalSupportTemplate {
     pub coping_strategies: Vec<CopingStrategy>,
 }
 
+impl Default for AICoachingSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AICoachingSystem {
     /// Create a new AI coaching system
+    #[must_use]
     pub fn new() -> Self {
         Self {
             coaches: RwLock::new(HashMap::new()),
@@ -1170,8 +1177,7 @@ impl AICoachingSystem {
         let recommended_focus = skill_breakdown
             .iter()
             .min_by(|a, b| a.1.accuracy.partial_cmp(&b.1.accuracy).unwrap())
-            .map(|(area, _)| area.clone())
-            .unwrap_or(FocusArea::Pronunciation);
+            .map_or(FocusArea::Pronunciation, |(area, _)| area.clone());
 
         let assessment = SkillAssessment {
             assessment_id,

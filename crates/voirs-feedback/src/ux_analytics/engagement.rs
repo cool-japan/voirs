@@ -3,7 +3,7 @@
 //! This module contains all analytics related to user engagement and satisfaction,
 //! including engagement patterns, satisfaction tracking, and feedback analysis.
 
-use super::types::*;
+use super::types::{IssueSeverity, TrendDirection};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

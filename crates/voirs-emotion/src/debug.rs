@@ -26,6 +26,10 @@ pub struct EmotionDebugger {
     captured_states: Vec<EmotionStateSnapshot>,
     /// Performance metrics
     performance_metrics: DebugPerformanceMetrics,
+    /// Recent activity window for CPU estimation (last N operations)
+    recent_operations: Vec<(std::time::Instant, Duration)>,
+    /// CPU estimation window size
+    cpu_window_size: usize,
 }
 
 /// Configuration for emotion debugging
@@ -125,10 +129,13 @@ impl EmotionDebugger {
             config,
             captured_states: Vec::new(),
             performance_metrics: DebugPerformanceMetrics::default(),
+            recent_operations: Vec::with_capacity(100),
+            cpu_window_size: 100, // Track last 100 operations for CPU estimation
         }
     }
 
     /// Create debugger with default configuration
+    #[allow(clippy::should_implement_trait)]
     pub fn default() -> Self {
         Self::new(DebugConfig::default())
     }
@@ -193,8 +200,12 @@ impl EmotionDebugger {
         }
 
         // Update performance metrics
+        let processing_time = start_time.elapsed();
         self.performance_metrics.operation_count += 1;
-        self.performance_metrics.total_processing_time += start_time.elapsed();
+        self.performance_metrics.total_processing_time += processing_time;
+
+        // Record operation for CPU usage tracking
+        self.record_operation(processing_time);
 
         debug!("Emotion state captured successfully");
         Ok(())
@@ -318,9 +329,46 @@ impl EmotionDebugger {
     }
 
     fn estimate_cpu_usage(&self) -> f32 {
-        // Placeholder CPU usage estimation
-        // Real implementation would use system APIs
-        10.0
+        // Estimate CPU usage based on recent processing activity
+        // This is a relative metric: (time spent processing / wall clock time) * 100
+
+        if self.recent_operations.is_empty() {
+            return 0.0;
+        }
+
+        // Calculate time window
+        let now = std::time::Instant::now();
+        let window_start = self
+            .recent_operations
+            .first()
+            .expect("recent_operations should not be empty at this point")
+            .0;
+        let wall_clock_time = now.duration_since(window_start);
+
+        // Sum up processing time in window
+        let total_processing_time: Duration = self
+            .recent_operations
+            .iter()
+            .map(|(_, duration)| *duration)
+            .sum();
+
+        // Calculate percentage (capped at 100%)
+        if wall_clock_time.as_secs_f32() > 0.0 {
+            (total_processing_time.as_secs_f32() / wall_clock_time.as_secs_f32() * 100.0).min(100.0)
+        } else {
+            0.0
+        }
+    }
+
+    /// Record an operation for CPU usage tracking
+    fn record_operation(&mut self, processing_time: Duration) {
+        let now = std::time::Instant::now();
+        self.recent_operations.push((now, processing_time));
+
+        // Keep only recent operations within window
+        if self.recent_operations.len() > self.cpu_window_size {
+            self.recent_operations.remove(0);
+        }
     }
 
     fn generate_text_report(&self) -> Result<String> {
@@ -341,7 +389,7 @@ impl EmotionDebugger {
             "Average Processing Time: {:?}\n",
             self.performance_metrics.average_processing_time
         ));
-        report.push_str("\n");
+        report.push('\n');
 
         // Recent states
         report.push_str("Recent Emotion States:\n");
@@ -357,7 +405,7 @@ impl EmotionDebugger {
 
         // Transition analysis
         let transition_analysis = self.analyze_transitions();
-        report.push_str(&format!("\nTransition Analysis:\n"));
+        report.push_str("\nTransition Analysis:\n");
         report.push_str(&format!(
             "  Total Transitions: {}\n",
             transition_analysis.total_transitions
@@ -386,7 +434,7 @@ impl EmotionDebugger {
             }
         });
 
-        serde_json::to_string_pretty(&report_data).map_err(|e| Error::Serialization(e))
+        serde_json::to_string_pretty(&report_data).map_err(Error::Serialization)
     }
 
     fn generate_csv_report(&self) -> Result<String> {

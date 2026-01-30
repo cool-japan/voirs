@@ -1,4 +1,6 @@
-use super::types::*;
+use super::types::{
+    BoundingBox, EyeGazeTracking, FacialLandmarks, GazeTarget, Point2D, VideoFrame,
+};
 use anyhow::Result;
 use std::time::{Duration, SystemTime};
 
@@ -39,8 +41,15 @@ pub struct GazeData {
     pub quality: f32,
 }
 
+impl Default for GazeTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GazeTracker {
     /// Description
+    #[must_use]
     pub fn new() -> Self {
         Self {
             gaze_history: Vec::new(),
@@ -99,8 +108,8 @@ impl GazeTracker {
         let right_eye_center = self.calculate_eye_center(&eye_landmarks[6..12]);
 
         Point2D {
-            x: (left_eye_center.x + right_eye_center.x) / 2.0,
-            y: (left_eye_center.y + right_eye_center.y) / 2.0,
+            x: f32::midpoint(left_eye_center.x, right_eye_center.x),
+            y: f32::midpoint(left_eye_center.y, right_eye_center.y),
         }
     }
 
@@ -133,7 +142,7 @@ impl GazeTracker {
         let left_eye_openness = self.calculate_eye_openness(&eye_landmarks[0..6]);
         let right_eye_openness = self.calculate_eye_openness(&eye_landmarks[6..12]);
 
-        let avg_openness = (left_eye_openness + right_eye_openness) / 2.0;
+        let avg_openness = f32::midpoint(left_eye_openness, right_eye_openness);
 
         if avg_openness < 0.3 {
             25.0
@@ -166,7 +175,7 @@ impl GazeTracker {
             let left_eye_width = (eye_landmarks[3].x - eye_landmarks[0].x).abs();
             let right_eye_width = (eye_landmarks[9].x - eye_landmarks[6].x).abs();
 
-            (left_eye_width + right_eye_width) / 2.0 / 30.0
+            f32::midpoint(left_eye_width, right_eye_width) / 30.0
         } else {
             0.5
         }
@@ -203,8 +212,15 @@ pub struct EyeTrackingAnalyzer {
     gaze_tracker: GazeTracker,
 }
 
+impl Default for EyeTrackingAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EyeTrackingAnalyzer {
     /// Description
+    #[must_use]
     pub fn new() -> Self {
         Self {
             gaze_tracker: GazeTracker::new(),

@@ -509,8 +509,8 @@ impl NormalizingFlows {
                 &device,
                 vb.pp(format!("flow_{i}")),
             )
-            .map_err(|e| {
-                AcousticError::ModelError(format!("Failed to create flow step {i}: {e}"))
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to create flow step {i}: {e}"),
             })?;
 
             flow_steps.push(step);
@@ -528,19 +528,23 @@ impl NormalizingFlows {
         let mut current_z = z.clone();
         let mut total_log_det =
             Tensor::zeros((z.dims()[0],), DType::F32, &self.device).map_err(|e| {
-                AcousticError::ModelError(format!("Failed to create log_det tensor: {e}"))
+                AcousticError::ModelError {
+                    message: format!("Failed to create log_det tensor: {e}"),
+                }
             })?;
 
         tracing::debug!("NormalizingFlows forward: input shape {:?}", z.dims());
 
         for (i, step) in self.flow_steps.iter_mut().enumerate() {
-            let (new_z, log_det) = step.forward(&current_z).map_err(|e| {
-                AcousticError::ModelError(format!("Flow step {i} forward failed: {e}"))
-            })?;
+            let (new_z, log_det) =
+                step.forward(&current_z)
+                    .map_err(|e| AcousticError::ModelError {
+                        message: format!("Flow step {i} forward failed: {e}"),
+                    })?;
 
             current_z = new_z;
-            total_log_det = (&total_log_det + log_det).map_err(|e| {
-                AcousticError::ModelError(format!("Log det accumulation failed at step {i}: {e}"))
+            total_log_det = (&total_log_det + log_det).map_err(|e| AcousticError::ModelError {
+                message: format!("Log det accumulation failed at step {i}: {e}"),
             })?;
 
             tracing::debug!("Flow step {}: output shape {:?}", i, current_z.dims());
@@ -554,20 +558,24 @@ impl NormalizingFlows {
         let mut current_z = z.clone();
         let mut total_log_det =
             Tensor::zeros((z.dims()[0],), DType::F32, &self.device).map_err(|e| {
-                AcousticError::ModelError(format!("Failed to create log_det tensor: {e}"))
+                AcousticError::ModelError {
+                    message: format!("Failed to create log_det tensor: {e}"),
+                }
             })?;
 
         tracing::debug!("NormalizingFlows inverse: input shape {:?}", z.dims());
 
         // Apply steps in reverse order
         for (i, step) in self.flow_steps.iter().enumerate().rev() {
-            let (new_z, log_det) = step.inverse(&current_z).map_err(|e| {
-                AcousticError::ModelError(format!("Flow step {i} inverse failed: {e}"))
-            })?;
+            let (new_z, log_det) =
+                step.inverse(&current_z)
+                    .map_err(|e| AcousticError::ModelError {
+                        message: format!("Flow step {i} inverse failed: {e}"),
+                    })?;
 
             current_z = new_z;
-            total_log_det = (&total_log_det + log_det).map_err(|e| {
-                AcousticError::ModelError(format!("Log det accumulation failed at step {i}: {e}"))
+            total_log_det = (&total_log_det + log_det).map_err(|e| AcousticError::ModelError {
+                message: format!("Log det accumulation failed at step {i}: {e}"),
             })?;
 
             tracing::debug!(

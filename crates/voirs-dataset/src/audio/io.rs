@@ -586,8 +586,9 @@ impl StreamingAudioReader {
     fn read_flac_chunk(&mut self) -> Result<Option<AudioData>> {
         // For FLAC, we need to cache the entire file on first read
         if self.cached_audio.is_none() {
-            self.cached_audio = Some(load_flac(&self.file_path)?);
-            self.total_samples = Some(self.cached_audio.as_ref().unwrap().samples().len());
+            let audio = load_flac(&self.file_path)?;
+            self.total_samples = Some(audio.samples().len());
+            self.cached_audio = Some(audio);
         }
 
         self.read_from_cached_audio()
@@ -596,8 +597,9 @@ impl StreamingAudioReader {
     fn read_mp3_chunk(&mut self) -> Result<Option<AudioData>> {
         // For MP3, we need to cache the entire file on first read
         if self.cached_audio.is_none() {
-            self.cached_audio = Some(load_mp3(&self.file_path)?);
-            self.total_samples = Some(self.cached_audio.as_ref().unwrap().samples().len());
+            let audio = load_mp3(&self.file_path)?;
+            self.total_samples = Some(audio.samples().len());
+            self.cached_audio = Some(audio);
         }
 
         self.read_from_cached_audio()
@@ -606,8 +608,9 @@ impl StreamingAudioReader {
     fn read_ogg_chunk(&mut self) -> Result<Option<AudioData>> {
         // For OGG, we need to cache the entire file on first read
         if self.cached_audio.is_none() {
-            self.cached_audio = Some(load_ogg(&self.file_path)?);
-            self.total_samples = Some(self.cached_audio.as_ref().unwrap().samples().len());
+            let audio = load_ogg(&self.file_path)?;
+            self.total_samples = Some(audio.samples().len());
+            self.cached_audio = Some(audio);
         }
 
         self.read_from_cached_audio()
@@ -616,15 +619,19 @@ impl StreamingAudioReader {
     fn read_opus_chunk(&mut self) -> Result<Option<AudioData>> {
         // For OPUS, we need to cache the entire file on first read
         if self.cached_audio.is_none() {
-            self.cached_audio = Some(load_opus(&self.file_path)?);
-            self.total_samples = Some(self.cached_audio.as_ref().unwrap().samples().len());
+            let audio = load_opus(&self.file_path)?;
+            self.total_samples = Some(audio.samples().len());
+            self.cached_audio = Some(audio);
         }
 
         self.read_from_cached_audio()
     }
 
     fn read_from_cached_audio(&mut self) -> Result<Option<AudioData>> {
-        let cached = self.cached_audio.as_ref().unwrap();
+        let cached = self
+            .cached_audio
+            .as_ref()
+            .ok_or_else(|| DatasetError::AudioError("Cached audio not initialized".to_string()))?;
 
         if self.current_position >= cached.samples().len() {
             return Ok(None);

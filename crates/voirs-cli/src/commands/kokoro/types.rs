@@ -2,15 +2,18 @@
 //!
 //! 🤖 Generated with [SplitRS](https://github.com/cool-japan/splitrs)
 
+use clap::Subcommand;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 /// Voice metadata
 #[derive(Debug, Clone)]
-struct VoiceInfo {
-    index: usize,
-    name: &'static str,
-    language: &'static str,
-    language_short: &'static str,
-    gender: &'static str,
+pub struct VoiceInfo {
+    pub index: usize,
+    pub name: &'static str,
+    pub language: &'static str,
+    pub language_short: &'static str,
+    pub gender: &'static str,
 }
 /// Kokoro-specific configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,18 +56,14 @@ impl KokoroConfig {
     }
     /// Save config to specified path
     pub fn save(&self, path: &PathBuf) -> Result<()> {
-        let content = toml::to_string_pretty(self)
-            .map_err(|e| {
-                voirs_sdk::VoirsError::config_error(
-                    format!("Failed to serialize config: {}", e),
-                )
-            })?;
-        std::fs::write(path, content)
-            .map_err(|e| voirs_sdk::VoirsError::IoError {
-                path: path.clone(),
-                operation: voirs_sdk::error::IoOperation::Write,
-                source: e,
-            })?;
+        let content = toml::to_string_pretty(self).map_err(|e| {
+            voirs_sdk::VoirsError::config_error(format!("Failed to serialize config: {}", e))
+        })?;
+        std::fs::write(path, content).map_err(|e| voirs_sdk::VoirsError::IoError {
+            path: path.clone(),
+            operation: voirs_sdk::error::IoOperation::Write,
+            source: e,
+        })?;
         Ok(())
     }
 }

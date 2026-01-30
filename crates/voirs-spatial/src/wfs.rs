@@ -561,7 +561,7 @@ impl WfsArrayBuilder {
     fn build_rectangular_array(&self) -> Vec<Position3D> {
         // Simple rectangular grid
         let cols = (self.speaker_count as f32).sqrt().ceil() as usize;
-        let rows = (self.speaker_count + cols - 1) / cols;
+        let rows = self.speaker_count.div_ceil(cols);
 
         let x_spacing = self.dimensions.0 / (cols - 1) as f32;
         let y_spacing = self.dimensions.1 / (rows - 1) as f32;

@@ -142,11 +142,9 @@ pub fn transpose_conv1d_f32(
                 if kernel_len >= 8 && is_x86_feature_detected!("avx2") {
                     let mut temp = vec![0.0; kernel_len];
                     super::x86_64::mul_scalar_f32_x86_64(kernel, input[i], &mut temp);
-                    super::x86_64::add_f32_x86_64(
-                        &output[out_pos..out_pos + kernel_len],
-                        &temp,
-                        &mut output[out_pos..out_pos + kernel_len],
-                    );
+                    let slice = &mut output[out_pos..out_pos + kernel_len];
+                    let original_slice = slice.to_vec();
+                    super::x86_64::add_f32_x86_64(&original_slice, &temp, slice);
                 } else {
                     for (j, &k) in kernel.iter().enumerate() {
                         if out_pos + j < output_len {
@@ -223,7 +221,8 @@ pub fn conv1d_multi_channel_f32(
                 #[cfg(target_arch = "x86_64")]
                 {
                     if output_length >= 8 && is_x86_feature_detected!("avx2") {
-                        super::x86_64::add_f32_x86_64(out_slice, &temp_output, out_slice);
+                        let original_slice = out_slice.to_vec();
+                        super::x86_64::add_f32_x86_64(&original_slice, &temp_output, out_slice);
                     } else {
                         for i in 0..output_length {
                             out_slice[i] += temp_output[i];

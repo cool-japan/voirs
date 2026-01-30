@@ -280,7 +280,7 @@ impl WhisperAudioProcessor {
                     } else {
                         0.0
                     };
-                    sample as f64
+                    f64::from(sample)
                 })
                 .collect();
 

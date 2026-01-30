@@ -5,6 +5,33 @@ All notable changes to VoiRS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0-alpha.3] - 2026-01-29
+
+### Added
+- Enhanced CUDA GPU acceleration support across acoustic and vocoder pipelines
+- Improved performance optimizations for real-time synthesis
+- Additional SIMD optimizations for mel spectrogram computation
+- Enhanced error handling and diagnostics across all crates
+
+### Changed
+- Refactored multiple modules to comply with 2000-line file policy using splitrs
+- Updated SciRS2-Core integration to version 0.1.3 with improved SIMD and parallel operations
+- Improved code quality and eliminated additional unwrap() calls following no-unwrap policy
+- Enhanced workspace dependency management and version consistency
+
+### Fixed
+- Resolved various clippy warnings and lints across the workspace
+- Fixed potential edge cases in audio processing pipelines
+- Improved test coverage and stability
+
+### Technical Improvements
+- Comprehensive codebase refactoring for better maintainability
+- Enhanced documentation and inline comments
+- Improved trait implementations and abstractions
+- Better separation of concerns across modules
+
+---
+
 ## [0.1.0-alpha.2] - 2025-10-04
 
 ### Added

@@ -55,7 +55,7 @@ pub fn mono_to_stereo(audio: &AudioBuffer) -> Result<AudioBuffer> {
 /// Convert stereo to mono by averaging channels
 pub fn stereo_to_mono(audio: &AudioBuffer) -> Result<AudioBuffer> {
     let samples = audio.samples();
-    if samples.len() % 2 != 0 {
+    if !samples.len().is_multiple_of(2) {
         return Err(VocoderError::InputError(
             "Invalid stereo audio length".to_string(),
         ));

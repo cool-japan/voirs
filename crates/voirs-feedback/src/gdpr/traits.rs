@@ -6,7 +6,10 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::types::*;
+use super::types::{
+    ComplianceReport, ConsentRecord, DataBreach, DataRequest, DataSubject, GdprResult,
+    ProcessingActivity, ProcessingPurpose, RetentionReport, RetentionViolation, SubjectDataExport,
+};
 
 /// Core GDPR compliance trait defining required functionality
 #[async_trait]

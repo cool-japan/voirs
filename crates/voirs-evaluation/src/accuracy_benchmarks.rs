@@ -1458,6 +1458,7 @@ mod tests {
 
     struct MockG2pSystem;
 
+    #[async_trait::async_trait]
     impl G2pSystem for MockG2pSystem {
         async fn convert_to_phonemes(
             &self,
@@ -1469,6 +1470,7 @@ mod tests {
         }
     }
 
+    #[async_trait::async_trait]
     impl TtsSystem for MockG2pSystem {
         async fn synthesize(
             &self,
@@ -1485,6 +1487,7 @@ mod tests {
         }
     }
 
+    #[async_trait::async_trait]
     impl AsrSystem for MockG2pSystem {
         async fn transcribe(
             &self,

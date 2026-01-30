@@ -1063,7 +1063,7 @@ impl AudioBuffer {
     ) -> Result<AudioBuffer> {
         let samples = match format {
             RawFormat::F32Le => {
-                if bytes.len() % 4 != 0 {
+                if !bytes.len().is_multiple_of(4) {
                     return Err(VoirsError::audio_error(
                         "Invalid byte length for F32 format",
                     ));
@@ -1074,7 +1074,7 @@ impl AudioBuffer {
                     .collect()
             }
             RawFormat::I16Le => {
-                if bytes.len() % 2 != 0 {
+                if !bytes.len().is_multiple_of(2) {
                     return Err(VoirsError::audio_error(
                         "Invalid byte length for I16 format",
                     ));

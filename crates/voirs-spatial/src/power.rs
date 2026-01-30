@@ -727,7 +727,7 @@ mod tests {
         for i in 0..100 {
             optimizer.update_state(0.8, 30.0, 20.0, None, 100.0, 8, 0.8);
             if i % 10 == 0 {
-                optimizer.optimize().unwrap();
+                optimizer.optimize().expect("Optimization should succeed");
             }
         }
 

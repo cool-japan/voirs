@@ -109,9 +109,9 @@ impl ProsodyEvaluator {
     /// Extract prosody features from mel spectrogram
     pub fn extract_prosody_features(&self, mel_data: &[Vec<f32>]) -> Result<ProsodyFeatures> {
         if mel_data.is_empty() || mel_data[0].is_empty() {
-            return Err(AcousticError::InputError(
-                "Empty mel spectrogram data".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Empty mel spectrogram data".to_string(),
+            });
         }
 
         // Extract pitch contour
@@ -141,7 +141,9 @@ impl ProsodyEvaluator {
         reference_durations: &[f32],
     ) -> Result<f32> {
         if generated_durations.is_empty() || reference_durations.is_empty() {
-            return Err(AcousticError::InputError("Empty duration data".to_string()));
+            return Err(AcousticError::InputError {
+                message: "Empty duration data".to_string(),
+            });
         }
 
         let min_len = generated_durations.len().min(reference_durations.len());
@@ -176,7 +178,9 @@ impl ProsodyEvaluator {
         reference_pitch: &[f32],
     ) -> Result<f32> {
         if generated_pitch.is_empty() || reference_pitch.is_empty() {
-            return Err(AcousticError::InputError("Empty pitch data".to_string()));
+            return Err(AcousticError::InputError {
+                message: "Empty pitch data".to_string(),
+            });
         }
 
         let min_len = generated_pitch.len().min(reference_pitch.len());
@@ -211,9 +215,9 @@ impl ProsodyEvaluator {
         reference_stress: &[u8],
     ) -> Result<f32> {
         if generated_stress.is_empty() || reference_stress.is_empty() {
-            return Err(AcousticError::InputError(
-                "Empty stress pattern data".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Empty stress pattern data".to_string(),
+            });
         }
 
         let min_len = generated_stress.len().min(reference_stress.len());
@@ -274,7 +278,9 @@ impl ProsodyEvaluator {
     /// Compute intrinsic duration quality (without reference)
     pub fn compute_intrinsic_duration_quality(&self, durations: &[f32]) -> Result<f32> {
         if durations.is_empty() {
-            return Err(AcousticError::InputError("Empty duration data".to_string()));
+            return Err(AcousticError::InputError {
+                message: "Empty duration data".to_string(),
+            });
         }
 
         // Check for reasonable duration values
@@ -308,7 +314,9 @@ impl ProsodyEvaluator {
     /// Compute intrinsic pitch quality (without reference)
     pub fn compute_intrinsic_pitch_quality(&self, pitch_contour: &[f32]) -> Result<f32> {
         if pitch_contour.is_empty() {
-            return Err(AcousticError::InputError("Empty pitch data".to_string()));
+            return Err(AcousticError::InputError {
+                message: "Empty pitch data".to_string(),
+            });
         }
 
         // Filter voiced frames
@@ -627,9 +635,9 @@ impl ProsodyEvaluator {
 
     fn compute_pearson_correlation(&self, x: &[f32], y: &[f32]) -> Result<f32> {
         if x.len() != y.len() || x.is_empty() {
-            return Err(AcousticError::InputError(
-                "Arrays must have same non-zero length".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Arrays must have same non-zero length".to_string(),
+            });
         }
 
         let n = x.len() as f32;
@@ -752,7 +760,8 @@ impl ProsodyEvaluator {
         }
 
         let mut sorted_values = values.to_vec();
-        sorted_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        // Sort with NaN handling: NaN values are treated as equal
+        sorted_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let index = (percentile * (sorted_values.len() - 1) as f32) as usize;
         sorted_values[index.min(sorted_values.len() - 1)]
@@ -768,7 +777,8 @@ impl ProsodyEvaluator {
 
         for i in half_window..(data.len() - half_window) {
             let mut window: Vec<f32> = data[(i - half_window)..=(i + half_window)].to_vec();
-            window.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            // Sort with NaN handling for median filter
+            window.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             filtered_data[i] = window[half_window];
         }
 

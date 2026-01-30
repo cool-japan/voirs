@@ -146,6 +146,7 @@ impl ErrorContext {
     }
 
     /// Add multiple metadata entries
+    #[must_use]
     pub fn with_metadata_map(mut self, metadata: HashMap<String, String>) -> Self {
         self.metadata.extend(metadata);
         self
@@ -158,6 +159,7 @@ impl ErrorContext {
     }
 
     /// Add resolution steps
+    #[must_use]
     pub fn with_resolution_steps(mut self, steps: Vec<String>) -> Self {
         self.resolution_steps = steps;
         self
@@ -170,18 +172,21 @@ impl ErrorContext {
     }
 
     /// Set processing time before error occurred
+    #[must_use]
     pub fn with_processing_time(mut self, duration: Duration) -> Self {
         self.processing_time = Some(duration);
         self
     }
 
     /// Set retry count
+    #[must_use]
     pub fn with_retry_count(mut self, count: u32) -> Self {
         self.retry_count = count;
         self
     }
 
     /// Mark error as recoverable
+    #[must_use]
     pub fn as_recoverable(mut self) -> Self {
         self.recoverable = true;
         self
@@ -193,6 +198,7 @@ impl ErrorContext {
     }
 
     /// Create a summary string for quick logging
+    #[must_use]
     pub fn summary(&self) -> String {
         format!(
             "[{}] {} - {} in {} (ID: {})",
@@ -220,6 +226,7 @@ impl ErrorContext {
     }
 
     /// Check if error is user-facing
+    #[must_use]
     pub fn is_user_facing(&self) -> bool {
         matches!(
             self.category,
@@ -228,6 +235,7 @@ impl ErrorContext {
     }
 
     /// Check if error requires immediate attention
+    #[must_use]
     pub fn requires_immediate_attention(&self) -> bool {
         matches!(self.severity, ErrorSeverity::Critical)
     }
@@ -237,7 +245,7 @@ impl fmt::Display for ErrorContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.summary())?;
         if let Some(details) = &self.details {
-            write!(f, "\nDetails: {}", details)?;
+            write!(f, "\nDetails: {details}")?;
         }
         if !self.resolution_steps.is_empty() {
             write!(f, "\nResolution steps:")?;
@@ -298,12 +306,14 @@ impl ErrorContextBuilder {
     }
 
     /// Mark as recoverable
+    #[must_use]
     pub fn recoverable(mut self) -> Self {
         self.context = self.context.as_recoverable();
         self
     }
 
     /// Build the final error context
+    #[must_use]
     pub fn build(self) -> ErrorContext {
         self.context
     }

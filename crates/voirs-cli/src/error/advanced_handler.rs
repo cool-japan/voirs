@@ -525,10 +525,7 @@ impl AdvancedErrorHandler {
         stats.total_errors += 1;
 
         // Update category statistics
-        let category_stats = stats
-            .category_stats
-            .entry(error.category.clone())
-            .or_default();
+        let category_stats = stats.category_stats.entry(error.category).or_default();
         category_stats.count += 1;
     }
 
@@ -867,8 +864,8 @@ impl AdvancedErrorHandler {
             error_id: error.error_id.clone(),
             timestamp: error.timestamp,
             component: error.context.component.clone(),
-            severity: error.severity.clone(),
-            category: error.category.clone(),
+            severity: error.severity,
+            category: error.category,
             session_id: error.context.session_id.clone(),
             request_id: error.context.request_id.clone(),
             support_url: Some("https://support.voirs.com".to_string()),

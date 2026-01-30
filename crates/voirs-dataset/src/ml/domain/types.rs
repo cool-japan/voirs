@@ -298,7 +298,7 @@ impl DomainStatistics {
         self.text_stats
             .language_distribution
             .iter()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(lang, _)| *lang)
     }
 
@@ -325,7 +325,7 @@ impl AudioStatistics {
     pub fn most_common_sample_rate(&self) -> Option<u32> {
         self.sample_rate_distribution
             .iter()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(rate, _)| *rate)
     }
 
@@ -333,7 +333,7 @@ impl AudioStatistics {
     pub fn most_common_channels(&self) -> Option<u32> {
         self.channel_distribution
             .iter()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(channels, _)| *channels)
     }
 

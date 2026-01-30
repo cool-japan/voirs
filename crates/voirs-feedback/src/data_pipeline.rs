@@ -1,7 +1,7 @@
 //! Efficient data pipeline for real-time and batch data processing
 //!
 //! This module provides comprehensive data pipeline functionality for processing,
-//! transforming, and moving data efficiently across the VoiRS feedback system.
+//! transforming, and moving data efficiently across the `VoiRS` feedback system.
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -266,6 +266,7 @@ pub struct DataPipeline {
 
 impl DataPipeline {
     /// Create a new data pipeline
+    #[must_use]
     pub fn new(config: PipelineConfig) -> Self {
         let (tx, _rx) = mpsc::channel(config.max_buffer_size);
 
@@ -590,7 +591,7 @@ impl DataPipeline {
             try_join_all(futures)
                 .await
                 .map_err(|e| DataPipelineError::ProcessingFailed {
-                    message: format!("Parallel processing failed: {}", e),
+                    message: format!("Parallel processing failed: {e}"),
                 })?;
 
         let mut final_result = Vec::new();
@@ -762,7 +763,7 @@ impl DataPipeline {
                     if attempts >= self.config.retry_config.max_attempts {
                         return Err(DataPipelineError::SinkError {
                             sink_name: sink.name().to_string(),
-                            message: format!("Failed after {} attempts: {}", attempts, e),
+                            message: format!("Failed after {attempts} attempts: {e}"),
                         });
                     }
 
@@ -843,8 +844,15 @@ pub struct FeedbackProcessor {
     name: String,
 }
 
+impl Default for FeedbackProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FeedbackProcessor {
     /// Create a new feedback processor
+    #[must_use]
     pub fn new() -> Self {
         Self {
             name: "FeedbackProcessor".to_string(),
@@ -886,8 +894,15 @@ pub struct AnalyticsSink {
     buffer: Arc<RwLock<Vec<DataType>>>,
 }
 
+impl Default for AnalyticsSink {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AnalyticsSink {
     /// Create a new analytics sink
+    #[must_use]
     pub fn new() -> Self {
         Self {
             name: "AnalyticsSink".to_string(),

@@ -338,9 +338,10 @@ pub struct IoTVoiceConverter {
 impl IoTVoiceConverter {
     /// Create new IoT voice converter
     pub async fn new(platform: IoTPlatform) -> Result<Self> {
+        let processing_mode = platform.recommended_processing_mode();
         let config = IoTConversionConfig {
             platform,
-            processing_mode: platform.recommended_processing_mode(),
+            processing_mode,
             ..IoTConversionConfig::default()
         };
 
@@ -350,11 +351,12 @@ impl IoTVoiceConverter {
     /// Create IoT converter with custom configuration
     pub async fn with_config(config: IoTConversionConfig) -> Result<Self> {
         let converter = Arc::new(VoiceConverter::new()?);
+        let platform = config.platform.clone();
         let constraints = config.platform.typical_constraints();
 
         // Initialize device status
         let device_status = Arc::new(RwLock::new(IoTDeviceStatus {
-            platform: config.platform,
+            platform,
             resource_usage: ResourceUsage {
                 memory_mb: 0.0,
                 cpu_percent: 0.0,
@@ -733,11 +735,16 @@ impl IoTVoiceConverter {
         let mut hasher = DefaultHasher::new();
         request.conversion_type.hash(&mut hasher);
         request.source_sample_rate.hash(&mut hasher);
-        // Hash first few samples to avoid hashing entire audio
-        request
-            .source_audio
-            .get(..100.min(request.source_audio.len()))
-            .hash(&mut hasher);
+        // Hash audio length and first/last samples (f32 doesn't implement Hash directly)
+        request.source_audio.len().hash(&mut hasher);
+        if !request.source_audio.is_empty() {
+            request.source_audio[0].to_bits().hash(&mut hasher);
+            if request.source_audio.len() > 1 {
+                request.source_audio[request.source_audio.len() - 1]
+                    .to_bits()
+                    .hash(&mut hasher);
+            }
+        }
 
         format!("iot_cache_{:x}", hasher.finish())
     }
@@ -858,11 +865,13 @@ impl IoTVoiceConverter {
     // Serialization helpers
 
     fn serialize_request(&self, request: &ConversionRequest) -> Result<Vec<u8>> {
-        serde_json::to_vec(request).map_err(|e| Error::serialization(e))
+        serde_json::to_vec(request)
+            .map_err(|e| Error::processing(format!("Serialization error: {}", e)))
     }
 
     fn deserialize_result(&self, data: Vec<u8>) -> Result<ConversionResult> {
-        serde_json::from_slice(&data).map_err(|e| Error::serialization(e))
+        serde_json::from_slice(&data)
+            .map_err(|e| Error::processing(format!("Deserialization error: {}", e)))
     }
 
     async fn compress_request(&self, request: &ConversionRequest) -> Result<Vec<u8>> {

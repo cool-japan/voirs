@@ -106,24 +106,36 @@ impl Default for VoirsApiPerformanceConfig {
 }
 
 /// Create a default synthesis configuration
+///
+/// # Safety
+/// This function is safe to call and returns a properly initialized VoirsSynthesisConfig.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_config_create_synthesis_default() -> VoirsSynthesisConfig {
     VoirsSynthesisConfig::default()
 }
 
 /// Create a default model configuration
+///
+/// # Safety
+/// This function is safe to call and returns a properly initialized VoirsModelConfig.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_config_create_model_default() -> VoirsModelConfig {
     VoirsModelConfig::default()
 }
 
 /// Create a default performance configuration
+///
+/// # Safety
+/// This function is safe to call and returns a properly initialized VoirsApiPerformanceConfig.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_config_create_performance_default() -> VoirsApiPerformanceConfig {
     VoirsApiPerformanceConfig::default()
 }
 
 /// Validate synthesis configuration
+///
+/// # Safety
+/// The `config` pointer must be valid and point to a properly initialized VoirsSynthesisConfig.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_config_validate_synthesis(
     config: *const VoirsSynthesisConfig,
@@ -169,6 +181,9 @@ pub unsafe extern "C" fn voirs_config_validate_synthesis(
 }
 
 /// Validate model configuration
+///
+/// # Safety
+/// The `config` pointer must be valid and point to a properly initialized VoirsModelConfig.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_config_validate_model(
     config: *const VoirsModelConfig,
@@ -208,6 +223,9 @@ pub unsafe extern "C" fn voirs_config_validate_model(
 }
 
 /// Validate performance configuration
+///
+/// # Safety
+/// The `config` pointer must be valid and point to a properly initialized VoirsApiPerformanceConfig.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_config_validate_performance(
     config: *const VoirsApiPerformanceConfig,
@@ -242,6 +260,10 @@ pub unsafe extern "C" fn voirs_config_validate_performance(
 }
 
 /// Get synthesis configuration description
+///
+/// # Safety
+/// The `config` pointer must be valid and point to a properly initialized VoirsSynthesisConfig.
+/// The `buffer` pointer must be valid and point to a writable buffer of at least `buffer_size` bytes.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_config_get_synthesis_info(
     config: *const VoirsSynthesisConfig,
@@ -272,6 +294,9 @@ pub unsafe extern "C" fn voirs_config_get_synthesis_info(
 }
 
 /// Apply synthesis configuration preset
+///
+/// # Safety
+/// The `config` pointer must be valid and point to a properly initialized VoirsSynthesisConfig.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_config_apply_synthesis_preset(
     config: *mut VoirsSynthesisConfig,

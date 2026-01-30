@@ -96,7 +96,8 @@ impl LayerStatistics {
         }
 
         let mut sorted = self.values.clone();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        // Sort with NaN handling for quantization calibration
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let index = ((p / 100.0) * (sorted.len() - 1) as f32) as usize;
         sorted[index.min(sorted.len() - 1)]
@@ -124,9 +125,12 @@ impl PostTrainingQuantizer {
 
     /// Calculate quantization parameters using the specified method
     pub fn calculate_quantization_params(&self, layer_name: &str) -> Result<QuantizationParams> {
-        let stats = self.layer_stats.get(layer_name).ok_or_else(|| {
-            AcousticError::Processing(format!("No statistics found for layer: {layer_name}"))
-        })?;
+        let stats =
+            self.layer_stats
+                .get(layer_name)
+                .ok_or_else(|| AcousticError::ProcessingError {
+                    message: format!("No statistics found for layer: {layer_name}"),
+                })?;
 
         match self.config.method {
             PtqMethod::MinMax => self.calculate_minmax_params(stats),
@@ -181,9 +185,9 @@ impl PostTrainingQuantizer {
         let num_levels = (qmax - qmin + 1) as usize;
 
         if stats.values.is_empty() {
-            return Err(AcousticError::Processing(
-                "No data for K-means clustering".to_string(),
-            ));
+            return Err(AcousticError::ProcessingError {
+                message: "No data for K-means clustering".to_string(),
+            });
         }
 
         // Initialize centroids uniformly across the range

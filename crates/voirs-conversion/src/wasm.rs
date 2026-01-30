@@ -46,6 +46,9 @@
 use wasm_bindgen::prelude::*;
 
 #[cfg(feature = "wasm")]
+use serde_wasm_bindgen;
+
+#[cfg(feature = "wasm")]
 use js_sys::{Array, Float32Array, Object, Promise, Uint8Array};
 
 #[cfg(feature = "wasm")]
@@ -68,9 +71,6 @@ extern "C" {
 
     #[wasm_bindgen(js_namespace = console)]
     fn warn(s: &str);
-
-    #[wasm_bindgen(js_namespace = console)]
-    fn error(s: &str);
 }
 
 #[cfg(feature = "wasm")]
@@ -81,11 +81,6 @@ macro_rules! console_log {
 #[cfg(feature = "wasm")]
 macro_rules! console_warn {
     ($($t:tt)*) => (warn(&format_args!($($t)*).to_string()))
-}
-
-#[cfg(feature = "wasm")]
-macro_rules! console_error {
-    ($($t:tt)*) => (error(&format_args!($($t)*).to_string()))
 }
 
 /// WebAssembly voice converter configuration
@@ -220,13 +215,12 @@ impl BrowserCapabilities {
         // Check for WebAssembly support
         if js_sys::Reflect::has(&js_sys::global(), &"WebAssembly".into()).unwrap_or(false) {
             // Check for SIMD support
-            if js_sys::Reflect::has(
-                &js_sys::global().get(&"WebAssembly".into()).unwrap(),
-                &"SIMD".into(),
-            )
-            .unwrap_or(false)
-            {
-                WasmSupportLevel::Advanced
+            if let Ok(wasm_obj) = js_sys::Reflect::get(&js_sys::global(), &"WebAssembly".into()) {
+                if js_sys::Reflect::has(&wasm_obj, &"SIMD".into()).unwrap_or(false) {
+                    WasmSupportLevel::Advanced
+                } else {
+                    WasmSupportLevel::Full
+                }
             } else {
                 WasmSupportLevel::Full
             }
@@ -270,7 +264,7 @@ impl BrowserCapabilities {
 
     fn detect_browser_info(navigator: &web_sys::Navigator) -> String {
         let user_agent = navigator.user_agent().unwrap_or_default();
-        let app_name = navigator.app_name().unwrap_or_default();
+        let app_name = navigator.app_name();
         let app_version = navigator.app_version().unwrap_or_default();
 
         format!("{app_name} {app_version} ({user_agent})")
@@ -295,7 +289,7 @@ impl BrowserCapabilities {
             WasmSupportLevel::None => score -= 30,
         }
 
-        score.min(100).max(0)
+        score.clamp(0, 100)
     }
 }
 
@@ -330,6 +324,13 @@ pub struct WasmVoiceConverter {
 }
 
 #[cfg(feature = "wasm")]
+impl Default for WasmVoiceConverter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "wasm")]
 #[wasm_bindgen]
 impl WasmVoiceConverter {
     /// Create new WebAssembly voice converter
@@ -351,8 +352,7 @@ impl WasmVoiceConverter {
     /// Create converter with custom configuration
     #[wasm_bindgen]
     pub fn with_config(config_js: &JsValue) -> std::result::Result<WasmVoiceConverter, JsValue> {
-        let config: WasmConversionConfig = config_js
-            .into_serde()
+        let config: WasmConversionConfig = serde_wasm_bindgen::from_value(config_js.clone())
             .map_err(|e| JsValue::from_str(&format!("Invalid config: {e}")))?;
 
         console_log!("Creating WASM Voice Converter with custom config");
@@ -372,7 +372,7 @@ impl WasmVoiceConverter {
 
     /// Initialize the converter and Web Audio API
     #[wasm_bindgen]
-    pub async fn initialize(&mut self) -> Result<(), JsValue> {
+    pub async fn initialize(&mut self) -> std::result::Result<(), JsValue> {
         console_log!("Initializing WASM Voice Converter");
 
         if !self.capabilities.web_audio_supported {
@@ -403,7 +403,7 @@ impl WasmVoiceConverter {
         &mut self,
         audio_data: &Float32Array,
         conversion_params: &JsValue,
-    ) -> Result<Float32Array, JsValue> {
+    ) -> std::result::Result<Float32Array, JsValue> {
         if !self.initialized {
             return Err(JsValue::from_str("Converter not initialized"));
         }
@@ -412,11 +412,12 @@ impl WasmVoiceConverter {
 
         // Convert JS types to Rust
         let audio_vec: Vec<f32> = audio_data.to_vec();
-        let params: ConversionParameters = conversion_params
-            .into_serde()
-            .map_err(|e| JsValue::from_str(&format!("Invalid conversion parameters: {e}")))?;
+        let params: ConversionParameters =
+            serde_wasm_bindgen::from_value(conversion_params.clone())
+                .map_err(|e| JsValue::from_str(&format!("Invalid conversion parameters: {e}")))?;
 
         // Create conversion request
+        let conversion_type = params.conversion_type.clone();
         let request = ConversionRequest::new(
             self.generate_request_id(),
             audio_vec,
@@ -443,7 +444,7 @@ impl WasmVoiceConverter {
         // Record statistics
         let processing_time = Self::get_performance_now() - start_time;
         self.stats
-            .record_conversion(processing_time, params.conversion_type);
+            .record_conversion(processing_time, conversion_type);
 
         console_log!("Conversion completed in {:.2}ms", processing_time);
         Ok(output_array)
@@ -451,7 +452,10 @@ impl WasmVoiceConverter {
 
     /// Start real-time audio processing
     #[wasm_bindgen]
-    pub async fn start_realtime_processing(&mut self, source_node_id: &str) -> Result<(), JsValue> {
+    pub async fn start_realtime_processing(
+        &mut self,
+        source_node_id: &str,
+    ) -> std::result::Result<(), JsValue> {
         if !self.initialized {
             return Err(JsValue::from_str("Converter not initialized"));
         }
@@ -476,7 +480,7 @@ impl WasmVoiceConverter {
         console_log!("Stopping real-time processing");
 
         // Disconnect all processing nodes
-        for (_, node) in &mut self.processing_nodes {
+        for node in self.processing_nodes.values_mut() {
             node.disconnect()?;
         }
 
@@ -487,16 +491,16 @@ impl WasmVoiceConverter {
 
     /// Get conversion statistics
     #[wasm_bindgen]
-    pub fn get_statistics(&self) -> Result<JsValue, JsValue> {
+    pub fn get_statistics(&self) -> std::result::Result<JsValue, JsValue> {
         let stats = self.stats.get_statistics();
-        JsValue::from_serde(&stats)
+        serde_wasm_bindgen::to_value(&stats)
             .map_err(|e| JsValue::from_str(&format!("Failed to serialize statistics: {e}")))
     }
 
     /// Get browser capabilities
     #[wasm_bindgen]
-    pub fn get_capabilities(&self) -> Result<JsValue, JsValue> {
-        JsValue::from_serde(&self.capabilities)
+    pub fn get_capabilities(&self) -> std::result::Result<JsValue, JsValue> {
+        serde_wasm_bindgen::to_value(&self.capabilities)
             .map_err(|e| JsValue::from_str(&format!("Failed to serialize capabilities: {e}")))
     }
 
@@ -508,16 +512,15 @@ impl WasmVoiceConverter {
 
     /// Get current configuration
     #[wasm_bindgen]
-    pub fn get_config(&self) -> Result<JsValue, JsValue> {
-        JsValue::from_serde(&self.config)
+    pub fn get_config(&self) -> std::result::Result<JsValue, JsValue> {
+        serde_wasm_bindgen::to_value(&self.config)
             .map_err(|e| JsValue::from_str(&format!("Failed to serialize config: {e}")))
     }
 
     /// Update configuration
     #[wasm_bindgen]
-    pub fn update_config(&mut self, config_js: &JsValue) -> Result<(), JsValue> {
-        let config: WasmConversionConfig = config_js
-            .into_serde()
+    pub fn update_config(&mut self, config_js: &JsValue) -> std::result::Result<(), JsValue> {
+        let config: WasmConversionConfig = serde_wasm_bindgen::from_value(config_js.clone())
             .map_err(|e| JsValue::from_str(&format!("Invalid config: {e}")))?;
 
         self.config = config;
@@ -527,7 +530,7 @@ impl WasmVoiceConverter {
 
     // Internal implementation methods
 
-    async fn initialize_audio_context(&mut self) -> Result<(), JsValue> {
+    async fn initialize_audio_context(&mut self) -> std::result::Result<(), JsValue> {
         let audio_context = AudioContext::new()
             .map_err(|e| JsValue::from_str(&format!("Failed to create AudioContext: {:?}", e)))?;
 
@@ -547,7 +550,7 @@ impl WasmVoiceConverter {
         Ok(())
     }
 
-    fn validate_memory_constraints(&self) -> Result<(), JsValue> {
+    fn validate_memory_constraints(&self) -> std::result::Result<(), JsValue> {
         if self.capabilities.available_memory_mb < self.config.memory_limit_mb {
             console_warn!(
                 "Available memory ({} MB) is less than required ({} MB)",
@@ -558,7 +561,7 @@ impl WasmVoiceConverter {
         Ok(())
     }
 
-    async fn initialize_processing_pipeline(&mut self) -> Result<(), JsValue> {
+    async fn initialize_processing_pipeline(&mut self) -> std::result::Result<(), JsValue> {
         // Initialize conversion models and pipeline
         console_log!("Initializing processing pipeline");
 
@@ -573,14 +576,14 @@ impl WasmVoiceConverter {
         Ok(())
     }
 
-    async fn load_models_progressively(&self) -> Result<(), JsValue> {
+    async fn load_models_progressively(&self) -> std::result::Result<(), JsValue> {
         console_log!("Loading models progressively");
         // In a real implementation, this would load models on demand
         tokio::time::sleep(Duration::from_millis(100)).await;
         Ok(())
     }
 
-    async fn load_all_models(&self) -> Result<(), JsValue> {
+    async fn load_all_models(&self) -> std::result::Result<(), JsValue> {
         console_log!("Loading all models");
         // In a real implementation, this would load all models upfront
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -590,7 +593,7 @@ impl WasmVoiceConverter {
     async fn convert_streaming(
         &self,
         request: &ConversionRequest,
-    ) -> Result<ConversionResult, JsValue> {
+    ) -> std::result::Result<ConversionResult, JsValue> {
         console_log!("Performing streaming conversion");
 
         // Process audio in chunks
@@ -633,7 +636,7 @@ impl WasmVoiceConverter {
     async fn convert_standard(
         &self,
         request: &ConversionRequest,
-    ) -> Result<ConversionResult, JsValue> {
+    ) -> std::result::Result<ConversionResult, JsValue> {
         console_log!("Performing standard conversion");
 
         self.converter
@@ -645,7 +648,7 @@ impl WasmVoiceConverter {
     async fn create_realtime_processing_chain(
         &mut self,
         source_node_id: &str,
-    ) -> Result<(), JsValue> {
+    ) -> std::result::Result<(), JsValue> {
         let audio_context = self
             .audio_context
             .as_ref()
@@ -654,7 +657,7 @@ impl WasmVoiceConverter {
         // Create ScriptProcessorNode for custom processing
         let buffer_size = self.config.max_buffer_size as u32;
         let script_processor = audio_context
-            .create_script_processor_with_buffer_size_and_number_of_output_channels(
+            .create_script_processor_with_buffer_size_and_number_of_input_channels_and_number_of_output_channels(
                 buffer_size,
                 self.config.channels,
                 self.config.channels,
@@ -686,10 +689,12 @@ impl WasmVoiceConverter {
 
             // Note: In a real implementation, this would need to be handled differently
             // as async operations cannot be performed in the audio callback
-            let mut output_channel = output_buffer.get_channel_data(0).unwrap();
-            for (i, sample) in request.source_audio.iter().enumerate() {
-                if i < output_channel.length() as usize {
-                    output_channel.set_index(i as u32, *sample);
+            if let Ok(channel_data) = output_buffer.get_channel_data(0) {
+                let mut output_channel = channel_data.to_vec();
+                for (i, sample) in request.source_audio.iter().enumerate() {
+                    if i < output_channel.len() {
+                        output_channel[i] = *sample;
+                    }
                 }
             }
         }) as Box<dyn FnMut(_)>);
@@ -734,14 +739,14 @@ enum WebAudioNode {
 
 #[cfg(feature = "wasm")]
 impl WebAudioNode {
-    fn disconnect(&mut self) -> Result<(), Error> {
+    fn disconnect(&mut self) -> std::result::Result<(), JsValue> {
         match self {
             WebAudioNode::ScriptProcessor(node) => node
                 .disconnect()
-                .map_err(|e| Error::processing(format!("Disconnect failed: {:?}", e))),
+                .map_err(|e| JsValue::from_str(&format!("Disconnect failed: {:?}", e))),
             WebAudioNode::Gain(node) => node
                 .disconnect()
-                .map_err(|e| Error::processing(format!("Disconnect failed: {:?}", e))),
+                .map_err(|e| JsValue::from_str(&format!("Disconnect failed: {:?}", e))),
         }
     }
 }
@@ -879,6 +884,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_arch = "wasm32")]
     fn test_browser_capabilities_detection() {
         let capabilities = BrowserCapabilities::detect();
         assert!(!capabilities.browser_info.is_empty());
@@ -903,6 +909,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_arch = "wasm32")]
     fn test_wasm_stats() {
         let stats = WasmConversionStats::new();
         stats.record_conversion(100.0, ConversionType::PitchShift);
@@ -914,8 +921,8 @@ mod tests {
         assert!(statistics.average_processing_time_ms > 0.0);
     }
 
-    #[cfg(feature = "wasm")]
     #[test]
+    #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
     fn test_wasm_converter_creation() {
         let converter = WasmVoiceConverter::new();
         assert!(!converter.is_initialized());

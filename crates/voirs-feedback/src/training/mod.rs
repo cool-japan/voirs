@@ -33,7 +33,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use std::time::Duration;
 
-/// Implementation of TrainingProvider trait for InteractiveTrainer
+/// Implementation of `TrainingProvider` trait for `InteractiveTrainer`
 #[async_trait]
 impl TrainingProvider for InteractiveTrainer {
     async fn get_exercises(
@@ -84,13 +84,11 @@ impl TrainingProvider for InteractiveTrainer {
         // Create a temporary session for evaluation
         let session = self
             .start_session("eval_user", None)
-            .await
             .map_err(VoirsError::from)?;
 
         // Start the exercise
         let _ = self
             .start_exercise(&session.session_id, &exercise.exercise_id)
-            .await
             .map_err(VoirsError::from)?;
 
         // Submit the attempt

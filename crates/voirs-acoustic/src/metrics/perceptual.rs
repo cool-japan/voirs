@@ -98,7 +98,9 @@ impl PerceptualEvaluator {
     /// Compute PESQ score (Perceptual Evaluation of Speech Quality)
     pub fn compute_pesq(&self, degraded: &[f32], reference: &[f32]) -> Result<f32> {
         if degraded.is_empty() || reference.is_empty() {
-            return Err(AcousticError::InputError("Empty audio samples".to_string()));
+            return Err(AcousticError::InputError {
+                message: "Empty audio samples".to_string(),
+            });
         }
 
         // Simplified PESQ implementation
@@ -112,7 +114,9 @@ impl PerceptualEvaluator {
     /// Compute STOI score (Short-Time Objective Intelligibility)
     pub fn compute_stoi(&self, degraded: &[f32], reference: &[f32]) -> Result<f32> {
         if degraded.is_empty() || reference.is_empty() {
-            return Err(AcousticError::InputError("Empty audio samples".to_string()));
+            return Err(AcousticError::InputError {
+                message: "Empty audio samples".to_string(),
+            });
         }
 
         // Align signals by length
@@ -129,7 +133,9 @@ impl PerceptualEvaluator {
     /// Compute SI-SDR (Scale-Invariant Signal-to-Distortion Ratio)
     pub fn compute_si_sdr(&self, estimated: &[f32], target: &[f32]) -> Result<f32> {
         if estimated.is_empty() || target.is_empty() {
-            return Err(AcousticError::InputError("Empty audio samples".to_string()));
+            return Err(AcousticError::InputError {
+                message: "Empty audio samples".to_string(),
+            });
         }
 
         let min_len = estimated.len().min(target.len());
@@ -160,7 +166,9 @@ impl PerceptualEvaluator {
     /// Compute intrinsic quality score without reference
     pub fn compute_intrinsic_quality(&self, audio: &[f32]) -> Result<f32> {
         if audio.is_empty() {
-            return Err(AcousticError::InputError("Empty audio samples".to_string()));
+            return Err(AcousticError::InputError {
+                message: "Empty audio samples".to_string(),
+            });
         }
 
         // Compute various intrinsic quality indicators

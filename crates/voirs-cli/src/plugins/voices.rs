@@ -319,18 +319,65 @@ impl Plugin for DefaultVoicePlugin {
 
 impl VoicePlugin for DefaultVoicePlugin {
     fn synthesize(&self, text: &str, config: &VoicePluginConfig) -> PluginResult<Vec<f32>> {
-        // Placeholder implementation - generate simple sine wave based on text length
-        let duration = text.len() as f32 * 0.1 * config.speed_multiplier;
+        // Enhanced formant-based synthesis for more speech-like audio
+        // Duration based on character count with speed multiplier
+        let base_duration = text.len() as f32 * 0.08 * config.speed_multiplier;
         let sample_rate = self.get_sample_rate() as f32;
-        let samples = (duration * sample_rate) as usize;
+        let samples = (base_duration * sample_rate) as usize;
 
-        let frequency = 440.0 * (2.0_f32).powf(config.pitch_shift / 12.0);
-        let amplitude = 0.1 * (10.0_f32).powf(config.volume_gain / 20.0);
+        // Fundamental frequency (F0) with pitch shift
+        let f0 = 150.0 * (2.0_f32).powf(config.pitch_shift / 12.0);
+
+        // Speech formant frequencies (approximate vowel /a/)
+        let formants = [
+            (800.0, 0.3),   // F1: First formant
+            (1200.0, 0.2),  // F2: Second formant
+            (2500.0, 0.15), // F3: Third formant
+            (3500.0, 0.1),  // F4: Fourth formant
+        ];
+
+        // Base amplitude with volume control
+        let base_amplitude = 0.08 * (10.0_f32).powf(config.volume_gain / 20.0);
 
         let mut audio = Vec::with_capacity(samples);
+        let two_pi = 2.0 * std::f32::consts::PI;
+
         for i in 0..samples {
             let t = i as f32 / sample_rate;
-            let sample = amplitude * (2.0 * std::f32::consts::PI * frequency * t).sin();
+
+            // Generate fundamental frequency with harmonics
+            let mut sample = 0.0;
+
+            // Add harmonics (up to 8th harmonic for richness)
+            for harmonic in 1..=8 {
+                let freq = f0 * harmonic as f32;
+                let amplitude = base_amplitude / harmonic as f32; // Harmonic rolloff
+                sample += amplitude * (two_pi * freq * t).sin();
+            }
+
+            // Apply formant filtering (simplified resonance)
+            for (formant_freq, formant_amp) in &formants {
+                let formant_phase = (two_pi * formant_freq * t).sin();
+                sample += formant_phase * formant_amp * base_amplitude;
+            }
+
+            // Apply simple envelope (attack-sustain-release)
+            let envelope = if t < 0.02 {
+                // Attack (20ms)
+                t / 0.02
+            } else if t > base_duration - 0.05 {
+                // Release (50ms)
+                (base_duration - t) / 0.05
+            } else {
+                // Sustain
+                1.0
+            };
+
+            sample *= envelope;
+
+            // Soft clipping to prevent distortion
+            sample = sample.clamp(-0.95, 0.95);
+
             audio.push(sample);
         }
 

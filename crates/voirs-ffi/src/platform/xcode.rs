@@ -255,7 +255,7 @@ impl XcodeIntegration {
         if let Some(dev_dir) = developer_dir {
             // Detect macOS SDK
             if let Ok(output) = Command::new("xcrun")
-                .args(&["--sdk", "macosx", "--show-sdk-path"])
+                .args(["--sdk", "macosx", "--show-sdk-path"])
                 .output()
             {
                 let output_str = String::from_utf8_lossy(&output.stdout);
@@ -267,7 +267,7 @@ impl XcodeIntegration {
 
             // Detect iOS SDK
             if let Ok(output) = Command::new("xcrun")
-                .args(&["--sdk", "iphoneos", "--show-sdk-path"])
+                .args(["--sdk", "iphoneos", "--show-sdk-path"])
                 .output()
             {
                 let output_str = String::from_utf8_lossy(&output.stdout);
@@ -279,7 +279,7 @@ impl XcodeIntegration {
 
             // Detect iOS Simulator SDK
             if let Ok(output) = Command::new("xcrun")
-                .args(&["--sdk", "iphonesimulator", "--show-sdk-path"])
+                .args(["--sdk", "iphonesimulator", "--show-sdk-path"])
                 .output()
             {
                 let output_str = String::from_utf8_lossy(&output.stdout);
@@ -291,7 +291,7 @@ impl XcodeIntegration {
 
             // Detect watchOS SDK
             if let Ok(output) = Command::new("xcrun")
-                .args(&["--sdk", "watchos", "--show-sdk-path"])
+                .args(["--sdk", "watchos", "--show-sdk-path"])
                 .output()
             {
                 let output_str = String::from_utf8_lossy(&output.stdout);
@@ -303,7 +303,7 @@ impl XcodeIntegration {
 
             // Detect tvOS SDK
             if let Ok(output) = Command::new("xcrun")
-                .args(&["--sdk", "appletvos", "--show-sdk-path"])
+                .args(["--sdk", "appletvos", "--show-sdk-path"])
                 .output()
             {
                 let output_str = String::from_utf8_lossy(&output.stdout);
@@ -430,7 +430,7 @@ impl XcodeIntegration {
         // Products
         swift_content.push_str("    products: [\n");
         for (i, product) in package.products.iter().enumerate() {
-            swift_content.push_str(&format!("        .library(\n"));
+            swift_content.push_str("        .library(\n");
             swift_content.push_str(&format!("            name: \"{}\",\n", product.name));
             swift_content.push_str(&format!(
                 "            targets: [\"{}\"]\n",
@@ -672,7 +672,7 @@ impl XcodeIntegration {
         if podspec.source_files.len() == 1 {
             content.push_str(&format!("'{}'\n", podspec.source_files[0]));
         } else {
-            content.push_str("[");
+            content.push('[');
             for (i, file) in podspec.source_files.iter().enumerate() {
                 content.push_str(&format!("'{}'", file));
                 if i < podspec.source_files.len() - 1 {
@@ -688,7 +688,7 @@ impl XcodeIntegration {
             if podspec.public_header_files.len() == 1 {
                 content.push_str(&format!("'{}'\n", podspec.public_header_files[0]));
             } else {
-                content.push_str("[");
+                content.push('[');
                 for (i, file) in podspec.public_header_files.iter().enumerate() {
                     content.push_str(&format!("'{}'", file));
                     if i < podspec.public_header_files.len() - 1 {
@@ -705,7 +705,7 @@ impl XcodeIntegration {
             if podspec.vendored_libraries.len() == 1 {
                 content.push_str(&format!("'{}'\n", podspec.vendored_libraries[0]));
             } else {
-                content.push_str("[");
+                content.push('[');
                 for (i, lib) in podspec.vendored_libraries.iter().enumerate() {
                     content.push_str(&format!("'{}'", lib));
                     if i < podspec.vendored_libraries.len() - 1 {
@@ -722,7 +722,7 @@ impl XcodeIntegration {
             if podspec.frameworks.len() == 1 {
                 content.push_str(&format!("'{}'\n", podspec.frameworks[0]));
             } else {
-                content.push_str("[");
+                content.push('[');
                 for (i, framework) in podspec.frameworks.iter().enumerate() {
                     content.push_str(&format!("'{}'", framework));
                     if i < podspec.frameworks.len() - 1 {
@@ -739,7 +739,7 @@ impl XcodeIntegration {
             if podspec.libraries.len() == 1 {
                 content.push_str(&format!("'{}'\n", podspec.libraries[0]));
             } else {
-                content.push_str("[");
+                content.push('[');
                 for (i, lib) in podspec.libraries.iter().enumerate() {
                     content.push_str(&format!("'{}'", lib));
                     if i < podspec.libraries.len() - 1 {
@@ -1448,6 +1448,11 @@ pub extern "C" fn voirs_xcode_create_integration() -> *mut XcodeIntegration {
     Box::into_raw(Box::new(XcodeIntegration::new()))
 }
 
+/// Destroy Xcode integration instance
+///
+/// # Safety
+/// The `integration` pointer must be a valid handle previously returned by `voirs_xcode_create_integration`.
+/// After calling this function, the handle becomes invalid and must not be used.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_xcode_destroy_integration(integration: *mut XcodeIntegration) {
     if !integration.is_null() {
@@ -1457,6 +1462,10 @@ pub unsafe extern "C" fn voirs_xcode_destroy_integration(integration: *mut Xcode
     }
 }
 
+/// Install Xcode integration
+///
+/// # Safety
+/// The `integration` pointer must be a valid handle previously returned by `voirs_xcode_create_integration`.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_xcode_install_integration(
     integration: *mut XcodeIntegration,
@@ -1468,6 +1477,10 @@ pub unsafe extern "C" fn voirs_xcode_install_integration(
     unsafe { (*integration).install_integration().is_ok() }
 }
 
+/// Verify Xcode installation
+///
+/// # Safety
+/// The `integration` pointer must be a valid handle previously returned by `voirs_xcode_create_integration`.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_xcode_verify_installation(
     integration: *mut XcodeIntegration,
@@ -1479,6 +1492,11 @@ pub unsafe extern "C" fn voirs_xcode_verify_installation(
     unsafe { (*integration).verify_installation().unwrap_or(false) }
 }
 
+/// Build Xcode framework
+///
+/// # Safety
+/// The `integration` pointer must be a valid handle previously returned by `voirs_xcode_create_integration`.
+/// The `output_path` pointer must be valid and point to a null-terminated C string.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_xcode_build_framework(
     integration: *mut XcodeIntegration,

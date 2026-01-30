@@ -595,7 +595,10 @@ mod tests {
 
         controller.add_action_mapping(GestureType::Point, action.clone());
 
-        let mappings = controller.action_mappings.get(&GestureType::Point).unwrap();
+        let mappings = controller
+            .action_mappings
+            .get(&GestureType::Point)
+            .expect("Should have Point gesture action mappings");
         assert_eq!(mappings.len(), 1);
     }
 
@@ -619,7 +622,9 @@ mod tests {
         let gesture_data =
             GestureBuilder::new(GestureType::Point, Position3D::new(0.0, 0.0, 1.0)).build();
 
-        let events = controller.process_gesture_data(gesture_data).unwrap();
+        let events = controller
+            .process_gesture_data(gesture_data)
+            .expect("Should successfully process gesture data");
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event_type, GestureEventType::Start);
         assert_eq!(controller.active_gestures.len(), 1);
@@ -634,7 +639,9 @@ mod tests {
             GestureBuilder::new(GestureType::Grab, Position3D::new(1.0, 1.0, 1.0)).build();
 
         // Process initial gesture
-        controller.process_gesture_data(gesture_data).unwrap();
+        controller
+            .process_gesture_data(gesture_data)
+            .expect("Should successfully process initial gesture");
         assert_eq!(controller.active_gestures.len(), 1);
 
         // Wait and process timeouts
@@ -669,7 +676,7 @@ mod tests {
 
         let events = controller
             .process_gesture_data(low_confidence_gesture)
-            .unwrap();
+            .expect("Should successfully process low confidence gesture (even if filtered)");
         assert_eq!(events.len(), 0); // Should be filtered out
     }
 }

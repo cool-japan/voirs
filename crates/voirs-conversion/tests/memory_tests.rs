@@ -9,7 +9,6 @@ use std::sync::{
 };
 use std::thread;
 use std::time::{Duration, Instant};
-use tokio;
 use voirs_conversion::prelude::*;
 
 /// Test memory usage during voice conversion with different audio lengths

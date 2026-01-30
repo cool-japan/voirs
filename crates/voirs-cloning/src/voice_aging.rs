@@ -296,6 +296,12 @@ pub struct VoiceAgingEngine {
     aging_presets: HashMap<String, AgingCharacteristics>,
 }
 
+impl Default for VoiceAgingEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VoiceAgingEngine {
     /// Create new voice aging engine
     pub fn new() -> Self {
@@ -813,7 +819,7 @@ impl VoiceAgingEngine {
         }
 
         // Check quality change realism
-        for (_, change) in &factors.quality_changes {
+        for change in factors.quality_changes.values() {
             if change.abs() > 0.5 {
                 // Very large quality change
                 score -= 0.1;

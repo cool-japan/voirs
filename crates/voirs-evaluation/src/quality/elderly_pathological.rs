@@ -1912,8 +1912,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_pathological_condition_evaluation() {
-        let mut config = ElderlyPathologicalConfig::default();
-        config.pathological_conditions = vec![PathologicalCondition::Parkinsons];
+        let config = ElderlyPathologicalConfig {
+            pathological_conditions: vec![PathologicalCondition::Parkinsons],
+            ..Default::default()
+        };
         let evaluator = ElderlyPathologicalEvaluator::with_config(config)
             .await
             .unwrap();

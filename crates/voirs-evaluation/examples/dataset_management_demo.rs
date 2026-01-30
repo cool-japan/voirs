@@ -389,7 +389,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  # Use in evaluation pipeline:");
     println!("  let reference = manager.get_dataset(\"ljspeech_reference\").unwrap();");
     println!("  let evaluator = QualityEvaluator::with_reference_dataset(reference);");
-    println!("");
+    println!();
     println!("  # Batch evaluation across multiple datasets:");
     println!("  let test_datasets = manager.search_datasets(&test_criteria);");
     println!("  for dataset in test_datasets {{");

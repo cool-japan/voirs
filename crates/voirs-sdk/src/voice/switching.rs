@@ -422,7 +422,7 @@ impl DefaultVoiceManager {
                 if total > 10 * 1024 * 1024 {
                     // > 10MB
                     let percent = (bytes_downloaded as f64 / total as f64) * 100.0;
-                    if bytes_downloaded % (1024 * 1024) == 0 {
+                    if bytes_downloaded.is_multiple_of(1024 * 1024) {
                         // Log every MB
                         tracing::debug!(
                             "Download progress: {:.1}% ({}/{})",

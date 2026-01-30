@@ -1,4 +1,4 @@
-//! Microservices architecture framework for VoiRS feedback system
+//! Microservices architecture framework for `VoiRS` feedback system
 //!
 //! This module provides a framework for organizing the system into independent,
 //! scalable microservices with service discovery, health monitoring, and
@@ -276,6 +276,7 @@ pub struct ServiceRegistry {
 
 impl ServiceRegistry {
     /// Create a new service registry
+    #[must_use]
     pub fn new(health_check_interval: Duration) -> Self {
         Self {
             services: Arc::new(RwLock::new(HashMap::new())),
@@ -380,7 +381,7 @@ impl ServiceDiscovery for ServiceRegistry {
             .await
             .insert(service_name, service_id);
 
-        log::info!("Service registered: {}", service_id);
+        log::info!("Service registered: {service_id}");
         Ok(())
     }
 
@@ -400,7 +401,7 @@ impl ServiceDiscovery for ServiceRegistry {
             // Remove from name index
             self.name_index.write().await.remove(&service.service_name);
 
-            log::info!("Service deregistered: {}", service_id);
+            log::info!("Service deregistered: {service_id}");
         }
 
         Ok(())
@@ -543,7 +544,7 @@ impl ServiceCommunication for ServiceCommunicationManager {
             .send()
             .await
             .map_err(|e| MicroserviceError::CommunicationError {
-                message: format!("HTTP request failed: {}", e),
+                message: format!("HTTP request failed: {e}"),
             })?;
 
         let response_bytes =
@@ -551,7 +552,7 @@ impl ServiceCommunication for ServiceCommunicationManager {
                 .bytes()
                 .await
                 .map_err(|e| MicroserviceError::CommunicationError {
-                    message: format!("Failed to read response: {}", e),
+                    message: format!("Failed to read response: {e}"),
                 })?;
 
         Ok(response_bytes.to_vec())
@@ -593,7 +594,7 @@ impl ServiceCommunication for ServiceCommunicationManager {
     async fn publish_message(&self, message: ServiceMessage) -> MicroserviceResult<()> {
         self.message_broadcaster.send(message).map_err(|e| {
             MicroserviceError::CommunicationError {
-                message: format!("Failed to publish message: {}", e),
+                message: format!("Failed to publish message: {e}"),
             }
         })?;
 
@@ -690,6 +691,7 @@ impl MicroserviceFramework {
     }
 
     /// Create a new service instance
+    #[must_use]
     pub fn create_service(
         &self,
         service_name: String,

@@ -171,9 +171,9 @@ impl SimdDispatcher {
     /// Vector addition with SIMD acceleration
     pub fn add_f32(&self, a: &[f32], b: &[f32], result: &mut [f32]) -> Result<()> {
         if a.len() != b.len() || a.len() != result.len() {
-            return Err(AcousticError::InputError(
-                "Vector lengths must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Vector lengths must match".to_string(),
+            });
         }
 
         #[cfg(target_arch = "x86_64")]
@@ -202,9 +202,9 @@ impl SimdDispatcher {
     /// Vector multiplication with SIMD acceleration
     pub fn mul_f32(&self, a: &[f32], b: &[f32], result: &mut [f32]) -> Result<()> {
         if a.len() != b.len() || a.len() != result.len() {
-            return Err(AcousticError::InputError(
-                "Vector lengths must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Vector lengths must match".to_string(),
+            });
         }
 
         #[cfg(target_arch = "x86_64")]
@@ -233,9 +233,9 @@ impl SimdDispatcher {
     /// Fused multiply-add with SIMD acceleration
     pub fn fma_f32(&self, a: &[f32], b: &[f32], c: &[f32], result: &mut [f32]) -> Result<()> {
         if a.len() != b.len() || a.len() != c.len() || a.len() != result.len() {
-            return Err(AcousticError::InputError(
-                "Vector lengths must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Vector lengths must match".to_string(),
+            });
         }
 
         #[cfg(target_arch = "x86_64")]
@@ -261,9 +261,9 @@ impl SimdDispatcher {
     /// Dot product with SIMD acceleration
     pub fn dot_product_f32(&self, a: &[f32], b: &[f32]) -> Result<f32> {
         if a.len() != b.len() {
-            return Err(AcousticError::InputError(
-                "Vector lengths must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Vector lengths must match".to_string(),
+            });
         }
 
         #[cfg(target_arch = "x86_64")]
@@ -288,9 +288,9 @@ impl SimdDispatcher {
     /// SIMD-optimized exponential function (approximate, for audio processing)
     pub fn exp_f32(&self, input: &[f32], result: &mut [f32]) -> Result<()> {
         if input.len() != result.len() {
-            return Err(AcousticError::InputError(
-                "Vector lengths must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Vector lengths must match".to_string(),
+            });
         }
 
         #[cfg(target_arch = "x86_64")]
@@ -314,9 +314,9 @@ impl SimdDispatcher {
     /// SIMD-optimized logarithm function (approximate, for audio processing)
     pub fn log_f32(&self, input: &[f32], result: &mut [f32]) -> Result<()> {
         if input.len() != result.len() {
-            return Err(AcousticError::InputError(
-                "Vector lengths must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Vector lengths must match".to_string(),
+            });
         }
 
         #[cfg(target_arch = "x86_64")]
@@ -344,9 +344,9 @@ impl SimdDispatcher {
     /// SIMD-optimized magnitude calculation for complex numbers
     pub fn magnitude_f32(&self, real: &[f32], imag: &[f32], result: &mut [f32]) -> Result<()> {
         if real.len() != imag.len() || real.len() != result.len() {
-            return Err(AcousticError::InputError(
-                "Vector lengths must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Vector lengths must match".to_string(),
+            });
         }
 
         #[cfg(target_arch = "x86_64")]
@@ -370,9 +370,9 @@ impl SimdDispatcher {
     /// SIMD-optimized mel-frequency computation
     pub fn mel_scale_f32(&self, frequencies: &[f32], result: &mut [f32]) -> Result<()> {
         if frequencies.len() != result.len() {
-            return Err(AcousticError::InputError(
-                "Vector lengths must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Vector lengths must match".to_string(),
+            });
         }
 
         #[cfg(target_arch = "x86_64")]
@@ -654,98 +654,6 @@ impl SimdDispatcher {
         let mut result = vget_lane_f32(sum_single, 0);
 
         // Add remaining elements
-        for i in simd_len..len {
-            result += a[i] * b[i];
-        }
-
-        Ok(result)
-    }
-
-    // AVX-512 implementations
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx512f")]
-    unsafe fn add_f32_avx512(&self, a: &[f32], b: &[f32], result: &mut [f32]) -> Result<()> {
-        let len = a.len();
-        let simd_len = len - (len % 16);
-
-        for i in (0..simd_len).step_by(16) {
-            let a_vec = _mm512_loadu_ps(a.as_ptr().add(i));
-            let b_vec = _mm512_loadu_ps(b.as_ptr().add(i));
-            let result_vec = _mm512_add_ps(a_vec, b_vec);
-            _mm512_storeu_ps(result.as_mut_ptr().add(i), result_vec);
-        }
-
-        for i in simd_len..len {
-            result[i] = a[i] + b[i];
-        }
-
-        Ok(())
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx512f")]
-    unsafe fn mul_f32_avx512(&self, a: &[f32], b: &[f32], result: &mut [f32]) -> Result<()> {
-        let len = a.len();
-        let simd_len = len - (len % 16);
-
-        for i in (0..simd_len).step_by(16) {
-            let a_vec = _mm512_loadu_ps(a.as_ptr().add(i));
-            let b_vec = _mm512_loadu_ps(b.as_ptr().add(i));
-            let result_vec = _mm512_mul_ps(a_vec, b_vec);
-            _mm512_storeu_ps(result.as_mut_ptr().add(i), result_vec);
-        }
-
-        for i in simd_len..len {
-            result[i] = a[i] * b[i];
-        }
-
-        Ok(())
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx512f")]
-    unsafe fn fma_f32_avx512(
-        &self,
-        a: &[f32],
-        b: &[f32],
-        c: &[f32],
-        result: &mut [f32],
-    ) -> Result<()> {
-        let len = a.len();
-        let simd_len = len - (len % 16);
-
-        for i in (0..simd_len).step_by(16) {
-            let a_vec = _mm512_loadu_ps(a.as_ptr().add(i));
-            let b_vec = _mm512_loadu_ps(b.as_ptr().add(i));
-            let c_vec = _mm512_loadu_ps(c.as_ptr().add(i));
-            let result_vec = _mm512_fmadd_ps(a_vec, b_vec, c_vec);
-            _mm512_storeu_ps(result.as_mut_ptr().add(i), result_vec);
-        }
-
-        for i in simd_len..len {
-            result[i] = a[i].mul_add(b[i], c[i]);
-        }
-
-        Ok(())
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx512f")]
-    unsafe fn dot_product_f32_avx512(&self, a: &[f32], b: &[f32]) -> Result<f32> {
-        let len = a.len();
-        let simd_len = len - (len % 16);
-
-        let mut sum_vec = _mm512_setzero_ps();
-
-        for i in (0..simd_len).step_by(16) {
-            let a_vec = _mm512_loadu_ps(a.as_ptr().add(i));
-            let b_vec = _mm512_loadu_ps(b.as_ptr().add(i));
-            let mul_vec = _mm512_mul_ps(a_vec, b_vec);
-            sum_vec = _mm512_add_ps(sum_vec, mul_vec);
-        }
-
-        let mut result = _mm512_reduce_add_ps(sum_vec);
-
         for i in simd_len..len {
             result += a[i] * b[i];
         }

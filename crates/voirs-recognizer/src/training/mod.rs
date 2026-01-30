@@ -8,6 +8,8 @@
 //! - Federated learning support
 //! - Automated hyperparameter optimization
 
+#![allow(clippy::unused_async)] // Functions are async for API consistency and future I/O operations
+
 pub mod transfer_learning;
 // Additional modules will be implemented in future versions
 // pub mod domain_adaptation;
@@ -248,7 +250,7 @@ pub enum RetentionStrategy {
     ProgressiveNeuralNetworks,
     /// Memory Replay
     MemoryReplay,
-    /// PackNet
+    /// `PackNet`
     PackNet,
 }
 
@@ -283,7 +285,7 @@ pub enum ClientSelectionStrategy {
 /// Aggregation strategies for federated learning
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AggregationStrategy {
-    /// Federated Averaging (FedAvg)
+    /// Federated Averaging (`FedAvg`)
     FederatedAveraging,
     /// Weighted aggregation by data size
     WeightedByDataSize,
@@ -480,7 +482,7 @@ pub enum ModelArchitecture {
         /// Convolutional kernel size
         conv_kernel_size: usize,
     },
-    /// Wav2Vec2 architecture
+    /// `Wav2Vec2` architecture
     Wav2Vec2 {
         /// Number of feature extractor layers
         feature_extractor_layers: usize,
@@ -585,7 +587,7 @@ pub enum LayerParameter {
 /// Activation function types
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ActivationFunction {
-    /// ReLU activation
+    /// `ReLU` activation
     ReLU,
     /// GELU activation
     GELU,
@@ -597,7 +599,7 @@ pub enum ActivationFunction {
     Sigmoid,
     /// Softmax activation
     Softmax,
-    /// LeakyReLU activation
+    /// `LeakyReLU` activation
     LeakyReLU {
         /// Negative slope coefficient
         negative_slope: f32,
@@ -681,7 +683,7 @@ pub enum OptimizerType {
         /// Epsilon for numerical stability
         eps: f32,
     },
-    /// AdamW optimizer
+    /// `AdamW` optimizer
     AdamW {
         /// Learning rate
         lr: f32,
@@ -705,7 +707,7 @@ pub enum OptimizerType {
         /// Weight decay coefficient
         weight_decay: f32,
     },
-    /// RMSprop optimizer
+    /// `RMSprop` optimizer
     RMSprop {
         /// Learning rate
         lr: f32,
@@ -865,15 +867,15 @@ pub struct OutputConfiguration {
 /// Model export formats
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ModelExportFormat {
-    /// PyTorch format
+    /// `PyTorch` format
     PyTorch,
     /// ONNX format
     ONNX,
-    /// TensorFlow SavedModel
+    /// TensorFlow `SavedModel`
     TensorFlowSavedModel,
     /// TensorFlow Lite
     TensorFlowLite,
-    /// CoreML
+    /// `CoreML`
     CoreML,
     /// Quantized ONNX
     QuantizedONNX,
@@ -1422,7 +1424,7 @@ impl TrainingManager {
         // Simulate client selection based on strategy
         let client_count = (config.num_clients as f32 * 0.5) as usize; // Use 50% as default fraction
         let selected_clients: Vec<String> =
-            (0..client_count).map(|i| format!("client_{}", i)).collect();
+            (0..client_count).map(|i| format!("client_{i}")).collect();
 
         tracing::info!(
             "Selected {} clients using {:?} strategy",

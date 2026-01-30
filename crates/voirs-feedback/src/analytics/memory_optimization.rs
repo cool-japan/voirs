@@ -4,7 +4,10 @@
 //! with string interning, bounded collections, and efficient storage strategies.
 
 use super::metrics::MemoryStats;
-use super::types::*;
+use super::types::{
+    AnalyticsConfig, AnalyticsResult, InteractionType, SessionData, StringPool, StringPoolStats,
+    UserInteractionEvent,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -48,6 +51,7 @@ impl OptimizedUserInteractionEvent {
     }
 
     /// Estimate memory usage of this optimized interaction event
+    #[must_use]
     pub fn estimated_memory_size(&self) -> usize {
         // Account for Arc overhead + string data for interned strings
         (std::mem::size_of::<Arc<str>>() + self.user_id.len())
@@ -59,7 +63,8 @@ impl OptimizedUserInteractionEvent {
             + self.metadata.estimated_memory_size()
     }
 
-    /// Convert back to regular UserInteractionEvent
+    /// Convert back to regular `UserInteractionEvent`
+    #[must_use]
     pub fn to_interaction(&self) -> UserInteractionEvent {
         UserInteractionEvent {
             user_id: self.user_id.to_string(),
@@ -76,7 +81,7 @@ impl OptimizedUserInteractionEvent {
 /// Bounded metadata collection with size limits
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BoundedMetadata {
-    /// Metadata entries (limited to MAX_ENTRIES)
+    /// Metadata entries (limited to `MAX_ENTRIES`)
     entries: VecDeque<(Arc<str>, Arc<str>)>,
     /// Total memory usage in bytes
     memory_usage: usize,
@@ -89,6 +94,7 @@ impl BoundedMetadata {
     pub const MAX_MEMORY_BYTES: usize = 1024;
 
     /// Create empty bounded metadata
+    #[must_use]
     pub fn new() -> Self {
         Self {
             entries: VecDeque::with_capacity(Self::MAX_ENTRIES),
@@ -96,7 +102,7 @@ impl BoundedMetadata {
         }
     }
 
-    /// Create bounded metadata from HashMap
+    /// Create bounded metadata from `HashMap`
     pub fn from_hashmap(metadata: &HashMap<String, String>, string_pool: &mut StringPool) -> Self {
         let mut bounded = Self::new();
 
@@ -143,6 +149,7 @@ impl BoundedMetadata {
     }
 
     /// Get value by key
+    #[must_use]
     pub fn get(&self, key: &str) -> Option<&str> {
         self.entries
             .iter()
@@ -155,7 +162,8 @@ impl BoundedMetadata {
         self.entries.iter().map(|(k, v)| (k.as_ref(), v.as_ref()))
     }
 
-    /// Convert to HashMap
+    /// Convert to `HashMap`
+    #[must_use]
     pub fn to_hashmap(&self) -> HashMap<String, String> {
         self.entries
             .iter()
@@ -164,16 +172,19 @@ impl BoundedMetadata {
     }
 
     /// Get memory usage estimate
+    #[must_use]
     pub fn estimated_memory_size(&self) -> usize {
         self.memory_usage
     }
 
     /// Get number of entries
+    #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
     /// Check if empty
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
@@ -222,6 +233,7 @@ impl OptimizedSessionData {
     }
 
     /// Get memory usage estimate
+    #[must_use]
     pub fn estimated_memory_size(&self) -> usize {
         std::mem::size_of::<Arc<str>>() // user_id (just pointer)
             + std::mem::size_of::<DateTime<Utc>>() * 2 // timestamps
@@ -251,6 +263,7 @@ impl CompactInteractionSummary {
     const MAX_TOP_FEATURES: usize = 5;
 
     /// Create summary from list of interactions
+    #[must_use]
     pub fn from_interactions(interactions: &[UserInteractionEvent]) -> Self {
         let mut summary = Self::default();
         for interaction in interactions {
@@ -279,11 +292,11 @@ impl CompactInteractionSummary {
             if self.total_interactions == 1 {
                 self.avg_feedback_score_x1000 = score_x1000;
             } else {
-                let total_x1000 = (self.avg_feedback_score_x1000 as u64
-                    * (self.total_interactions - 1) as u64)
-                    + score_x1000 as u64;
+                let total_x1000 = (u64::from(self.avg_feedback_score_x1000)
+                    * u64::from(self.total_interactions - 1))
+                    + u64::from(score_x1000);
                 self.avg_feedback_score_x1000 =
-                    (total_x1000 / self.total_interactions as u64) as u16;
+                    (total_x1000 / u64::from(self.total_interactions)) as u16;
             }
         }
 
@@ -310,11 +323,11 @@ impl CompactInteractionSummary {
             if self.total_interactions == 1 {
                 self.avg_feedback_score_x1000 = score_x1000;
             } else {
-                let total_x1000 = (self.avg_feedback_score_x1000 as u64
-                    * (self.total_interactions - 1) as u64)
-                    + score_x1000 as u64;
+                let total_x1000 = (u64::from(self.avg_feedback_score_x1000)
+                    * u64::from(self.total_interactions - 1))
+                    + u64::from(score_x1000);
                 self.avg_feedback_score_x1000 =
-                    (total_x1000 / self.total_interactions as u64) as u16;
+                    (total_x1000 / u64::from(self.total_interactions)) as u16;
             }
         }
 
@@ -343,11 +356,13 @@ impl CompactInteractionSummary {
     }
 
     /// Get average feedback score as f32
+    #[must_use]
     pub fn avg_feedback_score(&self) -> f32 {
-        self.avg_feedback_score_x1000 as f32 / 1000.0
+        f32::from(self.avg_feedback_score_x1000) / 1000.0
     }
 
     /// Get memory usage estimate
+    #[must_use]
     pub fn estimated_memory_size(&self) -> usize {
         std::mem::size_of::<Self>()
             + self.type_counts.len()
@@ -514,13 +529,13 @@ impl OptimizedDataCollector {
         let interactions_memory: usize = self
             .interactions
             .iter()
-            .map(|i| i.estimated_memory_size())
+            .map(OptimizedUserInteractionEvent::estimated_memory_size)
             .sum();
 
         let sessions_memory: usize = self
             .sessions
             .values()
-            .map(|s| s.estimated_memory_size())
+            .map(OptimizedSessionData::estimated_memory_size)
             .sum();
 
         let string_pool_memory = self.string_pool.memory_savings();
@@ -541,21 +556,25 @@ impl OptimizedDataCollector {
     }
 
     /// Get memory statistics
+    #[must_use]
     pub fn get_memory_stats(&self) -> &MemoryStats {
         &self.memory_stats
     }
 
     /// Get string pool statistics
+    #[must_use]
     pub fn get_string_pool_stats(&self) -> &StringPoolStats {
         self.string_pool.stats()
     }
 
     /// Get optimized interactions (for testing/debugging)
+    #[must_use]
     pub fn get_interactions(&self) -> &VecDeque<OptimizedUserInteractionEvent> {
         &self.interactions
     }
 
     /// Get optimized sessions (for testing/debugging)
+    #[must_use]
     pub fn get_sessions(&self) -> &HashMap<Arc<str>, OptimizedSessionData> {
         &self.sessions
     }

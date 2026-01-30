@@ -291,7 +291,7 @@ impl PluginRegistry {
                 let should_keep = entry.enabled
                     || entry
                         .last_used
-                        .map_or(false, |last_used| last_used > cutoff_date)
+                        .is_some_and(|last_used| last_used > cutoff_date)
                     || entry.usage_count > 0;
 
                 if !should_keep {

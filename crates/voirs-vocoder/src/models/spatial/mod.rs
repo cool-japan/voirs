@@ -497,6 +497,7 @@ impl SpatialVocoder {
                     * linear_bins as f32) as usize;
 
                 // Distribute mel energy across linear bins
+                #[allow(clippy::needless_range_loop)]
                 for linear_bin in linear_bin_low..linear_bin_high.min(linear_bins) {
                     linear_spec[frame_idx][linear_bin] +=
                         mel_value / (linear_bin_high - linear_bin_low).max(1) as f32;

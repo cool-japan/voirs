@@ -43,15 +43,15 @@ impl ModelConfig {
     /// Validate model configuration
     pub fn validate(&self) -> Result<()> {
         if self.model_path.is_empty() {
-            return Err(AcousticError::ConfigError(
-                "Model path cannot be empty".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Model path cannot be empty".to_string(),
+            });
         }
 
         if self.supported_languages.is_empty() {
-            return Err(AcousticError::ConfigError(
-                "At least one language must be supported".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "At least one language must be supported".to_string(),
+            });
         }
 
         self.architecture_params.validate()?;
@@ -227,9 +227,9 @@ impl VitsParams {
 
         if let Some(n_speakers) = self.n_speakers {
             if n_speakers == 0 {
-                return Err(AcousticError::ConfigError(
-                    "Number of speakers must be > 0".to_string(),
-                ));
+                return Err(AcousticError::ConfigError {
+                    message: "Number of speakers must be > 0".to_string(),
+                });
             }
         }
 
@@ -271,24 +271,24 @@ impl TextEncoderParams {
     /// Validate text encoder parameters
     pub fn validate(&self) -> Result<()> {
         if self.n_layers == 0 {
-            return Err(AcousticError::ConfigError(
-                "Number of layers must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Number of layers must be > 0".to_string(),
+            });
         }
         if self.hidden_dim == 0 {
-            return Err(AcousticError::ConfigError(
-                "Hidden dimension must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Hidden dimension must be > 0".to_string(),
+            });
         }
         if self.n_heads == 0 {
-            return Err(AcousticError::ConfigError(
-                "Number of heads must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Number of heads must be > 0".to_string(),
+            });
         }
         if self.dropout < 0.0 || self.dropout > 1.0 {
-            return Err(AcousticError::ConfigError(
-                "Dropout must be between 0.0 and 1.0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Dropout must be between 0.0 and 1.0".to_string(),
+            });
         }
         Ok(())
     }
@@ -332,19 +332,19 @@ impl PosteriorEncoderParams {
     /// Validate posterior encoder parameters
     pub fn validate(&self) -> Result<()> {
         if self.n_layers == 0 {
-            return Err(AcousticError::ConfigError(
-                "Number of layers must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Number of layers must be > 0".to_string(),
+            });
         }
         if self.hidden_channels == 0 {
-            return Err(AcousticError::ConfigError(
-                "Hidden channels must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Hidden channels must be > 0".to_string(),
+            });
         }
         if self.kernel_size == 0 {
-            return Err(AcousticError::ConfigError(
-                "Kernel size must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Kernel size must be > 0".to_string(),
+            });
         }
         Ok(())
     }
@@ -386,19 +386,19 @@ impl FlowParams {
     /// Validate flow parameters
     pub fn validate(&self) -> Result<()> {
         if self.n_flows == 0 {
-            return Err(AcousticError::ConfigError(
-                "Number of flows must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Number of flows must be > 0".to_string(),
+            });
         }
         if self.n_layers == 0 {
-            return Err(AcousticError::ConfigError(
-                "Number of layers must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Number of layers must be > 0".to_string(),
+            });
         }
         if self.hidden_channels == 0 {
-            return Err(AcousticError::ConfigError(
-                "Hidden channels must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Hidden channels must be > 0".to_string(),
+            });
         }
         Ok(())
     }
@@ -444,19 +444,19 @@ impl DecoderParams {
     /// Validate decoder parameters
     pub fn validate(&self) -> Result<()> {
         if self.initial_channels == 0 {
-            return Err(AcousticError::ConfigError(
-                "Initial channels must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Initial channels must be > 0".to_string(),
+            });
         }
         if self.resblock_kernel_sizes.is_empty() {
-            return Err(AcousticError::ConfigError(
-                "Resblock kernel sizes cannot be empty".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Resblock kernel sizes cannot be empty".to_string(),
+            });
         }
         if self.upsample_rates.is_empty() {
-            return Err(AcousticError::ConfigError(
-                "Upsample rates cannot be empty".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Upsample rates cannot be empty".to_string(),
+            });
         }
         Ok(())
     }
@@ -534,19 +534,19 @@ impl VarianceAdaptorParams {
     /// Validate variance adaptor parameters
     pub fn validate(&self) -> Result<()> {
         if self.filter_size == 0 {
-            return Err(AcousticError::ConfigError(
-                "Filter size must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Filter size must be > 0".to_string(),
+            });
         }
         if self.kernel_size == 0 {
-            return Err(AcousticError::ConfigError(
-                "Kernel size must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Kernel size must be > 0".to_string(),
+            });
         }
         if self.dropout < 0.0 || self.dropout > 1.0 {
-            return Err(AcousticError::ConfigError(
-                "Dropout must be between 0.0 and 1.0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Dropout must be between 0.0 and 1.0".to_string(),
+            });
         }
         Ok(())
     }
@@ -588,24 +588,24 @@ impl MelDecoderParams {
     /// Validate mel decoder parameters
     pub fn validate(&self) -> Result<()> {
         if self.n_layers == 0 {
-            return Err(AcousticError::ConfigError(
-                "Number of layers must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Number of layers must be > 0".to_string(),
+            });
         }
         if self.hidden_dim == 0 {
-            return Err(AcousticError::ConfigError(
-                "Hidden dimension must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Hidden dimension must be > 0".to_string(),
+            });
         }
         if self.n_heads == 0 {
-            return Err(AcousticError::ConfigError(
-                "Number of heads must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Number of heads must be > 0".to_string(),
+            });
         }
         if self.dropout < 0.0 || self.dropout > 1.0 {
-            return Err(AcousticError::ConfigError(
-                "Dropout must be between 0.0 and 1.0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Dropout must be between 0.0 and 1.0".to_string(),
+            });
         }
         Ok(())
     }
@@ -675,19 +675,19 @@ impl EncoderParams {
     /// Validate encoder parameters
     pub fn validate(&self) -> Result<()> {
         if self.embedding_dim == 0 {
-            return Err(AcousticError::ConfigError(
-                "Embedding dimension must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Embedding dimension must be > 0".to_string(),
+            });
         }
         if self.n_convolutions == 0 {
-            return Err(AcousticError::ConfigError(
-                "Number of convolutions must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Number of convolutions must be > 0".to_string(),
+            });
         }
         if self.kernel_size == 0 {
-            return Err(AcousticError::ConfigError(
-                "Kernel size must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Kernel size must be > 0".to_string(),
+            });
         }
         Ok(())
     }
@@ -739,24 +739,24 @@ impl AttentionDecoderParams {
     /// Validate attention decoder parameters
     pub fn validate(&self) -> Result<()> {
         if self.n_mel_channels == 0 {
-            return Err(AcousticError::ConfigError(
-                "Number of mel channels must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Number of mel channels must be > 0".to_string(),
+            });
         }
         if self.n_frames_per_step == 0 {
-            return Err(AcousticError::ConfigError(
-                "Frames per step must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Frames per step must be > 0".to_string(),
+            });
         }
         if self.max_decoder_steps == 0 {
-            return Err(AcousticError::ConfigError(
-                "Max decoder steps must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Max decoder steps must be > 0".to_string(),
+            });
         }
         if self.gate_threshold < 0.0 || self.gate_threshold > 1.0 {
-            return Err(AcousticError::ConfigError(
-                "Gate threshold must be between 0.0 and 1.0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Gate threshold must be between 0.0 and 1.0".to_string(),
+            });
         }
         Ok(())
     }
@@ -812,29 +812,29 @@ impl PostnetParams {
     /// Validate postnet parameters
     pub fn validate(&self) -> Result<()> {
         if self.n_mel_channels == 0 {
-            return Err(AcousticError::ConfigError(
-                "Number of mel channels must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Number of mel channels must be > 0".to_string(),
+            });
         }
         if self.postnet_embedding_dim == 0 {
-            return Err(AcousticError::ConfigError(
-                "Postnet embedding dimension must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Postnet embedding dimension must be > 0".to_string(),
+            });
         }
         if self.postnet_kernel_size == 0 {
-            return Err(AcousticError::ConfigError(
-                "Postnet kernel size must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Postnet kernel size must be > 0".to_string(),
+            });
         }
         if self.postnet_n_convolutions == 0 {
-            return Err(AcousticError::ConfigError(
-                "Number of postnet convolutions must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Number of postnet convolutions must be > 0".to_string(),
+            });
         }
         if self.postnet_dropout < 0.0 || self.postnet_dropout > 1.0 {
-            return Err(AcousticError::ConfigError(
-                "Postnet dropout must be between 0.0 and 1.0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Postnet dropout must be between 0.0 and 1.0".to_string(),
+            });
         }
         Ok(())
     }
@@ -932,15 +932,17 @@ impl TryFrom<toml::Value> for ModelConfig {
     type Error = AcousticError;
 
     fn try_from(value: toml::Value) -> Result<Self> {
-        let table = value.as_table().ok_or_else(|| {
-            AcousticError::ConfigError("Expected table for model config".to_string())
+        let table = value.as_table().ok_or_else(|| AcousticError::ConfigError {
+            message: "Expected table for model config".to_string(),
         })?;
 
         // Parse architecture
         let architecture_str = table
             .get("architecture")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| AcousticError::ConfigError("Missing architecture".to_string()))?;
+            .ok_or_else(|| AcousticError::ConfigError {
+                message: "Missing architecture".to_string(),
+            })?;
 
         let architecture = match architecture_str {
             "vits" => ModelArchitecture::Vits,
@@ -953,7 +955,9 @@ impl TryFrom<toml::Value> for ModelConfig {
         let model_path = table
             .get("model_path")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| AcousticError::ConfigError("Missing model_path".to_string()))?
+            .ok_or_else(|| AcousticError::ConfigError {
+                message: "Missing model_path".to_string(),
+            })?
             .to_string();
 
         let version = table

@@ -91,59 +91,61 @@ impl MelParams {
     /// Validate mel parameters
     pub fn validate(&self) -> Result<()> {
         if self.sample_rate == 0 {
-            return Err(AcousticError::ConfigError(
-                "Sample rate must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Sample rate must be > 0".to_string(),
+            });
         }
         if self.n_mels == 0 {
-            return Err(AcousticError::ConfigError(
-                "Number of mel filters must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Number of mel filters must be > 0".to_string(),
+            });
         }
         if self.n_fft == 0 {
-            return Err(AcousticError::ConfigError(
-                "FFT size must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "FFT size must be > 0".to_string(),
+            });
         }
         if self.hop_length == 0 {
-            return Err(AcousticError::ConfigError(
-                "Hop length must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Hop length must be > 0".to_string(),
+            });
         }
         if self.win_length == 0 {
-            return Err(AcousticError::ConfigError(
-                "Window length must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Window length must be > 0".to_string(),
+            });
         }
         if self.win_length > self.n_fft {
-            return Err(AcousticError::ConfigError(
-                "Window length must be <= FFT size".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Window length must be <= FFT size".to_string(),
+            });
         }
         if self.fmin < 0.0 {
-            return Err(AcousticError::ConfigError(
-                "Minimum frequency must be >= 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Minimum frequency must be >= 0".to_string(),
+            });
         }
         if let Some(fmax) = self.fmax {
             if fmax <= self.fmin {
-                return Err(AcousticError::ConfigError(
-                    "Maximum frequency must be > minimum frequency".to_string(),
-                ));
+                return Err(AcousticError::ConfigError {
+                    message: "Maximum frequency must be > minimum frequency".to_string(),
+                });
             }
             if fmax > self.sample_rate as f32 / 2.0 {
-                return Err(AcousticError::ConfigError(
-                    "Maximum frequency must be <= Nyquist frequency".to_string(),
-                ));
+                return Err(AcousticError::ConfigError {
+                    message: "Maximum frequency must be <= Nyquist frequency".to_string(),
+                });
             }
         }
         if self.power <= 0.0 {
-            return Err(AcousticError::ConfigError("Power must be > 0".to_string()));
+            return Err(AcousticError::ConfigError {
+                message: "Power must be > 0".to_string(),
+            });
         }
         if self.log_offset <= 0.0 {
-            return Err(AcousticError::ConfigError(
-                "Log offset must be > 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Log offset must be > 0".to_string(),
+            });
         }
         Ok(())
     }
@@ -300,9 +302,9 @@ impl MelStats {
     /// Compute statistics from mel spectrogram
     pub fn compute(mel: &MelSpectrogram) -> Result<Self> {
         if mel.data.is_empty() {
-            return Err(AcousticError::InputError(
-                "Empty mel spectrogram".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Empty mel spectrogram".to_string(),
+            });
         }
 
         let n_mels = mel.n_mels;
@@ -438,17 +440,19 @@ pub fn create_mel_filterbank(
     norm: Option<MelNormalization>,
 ) -> Result<Vec<Vec<f32>>> {
     if n_mels == 0 {
-        return Err(AcousticError::InputError(
-            "Number of mel filters must be > 0".to_string(),
-        ));
+        return Err(AcousticError::InputError {
+            message: "Number of mel filters must be > 0".to_string(),
+        });
     }
     if n_freqs == 0 {
-        return Err(AcousticError::InputError(
-            "Number of frequency bins must be > 0".to_string(),
-        ));
+        return Err(AcousticError::InputError {
+            message: "Number of frequency bins must be > 0".to_string(),
+        });
     }
     if fmin >= fmax {
-        return Err(AcousticError::InputError("fmin must be < fmax".to_string()));
+        return Err(AcousticError::InputError {
+            message: "fmin must be < fmax".to_string(),
+        });
     }
 
     // Convert frequency range to mel scale
@@ -476,6 +480,7 @@ pub fn create_mel_filterbank(
         let center = bin_points[i + 1];
         let right = bin_points[i + 2];
 
+        #[allow(clippy::needless_range_loop)]
         for j in 0..n_freqs as usize {
             let freq_bin = j as f32;
 

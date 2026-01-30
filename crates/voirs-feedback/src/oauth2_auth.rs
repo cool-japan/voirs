@@ -1,4 +1,4 @@
-//! OAuth 2.0 Authentication Implementation for VoiRS Feedback System
+//! OAuth 2.0 Authentication Implementation for `VoiRS` Feedback System
 //!
 //! This module provides comprehensive OAuth 2.0 authentication with support for
 //! multiple providers, JWT tokens, PKCE (Proof Key for Code Exchange), and
@@ -28,7 +28,7 @@ pub enum OAuth2Error {
     #[error("Invalid access token: {message}")]
     InvalidAccessToken {
         /// Error message
-        message: String
+        message: String,
     },
 
     /// Token expired
@@ -45,28 +45,28 @@ pub enum OAuth2Error {
         /// Provider name
         provider: String,
         /// Error message
-        message: String
+        message: String,
     },
 
     /// Configuration error
     #[error("OAuth configuration error: {message}")]
     ConfigurationError {
         /// Error message
-        message: String
+        message: String,
     },
 
     /// Network error
     #[error("Network error: {message}")]
     NetworkError {
         /// Error message
-        message: String
+        message: String,
     },
 
     /// JWT error
     #[error("JWT error: {message}")]
     JwtError {
         /// Error message
-        message: String
+        message: String,
     },
 
     /// PKCE error
@@ -79,7 +79,7 @@ pub enum OAuth2Error {
         /// Required scope
         required: String,
         /// Actual scope
-        actual: String
+        actual: String,
     },
 }
 
@@ -102,7 +102,7 @@ pub enum OAuth2Provider {
         /// Provider name
         name: String,
         /// Base URL
-        base_url: String
+        base_url: String,
     },
 }
 
@@ -188,7 +188,7 @@ pub struct TokenResponse {
     pub refresh_token: Option<String>,
     /// Granted scopes
     pub scope: Option<String>,
-    /// ID token (OpenID Connect)
+    /// ID token (`OpenID` Connect)
     pub id_token: Option<String>,
 }
 
@@ -245,8 +245,15 @@ pub struct PkceChallenge {
     pub method: String,
 }
 
+impl Default for PkceChallenge {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PkceChallenge {
     /// Generate new PKCE challenge
+    #[must_use]
     pub fn new() -> Self {
         use scirs2_core::random::Random;
 
@@ -272,6 +279,7 @@ impl PkceChallenge {
     }
 
     /// Verify PKCE challenge
+    #[must_use]
     pub fn verify(&self, verifier: &str) -> bool {
         let digest = Sha256::digest(verifier.as_bytes());
         let challenge = URL_SAFE_NO_PAD.encode(digest);
@@ -569,6 +577,7 @@ impl OAuth2Manager {
     }
 
     /// Get OAuth provider configurations
+    #[must_use]
     pub fn get_provider_config(provider: OAuth2Provider) -> OAuth2Config {
         match provider {
             OAuth2Provider::Google => OAuth2Config {
@@ -647,6 +656,7 @@ pub struct OAuth2Middleware {
 
 impl OAuth2Middleware {
     /// Create new OAuth 2.0 middleware
+    #[must_use]
     pub fn new(manager: Arc<OAuth2Manager>, required_scopes: Vec<String>) -> Self {
         Self {
             manager,

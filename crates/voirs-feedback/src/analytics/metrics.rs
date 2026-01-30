@@ -34,6 +34,7 @@ impl MemoryStats {
     }
 
     /// Get memory efficiency ratio (items per byte)
+    #[must_use]
     pub fn efficiency_ratio(&self) -> f64 {
         if self.current_usage == 0 {
             0.0
@@ -58,6 +59,7 @@ pub struct SystemMetrics {
 
 impl SystemMetrics {
     /// Create new system metrics
+    #[must_use]
     pub fn new() -> Self {
         Self {
             total_interactions: 0,

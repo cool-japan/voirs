@@ -731,7 +731,10 @@ impl ManifestGenerator {
 
         // Create a README file explaining the format
         let readme_path = base_path.with_extension("README.md");
-        let base_name = base_path.file_name().unwrap().to_string_lossy();
+        let base_name = base_path
+            .file_name()
+            .ok_or_else(|| DatasetError::ConfigError("Invalid base path".to_string()))?
+            .to_string_lossy();
         let readme_content = format!(
             r#"# Native Parquet Dataset Export
 

@@ -430,7 +430,10 @@ pub mod utils {
         }
 
         // Get stress patterns from phonemes
-        let stress_levels: Vec<i32> = phonemes.iter().map(|p| p.phoneme.stress as i32).collect();
+        let stress_levels: Vec<i32> = phonemes
+            .iter()
+            .map(|p| i32::from(p.phoneme.stress))
+            .collect();
 
         // Find primary stress positions (stress level > 0)
         let primary_stress_positions: Vec<usize> = stress_levels
@@ -442,7 +445,8 @@ pub mod utils {
 
         // For most English words, there should be exactly one primary stress
         // Calculate accuracy based on stress pattern plausibility
-        let accuracy = if primary_stress_positions.is_empty() {
+
+        if primary_stress_positions.is_empty() {
             // No stress marked - could be correct for function words
             if phonemes.len() <= 2 {
                 1.0 // Short words often have no marked stress
@@ -463,9 +467,7 @@ pub mod utils {
         } else {
             // Multiple primary stresses - less common but possible for compounds
             0.6
-        };
-
-        accuracy
+        }
     }
 
     /// Calculate syllable accuracy for a word based on phoneme syllable positions
@@ -500,7 +502,8 @@ pub mod utils {
         }
 
         // Calculate accuracy based on how close the detected syllable count is to expected
-        let syllable_accuracy = if nuclei_count == estimated_syllables {
+
+        if nuclei_count == estimated_syllables {
             1.0
         } else if nuclei_count == 0 {
             // No nuclei detected - significant issue
@@ -510,9 +513,7 @@ pub mod utils {
             let diff = (nuclei_count as i32 - estimated_syllables as i32).abs() as f32;
             let max_syllables = estimated_syllables.max(nuclei_count) as f32;
             1.0 - (diff / max_syllables).min(1.0)
-        };
-
-        syllable_accuracy
+        }
     }
 
     /// Detect mispronunciations

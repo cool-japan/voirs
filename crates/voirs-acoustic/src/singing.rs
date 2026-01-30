@@ -233,7 +233,9 @@ impl MusicalPhrase {
     /// Add breath mark at position
     pub fn add_breath_mark(&mut self, position: f32) {
         self.breath_marks.push(position);
-        self.breath_marks.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        // Sort with NaN handling: NaN values are placed at the end
+        self.breath_marks
+            .sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     }
 
     /// Get total duration in seconds

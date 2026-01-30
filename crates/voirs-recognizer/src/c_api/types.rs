@@ -45,6 +45,7 @@ pub struct VoirsSegment {
 
 /// Configuration structure for recognition
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct VoirsRecognitionConfig {
     /// Model name (null-terminated C string)
     pub model_name: *const c_char,
@@ -82,6 +83,7 @@ pub struct VoirsStreamingConfig {
 
 /// Audio format information
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct VoirsAudioFormat {
     /// Sample rate in Hz
     pub sample_rate: u32,
@@ -95,6 +97,7 @@ pub struct VoirsAudioFormat {
 
 /// Audio format types
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub enum VoirsAudioFormatType {
     /// 16-bit signed PCM
     PCM16 = 0,
@@ -192,6 +195,12 @@ pub struct VoirsCapabilities {
     /// Array of supported language codes
     pub supported_languages: *const *const c_char,
 }
+
+// Safety: VoirsCapabilities is a C API structure with raw pointers that are managed
+// by the VoirsMemoryManager. The pointers are guaranteed to be valid for the lifetime
+// of the structure and are protected by the memory manager's internal synchronization.
+unsafe impl Send for VoirsCapabilities {}
+unsafe impl Sync for VoirsCapabilities {}
 
 /// Performance metrics structure
 #[repr(C)]

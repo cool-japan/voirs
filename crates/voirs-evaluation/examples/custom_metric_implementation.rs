@@ -155,14 +155,15 @@ impl SpectralCentroidMetric {
         let n = samples.len();
         let mut magnitude_spectrum = vec![0.0; n / 2];
 
+        #[allow(clippy::needless_range_loop)]
         for k in 0..n / 2 {
             let mut real = 0.0;
             let mut imag = 0.0;
 
-            for i in 0..n {
+            for (i, &sample) in samples.iter().enumerate().take(n) {
                 let angle = -2.0 * std::f32::consts::PI * k as f32 * i as f32 / n as f32;
-                real += samples[i] * angle.cos();
-                imag += samples[i] * angle.sin();
+                real += sample * angle.cos();
+                imag += sample * angle.sin();
             }
 
             magnitude_spectrum[k] = (real * real + imag * imag).sqrt();

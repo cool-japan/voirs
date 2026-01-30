@@ -329,12 +329,12 @@ impl RealtimeLibraryManager {
 
     /// Get current latency measurement
     pub fn get_current_latency(&self) -> f32 {
-        self.stats.lock().unwrap().current_latency
+        self.stats.lock().expect("Lock poisoned").current_latency
     }
 
     /// Get processing statistics
     pub fn get_stats(&self) -> RealtimeStats {
-        self.stats.lock().unwrap().clone()
+        self.stats.lock().expect("Lock poisoned").clone()
     }
 
     /// Get active backend information
@@ -534,8 +534,10 @@ impl RealtimeLibraryManager {
         {
             // Prefer JACK on Linux for professional audio
             match capabilities {
-                caps if caps as *const _
-                    == self.backend_capabilities.get(&AudioBackend::JACK).unwrap() as *const _ =>
+                caps if std::ptr::eq(
+                    caps,
+                    self.backend_capabilities.get(&AudioBackend::JACK).unwrap(),
+                ) =>
                 {
                     score += 10.0
                 }
@@ -655,7 +657,7 @@ impl RealtimeLibraryManager {
             frame_count += 1;
 
             // Update statistics every 100 frames
-            if frame_count % 100 == 0 {
+            if frame_count.is_multiple_of(100) {
                 if let Ok(mut stats) = stats.lock() {
                     stats.frames_processed = frame_count;
                     stats.cpu_usage = cpu_usage_accumulator / 100.0;
@@ -889,7 +891,6 @@ mod tests {
         assert_eq!(buffer.channels, 2);
         assert_eq!(buffer.samples_per_channel(), 2);
         assert!(buffer.duration_ms() > 0.0);
-        assert!(buffer.buffer_id >= 0);
     }
 
     #[test]

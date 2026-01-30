@@ -39,11 +39,14 @@ impl AcousticConfig {
 
     /// Load configuration from file
     pub fn load_from_file(path: &str) -> Result<Self> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| AcousticError::ConfigError(format!("Failed to read config file: {e}")))?;
+        let content = std::fs::read_to_string(path).map_err(|e| AcousticError::ConfigError {
+            message: format!("Failed to read config file: {e}"),
+        })?;
 
-        let config: AcousticConfig = serde_json::from_str(&content)
-            .map_err(|e| AcousticError::ConfigError(format!("Failed to parse config: {e}")))?;
+        let config: AcousticConfig =
+            serde_json::from_str(&content).map_err(|e| AcousticError::ConfigError {
+                message: format!("Failed to parse config: {e}"),
+            })?;
 
         config.validate()?;
         Ok(config)
@@ -51,11 +54,14 @@ impl AcousticConfig {
 
     /// Save configuration to file
     pub fn save_to_file(&self, path: &str) -> Result<()> {
-        let content = serde_json::to_string_pretty(self)
-            .map_err(|e| AcousticError::ConfigError(format!("Failed to serialize config: {e}")))?;
+        let content =
+            serde_json::to_string_pretty(self).map_err(|e| AcousticError::ConfigError {
+                message: format!("Failed to serialize config: {e}"),
+            })?;
 
-        std::fs::write(path, content)
-            .map_err(|e| AcousticError::ConfigError(format!("Failed to write config file: {e}")))?;
+        std::fs::write(path, content).map_err(|e| AcousticError::ConfigError {
+            message: format!("Failed to write config file: {e}"),
+        })?;
 
         Ok(())
     }

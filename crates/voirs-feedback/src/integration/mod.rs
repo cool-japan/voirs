@@ -1,6 +1,6 @@
 //! # Integration and Platform Support
 //!
-//! This module provides seamless integration capabilities for the VoiRS feedback system,
+//! This module provides seamless integration capabilities for the `VoiRS` feedback system,
 //! including cross-platform compatibility, API frameworks, and ecosystem synchronization.
 
 use async_trait::async_trait;
@@ -16,6 +16,7 @@ pub mod graphql;
 pub mod lms;
 pub mod platform;
 pub mod video_conferencing;
+pub mod zoom;
 
 // Re-export main types from submodules
 pub use api::*;
@@ -38,6 +39,12 @@ pub use platform::{
 };
 
 pub use video_conferencing::*;
+// Re-export Zoom module with specific types to avoid conflicts
+pub use zoom::{
+    AudioType, CreateMeetingRequest, MeetingSettings, MeetingType, VideoQuality,
+    WebhookEvent as ZoomWebhookEvent, WebhookEventType as ZoomWebhookEventType, ZoomClient,
+    ZoomClientConfig, ZoomError, ZoomManager, ZoomMeeting, ZoomParticipant, ZoomRecording,
+};
 
 /// Integration error types
 #[derive(Error, Debug)]

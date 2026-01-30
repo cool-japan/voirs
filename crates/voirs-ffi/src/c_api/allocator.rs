@@ -80,6 +80,9 @@ pub extern "C" fn voirs_set_allocator(
 /// # Arguments
 /// * `stats` - Pointer to VoirsAllocatorStats structure to fill
 ///
+/// # Safety
+/// The `stats` pointer must be valid and point to properly allocated memory for a VoirsAllocatorStats structure.
+///
 /// Returns 0 on success, or error code on failure.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_get_allocator_stats(stats: *mut VoirsAllocatorStats) -> c_int {

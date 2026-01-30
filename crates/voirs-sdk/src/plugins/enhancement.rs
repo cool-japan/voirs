@@ -11,7 +11,8 @@ use crate::{
     VoirsError,
 };
 use async_trait::async_trait;
-use std::{collections::HashMap, sync::RwLock};
+use parking_lot::RwLock;
+use std::collections::HashMap;
 
 /// Noise reduction plugin using spectral subtraction
 pub struct NoiseReduction {
@@ -40,9 +41,9 @@ impl NoiseReduction {
 
     /// Simple noise reduction using amplitude thresholding
     fn apply_noise_reduction(&self, samples: &mut [f32]) {
-        let noise_floor_linear = 10.0_f32.powf(*self.noise_floor.read().unwrap() / 20.0);
-        let reduction_strength = *self.reduction_strength.read().unwrap();
-        let speech_preservation = *self.speech_preservation.read().unwrap();
+        let noise_floor_linear = 10.0_f32.powf(*self.noise_floor.read() / 20.0);
+        let reduction_strength = *self.reduction_strength.read();
+        let speech_preservation = *self.speech_preservation.read();
 
         for sample in samples.iter_mut() {
             let abs_sample = sample.abs();
@@ -99,19 +100,19 @@ impl AudioEffect for NoiseReduction {
         let mut params = HashMap::new();
         params.insert(
             "noise_floor".to_string(),
-            ParameterValue::Float(*self.noise_floor.read().unwrap()),
+            ParameterValue::Float(*self.noise_floor.read()),
         );
         params.insert(
             "reduction_strength".to_string(),
-            ParameterValue::Float(*self.reduction_strength.read().unwrap()),
+            ParameterValue::Float(*self.reduction_strength.read()),
         );
         params.insert(
             "smoothing".to_string(),
-            ParameterValue::Float(*self.smoothing.read().unwrap()),
+            ParameterValue::Float(*self.smoothing.read()),
         );
         params.insert(
             "speech_preservation".to_string(),
-            ParameterValue::Float(*self.speech_preservation.read().unwrap()),
+            ParameterValue::Float(*self.speech_preservation.read()),
         );
         params
     }
@@ -120,7 +121,7 @@ impl AudioEffect for NoiseReduction {
         match name {
             "noise_floor" => {
                 if let Some(v) = value.as_f32() {
-                    *self.noise_floor.write().unwrap() = v.clamp(-80.0, -10.0);
+                    *self.noise_floor.write() = v.clamp(-80.0, -10.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -131,7 +132,7 @@ impl AudioEffect for NoiseReduction {
             }
             "reduction_strength" => {
                 if let Some(v) = value.as_f32() {
-                    *self.reduction_strength.write().unwrap() = v.clamp(0.0, 1.0);
+                    *self.reduction_strength.write() = v.clamp(0.0, 1.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -142,7 +143,7 @@ impl AudioEffect for NoiseReduction {
             }
             "smoothing" => {
                 if let Some(v) = value.as_f32() {
-                    *self.smoothing.write().unwrap() = v.clamp(0.0, 1.0);
+                    *self.smoothing.write() = v.clamp(0.0, 1.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -153,7 +154,7 @@ impl AudioEffect for NoiseReduction {
             }
             "speech_preservation" => {
                 if let Some(v) = value.as_f32() {
-                    *self.speech_preservation.write().unwrap() = v.clamp(0.0, 1.0);
+                    *self.speech_preservation.write() = v.clamp(0.0, 1.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -243,9 +244,9 @@ impl SpeechEnhancement {
 
     /// Apply speech enhancement processing
     fn enhance_speech(&self, samples: &mut [f32], _sample_rate: u32) {
-        let formant_enhancement = *self.formant_enhancement.read().unwrap();
-        let clarity_boost = *self.clarity_boost.read().unwrap();
-        let presence = *self.presence.read().unwrap();
+        let formant_enhancement = *self.formant_enhancement.read();
+        let clarity_boost = *self.clarity_boost.read();
+        let presence = *self.presence.read();
 
         // Simple speech enhancement using frequency-domain processing
         // In a real implementation, this would use proper filter banks
@@ -304,19 +305,19 @@ impl AudioEffect for SpeechEnhancement {
         let mut params = HashMap::new();
         params.insert(
             "formant_enhancement".to_string(),
-            ParameterValue::Float(*self.formant_enhancement.read().unwrap()),
+            ParameterValue::Float(*self.formant_enhancement.read()),
         );
         params.insert(
             "clarity_boost".to_string(),
-            ParameterValue::Float(*self.clarity_boost.read().unwrap()),
+            ParameterValue::Float(*self.clarity_boost.read()),
         );
         params.insert(
             "presence".to_string(),
-            ParameterValue::Float(*self.presence.read().unwrap()),
+            ParameterValue::Float(*self.presence.read()),
         );
         params.insert(
             "sibilance_control".to_string(),
-            ParameterValue::Float(*self.sibilance_control.read().unwrap()),
+            ParameterValue::Float(*self.sibilance_control.read()),
         );
         params
     }
@@ -325,7 +326,7 @@ impl AudioEffect for SpeechEnhancement {
         match name {
             "formant_enhancement" => {
                 if let Some(v) = value.as_f32() {
-                    *self.formant_enhancement.write().unwrap() = v.clamp(0.0, 1.0);
+                    *self.formant_enhancement.write() = v.clamp(0.0, 1.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -336,7 +337,7 @@ impl AudioEffect for SpeechEnhancement {
             }
             "clarity_boost" => {
                 if let Some(v) = value.as_f32() {
-                    *self.clarity_boost.write().unwrap() = v.clamp(0.0, 1.0);
+                    *self.clarity_boost.write() = v.clamp(0.0, 1.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -347,7 +348,7 @@ impl AudioEffect for SpeechEnhancement {
             }
             "presence" => {
                 if let Some(v) = value.as_f32() {
-                    *self.presence.write().unwrap() = v.clamp(0.0, 1.0);
+                    *self.presence.write() = v.clamp(0.0, 1.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -358,7 +359,7 @@ impl AudioEffect for SpeechEnhancement {
             }
             "sibilance_control" => {
                 if let Some(v) = value.as_f32() {
-                    *self.sibilance_control.write().unwrap() = v.clamp(0.0, 1.0);
+                    *self.sibilance_control.write() = v.clamp(0.0, 1.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -448,9 +449,9 @@ impl QualityUpsampler {
 
     /// Simple linear interpolation upsampling
     fn upsample_audio(&self, samples: &[f32]) -> Vec<f32> {
-        let factor = *self.upsample_factor.read().unwrap() as usize;
-        let quality = *self.interpolation_quality.read().unwrap();
-        let hf_restoration = *self.hf_restoration.read().unwrap();
+        let factor = *self.upsample_factor.read() as usize;
+        let quality = *self.interpolation_quality.read();
+        let hf_restoration = *self.hf_restoration.read();
 
         let mut upsampled = Vec::with_capacity(samples.len() * factor);
 
@@ -513,7 +514,7 @@ impl VoirsPlugin for QualityUpsampler {
 #[async_trait]
 impl AudioEffect for QualityUpsampler {
     async fn process_audio(&self, audio: &AudioBuffer) -> Result<AudioBuffer> {
-        let factor = *self.upsample_factor.read().unwrap();
+        let factor = *self.upsample_factor.read();
         let upsampled_samples = self.upsample_audio(audio.samples());
         let new_sample_rate = audio.sample_rate() * factor;
 
@@ -526,19 +527,19 @@ impl AudioEffect for QualityUpsampler {
         let mut params = HashMap::new();
         params.insert(
             "upsample_factor".to_string(),
-            ParameterValue::Integer(*self.upsample_factor.read().unwrap() as i64),
+            ParameterValue::Integer(*self.upsample_factor.read() as i64),
         );
         params.insert(
             "anti_aliasing".to_string(),
-            ParameterValue::Float(*self.anti_aliasing.read().unwrap()),
+            ParameterValue::Float(*self.anti_aliasing.read()),
         );
         params.insert(
             "interpolation_quality".to_string(),
-            ParameterValue::Float(*self.interpolation_quality.read().unwrap()),
+            ParameterValue::Float(*self.interpolation_quality.read()),
         );
         params.insert(
             "hf_restoration".to_string(),
-            ParameterValue::Float(*self.hf_restoration.read().unwrap()),
+            ParameterValue::Float(*self.hf_restoration.read()),
         );
         params
     }
@@ -547,7 +548,7 @@ impl AudioEffect for QualityUpsampler {
         match name {
             "upsample_factor" => {
                 if let Some(v) = value.as_i64() {
-                    *self.upsample_factor.write().unwrap() = (v as u32).clamp(2, 8);
+                    *self.upsample_factor.write() = (v as u32).clamp(2, 8);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -558,7 +559,7 @@ impl AudioEffect for QualityUpsampler {
             }
             "anti_aliasing" => {
                 if let Some(v) = value.as_f32() {
-                    *self.anti_aliasing.write().unwrap() = v.clamp(0.0, 1.0);
+                    *self.anti_aliasing.write() = v.clamp(0.0, 1.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -569,7 +570,7 @@ impl AudioEffect for QualityUpsampler {
             }
             "interpolation_quality" => {
                 if let Some(v) = value.as_f32() {
-                    *self.interpolation_quality.write().unwrap() = v.clamp(0.0, 1.0);
+                    *self.interpolation_quality.write() = v.clamp(0.0, 1.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -580,7 +581,7 @@ impl AudioEffect for QualityUpsampler {
             }
             "hf_restoration" => {
                 if let Some(v) = value.as_f32() {
-                    *self.hf_restoration.write().unwrap() = v.clamp(0.0, 1.0);
+                    *self.hf_restoration.write() = v.clamp(0.0, 1.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -670,10 +671,10 @@ impl ArtifactRemoval {
 
     /// Remove clicks, pops, and other artifacts
     fn remove_artifacts(&self, samples: &mut [f32]) {
-        let click_removal = *self.click_removal.read().unwrap();
-        let glitch_sensitivity = *self.glitch_sensitivity.read().unwrap();
-        let smoothing = *self.smoothing.read().unwrap();
-        let transient_preservation = *self.transient_preservation.read().unwrap();
+        let click_removal = *self.click_removal.read();
+        let glitch_sensitivity = *self.glitch_sensitivity.read();
+        let smoothing = *self.smoothing.read();
+        let transient_preservation = *self.transient_preservation.read();
 
         // Simple artifact detection and removal
         for i in 1..samples.len() - 1 {
@@ -745,19 +746,19 @@ impl AudioEffect for ArtifactRemoval {
         let mut params = HashMap::new();
         params.insert(
             "click_removal".to_string(),
-            ParameterValue::Float(*self.click_removal.read().unwrap()),
+            ParameterValue::Float(*self.click_removal.read()),
         );
         params.insert(
             "glitch_sensitivity".to_string(),
-            ParameterValue::Float(*self.glitch_sensitivity.read().unwrap()),
+            ParameterValue::Float(*self.glitch_sensitivity.read()),
         );
         params.insert(
             "smoothing".to_string(),
-            ParameterValue::Float(*self.smoothing.read().unwrap()),
+            ParameterValue::Float(*self.smoothing.read()),
         );
         params.insert(
             "transient_preservation".to_string(),
-            ParameterValue::Float(*self.transient_preservation.read().unwrap()),
+            ParameterValue::Float(*self.transient_preservation.read()),
         );
         params
     }
@@ -766,7 +767,7 @@ impl AudioEffect for ArtifactRemoval {
         match name {
             "click_removal" => {
                 if let Some(v) = value.as_f32() {
-                    *self.click_removal.write().unwrap() = v.clamp(0.0, 1.0);
+                    *self.click_removal.write() = v.clamp(0.0, 1.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -777,7 +778,7 @@ impl AudioEffect for ArtifactRemoval {
             }
             "glitch_sensitivity" => {
                 if let Some(v) = value.as_f32() {
-                    *self.glitch_sensitivity.write().unwrap() = v.clamp(0.0, 1.0);
+                    *self.glitch_sensitivity.write() = v.clamp(0.0, 1.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -788,7 +789,7 @@ impl AudioEffect for ArtifactRemoval {
             }
             "smoothing" => {
                 if let Some(v) = value.as_f32() {
-                    *self.smoothing.write().unwrap() = v.clamp(0.0, 1.0);
+                    *self.smoothing.write() = v.clamp(0.0, 1.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -799,7 +800,7 @@ impl AudioEffect for ArtifactRemoval {
             }
             "transient_preservation" => {
                 if let Some(v) = value.as_f32() {
-                    *self.transient_preservation.write().unwrap() = v.clamp(0.0, 1.0);
+                    *self.transient_preservation.write() = v.clamp(0.0, 1.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -876,8 +877,8 @@ mod tests {
         nr.set_parameter("reduction_strength", ParameterValue::Float(0.8))
             .unwrap();
 
-        assert_eq!(*nr.noise_floor.read().unwrap(), -50.0);
-        assert_eq!(*nr.reduction_strength.read().unwrap(), 0.8);
+        assert_eq!(*nr.noise_floor.read(), -50.0);
+        assert_eq!(*nr.reduction_strength.read(), 0.8);
 
         // Test audio processing
         let audio = crate::AudioBuffer::sine_wave(440.0, 0.1, 44100, 0.5); // Quiet signal
@@ -897,8 +898,8 @@ mod tests {
         se.set_parameter("clarity_boost", ParameterValue::Float(0.7))
             .unwrap();
 
-        assert_eq!(*se.formant_enhancement.read().unwrap(), 0.5);
-        assert_eq!(*se.clarity_boost.read().unwrap(), 0.7);
+        assert_eq!(*se.formant_enhancement.read(), 0.5);
+        assert_eq!(*se.clarity_boost.read(), 0.7);
 
         // Test audio processing
         let audio = crate::AudioBuffer::sine_wave(1000.0, 0.5, 44100, 0.5);
@@ -917,7 +918,7 @@ mod tests {
             .set_parameter("upsample_factor", ParameterValue::Integer(4))
             .unwrap();
 
-        assert_eq!(*upsampler.upsample_factor.read().unwrap(), 4);
+        assert_eq!(*upsampler.upsample_factor.read(), 4);
 
         // Test audio processing - should increase sample rate
         let audio = crate::AudioBuffer::sine_wave(440.0, 0.1, 22050, 0.5);
@@ -937,8 +938,8 @@ mod tests {
         ar.set_parameter("glitch_sensitivity", ParameterValue::Float(0.6))
             .unwrap();
 
-        assert_eq!(*ar.click_removal.read().unwrap(), 0.9);
-        assert_eq!(*ar.glitch_sensitivity.read().unwrap(), 0.6);
+        assert_eq!(*ar.click_removal.read(), 0.9);
+        assert_eq!(*ar.glitch_sensitivity.read(), 0.6);
 
         // Test audio processing
         let audio = crate::AudioBuffer::sine_wave(440.0, 0.5, 44100, 0.5);

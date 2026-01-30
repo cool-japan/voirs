@@ -391,7 +391,7 @@ impl ConfigWatcher {
         let current_modified =
             Self::get_file_modification_time(&self.path).map_err(|e| ConfigLoadError::Io {
                 path: self.path.clone(),
-                error: std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+                error: std::io::Error::other(e.to_string()),
             })?;
 
         // Compare with last known modification time

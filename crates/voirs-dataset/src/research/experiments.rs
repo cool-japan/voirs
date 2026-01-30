@@ -400,7 +400,7 @@ impl ExperimentTracker {
     fn save_to_disk(&self) -> DatasetResult<()> {
         if let Some(path) = &self.storage_path {
             let json = serde_json::to_string_pretty(&self.experiments).map_err(|e| {
-                DatasetError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e))
+                DatasetError::IoError(std::io::Error::other(e))
             })?;
 
             std::fs::write(path, json).map_err(DatasetError::IoError)?;
@@ -415,7 +415,7 @@ impl ExperimentTracker {
                 let content = std::fs::read_to_string(path).map_err(DatasetError::IoError)?;
 
                 self.experiments = serde_json::from_str(&content).map_err(|e| {
-                    DatasetError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e))
+                    DatasetError::IoError(std::io::Error::other(e))
                 })?;
             }
         }

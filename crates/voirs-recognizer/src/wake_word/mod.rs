@@ -3,6 +3,9 @@
 //! This module provides always-on listening capabilities, custom wake word training,
 //! false positive reduction, and energy-efficient detection algorithms.
 
+// Allow unused async for API consistency and future compatibility
+#![allow(clippy::unused_async)]
+
 use crate::RecognitionError;
 use async_trait::async_trait;
 use std::time::{Duration, Instant};
@@ -231,13 +234,13 @@ mod tests {
     #[test]
     fn test_wake_word_config_default() {
         let config = WakeWordConfig::default();
-        assert_eq!(config.sensitivity, 0.7);
-        assert_eq!(config.min_confidence, 0.8);
+        assert!((config.sensitivity - 0.7).abs() < f32::EPSILON);
+        assert!((config.min_confidence - 0.8).abs() < f32::EPSILON);
         assert_eq!(config.max_false_positives_per_hour, 5);
         assert!(config.energy_saving);
         assert_eq!(config.wake_words.len(), 3);
         assert_eq!(config.detection_window_ms, 1000);
-        assert_eq!(config.overlap_ratio, 0.5);
+        assert!((config.overlap_ratio - 0.5).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -246,7 +249,7 @@ mod tests {
         assert_eq!(stats.total_detections, 0);
         assert_eq!(stats.false_positives, 0);
         assert_eq!(stats.true_positives, 0);
-        assert_eq!(stats.avg_confidence, 0.0);
+        assert!((stats.avg_confidence - 0.0).abs() < f32::EPSILON);
     }
 
     #[test]

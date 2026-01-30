@@ -17,12 +17,15 @@ pub struct VoirsRc<T> {
     inner: Arc<RcInner<T>>,
 }
 
+/// Type alias for drop handler callbacks
+type DropHandler<T> = Box<dyn Fn(&T) + Send + Sync>;
+
 struct RcInner<T> {
     data: T,
     strong_count: AtomicUsize,
     weak_count: AtomicUsize,
     id: usize,
-    drop_handler: Option<Box<dyn Fn(&T) + Send + Sync>>,
+    drop_handler: Option<DropHandler<T>>,
 }
 
 /// Weak reference to a VoirsRc

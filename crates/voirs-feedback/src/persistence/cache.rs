@@ -54,6 +54,7 @@ where
     V: Clone,
 {
     /// Create a new LRU TTL cache
+    #[must_use]
     pub fn new(max_size: usize, default_ttl_seconds: u64) -> Self {
         Self {
             cache: Arc::new(RwLock::new(HashMap::new())),
@@ -239,6 +240,7 @@ pub struct PersistenceCache {
 
 impl PersistenceCache {
     /// Create a new persistence cache
+    #[must_use]
     pub fn new(max_size_per_type: usize, default_ttl_seconds: u64) -> Self {
         Self {
             session_cache: LruTtlCache::new(max_size_per_type, default_ttl_seconds),

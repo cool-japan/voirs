@@ -344,7 +344,12 @@ impl HrtfDatabaseManager {
             StorageFormat::Hdf5 => self.load_hdf5_database(path).await?,
         };
 
-        let mut db = self.main_database.write().unwrap();
+        let mut db = self.main_database.write().map_err(|e| {
+            Error::LegacyProcessing(format!(
+                "Failed to acquire write lock on HRTF database: {}",
+                e
+            ))
+        })?;
         *db = database;
 
         // Precompute interpolation weights if enabled
@@ -363,7 +368,12 @@ impl HrtfDatabaseManager {
 
         // Check cache first and perform interpolation
         let interpolated = {
-            let db = self.main_database.read().unwrap();
+            let db = self.main_database.read().map_err(|e| {
+                Error::LegacyProcessing(format!(
+                    "Failed to acquire read lock on HRTF database: {}",
+                    e
+                ))
+            })?;
             if let Some(measurement) = db.measurements.get(&hrtf_pos) {
                 self.metrics.cache_hits += 1;
                 self.metrics.total_lookups += 1;
@@ -389,7 +399,12 @@ impl HrtfDatabaseManager {
         user_id: &str,
         position: &Position3D,
     ) -> Result<HrtfMeasurement> {
-        let cache = self.personalized_cache.read().unwrap();
+        let cache = self.personalized_cache.read().map_err(|e| {
+            Error::LegacyProcessing(format!(
+                "Failed to acquire read lock on personalized cache: {}",
+                e
+            ))
+        })?;
         let hrtf_pos = HrtfPosition::from_position3d(position);
 
         if let Some(personalized) = cache.get(user_id) {
@@ -421,7 +436,12 @@ impl HrtfDatabaseManager {
             last_updated: "2025-07-23T00:00:00Z".to_string(),
         };
 
-        let mut cache = self.personalized_cache.write().unwrap();
+        let mut cache = self.personalized_cache.write().map_err(|e| {
+            Error::LegacyProcessing(format!(
+                "Failed to acquire write lock on personalized cache: {}",
+                e
+            ))
+        })?;
         cache.insert(user_id, personalized);
 
         Ok(())
@@ -429,7 +449,12 @@ impl HrtfDatabaseManager {
 
     /// Optimize database for better performance
     pub fn optimize_database(&mut self) -> Result<()> {
-        let mut db = self.main_database.write().unwrap();
+        let mut db = self.main_database.write().map_err(|e| {
+            Error::LegacyProcessing(format!(
+                "Failed to acquire write lock on HRTF database: {}",
+                e
+            ))
+        })?;
 
         // Remove low-quality measurements
         db.measurements
@@ -448,8 +473,14 @@ impl HrtfDatabaseManager {
 
     /// Get database statistics
     pub fn get_statistics(&self) -> DatabaseStatistics {
-        let db = self.main_database.read().unwrap();
-        let cache = self.personalized_cache.read().unwrap();
+        let db = self
+            .main_database
+            .read()
+            .expect("Failed to acquire read lock on HRTF database for statistics");
+        let cache = self
+            .personalized_cache
+            .read()
+            .expect("Failed to acquire read lock on personalized cache for statistics");
 
         DatabaseStatistics {
             total_measurements: db.measurements.len(),
@@ -607,7 +638,11 @@ impl HrtfDatabaseManager {
             })
             .collect();
 
-        neighbors.sort_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap());
+        neighbors.sort_by(|a, b| {
+            a.distance
+                .partial_cmp(&b.distance)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         neighbors.truncate(count);
 
         // Calculate interpolation weights (inverse distance weighting)
@@ -899,7 +934,8 @@ mod tests {
     #[test]
     fn test_angular_distance_calculation() {
         let config = DatabaseConfig::default();
-        let manager = HrtfDatabaseManager::new(config).unwrap();
+        let manager = HrtfDatabaseManager::new(config)
+            .expect("Failed to create HRTF database manager for angular distance test");
 
         let pos1 = HrtfPosition {
             azimuth: 0,

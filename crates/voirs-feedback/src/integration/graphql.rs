@@ -1,4 +1,4 @@
-//! GraphQL API implementation for VoiRS feedback system
+//! GraphQL API implementation for `VoiRS` feedback system
 //!
 //! This module provides a comprehensive GraphQL API for querying and mutating
 //! feedback data, user progress, training exercises, and system analytics.
@@ -961,6 +961,7 @@ impl MutationRoot {
 }
 
 /// Create the GraphQL schema
+#[must_use]
 pub fn create_schema(feedback_system: Arc<FeedbackSystem>) -> FeedbackSchema {
     Schema::build(QueryRoot, MutationRoot, EmptySubscription)
         .data(feedback_system)
@@ -1000,12 +1001,24 @@ impl Default for GraphQLConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{FeedbackError, FeedbackSystemConfig};
     use async_graphql::{Request, Variables};
+
+    /// Helper to create FeedbackSystem with test database (in-memory for tests)
+    async fn create_test_feedback_system() -> Result<FeedbackSystem, FeedbackError> {
+        let mut config = FeedbackSystemConfig::default();
+        #[cfg(feature = "persistence")]
+        {
+            // Use in-memory database for tests - faster and no file permission issues
+            config.database_path = Some(":memory:".to_string());
+        }
+        FeedbackSystem::with_config(config).await
+    }
 
     #[tokio::test]
     async fn test_graphql_user_query() {
         let feedback_system = Arc::new(
-            FeedbackSystem::new()
+            create_test_feedback_system()
                 .await
                 .expect("Failed to create feedback system"),
         );
@@ -1041,7 +1054,7 @@ mod tests {
     #[tokio::test]
     async fn test_graphql_create_user_mutation() {
         let feedback_system = Arc::new(
-            FeedbackSystem::new()
+            create_test_feedback_system()
                 .await
                 .expect("Failed to create feedback system"),
         );
@@ -1076,7 +1089,7 @@ mod tests {
     #[tokio::test]
     async fn test_graphql_analytics_query() {
         let feedback_system = Arc::new(
-            FeedbackSystem::new()
+            create_test_feedback_system()
                 .await
                 .expect("Failed to create feedback system"),
         );

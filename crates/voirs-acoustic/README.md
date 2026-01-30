@@ -492,6 +492,178 @@ let plot = visualizer.plot_attention(
 plot.save("attention.png")?;
 ```
 
+## Examples and Benchmarks
+
+### Available Examples
+
+The crate includes several comprehensive examples demonstrating different features:
+
+- **`simple_synthesis_demo`**: Basic synthesis workflow with minimal setup
+- **`advanced_features_demo`**: Comprehensive demo of advanced features (requires `candle` feature)
+- **`fusion_optimization_demo`**: Kernel fusion optimization demonstrations
+- **`profiling_demo`**: Performance profiling and tracing examples
+- **`production_monitoring_demo`**: Production monitoring and metrics tracking
+- **`scirs2_optimization_demo`**: SciRS2-Core integration and SIMD optimizations
+- **`model_optimization`**: Model optimization techniques (requires `candle` feature)
+- **`pretrained_models`**: Working with pre-trained models from HuggingFace Hub (requires `candle` feature)
+
+Run examples with:
+```bash
+# Basic example (no features required)
+cargo run --example simple_synthesis_demo
+
+# Advanced features (requires candle)
+cargo run --example advanced_features_demo --features candle
+
+# Fusion optimization demo
+cargo run --example fusion_optimization_demo
+```
+
+### Performance Benchmarks
+
+The crate includes comprehensive benchmark suites for performance analysis:
+
+- **`simple_benchmarks`**: Basic performance regression testing
+- **`performance_validation`**: Performance target validation across different scenarios
+- **`advanced_features_benchmarks`**: Advanced features performance testing
+- **`profiling_benchmarks`**: Profiling system overhead measurements
+- **`scirs2_benchmarks`**: SciRS2-Core optimization benchmarks (SIMD, parallel, etc.)
+- **`fusion_benchmarks`**: Kernel fusion performance improvements
+- **`production_benchmarks`**: Production-realistic workload benchmarks
+
+Run benchmarks with:
+```bash
+# Run all benchmarks (generates HTML reports in target/criterion/)
+cargo bench
+
+# Run specific benchmark suite
+cargo bench --bench fusion_benchmarks
+
+# Run with baseline comparison
+cargo bench --bench performance_validation -- --save-baseline main
+```
+
+### Property-Based Testing
+
+The crate includes comprehensive property-based tests using `proptest`:
+
+```bash
+# Run property-based tests
+cargo test --test property_tests
+
+# Run with more iterations for thorough validation
+PROPTEST_CASES=10000 cargo test --test property_tests
+```
+
+### Integration Tests
+
+Run all integration tests including fusion system validation:
+
+```bash
+# Run all integration tests
+cargo test --tests
+
+# Run specific integration test
+cargo test --test fusion_integration
+```
+
+## Developer Resources
+
+### Getting Started Guide
+
+For a comprehensive guide to getting started with voirs-acoustic, see [GETTING_STARTED.md](GETTING_STARTED.md). This guide covers:
+
+- Quick start and hello world examples
+- Core concepts and architecture
+- Basic and advanced usage patterns
+- Performance optimization strategies
+- Production deployment best practices
+- Troubleshooting common issues
+
+### Production-Ready Features
+
+#### Error Handling and Diagnostics
+
+The crate provides sophisticated error handling with structured diagnostics:
+
+```rust
+use voirs_acoustic::error::ErrorContextBuilder;
+
+// Get detailed error context with recovery suggestions
+let ctx = ErrorContextBuilder::inference_error(
+    "synthesis",
+    "[100 phonemes]",
+    "Shape mismatch",
+);
+
+// Print comprehensive error report
+println!("{}", ctx.format_report());
+// Output includes:
+// - Error severity and category
+// - Context information
+// - Performance impact estimate
+// - Prioritized recovery suggestions
+// - Related error chains
+```
+
+#### Performance Monitoring
+
+Built-in production monitoring for tracking synthesis performance:
+
+```bash
+# Run production monitoring example
+cargo run --example production_monitoring_simple --features candle
+```
+
+Features:
+- Real-time performance metrics (RTF, latency, throughput)
+- Success/failure rate tracking
+- Performance alert system
+- Detailed error diagnostics with recovery actions
+
+#### Memory Optimization
+
+Advanced memory management strategies for different deployment scenarios:
+
+```bash
+# Run memory optimization examples
+cargo run --example memory_optimization_advanced --features candle
+```
+
+Strategies demonstrated:
+- Memory pooling and reuse
+- Streaming synthesis for long sequences
+- Adaptive batch sizing
+- Memory pressure handling
+
+### Testing Infrastructure
+
+The crate includes comprehensive testing:
+
+- **746 total tests** across all test suites:
+  - 605 unit tests
+  - 55 property-based tests (robustness validation) - **10 NEW optimization property tests!**
+  - 29 fusion integration tests
+  - 16 multi-language integration tests
+  - 12 optimization integration tests (NEW!)
+  - 10 SciRS2 integration tests
+  - 10 conditioning tests
+  - 9 production integration tests
+
+Run property-based tests with custom iteration counts:
+
+```bash
+# Run with more iterations for thorough testing
+PROPTEST_CASES=10000 cargo test --test property_tests
+```
+
+### Code Quality Standards
+
+- ✅ **Zero warnings policy**: All code must compile without warnings
+- ✅ **100% SciRS2 compliance**: No direct use of rand/ndarray/etc.
+- ✅ **Refactoring compliance**: No single file exceeds 2000 lines
+- ✅ **Comprehensive documentation**: All public APIs documented with examples
+
 ## Contributing
 
 We welcome contributions! Please see the [main repository](https://github.com/cool-japan/voirs) for contribution guidelines.

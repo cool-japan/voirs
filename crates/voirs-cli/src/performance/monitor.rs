@@ -351,7 +351,7 @@ impl PerformanceMonitor {
                 .as_ref()
                 .unwrap_or(&self.config.thresholds);
 
-            if let Some(alert) = self.check_target_alerts(&target, metrics, thresholds).await {
+            if let Some(alert) = self.check_target_alerts(target, metrics, thresholds).await {
                 let _ = self.alert_sender.send(alert);
             }
         }

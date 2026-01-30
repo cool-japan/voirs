@@ -68,15 +68,19 @@ ndk-sys = { version = "0.6", optional = true }
 objc = { version = "0.2", optional = true }
 cocoa = { version = "0.26", optional = true }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+metal-rs = { version = "0.27", optional = true, package = "metal" }
+
 [dev-dependencies]
 tokio-test = { workspace = true }
 criterion = { workspace = true }
+proptest = { workspace = true }
 
 [features]
 default = []
 gpu = []
 cuda = ["candle-core/cuda"]
-metal = ["candle-core/metal"]
+metal = ["dep:metal-rs"]
 
 # VR/AR Platform Features
 steamvr = ["openvr"]

@@ -1,9 +1,15 @@
 //! Core progress tracking implementation
 //!
-//! This module contains the main ProgressAnalyzer struct and its implementation,
+//! This module contains the main `ProgressAnalyzer` struct and its implementation,
 //! along with supporting analytics frameworks and core functionality.
 
-use super::types::*;
+use super::types::{
+    AchievementAnalysis, AchievementCondition, AchievementDefinition, AggregatedMetric,
+    AnalyticsConfig, AnalyticsMetric, AnalyticsSummary, ComparativeAnalysis,
+    ComparativeAnalyticsResult, ComprehensiveAnalyticsReport, DetailedProgressReport, GoalAnalysis,
+    LongitudinalDataPoint, LongitudinalStudyData, MemoryBoundedMetrics, MetricType,
+    ProgressRecommendation, StatisticalSignificanceResult, TrendAnalysis, TrendAnalytics,
+};
 use crate::adaptive::RecommendationType;
 use crate::progress::analytics::TrendDirection;
 use crate::progress::dashboard::{
@@ -218,7 +224,7 @@ impl ComprehensiveAnalyticsFramework {
         // Calculate trend direction and slope
         let (slope, r_squared) = if scores.len() >= 2 {
             let x_values: Vec<f64> = (0..scores.len()).map(|i| i as f64).collect();
-            let y_values: Vec<f64> = scores.iter().map(|&s| s as f64).collect();
+            let y_values: Vec<f64> = scores.iter().map(|&s| f64::from(s)).collect();
 
             // Simple linear regression
             let n = x_values.len() as f64;
@@ -540,7 +546,7 @@ impl ProgressAnalyzer {
                 timestamp: Utc::now(),
                 overall_score: session_score,
                 area_scores: self.extract_area_scores(scores, feedback),
-                session_count: (progress.training_stats.total_sessions + 1) as usize,
+                session_count: (progress.training_stats.total_sessions + 1),
                 events: self.extract_session_events(feedback),
             };
 
@@ -882,11 +888,7 @@ impl ProgressAnalyzer {
         stats.exercises_completed += 5; // Assume 5 exercises per session
 
         // Update success rate
-        let session_success = if scores.pronunciation >= 0.7 && scores.quality >= 0.7 {
-            1
-        } else {
-            0
-        };
+        let session_success = usize::from(scores.pronunciation >= 0.7 && scores.quality >= 0.7);
         stats.successful_sessions += session_success;
         stats.success_rate = stats.successful_sessions as f32 / stats.total_sessions as f32;
 

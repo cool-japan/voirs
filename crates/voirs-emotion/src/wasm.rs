@@ -85,6 +85,7 @@ pub struct WasmEmotionProcessor {
 impl WasmEmotionProcessor {
     /// Create new WebAssembly emotion processor
     #[wasm_bindgen(constructor)]
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         console_log!("Creating new WasmEmotionProcessor");
         utils::set_panic_hook();

@@ -71,6 +71,7 @@ pub struct MetricsCalculator;
 
 impl MetricsCalculator {
     /// Calculate session analytics from progress history
+    #[must_use]
     pub fn calculate_session_analytics(history: &[&ProgressSnapshot]) -> SessionAnalytics {
         let session_count = history.len();
         let total_score: f32 = history.iter().map(|s| s.overall_score).sum();
@@ -102,6 +103,7 @@ impl MetricsCalculator {
     }
 
     /// Calculate consistency metrics from progress history
+    #[must_use]
     pub fn calculate_consistency_metrics(history: &[&ProgressSnapshot]) -> ConsistencyMetrics {
         let scores: Vec<f32> = history.iter().map(|s| s.overall_score).collect();
 
@@ -194,7 +196,7 @@ impl MetricsCalculator {
                     let regularity = 1.0 / (1.0 + cv);
 
                     // Bonus for sessions within reasonable intervals (1-7 days)
-                    let ideal_gap_bonus = if mean_gap >= 24.0 && mean_gap <= 168.0 {
+                    let ideal_gap_bonus = if (24.0..=168.0).contains(&mean_gap) {
                         1.2 // 20% bonus for sessions between 1-7 days apart
                     } else if mean_gap < 24.0 {
                         0.9 // Slight penalty for too frequent sessions
@@ -215,6 +217,7 @@ impl MetricsCalculator {
     }
 
     /// Calculate overall improvement from progress history
+    #[must_use]
     pub fn calculate_overall_improvement(history: &[&ProgressSnapshot]) -> f32 {
         if history.len() < 2 {
             return 0.0;
@@ -227,6 +230,7 @@ impl MetricsCalculator {
     }
 
     /// Calculate improvements per focus area
+    #[must_use]
     pub fn calculate_area_improvements(history: &[&ProgressSnapshot]) -> HashMap<FocusArea, f32> {
         let mut improvements = HashMap::new();
 
@@ -247,6 +251,7 @@ impl MetricsCalculator {
     }
 
     /// Calculate skill trends for different focus areas
+    #[must_use]
     pub fn calculate_skill_trends(
         history: &[&ProgressSnapshot],
     ) -> HashMap<FocusArea, TrendDirection> {
@@ -278,6 +283,7 @@ impl MetricsCalculator {
     }
 
     /// Calculate linear trend direction from a series of scores
+    #[must_use]
     pub fn calculate_linear_trend(scores: &[f32]) -> TrendDirection {
         if scores.len() < 2 {
             return TrendDirection::Stable;
@@ -316,6 +322,7 @@ impl MetricsCalculator {
     }
 
     /// Calculate learning velocity (rate of improvement)
+    #[must_use]
     pub fn calculate_learning_velocity(history: &[ProgressSnapshot]) -> f32 {
         if history.len() < 2 {
             return 0.0;

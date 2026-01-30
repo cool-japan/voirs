@@ -6,12 +6,13 @@ use crate::{
     traits::CacheStats,
     types::{MelSpectrogram, Phoneme},
 };
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, VecDeque},
     hash::{Hash, Hasher},
     path::PathBuf,
-    sync::{Arc, RwLock},
+    sync::Arc,
     time::{Duration, SystemTime},
 };
 use tokio::{fs, io::AsyncWriteExt};
@@ -460,7 +461,7 @@ impl SynthesisResultCache {
 
     /// Get exact cache match
     async fn get_exact_match(&self, cache_key: &str) -> Option<CachedSynthesisResult> {
-        let cache = self.memory_cache.read().unwrap();
+        let cache = self.memory_cache.read();
 
         if let Some(result) = cache.get(cache_key) {
             // Check expiration
@@ -481,7 +482,7 @@ impl SynthesisResultCache {
     ) -> Option<CachedSynthesisResult> {
         // Collect candidate keys without holding the lock
         let candidate_keys = {
-            let similarity_index = self.similarity_index.read().unwrap();
+            let similarity_index = self.similarity_index.read();
             let mut candidates = Vec::new();
 
             for (cached_text, similar_keys) in similarity_index.iter() {
@@ -500,7 +501,7 @@ impl SynthesisResultCache {
             if let Some(result) = self.get_exact_match(&similar_key).await {
                 // Update stats for similarity match
                 {
-                    let mut stats = self.stats.write().unwrap();
+                    let mut stats = self.stats.write();
                     stats.similarity_matches += 1;
                 }
 
@@ -602,9 +603,9 @@ impl SynthesisResultCache {
 
         // Store in memory cache
         {
-            let mut cache = self.memory_cache.write().unwrap();
-            let mut current_usage = self.current_memory_usage.write().unwrap();
-            let mut lru_queue = self.lru_queue.write().unwrap();
+            let mut cache = self.memory_cache.write();
+            let mut current_usage = self.current_memory_usage.write();
+            let mut lru_queue = self.lru_queue.write();
 
             let result_size = cached_result.size_bytes;
             cache.insert(cache_key.clone(), cached_result.clone());
@@ -619,7 +620,7 @@ impl SynthesisResultCache {
 
         // Store quality metrics
         {
-            let mut quality_cache = self.quality_cache.write().unwrap();
+            let mut quality_cache = self.quality_cache.write();
             quality_cache.insert(cache_key.clone(), params.quality_metrics);
         }
 
@@ -664,7 +665,7 @@ impl SynthesisResultCache {
 
     /// Ensure sufficient cache capacity
     async fn ensure_capacity(&self, required_bytes: usize) -> Result<()> {
-        let current_usage = *self.current_memory_usage.read().unwrap();
+        let current_usage = *self.current_memory_usage.read();
         let max_bytes = self.config.memory_cache_size_mb * 1024 * 1024;
 
         if current_usage + required_bytes > max_bytes {
@@ -681,14 +682,14 @@ impl SynthesisResultCache {
 
         loop {
             let key_to_evict = {
-                let mut lru_queue = self.lru_queue.write().unwrap();
+                let mut lru_queue = self.lru_queue.write();
                 lru_queue.pop_back()
             };
 
             if let Some(key) = key_to_evict {
                 // Check if result is pinned
                 let can_evict = {
-                    let cache = self.memory_cache.read().unwrap();
+                    let cache = self.memory_cache.read();
                     cache
                         .get(&key)
                         .map(|result| !result.cache_metadata.pinned)
@@ -713,7 +714,7 @@ impl SynthesisResultCache {
 
         // Update statistics
         {
-            let mut stats = self.stats.write().unwrap();
+            let mut stats = self.stats.write();
             stats.results_evicted += evicted_count;
         }
 
@@ -727,28 +728,28 @@ impl SynthesisResultCache {
     /// Remove a result from cache
     async fn remove_result(&self, key: &str) -> Result<Option<CachedSynthesisResult>> {
         let removed_result = {
-            let mut cache = self.memory_cache.write().unwrap();
+            let mut cache = self.memory_cache.write();
             cache.remove(key)
         };
 
         if let Some(ref result) = removed_result {
             // Update memory usage
             {
-                let mut current_usage = self.current_memory_usage.write().unwrap();
+                let mut current_usage = self.current_memory_usage.write();
                 *current_usage = current_usage.saturating_sub(result.size_bytes);
             }
 
             // Remove from quality cache
             {
-                let mut quality_cache = self.quality_cache.write().unwrap();
+                let mut quality_cache = self.quality_cache.write();
                 quality_cache.remove(key);
             }
 
             // Update statistics
             {
-                let mut stats = self.stats.write().unwrap();
+                let mut stats = self.stats.write();
                 stats.basic_stats.total_entries = stats.basic_stats.total_entries.saturating_sub(1);
-                stats.basic_stats.memory_usage_bytes = *self.current_memory_usage.read().unwrap();
+                stats.basic_stats.memory_usage_bytes = *self.current_memory_usage.read();
             }
         }
 
@@ -757,7 +758,7 @@ impl SynthesisResultCache {
 
     /// Update similarity index
     async fn update_similarity_index(&self, text: &str, cache_key: &str) {
-        let mut similarity_index = self.similarity_index.write().unwrap();
+        let mut similarity_index = self.similarity_index.write();
 
         similarity_index
             .entry(text.to_string())
@@ -774,7 +775,7 @@ impl SynthesisResultCache {
 
     /// Update access information
     async fn update_access_info(&self, cache_key: &str) {
-        let mut access_frequency = self.access_frequency.write().unwrap();
+        let mut access_frequency = self.access_frequency.write();
         let now = SystemTime::now();
 
         let access_info = access_frequency
@@ -808,7 +809,7 @@ impl SynthesisResultCache {
 
     /// Update hit statistics
     async fn update_hit_stats(&self) {
-        let mut stats = self.stats.write().unwrap();
+        let mut stats = self.stats.write();
         stats.results_served_from_cache += 1;
 
         // Update hit rate
@@ -820,7 +821,7 @@ impl SynthesisResultCache {
 
     /// Update miss statistics
     async fn update_miss_stats(&self) {
-        let mut stats = self.stats.write().unwrap();
+        let mut stats = self.stats.write();
         stats.cache_misses += 1;
 
         // Update miss rate
@@ -832,11 +833,11 @@ impl SynthesisResultCache {
 
     /// Update cache statistics
     async fn update_cache_stats(&self, result: &CachedSynthesisResult) {
-        let mut stats = self.stats.write().unwrap();
+        let mut stats = self.stats.write();
 
         stats.results_generated += 1;
         stats.basic_stats.total_entries += 1;
-        stats.basic_stats.memory_usage_bytes = *self.current_memory_usage.read().unwrap();
+        stats.basic_stats.memory_usage_bytes = *self.current_memory_usage.read();
 
         // Update quality distribution
         let quality = result.quality_metrics.overall_score;
@@ -942,7 +943,7 @@ impl SynthesisResultCache {
 
         // Find expired results
         {
-            let cache = self.memory_cache.read().unwrap();
+            let cache = self.memory_cache.read();
             for (key, result) in cache.iter() {
                 if result.cache_metadata.expires_at <= now && !result.cache_metadata.pinned {
                     expired_keys.push(key.clone());
@@ -960,7 +961,7 @@ impl SynthesisResultCache {
 
         // Update statistics
         {
-            let mut stats = self.stats.write().unwrap();
+            let mut stats = self.stats.write();
             stats.results_expired += removed_count;
         }
 
@@ -970,12 +971,12 @@ impl SynthesisResultCache {
     /// Clear all cached results
     pub async fn clear(&self) -> Result<()> {
         {
-            let mut cache = self.memory_cache.write().unwrap();
-            let mut current_usage = self.current_memory_usage.write().unwrap();
-            let mut lru_queue = self.lru_queue.write().unwrap();
-            let mut access_frequency = self.access_frequency.write().unwrap();
-            let mut similarity_index = self.similarity_index.write().unwrap();
-            let mut quality_cache = self.quality_cache.write().unwrap();
+            let mut cache = self.memory_cache.write();
+            let mut current_usage = self.current_memory_usage.write();
+            let mut lru_queue = self.lru_queue.write();
+            let mut access_frequency = self.access_frequency.write();
+            let mut similarity_index = self.similarity_index.write();
+            let mut quality_cache = self.quality_cache.write();
 
             cache.clear();
             *current_usage = 0;
@@ -987,7 +988,7 @@ impl SynthesisResultCache {
 
         // Reset statistics
         {
-            let mut stats = self.stats.write().unwrap();
+            let mut stats = self.stats.write();
             stats.basic_stats.total_entries = 0;
             stats.basic_stats.memory_usage_bytes = 0;
         }
@@ -998,13 +999,13 @@ impl SynthesisResultCache {
 
     /// Get cache statistics
     pub fn stats(&self) -> ResultCacheStats {
-        self.stats.read().unwrap().clone()
+        self.stats.read().clone()
     }
 
     /// Get cache usage summary
     pub async fn get_usage_summary(&self) -> CacheUsageSummary {
-        let cache = self.memory_cache.read().unwrap();
-        let current_usage = *self.current_memory_usage.read().unwrap();
+        let cache = self.memory_cache.read();
+        let current_usage = *self.current_memory_usage.read();
         let max_bytes = self.config.memory_cache_size_mb * 1024 * 1024;
 
         CacheUsageSummary {

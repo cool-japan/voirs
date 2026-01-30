@@ -685,7 +685,7 @@ impl MobileVoiceCloner {
         if hit {
             stats.cache_hit_rate = (stats.cache_hit_rate * 0.9) + (1.0 * 0.1);
         } else {
-            stats.cache_hit_rate = stats.cache_hit_rate * 0.9;
+            stats.cache_hit_rate *= 0.9;
         }
     }
 
@@ -770,9 +770,7 @@ impl MobileVoiceCloner {
 
     /// Check if NEON optimizations are available and enabled
     pub fn is_neon_enabled(&self) -> bool {
-        self.neon_optimizer
-            .as_ref()
-            .map_or(false, |opt| opt.enabled)
+        self.neon_optimizer.as_ref().is_some_and(|opt| opt.enabled)
     }
 }
 

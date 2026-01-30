@@ -299,7 +299,7 @@ impl EmotionEditor {
         println!("10. Help");
         println!("{}", "─".repeat(30));
         println!(" u. Undo   r. Redo   q. Quit");
-        print!("\n");
+        println!();
         Ok(())
     }
 
@@ -597,10 +597,10 @@ impl EmotionEditor {
         Ok(())
     }
 
-    /// Preview current emotion state (placeholder for audio preview)
+    /// Preview current emotion state with detailed simulation
     fn preview_current_state(&mut self) -> Result<()> {
-        println!("\n🔊 Audio Preview");
-        println!("Playing preview of current emotion state...");
+        println!("\n🔊 Audio Preview Simulation");
+        println!("{}", "═".repeat(50));
         println!(
             "  Emotion: {} {}",
             self.state.current_emotion.as_str(),
@@ -610,21 +610,112 @@ impl EmotionEditor {
             "  Intensity: {:.1}%",
             self.state.current_intensity.value() * 100.0
         );
+        println!("{}", "─".repeat(50));
 
-        // Simulate preview time
-        print!("Playing");
-        io::stdout().flush().unwrap();
-        for _ in 0..5 {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            print!(".");
-            io::stdout().flush().unwrap();
+        // Show what audio characteristics would be applied
+        println!("\n📊 Audio Characteristics:");
+        self.show_audio_characteristics_preview()?;
+
+        // Simulate preview playback
+        println!("\n▶ Playing preview sample...");
+        self.simulate_audio_playback()?;
+        println!("✓ Preview complete!");
+
+        // Show additional info
+        println!("\n💡 Note: In production mode, this would:");
+        println!("   • Apply current emotion to synthesis engine");
+        println!("   • Generate 3-second audio sample");
+        println!("   • Play audio through default output device");
+        println!("   • Display real-time waveform visualization");
+
+        Ok(())
+    }
+
+    /// Show audio characteristics that would be applied
+    fn show_audio_characteristics_preview(&self) -> Result<()> {
+        let intensity = self.state.current_intensity.value();
+
+        // Calculate prosody modifications based on emotion
+        let (pitch_desc, pitch_mod) = match self.state.current_emotion {
+            Emotion::Happy | Emotion::Excited => ("Higher", 1.0 + (0.15 * intensity)),
+            Emotion::Sad | Emotion::Melancholic => ("Lower", 1.0 - (0.1 * intensity)),
+            Emotion::Angry => ("Raised", 1.0 + (0.1 * intensity)),
+            Emotion::Fear => ("Much Higher", 1.0 + (0.2 * intensity)),
+            Emotion::Calm | Emotion::Tender => ("Slightly Lower", 1.0 - (0.05 * intensity)),
+            _ => ("Normal", 1.0),
+        };
+
+        let (tempo_desc, tempo_mod) = match self.state.current_emotion {
+            Emotion::Excited | Emotion::Angry => ("Faster", 1.0 + (0.15 * intensity)),
+            Emotion::Sad => ("Slower", 1.0 - (0.15 * intensity)),
+            Emotion::Fear => ("Much Faster", 1.0 + (0.2 * intensity)),
+            Emotion::Calm => ("Slower", 1.0 - (0.05 * intensity)),
+            _ => ("Normal", 1.0),
+        };
+
+        let (energy_desc, energy_mod) = match self.state.current_emotion {
+            Emotion::Excited => ("High Energy", 1.0 + (0.3 * intensity)),
+            Emotion::Angry => ("Very High", 1.0 + (0.3 * intensity)),
+            Emotion::Sad => ("Low Energy", 1.0 - (0.2 * intensity)),
+            Emotion::Calm => ("Reduced", 1.0 - (0.1 * intensity)),
+            _ => ("Normal", 1.0),
+        };
+
+        println!("  • Pitch:    {} (×{:.2})", pitch_desc, pitch_mod);
+        println!("  • Tempo:    {} (×{:.2})", tempo_desc, tempo_mod);
+        println!("  • Energy:   {} (×{:.2})", energy_desc, energy_mod);
+
+        // Show voice quality modifications
+        let breathiness = match self.state.current_emotion {
+            Emotion::Sad => 0.15 * intensity,
+            Emotion::Fear => 0.1 * intensity,
+            Emotion::Tender => 0.1 * intensity,
+            _ => 0.05 * intensity,
+        };
+
+        let roughness = match self.state.current_emotion {
+            Emotion::Angry => 0.2 * intensity,
+            Emotion::Disgust => 0.15 * intensity,
+            _ => 0.0,
+        };
+
+        if breathiness > 0.05 {
+            println!("  • Breathiness: {:.0}%", breathiness * 100.0);
         }
-        println!(" Done!");
+        if roughness > 0.0 {
+            println!("  • Roughness:   {:.0}%", roughness * 100.0);
+        }
 
-        // In a real implementation, this would:
-        // 1. Apply current emotion to the processor
-        // 2. Generate a short audio sample
-        // 3. Play it back to the user
+        Ok(())
+    }
+
+    /// Simulate audio playback with progress indicators
+    fn simulate_audio_playback(&self) -> Result<()> {
+        let duration_ms = 3000; // 3 second preview
+        let steps = 30;
+        let step_duration = duration_ms / steps;
+
+        for i in 0..=steps {
+            let progress = (i as f32 / steps as f32) * 100.0;
+            let bar_width = 40;
+            let filled = ((i as f32 / steps as f32) * bar_width as f32) as usize;
+            let empty = bar_width - filled;
+
+            print!(
+                "\r  [{}{}] {:.0}% ({:.1}s/3.0s) ",
+                "█".repeat(filled),
+                "░".repeat(empty),
+                progress,
+                i as f32 * step_duration as f32 / 1000.0
+            );
+            // Flush stdout, ignore error if stdout is unavailable
+            let _ = io::stdout().flush();
+
+            if i < steps {
+                std::thread::sleep(std::time::Duration::from_millis(step_duration as u64));
+            }
+        }
+        println!();
 
         Ok(())
     }
@@ -1070,7 +1161,7 @@ impl EmotionEditor {
         match dominance {
             d if d > 0.5 => "Very Dominant",
             d if d > 0.0 => "Somewhat Dominant",
-            d if d == 0.0 => "Neutral",
+            0.0 => "Neutral",
             d if d > -0.5 => "Somewhat Submissive",
             _ => "Very Submissive",
         }

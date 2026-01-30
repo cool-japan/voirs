@@ -247,7 +247,9 @@ impl ResourceUsage {
 
         unsafe {
             let mut info: libc::vm_statistics64 = mem::zeroed();
-            let mut count = (mem::size_of::<libc::vm_statistics64>() / mem::size_of::<libc::integer_t>()) as libc::mach_msg_type_number_t;
+            let mut count = (mem::size_of::<libc::vm_statistics64>()
+                / mem::size_of::<libc::integer_t>())
+                as libc::mach_msg_type_number_t;
 
             let host_port = libc::mach_host_self();
             let result = libc::host_statistics64(
@@ -259,7 +261,8 @@ impl ResourceUsage {
 
             if result == libc::KERN_SUCCESS {
                 let page_size = Self::get_page_size();
-                let used_memory = (info.active_count + info.inactive_count + info.wire_count) as u64 * page_size;
+                let used_memory =
+                    (info.active_count + info.inactive_count + info.wire_count) as u64 * page_size;
                 used_memory as f64 / 1_073_741_824.0 // Convert bytes to GB
             } else {
                 0.0
@@ -276,12 +279,14 @@ impl ResourceUsage {
 
             for line in content.lines() {
                 if line.starts_with("MemTotal:") {
-                    total_kb = line.split_whitespace()
+                    total_kb = line
+                        .split_whitespace()
                         .nth(1)
                         .and_then(|s| s.parse().ok())
                         .unwrap_or(0);
                 } else if line.starts_with("MemAvailable:") {
-                    available_kb = line.split_whitespace()
+                    available_kb = line
+                        .split_whitespace()
                         .nth(1)
                         .and_then(|s| s.parse().ok())
                         .unwrap_or(0);
@@ -304,9 +309,7 @@ impl ResourceUsage {
 
     #[cfg(target_os = "macos")]
     fn get_page_size() -> u64 {
-        unsafe {
-            libc::sysconf(libc::_SC_PAGESIZE) as u64
-        }
+        unsafe { libc::sysconf(libc::_SC_PAGESIZE) as u64 }
     }
 
     /// Get approximate CPU usage percent

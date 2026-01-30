@@ -519,7 +519,7 @@ impl Clone for VoirsError {
             } => Self::IoError {
                 path: path.clone(),
                 operation: *operation,
-                source: std::io::Error::new(std::io::ErrorKind::Other, "Cloned error"),
+                source: std::io::Error::other("Cloned error"),
             },
             Self::UnsupportedFileFormat { path, format } => Self::UnsupportedFileFormat {
                 path: path.clone(),

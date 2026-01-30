@@ -268,11 +268,21 @@ async fn run_feature_performance_benchmark(
     // Spatial audio
     #[cfg(feature = "spatial")]
     {
-        // TODO: Implement spatial positioning when VoirsPipeline supports it
-        // use voirs_spatial::Position3D;
-        // pipeline
-        //     .set_spatial_position(Position3D::new(1.0, 0.0, 0.0))
-        //     .await?;
+        use voirs_sdk::spatial::{Orientation3D, Position3D};
+        pipeline
+            .set_listener_position(
+                Position3D {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                Orientation3D {
+                    yaw: 0.0,
+                    pitch: 0.0,
+                    roll: 0.0,
+                },
+            )
+            .await?;
         results.push(
             benchmark_feature(
                 pipeline,
@@ -401,7 +411,7 @@ async fn run_concurrency_benchmark(pipeline: &VoirsPipeline) -> Result<Vec<Bench
         let tasks: Vec<_> = (0..concurrent_count)
             .map(|i| {
                 let text = format!("{} (iteration {})", test_text, i);
-                let pipeline = pipeline;
+                // pipeline is already in scope
                 async move { pipeline.synthesize(&text).await }
             })
             .collect();
@@ -459,14 +469,10 @@ async fn run_streaming_benchmark(pipeline: &VoirsPipeline) -> Result<Vec<Benchma
         // Note: synthesize_streaming not available, using regular synthesis
         let audio = pipeline.synthesize(text).await?;
 
-        let mut first_chunk_latency = None;
-        let mut chunk_count = 0;
-        let mut total_samples = 0;
-
         // Simulate streaming behavior for demonstration
-        first_chunk_latency = Some(start_time.elapsed());
-        chunk_count = 1;
-        total_samples = audio.len();
+        let first_chunk_latency = start_time.elapsed();
+        let chunk_count = 1;
+        let total_samples = audio.len();
 
         let total_time = start_time.elapsed();
         let audio_duration = total_samples as f64 / 22050.0; // Assuming 22050 Hz
@@ -487,7 +493,7 @@ async fn run_streaming_benchmark(pipeline: &VoirsPipeline) -> Result<Vec<Benchma
         println!("  📊 Chunks generated: {}", chunk_count);
         println!(
             "  ⚡ First chunk latency: {:.2}ms",
-            first_chunk_latency.unwrap().as_secs_f64() * 1000.0
+            first_chunk_latency.as_secs_f64() * 1000.0
         );
         println!("  🎵 Total audio: {:.2}s", result.audio_duration_s);
         println!("  📈 RTF: {:.3}\n", result.real_time_factor);
@@ -534,7 +540,9 @@ async fn benchmark_feature(
     Ok(result)
 }
 
+#[allow(clippy::vec_init_then_push)]
 fn collect_system_info() -> SystemInfo {
+    #[allow(clippy::vec_init_then_push)]
     let mut features_enabled = Vec::new();
 
     #[cfg(feature = "emotion")]

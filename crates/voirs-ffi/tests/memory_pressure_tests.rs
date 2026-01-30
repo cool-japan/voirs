@@ -59,7 +59,7 @@ async fn test_memory_fragmentation_resistance() {
         });
     }
 
-    while let Some(_) = tasks.join_next().await {}
+    while (tasks.join_next().await).is_some() {}
 
     let successful = success_count.load(Ordering::Relaxed);
     let errors = error_count.load(Ordering::Relaxed);
@@ -249,7 +249,7 @@ async fn test_concurrent_memory_access() {
         });
     }
 
-    while let Some(_) = tasks.join_next().await {}
+    while (tasks.join_next().await).is_some() {}
 
     let successful = success_count.load(Ordering::Relaxed);
     let errors = error_count.load(Ordering::Relaxed);
@@ -280,21 +280,17 @@ fn get_memory_usage() -> usize {
 
 fn try_allocate_chunk(size: usize) -> Option<Vec<u8>> {
     // Try to allocate memory chunk, return None if it fails
-    match std::panic::catch_unwind(|| vec![0u8; size]) {
-        Ok(chunk) => Some(chunk),
-        Err(_) => None,
-    }
+    std::panic::catch_unwind(|| vec![0u8; size]).ok()
 }
 
 async fn test_operation_under_memory_pressure() -> bool {
     // Test a basic operation under memory pressure
-    match std::panic::catch_unwind(|| {
+    std::panic::catch_unwind(|| {
         let _test_buffer = vec![42u8; 1024 * 100]; // 100KB test allocation
-        tokio::task::yield_now();
-    }) {
-        Ok(_) => true,
-        Err(_) => false,
-    }
+                                                   // Note: Not awaiting yield_now here as we're inside catch_unwind
+        std::mem::drop(tokio::task::yield_now());
+    })
+    .is_ok()
 }
 
 #[cfg(test)]

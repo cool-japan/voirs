@@ -742,7 +742,7 @@ impl ConformerModel {
             ActivationType::ReLU => x.max(0.0),
             ActivationType::GELU => {
                 // Approximation of GELU
-                0.5 * x * (1.0 + (0.7978845608 * (x + 0.044715 * x.powi(3))).tanh())
+                0.5 * x * (1.0 + (0.797_884_560_8 * (x + 0.044_715 * x.powi(3))).tanh())
             }
             ActivationType::Swish => x / (1.0 + (-x).exp()),
             ActivationType::GLU => {
@@ -812,7 +812,8 @@ impl ConformerModel {
             if token_id == 0 {
                 // Blank token (CTC)
                 continue;
-            } else if token_id == 1 {
+            }
+            if token_id == 1 {
                 // Space token
                 if !current_word.is_empty() {
                     words.push(current_word.clone());

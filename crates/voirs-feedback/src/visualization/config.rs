@@ -402,11 +402,12 @@ impl Default for TimelineConfig {
 
 /// Timeline range enum for non-UI implementation
 #[cfg(not(feature = "ui"))]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum TimelineRange {
     /// Show events from the last day
     Day,
     /// Show events from the last week
+    #[default]
     Week,
     /// Show events from the last month
     Month,
@@ -417,11 +418,6 @@ pub enum TimelineRange {
 }
 
 #[cfg(not(feature = "ui"))]
-impl Default for TimelineRange {
-    fn default() -> Self {
-        TimelineRange::Week
-    }
-}
 
 /// Progress visualization configuration (enhanced implementation)
 #[cfg(not(feature = "ui"))]

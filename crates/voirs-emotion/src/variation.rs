@@ -286,7 +286,7 @@ impl NaturalVariationGenerator {
             let prosodic_patterns =
                 self.generate_prosodic_variations(variation_strength, duration)?;
             for pattern in &prosodic_patterns {
-                self.apply_variation_pattern(&mut varied_parameters, pattern, &base_parameters)?;
+                self.apply_variation_pattern(&mut varied_parameters, pattern, base_parameters)?;
             }
             active_patterns.extend(prosodic_patterns);
         }
@@ -295,7 +295,7 @@ impl NaturalVariationGenerator {
             let voice_patterns =
                 self.generate_voice_quality_variations(variation_strength, duration)?;
             for pattern in &voice_patterns {
-                self.apply_variation_pattern(&mut varied_parameters, pattern, &base_parameters)?;
+                self.apply_variation_pattern(&mut varied_parameters, pattern, base_parameters)?;
             }
             active_patterns.extend(voice_patterns);
         }
@@ -304,7 +304,7 @@ impl NaturalVariationGenerator {
             let breathing_patterns =
                 self.generate_breathing_variations(variation_strength, duration)?;
             for pattern in &breathing_patterns {
-                self.apply_variation_pattern(&mut varied_parameters, pattern, &base_parameters)?;
+                self.apply_variation_pattern(&mut varied_parameters, pattern, base_parameters)?;
             }
             active_patterns.extend(breathing_patterns);
         }
@@ -347,6 +347,7 @@ impl NaturalVariationGenerator {
     }
 
     /// Generate prosodic variations
+    #[allow(clippy::vec_init_then_push)]
     fn generate_prosodic_variations(
         &mut self,
         base_strength: f32,
@@ -401,6 +402,7 @@ impl NaturalVariationGenerator {
     }
 
     /// Generate voice quality variations
+    #[allow(clippy::vec_init_then_push)]
     fn generate_voice_quality_variations(
         &mut self,
         base_strength: f32,

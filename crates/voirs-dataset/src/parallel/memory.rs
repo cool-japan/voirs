@@ -323,8 +323,9 @@ impl MemoryPool {
                 // Move to active buffers
                 if let Ok(mut active) = self.active_buffers.lock() {
                     let buffer_id = buffer.id();
+                    let buffer_clone = buffer.clone();
                     active.insert(buffer_id, buffer);
-                    return Ok(active.get(&buffer_id).unwrap().clone());
+                    return Ok(buffer_clone);
                 }
             }
         }
@@ -359,8 +360,9 @@ impl MemoryPool {
 
         // Add to active buffers
         if let Ok(mut active) = self.active_buffers.lock() {
+            let buffer_clone = buffer.clone();
             active.insert(buffer_id, buffer);
-            Ok(active.get(&buffer_id).unwrap().clone())
+            Ok(buffer_clone)
         } else {
             Err(DatasetError::MemoryError(
                 "Failed to track buffer".to_string(),

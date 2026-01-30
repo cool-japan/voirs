@@ -23,7 +23,6 @@ fn test_synthesize_with_options() {
         "voirs",
         "synthesize",
         "Test text",
-        "--output",
         "test.wav",
         "--rate",
         "1.5",
@@ -48,6 +47,7 @@ fn test_synthesize_with_options() {
             quality,
             enhance,
             play,
+            auto_detect,
         } => {
             assert_eq!(text, "Test text");
             assert_eq!(output.unwrap().to_str().unwrap(), "test.wav");

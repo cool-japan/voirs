@@ -640,7 +640,7 @@ mod tests {
     fn test_enhanced_analyzer_creation() {
         let analyzer = EnhancedStatisticalAnalyzer::new();
         assert_eq!(analyzer.bootstrap_samples, 10000);
-        assert_eq!(analyzer.alpha, 0.05);
+        assert!((analyzer.alpha - 0.05).abs() < 0.001);
     }
 
     #[test]
@@ -683,7 +683,7 @@ mod tests {
     fn test_power_analysis() {
         let analyzer = EnhancedStatisticalAnalyzer::new();
         let power = analyzer.power_analysis(0.5, 30, 0.05).unwrap();
-        assert!(power >= 0.0 && power <= 1.0);
+        assert!((0.0..=1.0).contains(&power));
 
         // Larger effect size should give higher power
         let power_large = analyzer.power_analysis(1.0, 30, 0.05).unwrap();

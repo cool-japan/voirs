@@ -13,8 +13,12 @@ pub mod memory_optimizer;
 pub mod metrics;
 pub mod monitor;
 pub mod optimizer;
+pub mod phoneme_cache;
 pub mod profiler;
 pub mod streaming_optimizer;
+
+/// Type alias for the timings store used in OperationTimer
+type TimingsStore = Arc<RwLock<HashMap<String, Vec<Duration>>>>;
 
 /// Performance metrics collector
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -538,16 +542,12 @@ impl PerformanceProfiler {
 /// Timer for tracking operation performance
 pub struct OperationTimer {
     operation_name: String,
-    timings_store: Option<Arc<RwLock<HashMap<String, Vec<Duration>>>>>,
+    timings_store: Option<TimingsStore>,
     start_time: Instant,
 }
 
 impl OperationTimer {
-    fn new(
-        operation_name: String,
-        timings_store: Arc<RwLock<HashMap<String, Vec<Duration>>>>,
-        start_time: Instant,
-    ) -> Self {
+    fn new(operation_name: String, timings_store: TimingsStore, start_time: Instant) -> Self {
         Self {
             operation_name,
             timings_store: Some(timings_store),

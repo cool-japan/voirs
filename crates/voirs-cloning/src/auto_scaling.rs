@@ -488,13 +488,14 @@ impl AutoScaler {
                     {
                         if decision.action != ScalingAction::NoAction {
                             // Execute scaling decision
-                            if let Ok(_) = Self::execute_scaling_decision(
+                            if Self::execute_scaling_decision(
                                 &config,
                                 &decision,
                                 &instances,
                                 &load_balancer,
                             )
                             .await
+                            .is_ok()
                             {
                                 // Record scaling decision
                                 {
@@ -969,7 +970,7 @@ impl AutoScaler {
                     instances_lock
                         .values()
                         .filter(|instance| instance.state == InstanceState::Running)
-                        .take(decision.instance_delta.abs() as usize)
+                        .take(decision.instance_delta.unsigned_abs() as usize)
                         .map(|instance| instance.instance_id.clone())
                         .collect()
                 };

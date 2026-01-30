@@ -85,8 +85,41 @@ fn get_os_version() -> String {
 fn get_memory_info() -> (u64, u64) {
     #[cfg(target_os = "windows")]
     {
-        // Windows memory detection using Windows API
-        (8_000_000_000, 4_000_000_000) // Placeholder values
+        // Windows memory detection using systeminfo command
+        use std::process::Command;
+
+        let output = Command::new("wmic")
+            .args([
+                "OS",
+                "get",
+                "TotalVisibleMemorySize,FreePhysicalMemory",
+                "/Value",
+            ])
+            .output()
+            .ok();
+
+        if let Some(output) = output {
+            if let Ok(text) = String::from_utf8(output.stdout) {
+                let mut total = 0u64;
+                let mut free = 0u64;
+
+                for line in text.lines() {
+                    if let Some(value) = line.strip_prefix("TotalVisibleMemorySize=") {
+                        total = value.trim().parse::<u64>().unwrap_or(0) * 1024;
+                    // KB to bytes
+                    } else if let Some(value) = line.strip_prefix("FreePhysicalMemory=") {
+                        free = value.trim().parse::<u64>().unwrap_or(0) * 1024; // KB to bytes
+                    }
+                }
+
+                if total > 0 {
+                    return (total, free);
+                }
+            }
+        }
+
+        // Fallback values if command fails
+        (8_000_000_000, 4_000_000_000)
     }
     #[cfg(target_os = "macos")]
     {
@@ -253,8 +286,15 @@ pub fn ensure_platform_dirs() -> Result<(), Box<dyn std::error::Error>> {
 pub fn is_elevated() -> bool {
     #[cfg(target_os = "windows")]
     {
-        // Windows: Check if running as administrator
-        false // Placeholder - would need Windows API calls
+        // Windows: Check if running as administrator using net session command
+        use std::process::Command;
+
+        // The 'net session' command only succeeds when run as administrator
+        Command::new("net")
+            .args(["session"])
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
     }
     #[cfg(unix)]
     {

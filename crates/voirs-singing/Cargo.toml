@@ -38,6 +38,7 @@ uuid = { workspace = true, features = ["v4", "serde"] }
 chrono = { workspace = true, features = ["serde"] }
 async-trait = { workspace = true }
 base64 = { workspace = true }
+fastrand = { workspace = true }
 
 # WebAssembly support
 wasm-bindgen = { workspace = true, optional = true }

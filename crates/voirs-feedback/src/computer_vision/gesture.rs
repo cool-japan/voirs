@@ -1,4 +1,7 @@
-use super::types::*;
+use super::types::{
+    FingerPositions, GesturePattern, GestureType, HandPosition, HeadPose, Point2D, PostureAnalysis,
+    VideoFrame,
+};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
@@ -37,8 +40,15 @@ pub struct GestureData {
     pub quality: f32,
 }
 
+impl Default for GestureRecognizer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GestureRecognizer {
     /// Description
+    #[must_use]
     pub fn new() -> Self {
         Self {
             gesture_templates: Self::initialize_templates(),
@@ -163,8 +173,15 @@ pub struct PostureData {
     pub overall_score: f32,
 }
 
+impl Default for PostureAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PostureAnalyzer {
     /// Description
+    #[must_use]
     pub fn new() -> Self {
         Self {
             reference_pose: None,
@@ -236,8 +253,8 @@ impl PostureAnalyzer {
         let right_ear = &body_landmarks[4];
 
         let ear_midpoint = Point2D {
-            x: (left_ear.x + right_ear.x) / 2.0,
-            y: (left_ear.y + right_ear.y) / 2.0,
+            x: f32::midpoint(left_ear.x, right_ear.x),
+            y: f32::midpoint(left_ear.y, right_ear.y),
         };
 
         let pitch = ((nose.y - ear_midpoint.y) / 50.0).atan().to_degrees();
@@ -277,12 +294,12 @@ impl PostureAnalyzer {
         }
 
         let neck = Point2D {
-            x: (body_landmarks[5].x + body_landmarks[6].x) / 2.0,
-            y: (body_landmarks[5].y + body_landmarks[6].y) / 2.0,
+            x: f32::midpoint(body_landmarks[5].x, body_landmarks[6].x),
+            y: f32::midpoint(body_landmarks[5].y, body_landmarks[6].y),
         };
         let mid_hip = Point2D {
-            x: (body_landmarks[11].x + body_landmarks[12].x) / 2.0,
-            y: (body_landmarks[11].y + body_landmarks[12].y) / 2.0,
+            x: f32::midpoint(body_landmarks[11].x, body_landmarks[12].x),
+            y: f32::midpoint(body_landmarks[11].y, body_landmarks[12].y),
         };
 
         let spine_angle = ((neck.x - mid_hip.x) / (neck.y - mid_hip.y))
@@ -298,8 +315,8 @@ impl PostureAnalyzer {
             return 0.5;
         }
 
-        let left_points = vec![5, 7, 9, 11, 13, 15];
-        let right_points = vec![6, 8, 10, 12, 14, 16];
+        let left_points = [5, 7, 9, 11, 13, 15];
+        let right_points = [6, 8, 10, 12, 14, 16];
 
         let mut symmetry_score = 0.0;
         let mut valid_pairs = 0;
@@ -309,7 +326,7 @@ impl PostureAnalyzer {
                 let left_point = &body_landmarks[*left_idx];
                 let right_point = &body_landmarks[*right_idx];
 
-                let center_x = (left_point.x + right_point.x) / 2.0;
+                let center_x = f32::midpoint(left_point.x, right_point.x);
                 let left_distance = (left_point.x - center_x).abs();
                 let right_distance = (right_point.x - center_x).abs();
 
@@ -349,21 +366,21 @@ impl PostureAnalyzer {
         let head_confidence = 1.0 - (head_pose.pitch.abs() / 45.0).min(1.0);
         let posture_confidence = shoulder_alignment;
 
-        (head_confidence + posture_confidence) / 2.0
+        f32::midpoint(head_confidence, posture_confidence)
     }
 
     fn calculate_engagement_level(&self, head_pose: &HeadPose, body_landmarks: &[Point2D]) -> f32 {
         let head_engagement = 1.0 - (head_pose.yaw.abs() / 45.0).min(1.0);
         let posture_engagement = if body_landmarks.len() >= 12 {
-            let shoulder_height = (body_landmarks[5].y + body_landmarks[6].y) / 2.0;
-            let hip_height = (body_landmarks[11].y + body_landmarks[12].y) / 2.0;
-            let upright_score = 1.0 - ((shoulder_height - hip_height) / 100.0).abs().min(1.0);
-            upright_score
+            let shoulder_height = f32::midpoint(body_landmarks[5].y, body_landmarks[6].y);
+            let hip_height = f32::midpoint(body_landmarks[11].y, body_landmarks[12].y);
+
+            1.0 - ((shoulder_height - hip_height) / 100.0).abs().min(1.0)
         } else {
             0.5
         };
 
-        (head_engagement + posture_engagement) / 2.0
+        f32::midpoint(head_engagement, posture_engagement)
     }
 }
 
@@ -373,8 +390,15 @@ pub struct GesturePostureAnalyzer {
     posture_analyzer: PostureAnalyzer,
 }
 
+impl Default for GesturePostureAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GesturePostureAnalyzer {
     /// Description
+    #[must_use]
     pub fn new() -> Self {
         Self {
             gesture_recognizer: GestureRecognizer::new(),

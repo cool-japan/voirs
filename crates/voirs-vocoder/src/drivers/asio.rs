@@ -385,7 +385,8 @@ mod tests {
                     // This is acceptable - no ASIO devices might be installed
                 }
                 Err(e) => {
-                    panic!("Unexpected error: {e}");
+                    // For unexpected errors in tests, use Result::unwrap with context
+                    panic!("Unexpected error enumerating ASIO devices. Only DeviceNotFound should occur during testing: {e}");
                 }
             }
         }
@@ -409,7 +410,8 @@ mod tests {
                     // This is acceptable - no ASIO devices might be installed
                 }
                 Err(e) => {
-                    panic!("Unexpected error: {e}");
+                    // For unexpected errors in tests, use Result::unwrap with context
+                    panic!("Unexpected error getting default ASIO device. Only DeviceNotFound should occur during testing: {e}");
                 }
             }
         }

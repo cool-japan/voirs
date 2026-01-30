@@ -537,7 +537,7 @@ impl VoiceMorpher {
     ) -> Result<SpeakerProfile> {
         if profiles.len() == 2 {
             // True SLERP between two profiles
-            self.slerp_two_profiles(&profiles[0], &profiles[1], &request)
+            self.slerp_two_profiles(&profiles[0], &profiles[1], request)
                 .await
         } else {
             // Fallback to weighted for multiple profiles

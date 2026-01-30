@@ -28,6 +28,7 @@ pub struct LeaderboardSystem {
 
 impl LeaderboardSystem {
     /// Create new leaderboard system
+    #[must_use]
     pub fn new() -> Self {
         let mut system = Self {
             leaderboards: HashMap::new(),
@@ -238,6 +239,7 @@ impl LeaderboardSystem {
     }
 
     /// Get leaderboard
+    #[must_use]
     pub fn get_leaderboard(
         &self,
         leaderboard_id: Uuid,
@@ -269,6 +271,7 @@ impl LeaderboardSystem {
     }
 
     /// Get user's rankings across all leaderboards
+    #[must_use]
     pub fn get_user_rankings(&self, user_id: Uuid) -> Vec<UserRanking> {
         self.user_rankings
             .get(&user_id)
@@ -277,6 +280,7 @@ impl LeaderboardSystem {
     }
 
     /// Get user's position in specific leaderboard
+    #[must_use]
     pub fn get_user_position(&self, user_id: Uuid, leaderboard_id: Uuid) -> Option<UserPosition> {
         let leaderboard = self.leaderboards.get(&leaderboard_id)?;
         let position = leaderboard
@@ -329,6 +333,7 @@ impl LeaderboardSystem {
     }
 
     /// Get available leaderboards
+    #[must_use]
     pub fn get_available_leaderboards(&self) -> Vec<LeaderboardSummary> {
         self.leaderboards
             .values()

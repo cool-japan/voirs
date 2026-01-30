@@ -116,7 +116,7 @@ fn write_ogg_page_header<W: Write>(
         .map_err(|e| VocoderError::InputError(format!("Failed to write CRC checksum: {e}")))?;
 
     // Number of page segments
-    let segments = (opus_data.len() + 254) / 255; // Number of 255-byte segments needed
+    let segments = opus_data.len().div_ceil(255); // Number of 255-byte segments needed
     writer
         .write_all(&[segments as u8])
         .map_err(|e| VocoderError::InputError(format!("Failed to write segment count: {e}")))?;

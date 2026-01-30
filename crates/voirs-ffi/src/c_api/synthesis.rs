@@ -157,6 +157,8 @@ fn apply_audio_enhancement(samples: &mut [f32], _sample_rate: u32, enable_enhanc
     if samples.len() > 1 {
         let pre_emphasis_coefficient = 0.95;
         let mut previous_sample = samples[0];
+        // Note: Cannot use iterator here due to needing both mutable access and previous value
+        #[allow(clippy::needless_range_loop)]
         for i in 1..samples.len() {
             let current_sample = samples[i];
             samples[i] = current_sample - pre_emphasis_coefficient * previous_sample;
@@ -179,8 +181,8 @@ async fn create_pipeline_and_synthesize(
     if test_mode {
         use voirs_sdk::audio::AudioBuffer;
 
-        let sample_rate = config.base_config.sample_rate as u32;
-        let duration_seconds = (text.len() as f32 * 0.1).max(0.1).min(5.0); // Estimate duration based on text length
+        let sample_rate = config.base_config.sample_rate;
+        let duration_seconds = (text.len() as f32 * 0.1).clamp(0.1, 5.0); // Estimate duration based on text length
         let sample_count = (sample_rate as f32 * duration_seconds) as usize;
 
         // Generate a simple test tone instead of actual synthesis
@@ -967,8 +969,8 @@ async fn create_streaming_pipeline_and_synthesize(
     if test_mode {
         use voirs_sdk::audio::AudioBuffer;
 
-        let sample_rate = config.base_config.sample_rate as u32;
-        let chunk_count = (text.len() / 20).max(2).min(5); // Simulate 2-5 chunks
+        let sample_rate = config.base_config.sample_rate;
+        let chunk_count = (text.len() / 20).clamp(2, 5); // Simulate 2-5 chunks
         let chunk_duration_ms = 100;
 
         for chunk_idx in 0..chunk_count {
@@ -1118,9 +1120,7 @@ async fn create_streaming_pipeline_and_synthesize(
             let is_final = chunk_index >= estimated_chunks as u32;
 
             // Call the callback with this real-time chunk
-            unsafe {
-                chunk_callback(&c_audio_buffer, chunk_index, is_final, user_data);
-            }
+            chunk_callback(&c_audio_buffer, chunk_index, is_final, user_data);
 
             chunk_index += 1;
 
@@ -1516,7 +1516,7 @@ pub unsafe extern "C" fn voirs_free_batch_synthesis_result(result: *mut VoirsBat
 
         for buffer in audio_buffers.iter_mut() {
             if !buffer.samples.is_null() {
-                let samples = Box::from_raw(slice::from_raw_parts_mut(
+                let samples = Box::from_raw(std::ptr::slice_from_raw_parts_mut(
                     buffer.samples,
                     buffer.length as usize,
                 ));
@@ -1524,7 +1524,7 @@ pub unsafe extern "C" fn voirs_free_batch_synthesis_result(result: *mut VoirsBat
             }
         }
 
-        let _ = Box::from_raw(slice::from_raw_parts_mut(
+        let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(
             batch_result.audio_buffers,
             batch_result.buffer_count as usize,
         ));
@@ -1532,7 +1532,7 @@ pub unsafe extern "C" fn voirs_free_batch_synthesis_result(result: *mut VoirsBat
 
     // Free error codes array
     if !batch_result.error_codes.is_null() {
-        let _ = Box::from_raw(slice::from_raw_parts_mut(
+        let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(
             batch_result.error_codes,
             batch_result.buffer_count as usize,
         ));

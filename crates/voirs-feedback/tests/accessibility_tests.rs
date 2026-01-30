@@ -16,12 +16,26 @@ use voirs_feedback::prelude::*;
 use voirs_feedback::traits::{
     AdaptiveState, FocusArea, SessionState, SessionStatistics, SessionStats, UserPreferences,
 };
-use voirs_feedback::{AudioBuffer, FeedbackConfig, FeedbackSession, FeedbackSystem};
+use voirs_feedback::{
+    AudioBuffer, FeedbackConfig, FeedbackError, FeedbackSession, FeedbackSystem,
+    FeedbackSystemConfig,
+};
+
+/// Helper to create FeedbackSystem with test database (in-memory for tests)
+async fn create_test_feedback_system() -> Result<FeedbackSystem, FeedbackError> {
+    let mut config = FeedbackSystemConfig::default();
+    #[cfg(feature = "persistence")]
+    {
+        // Use in-memory database for tests - faster and no file permission issues
+        config.database_path = Some(":memory:".to_string());
+    }
+    FeedbackSystem::with_config(config).await
+}
 
 #[tokio::test]
 async fn test_keyboard_navigation_accessibility() {
     // Test that all functionality can be accessed without mouse
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let mut session = feedback_system
@@ -70,7 +84,7 @@ async fn test_keyboard_navigation_accessibility() {
 #[tokio::test]
 async fn test_screen_reader_compatibility() {
     // Test that all feedback messages are structured for screen readers
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let mut session = feedback_system
@@ -123,7 +137,7 @@ async fn test_screen_reader_compatibility() {
 #[tokio::test]
 async fn test_high_contrast_theme_support() {
     // Test that high contrast themes are supported
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let mut session = feedback_system
@@ -164,7 +178,7 @@ async fn test_high_contrast_theme_support() {
 #[tokio::test]
 async fn test_text_to_speech_integration() {
     // Test that feedback can be converted to speech
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let mut session = feedback_system
@@ -216,7 +230,7 @@ async fn test_text_to_speech_integration() {
 #[tokio::test]
 async fn test_user_interaction_flow() {
     // Test that user interaction flows are logical and accessible
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
 
@@ -259,7 +273,7 @@ async fn test_user_interaction_flow() {
 #[tokio::test]
 async fn test_configuration_accessibility() {
     // Test that configuration is accessible and understandable
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let mut session = feedback_system
@@ -305,7 +319,7 @@ async fn test_configuration_accessibility() {
 #[tokio::test]
 async fn test_error_message_accessibility() {
     // Test that error messages are accessible and helpful
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let mut session = feedback_system
@@ -359,7 +373,7 @@ async fn test_error_message_accessibility() {
 #[tokio::test]
 async fn test_timeout_accessibility() {
     // Test that timeouts are handled accessibly
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let mut session = feedback_system
@@ -393,7 +407,7 @@ async fn test_timeout_accessibility() {
 #[tokio::test]
 async fn test_multi_language_accessibility() {
     // Test that multi-language support is accessible
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let mut session = feedback_system
@@ -444,7 +458,7 @@ async fn test_multi_language_accessibility() {
 #[tokio::test]
 async fn test_progress_tracking_accessibility() {
     // Test that progress tracking is accessible
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let mut session = feedback_system
@@ -497,7 +511,7 @@ async fn test_progress_tracking_accessibility() {
 #[tokio::test]
 async fn test_wcag_2_1_perceivable_compliance() {
     // WCAG 2.1 Principle 1: Perceivable - Information and UI components must be presentable to users in ways they can perceive
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let mut session = feedback_system
@@ -552,7 +566,7 @@ async fn test_wcag_2_1_perceivable_compliance() {
 #[tokio::test]
 async fn test_wcag_2_1_operable_compliance() {
     // WCAG 2.1 Principle 2: Operable - UI components and navigation must be operable
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let mut session = feedback_system
@@ -604,7 +618,7 @@ async fn test_wcag_2_1_operable_compliance() {
 #[tokio::test]
 async fn test_wcag_2_1_understandable_compliance() {
     // WCAG 2.1 Principle 3: Understandable - Information and operation of UI must be understandable
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let mut session = feedback_system
@@ -666,7 +680,7 @@ async fn test_wcag_2_1_understandable_compliance() {
 #[tokio::test]
 async fn test_wcag_2_1_robust_compliance() {
     // WCAG 2.1 Principle 4: Robust - Content must be robust enough to be interpreted reliably
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let mut session = feedback_system
@@ -723,7 +737,7 @@ async fn test_wcag_2_1_robust_compliance() {
 #[tokio::test]
 async fn test_wcag_2_1_color_contrast_compliance() {
     // WCAG 2.1 Success Criterion 1.4.3: Color contrast ratio requirements
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let mut session = feedback_system
@@ -769,7 +783,7 @@ async fn test_wcag_2_1_color_contrast_compliance() {
 #[tokio::test]
 async fn test_wcag_2_1_resize_text_compliance() {
     // WCAG 2.1 Success Criterion 1.4.4: Resize text up to 200% without loss of functionality
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let mut session = feedback_system
@@ -809,7 +823,7 @@ async fn test_wcag_2_1_resize_text_compliance() {
 #[tokio::test]
 async fn test_wcag_2_1_focus_management_compliance() {
     // WCAG 2.1 Success Criterion 2.4.3: Focus Order and 2.4.7: Focus Visible
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let mut session = feedback_system
@@ -848,7 +862,7 @@ async fn test_wcag_2_1_focus_management_compliance() {
 #[tokio::test]
 async fn test_wcag_2_1_motion_animation_compliance() {
     // WCAG 2.1 Success Criterion 2.3.3: Animation from Interactions
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let mut session = feedback_system
@@ -887,7 +901,7 @@ async fn test_wcag_2_1_motion_animation_compliance() {
 #[tokio::test]
 async fn test_wcag_2_1_error_prevention_compliance() {
     // WCAG 2.1 Success Criterion 3.3.4: Error Prevention
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let mut session = feedback_system

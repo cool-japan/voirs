@@ -632,8 +632,8 @@ impl LoadBalancer {
         nodes
             .iter()
             .min_by_key(|node| node.latency_ms)
+            .copied()
             .ok_or_else(|| anyhow::anyhow!("No nodes available"))
-            .map(|&node| node)
     }
 
     fn select_highest_capacity_node<'a>(&self, nodes: &[&'a CloudNode]) -> Result<&'a CloudNode> {
@@ -641,8 +641,8 @@ impl LoadBalancer {
             .iter()
             .filter(|node| node.current_load < node.capacity)
             .max_by_key(|node| node.capacity - node.current_load)
+            .copied()
             .ok_or_else(|| anyhow::anyhow!("No available capacity"))
-            .map(|&node| node)
     }
 
     async fn select_adaptive_node<'a>(

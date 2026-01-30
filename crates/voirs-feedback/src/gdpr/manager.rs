@@ -1,6 +1,6 @@
 //! GDPR Compliance Manager Implementation
 //!
-//! This module contains the main GdprComplianceManager that implements
+//! This module contains the main `GdprComplianceManager` that implements
 //! the core GDPR compliance functionality.
 
 use async_trait::async_trait;
@@ -11,7 +11,11 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use super::traits::GdprCompliance;
-use super::types::*;
+use super::types::{
+    ComplianceReport, ConsentRecord, DataBreach, DataRequest, DataRequestType, DataSubject,
+    GdprError, GdprResult, ProcessingActivity, ProcessingPurpose, RequestStatus, RetentionReport,
+    RetentionViolation, SubjectDataExport,
+};
 use crate::traits::{FeedbackResponse, UserProgress};
 
 /// Main GDPR compliance manager
@@ -29,6 +33,7 @@ pub struct GdprComplianceManager {
 
 impl GdprComplianceManager {
     /// Create a new GDPR compliance manager
+    #[must_use]
     pub fn new() -> Self {
         Self {
             subjects: Arc::new(RwLock::new(HashMap::new())),
@@ -51,7 +56,7 @@ impl GdprComplianceManager {
     fn is_consent_valid(&self, consent: &ConsentRecord) -> bool {
         consent.consent_given
             && consent.withdrawn_at.is_none()
-            && consent.expires_at.map_or(true, |exp| exp > Utc::now())
+            && consent.expires_at.is_none_or(|exp| exp > Utc::now())
     }
 }
 
@@ -98,7 +103,7 @@ impl GdprCompliance for GdprComplianceManager {
             }
 
             Err(GdprError::ConsentValidationFailed {
-                reason: format!("No active consent found for purpose {:?}", purpose),
+                reason: format!("No active consent found for purpose {purpose:?}"),
             })
         } else {
             Err(GdprError::DataSubjectNotFound {
@@ -176,7 +181,7 @@ impl GdprCompliance for GdprComplianceManager {
             Ok(())
         } else {
             Err(GdprError::DataExportFailed {
-                message: format!("Request {} not found", request_id),
+                message: format!("Request {request_id} not found"),
             })
         }
     }
@@ -351,6 +356,9 @@ impl Default for GdprComplianceManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gdpr::{
+        BreachSeverity, LegalBasis, NotificationStatus, PrivacyPreferences, RetentionSettings,
+    };
     use chrono::Duration as ChronoDuration;
 
     #[tokio::test]

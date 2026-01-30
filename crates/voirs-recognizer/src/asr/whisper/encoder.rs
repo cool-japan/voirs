@@ -98,6 +98,7 @@ impl Default for WhisperConfig {
 
 impl WhisperConfig {
     /// Create configuration for Whisper Tiny model (~39 MB)
+    #[must_use]
     pub fn tiny() -> Self {
         Self {
             n_mels: 80,
@@ -120,11 +121,13 @@ impl WhisperConfig {
     }
 
     /// Create configuration for Whisper Base model (~74 MB)
+    #[must_use]
     pub fn base() -> Self {
         Self::default()
     }
 
     /// Create configuration for Whisper Small model (~244 MB)
+    #[must_use]
     pub fn small() -> Self {
         Self {
             n_mels: 80,
@@ -147,6 +150,7 @@ impl WhisperConfig {
     }
 
     /// Create configuration for Whisper Medium model (~769 MB)
+    #[must_use]
     pub fn medium() -> Self {
         Self {
             n_mels: 80,
@@ -169,6 +173,7 @@ impl WhisperConfig {
     }
 
     /// Create configuration for Whisper Large model (~1550 MB)
+    #[must_use]
     pub fn large() -> Self {
         Self {
             n_mels: 80,
@@ -191,6 +196,7 @@ impl WhisperConfig {
     }
 
     /// Create configuration for Whisper Large-v2 model (~1550 MB)
+    #[must_use]
     pub fn large_v2() -> Self {
         let mut config = Self::large();
         config.model_size = "large-v2".to_string();
@@ -198,13 +204,15 @@ impl WhisperConfig {
     }
 
     /// Create configuration for Whisper Large-v3 model (~1550 MB)
+    #[must_use]
     pub fn large_v3() -> Self {
         let mut config = Self::large();
         config.model_size = "large-v3".to_string();
         config
     }
 
-    /// Create configuration from WhisperModelSize enum
+    /// Create configuration from `WhisperModelSize` enum
+    #[must_use]
     pub fn from_model_size(model_size: crate::asr::WhisperModelSize) -> Self {
         match model_size {
             crate::asr::WhisperModelSize::Tiny => Self::tiny(),
@@ -218,6 +226,7 @@ impl WhisperConfig {
     }
 
     /// Get model size as enum
+    #[must_use]
     pub fn get_model_size(&self) -> Option<crate::asr::WhisperModelSize> {
         match self.model_size.as_str() {
             "tiny" => Some(crate::asr::WhisperModelSize::Tiny),
@@ -232,6 +241,7 @@ impl WhisperConfig {
     }
 
     /// Get estimated model size in MB
+    #[must_use]
     pub fn estimated_size_mb(&self) -> f32 {
         match self.model_size.as_str() {
             "tiny" => 39.0,
@@ -244,6 +254,7 @@ impl WhisperConfig {
     }
 
     /// Get model parameters count
+    #[must_use]
     pub fn parameter_count(&self) -> usize {
         match self.model_size.as_str() {
             "tiny" => 39_000_000,
@@ -256,11 +267,13 @@ impl WhisperConfig {
     }
 
     /// Check if model supports multilingual
+    #[must_use]
     pub fn is_multilingual(&self) -> bool {
         self.multilingual
     }
 
     /// Get recommended batch size for model
+    #[must_use]
     pub fn recommended_batch_size(&self) -> usize {
         match self.model_size.as_str() {
             "tiny" => 8,
@@ -273,6 +286,7 @@ impl WhisperConfig {
     }
 
     /// Get recommended quantization mode for model
+    #[must_use]
     pub fn recommended_quantization(&self) -> QuantizationMode {
         match self.model_size.as_str() {
             "tiny" | "base" => QuantizationMode::None,
@@ -284,24 +298,28 @@ impl WhisperConfig {
     }
 
     /// Enable quantization for the model
+    #[must_use]
     pub fn with_quantization(mut self, quantization: QuantizationMode) -> Self {
         self.quantization = quantization;
         self
     }
 
     /// Set multilingual support
+    #[must_use]
     pub fn with_multilingual(mut self, multilingual: bool) -> Self {
         self.multilingual = multilingual;
         self
     }
 
     /// Set custom sample rate
+    #[must_use]
     pub fn with_sample_rate(mut self, sample_rate: u32) -> Self {
         self.sample_rate = sample_rate;
         self
     }
 
     /// Set custom chunk length
+    #[must_use]
     pub fn with_chunk_length(mut self, chunk_length: usize) -> Self {
         self.chunk_length = chunk_length;
         self
@@ -649,7 +667,7 @@ impl MLP {
     /// output = Linear2(GELU(Linear1(x)))
     ///
     /// # Arguments
-    /// * `x` - Input tensor of shape [batch_size, seq_len, hidden_size]
+    /// * `x` - Input tensor of shape [`batch_size`, `seq_len`, `hidden_size`]
     ///
     /// # Returns
     /// Transformed tensor with the same shape as input

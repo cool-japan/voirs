@@ -9,7 +9,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::Client;
 use sha2::{Digest, Sha256};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
 use voirs_sdk::config::AppConfig;
 use voirs_sdk::Result;
@@ -71,7 +71,7 @@ fn get_models_directory(config: &AppConfig) -> Result<PathBuf> {
 /// Download model from repository
 async fn download_model_from_repository(
     model_id: &str,
-    models_dir: &PathBuf,
+    models_dir: &Path,
     global: &GlobalOptions,
 ) -> Result<()> {
     if !global.quiet {
@@ -207,7 +207,7 @@ async fn get_model_metadata(
 async fn download_model_files(
     repo: &hf_hub::api::sync::ApiRepo,
     metadata: &ModelMetadata,
-    model_dir: &PathBuf,
+    model_dir: &Path,
     global: &GlobalOptions,
 ) -> Result<()> {
     let progress_bar = if !global.quiet {
@@ -259,11 +259,10 @@ async fn download_model_files(
 
         // Verify file was created
         if !file_path.exists() {
-            return Err(voirs_sdk::VoirsError::config_error(&format!(
+            return Err(voirs_sdk::VoirsError::config_error(format!(
                 "Failed to create file: {}",
                 file_path.display()
-            ))
-            .into());
+            )));
         }
 
         // Small delay to be gentle on the API
@@ -278,7 +277,7 @@ async fn download_model_files(
 }
 
 /// Create a placeholder file when download fails
-fn create_placeholder_file(file_path: &PathBuf, file_name: &str, model_id: &str) -> Result<()> {
+fn create_placeholder_file(file_path: &Path, file_name: &str, model_id: &str) -> Result<()> {
     match file_name {
         "config.json" => {
             let config = serde_json::json!({
@@ -323,7 +322,7 @@ fn create_placeholder_file(file_path: &PathBuf, file_name: &str, model_id: &str)
 /// Verify downloaded files
 async fn verify_downloaded_files(
     metadata: &ModelMetadata,
-    model_dir: &PathBuf,
+    model_dir: &Path,
     global: &GlobalOptions,
 ) -> Result<()> {
     if !global.quiet {
@@ -367,11 +366,7 @@ async fn verify_downloaded_files(
 }
 
 /// Create model configuration file
-fn create_model_config(
-    model_dir: &PathBuf,
-    model_id: &str,
-    metadata: &ModelMetadata,
-) -> Result<()> {
+fn create_model_config(model_dir: &Path, model_id: &str, metadata: &ModelMetadata) -> Result<()> {
     let config = serde_json::json!({
         "model_id": model_id,
         "name": metadata.name,
@@ -397,7 +392,7 @@ fn create_model_config(
 /// Verify model installation with enhanced SafeTensors support
 async fn verify_model_installation(
     model_id: &str,
-    models_dir: &PathBuf,
+    models_dir: &Path,
     global: &GlobalOptions,
 ) -> Result<()> {
     if !global.quiet {
@@ -556,11 +551,10 @@ fn verify_file_checksum(file_path: &PathBuf, expected_hash: &str) -> Result<()> 
     let actual_hash = format!("{:x}", result);
 
     if actual_hash != expected_hash {
-        return Err(voirs_sdk::VoirsError::config_error(&format!(
+        return Err(voirs_sdk::VoirsError::config_error(format!(
             "Checksum mismatch: expected {}, got {}",
             expected_hash, actual_hash
-        ))
-        .into());
+        )));
     }
 
     Ok(())

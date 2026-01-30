@@ -5,7 +5,8 @@
 
 use crate::{audio::AudioBuffer, error::Result, plugins::VoirsPlugin, VoirsError};
 use async_trait::async_trait;
-use std::{collections::HashMap, sync::RwLock};
+use parking_lot::RwLock;
+use std::collections::HashMap;
 
 /// Trait for format plugins that handle audio encoding/decoding
 #[async_trait]
@@ -54,17 +55,14 @@ impl VoirsFormat {
 
         // Header: "VOIRS" + version + sample_rate + channels + length
         data.extend_from_slice(b"VOIRS");
-        data.extend_from_slice(&(*self.format_version.read().unwrap()).to_le_bytes());
+        data.extend_from_slice(&(*self.format_version.read()).to_le_bytes());
         data.extend_from_slice(&audio.sample_rate().to_le_bytes());
         data.extend_from_slice(&audio.channels().to_le_bytes());
         data.extend_from_slice(&(audio.samples().len() as u32).to_le_bytes());
 
         // Metadata section
-        if *self.include_metadata.read().unwrap() {
-            let metadata = format!(
-                "VoiRS Audio Format v{}",
-                *self.format_version.read().unwrap()
-            );
+        if *self.include_metadata.read() {
+            let metadata = format!("VoiRS Audio Format v{}", *self.format_version.read());
             let metadata_bytes = metadata.as_bytes();
             data.extend_from_slice(&(metadata_bytes.len() as u32).to_le_bytes());
             data.extend_from_slice(metadata_bytes);
@@ -73,7 +71,7 @@ impl VoirsFormat {
         }
 
         // Simple compression: quantize based on compression level
-        let compression = *self.compression_level.read().unwrap() as f32 / 9.0;
+        let compression = *self.compression_level.read() as f32 / 9.0;
         let quantization_factor = 1.0 + compression * 15.0; // 1x to 16x quantization
 
         for &sample in audio.samples() {
@@ -211,11 +209,11 @@ impl FormatPlugin for VoirsFormat {
         metadata.insert("format".to_string(), "VoiRS".to_string());
         metadata.insert(
             "version".to_string(),
-            self.format_version.read().unwrap().to_string(),
+            self.format_version.read().to_string(),
         );
         metadata.insert(
             "compression".to_string(),
-            self.compression_level.read().unwrap().to_string(),
+            self.compression_level.read().to_string(),
         );
         metadata
     }
@@ -252,8 +250,8 @@ impl CodecIntegration {
 
     /// Simulate codec encoding
     fn encode_with_codec(&self, audio: &AudioBuffer) -> Vec<u8> {
-        let codec = self.codec_type.read().unwrap().clone();
-        let quality = *self.quality.read().unwrap();
+        let codec = self.codec_type.read().clone();
+        let quality = *self.quality.read();
 
         match codec.as_str() {
             "PCM" => {
@@ -362,21 +360,15 @@ impl FormatPlugin for CodecIntegration {
 
     fn get_metadata(&self) -> HashMap<String, String> {
         let mut metadata = HashMap::new();
-        metadata.insert("codec".to_string(), self.codec_type.read().unwrap().clone());
-        metadata.insert(
-            "bitrate".to_string(),
-            self.bitrate.read().unwrap().to_string(),
-        );
-        metadata.insert(
-            "quality".to_string(),
-            self.quality.read().unwrap().to_string(),
-        );
+        metadata.insert("codec".to_string(), self.codec_type.read().clone());
+        metadata.insert("bitrate".to_string(), self.bitrate.read().to_string());
+        metadata.insert("quality".to_string(), self.quality.read().to_string());
         metadata
     }
 
     fn validate_data(&self, data: &[u8]) -> bool {
         data.len() >= 4
-            && (data.len() % 4 == 0 || data.starts_with(b"MP3_SIM") || data.starts_with(b"OGG_SIM"))
+            && (data.len().is_multiple_of(4) || data.starts_with(b"MP3_SIM") || data.starts_with(b"OGG_SIM"))
     }
 }
 
@@ -412,8 +404,8 @@ impl StreamingProtocol {
     /// Create streaming packets
     #[allow(dead_code)]
     fn create_stream_packets(&self, audio: &AudioBuffer) -> Vec<Vec<u8>> {
-        let buffer_size = *self.buffer_size.read().unwrap() as usize;
-        let protocol = self.protocol_type.read().unwrap().clone();
+        let buffer_size = *self.buffer_size.read() as usize;
+        let protocol = self.protocol_type.read().clone();
         let mut packets = Vec::new();
 
         for chunk in audio.samples().chunks(buffer_size) {
@@ -553,17 +545,17 @@ impl NetworkFormat {
 
         // Flags
         let mut flags = 0u8;
-        if *self.compression_enabled.read().unwrap() {
+        if *self.compression_enabled.read() {
             flags |= 0x01;
         }
-        if *self.checksum_enabled.read().unwrap() {
+        if *self.checksum_enabled.read() {
             flags |= 0x02;
         }
-        flags |= (*self.encryption_level.read().unwrap() as u8) << 2;
+        flags |= (*self.encryption_level.read() as u8) << 2;
         data.push(flags);
 
         // Audio data with optional compression
-        let audio_data: Vec<u8> = if *self.compression_enabled.read().unwrap() {
+        let audio_data: Vec<u8> = if *self.compression_enabled.read() {
             // Simple compression: delta encoding
             let mut compressed = Vec::new();
             let mut prev_sample = 0.0f32;
@@ -589,7 +581,7 @@ impl NetworkFormat {
         data.extend_from_slice(&audio_data);
 
         // Add checksum if enabled
-        if *self.checksum_enabled.read().unwrap() {
+        if *self.checksum_enabled.read() {
             let checksum = audio_data
                 .iter()
                 .fold(0u32, |acc, &b| acc.wrapping_add(b as u32));
@@ -734,15 +726,15 @@ impl FormatPlugin for NetworkFormat {
         let mut metadata = HashMap::new();
         metadata.insert(
             "compression".to_string(),
-            self.compression_enabled.read().unwrap().to_string(),
+            self.compression_enabled.read().to_string(),
         );
         metadata.insert(
             "encryption".to_string(),
-            self.encryption_level.read().unwrap().to_string(),
+            self.encryption_level.read().to_string(),
         );
         metadata.insert(
             "checksum".to_string(),
-            self.checksum_enabled.read().unwrap().to_string(),
+            self.checksum_enabled.read().to_string(),
         );
         metadata
     }

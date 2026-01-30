@@ -664,7 +664,7 @@ impl ComprehensiveQualityAssessor {
 
     /// Check if assessment should be performed based on configuration
     pub fn should_assess(&self, sample_count: usize) -> bool {
-        sample_count % self.config.assessment_frequency == 0
+        sample_count.is_multiple_of(self.config.assessment_frequency)
     }
 }
 

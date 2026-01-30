@@ -590,7 +590,7 @@ impl ProcessingValidator {
 
         // Calculate dynamic range (simplified)
         let mut sorted_samples: Vec<f32> = samples.iter().map(|&s| s.abs()).collect();
-        sorted_samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted_samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let percentile_95 = sorted_samples[(sorted_samples.len() as f32 * 0.95) as usize];
         let percentile_5 = sorted_samples[(sorted_samples.len() as f32 * 0.05) as usize];
         let dynamic_range = 20.0 * (percentile_95 / percentile_5.max(0.001)).log10();
@@ -803,12 +803,11 @@ fn levenshtein_distance(chars1: &[char], chars2: &[char]) -> usize {
     let mut matrix = vec![vec![0; len2 + 1]; len1 + 1];
 
     // Initialize first row and column
-    #[allow(clippy::needless_range_loop)]
-    for i in 0..=len1 {
-        matrix[i][0] = i;
+    for (i, row) in matrix.iter_mut().enumerate().take(len1 + 1) {
+        row[0] = i;
     }
-    for j in 0..=len2 {
-        matrix[0][j] = j;
+    for (j, cell) in matrix[0].iter_mut().enumerate().take(len2 + 1) {
+        *cell = j;
     }
 
     // Fill the matrix

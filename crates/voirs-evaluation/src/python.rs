@@ -530,7 +530,7 @@ impl PyStatisticalAnalyzer {
         Ok(PyStatisticalResult {
             statistic: result.test_statistic,
             p_value: result.p_value,
-            effect_size: Some(result.coefficient).unwrap_or(0.0),
+            effect_size: result.coefficient,
             ci_lower,
             ci_upper,
             degrees_of_freedom: result.degrees_freedom as i32,

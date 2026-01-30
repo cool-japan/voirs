@@ -1,4 +1,4 @@
-//! PostgreSQL persistence backend
+//! `PostgreSQL` persistence backend
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -14,7 +14,7 @@ use crate::persistence::{
 };
 use crate::traits::{FeedbackResponse, SessionState, UserPreferences, UserProgress};
 
-/// PostgreSQL persistence manager with query optimization
+/// `PostgreSQL` persistence manager with query optimization
 pub struct PostgresPersistenceManager {
     pool: PgPool,
     config: PersistenceConfig,
@@ -22,7 +22,7 @@ pub struct PostgresPersistenceManager {
 }
 
 impl PostgresPersistenceManager {
-    /// Create a new PostgreSQL persistence manager with query optimization
+    /// Create a new `PostgreSQL` persistence manager with query optimization
     pub async fn new(config: PersistenceConfig) -> PersistenceResult<Self> {
         let pool = PgPool::connect(&config.connection_string)
             .await
@@ -80,7 +80,7 @@ impl PostgresPersistenceManager {
 
     /// Clear query cache
     pub async fn clear_query_cache(&self) {
-        self.query_optimizer.clear_cache().await
+        self.query_optimizer.clear_cache().await;
     }
 
     /// Create database schema
@@ -95,7 +95,7 @@ impl PostgresPersistenceManager {
 
         // Sessions table
         sqlx::query(
-            r#"
+            r"
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id UUID PRIMARY KEY,
                 user_id TEXT NOT NULL,
@@ -105,7 +105,7 @@ impl PostgresPersistenceManager {
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
-            "#,
+            ",
         )
         .execute(&mut *tx)
         .await
@@ -115,14 +115,14 @@ impl PostgresPersistenceManager {
 
         // User progress table
         sqlx::query(
-            r#"
+            r"
             CREATE TABLE IF NOT EXISTS user_progress (
                 user_id TEXT PRIMARY KEY,
                 progress_data JSONB NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
-            "#,
+            ",
         )
         .execute(&mut *tx)
         .await
@@ -132,14 +132,14 @@ impl PostgresPersistenceManager {
 
         // User preferences table
         sqlx::query(
-            r#"
+            r"
             CREATE TABLE IF NOT EXISTS user_preferences (
                 user_id TEXT PRIMARY KEY,
                 preferences_data JSONB NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
-            "#,
+            ",
         )
         .execute(&mut *tx)
         .await
@@ -149,14 +149,14 @@ impl PostgresPersistenceManager {
 
         // Feedback history table
         sqlx::query(
-            r#"
+            r"
             CREATE TABLE IF NOT EXISTS feedback_history (
                 id SERIAL PRIMARY KEY,
                 user_id TEXT NOT NULL,
                 feedback_data JSONB NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
-            "#,
+            ",
         )
         .execute(&mut *tx)
         .await
@@ -166,14 +166,14 @@ impl PostgresPersistenceManager {
 
         // Metadata table for key-value storage
         sqlx::query(
-            r#"
+            r"
             CREATE TABLE IF NOT EXISTS metadata (
                 key TEXT PRIMARY KEY,
                 value JSONB NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
-            "#,
+            ",
         )
         .execute(&mut *tx)
         .await
@@ -254,7 +254,7 @@ impl PersistenceManager for PostgresPersistenceManager {
         let session_data = self.serialize(session)?;
 
         sqlx::query(
-            r#"
+            r"
             INSERT INTO sessions 
             (session_id, user_id, start_time, last_activity, session_data, updated_at)
             VALUES ($1, $2, $3, $4, $5, NOW())
@@ -265,7 +265,7 @@ impl PersistenceManager for PostgresPersistenceManager {
                 last_activity = EXCLUDED.last_activity,
                 session_data = EXCLUDED.session_data,
                 updated_at = NOW()
-            "#,
+            ",
         )
         .bind(session.session_id)
         .bind(&session.user_id)
@@ -311,7 +311,7 @@ impl PersistenceManager for PostgresPersistenceManager {
         let progress_data = self.serialize(progress)?;
 
         sqlx::query(
-            r#"
+            r"
             INSERT INTO user_progress 
             (user_id, progress_data, updated_at)
             VALUES ($1, $2, NOW())
@@ -319,7 +319,7 @@ impl PersistenceManager for PostgresPersistenceManager {
             DO UPDATE SET 
                 progress_data = EXCLUDED.progress_data,
                 updated_at = NOW()
-            "#,
+            ",
         )
         .bind(user_id)
         .bind(progress_data)
@@ -329,7 +329,7 @@ impl PersistenceManager for PostgresPersistenceManager {
             message: format!("Failed to save user progress: {e}"),
         })?;
 
-        log::debug!("Saved progress for user: {}", user_id);
+        log::debug!("Saved progress for user: {user_id}");
         Ok(())
     }
 
@@ -362,10 +362,10 @@ impl PersistenceManager for PostgresPersistenceManager {
         let feedback_data = self.serialize(feedback)?;
 
         sqlx::query(
-            r#"
+            r"
             INSERT INTO feedback_history (user_id, feedback_data)
             VALUES ($1, $2)
-            "#,
+            ",
         )
         .bind(user_id)
         .bind(feedback_data)
@@ -375,7 +375,7 @@ impl PersistenceManager for PostgresPersistenceManager {
             message: format!("Failed to save feedback: {e}"),
         })?;
 
-        log::debug!("Saved feedback for user: {}", user_id);
+        log::debug!("Saved feedback for user: {user_id}");
         Ok(())
     }
 
@@ -423,7 +423,7 @@ impl PersistenceManager for PostgresPersistenceManager {
         let preferences_data = self.serialize(preferences)?;
 
         sqlx::query(
-            r#"
+            r"
             INSERT INTO user_preferences 
             (user_id, preferences_data, updated_at)
             VALUES ($1, $2, NOW())
@@ -431,7 +431,7 @@ impl PersistenceManager for PostgresPersistenceManager {
             DO UPDATE SET 
                 preferences_data = EXCLUDED.preferences_data,
                 updated_at = NOW()
-            "#,
+            ",
         )
         .bind(user_id)
         .bind(preferences_data)
@@ -441,7 +441,7 @@ impl PersistenceManager for PostgresPersistenceManager {
             message: format!("Failed to save user preferences: {e}"),
         })?;
 
-        log::debug!("Saved preferences for user: {}", user_id);
+        log::debug!("Saved preferences for user: {user_id}");
         Ok(())
     }
 
@@ -514,7 +514,7 @@ impl PersistenceManager for PostgresPersistenceManager {
                 message: format!("Failed to commit delete transaction: {e}"),
             })?;
 
-        log::info!("Deleted all data for user: {}", user_id);
+        log::info!("Deleted all data for user: {user_id}");
         Ok(())
     }
 
@@ -685,14 +685,14 @@ impl PersistenceManager for PostgresPersistenceManager {
         });
 
         sqlx::query(
-            r#"
+            r"
             INSERT INTO metadata (key, value, updated_at)
             VALUES ('last_cleanup', $1, NOW())
             ON CONFLICT (key) 
             DO UPDATE SET 
                 value = EXCLUDED.value,
                 updated_at = NOW()
-            "#,
+            ",
         )
         .bind(metadata_value)
         .execute(&self.pool)
@@ -704,10 +704,7 @@ impl PersistenceManager for PostgresPersistenceManager {
         let cleanup_duration = start_time.elapsed();
 
         log::info!(
-            "Cleanup completed: {} sessions, {} feedback records removed in {:?}",
-            sessions_count,
-            feedback_count,
-            cleanup_duration
+            "Cleanup completed: {sessions_count} sessions, {feedback_count} feedback records removed in {cleanup_duration:?}"
         );
 
         Ok(CleanupResult {
@@ -784,7 +781,7 @@ mod tests {
     }
 }
 
-/// Query optimization utilities for PostgreSQL
+/// Query optimization utilities for `PostgreSQL`
 impl PostgresPersistenceManager {
     /// Create additional performance indexes
     pub async fn create_performance_indexes(&self) -> PersistenceResult<()> {
@@ -863,10 +860,7 @@ impl PostgresPersistenceManager {
 
         if min_score.is_some() {
             param_count += 1;
-            where_clause += &format!(
-                " AND (feedback_data->>'score')::numeric >= ${}",
-                param_count
-            );
+            where_clause += &format!(" AND (feedback_data->>'score')::numeric >= ${param_count}");
         }
 
         // Count query for pagination
@@ -886,8 +880,7 @@ impl PostgresPersistenceManager {
 
         // Data query with pagination and ordering
         let data_query = format!(
-            "SELECT feedback_data FROM feedback_history {} ORDER BY created_at DESC LIMIT {} OFFSET {}",
-            where_clause, limit, offset
+            "SELECT feedback_data FROM feedback_history {where_clause} ORDER BY created_at DESC LIMIT {limit} OFFSET {offset}"
         );
         let mut data_query_builder = sqlx::query(&data_query).bind(user_id);
         if let Some(score) = min_score {
@@ -917,7 +910,7 @@ impl PostgresPersistenceManager {
         user_id: &str,
         days_back: i32,
     ) -> PersistenceResult<SkillProgressionAnalytics> {
-        let query = r#"
+        let query = r"
             WITH skill_progression AS (
                 SELECT 
                     DATE_TRUNC('day', created_at) as day,
@@ -939,7 +932,7 @@ impl PostgresPersistenceManager {
                 max_score,
                 LAG(avg_score) OVER (ORDER BY day) as prev_avg_score
             FROM skill_progression
-        "#;
+        ";
 
         let formatted_query = query.replace("%d", &days_back.to_string());
         let rows = sqlx::query(&formatted_query)
@@ -1017,7 +1010,7 @@ impl PostgresPersistenceManager {
             progress_data_list.push(serialized);
         }
 
-        let query = r#"
+        let query = r"
             INSERT INTO user_progress (user_id, progress_data, updated_at)
             SELECT * FROM UNNEST($1::text[], $2::jsonb[]) AS t(user_id, progress_data), 
                    (SELECT NOW()) AS updated_at
@@ -1025,7 +1018,7 @@ impl PostgresPersistenceManager {
             DO UPDATE SET 
                 progress_data = EXCLUDED.progress_data,
                 updated_at = EXCLUDED.updated_at
-        "#;
+        ";
 
         let affected_rows = sqlx::query(query)
             .bind(&user_ids)
@@ -1069,7 +1062,7 @@ impl PostgresPersistenceManager {
         }
 
         // Get table sizes for monitoring
-        let size_query = r#"
+        let size_query = r"
             SELECT 
                 schemaname,
                 tablename,
@@ -1078,7 +1071,7 @@ impl PostgresPersistenceManager {
             FROM pg_tables 
             WHERE schemaname = 'public'
             ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
-        "#;
+        ";
 
         let rows = sqlx::query(size_query)
             .fetch_all(&self.pool)

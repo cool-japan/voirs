@@ -1,0 +1,70 @@
+# Production environment overlay for VoiRS Evaluation
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: voirs-prod
+
+bases:
+- ../../base
+
+namePrefix: prod-
+
+commonLabels:
+  environment: production
+
+patches:
+- target:
+    kind: Deployment
+    name: voirs-evaluation-worker
+  patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 5
+    - op: add
+      path: /spec/template/spec/affinity/nodeAffinity
+      value:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values:
+              - c5.2xlarge
+              - c5.4xlarge
+
+- target:
+    kind: HorizontalPodAutoscaler
+    name: voirs-evaluation-worker-hpa
+  patch: |-
+    - op: replace
+      path: /spec/minReplicas
+      value: 5
+    - op: replace
+      path: /spec/maxReplicas
+      value: 50
+
+- target:
+    kind: Service
+    name: voirs-evaluation-api
+  patch: |-
+    - op: add
+      path: /metadata/annotations/service.beta.kubernetes.io~1aws-load-balancer-ssl-cert
+      value: "arn:aws:acm:us-east-1:123456789012:certificate/abcd1234"
+    - op: add
+      path: /metadata/annotations/service.beta.kubernetes.io~1aws-load-balancer-backend-protocol
+      value: "http"
+
+configMapGenerator:
+- name: voirs-evaluation-env-prod
+  behavior: merge
+  literals:
+  - RUST_LOG=info
+  - ENABLE_DEBUG=false
+  - MOCK_EVALUATION=false
+  - ENABLE_TELEMETRY=true
+  - TELEMETRY_ENDPOINT=https://telemetry.voirs.example.com
+
+images:
+- name: voirs/evaluation
+  newTag: v0.1.0-alpha.3
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000

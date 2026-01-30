@@ -70,11 +70,11 @@ impl JsonFilePersistenceManager {
             fs::read_to_string(file_path)
                 .await
                 .map_err(|e| PersistenceError::ConnectionError {
-                    message: format!("Failed to read file {}: {}", file_path, e),
+                    message: format!("Failed to read file {file_path}: {e}"),
                 })?;
 
         serde_json::from_str(&content).map_err(|e| PersistenceError::SerializationError {
-            message: format!("Failed to parse JSON: {}", e),
+            message: format!("Failed to parse JSON: {e}"),
         })
     }
 
@@ -82,7 +82,7 @@ impl JsonFilePersistenceManager {
     async fn save_to_file(&self, storage: &JsonFileStorage) -> PersistenceResult<()> {
         let content = serde_json::to_string_pretty(storage).map_err(|e| {
             PersistenceError::SerializationError {
-                message: format!("Failed to serialize to JSON: {}", e),
+                message: format!("Failed to serialize to JSON: {e}"),
             }
         })?;
 
@@ -91,7 +91,7 @@ impl JsonFilePersistenceManager {
             fs::create_dir_all(parent)
                 .await
                 .map_err(|e| PersistenceError::ConnectionError {
-                    message: format!("Failed to create directory: {}", e),
+                    message: format!("Failed to create directory: {e}"),
                 })?;
         }
 
@@ -107,7 +107,7 @@ impl JsonFilePersistenceManager {
     /// Auto-save storage if needed
     async fn auto_save(&self) -> PersistenceResult<()> {
         let storage = self.storage.read().await;
-        self.save_to_file(&*storage).await
+        self.save_to_file(&storage).await
     }
 }
 
@@ -117,7 +117,7 @@ impl PersistenceManager for JsonFilePersistenceManager {
         // Ensure the file exists
         if !Path::new(&self.file_path).exists() {
             let storage = self.storage.read().await;
-            self.save_to_file(&*storage).await?;
+            self.save_to_file(&storage).await?;
         }
 
         log::info!(
@@ -165,7 +165,7 @@ impl PersistenceManager for JsonFilePersistenceManager {
         }
 
         self.auto_save().await?;
-        log::debug!("Saved progress for user: {}", user_id);
+        log::debug!("Saved progress for user: {user_id}");
         Ok(())
     }
 
@@ -197,7 +197,7 @@ impl PersistenceManager for JsonFilePersistenceManager {
         }
 
         self.auto_save().await?;
-        log::debug!("Saved feedback for user: {}", user_id);
+        log::debug!("Saved feedback for user: {user_id}");
         Ok(())
     }
 
@@ -236,7 +236,7 @@ impl PersistenceManager for JsonFilePersistenceManager {
         }
 
         self.auto_save().await?;
-        log::debug!("Saved preferences for user: {}", user_id);
+        log::debug!("Saved preferences for user: {user_id}");
         Ok(())
     }
 
@@ -274,7 +274,7 @@ impl PersistenceManager for JsonFilePersistenceManager {
         }
 
         self.auto_save().await?;
-        log::info!("Deleted all data for user: {}", user_id);
+        log::info!("Deleted all data for user: {user_id}");
         Ok(())
     }
 
@@ -328,8 +328,11 @@ impl PersistenceManager for JsonFilePersistenceManager {
 
         let total_users = storage.user_progress.len();
         let total_sessions = storage.sessions.len();
-        let total_feedback_records: usize =
-            storage.feedback_history.values().map(|v| v.len()).sum();
+        let total_feedback_records: usize = storage
+            .feedback_history
+            .values()
+            .map(std::vec::Vec::len)
+            .sum();
 
         // Get file size
         let storage_size_bytes = if Path::new(&self.file_path).exists() {
@@ -358,8 +361,11 @@ impl PersistenceManager for JsonFilePersistenceManager {
             let mut storage = self.storage.write().await;
 
             let initial_sessions = storage.sessions.len();
-            let initial_feedback_records: usize =
-                storage.feedback_history.values().map(|v| v.len()).sum();
+            let initial_feedback_records: usize = storage
+                .feedback_history
+                .values()
+                .map(std::vec::Vec::len)
+                .sum();
 
             // Clean up old sessions
             storage
@@ -374,8 +380,11 @@ impl PersistenceManager for JsonFilePersistenceManager {
             storage.last_updated = Utc::now();
 
             let final_sessions = storage.sessions.len();
-            let final_feedback_records: usize =
-                storage.feedback_history.values().map(|v| v.len()).sum();
+            let final_feedback_records: usize = storage
+                .feedback_history
+                .values()
+                .map(std::vec::Vec::len)
+                .sum();
 
             (
                 initial_sessions - final_sessions,
@@ -389,10 +398,7 @@ impl PersistenceManager for JsonFilePersistenceManager {
         let cleanup_duration = start_time.elapsed();
 
         log::info!(
-            "JSON file cleanup completed: {} sessions, {} feedback records cleaned in {:?}",
-            sessions_cleaned,
-            feedback_records_cleaned,
-            cleanup_duration
+            "JSON file cleanup completed: {sessions_cleaned} sessions, {feedback_records_cleaned} feedback records cleaned in {cleanup_duration:?}"
         );
 
         Ok(CleanupResult {

@@ -48,28 +48,28 @@ impl fmt::Display for VideoConferencingError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             VideoConferencingError::AuthenticationFailed(msg) => {
-                write!(f, "Authentication failed: {}", msg)
+                write!(f, "Authentication failed: {msg}")
             }
             VideoConferencingError::ConnectionTimeout => write!(f, "Connection timeout"),
             VideoConferencingError::InvalidApiKey => write!(f, "Invalid API key"),
-            VideoConferencingError::MeetingNotFound(id) => write!(f, "Meeting not found: {}", id),
+            VideoConferencingError::MeetingNotFound(id) => write!(f, "Meeting not found: {id}"),
             VideoConferencingError::ParticipantNotFound(id) => {
-                write!(f, "Participant not found: {}", id)
+                write!(f, "Participant not found: {id}")
             }
             VideoConferencingError::PermissionDenied(msg) => {
-                write!(f, "Permission denied: {}", msg)
+                write!(f, "Permission denied: {msg}")
             }
-            VideoConferencingError::NetworkError(msg) => write!(f, "Network error: {}", msg),
+            VideoConferencingError::NetworkError(msg) => write!(f, "Network error: {msg}"),
             VideoConferencingError::ConfigurationError(msg) => {
-                write!(f, "Configuration error: {}", msg)
+                write!(f, "Configuration error: {msg}")
             }
             VideoConferencingError::RateLimitExceeded => write!(f, "Rate limit exceeded"),
             VideoConferencingError::UnauthorizedAccess => write!(f, "Unauthorized access"),
-            VideoConferencingError::RecordingFailed(msg) => write!(f, "Recording failed: {}", msg),
+            VideoConferencingError::RecordingFailed(msg) => write!(f, "Recording failed: {msg}"),
             VideoConferencingError::PluginInstallationFailed(msg) => {
-                write!(f, "Plugin installation failed: {}", msg)
+                write!(f, "Plugin installation failed: {msg}")
             }
-            VideoConferencingError::WebhookError(msg) => write!(f, "Webhook error: {}", msg),
+            VideoConferencingError::WebhookError(msg) => write!(f, "Webhook error: {msg}"),
         }
     }
 }
@@ -85,11 +85,11 @@ pub enum VideoConferencingPlatform {
     MicrosoftTeams,
     /// Google Meet platform
     GoogleMeet,
-    /// Cisco WebEx platform
+    /// Cisco `WebEx` platform
     WebEx,
-    /// GoToMeeting platform
+    /// `GoToMeeting` platform
     GoToMeeting,
-    /// BlueJeans platform
+    /// `BlueJeans` platform
     BlueJeans,
     /// Jitsi Meet platform
     Jitsi,
@@ -110,7 +110,7 @@ impl fmt::Display for VideoConferencingPlatform {
             VideoConferencingPlatform::BlueJeans => write!(f, "BlueJeans"),
             VideoConferencingPlatform::Jitsi => write!(f, "Jitsi Meet"),
             VideoConferencingPlatform::Skype => write!(f, "Skype"),
-            VideoConferencingPlatform::Custom(name) => write!(f, "Custom: {}", name),
+            VideoConferencingPlatform::Custom(name) => write!(f, "Custom: {name}"),
         }
     }
 }
@@ -452,6 +452,7 @@ struct ActiveMeetingSession {
 
 impl VideoConferencingIntegrationManager {
     /// Create a new video conferencing integration manager
+    #[must_use]
     pub fn new(config: VideoConferencingAuthConfig, realtime_config: RealtimeConfig) -> Self {
         Self {
             config,
@@ -771,7 +772,7 @@ impl VideoConferencingIntegrationManager {
         // Zoom meeting retrieval
         Ok(MeetingInfo {
             meeting_id: meeting_id.to_string(),
-            meeting_uuid: Some(format!("uuid_{}", meeting_id)),
+            meeting_uuid: Some(format!("uuid_{meeting_id}")),
             topic: "VoiRS Speech Training Session".to_string(),
             start_time: SystemTime::now(),
             duration_minutes: 60,
@@ -791,7 +792,7 @@ impl VideoConferencingIntegrationManager {
                 speech_analytics: None,
             }],
             status: MeetingStatus::InProgress,
-            meeting_url: format!("https://zoom.us/j/{}", meeting_id),
+            meeting_url: format!("https://zoom.us/j/{meeting_id}"),
             recording_enabled: self.config.enable_recording,
         })
     }
@@ -811,7 +812,7 @@ impl VideoConferencingIntegrationManager {
             host_name: "Prof. Johnson".to_string(),
             participants: vec![],
             status: MeetingStatus::InProgress,
-            meeting_url: format!("https://teams.microsoft.com/l/meetup-join/{}", meeting_id),
+            meeting_url: format!("https://teams.microsoft.com/l/meetup-join/{meeting_id}"),
             recording_enabled: self.config.enable_recording,
         })
     }
@@ -831,7 +832,7 @@ impl VideoConferencingIntegrationManager {
             host_name: "Ms. Williams".to_string(),
             participants: vec![],
             status: MeetingStatus::InProgress,
-            meeting_url: format!("https://meet.google.com/{}", meeting_id),
+            meeting_url: format!("https://meet.google.com/{meeting_id}"),
             recording_enabled: self.config.enable_recording,
         })
     }
@@ -1055,10 +1056,10 @@ impl VideoConferencingIntegrationManager {
             (microphone_on_count / total_participants) * 100.0;
 
         // Calculate overall engagement score
-        analytics.engagement_metrics.overall_engagement_score =
-            (analytics.engagement_metrics.camera_on_percentage
-                + analytics.engagement_metrics.microphone_usage_percentage)
-                / 2.0;
+        analytics.engagement_metrics.overall_engagement_score = f32::midpoint(
+            analytics.engagement_metrics.camera_on_percentage,
+            analytics.engagement_metrics.microphone_usage_percentage,
+        );
     }
 
     async fn generate_meeting_report(

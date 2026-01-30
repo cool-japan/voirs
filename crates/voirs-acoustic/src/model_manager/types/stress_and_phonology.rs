@@ -1,0 +1,609 @@
+//! Stress prediction and phonological rules for TTS pipeline
+//!
+//! This module contains methods for:
+//! - Stress prediction and syllable boundary detection
+//! - Language-specific stress rules (English, German, French, Spanish)
+//! - Phonological rules (assimilation, deletion, insertion, substitution)
+//! - Syllable analysis and vowel detection
+
+use super::*;
+use crate::{LanguageCode, ModelConfig, Phoneme, Result};
+use log::{debug, info};
+use std::collections::HashMap;
+
+impl TtsPipeline {
+    fn predict_stress(
+        &self,
+        phonemes: &mut [crate::Phoneme],
+        word: &str,
+        language: LanguageCode,
+        stress_config: &StressConfig,
+    ) -> Result<()> {
+        if !stress_config.predict_stress {
+            return Ok(());
+        }
+        debug!(
+            "Predicting stress for word: '{}' in language: {:?}",
+            word, language
+        );
+        let syllable_boundaries = self.detect_syllable_boundaries(phonemes)?;
+        match language {
+            LanguageCode::EnUs | LanguageCode::EnGb => {
+                self.apply_english_stress_rules(phonemes, word, &syllable_boundaries, stress_config)
+            }
+            LanguageCode::DeDe => {
+                self.apply_german_stress_rules(phonemes, word, &syllable_boundaries, stress_config)
+            }
+            LanguageCode::FrFr => {
+                self.apply_french_stress_rules(phonemes, word, &syllable_boundaries, stress_config)
+            }
+            LanguageCode::EsEs => {
+                self.apply_spanish_stress_rules(phonemes, word, &syllable_boundaries, stress_config)
+            }
+            _ => {
+                self.apply_default_stress_rules(phonemes, word, &syllable_boundaries, stress_config)
+            }
+        }
+    }
+    /// Detect syllable boundaries in phoneme sequence
+    #[allow(dead_code)]
+    fn detect_syllable_boundaries(&self, phonemes: &[crate::Phoneme]) -> Result<Vec<usize>> {
+        let mut boundaries = vec![0];
+        for (i, phoneme) in phonemes.iter().enumerate() {
+            if self.is_vowel_phoneme(&phoneme.symbol)
+                && i > 0
+                && !self.is_vowel_phoneme(&phonemes[i - 1].symbol)
+            {
+                let next_vowel_pos = self.find_next_vowel(phonemes, i + 1);
+                if let Some(next_pos) = next_vowel_pos {
+                    let consonants_between = next_pos - i - 1;
+                    if consonants_between > 0 {
+                        let split_point = self.find_syllable_split_point(phonemes, i + 1, next_pos);
+                        if split_point > *boundaries.last().unwrap_or(&0) {
+                            boundaries.push(split_point);
+                        }
+                    }
+                }
+            }
+        }
+        debug!("Detected syllable boundaries: {:?}", boundaries);
+        Ok(boundaries)
+    }
+    /// Find the next vowel position
+    #[allow(dead_code)]
+    fn find_next_vowel(&self, phonemes: &[crate::Phoneme], start: usize) -> Option<usize> {
+        for (i, phoneme) in phonemes.iter().enumerate().skip(start) {
+            if self.is_vowel_phoneme(&phoneme.symbol) {
+                return Some(i);
+            }
+        }
+        None
+    }
+    /// Find optimal syllable split point using phonotactic rules
+    #[allow(dead_code)]
+    fn find_syllable_split_point(
+        &self,
+        phonemes: &[crate::Phoneme],
+        start: usize,
+        end: usize,
+    ) -> usize {
+        if start >= end {
+            return start;
+        }
+        let consonant_count = end - start;
+        match consonant_count {
+            1 => end,
+            2 => {
+                if self.is_valid_onset_cluster(&phonemes[start..end]) {
+                    end
+                } else {
+                    start + 1
+                }
+            }
+            _ => start + 1,
+        }
+    }
+    /// Check if consonant cluster is a valid syllable onset
+    #[allow(dead_code)]
+    fn is_valid_onset_cluster(&self, consonants: &[crate::Phoneme]) -> bool {
+        if consonants.len() != 2 {
+            return false;
+        }
+        let c1 = &consonants[0].symbol;
+        let c2 = &consonants[1].symbol;
+        matches!(
+            (c1.as_str(), c2.as_str()),
+            ("B", "L")
+                | ("B", "R")
+                | ("K", "L")
+                | ("K", "R")
+                | ("G", "L")
+                | ("G", "R")
+                | ("P", "L")
+                | ("P", "R")
+                | ("T", "R")
+                | ("D", "R")
+                | ("F", "L")
+                | ("F", "R")
+                | ("S", "K")
+                | ("S", "P")
+                | ("S", "T")
+                | ("S", "M")
+                | ("S", "N")
+                | ("TH", "R")
+        )
+    }
+    /// Apply English stress rules
+    #[allow(dead_code)]
+    fn apply_english_stress_rules(
+        &self,
+        phonemes: &mut [crate::Phoneme],
+        word: &str,
+        syllable_boundaries: &[usize],
+        stress_config: &StressConfig,
+    ) -> Result<()> {
+        if syllable_boundaries.len() < 2 {
+            return Ok(());
+        }
+        let syllable_vowels = self.find_syllable_vowels(phonemes, syllable_boundaries)?;
+        let primary_stress_syllable = self.predict_english_primary_stress(word, &syllable_vowels);
+        if let Some(stress_syllable) = primary_stress_syllable {
+            if stress_syllable < syllable_vowels.len() {
+                if let Some(vowel_idx) = syllable_vowels[stress_syllable] {
+                    let features = phonemes[vowel_idx]
+                        .features
+                        .get_or_insert_with(HashMap::new);
+                    features.insert(
+                        "stress".to_string(),
+                        stress_config.primary_stress_marker.clone(),
+                    );
+                    debug!(
+                        "Applied primary stress to syllable {} (phoneme {})",
+                        stress_syllable, vowel_idx
+                    );
+                }
+            }
+        }
+        if syllable_vowels.len() > 3 {
+            let secondary_stress_syllable = self.predict_english_secondary_stress(
+                word,
+                &syllable_vowels,
+                primary_stress_syllable,
+            );
+            if let Some(sec_syllable) = secondary_stress_syllable {
+                if sec_syllable < syllable_vowels.len() {
+                    if let Some(vowel_idx) = syllable_vowels[sec_syllable] {
+                        let features = phonemes[vowel_idx]
+                            .features
+                            .get_or_insert_with(HashMap::new);
+                        features.insert(
+                            "stress".to_string(),
+                            stress_config.secondary_stress_marker.clone(),
+                        );
+                        debug!(
+                            "Applied secondary stress to syllable {} (phoneme {})",
+                            sec_syllable, vowel_idx
+                        );
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    /// Find vowel positions for each syllable
+    #[allow(dead_code)]
+    fn find_syllable_vowels(
+        &self,
+        phonemes: &[crate::Phoneme],
+        boundaries: &[usize],
+    ) -> Result<Vec<Option<usize>>> {
+        let mut syllable_vowels = Vec::new();
+        for i in 0..boundaries.len() {
+            let start = boundaries[i];
+            let end = if i + 1 < boundaries.len() {
+                boundaries[i + 1]
+            } else {
+                phonemes.len()
+            };
+            let vowel_pos = (start..end)
+                .find(|&idx| idx < phonemes.len() && self.is_vowel_phoneme(&phonemes[idx].symbol));
+            syllable_vowels.push(vowel_pos);
+        }
+        Ok(syllable_vowels)
+    }
+    /// Predict primary stress position for English words
+    #[allow(dead_code)]
+    fn predict_english_primary_stress(
+        &self,
+        word: &str,
+        syllable_vowels: &[Option<usize>],
+    ) -> Option<usize> {
+        let _word_lower = word.to_lowercase();
+        let syllable_count = syllable_vowels.len();
+        if syllable_count == 1 {
+            None
+        } else if syllable_count == 2 || syllable_count == 3 {
+            Some(0)
+        } else {
+            Some(1)
+        }
+    }
+    /// Predict secondary stress position for English words
+    #[allow(dead_code)]
+    fn predict_english_secondary_stress(
+        &self,
+        _word: &str,
+        syllable_vowels: &[Option<usize>],
+        primary: Option<usize>,
+    ) -> Option<usize> {
+        let syllable_count = syllable_vowels.len();
+        if syllable_count <= 3 {
+            return None;
+        }
+        match primary {
+            Some(0) => Some(syllable_count - 2),
+            Some(primary_pos) if primary_pos < syllable_count / 2 => Some(syllable_count - 1),
+            _ => Some(0),
+        }
+    }
+    /// Apply German stress rules (simplified)
+    #[allow(dead_code)]
+    fn apply_german_stress_rules(
+        &self,
+        phonemes: &mut [crate::Phoneme],
+        _word: &str,
+        syllable_boundaries: &[usize],
+        stress_config: &StressConfig,
+    ) -> Result<()> {
+        self.apply_first_syllable_stress(phonemes, syllable_boundaries, stress_config)
+    }
+    /// Apply French stress rules (simplified)
+    #[allow(dead_code)]
+    fn apply_french_stress_rules(
+        &self,
+        phonemes: &mut [crate::Phoneme],
+        _word: &str,
+        syllable_boundaries: &[usize],
+        stress_config: &StressConfig,
+    ) -> Result<()> {
+        self.apply_last_syllable_stress(phonemes, syllable_boundaries, stress_config)
+    }
+    /// Apply Spanish stress rules (simplified)
+    #[allow(dead_code)]
+    fn apply_spanish_stress_rules(
+        &self,
+        phonemes: &mut [crate::Phoneme],
+        word: &str,
+        syllable_boundaries: &[usize],
+        stress_config: &StressConfig,
+    ) -> Result<()> {
+        let ends_with_vowel_n_s = word
+            .to_lowercase()
+            .chars()
+            .last()
+            .map(|c| matches!(c, 'a' | 'e' | 'i' | 'o' | 'u' | 'n' | 's'))
+            .unwrap_or(false);
+        if ends_with_vowel_n_s {
+            self.apply_penultimate_syllable_stress(phonemes, syllable_boundaries, stress_config)
+        } else {
+            self.apply_last_syllable_stress(phonemes, syllable_boundaries, stress_config)
+        }
+    }
+    /// Apply default stress rules for unknown languages
+    #[allow(dead_code)]
+    fn apply_default_stress_rules(
+        &self,
+        phonemes: &mut [crate::Phoneme],
+        _word: &str,
+        syllable_boundaries: &[usize],
+        stress_config: &StressConfig,
+    ) -> Result<()> {
+        self.apply_first_syllable_stress(phonemes, syllable_boundaries, stress_config)
+    }
+    /// Apply stress to first syllable
+    #[allow(dead_code)]
+    fn apply_first_syllable_stress(
+        &self,
+        phonemes: &mut [crate::Phoneme],
+        syllable_boundaries: &[usize],
+        stress_config: &StressConfig,
+    ) -> Result<()> {
+        if syllable_boundaries.is_empty() {
+            return Ok(());
+        }
+        let syllable_vowels = self.find_syllable_vowels(phonemes, syllable_boundaries)?;
+        if let Some(Some(vowel_idx)) = syllable_vowels.first() {
+            let features = phonemes[*vowel_idx]
+                .features
+                .get_or_insert_with(HashMap::new);
+            features.insert(
+                "stress".to_string(),
+                stress_config.primary_stress_marker.clone(),
+            );
+        }
+        Ok(())
+    }
+    /// Apply stress to last syllable
+    #[allow(dead_code)]
+    fn apply_last_syllable_stress(
+        &self,
+        phonemes: &mut [crate::Phoneme],
+        syllable_boundaries: &[usize],
+        stress_config: &StressConfig,
+    ) -> Result<()> {
+        if syllable_boundaries.is_empty() {
+            return Ok(());
+        }
+        let syllable_vowels = self.find_syllable_vowels(phonemes, syllable_boundaries)?;
+        if let Some(Some(vowel_idx)) = syllable_vowels.last() {
+            let features = phonemes[*vowel_idx]
+                .features
+                .get_or_insert_with(HashMap::new);
+            features.insert(
+                "stress".to_string(),
+                stress_config.primary_stress_marker.clone(),
+            );
+        }
+        Ok(())
+    }
+    /// Apply stress to penultimate (second-to-last) syllable
+    #[allow(dead_code)]
+    fn apply_penultimate_syllable_stress(
+        &self,
+        phonemes: &mut [crate::Phoneme],
+        syllable_boundaries: &[usize],
+        stress_config: &StressConfig,
+    ) -> Result<()> {
+        let syllable_vowels = self.find_syllable_vowels(phonemes, syllable_boundaries)?;
+        if syllable_vowels.len() >= 2 {
+            let penultimate_idx = syllable_vowels.len() - 2;
+            if let Some(Some(vowel_idx)) = syllable_vowels.get(penultimate_idx) {
+                let features = phonemes[*vowel_idx]
+                    .features
+                    .get_or_insert_with(HashMap::new);
+                features.insert(
+                    "stress".to_string(),
+                    stress_config.primary_stress_marker.clone(),
+                );
+            }
+        }
+        Ok(())
+    }
+    /// Apply assimilation rules to phonemes
+    #[allow(dead_code)]
+    pub(crate) fn apply_assimilation_rules(&self, phonemes: &mut [crate::Phoneme]) -> Result<()> {
+        for i in 0..phonemes.len().saturating_sub(1) {
+            let current = &phonemes[i].symbol;
+            let next = &phonemes[i + 1].symbol;
+            if current == "N" && (next == "P" || next == "B") {
+                phonemes[i].symbol = "M".to_string();
+            } else if current == "N" && (next == "K" || next == "G") {
+                phonemes[i].symbol = "NG".to_string();
+            }
+        }
+        Ok(())
+    }
+    /// Apply deletion rules to phonemes
+    #[allow(dead_code)]
+    pub(crate) fn apply_deletion_rules(&self, phonemes: &mut Vec<crate::Phoneme>) -> Result<()> {
+        phonemes.retain(|phoneme| {
+            !(phoneme.symbol == "AH" && phoneme.duration.is_some_and(|d| d < 0.05))
+        });
+        Ok(())
+    }
+    /// Apply insertion rules to phonemes
+    #[allow(dead_code)]
+    pub(crate) fn apply_insertion_rules(&self, phonemes: &mut Vec<crate::Phoneme>) -> Result<()> {
+        let mut insertions = Vec::new();
+        for i in 0..phonemes.len().saturating_sub(1) {
+            let current = &phonemes[i].symbol;
+            let next = &phonemes[i + 1].symbol;
+            if current == "S" && (next == "T" || next == "P") {
+                insertions.push((
+                    i + 1,
+                    crate::Phoneme {
+                        symbol: "AH".to_string(),
+                        duration: Some(0.03),
+                        features: None,
+                    },
+                ));
+            }
+        }
+        for (offset, (index, phoneme)) in insertions.into_iter().enumerate() {
+            phonemes.insert(index + offset, phoneme);
+        }
+        Ok(())
+    }
+    /// Apply substitution rules to phonemes
+    #[allow(dead_code)]
+    pub(crate) fn apply_substitution_rules(&self, phonemes: &mut [crate::Phoneme]) -> Result<()> {
+        for phoneme in phonemes.iter_mut() {
+            match phoneme.symbol.as_str() {
+                "AA" if phoneme.duration.is_some_and(|d| d < 0.1) => {
+                    phoneme.symbol = "AH".to_string();
+                }
+                "IY" if phoneme.duration.is_some_and(|d| d < 0.08) => {
+                    phoneme.symbol = "IH".to_string();
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+    /// Apply English-specific phonological rules
+    #[allow(dead_code)]
+    pub(crate) fn apply_english_phonological_rules(
+        &self,
+        phonemes: &mut [crate::Phoneme],
+    ) -> Result<()> {
+        for i in 0..phonemes.len().saturating_sub(1) {
+            let current = &phonemes[i].symbol;
+            let next = &phonemes[i + 1].symbol;
+            if current == "T" && self.is_vowel_phoneme(next) {
+                phonemes[i].symbol = "DX".to_string();
+            }
+        }
+        Ok(())
+    }
+    /// Apply German-specific phonological rules
+    #[allow(dead_code)]
+    pub(crate) fn apply_german_phonological_rules(
+        &self,
+        phonemes: &mut [crate::Phoneme],
+    ) -> Result<()> {
+        for phoneme in phonemes.iter_mut() {
+            if phoneme.symbol == "G" {
+                phoneme.symbol = "X".to_string();
+            }
+        }
+        Ok(())
+    }
+    /// Apply French-specific phonological rules
+    #[allow(dead_code)]
+    pub(crate) fn apply_french_phonological_rules(
+        &self,
+        phonemes: &mut [crate::Phoneme],
+    ) -> Result<()> {
+        for phoneme in phonemes.iter_mut() {
+            if phoneme.symbol == "R" {
+                phoneme.symbol = "GH".to_string();
+            }
+        }
+        Ok(())
+    }
+    /// Apply Spanish-specific phonological rules
+    #[allow(dead_code)]
+    pub(crate) fn apply_spanish_phonological_rules(
+        &self,
+        phonemes: &mut [crate::Phoneme],
+    ) -> Result<()> {
+        for phoneme in phonemes.iter_mut() {
+            if phoneme.symbol == "B" {
+                phoneme.symbol = "V".to_string();
+            }
+        }
+        Ok(())
+    }
+    /// Apply default phonological rules
+    #[allow(dead_code)]
+    pub(crate) fn apply_default_phonological_rules(
+        &self,
+        phonemes: &mut Vec<crate::Phoneme>,
+    ) -> Result<()> {
+        self.apply_assimilation_rules(phonemes)?;
+        self.apply_deletion_rules(phonemes)?;
+        Ok(())
+    }
+    /// Integrate prosody features into phoneme sequence
+    pub(crate) fn integrate_prosody_features(
+        &self,
+        phonemes: &mut [crate::Phoneme],
+        g2p_config: &G2pConfig,
+    ) -> Result<()> {
+        debug!(
+            "Integrating prosody features for {} phonemes",
+            phonemes.len()
+        );
+        self.apply_intonation_patterns(phonemes)?;
+        self.apply_rhythm_adjustments(phonemes)?;
+        self.apply_emphasis_features(phonemes)?;
+        self.apply_boundary_tones(phonemes)?;
+        self.apply_voice_quality_features(phonemes, g2p_config)?;
+        Ok(())
+    }
+    /// Check if phoneme is a stop consonant
+    #[allow(dead_code)]
+    pub(crate) fn is_stop_consonant(&self, symbol: &str) -> bool {
+        matches!(symbol, "P" | "B" | "T" | "D" | "K" | "G")
+    }
+    /// Check if phoneme is a fricative
+    #[allow(dead_code)]
+    pub(crate) fn is_fricative(&self, symbol: &str) -> bool {
+        matches!(
+            symbol,
+            "F" | "V" | "TH" | "DH" | "S" | "Z" | "SH" | "ZH" | "HH"
+        )
+    }
+    fn apply_intonation_patterns(&self, phonemes: &mut [crate::Phoneme]) -> Result<()> {
+        let phonemes_len = phonemes.len();
+        for (i, phoneme) in phonemes.iter_mut().enumerate() {
+            if self.is_vowel_phoneme(&phoneme.symbol) {
+                let position = i as f32 / phonemes_len as f32;
+                let mut features = phoneme.features.clone().unwrap_or_default();
+                if position < 0.5 {
+                    features.insert("pitch_mult".to_string(), "1.1".to_string());
+                } else {
+                    features.insert("pitch_mult".to_string(), "0.9".to_string());
+                }
+                phoneme.features = Some(features);
+            }
+        }
+        Ok(())
+    }
+    /// Apply rhythm adjustments
+    #[allow(dead_code)]
+    fn apply_rhythm_adjustments(&self, phonemes: &mut [crate::Phoneme]) -> Result<()> {
+        for phoneme in phonemes.iter_mut() {
+            if self.is_vowel_phoneme(&phoneme.symbol) {
+                if let Some(duration) = phoneme.duration {
+                    phoneme.duration = Some(duration * 1.2);
+                }
+            }
+        }
+        Ok(())
+    }
+    /// Apply emphasis features
+    #[allow(dead_code)]
+    fn apply_emphasis_features(&self, phonemes: &mut [crate::Phoneme]) -> Result<()> {
+        for phoneme in phonemes.iter_mut() {
+            let mut features = phoneme.features.clone().unwrap_or_default();
+            if let Some(energy_str) = features.get("energy") {
+                if let Ok(energy) = energy_str.parse::<f32>() {
+                    if energy > 0.8 {
+                        features.insert("pitch_mult".to_string(), "1.2".to_string());
+                        if let Some(duration) = phoneme.duration {
+                            phoneme.duration = Some(duration * 1.1);
+                        }
+                    }
+                }
+            }
+            phoneme.features = Some(features);
+        }
+        Ok(())
+    }
+    /// Apply boundary tones
+    #[allow(dead_code)]
+    fn apply_boundary_tones(&self, phonemes: &mut [crate::Phoneme]) -> Result<()> {
+        if let Some(first) = phonemes.first_mut() {
+            if self.is_vowel_phoneme(&first.symbol) {
+                let mut features = first.features.clone().unwrap_or_default();
+                features.insert("boundary_tone".to_string(), "high".to_string());
+                first.features = Some(features);
+            }
+        }
+        if let Some(last) = phonemes.last_mut() {
+            if self.is_vowel_phoneme(&last.symbol) {
+                let mut features = last.features.clone().unwrap_or_default();
+                features.insert("boundary_tone".to_string(), "low".to_string());
+                last.features = Some(features);
+            }
+        }
+        Ok(())
+    }
+    /// Apply voice quality features
+    #[allow(dead_code)]
+    fn apply_voice_quality_features(
+        &self,
+        phonemes: &mut [crate::Phoneme],
+        _g2p_config: &G2pConfig,
+    ) -> Result<()> {
+        for phoneme in phonemes.iter_mut() {
+            if self.is_vowel_phoneme(&phoneme.symbol) {
+                let mut features = phoneme.features.clone().unwrap_or_default();
+                features.insert("energy_mult".to_string(), "0.95".to_string());
+                phoneme.features = Some(features);
+            }
+        }
+        Ok(())
+    }
+}

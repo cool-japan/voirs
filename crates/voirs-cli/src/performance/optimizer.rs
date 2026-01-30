@@ -289,17 +289,17 @@ impl PerformanceOptimizer {
             OptimizationCategory::ModelOptimization => {
                 self.apply_model_optimization(recommendation).await?
             }
-            OptimizationCategory::Io => {
-                self.apply_io_optimization(recommendation).await?
-            }
+            OptimizationCategory::Io => self.apply_io_optimization(recommendation).await?,
             OptimizationCategory::Network => {
                 self.apply_network_optimization(recommendation).await?
             }
             OptimizationCategory::Configuration => {
-                self.apply_configuration_optimization(recommendation).await?
+                self.apply_configuration_optimization(recommendation)
+                    .await?
             }
             OptimizationCategory::ResourceAllocation => {
-                self.apply_resource_allocation_optimization(recommendation).await?
+                self.apply_resource_allocation_optimization(recommendation)
+                    .await?
             }
         };
 

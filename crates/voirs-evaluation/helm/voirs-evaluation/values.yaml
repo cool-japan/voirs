@@ -1,0 +1,322 @@
+# Default values for voirs-evaluation Helm chart
+# This is a YAML-formatted file declaring values for the chart templates
+
+# Global settings
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  storageClass: ""
+
+# Image configuration
+image:
+  registry: docker.io
+  repository: voirs/evaluation
+  tag: v0.1.0-alpha.3
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+# Coordinator configuration
+coordinator:
+  enabled: true
+  replicas: 1
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+
+  persistence:
+    enabled: true
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: 10Gi
+
+  service:
+    type: ClusterIP
+    port: 8080
+    grpcPort: 9000
+    metricsPort: 9090
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Worker configuration
+worker:
+  enabled: true
+  replicas: 3
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+      ephemeralStorage: 2Gi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+      ephemeralStorage: 10Gi
+
+  cache:
+    enabled: true
+    sizeLimit: 5Gi
+
+  nodeSelector: {}
+  tolerations: []
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app: voirs-evaluation
+              component: worker
+          topologyKey: kubernetes.io/hostname
+
+# Autoscaling configuration
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+  # Custom metrics
+  customMetrics:
+    enabled: true
+    queueDepth: 20
+    activeTasks: 8
+
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 25
+        periodSeconds: 120
+      - type: Pods
+        value: 1
+        periodSeconds: 120
+
+# Service configuration
+service:
+  type: LoadBalancer
+  port: 80
+  httpsPort: 443
+  annotations: {}
+  loadBalancerSourceRanges: []
+  sessionAffinity: ClientIP
+
+# Ingress configuration
+ingress:
+  enabled: false
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: evaluation.voirs.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: voirs-evaluation-tls
+      hosts:
+        - evaluation.voirs.example.com
+
+# RBAC configuration
+rbac:
+  create: true
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+
+# Network policy configuration
+networkPolicy:
+  enabled: true
+  policyTypes:
+    - Ingress
+    - Egress
+
+# Monitoring configuration
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+
+  prometheusRule:
+    enabled: true
+    rules:
+      - alert: VoiRSWorkerDown
+        expr: up{job="voirs-evaluation-worker"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "VoiRS evaluation worker is down"
+          description: "Worker {{ $labels.instance }} has been down for more than 5 minutes."
+
+      - alert: VoiRSHighQueueDepth
+        expr: voirs_evaluation_queue_depth > 50
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High queue depth detected"
+          description: "Queue depth is {{ $value }}, which is above threshold."
+
+      - alert: VoiRSHighErrorRate
+        expr: rate(voirs_evaluation_errors_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value }} errors per second."
+
+# Application configuration
+config:
+  distributed:
+    maxWorkers: 20
+    minWorkers: 1
+    taskTimeoutSeconds: 300
+    heartbeatIntervalSeconds: 30
+    maxRetries: 3
+    loadBalancing: "adaptive"
+
+    autoScaling:
+      enabled: true
+      targetCpuUtilization: 70.0
+      targetMemoryUtilization: 80.0
+      targetQueueDepth: 20
+      scaleUpThreshold: 3
+      scaleDownThreshold: 5
+      cooldownSeconds: 300
+      scaleUpIncrement: 2
+      scaleDownDecrement: 1
+
+    faultTolerance:
+      enableCheckpointing: true
+      checkpointIntervalSeconds: 600
+      enableResultReplication: false
+      replicationFactor: 2
+      retryBackoffSeconds: 10
+
+    cluster:
+      enabled: true
+      clusterName: "voirs-eval-cluster"
+      discoveryMethod: "kubernetes"
+      consensusEnabled: false
+      replicationEnabled: false
+
+  quality:
+    defaultSampleRate: 16000
+    enableGpu: false
+    cacheResults: true
+    cacheTtlSeconds: 3600
+
+    metrics:
+      pesq:
+        enabled: true
+        mode: "wb"
+      stoi:
+        enabled: true
+        extended: true
+      mcd:
+        enabled: true
+        useDtw: true
+      polqa:
+        enabled: false
+        bandwidth: "wideband"
+
+  logging:
+    level: "info"
+    format: "json"
+    output: "stdout"
+
+  api:
+    enableRestApi: true
+    enableCors: true
+    corsAllowedOrigins: ["*"]
+    maxRequestSizeMb: 100
+
+    rateLimiting:
+      enabled: true
+      requestsPerMinute: 60
+      burstSize: 10
+
+    authentication:
+      enabled: false
+      requireApiKey: false
+
+    websocket:
+      enabled: true
+      path: "/ws"
+      maxConnections: 100
+      pingIntervalSeconds: 30
+
+  storage:
+    backend: "filesystem"
+    basePath: "/data"
+    enableCompression: true
+    compressionLevel: 6
+
+    retention:
+      enabled: true
+      maxAgeDays: 90
+      maxSizeGb: 100
+      cleanupIntervalHours: 24
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Additional labels and annotations
+commonLabels: {}
+commonAnnotations: {}
+
+# Extra environment variables
+extraEnv: []
+# - name: CUSTOM_VAR
+#   value: "custom-value"
+
+# Extra volumes
+extraVolumes: []
+# - name: custom-volume
+#   emptyDir: {}
+
+# Extra volume mounts
+extraVolumeMounts: []
+# - name: custom-volume
+#   mountPath: /custom/path

@@ -189,14 +189,14 @@ pub enum IndexType {
     Hash,
     /// GIN (Generalized Inverted Index)
     Gin,
-    /// GiST (Generalized Search Tree)
+    /// `GiST` (Generalized Search Tree)
     Gist,
     /// Composite index on multiple columns
     Composite,
     /// Partial index with condition
     PartialIndex {
         /// Index condition
-        condition: String
+        condition: String,
     },
 }
 
@@ -219,6 +219,7 @@ pub struct PerformanceBaseline {
 
 impl QueryOptimizer {
     /// Create a new query optimizer
+    #[must_use]
     pub fn new(config: QueryOptimizerConfig) -> Self {
         Self {
             config,
@@ -245,7 +246,7 @@ impl QueryOptimizer {
         let offset = offset.unwrap_or(0);
 
         // Check cache first
-        let cache_key = format!("feedback_history:{}:{}:{}", user_id, limit, offset);
+        let cache_key = format!("feedback_history:{user_id}:{limit}:{offset}");
         if self.config.enable_query_cache {
             if let Some(cached) = self
                 .get_from_cache::<Vec<FeedbackResponse>>(&cache_key)
@@ -258,13 +259,13 @@ impl QueryOptimizer {
 
         // Execute optimized query with proper parameterization
         let rows = sqlx::query(
-            r#"
+            r"
             SELECT feedback_data 
             FROM feedback_history 
             WHERE user_id = $1 
             ORDER BY created_at DESC 
             LIMIT $2 OFFSET $3
-            "#,
+            ",
         )
         .bind(user_id)
         .bind(limit as i64)
@@ -272,7 +273,7 @@ impl QueryOptimizer {
         .fetch_all(pool)
         .await
         .map_err(|e| PersistenceError::ConnectionError {
-            message: format!("Failed to load feedback history: {}", e),
+            message: format!("Failed to load feedback history: {e}"),
         })?;
 
         // Deserialize results
@@ -282,7 +283,7 @@ impl QueryOptimizer {
             let feedback: FeedbackResponse =
                 serde_json::from_value(feedback_data).map_err(|e| {
                     PersistenceError::SerializationError {
-                        message: format!("Failed to deserialize feedback: {}", e),
+                        message: format!("Failed to deserialize feedback: {e}"),
                     }
                 })?;
             feedback_history.push(feedback);
@@ -325,7 +326,7 @@ impl QueryOptimizer {
 
             let result = query_builder.build().execute(pool).await.map_err(|e| {
                 PersistenceError::ConnectionError {
-                    message: format!("Failed to batch save feedback: {}", e),
+                    message: format!("Failed to batch save feedback: {e}"),
                 }
             })?;
 
@@ -348,7 +349,7 @@ impl QueryOptimizer {
         let start_time = Instant::now();
 
         // Check cache first
-        let cache_key = format!("user_data_complete:{}", user_id);
+        let cache_key = format!("user_data_complete:{user_id}");
         if self.config.enable_query_cache {
             if let Some(cached) = self.get_from_cache::<CompleteUserData>(&cache_key).await {
                 self.record_cache_hit().await;
@@ -358,7 +359,7 @@ impl QueryOptimizer {
 
         // Single query with joins to reduce round trips
         let row = sqlx::query(
-            r#"
+            r"
             SELECT 
                 up.progress_data,
                 upr.preferences_data,
@@ -376,13 +377,13 @@ impl QueryOptimizer {
             FULL OUTER JOIN user_preferences upr ON up.user_id = upr.user_id
             WHERE up.user_id = $1 OR upr.user_id = $1
             LIMIT 1
-            "#,
+            ",
         )
         .bind(user_id)
         .fetch_optional(pool)
         .await
         .map_err(|e| PersistenceError::ConnectionError {
-            message: format!("Failed to load complete user data: {}", e),
+            message: format!("Failed to load complete user data: {e}"),
         })?;
 
         let user_data = match row {
@@ -395,7 +396,7 @@ impl QueryOptimizer {
                 let progress = if let Some(data) = progress_data {
                     Some(serde_json::from_value(data).map_err(|e| {
                         PersistenceError::SerializationError {
-                            message: format!("Failed to deserialize progress: {}", e),
+                            message: format!("Failed to deserialize progress: {e}"),
                         }
                     })?)
                 } else {
@@ -405,7 +406,7 @@ impl QueryOptimizer {
                 let preferences = if let Some(data) = preferences_data {
                     Some(serde_json::from_value(data).map_err(|e| {
                         PersistenceError::SerializationError {
-                            message: format!("Failed to deserialize preferences: {}", e),
+                            message: format!("Failed to deserialize preferences: {e}"),
                         }
                     })?)
                 } else {
@@ -548,7 +549,7 @@ impl QueryOptimizer {
 
         // Add streaming optimization hints if enabled
         let optimized_query = if self.config.enable_query_hints {
-            format!("/*+ USE_HASH_JOIN CURSOR_SHARING=EXACT */ {}", base_query)
+            format!("/*+ USE_HASH_JOIN CURSOR_SHARING=EXACT */ {base_query}")
         } else {
             base_query.to_string()
         };
@@ -564,8 +565,7 @@ impl QueryOptimizer {
                         return None;
                     }
 
-                    let paginated_query =
-                        format!("{} LIMIT {} OFFSET {}", query, page_size, offset);
+                    let paginated_query = format!("{query} LIMIT {page_size} OFFSET {offset}");
 
                     match sqlx::query(&paginated_query).fetch_all(&pool).await {
                         Ok(rows) => {
@@ -575,7 +575,7 @@ impl QueryOptimizer {
                                 .map(|row| {
                                     T::from_row(&row).map_err(|e| {
                                         PersistenceError::SerializationError {
-                                            message: format!("Failed to deserialize row: {}", e),
+                                            message: format!("Failed to deserialize row: {e}"),
                                         }
                                     })
                                 })
@@ -585,7 +585,7 @@ impl QueryOptimizer {
                         }
                         Err(e) => {
                             let error = PersistenceError::ConnectionError {
-                                message: format!("Streaming query failed: {}", e),
+                                message: format!("Streaming query failed: {e}"),
                             };
                             Some((
                                 stream::iter(vec![Err(error)]),
@@ -610,12 +610,12 @@ impl QueryOptimizer {
         let start_time = Instant::now();
 
         // Get query execution plan
-        let explain_query = format!("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {}", query);
+        let explain_query = format!("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {query}");
         let row = sqlx::query(&explain_query)
             .fetch_one(pool)
             .await
             .map_err(|e| PersistenceError::ConnectionError {
-                message: format!("Failed to get query plan: {}", e),
+                message: format!("Failed to get query plan: {e}"),
             })?;
 
         let execution_plan: serde_json::Value = row.get(0);
@@ -644,7 +644,7 @@ impl QueryOptimizer {
         let mut cost_estimate = 0.0;
 
         if let Some(plan_array) = plan.as_array() {
-            if let Some(plan_obj) = plan_array.get(0) {
+            if let Some(plan_obj) = plan_array.first() {
                 if let Some(plan_data) = plan_obj.get("Plan") {
                     self.analyze_plan_node(
                         plan_data,
@@ -678,7 +678,7 @@ impl QueryOptimizer {
             scan_types.push(node_type.to_string());
 
             // Add cost
-            if let Some(total_cost) = node.get("Total Cost").and_then(|v| v.as_f64()) {
+            if let Some(total_cost) = node.get("Total Cost").and_then(serde_json::Value::as_f64) {
                 *cost_estimate += total_cost;
             }
 
@@ -687,8 +687,7 @@ impl QueryOptimizer {
                 "Seq Scan" => {
                     if let Some(relation) = node.get("Relation Name").and_then(|v| v.as_str()) {
                         recommendations.push(format!(
-                            "Consider adding an index on table '{}' to avoid sequential scan",
-                            relation
+                            "Consider adding an index on table '{relation}' to avoid sequential scan"
                         ));
                     }
                 }
@@ -698,7 +697,8 @@ impl QueryOptimizer {
                     }
                 }
                 "Hash Join" | "Nested Loop" => {
-                    if let Some(rows) = node.get("Actual Rows").and_then(|v| v.as_u64()) {
+                    if let Some(rows) = node.get("Actual Rows").and_then(serde_json::Value::as_u64)
+                    {
                         if rows > 100000 {
                             recommendations.push(
                                 String::from("Large join detected. Consider optimizing join conditions or partitioning")
@@ -709,8 +709,7 @@ impl QueryOptimizer {
                 "Sort" => {
                     if let Some(sort_key) = node.get("Sort Key") {
                         recommendations.push(format!(
-                            "Sort operation detected on {}. Consider adding an index to avoid sorting",
-                            sort_key
+                            "Sort operation detected on {sort_key}. Consider adding an index to avoid sorting"
                         ));
                     }
                 }
@@ -790,7 +789,7 @@ impl QueryOptimizer {
                 })
             }
             Err(e) => Err(PersistenceError::ConnectionError {
-                message: format!("Connection pool health check failed: {}", e),
+                message: format!("Connection pool health check failed: {e}"),
             }),
         }
     }
@@ -832,7 +831,7 @@ impl QueryOptimizer {
             .execute(pool)
             .await
             .map_err(|e| PersistenceError::ConnectionError {
-                message: format!("Prepared statement execution failed: {}", e),
+                message: format!("Prepared statement execution failed: {e}"),
             })?;
 
         let execution_time = start_time.elapsed();
@@ -873,18 +872,18 @@ impl QueryOptimizer {
 
         // Analyze slow queries from pg_stat_statements
         let slow_queries = sqlx::query(
-            r#"
+            r"
             SELECT query, calls, total_time, mean_time, rows
             FROM pg_stat_statements 
             WHERE mean_time > 1000 -- Queries taking more than 1 second on average
             ORDER BY mean_time DESC 
             LIMIT 50
-            "#,
+            ",
         )
         .fetch_all(pool)
         .await
         .map_err(|e| PersistenceError::ConnectionError {
-            message: format!("Failed to analyze slow queries: {}", e),
+            message: format!("Failed to analyze slow queries: {e}"),
         })?;
 
         let mut recommendations = Vec::new();
@@ -980,7 +979,7 @@ impl QueryOptimizer {
                 .split(',')
                 .map(|col| {
                     // Remove ASC/DESC and extra whitespace
-                    col.trim().split_whitespace().next().unwrap_or("").trim()
+                    col.split_whitespace().next().unwrap_or("").trim()
                 })
                 .filter(|col| !col.is_empty())
                 .collect();
@@ -1213,10 +1212,9 @@ impl QueryOptimizer {
             recommendation.action = ScalingAction::ScaleUp;
             recommendation.recommended_max_connections =
                 (current_stats.total_connections as f32 * 1.5).min(100.0) as u32;
-            recommendation.confidence = ((utilization as f64 - 85.0) / 15.0).min(1.0);
+            recommendation.confidence = ((f64::from(utilization) - 85.0) / 15.0).min(1.0);
             recommendation.reasoning.push(format!(
-                "High utilization ({}%) suggests connection pressure",
-                utilization
+                "High utilization ({utilization}%) suggests connection pressure"
             ));
         }
 
@@ -1237,10 +1235,9 @@ impl QueryOptimizer {
             recommendation.action = ScalingAction::ScaleDown;
             recommendation.recommended_max_connections =
                 (current_stats.total_connections as f32 * 0.8).max(10.0) as u32;
-            recommendation.confidence = ((20.0 - utilization as f64) / 20.0).min(0.6); // Lower confidence for scaling down
+            recommendation.confidence = ((20.0 - f64::from(utilization)) / 20.0).min(0.6); // Lower confidence for scaling down
             recommendation.reasoning.push(format!(
-                "Low utilization ({}%) suggests overprovisioning",
-                utilization
+                "Low utilization ({utilization}%) suggests overprovisioning"
             ));
         }
 
@@ -1259,7 +1256,13 @@ impl QueryOptimizer {
         // Route based on query type
         let routing = if query_lower.starts_with("select") && !query_lower.contains("for update") {
             // Read query - route to read replica
-            if !read_replica_pools.is_empty() {
+            if read_replica_pools.is_empty() {
+                QueryRoutingDecision {
+                    target: QueryTarget::Primary,
+                    reasoning: String::from("No read replicas available"),
+                    estimated_load_impact: LoadImpact::Medium,
+                }
+            } else {
                 // Simple round-robin with health checking
                 let replica_index =
                     (self.get_stats().await.total_queries as usize) % read_replica_pools.len();
@@ -1267,12 +1270,6 @@ impl QueryOptimizer {
                     target: QueryTarget::ReadReplica(replica_index),
                     reasoning: String::from("Read-only query routed to read replica"),
                     estimated_load_impact: LoadImpact::Low,
-                }
-            } else {
-                QueryRoutingDecision {
-                    target: QueryTarget::Primary,
-                    reasoning: String::from("No read replicas available"),
-                    estimated_load_impact: LoadImpact::Medium,
                 }
             }
         } else {
@@ -1307,8 +1304,9 @@ impl QueryOptimizer {
         let mut results = Vec::new();
 
         // Adaptive batch sizing based on query complexity
-        let avg_query_length: f64 =
-            queries.iter().map(|q| q.len()).sum::<usize>() as f64 / queries.len() as f64;
+        let avg_query_length: f64 = queries.iter().map(std::string::String::len).sum::<usize>()
+            as f64
+            / queries.len() as f64;
         let adaptive_batch_size = if avg_query_length > 200.0 {
             // Complex queries - smaller batches
             self.config.batch_size / 2
@@ -1411,7 +1409,7 @@ impl QueryOptimizer {
 
         // Time-based predictions
         let current_hour = chrono::Utc::now().hour();
-        if current_hour >= 9 && current_hour <= 17 {
+        if (9..=17).contains(&current_hour) {
             // Business hours - likely to access recent feedback
             predictions.push(PredictedQuery {
                 query: String::from("SELECT feedback_data FROM feedback_history WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10"),

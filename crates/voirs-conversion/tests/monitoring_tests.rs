@@ -23,6 +23,12 @@ pub struct MonitoringTestSuite {
     test_session_id: String,
 }
 
+impl Default for MonitoringTestSuite {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MonitoringTestSuite {
     pub fn new() -> Self {
         let config = MonitorConfig {

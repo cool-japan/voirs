@@ -752,10 +752,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_f0_tracking_config() {
-        let mut config = F0TrackingConfig::default();
-        config.f0_min = 100.0;
-        config.f0_max = 400.0;
-        config.voicing_threshold = 0.3;
+        let config = F0TrackingConfig {
+            f0_min: 100.0,
+            f0_max: 400.0,
+            voicing_threshold: 0.3,
+            ..Default::default()
+        };
 
         let tracker = F0Tracker::new(F0Algorithm::YIN, config.clone());
         let audio = create_test_audio(16000, 0.5, 250.0);

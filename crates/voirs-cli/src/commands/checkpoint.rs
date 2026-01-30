@@ -5,7 +5,7 @@
 use crate::GlobalOptions;
 use clap::Subcommand;
 use safetensors::SafeTensors;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use voirs_sdk::Result;
 
 /// Checkpoint management subcommands
@@ -165,7 +165,13 @@ async fn inspect_checkpoint(
     if format == "json" {
         output_json_format(&tensors, checkpoint_path, verbose, metadata.as_ref())?;
     } else {
-        output_text_format(&tensors, checkpoint_path, verbose, global, metadata.as_ref())?;
+        output_text_format(
+            &tensors,
+            checkpoint_path,
+            verbose,
+            global,
+            metadata.as_ref(),
+        )?;
     }
 
     Ok(())
@@ -174,7 +180,7 @@ async fn inspect_checkpoint(
 /// Output checkpoint info in text format
 fn output_text_format(
     tensors: &SafeTensors,
-    checkpoint_path: &PathBuf,
+    checkpoint_path: &Path,
     verbose: bool,
     global: &GlobalOptions,
     metadata: Option<&serde_json::Value>,
@@ -183,7 +189,10 @@ fn output_text_format(
         println!("\n╔══════════════════════════════════════════════════════════╗");
         println!("║              Checkpoint Inspection                       ║");
         println!("╠══════════════════════════════════════════════════════════╣");
-        println!("║ File: {:<50} ║", truncate_str(&checkpoint_path.display().to_string(), 50));
+        println!(
+            "║ File: {:<50} ║",
+            truncate_str(&checkpoint_path.display().to_string(), 50)
+        );
 
         // Display metadata if available
         if let Some(meta_val) = metadata {
@@ -196,7 +205,11 @@ fn output_text_format(
                             serde_json::Value::Number(n) => n.to_string(),
                             _ => value.to_string(),
                         };
-                        println!("║ {}: {:<47} ║", key, truncate_str(&value_str, 47 - key.len()));
+                        println!(
+                            "║ {}: {:<47} ║",
+                            key,
+                            truncate_str(&value_str, 47 - key.len())
+                        );
                     }
                 }
             }
@@ -219,10 +232,7 @@ fn output_text_format(
         }
 
         println!("║ Total parameters: {:<38} ║", format_number(total_params));
-        println!(
-            "║ Total size: {:<44} ║",
-            format_bytes(total_size)
-        );
+        println!("║ Total size: {:<44} ║", format_bytes(total_size));
         println!("╚══════════════════════════════════════════════════════════╝\n");
 
         if verbose {
@@ -254,7 +264,7 @@ fn output_text_format(
 /// Output checkpoint info in JSON format
 fn output_json_format(
     tensors: &SafeTensors,
-    checkpoint_path: &PathBuf,
+    checkpoint_path: &Path,
     verbose: bool,
     metadata: Option<&serde_json::Value>,
 ) -> Result<()> {
@@ -323,8 +333,7 @@ async fn list_checkpoints(
 
                 if json_path.exists() {
                     if let Ok(meta_str) = tokio::fs::read_to_string(&json_path).await {
-                        if let Ok(meta_json) =
-                            serde_json::from_str::<serde_json::Value>(&meta_str)
+                        if let Ok(meta_json) = serde_json::from_str::<serde_json::Value>(&meta_str)
                         {
                             if let Some(obj) = meta_json.as_object() {
                                 epoch = obj
@@ -338,17 +347,15 @@ async fn list_checkpoints(
                                 train_loss = obj
                                     .get("train_loss")
                                     .and_then(|v| {
-                                        v.as_f64().or_else(|| {
-                                            v.as_str().and_then(|s| s.parse().ok())
-                                        })
+                                        v.as_f64()
+                                            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
                                     })
                                     .unwrap_or(0.0);
                                 val_loss = obj
                                     .get("val_loss")
                                     .and_then(|v| {
-                                        v.as_f64().or_else(|| {
-                                            v.as_str().and_then(|s| s.parse().ok())
-                                        })
+                                        v.as_f64()
+                                            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
                                     })
                                     .unwrap_or(0.0);
                             }
@@ -358,7 +365,6 @@ async fn list_checkpoints(
 
                 if let Ok(data) = tokio::fs::read(&path).await {
                     if SafeTensors::deserialize(&data).is_ok() {
-
                         checkpoints.push(CheckpointInfo {
                             path: path.clone(),
                             name: path.file_name().unwrap().to_string_lossy().to_string(),
@@ -478,7 +484,10 @@ async fn compare_checkpoints(
         // Compare metadata
         if let (Some(m1), Some(m2)) = (meta1.as_ref(), meta2.as_ref()) {
             if let (Some(o1), Some(o2)) = (m1.as_object(), m2.as_object()) {
-                println!("║ {:<25} {:<12} {:<15} ║", "Metric", "Checkpoint 1", "Checkpoint 2");
+                println!(
+                    "║ {:<25} {:<12} {:<15} ║",
+                    "Metric", "Checkpoint 1", "Checkpoint 2"
+                );
                 println!("╠══════════════════════════════════════════════════════════╣");
 
                 for key in o1.keys() {
@@ -509,8 +518,14 @@ async fn compare_checkpoints(
         }
 
         println!("╠══════════════════════════════════════════════════════════╣");
-        println!("║ Tensors in checkpoint 1: {:<31} ║", tensors1.names().len());
-        println!("║ Tensors in checkpoint 2: {:<31} ║", tensors2.names().len());
+        println!(
+            "║ Tensors in checkpoint 1: {:<31} ║",
+            tensors1.names().len()
+        );
+        println!(
+            "║ Tensors in checkpoint 2: {:<31} ║",
+            tensors2.names().len()
+        );
         println!("╚══════════════════════════════════════════════════════════╝\n");
 
         if diff_params {
@@ -662,7 +677,10 @@ async fn convert_safetensors_to_safetensors(
         println!("   Tensors: {}", tensors.names().len());
 
         if metadata.is_some() {
-            println!("   Metadata copied: {}", output.with_extension("json").display());
+            println!(
+                "   Metadata copied: {}",
+                output.with_extension("json").display()
+            );
         }
     }
 
@@ -705,19 +723,30 @@ async fn prune_checkpoints(
 
                 if json_path.exists() {
                     if let Ok(meta_str) = tokio::fs::read_to_string(&json_path).await {
-                        if let Ok(meta_json) = serde_json::from_str::<serde_json::Value>(&meta_str) {
+                        if let Ok(meta_json) = serde_json::from_str::<serde_json::Value>(&meta_str)
+                        {
                             if let Some(obj) = meta_json.as_object() {
-                                epoch = obj.get("epoch")
-                                    .and_then(|v| v.as_u64().map(|n| n as usize)
-                                        .or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+                                epoch = obj
+                                    .get("epoch")
+                                    .and_then(|v| {
+                                        v.as_u64()
+                                            .map(|n| n as usize)
+                                            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+                                    })
                                     .unwrap_or(0);
-                                train_loss = obj.get("train_loss")
-                                    .and_then(|v| v.as_f64()
-                                        .or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+                                train_loss = obj
+                                    .get("train_loss")
+                                    .and_then(|v| {
+                                        v.as_f64()
+                                            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+                                    })
                                     .unwrap_or(0.0);
-                                val_loss = obj.get("val_loss")
-                                    .and_then(|v| v.as_f64()
-                                        .or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+                                val_loss = obj
+                                    .get("val_loss")
+                                    .and_then(|v| {
+                                        v.as_f64()
+                                            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+                                    })
                                     .unwrap_or(f64::MAX);
                             }
                         }
@@ -733,7 +762,9 @@ async fn prune_checkpoints(
                             train_loss,
                             val_loss,
                             size: metadata.len(),
-                            modified: metadata.modified().ok()
+                            modified: metadata
+                                .modified()
+                                .ok()
                                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                                 .map(|d| d.as_secs())
                                 .unwrap_or(0),
@@ -757,13 +788,15 @@ async fn prune_checkpoints(
     if let Some(n) = keep_best {
         // Sort by validation loss (ascending - lower is better)
         let mut sorted = checkpoints.clone();
-        sorted.sort_by(|a, b| a.val_loss.partial_cmp(&b.val_loss).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.sort_by(|a, b| {
+            a.val_loss
+                .partial_cmp(&b.val_loss)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Keep best N, mark rest for deletion
-        let to_keep: std::collections::HashSet<_> = sorted.iter()
-            .take(n)
-            .map(|c| c.path.clone())
-            .collect();
+        let to_keep: std::collections::HashSet<_> =
+            sorted.iter().take(n).map(|c| c.path.clone()).collect();
 
         for ckpt in &checkpoints {
             if !to_keep.contains(&ckpt.path) {
@@ -778,10 +811,8 @@ async fn prune_checkpoints(
         sorted.sort_by(|a, b| b.modified.cmp(&a.modified));
 
         // Keep latest N
-        let to_keep: std::collections::HashSet<_> = sorted.iter()
-            .take(n)
-            .map(|c| c.path.clone())
-            .collect();
+        let to_keep: std::collections::HashSet<_> =
+            sorted.iter().take(n).map(|c| c.path.clone()).collect();
 
         // Only delete if not already marked and not in keep set
         for ckpt in &checkpoints {
@@ -808,7 +839,10 @@ async fn prune_checkpoints(
         }
 
         println!("\nCheckpoints to be deleted:");
-        println!("{:<35} {:>8} {:>12} {:>10}", "Name", "Epoch", "Val Loss", "Size");
+        println!(
+            "{:<35} {:>8} {:>12} {:>10}",
+            "Name", "Epoch", "Val Loss", "Size"
+        );
         println!("{}", "─".repeat(70));
 
         for ckpt in &to_delete {
@@ -816,7 +850,11 @@ async fn prune_checkpoints(
                 "{:<35} {:>8} {:>12.6} {:>10}",
                 truncate_str(&ckpt.name, 35),
                 ckpt.epoch,
-                if ckpt.val_loss == f64::MAX { 0.0 } else { ckpt.val_loss },
+                if ckpt.val_loss == f64::MAX {
+                    0.0
+                } else {
+                    ckpt.val_loss
+                },
                 format_bytes(ckpt.size as usize)
             );
         }

@@ -169,7 +169,7 @@ fn bench_voice_cloning(c: &mut Criterion) {
                             parameters: HashMap::new(),
                             timestamp: std::time::SystemTime::now(),
                         };
-                        (request)
+                        request
                     },
                     |request| async move {
                         let config = CloningConfigBuilder::new()

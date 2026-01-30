@@ -444,7 +444,7 @@ impl ASRModel for PureRustWhisper {
         // Spawn background task to process audio stream
         tokio::spawn(async move {
             let mut audio_stream = audio_stream;
-            let mut segment_counter = 0;
+            let mut _segment_counter = 0;
 
             // Process each audio buffer from the stream
             while let Some(audio_buffer) = audio_stream.next().await {
@@ -476,7 +476,7 @@ impl ASRModel for PureRustWhisper {
                             confidence: segment.confidence,
                         };
 
-                        segment_counter += 1;
+                        _segment_counter += 1;
 
                         // Send the chunk
                         if transcript_tx.send(Ok(chunk)).is_err() {

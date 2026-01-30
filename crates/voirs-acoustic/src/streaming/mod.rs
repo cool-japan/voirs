@@ -177,81 +177,83 @@ impl StreamingConfig {
     /// Validate streaming configuration
     pub fn validate(&self) -> Result<()> {
         if self.chunk_frames == 0 {
-            return Err(AcousticError::InvalidConfiguration(
-                "Chunk frames must be greater than 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Chunk frames must be greater than 0".to_string(),
+            });
         }
 
         if self.overlap_frames >= self.chunk_frames {
-            return Err(AcousticError::InvalidConfiguration(
-                "Overlap frames must be less than chunk frames".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Overlap frames must be less than chunk frames".to_string(),
+            });
         }
 
         if self.max_latency_ms == 0 {
-            return Err(AcousticError::InvalidConfiguration(
-                "Max latency must be greater than 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Max latency must be greater than 0".to_string(),
+            });
         }
 
         if !(0.0..=1.0).contains(&self.quality_factor) {
-            return Err(AcousticError::InvalidConfiguration(
-                "Quality factor must be between 0.0 and 1.0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Quality factor must be between 0.0 and 1.0".to_string(),
+            });
         }
 
         if self.buffer_size == 0 {
-            return Err(AcousticError::InvalidConfiguration(
-                "Buffer size must be greater than 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Buffer size must be greater than 0".to_string(),
+            });
         }
 
         if self.min_chunk_frames == 0 {
-            return Err(AcousticError::InvalidConfiguration(
-                "Minimum chunk frames must be greater than 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Minimum chunk frames must be greater than 0".to_string(),
+            });
         }
 
         if self.max_chunk_frames <= self.min_chunk_frames {
-            return Err(AcousticError::InvalidConfiguration(
-                "Maximum chunk frames must be greater than minimum chunk frames".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Maximum chunk frames must be greater than minimum chunk frames"
+                    .to_string(),
+            });
         }
 
         if self.chunk_frames < self.min_chunk_frames || self.chunk_frames > self.max_chunk_frames {
-            return Err(AcousticError::InvalidConfiguration(
-                "Chunk frames must be between min and max chunk frames".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Chunk frames must be between min and max chunk frames".to_string(),
+            });
         }
 
         if self.num_threads == 0 {
-            return Err(AcousticError::InvalidConfiguration(
-                "Number of threads must be greater than 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Number of threads must be greater than 0".to_string(),
+            });
         }
 
         if self.num_threads > 16 {
-            return Err(AcousticError::InvalidConfiguration(
-                "Number of threads should not exceed 16 for optimal performance".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Number of threads should not exceed 16 for optimal performance"
+                    .to_string(),
+            });
         }
 
         if !(0.0..=1.0).contains(&self.vad_threshold) {
-            return Err(AcousticError::InvalidConfiguration(
-                "VAD threshold must be between 0.0 and 1.0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "VAD threshold must be between 0.0 and 1.0".to_string(),
+            });
         }
 
         if self.crossfade_frames >= self.overlap_frames {
-            return Err(AcousticError::InvalidConfiguration(
-                "Crossfade frames must be less than overlap frames".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Crossfade frames must be less than overlap frames".to_string(),
+            });
         }
 
         if self.prediction_lookahead == 0 {
-            return Err(AcousticError::InvalidConfiguration(
-                "Prediction lookahead must be greater than 0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Prediction lookahead must be greater than 0".to_string(),
+            });
         }
 
         Ok(())
@@ -863,8 +865,8 @@ impl<M: AcousticModel> StreamingSynthesizer<M> {
                 scirs2_core::parallel_ops::ThreadPoolBuilder::new()
                     .num_threads(config.num_threads)
                     .build()
-                    .map_err(|e| {
-                        AcousticError::Processing(format!("Failed to create thread pool: {e}"))
+                    .map_err(|e| AcousticError::ProcessingError {
+                        message: format!("Failed to create thread pool: {e}"),
                     })?,
             )
         } else {
@@ -1084,9 +1086,9 @@ impl<M: AcousticModel> StreamingSynthesizer<M> {
             audio_streamer.set_output_callback(callback);
             Ok(())
         } else {
-            Err(AcousticError::InvalidConfiguration(
-                "Real-time audio streaming is not enabled".to_string(),
-            ))
+            Err(AcousticError::ConfigError {
+                message: "Real-time audio streaming is not enabled".to_string(),
+            })
         }
     }
 
@@ -1109,7 +1111,7 @@ impl<M: AcousticModel> StreamingSynthesizer<M> {
 
     /// Check if voice activity is currently detected
     pub fn is_voice_active(&self) -> bool {
-        self.vad.as_ref().map_or(true, |vad| vad.voice_state)
+        self.vad.as_ref().is_none_or(|vad| vad.voice_state)
     }
 
     /// Get current streaming state

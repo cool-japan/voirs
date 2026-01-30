@@ -63,6 +63,9 @@ chrono.workspace = true
 # Random number generation
 fastrand.workspace = true
 
+# Cryptographic hashing
+md5.workspace = true
+
 # System info
 num_cpus.workspace = true
 
@@ -86,8 +89,11 @@ candle = ["dep:candle-core", "dep:candle-nn"]
 onnx = ["dep:ort"]
 gpu = ["metal"]  # On macOS, use Metal; on Linux/Windows would use cuda
 cuda = ["candle-core?/cuda", "ort?/cuda"]
-metal = ["candle-core?/metal"]
+metal = ["dep:metal-rs"]  # Only available on macOS
 coreml = ["ort?/coreml"]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+metal-rs = { version = "0.27", optional = true, package = "metal" }
 
 [[bench]]
 name = "rtf_benchmark"
@@ -100,5 +106,10 @@ harness = false
 [[bench]]
 name = "memory_benchmark"
 harness = false
+
+[[bench]]
+name = "diffusion_sampling_benchmark"
+harness = false
+
 [lints]
 workspace = true

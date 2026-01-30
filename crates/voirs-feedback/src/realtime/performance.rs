@@ -130,6 +130,7 @@ pub enum OptimizationSeverity {
 
 impl PerformanceMonitor {
     /// Create a new performance monitor
+    #[must_use]
     pub fn new() -> Self {
         Self {
             metrics: Arc::new(RwLock::new(PerformanceMetrics::default())),
@@ -316,7 +317,11 @@ impl PerformanceMonitor {
 
         let total_duration = start_time.elapsed();
         let average_duration = Duration::from_nanos(
-            durations.iter().map(|d| d.as_nanos()).sum::<u128>() as u64 / iterations as u64,
+            durations
+                .iter()
+                .map(std::time::Duration::as_nanos)
+                .sum::<u128>() as u64
+                / u64::from(iterations),
         );
         let min_duration = durations.iter().min().copied().unwrap_or(Duration::ZERO);
         let max_duration = durations.iter().max().copied().unwrap_or(Duration::ZERO);

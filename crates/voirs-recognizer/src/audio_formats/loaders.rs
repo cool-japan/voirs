@@ -503,9 +503,9 @@ impl M4aLoader {
                     // End of stream
                     break;
                 }
-                Err(SymphoniaError::DecodeError(ref err)) => {
+                Err(SymphoniaError::DecodeError(err)) => {
                     // Decode error, skip this packet
-                    tracing::warn!("Decode error in M4A packet: {}", err);
+                    tracing::warn!("Decode error in M4A packet: {}", &err);
                     {}
                 }
                 Err(err) => {
@@ -525,7 +525,7 @@ impl M4aLoader {
         self.process_samples(audio_samples, sample_rate, channels)
     }
 
-    /// Extract samples from symphonia AudioBufferRef and convert to f32
+    /// Extract samples from symphonia `AudioBufferRef` and convert to f32
     fn extract_samples_from_audio_buffer(
         &self,
         audio_buf: AudioBufferRef,
@@ -556,7 +556,8 @@ impl M4aLoader {
             AudioBufferRef::U32(buf) => {
                 for plane in buf.planes().planes() {
                     for &sample in *plane {
-                        samples.push((sample as f64 - 2_147_483_648.0) as f32 / 2_147_483_648.0);
+                        samples
+                            .push((f64::from(sample) - 2_147_483_648.0) as f32 / 2_147_483_648.0);
                     }
                 }
             }
@@ -590,7 +591,7 @@ impl M4aLoader {
             }
             AudioBufferRef::F32(buf) => {
                 for plane in buf.planes().planes() {
-                    samples.extend_from_slice(*plane);
+                    samples.extend_from_slice(plane);
                 }
             }
             AudioBufferRef::F64(buf) => {

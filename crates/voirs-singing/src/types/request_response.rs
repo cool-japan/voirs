@@ -62,6 +62,20 @@ pub struct SingingResponse {
     pub metadata: HashMap<String, String>,
 }
 
+impl Default for SingingResponse {
+    fn default() -> Self {
+        Self {
+            audio: Vec::new(),
+            sample_rate: 44100,
+            duration: Duration::from_secs(0),
+            voice: VoiceCharacteristics::default(),
+            technique: crate::techniques::SingingTechnique::default(),
+            stats: SingingStats::default(),
+            metadata: HashMap::new(),
+        }
+    }
+}
+
 /// Performance statistics for singing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SingingStats {

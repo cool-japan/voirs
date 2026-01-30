@@ -14,7 +14,6 @@ use std::sync::{
 };
 use std::thread;
 use std::time::{Duration, Instant};
-use tokio;
 use voirs_cloning::{
     prelude::*, CloningConfig, CloningConfigBuilder, CloningMethod, Error, Result, SpeakerData,
     SpeakerProfile, VoiceCloneRequest, VoiceCloner, VoiceClonerBuilder, VoiceSample,

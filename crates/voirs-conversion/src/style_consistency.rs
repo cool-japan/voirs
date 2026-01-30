@@ -924,7 +924,7 @@ impl StyleConsistencyEngine {
             if let Some((peak_idx, &peak_val)) = spectrum[window_start..window_end]
                 .iter()
                 .enumerate()
-                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             {
                 let freq = (window_start + peak_idx) as f32 * freq_per_bin;
                 if peak_val > 0.01 && freq > 200.0 && freq < 3000.0 {
@@ -1346,7 +1346,10 @@ impl StyleConsistencyEngine {
 
     /// Get current statistics
     pub fn get_statistics(&self) -> StyleConsistencyStats {
-        self.statistics.read().unwrap().clone()
+        self.statistics
+            .read()
+            .expect("Statistics lock poisoned")
+            .clone()
     }
 }
 

@@ -455,11 +455,11 @@ impl ConversionCacheSystem {
         let stored =
             if size <= self.config.l1_max_size / 10 && policy.priority >= CachePriority::High {
                 // Store in L1 cache for small, important items
-                let mut l1 = self.l1_cache.write().unwrap();
+                let mut l1 = self.l1_cache.write().expect("L1 cache lock poisoned");
                 l1.insert(key.clone(), item.clone(), size)
             } else if size <= self.config.l2_max_size / 10 {
                 // Store in L2 cache for larger items
-                let mut l2 = self.l2_cache.write().unwrap();
+                let mut l2 = self.l2_cache.write().expect("L2 cache lock poisoned");
                 l2.insert(key.clone(), item.clone(), size)
             } else {
                 false
@@ -483,7 +483,7 @@ impl ConversionCacheSystem {
 
         // Try L1 cache first
         {
-            let mut l1 = self.l1_cache.write().unwrap();
+            let mut l1 = self.l1_cache.write().expect("L1 cache lock poisoned");
             if let Some(item) = l1.get(&key.to_string()) {
                 if !self.is_expired(item) {
                     let result = self.process_data_for_retrieval(&item.data, item.compressed);
@@ -495,7 +495,7 @@ impl ConversionCacheSystem {
 
         // Try L2 cache
         {
-            let mut l2 = self.l2_cache.write().unwrap();
+            let mut l2 = self.l2_cache.write().expect("L2 cache lock poisoned");
             if let Some(item) = l2.get(&key.to_string()) {
                 if !self.is_expired(item) {
                     let result = self.process_data_for_retrieval(&item.data, item.compressed);
@@ -507,7 +507,10 @@ impl ConversionCacheSystem {
 
         // Try persistent cache
         if self.config.enable_persistence {
-            let persistent = self.persistent_cache.read().unwrap();
+            let persistent = self
+                .persistent_cache
+                .read()
+                .expect("Persistent cache lock poisoned");
             if let Some(persistent_item) = persistent.get(key) {
                 if !self.is_persistent_expired(persistent_item) {
                     // Deserialize and decompress if needed
@@ -527,15 +530,18 @@ impl ConversionCacheSystem {
     /// Remove an item from all cache levels
     pub fn remove(&self, key: &str) {
         {
-            let mut l1 = self.l1_cache.write().unwrap();
+            let mut l1 = self.l1_cache.write().expect("L1 cache lock poisoned");
             l1.remove(&key.to_string());
         }
         {
-            let mut l2 = self.l2_cache.write().unwrap();
+            let mut l2 = self.l2_cache.write().expect("L2 cache lock poisoned");
             l2.remove(&key.to_string());
         }
         if self.config.enable_persistence {
-            let mut persistent = self.persistent_cache.write().unwrap();
+            let mut persistent = self
+                .persistent_cache
+                .write()
+                .expect("Persistent cache lock poisoned");
             persistent.remove(key);
         }
     }
@@ -543,36 +549,42 @@ impl ConversionCacheSystem {
     /// Clear all caches
     pub fn clear_all(&self) {
         {
-            let mut l1 = self.l1_cache.write().unwrap();
+            let mut l1 = self.l1_cache.write().expect("L1 cache lock poisoned");
             l1.clear();
         }
         {
-            let mut l2 = self.l2_cache.write().unwrap();
+            let mut l2 = self.l2_cache.write().expect("L2 cache lock poisoned");
             l2.clear();
         }
         if self.config.enable_persistence {
-            let mut persistent = self.persistent_cache.write().unwrap();
+            let mut persistent = self
+                .persistent_cache
+                .write()
+                .expect("Persistent cache lock poisoned");
             persistent.clear();
         }
     }
 
     /// Get cache statistics
     pub fn get_statistics(&self) -> CacheStatistics {
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock().expect("Cache stats lock poisoned");
 
         // Update current cache level stats
         {
-            let l1 = self.l1_cache.read().unwrap();
+            let l1 = self.l1_cache.read().expect("L1 cache lock poisoned");
             stats.l1_stats.current_items = l1.len();
             stats.l1_stats.current_size = l1.current_size();
         }
         {
-            let l2 = self.l2_cache.read().unwrap();
+            let l2 = self.l2_cache.read().expect("L2 cache lock poisoned");
             stats.l2_stats.current_items = l2.len();
             stats.l2_stats.current_size = l2.current_size();
         }
         if self.config.enable_persistence {
-            let persistent = self.persistent_cache.read().unwrap();
+            let persistent = self
+                .persistent_cache
+                .read()
+                .expect("Persistent cache lock poisoned");
             stats.persistent_stats.current_items = persistent.len();
             stats.persistent_stats.current_size =
                 persistent.values().map(|item| item.compressed_size).sum();
@@ -772,7 +784,10 @@ impl ConversionCacheSystem {
             data_hash: self.hash_data(&serialized_data),
         };
 
-        let mut persistent = self.persistent_cache.write().unwrap();
+        let mut persistent = self
+            .persistent_cache
+            .write()
+            .expect("Persistent cache lock poisoned");
         persistent.insert(key, persistent_item);
 
         Ok(())
@@ -792,7 +807,7 @@ impl ConversionCacheSystem {
     fn cleanup_expired_items(&self) {
         // L1 cache cleanup
         {
-            let mut l1 = self.l1_cache.write().unwrap();
+            let mut l1 = self.l1_cache.write().expect("L1 cache lock poisoned");
             let keys_to_remove: Vec<String> = l1
                 .entries
                 .iter()
@@ -807,7 +822,7 @@ impl ConversionCacheSystem {
 
         // L2 cache cleanup
         {
-            let mut l2 = self.l2_cache.write().unwrap();
+            let mut l2 = self.l2_cache.write().expect("L2 cache lock poisoned");
             let keys_to_remove: Vec<String> = l2
                 .entries
                 .iter()
@@ -822,7 +837,10 @@ impl ConversionCacheSystem {
 
         // Persistent cache cleanup
         if self.config.enable_persistence {
-            let mut persistent = self.persistent_cache.write().unwrap();
+            let mut persistent = self
+                .persistent_cache
+                .write()
+                .expect("Persistent cache lock poisoned");
             let keys_to_remove: Vec<String> = persistent
                 .iter()
                 .filter(|(_, item)| self.is_persistent_expired(item))
@@ -838,7 +856,7 @@ impl ConversionCacheSystem {
     fn rebalance_caches(&self) {
         let now = Instant::now();
         let l1_available_space = {
-            let l1 = self.l1_cache.read().unwrap();
+            let l1 = self.l1_cache.read().expect("L1 cache lock poisoned");
             self.config.l1_max_size.saturating_sub(l1.current_size())
         };
 
@@ -849,7 +867,7 @@ impl ConversionCacheSystem {
 
             // Collect high-access items from L2 for potential promotion to L1
             {
-                let l2 = self.l2_cache.read().unwrap();
+                let l2 = self.l2_cache.read().expect("L2 cache lock poisoned");
                 for (key, item) in l2.entries.iter() {
                     // Calculate access frequency (accesses per minute)
                     let age_minutes = now.duration_since(item.created_at).as_secs() / 60;
@@ -892,11 +910,11 @@ impl ConversionCacheSystem {
 
                 // Move item from L2 to L1
                 {
-                    let mut l2 = self.l2_cache.write().unwrap();
+                    let mut l2 = self.l2_cache.write().expect("L2 cache lock poisoned");
                     if l2.remove(&key).is_some() {
                         space_used += item_size;
 
-                        let mut l1 = self.l1_cache.write().unwrap();
+                        let mut l1 = self.l1_cache.write().expect("L1 cache lock poisoned");
                         l1.insert(key, item, item_size);
                     }
                 }
@@ -905,7 +923,7 @@ impl ConversionCacheSystem {
 
         // Also demote least accessed L1 items to L2 if L1 is near capacity
         let l1_utilization = {
-            let l1 = self.l1_cache.read().unwrap();
+            let l1 = self.l1_cache.read().expect("L1 cache lock poisoned");
             l1.current_size() as f64 / self.config.l1_max_size as f64
         };
 
@@ -914,7 +932,7 @@ impl ConversionCacheSystem {
             let mut candidates_for_demotion = Vec::new();
 
             {
-                let l1 = self.l1_cache.read().unwrap();
+                let l1 = self.l1_cache.read().expect("L1 cache lock poisoned");
                 for (key, item) in l1.entries.iter() {
                     let age_minutes = now.duration_since(item.created_at).as_secs() / 60;
                     let access_frequency = if age_minutes > 0 {
@@ -940,7 +958,7 @@ impl ConversionCacheSystem {
 
             // Demote candidates from L1 to L2
             let l2_available_space = {
-                let l2 = self.l2_cache.read().unwrap();
+                let l2 = self.l2_cache.read().expect("L2 cache lock poisoned");
                 self.config.l2_max_size.saturating_sub(l2.current_size())
             };
 
@@ -953,11 +971,11 @@ impl ConversionCacheSystem {
 
                 // Move item from L1 to L2
                 {
-                    let mut l1 = self.l1_cache.write().unwrap();
+                    let mut l1 = self.l1_cache.write().expect("L1 cache lock poisoned");
                     if l1.remove(&key).is_some() {
                         space_used += item_size;
 
-                        let mut l2 = self.l2_cache.write().unwrap();
+                        let mut l2 = self.l2_cache.write().expect("L2 cache lock poisoned");
                         l2.insert(key, item, item_size);
                     }
                 }
@@ -972,7 +990,7 @@ impl ConversionCacheSystem {
 
         // Compress underutilized items in L2 cache
         {
-            let mut l2 = self.l2_cache.write().unwrap();
+            let mut l2 = self.l2_cache.write().expect("L2 cache lock poisoned");
             let mut items_to_compress = Vec::new();
 
             for (key, item) in l2.entries.iter() {
@@ -1000,7 +1018,7 @@ impl ConversionCacheSystem {
                         item.compressed = true;
 
                         // Update statistics
-                        let mut stats = self.stats.lock().unwrap();
+                        let mut stats = self.stats.lock().expect("Cache stats lock poisoned");
                         stats.l2_stats.compressed_items += 1;
                         stats.l2_stats.bytes_saved += original_size.saturating_sub(item.size);
                     }
@@ -1010,7 +1028,10 @@ impl ConversionCacheSystem {
 
         // Also compress underutilized items in persistent cache
         if self.config.enable_persistence {
-            let mut persistent = self.persistent_cache.write().unwrap();
+            let mut persistent = self
+                .persistent_cache
+                .write()
+                .expect("Persistent cache lock poisoned");
             let mut items_to_recompress = Vec::new();
 
             for (key, item) in persistent.iter() {
@@ -1039,7 +1060,7 @@ impl ConversionCacheSystem {
                             item.compressed_size = item.data.len();
 
                             // Update statistics
-                            let mut stats = self.stats.lock().unwrap();
+                            let mut stats = self.stats.lock().expect("Cache stats lock poisoned");
                             stats.persistent_stats.bytes_saved +=
                                 old_size.saturating_sub(item.compressed_size);
                         }
@@ -1065,7 +1086,7 @@ impl ConversionCacheSystem {
     }
 
     fn update_store_stats(&self, duration: Duration) {
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock().expect("Cache stats lock poisoned");
         // Update average store time using exponential moving average
         let alpha = 0.1;
         let current_avg = stats.performance_metrics.avg_store_time.as_nanos() as f64;
@@ -1074,7 +1095,7 @@ impl ConversionCacheSystem {
     }
 
     fn update_retrieve_stats(&self, duration: Duration, hit: bool, cache_level: &str) {
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock().expect("Cache stats lock poisoned");
 
         // Update retrieve time
         let alpha = 0.1;

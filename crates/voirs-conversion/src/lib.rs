@@ -3,11 +3,39 @@
 //! This crate provides real-time voice conversion capabilities including speaker conversion,
 //! age/gender transformation, voice morphing, and streaming voice conversion.
 
+// Allow pedantic lints that are acceptable for audio/DSP processing code
+#![allow(clippy::cast_precision_loss)] // Acceptable for audio sample conversions
+#![allow(clippy::cast_possible_truncation)] // Controlled truncation in audio processing
+#![allow(clippy::cast_sign_loss)] // Intentional in index calculations
+#![allow(clippy::missing_errors_doc)] // Many internal functions with self-documenting error types
+#![allow(clippy::missing_panics_doc)] // Panics are documented where relevant
+#![allow(clippy::unused_self)] // Some trait implementations require &self for consistency
+#![allow(clippy::must_use_candidate)] // Not all return values need must_use annotation
+#![allow(clippy::doc_markdown)] // Technical terms don't all need backticks
+#![allow(clippy::unnecessary_wraps)] // Result wrappers maintained for API consistency
+#![allow(clippy::float_cmp)] // Exact float comparisons are intentional in some contexts
+#![allow(clippy::match_same_arms)] // Pattern matching clarity sometimes requires duplication
+#![allow(clippy::module_name_repetitions)] // Type names often repeat module names
+#![allow(clippy::struct_excessive_bools)] // Config structs naturally have many boolean flags
+#![allow(clippy::too_many_lines)] // Some functions are inherently complex
+#![allow(clippy::needless_pass_by_value)] // Some functions designed for ownership transfer
+#![allow(clippy::similar_names)] // Many similar variable names in algorithms
+#![allow(clippy::unused_async)] // Public API functions may need async for consistency
+#![allow(clippy::needless_range_loop)] // Range loops sometimes clearer than iterators
+#![allow(clippy::uninlined_format_args)] // Explicit argument names can improve clarity
+#![allow(clippy::manual_clamp)] // Manual clamping sometimes clearer
+#![allow(clippy::return_self_not_must_use)] // Not all builder methods need must_use
+#![allow(clippy::cast_possible_wrap)] // Controlled wrapping in processing code
+#![allow(clippy::cast_lossless)] // Explicit casts preferred for clarity
+#![allow(clippy::wildcard_imports)] // Prelude imports are convenient and standard
+#![allow(clippy::format_push_string)] // Sometimes more readable than alternative
+#![allow(clippy::redundant_closure_for_method_calls)] // Closures sometimes needed for type inference
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
 
 pub mod audio_libraries_update;
 pub mod audio_quality_research;
+pub mod buffer_pool;
 pub mod cache;
 pub mod cloud_scaling;
 pub mod communication;
@@ -18,6 +46,7 @@ pub mod diagnostics;
 pub mod fallback;
 pub mod format;
 pub mod gaming;
+pub mod simd_audio;
 
 #[cfg(feature = "iot")]
 pub mod iot;

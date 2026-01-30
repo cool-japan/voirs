@@ -3,7 +3,7 @@
 //! This module provides WebAssembly bindings that expose VoiRS functionality
 //! to web browsers and other WASM runtime environments.
 
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 pub mod wasm_bindings {
     use crate::{VoirsAudioFormat, VoirsQualityLevel};
     use js_sys::{Array, Promise, Uint8Array};
@@ -831,10 +831,10 @@ pub mod wasm_bindings {
     }
 }
 
-#[cfg(not(feature = "wasm"))]
+#[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
 pub mod wasm_bindings {
-    //! Stub module when WASM feature is not enabled
+    //! Stub module when WASM feature is not enabled or not targeting wasm32
     pub fn not_available() -> &'static str {
-        "WebAssembly bindings not available. Enable the 'wasm' feature to use these bindings."
+        "WebAssembly bindings not available. Enable the 'wasm' feature and compile for wasm32 target to use these bindings."
     }
 }

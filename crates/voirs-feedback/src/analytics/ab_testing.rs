@@ -1,4 +1,4 @@
-//! A/B Testing Framework for VoiRS Feedback System
+//! A/B Testing Framework for `VoiRS` Feedback System
 //!
 //! This module provides comprehensive A/B testing capabilities for evaluating
 //! different approaches to feedback delivery, UI/UX changes, and system improvements.
@@ -115,14 +115,14 @@ pub enum FeedbackTiming {
     /// Delayed feedback delivery
     Delayed {
         /// Delay in milliseconds
-        delay_ms: u64
+        delay_ms: u64,
     },
     /// Feedback at end of session
     EndOfSession,
     /// Custom trigger-based feedback
     Custom {
         /// Trigger condition
-        trigger: String
+        trigger: String,
     },
 }
 
@@ -196,7 +196,7 @@ pub enum AssignmentMethod {
     /// Cohort-based assignment
     Cohort {
         /// Cohort identifier
-        cohort_id: String
+        cohort_id: String,
     },
 }
 
@@ -272,6 +272,7 @@ pub struct ABTestManager {
 
 impl ABTestManager {
     /// Create a new A/B test manager
+    #[must_use]
     pub fn new(config: ABTestConfig) -> Self {
         Self {
             experiments: HashMap::new(),
@@ -338,13 +339,14 @@ impl ABTestManager {
 
         self.user_assignments
             .entry(user_id.to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(assignment);
 
         Ok(variant_id)
     }
 
     /// Get user's variant for an experiment
+    #[must_use]
     pub fn get_user_variant(&self, user_id: &str, experiment_id: &str) -> Option<String> {
         self.user_assignments
             .get(user_id)?
@@ -413,14 +415,12 @@ impl ABTestManager {
         let control_conversion = control_metrics
             .conversions
             .get(metric_name)
-            .map(|c| c.conversion_rate)
-            .unwrap_or(0.0);
+            .map_or(0.0, |c| c.conversion_rate);
 
         let treatment_conversion = treatment_metrics
             .conversions
             .get(metric_name)
-            .map(|c| c.conversion_rate)
-            .unwrap_or(0.0);
+            .map_or(0.0, |c| c.conversion_rate);
 
         let effect_size = treatment_conversion - control_conversion;
         let relative_improvement = if control_conversion > 0.0 {
@@ -452,10 +452,7 @@ impl ABTestManager {
         let total_traffic: f64 = experiment.traffic_allocation.values().sum();
         if (total_traffic - 100.0).abs() > 0.01 {
             return Err(ABTestError::InvalidConfiguration {
-                message: format!(
-                    "Traffic allocation sums to {}, expected 100%",
-                    total_traffic
-                ),
+                message: format!("Traffic allocation sums to {total_traffic}, expected 100%"),
             });
         }
 
@@ -463,7 +460,7 @@ impl ABTestManager {
         for variant_id in experiment.traffic_allocation.keys() {
             if !experiment.variants.iter().any(|v| &v.id == variant_id) {
                 return Err(ABTestError::InvalidConfiguration {
-                    message: format!("Variant {} not found in experiment", variant_id),
+                    message: format!("Variant {variant_id} not found in experiment"),
                 });
             }
         }
@@ -515,10 +512,7 @@ impl ABTestManager {
         event_type: &str,
         _event_data: &HashMap<String, String>,
     ) -> Result<(), ABTestError> {
-        let experiment_metrics = self
-            .metrics
-            .entry(experiment_id.to_string())
-            .or_insert_with(HashMap::new);
+        let experiment_metrics = self.metrics.entry(experiment_id.to_string()).or_default();
 
         let variant_metrics = experiment_metrics
             .entry(variant_id.to_string())
@@ -553,8 +547,8 @@ impl ABTestManager {
                         confidence_interval: (0.0, 0.0),
                     });
                 conversion.conversions += 1;
-                conversion.conversion_rate =
-                    conversion.conversions as f64 / variant_metrics.total_sessions.max(1) as f64;
+                conversion.conversion_rate = f64::from(conversion.conversions)
+                    / f64::from(variant_metrics.total_sessions.max(1));
             }
             _ => {}
         }
@@ -620,14 +614,14 @@ pub enum ABTestError {
     #[error("Experiment not found: {experiment_id}")]
     ExperimentNotFound {
         /// Experiment identifier
-        experiment_id: String
+        experiment_id: String,
     },
 
     /// Experiment not active error
     #[error("Experiment not active: {experiment_id}")]
     ExperimentNotActive {
         /// Experiment identifier
-        experiment_id: String
+        experiment_id: String,
     },
 
     /// User not assigned error
@@ -643,21 +637,21 @@ pub enum ABTestError {
     #[error("Invalid configuration: {message}")]
     InvalidConfiguration {
         /// Error message
-        message: String
+        message: String,
     },
 
     /// Insufficient data error
     #[error("Insufficient data: {message}")]
     InsufficientData {
         /// Error message
-        message: String
+        message: String,
     },
 
     /// Statistical analysis error
     #[error("Statistical analysis error: {message}")]
     StatisticalError {
         /// Error message
-        message: String
+        message: String,
     },
 }
 

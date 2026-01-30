@@ -3,13 +3,22 @@
 //! This module provides unified pipeline integration between recognition
 //! and synthesis components, enabling seamless audio processing workflows.
 
-use crate::{analysis::AudioAnalyzerImpl, traits::*, RecognitionError};
+use crate::{
+    analysis::AudioAnalyzerImpl,
+    traits::{
+        ASRConfig, ASRModel, AlignedPhoneme, AlignmentMethod, AudioAnalysis, AudioAnalysisConfig,
+        AudioAnalyzer, PhonemeAlignment, PhonemeRecognitionConfig, PhonemeRecognitionFeature,
+        PhonemeRecognizer, PhonemeRecognizerMetadata, RecognitionResult, ResourceManager,
+        Transcript,
+    },
+    RecognitionError,
+};
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use voirs_sdk::{AudioBuffer, LanguageCode};
 
-/// Unified VoiRS pipeline for comprehensive audio processing
+/// Unified `VoiRS` pipeline for comprehensive audio processing
 pub struct UnifiedVoirsPipeline {
     /// ASR model
     asr_model: Box<dyn ASRModel + Send + Sync>,
@@ -415,6 +424,7 @@ impl UnifiedVoirsPipeline {
     }
 
     /// Get pipeline configuration
+    #[must_use]
     pub fn get_config(&self) -> &PipelineProcessingConfig {
         &self.config
     }
@@ -436,7 +446,7 @@ impl UnifiedVoirsPipeline {
 
         let mut samples = Vec::with_capacity(audio_bytes.len() / samples_per_byte);
         for chunk in audio_bytes.chunks_exact(samples_per_byte) {
-            let sample = i16::from_le_bytes([chunk[0], chunk[1]]) as f32 / 32768.0;
+            let sample = f32::from(i16::from_le_bytes([chunk[0], chunk[1]])) / 32768.0;
             samples.push(sample);
         }
 
@@ -461,6 +471,7 @@ pub struct PipelineBuilder {
 
 impl PipelineBuilder {
     /// Create new pipeline builder
+    #[must_use]
     pub fn new() -> Self {
         Self {
             asr_model: None,
@@ -472,48 +483,56 @@ impl PipelineBuilder {
     }
 
     /// Set ASR model
+    #[must_use]
     pub fn with_asr_model(mut self, model: Box<dyn ASRModel + Send + Sync>) -> Self {
         self.asr_model = Some(model);
         self
     }
 
     /// Set pipeline configuration
+    #[must_use]
     pub fn with_config(mut self, config: PipelineProcessingConfig) -> Self {
         self.config = config;
         self
     }
 
     /// Set processing mode
+    #[must_use]
     pub fn with_mode(mut self, mode: ProcessingMode) -> Self {
         self.config.mode = mode;
         self
     }
 
     /// Enable parallel processing
+    #[must_use]
     pub fn with_parallel_processing(mut self, enabled: bool) -> Self {
         self.config.parallel_processing = enabled;
         self
     }
 
     /// Set buffer size
+    #[must_use]
     pub fn with_buffer_size(mut self, size: usize) -> Self {
         self.config.buffer_size = size;
         self
     }
 
     /// Set model name
+    #[must_use]
     pub fn with_model(mut self, model_name: &str) -> Self {
         self.model_name = Some(model_name.to_string());
         self
     }
 
     /// Set language
+    #[must_use]
     pub fn with_language(mut self, language: LanguageCode) -> Self {
         self.language = Some(language);
         self
     }
 
     /// Set sample rate
+    #[must_use]
     pub fn with_sample_rate(mut self, sample_rate: u32) -> Self {
         self.sample_rate = Some(sample_rate);
         self

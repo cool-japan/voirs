@@ -11,8 +11,9 @@ use crate::{Error, Result};
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -75,6 +76,7 @@ pub struct MisusePreventionManager {
 
 impl MisusePreventionManager {
     /// Create a new misuse prevention manager
+    #[allow(clippy::arc_with_non_send_sync)]
     pub fn new(config: MisusePreventionConfig) -> Self {
         Self {
             anomaly_detector: Arc::new(RwLock::new(AnomalyDetector::new(config.anomaly_threshold))),
@@ -85,6 +87,7 @@ impl MisusePreventionManager {
             ))),
             blocked_users: Arc::new(RwLock::new(HashMap::new())),
             deepfake_detector: Arc::new(RwLock::new(None)),
+            #[allow(clippy::arc_with_non_send_sync)]
             privacy_manager: Arc::new(RwLock::new(None)),
             consent_manager: Arc::new(RwLock::new(None)),
             usage_tracker: Arc::new(RwLock::new(None)),
@@ -93,43 +96,32 @@ impl MisusePreventionManager {
     }
 
     /// Set deepfake detection system
-    pub fn set_deepfake_detector(&self, detector: AuthenticityDetector) -> Result<()> {
-        let mut guard = self.deepfake_detector.write().map_err(|_| {
-            Error::Validation("Failed to acquire deepfake detector lock".to_string())
-        })?;
+    pub async fn set_deepfake_detector(&self, detector: AuthenticityDetector) -> Result<()> {
+        let mut guard = self.deepfake_detector.write().await;
         *guard = Some(detector);
         info!("Deepfake detector configured for misuse prevention");
         Ok(())
     }
 
     /// Set privacy protection manager
-    pub fn set_privacy_manager(&self, manager: PrivacyProtectionManager) -> Result<()> {
-        let mut guard = self
-            .privacy_manager
-            .write()
-            .map_err(|_| Error::Validation("Failed to acquire privacy manager lock".to_string()))?;
+    pub async fn set_privacy_manager(&self, manager: PrivacyProtectionManager) -> Result<()> {
+        let mut guard = self.privacy_manager.write().await;
         *guard = Some(manager);
         info!("Privacy protection manager configured for misuse prevention");
         Ok(())
     }
 
     /// Set consent manager
-    pub fn set_consent_manager(&self, manager: ConsentManager) -> Result<()> {
-        let mut guard = self
-            .consent_manager
-            .write()
-            .map_err(|_| Error::Validation("Failed to acquire consent manager lock".to_string()))?;
+    pub async fn set_consent_manager(&self, manager: ConsentManager) -> Result<()> {
+        let mut guard = self.consent_manager.write().await;
         *guard = Some(manager);
         info!("Consent manager configured for misuse prevention");
         Ok(())
     }
 
     /// Set usage tracker
-    pub fn set_usage_tracker(&self, tracker: UsageTracker) -> Result<()> {
-        let mut guard = self
-            .usage_tracker
-            .write()
-            .map_err(|_| Error::Validation("Failed to acquire usage tracker lock".to_string()))?;
+    pub async fn set_usage_tracker(&self, tracker: UsageTracker) -> Result<()> {
+        let mut guard = self.usage_tracker.write().await;
         *guard = Some(tracker);
         info!("Usage tracker configured for misuse prevention");
         Ok(())
@@ -142,7 +134,7 @@ impl MisusePreventionManager {
         let mut warnings = Vec::new();
 
         // Check if user is blocked
-        if self.is_user_blocked(&request.user_id)? {
+        if self.is_user_blocked(&request.user_id).await? {
             return Ok(MisuseCheckResult {
                 allowed: false,
                 confidence: 1.0,
@@ -163,7 +155,7 @@ impl MisusePreventionManager {
 
         // Check usage restrictions
         if self.config.enable_usage_restrictions {
-            if let Some(usage_violation) = self.check_usage_restrictions(request)? {
+            if let Some(usage_violation) = self.check_usage_restrictions(request).await? {
                 violations.push(usage_violation);
             }
         }
@@ -175,7 +167,7 @@ impl MisusePreventionManager {
 
         // Check for anomalous behavior
         if self.config.enable_anomaly_detection {
-            if let Some(anomaly_violation) = self.check_anomalous_behavior(request)? {
+            if let Some(anomaly_violation) = self.check_anomalous_behavior(request).await? {
                 violations.push(anomaly_violation);
             }
         }
@@ -204,7 +196,8 @@ impl MisusePreventionManager {
 
         // Auto-block user if too many violations
         if !allowed && self.config.auto_block_suspicious_users {
-            self.block_user(&request.user_id, "Multiple critical violations detected")?;
+            self.block_user(&request.user_id, "Multiple critical violations detected")
+                .await?;
         }
 
         // Calculate confidence based on violations
@@ -225,7 +218,7 @@ impl MisusePreventionManager {
     }
 
     /// Block a user for suspicious activity
-    pub fn block_user(&self, user_id: &str, reason: &str) -> Result<()> {
+    pub async fn block_user(&self, user_id: &str, reason: &str) -> Result<()> {
         let block_info = BlockInfo {
             user_id: user_id.to_string(),
             reason: reason.to_string(),
@@ -235,9 +228,7 @@ impl MisusePreventionManager {
         };
 
         {
-            let mut blocked = self.blocked_users.write().map_err(|_| {
-                Error::Validation("Failed to acquire blocked users lock".to_string())
-            })?;
+            let mut blocked = self.blocked_users.write().await;
             blocked.insert(user_id.to_string(), block_info);
         }
 
@@ -246,11 +237,9 @@ impl MisusePreventionManager {
     }
 
     /// Unblock a user
-    pub fn unblock_user(&self, user_id: &str) -> Result<()> {
+    pub async fn unblock_user(&self, user_id: &str) -> Result<()> {
         {
-            let mut blocked = self.blocked_users.write().map_err(|_| {
-                Error::Validation("Failed to acquire blocked users lock".to_string())
-            })?;
+            let mut blocked = self.blocked_users.write().await;
             blocked.remove(user_id);
         }
 
@@ -259,25 +248,19 @@ impl MisusePreventionManager {
     }
 
     /// Get misuse prevention statistics
-    pub fn get_statistics(&self) -> Result<MisuseStatistics> {
+    pub async fn get_statistics(&self) -> Result<MisuseStatistics> {
         let blocked_users = {
-            let blocked = self.blocked_users.read().map_err(|_| {
-                Error::Validation("Failed to acquire blocked users lock".to_string())
-            })?;
+            let blocked = self.blocked_users.read().await;
             blocked.len()
         };
 
         let anomaly_stats = {
-            let detector = self.anomaly_detector.read().map_err(|_| {
-                Error::Validation("Failed to acquire anomaly detector lock".to_string())
-            })?;
+            let detector = self.anomaly_detector.read().await;
             detector.get_statistics().clone()
         };
 
         let usage_stats = {
-            let monitor = self.usage_monitor.read().map_err(|_| {
-                Error::Validation("Failed to acquire usage monitor lock".to_string())
-            })?;
+            let monitor = self.usage_monitor.read().await;
             monitor.get_statistics().clone()
         };
 
@@ -293,17 +276,14 @@ impl MisusePreventionManager {
 
     // Private helper methods
 
-    fn is_user_blocked(&self, user_id: &str) -> Result<bool> {
-        let blocked = self
-            .blocked_users
-            .read()
-            .map_err(|_| Error::Validation("Failed to acquire blocked users lock".to_string()))?;
+    async fn is_user_blocked(&self, user_id: &str) -> Result<bool> {
+        let blocked = self.blocked_users.read().await;
 
         if let Some(block_info) = blocked.get(user_id) {
             if SystemTime::now() > block_info.expires_at {
                 // Block has expired, remove it
                 drop(blocked);
-                self.unblock_user(user_id)?;
+                self.unblock_user(user_id).await?;
                 Ok(false)
             } else {
                 Ok(true)
@@ -313,14 +293,11 @@ impl MisusePreventionManager {
         }
     }
 
-    fn check_usage_restrictions(
+    async fn check_usage_restrictions(
         &self,
         request: &VoiceCloningRequest,
     ) -> Result<Option<MisuseViolation>> {
-        let mut monitor = self
-            .usage_monitor
-            .write()
-            .map_err(|_| Error::Validation("Failed to acquire usage monitor lock".to_string()))?;
+        let mut monitor = self.usage_monitor.write().await;
 
         if monitor.check_rate_limit(&request.user_id) {
             Ok(None)
@@ -352,11 +329,9 @@ impl MisusePreventionManager {
         request: &VoiceCloningRequest,
     ) -> Result<Option<MisuseViolation>> {
         if let Some(consent_id) = &request.consent_id {
-            let consent_manager = self.consent_manager.read().map_err(|_| {
-                Error::Validation("Failed to acquire consent manager lock".to_string())
-            })?;
+            let consent_manager_guard = self.consent_manager.read().await;
 
-            if let Some(ref manager) = *consent_manager {
+            if let Some(manager) = consent_manager_guard.as_ref() {
                 let context = ConsentUsageContext {
                     use_case: request.use_case.clone(),
                     application: Some(request.application_id.clone()),
@@ -417,13 +392,11 @@ impl MisusePreventionManager {
         }
     }
 
-    fn check_anomalous_behavior(
+    async fn check_anomalous_behavior(
         &self,
         request: &VoiceCloningRequest,
     ) -> Result<Option<MisuseViolation>> {
-        let mut detector = self.anomaly_detector.write().map_err(|_| {
-            Error::Validation("Failed to acquire anomaly detector lock".to_string())
-        })?;
+        let mut detector = self.anomaly_detector.write().await;
 
         let anomaly_score = detector.analyze_request(request)?;
 
@@ -454,11 +427,12 @@ impl MisusePreventionManager {
         request: &VoiceCloningRequest,
     ) -> Result<Option<MisuseViolation>> {
         if let Some(ref input_audio) = request.input_audio {
-            let detector_guard = self.deepfake_detector.read().map_err(|_| {
-                Error::Validation("Failed to acquire deepfake detector lock".to_string())
-            })?;
+            let detector_opt = {
+                let detector_guard = self.deepfake_detector.read().await;
+                detector_guard.clone()
+            };
 
-            if let Some(ref detector) = *detector_guard {
+            if let Some(detector) = detector_opt {
                 let result = detector
                     .analyze_authenticity(input_audio, request.sample_rate)
                     .await?;
@@ -502,11 +476,12 @@ impl MisusePreventionManager {
         request: &VoiceCloningRequest,
     ) -> Result<Option<MisuseViolation>> {
         if let Some(ref input_audio) = request.input_audio {
-            let privacy_guard = self.privacy_manager.read().map_err(|_| {
-                Error::Validation("Failed to acquire privacy manager lock".to_string())
-            })?;
+            let privacy_manager_opt = {
+                let privacy_guard = self.privacy_manager.read().await;
+                privacy_guard.clone()
+            };
 
-            if let Some(ref manager) = *privacy_guard {
+            if let Some(manager) = privacy_manager_opt {
                 if let Some(detection_result) = manager.detect_watermark(input_audio)? {
                     Ok(Some(MisuseViolation {
                         violation_type: ViolationType::WatermarkViolation,
@@ -949,29 +924,29 @@ mod tests {
         assert_eq!(config.anomaly_threshold, 0.7);
     }
 
-    #[test]
-    fn test_misuse_prevention_manager_creation() {
+    #[tokio::test]
+    async fn test_misuse_prevention_manager_creation() {
         let config = MisusePreventionConfig::default();
         let manager = MisusePreventionManager::new(config);
 
-        let stats = manager.get_statistics().unwrap();
+        let stats = manager.get_statistics().await.unwrap();
         assert_eq!(stats.total_blocked_users, 0);
         assert_eq!(stats.total_anomalies_detected, 0);
     }
 
-    #[test]
-    fn test_user_blocking() {
+    #[tokio::test]
+    async fn test_user_blocking() {
         let config = MisusePreventionConfig::default();
         let manager = MisusePreventionManager::new(config);
 
         let user_id = "test-user";
         let reason = "Test blocking";
 
-        manager.block_user(user_id, reason).unwrap();
-        assert!(manager.is_user_blocked(user_id).unwrap());
+        manager.block_user(user_id, reason).await.unwrap();
+        assert!(manager.is_user_blocked(user_id).await.unwrap());
 
-        manager.unblock_user(user_id).unwrap();
-        assert!(!manager.is_user_blocked(user_id).unwrap());
+        manager.unblock_user(user_id).await.unwrap();
+        assert!(!manager.is_user_blocked(user_id).await.unwrap());
     }
 
     #[test]
@@ -1098,7 +1073,7 @@ mod tests {
 
         // Without configured external systems, should have some violations
         // but the system should still function
-        assert!(result.processing_time_ms >= 0); // Allow 0 for very fast tests
+        // processing_time_ms is u64, always >= 0
         assert!(!result.recommendations.is_empty() || result.violations.is_empty());
     }
 }

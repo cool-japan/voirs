@@ -432,31 +432,58 @@ mod tests {
         
         impl TemporalFeatureComputer for MockExtractor {
             fn compute_temporal_features(&self, _audio: &[f32]) -> Result<TemporalFeatureVector> {
-                unimplemented!()
+                Ok(TemporalFeatureVector {
+                    energy_envelope: vec![0.1, 0.3, 0.5, 0.3, 0.1],
+                    onset_density: 0.5,
+                    tempo_bpm: 120.0,
+                    rhythmic_regularity: 0.8,
+                    temporal_centroid: 0.5,
+                })
             }
-            
+
             fn extract_temporal_features(&self, _samples: &Array1<f32>, _power_spectrogram: &Array2<f32>) -> Result<TemporalFeatureVector> {
-                unimplemented!()
+                Ok(TemporalFeatureVector {
+                    energy_envelope: vec![0.1, 0.3, 0.5, 0.3, 0.1],
+                    onset_density: 0.5,
+                    tempo_bpm: 120.0,
+                    rhythmic_regularity: 0.8,
+                    temporal_centroid: 0.5,
+                })
             }
-            
-            fn compute_energy_envelope(&self, _power_spectrogram: &Array2<f32>) -> Vec<f32> {
-                unimplemented!()
+
+            fn compute_energy_envelope(&self, power_spectrogram: &Array2<f32>) -> Vec<f32> {
+                // Mock: return sum of each time frame
+                power_spectrogram.rows()
+                    .into_iter()
+                    .map(|row| row.sum())
+                    .collect()
             }
-            
-            fn compute_energy_statistics(&self, _energy_envelope: &[f32]) -> EnergyStatistics {
-                unimplemented!()
+
+            fn compute_energy_statistics(&self, energy_envelope: &[f32]) -> EnergyStatistics {
+                let mean = if !energy_envelope.is_empty() {
+                    energy_envelope.iter().sum::<f32>() / energy_envelope.len() as f32
+                } else {
+                    0.0
+                };
+
+                EnergyStatistics {
+                    mean,
+                    std_dev: 0.1,
+                    max: energy_envelope.iter().copied().fold(0.0f32, f32::max),
+                    min: energy_envelope.iter().copied().fold(1.0f32, f32::min),
+                }
             }
-            
+
             fn compute_onset_density(&self, _power_spectrogram: &Array2<f32>) -> f32 {
-                unimplemented!()
+                0.5 // Mock: neutral onset density
             }
-            
+
             fn estimate_tempo(&self, _power_spectrogram: &Array2<f32>) -> Result<f32> {
-                unimplemented!()
+                Ok(120.0) // Mock: standard tempo
             }
-            
+
             fn compute_rhythmic_regularity(&self, _power_spectrogram: &Array2<f32>) -> f32 {
-                unimplemented!()
+                0.8 // Mock: high regularity
             }
             
             fn compute_temporal_centroid(&self, energy_envelope: &[f32]) -> f32 {
@@ -479,7 +506,8 @@ mod tests {
             }
             
             fn compute_adsr_envelope(&self, _samples: &Array1<f32>) -> (f32, f32, f32, f32) {
-                unimplemented!()
+                // Mock: return neutral ADSR values (Attack, Decay, Sustain, Release)
+                (0.1, 0.1, 0.7, 0.2)
             }
         }
         

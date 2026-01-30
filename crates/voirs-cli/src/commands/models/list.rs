@@ -122,7 +122,7 @@ async fn get_local_models(model_type: ModelType) -> Result<Vec<ModelInfo>> {
         let model_dir = entry.path();
 
         if model_dir.is_dir() {
-            if let Ok(model_info) = load_local_model_info(&model_dir, model_type.clone()).await {
+            if let Ok(model_info) = load_local_model_info(&model_dir, model_type).await {
                 models.push(model_info);
             }
         }

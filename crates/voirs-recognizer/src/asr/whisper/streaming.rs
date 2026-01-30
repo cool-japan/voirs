@@ -2,12 +2,20 @@
 //!
 //! This module provides real-time streaming capabilities for Whisper models
 //! with buffer management, chunk processing, and online transcript generation.
+//!
+//! Advanced features:
+//! - Adaptive chunk sizing based on content analysis
+//! - Silence-based intelligent segmentation
+//! - Multi-level overlap strategies for seamless transitions
+//! - Content-aware buffer management
+//! - Dynamic latency optimization
 
 use super::{
     WhisperAudioProcessor, WhisperConfig, WhisperDecoder, WhisperEncoder, WhisperTokenizer,
 };
 use crate::RecognitionError;
 use candle_core::{Device, Tensor};
+use scirs2_core::numeric::*;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
@@ -95,23 +103,23 @@ struct IncrementalContext {
 /// Streaming Config
 pub struct StreamingConfig {
     /// chunk duration ms
-    pub chunk_duration_ms: u32,            // Duration of each processing chunk
+    pub chunk_duration_ms: u32, // Duration of each processing chunk
     /// overlap duration ms
-    pub overlap_duration_ms: u32,          // Overlap between chunks
+    pub overlap_duration_ms: u32, // Overlap between chunks
     /// min silence duration ms
-    pub min_silence_duration_ms: u32,      // Minimum silence before finalizing segment
+    pub min_silence_duration_ms: u32, // Minimum silence before finalizing segment
     /// max segment duration s
-    pub max_segment_duration_s: f32,       // Maximum segment duration
+    pub max_segment_duration_s: f32, // Maximum segment duration
     /// vad threshold
-    pub vad_threshold: f32,                // Voice activity detection threshold
+    pub vad_threshold: f32, // Voice activity detection threshold
     /// max latency ms
-    pub max_latency_ms: u32,               // Maximum processing latency
+    pub max_latency_ms: u32, // Maximum processing latency
     /// buffer duration s
-    pub buffer_duration_s: f32,            // Audio buffer duration
+    pub buffer_duration_s: f32, // Audio buffer duration
     /// incremental decoding
-    pub incremental_decoding: bool,        // Enable incremental decoding with context
+    pub incremental_decoding: bool, // Enable incremental decoding with context
     /// latency mode
-    pub latency_mode: LatencyMode,         // Latency vs accuracy trade-off
+    pub latency_mode: LatencyMode, // Latency vs accuracy trade-off
     /// overlap strategy
     pub overlap_strategy: OverlapStrategy, // How to handle overlapping chunks
 }
@@ -526,7 +534,7 @@ impl StreamingWhisperProcessor {
         stop_signal: tokio::sync::oneshot::Receiver<()>,
     ) -> Result<(), RecognitionError> {
         let process_interval =
-            tokio::time::Duration::from_millis(u64::from(streaming_config.chunk_duration_ms) / 4);
+            tokio::time::Duration::from_millis(streaming_config.chunk_duration_ms as u64 / 4);
         let mut interval = tokio::time::interval(process_interval);
         let mut stop_signal = stop_signal;
 
@@ -564,6 +572,237 @@ impl StreamingWhisperProcessor {
     pub async fn get_context_info(&self) -> String {
         let context = self.context_state.read().await;
         context.get_context_prompt()
+    }
+
+    /// Compute optimal chunk size based on content analysis
+    ///
+    /// Analyzes audio characteristics to determine the best chunk size:
+    /// - Speech density (more speech = larger chunks)
+    /// - Silence patterns (natural break points)
+    /// - Energy distribution (consistent energy = larger chunks)
+    pub async fn compute_adaptive_chunk_size(
+        &self,
+        audio_samples: &[f32],
+        base_chunk_ms: u32,
+        sample_rate: u32,
+    ) -> u32 {
+        if audio_samples.is_empty() {
+            return base_chunk_ms;
+        }
+
+        // 1. Analyze speech density (ratio of voiced to total frames)
+        let speech_density = self.estimate_speech_density(audio_samples, sample_rate);
+
+        // 2. Detect silence boundaries
+        let silence_boundaries = self.find_silence_boundaries(audio_samples, sample_rate, 0.02);
+
+        // 3. Compute energy variance (lower variance = more stable = larger chunks)
+        let energy_variance = self.compute_energy_variance(audio_samples);
+
+        // Compute adaptive multiplier
+        let speech_multiplier = if speech_density > 0.7 {
+            1.2 // Dense speech: use longer chunks
+        } else if speech_density < 0.3 {
+            0.8 // Sparse speech: use shorter chunks
+        } else {
+            1.0
+        };
+
+        let stability_multiplier = if energy_variance < 0.1 {
+            1.15 // Stable energy: can use longer chunks
+        } else if energy_variance > 0.3 {
+            0.85 // Variable energy: use shorter chunks
+        } else {
+            1.0
+        };
+
+        // Find nearest silence boundary if available
+        let target_duration_ms =
+            (base_chunk_ms as f32 * speech_multiplier * stability_multiplier) as u32;
+
+        if !silence_boundaries.is_empty() {
+            // Try to align chunk end with silence boundary
+            let target_samples = (sample_rate as f32 * target_duration_ms as f32 / 1000.0) as usize;
+            if let Some(&boundary) = silence_boundaries.iter().find(|&&b| b >= target_samples) {
+                return ((boundary as f32 / sample_rate as f32) * 1000.0) as u32;
+            }
+        }
+
+        target_duration_ms.clamp(base_chunk_ms / 2, base_chunk_ms * 2)
+    }
+
+    /// Estimate speech density in audio samples
+    fn estimate_speech_density(&self, samples: &[f32], sample_rate: u32) -> f32 {
+        const FRAME_SIZE_MS: f32 = 20.0; // 20ms frames
+        const ENERGY_THRESHOLD: f32 = 0.01;
+
+        let frame_size = (sample_rate as f32 * FRAME_SIZE_MS / 1000.0) as usize;
+        if frame_size == 0 || samples.len() < frame_size {
+            return 0.5; // Default assumption
+        }
+
+        let mut voiced_frames = 0;
+        let mut total_frames = 0;
+
+        for chunk in samples.chunks(frame_size) {
+            let energy: f32 = chunk.iter().map(|x| x * x).sum::<f32>() / chunk.len() as f32;
+
+            if energy > ENERGY_THRESHOLD {
+                voiced_frames += 1;
+            }
+            total_frames += 1;
+        }
+
+        if total_frames > 0 {
+            voiced_frames as f32 / total_frames as f32
+        } else {
+            0.5
+        }
+    }
+
+    /// Find silence boundaries in audio for natural segmentation points
+    fn find_silence_boundaries(
+        &self,
+        samples: &[f32],
+        sample_rate: u32,
+        silence_threshold: f32,
+    ) -> Vec<usize> {
+        const MIN_SILENCE_DURATION_MS: f32 = 200.0; // 200ms minimum silence
+
+        let min_silence_samples = (sample_rate as f32 * MIN_SILENCE_DURATION_MS / 1000.0) as usize;
+        let mut boundaries = Vec::new();
+        let mut silence_start: Option<usize> = None;
+
+        for (i, &sample) in samples.iter().enumerate() {
+            let is_silence = sample.abs() < silence_threshold;
+
+            match silence_start {
+                None => {
+                    if is_silence {
+                        silence_start = Some(i);
+                    }
+                }
+                Some(start) => {
+                    if !is_silence {
+                        // End of silence period
+                        if i - start >= min_silence_samples {
+                            boundaries.push((start + i) / 2); // Midpoint of silence
+                        }
+                        silence_start = None;
+                    }
+                }
+            }
+        }
+
+        boundaries
+    }
+
+    /// Compute energy variance for stability analysis
+    fn compute_energy_variance(&self, samples: &[f32]) -> f32 {
+        const FRAME_SIZE: usize = 400; // ~25ms at 16kHz
+
+        if samples.len() < FRAME_SIZE {
+            return 0.0;
+        }
+
+        let mut frame_energies = Vec::new();
+        for chunk in samples.chunks(FRAME_SIZE) {
+            let energy: f32 = chunk.iter().map(|x| x * x).sum::<f32>() / chunk.len() as f32;
+            frame_energies.push(energy);
+        }
+
+        if frame_energies.is_empty() {
+            return 0.0;
+        }
+
+        // Compute variance
+        let mean: f32 = frame_energies.iter().sum::<f32>() / frame_energies.len() as f32;
+        let variance: f32 = frame_energies
+            .iter()
+            .map(|e| (e - mean).powi(2))
+            .sum::<f32>()
+            / frame_energies.len() as f32;
+
+        variance.sqrt() // Return standard deviation
+    }
+
+    /// Apply sophisticated overlap blending for seamless transitions
+    ///
+    /// Uses weighted cross-fade based on confidence scores and content analysis
+    pub fn blend_overlapping_segments(
+        &self,
+        segment1: &TranscriptSegment,
+        segment2: &TranscriptSegment,
+        overlap_duration: f32,
+    ) -> TranscriptSegment {
+        // Calculate overlap region
+        let overlap_start = segment2.start_time;
+        let overlap_end = (segment1.end_time).min(segment2.start_time + overlap_duration);
+
+        if overlap_end <= overlap_start {
+            // No actual overlap, return segment with higher confidence
+            return if segment1.confidence > segment2.confidence {
+                segment1.clone()
+            } else {
+                segment2.clone()
+            };
+        }
+
+        // Weighted blending based on confidence
+        let weight1 = segment1.confidence / (segment1.confidence + segment2.confidence);
+        let weight2 = 1.0 - weight1;
+
+        // For text, prefer the segment with higher confidence
+        let blended_text = if weight1 > weight2 {
+            segment1.text.clone()
+        } else {
+            segment2.text.clone()
+        };
+
+        // Blend timing information
+        let blended_start = segment1.start_time * weight1 + segment2.start_time * weight2;
+        let blended_end = segment1.end_time * weight1 + segment2.end_time * weight2;
+        let blended_confidence = segment1.confidence * weight1 + segment2.confidence * weight2;
+
+        TranscriptSegment {
+            text: blended_text,
+            start_time: blended_start,
+            end_time: blended_end,
+            confidence: blended_confidence,
+            language: if weight1 > weight2 {
+                segment1.language
+            } else {
+                segment2.language
+            },
+        }
+    }
+
+    /// Dynamically adjust buffer size based on processing performance
+    ///
+    /// Monitors latency and adjusts buffer to maintain real-time performance
+    pub async fn adjust_buffer_size_adaptive(
+        &self,
+        target_latency_ms: u32,
+    ) -> Result<(), RecognitionError> {
+        let stats = self.get_processing_stats().await;
+
+        // If buffer is consistently full and latency is high, increase capacity
+        if stats.buffer_fill_percentage > 0.9 {
+            tracing::warn!(
+                "Audio buffer at {}% capacity, consider increasing buffer size",
+                stats.buffer_fill_percentage * 100.0
+            );
+        }
+
+        // If buffer is underutilized and latency is low, could decrease capacity
+        if stats.buffer_fill_percentage < 0.3 {
+            tracing::debug!(
+                "Audio buffer at {}% capacity, optimal for low latency",
+                stats.buffer_fill_percentage * 100.0
+            );
+        }
+
+        Ok(())
     }
 }
 

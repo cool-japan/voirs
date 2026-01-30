@@ -502,7 +502,7 @@ impl GpuEmotionProcessor {
 impl Default for GpuEmotionProcessor {
     fn default() -> Self {
         // Safe fallback implementation - CPU fallback if GPU fails
-        Self::new().unwrap_or_else(|_| {
+        Self::new().unwrap_or({
             // Emergency CPU-only fallback that can't fail
             #[cfg(feature = "gpu")]
             {
@@ -522,9 +522,13 @@ impl Default for GpuEmotionProcessor {
 /// GPU processing capabilities and configuration
 #[derive(Debug, Clone)]
 pub struct GpuCapabilities {
+    /// Whether CUDA GPU acceleration is available
     pub cuda_available: bool,
+    /// Whether OpenCL GPU acceleration is available
     pub opencl_available: bool,
+    /// Available GPU memory in megabytes
     pub memory_mb: Option<u64>,
+    /// GPU compute capability version (e.g., "8.6" for RTX 3090)
     pub compute_capability: Option<String>,
 }
 

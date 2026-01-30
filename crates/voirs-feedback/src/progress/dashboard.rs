@@ -131,6 +131,7 @@ pub struct DashboardMetricsGenerator {
 
 impl DashboardMetricsGenerator {
     /// Create a new dashboard metrics generator
+    #[must_use]
     pub fn new(config: DashboardConfig) -> Self {
         Self {
             config,
@@ -237,11 +238,11 @@ impl DashboardMetricsGenerator {
                         .iter()
                         .map(|p| p.training_stats.current_streak as u32)
                         .sum();
-                    Ok(total_streak as f64 / all_progress.len() as f64)
+                    Ok(f64::from(total_streak) / all_progress.len() as f64)
                 }
             }
             _ => Err(FeedbackError::ProgressTrackingError {
-                message: format!("Unknown metric: {}", metric_name),
+                message: format!("Unknown metric: {metric_name}"),
                 source: None,
             }),
         }
@@ -254,10 +255,7 @@ impl DashboardMetricsGenerator {
         value: f64,
         timestamp: DateTime<Utc>,
     ) {
-        let data_points = self
-            .historical_cache
-            .entry(metric_name)
-            .or_insert_with(Vec::new);
+        let data_points = self.historical_cache.entry(metric_name).or_default();
 
         data_points.push(MetricDataPoint {
             timestamp,
@@ -277,6 +275,7 @@ impl DashboardMetricsGenerator {
     }
 
     /// Get available metric names
+    #[must_use]
     pub fn get_available_metrics() -> Vec<String> {
         vec![
             "average_skill_level".to_string(),
@@ -295,6 +294,7 @@ impl DashboardMetricsGenerator {
     }
 
     /// Get current configuration
+    #[must_use]
     pub fn get_config(&self) -> &DashboardConfig {
         &self.config
     }
@@ -305,6 +305,7 @@ impl DashboardMetricsGenerator {
     }
 
     /// Get historical data for a specific metric
+    #[must_use]
     pub fn get_historical_data(&self, metric_name: &str) -> Option<&Vec<MetricDataPoint>> {
         self.historical_cache.get(metric_name)
     }
@@ -317,6 +318,7 @@ pub struct DashboardConfigBuilder {
 
 impl DashboardConfigBuilder {
     /// Create a new dashboard config builder
+    #[must_use]
     pub fn new() -> Self {
         Self {
             config: DashboardConfig::default(),
@@ -330,6 +332,7 @@ impl DashboardConfigBuilder {
     }
 
     /// Add metrics to display
+    #[must_use]
     pub fn metrics(mut self, metrics: Vec<String>) -> Self {
         self.config.metrics = metrics;
         self
@@ -342,30 +345,35 @@ impl DashboardConfigBuilder {
     }
 
     /// Set refresh interval
+    #[must_use]
     pub fn refresh_interval(mut self, seconds: u32) -> Self {
         self.config.refresh_interval = seconds;
         self
     }
 
     /// Enable or disable real-time updates
+    #[must_use]
     pub fn realtime(mut self, enabled: bool) -> Self {
         self.config.enable_realtime = enabled;
         self
     }
 
     /// Set maximum data points
+    #[must_use]
     pub fn max_data_points(mut self, max: usize) -> Self {
         self.config.max_data_points = max;
         self
     }
 
     /// Set theme
+    #[must_use]
     pub fn theme(mut self, theme: DashboardTheme) -> Self {
         self.config.theme = theme;
         self
     }
 
     /// Build the final configuration
+    #[must_use]
     pub fn build(self) -> DashboardConfig {
         self.config
     }

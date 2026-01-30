@@ -1,11 +1,11 @@
 //! Fusion Pattern Matching for Kernel Optimization
-//! 
+//!
 //! This module defines patterns for identifying fusible operation sequences
 //! in computation graphs and provides matching algorithms.
 
+use super::graph::{FusionGraph, FusionMatch, OpGraph, OpNode};
+use crate::AcousticError;
 use std::collections::HashMap;
-use crate::error::AcousticError;
-use super::graph::{OpGraph, OpNode, FusionGraph, FusionMatch};
 
 /// Defines a pattern of operations that can be fused together
 #[derive(Debug, Clone)]
@@ -73,7 +73,8 @@ impl FusionPattern {
             return false;
         }
 
-        ops.iter().zip(self.operations.iter())
+        ops.iter()
+            .zip(self.operations.iter())
             .all(|(op, pattern_op)| op == pattern_op || pattern_op == "*")
     }
 
@@ -91,7 +92,9 @@ impl FusionPattern {
 
     /// Check if constraints are satisfied
     pub fn check_constraints(&self, nodes: &[&OpNode]) -> bool {
-        self.constraints.iter().all(|constraint| constraint.check(nodes))
+        self.constraints
+            .iter()
+            .all(|constraint| constraint.check(nodes))
     }
 
     /// Estimate speedup for element-wise operations
@@ -99,11 +102,11 @@ impl FusionPattern {
         // Element-wise operations benefit from memory bandwidth reduction
         let memory_ops = nodes.len() as f32;
         let compute_ops = nodes.iter().map(|n| n.compute_cost()).sum::<f32>();
-        
+
         // Memory-bound operations see higher speedup
         let memory_bandwidth_factor = 1.5;
         let fusion_overhead = 0.9; // Small overhead for fusion
-        
+
         (memory_ops * memory_bandwidth_factor * fusion_overhead).min(3.0)
     }
 
@@ -112,7 +115,7 @@ impl FusionPattern {
         // Pointwise operations (like activations) benefit from register reuse
         let base_speedup = 1.3;
         let complexity_factor = nodes.len() as f32 * 0.1;
-        
+
         (base_speedup + complexity_factor).min(2.5)
     }
 
@@ -121,10 +124,11 @@ impl FusionPattern {
         // Convolution fusion can be very beneficial
         let has_conv = nodes.iter().any(|n| n.op_type().contains("conv"));
         let has_bias = nodes.iter().any(|n| n.op_type() == "add");
-        let has_activation = nodes.iter().any(|n| 
-            matches!(n.op_type(), "relu" | "tanh" | "sigmoid" | "gelu"));
+        let has_activation = nodes
+            .iter()
+            .any(|n| matches!(n.op_type(), "relu" | "tanh" | "sigmoid" | "gelu"));
 
-        let mut speedup = 1.0;
+        let mut speedup: f32 = 1.0;
         if has_conv {
             speedup *= 1.4;
         }
@@ -142,7 +146,7 @@ impl FusionPattern {
     fn estimate_linear_algebra_speedup(&self, nodes: &[&OpNode]) -> f32 {
         // Matrix operations can benefit from better cache utilization
         let matmul_count = nodes.iter().filter(|n| n.op_type() == "matmul").count();
-        
+
         if matmul_count >= 2 {
             2.0 + (matmul_count as f32 - 2.0) * 0.3
         } else {
@@ -155,7 +159,7 @@ impl FusionPattern {
         // Normalization patterns can be quite beneficial
         let reduction_ops = nodes.iter().filter(|n| n.is_reduction()).count();
         let elementwise_ops = nodes.iter().filter(|n| n.is_elementwise()).count();
-        
+
         1.5 + (reduction_ops as f32 * 0.3) + (elementwise_ops as f32 * 0.1)
     }
 }
@@ -199,37 +203,38 @@ impl FusionConstraint {
     pub fn check(&self, nodes: &[&OpNode]) -> bool {
         match self {
             FusionConstraint::MaxOperations(max) => nodes.len() <= *max,
-            
+
             FusionConstraint::SameOutputShape => {
                 if nodes.is_empty() {
                     return true;
                 }
                 let first_shape = nodes[0].output_shape();
                 nodes.iter().all(|node| node.output_shape() == first_shape)
-            },
-            
+            }
+
             FusionConstraint::ElementWiseCompatible => {
                 nodes.iter().all(|node| node.is_elementwise())
-            },
-            
+            }
+
             FusionConstraint::MaxMemoryOverhead(max_overhead) => {
                 // Simplified memory overhead estimation
-                let total_memory = nodes.iter()
+                let total_memory = nodes
+                    .iter()
                     .map(|node| node.output_shape().elem_count() as f32 * 4.0) // assume f32
                     .sum::<f32>();
                 let overhead = total_memory * 0.1; // Estimated 10% overhead
                 overhead / total_memory <= *max_overhead
-            },
-            
+            }
+
             FusionConstraint::MinSpeedup(min_speedup) => {
                 // This would need actual speedup estimation
                 *min_speedup <= 2.0 // Placeholder
-            },
-            
+            }
+
             FusionConstraint::Custom(_) => {
                 // Custom constraints would need specialized handling
                 true
-            },
+            }
         }
     }
 }
@@ -247,13 +252,16 @@ impl<'a> PatternMatcher<'a> {
     }
 
     /// Find all matching patterns in the fusion graph
-    pub fn find_matches(&self, graph: &FusionGraph) -> Result<Option<Vec<FusionMatch>>, AcousticError> {
+    pub fn find_matches(
+        &self,
+        graph: &FusionGraph,
+    ) -> Result<Option<Vec<FusionMatch>>, AcousticError> {
         let mut matches = Vec::new();
         let op_graph = graph.op_graph();
-        
+
         // Get topologically sorted nodes
         let sorted_nodes = op_graph.topological_sort()?;
-        
+
         // Try to match patterns starting from each node
         for &start_node in &sorted_nodes {
             for pattern in self.patterns {
@@ -265,7 +273,8 @@ impl<'a> PatternMatcher<'a> {
 
         // Sort matches by priority and estimated speedup
         matches.sort_by(|a, b| {
-            b.estimated_speedup.partial_cmp(&a.estimated_speedup)
+            b.estimated_speedup
+                .partial_cmp(&a.estimated_speedup)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
@@ -307,7 +316,8 @@ impl<'a> PatternMatcher<'a> {
         }
 
         // Get node references for constraint checking
-        let node_refs: Vec<&OpNode> = current_nodes.iter()
+        let node_refs: Vec<&OpNode> = current_nodes
+            .iter()
             .filter_map(|&id| graph.get_node(id))
             .collect();
 
@@ -347,7 +357,7 @@ mod tests {
     #[test]
     fn test_pattern_matching() {
         let pattern = FusionPattern::new("add_mul", vec!["add", "mul"]);
-        
+
         assert!(pattern.matches(&["add", "mul"]));
         assert!(!pattern.matches(&["mul", "add"]));
         assert!(!pattern.matches(&["add"]));
@@ -357,7 +367,7 @@ mod tests {
     #[test]
     fn test_wildcard_pattern() {
         let pattern = FusionPattern::new("any_relu", vec!["*", "relu"]);
-        
+
         assert!(pattern.matches(&["add", "relu"]));
         assert!(pattern.matches(&["mul", "relu"]));
         assert!(!pattern.matches(&["add", "tanh"]));
@@ -385,8 +395,8 @@ mod tests {
 
     #[test]
     fn test_speedup_estimation() {
-        let pattern = FusionPattern::new("add_mul", vec!["add", "mul"])
-            .with_rule(FusionRule::ElementWise);
+        let pattern =
+            FusionPattern::new("add_mul", vec!["add", "mul"]).with_rule(FusionRule::ElementWise);
 
         let shape = Shape::from_dims(&[1000]);
         let node1 = OpNode::new(0, "add".to_string(), shape.clone(), DType::F32);

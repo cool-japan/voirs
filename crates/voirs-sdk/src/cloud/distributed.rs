@@ -168,9 +168,9 @@ enum ScalingCondition {
 
 #[derive(Debug, Clone)]
 enum ScalingAction {
-    ScaleUp(u32),
-    ScaleDown(u32),
-    ScaleToTarget(u32),
+    Up(u32),
+    Down(u32),
+    ToTarget(u32),
 }
 
 struct ScalingEvent {
@@ -732,7 +732,7 @@ impl WorkerManager {
             // Record scaling event
             let scaling_event = ScalingEvent {
                 timestamp: chrono::Utc::now(),
-                action: ScalingAction::ScaleUp(1),
+                action: ScalingAction::Up(1),
                 reason: "Manual scale up requested".to_string(),
                 old_size: workers.len() as u32 - 1,
                 new_size: workers.len() as u32,
@@ -793,7 +793,7 @@ impl WorkerManager {
             // Record scaling event
             let scaling_event = ScalingEvent {
                 timestamp: chrono::Utc::now(),
-                action: ScalingAction::ScaleDown(1),
+                action: ScalingAction::Down(1),
                 reason: "Manual scale down requested".to_string(),
                 old_size: workers.len() as u32,
                 new_size: workers.len() as u32 - 1,
@@ -1193,11 +1193,7 @@ impl CostOptimizer {
             let provider_hourly_cost = cpu_hours * pricing.cpu_cost_per_hour
                 + memory_gb_hours * pricing.memory_cost_per_gb_hour
                 + network_gb * pricing.network_cost_per_gb
-                + if let Some(gpu_cost) = pricing.gpu_cost_per_hour {
-                    gpu_cost
-                } else {
-                    0.0
-                };
+                + pricing.gpu_cost_per_hour.unwrap_or(0.0);
 
             hourly_cost += provider_hourly_cost;
         }

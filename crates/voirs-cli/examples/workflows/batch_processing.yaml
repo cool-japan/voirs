@@ -1,0 +1,82 @@
+# Batch Processing Workflow
+#
+# This workflow demonstrates batch processing multiple texts
+# with loop iteration variables and parallel execution
+#
+# Usage: voirs workflow execute examples/workflows/batch_processing.yaml
+
+name: "batch-processing"
+version: "1.0"
+description: "Batch process multiple texts with parallel execution"
+
+variables:
+  texts:
+    - "Hello world"
+    - "This is sample text number two"
+    - "The third text for batch processing"
+    - "Fourth and final text in the batch"
+  voice: "en-US-neural-1"
+  output_dir: "batch_output"
+  quality: "high"
+  rate: 1.0
+
+config:
+  max_parallel: 4
+  timeout_seconds: 600
+
+steps:
+  # Step 1: Create output directory
+  - name: "setup"
+    type: "command"
+    description: "Prepare output directory"
+    parameters:
+      command: "mkdir"
+      args:
+        - "-p"
+        - "${output_dir}"
+
+  # Step 2: Process each text in parallel
+  - name: "batch_synthesis"
+    type: "synthesize"
+    description: "Synthesize each text (index: ${index}, text: ${item})"
+    for_each: "${texts}"
+    parallel: true
+    depends_on:
+      - step_name: "setup"
+        must_succeed: true
+    parameters:
+      text: "${item}"
+      voice: "${voice}"
+      output: "${output_dir}/audio_${index}.wav"
+      quality: "${quality}"
+      rate: "${rate}"
+    retry:
+      max_attempts: 2
+      strategy: "linear"
+      initial_delay_ms: 1000
+      max_delay_ms: 3000
+
+  # Step 3: Validate all outputs
+  - name: "validate_batch"
+    type: "validate"
+    description: "Ensure all audio files meet quality standards"
+    depends_on:
+      - step_name: "batch_synthesis"
+        must_succeed: true
+    parameters:
+      input_dir: "${output_dir}"
+      min_quality: 4.0
+      check_consistency: true
+
+  # Step 4: Generate summary report
+  - name: "summary"
+    type: "command"
+    description: "Create batch processing summary"
+    depends_on:
+      - step_name: "validate_batch"
+        must_succeed: false
+    parameters:
+      command: "ls"
+      args:
+        - "-lh"
+        - "${output_dir}"

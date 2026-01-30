@@ -141,9 +141,13 @@ pub enum CliError {
     #[error("Performance warning: {0}")]
     PerformanceWarning(String),
 
+    /// Workflow execution error
+    #[error("Workflow error: {0}")]
+    Workflow(String),
+
     /// Advanced error with rich context
     #[error("Advanced error: {0}")]
-    Advanced(#[from] advanced_handler::AdvancedError),
+    Advanced(#[from] Box<advanced_handler::AdvancedError>),
 }
 
 impl CliError {
@@ -585,6 +589,12 @@ impl CliError {
                     e
                 )
             }
+            CliError::Workflow(e) => {
+                format!(
+                    "Workflow execution error: {}\n\nSuggestions:\n- Check workflow definition syntax\n- Verify all step dependencies exist\n- Use 'voirs workflow validate' to check workflow\n- Check workflow state with 'voirs workflow status'",
+                    e
+                )
+            }
             CliError::Advanced(advanced_error) => {
                 // For advanced errors, we'd typically use the advanced handler's user report
                 format!("Advanced error: {}", advanced_error.message)
@@ -626,6 +636,7 @@ impl CliError {
             CliError::HardwareRequirement(_) => 38,
             CliError::NetworkError(_) => 39,
             CliError::PerformanceWarning(_) => 40,
+            CliError::Workflow(_) => 41,
             CliError::Advanced(_) => 50,
         }
     }

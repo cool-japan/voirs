@@ -181,6 +181,7 @@ pub enum RetentionComplianceStatus {
 
 impl DataRetentionManager {
     /// Create new data retention manager
+    #[must_use]
     pub fn new() -> Self {
         Self {
             config: RetentionPolicyConfig::default(),
@@ -204,7 +205,7 @@ impl DataRetentionManager {
             task_id: task_id.clone(),
             data_type: data_type.clone(),
             scheduled_at: Utc::now()
-                + ChronoDuration::hours(self.config.cleanup_interval_hours as i64),
+                + ChronoDuration::hours(i64::from(self.config.cleanup_interval_hours)),
             status: CleanupStatus::Scheduled,
             record_count: 0, // Will be determined during execution
             action,
@@ -241,7 +242,7 @@ impl DataRetentionManager {
                 Err(e) => {
                     result
                         .errors
-                        .push(format!("Rule '{}' failed: {}", rule_name, e));
+                        .push(format!("Rule '{rule_name}' failed: {e}"));
                 }
             }
         }
@@ -282,7 +283,7 @@ impl DataRetentionManager {
                     if let Err(e) = self.delete_data(&data_id).await {
                         result
                             .errors
-                            .push(format!("Failed to delete {}: {}", data_id, e));
+                            .push(format!("Failed to delete {data_id}: {e}"));
                     } else {
                         result.deleted_count += 1;
                     }
@@ -291,7 +292,7 @@ impl DataRetentionManager {
                     if let Err(e) = self.anonymize_data(&data_id).await {
                         result
                             .errors
-                            .push(format!("Failed to anonymize {}: {}", data_id, e));
+                            .push(format!("Failed to anonymize {data_id}: {e}"));
                     } else {
                         result.anonymized_count += 1;
                     }
@@ -300,7 +301,7 @@ impl DataRetentionManager {
                     if let Err(e) = self.archive_data(&data_id).await {
                         result
                             .errors
-                            .push(format!("Failed to archive {}: {}", data_id, e));
+                            .push(format!("Failed to archive {data_id}: {e}"));
                     } else {
                         result.archived_count += 1;
                     }
@@ -323,12 +324,12 @@ impl DataRetentionManager {
         for condition in conditions {
             match condition {
                 RetentionCondition::DataAge { days } => {
-                    let _cutoff_date = Utc::now() - ChronoDuration::days(*days as i64);
+                    let _cutoff_date = Utc::now() - ChronoDuration::days(i64::from(*days));
                     // Implementation would check data age against cutoff
                     // For now, assume condition is met
                 }
                 RetentionCondition::UserInactive { days } => {
-                    let _cutoff_date = Utc::now() - ChronoDuration::days(*days as i64);
+                    let _cutoff_date = Utc::now() - ChronoDuration::days(i64::from(*days));
                     // Implementation would check user activity
                 }
                 RetentionCondition::DataSize { min_bytes: _ } => {
@@ -351,7 +352,7 @@ impl DataRetentionManager {
         data_type: &str,
         retention_days: u32,
     ) -> GdprResult<Vec<String>> {
-        let _cutoff_date = Utc::now() - ChronoDuration::days(retention_days as i64);
+        let _cutoff_date = Utc::now() - ChronoDuration::days(i64::from(retention_days));
 
         // Mock implementation - in real system would query database
         let expired_data = match data_type {
@@ -400,7 +401,7 @@ impl DataRetentionManager {
             Ok(())
         } else {
             Err(GdprError::DataDeletionFailed {
-                message: format!("Cleanup task {} not found", task_id),
+                message: format!("Cleanup task {task_id} not found"),
             })
         }
     }

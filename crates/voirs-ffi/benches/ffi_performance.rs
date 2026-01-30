@@ -16,7 +16,6 @@ use voirs_sdk::types::{LanguageCode, QualityLevel};
 /// This module provides comprehensive performance benchmarking for FFI operations
 /// including overhead measurement, language-specific performance analysis, memory
 /// usage profiling, and scalability testing.
-
 #[repr(C)]
 struct BenchmarkContext {
     pipeline_id: u32,
@@ -25,6 +24,7 @@ struct BenchmarkContext {
 }
 
 impl BenchmarkContext {
+    #[allow(unused_unsafe)]
     fn new() -> Self {
         let pipeline_id = unsafe { voirs_create_pipeline() };
         let config = VoirsSynthesisConfig::default();
@@ -49,6 +49,7 @@ impl Drop for BenchmarkContext {
 }
 
 /// Benchmark FFI call overhead
+#[allow(unused_unsafe)]
 fn benchmark_ffi_overhead(c: &mut Criterion) {
     let mut group = c.benchmark_group("ffi_overhead");
 

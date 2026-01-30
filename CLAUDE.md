@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-VoiRS is a pure-Rust neural speech synthesis (TTS) framework with modular architecture. Current version: **0.1.0-alpha.2**.
+VoiRS is a pure-Rust neural speech synthesis (TTS) framework with modular architecture. Current version: **0.1.0-alpha.3**.
 
 ### Core Architecture
 
@@ -359,7 +359,7 @@ Cross-platform code should use conditional compilation for platform-specific opt
 
 ## Version and Release Notes
 
-Current version is 0.1.0-alpha.2. This is an alpha release with:
+Current version is 0.1.0-alpha.3. This is an alpha release with:
 - ✅ Core TTS pipeline working and tested
 - ✅ Advanced features (emotion, cloning, spatial) implemented
 - ✅ CLI tool and examples functional

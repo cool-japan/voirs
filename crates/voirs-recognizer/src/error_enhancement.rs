@@ -1,4 +1,4 @@
-//! Enhanced error messages and solutions for VoiRS Recognizer
+//! Enhanced error messages and solutions for `VoiRS` Recognizer
 //!
 //! This module provides comprehensive error enhancement functionality that adds
 //! detailed context, recovery suggestions, and actionable solutions to errors.
@@ -137,7 +137,7 @@ pub trait ErrorEnhancer {
 pub struct SystemInfo {
     /// Operating system
     pub os: String,
-    /// Architecture (x86_64, aarch64, etc.)
+    /// Architecture (`x86_64`, aarch64, etc.)
     pub arch: String,
     /// Available memory in MB
     pub available_memory_mb: u64,
@@ -162,7 +162,7 @@ pub struct EnvironmentInfo {
     pub cloud_provider: Option<String>,
     /// Programming language integration (Python, JavaScript, etc.)
     pub language_binding: Option<String>,
-    /// Framework integration (Flask, FastAPI, etc.)
+    /// Framework integration (Flask, `FastAPI`, etc.)
     pub framework: Option<String>,
 }
 
@@ -274,6 +274,9 @@ impl ErrorEnhancer for RecognitionError {
             }
             RecognitionError::TrainingError { message, .. } => {
                 create_training_error_enhancement(message)
+            }
+            RecognitionError::SynchronizationError { message } => {
+                create_synchronization_error_enhancement(message)
             }
         }
     }
@@ -1052,14 +1055,13 @@ fn create_format_error_enhancement(format: &str) -> ErrorEnhancement {
             code_example: Some(format!(
                 r#"
 // Convert using FFmpeg command line
-// ffmpeg -i input.{} -ar 16000 -ac 1 output.wav
+// ffmpeg -i input.{format} -ar 16000 -ac 1 output.wav
 
 // Or use the built-in audio loader with conversion
 use voirs_recognizer::audio_formats::load_audio;
 
 let audio = load_audio("input.wav")?;  // Will auto-convert
-"#,
-                format
+"#
             )),
             success_indicators: vec![
                 "Audio converts without quality loss".to_string(),
@@ -1318,15 +1320,14 @@ fn create_language_not_supported_enhancement(
 ) -> ErrorEnhancement {
     ErrorEnhancement {
         original_message: format!(
-            "Language '{}' not supported. Supported languages: {:?}",
-            language, supported
+            "Language '{language}' not supported. Supported languages: {supported:?}"
         ),
         category: ErrorCategory::FeatureSupport,
         severity: ErrorSeverity::Medium,
         context: ErrorContext {
             component: "Language Support".to_string(),
             operation: "Language validation".to_string(),
-            input_summary: format!("Requested language: {}", language),
+            input_summary: format!("Requested language: {language}"),
             system_state: "Language processing".to_string(),
             timestamp: std::time::SystemTime::now(),
             additional_info: std::collections::HashMap::new(),
@@ -1369,22 +1370,21 @@ fn create_device_not_available_enhancement(
 ) -> ErrorEnhancement {
     ErrorEnhancement {
         original_message: format!(
-            "Device '{}' not available: {}. Fallback: {}",
-            device, reason, fallback
+            "Device '{device}' not available: {reason}. Fallback: {fallback}"
         ),
         category: ErrorCategory::Resources,
         severity: ErrorSeverity::Medium,
         context: ErrorContext {
             component: "Device Manager".to_string(),
             operation: "Device initialization".to_string(),
-            input_summary: format!("Requested device: {}", device),
+            input_summary: format!("Requested device: {device}"),
             system_state: "Device discovery".to_string(),
             timestamp: std::time::SystemTime::now(),
             additional_info: std::collections::HashMap::new(),
         },
         solutions: vec![Solution {
             title: "Use fallback device".to_string(),
-            description: format!("Use fallback device: {}", fallback),
+            description: format!("Use fallback device: {fallback}"),
             priority: 1,
             estimated_time: "Immediate".to_string(),
             difficulty: SolutionDifficulty::Easy,
@@ -1396,9 +1396,8 @@ fn create_device_not_available_enhancement(
             code_example: Some(format!(
                 r#"
 // Configure fallback device
-let config = ASRConfig::default().with_device("{}");
-"#,
-                fallback
+let config = ASRConfig::default().with_device("{fallback}");
+"#
             )),
             success_indicators: vec![
                 "Processing continues with fallback".to_string(),
@@ -1421,15 +1420,14 @@ fn create_insufficient_memory_enhancement(
 ) -> ErrorEnhancement {
     ErrorEnhancement {
         original_message: format!(
-            "Insufficient memory: need {}MB, have {}MB. Recommendation: {}",
-            required_mb, available_mb, recommendation
+            "Insufficient memory: need {required_mb}MB, have {available_mb}MB. Recommendation: {recommendation}"
         ),
         category: ErrorCategory::Resources,
         severity: ErrorSeverity::High,
         context: ErrorContext {
             component: "Memory Manager".to_string(),
             operation: "Memory allocation".to_string(),
-            input_summary: format!("Required: {}MB, Available: {}MB", required_mb, available_mb),
+            input_summary: format!("Required: {required_mb}MB, Available: {available_mb}MB"),
             system_state: "Memory allocation".to_string(),
             timestamp: std::time::SystemTime::now(),
             additional_info: std::collections::HashMap::new(),
@@ -1474,15 +1472,14 @@ fn create_recognition_timeout_enhancement(
 ) -> ErrorEnhancement {
     ErrorEnhancement {
         original_message: format!(
-            "Recognition timed out after {}ms. Audio duration: {}ms. Suggestion: {}",
-            timeout_ms, audio_duration_ms, suggestion
+            "Recognition timed out after {timeout_ms}ms. Audio duration: {audio_duration_ms}ms. Suggestion: {suggestion}"
         ),
         category: ErrorCategory::Performance,
         severity: ErrorSeverity::Medium,
         context: ErrorContext {
             component: "Recognition Engine".to_string(),
             operation: "Speech recognition".to_string(),
-            input_summary: format!("Timeout: {}ms, Audio: {}ms", timeout_ms, audio_duration_ms),
+            input_summary: format!("Timeout: {timeout_ms}ms, Audio: {audio_duration_ms}ms"),
             system_state: "Recognition processing".to_string(),
             timestamp: std::time::SystemTime::now(),
             additional_info: std::collections::HashMap::new(),
@@ -1606,13 +1603,13 @@ fn format_enhanced_error(enhancement: &ErrorEnhancement) -> String {
             if !solution.steps.is_empty() {
                 output.push_str("     Steps:\n");
                 for step in &solution.steps {
-                    output.push_str(&format!("     - {}\n", step));
+                    output.push_str(&format!("     - {step}\n"));
                 }
             }
 
             if let Some(code) = &solution.code_example {
                 output.push_str("     Example code:\n");
-                output.push_str(&format!("     ```rust{}\n     ```\n", code));
+                output.push_str(&format!("     ```rust{code}\n     ```\n"));
             }
         }
     }
@@ -1620,31 +1617,34 @@ fn format_enhanced_error(enhancement: &ErrorEnhancement) -> String {
     if !enhancement.documentation_links.is_empty() {
         output.push_str("\n📚 Documentation:\n");
         for link in &enhancement.documentation_links {
-            output.push_str(&format!("  - {}\n", link));
+            output.push_str(&format!("  - {link}\n"));
         }
     }
 
     if !enhancement.troubleshooting_steps.is_empty() {
         output.push_str("\n🔍 Troubleshooting:\n");
         for step in &enhancement.troubleshooting_steps {
-            output.push_str(&format!("  - {}\n", step));
+            output.push_str(&format!("  - {step}\n"));
         }
     }
 
     output
 }
 
-/// Convenient function to enhance any RecognitionError
+/// Convenient function to enhance any `RecognitionError`
+#[must_use]
 pub fn enhance_recognition_error(error: &RecognitionError) -> String {
     error.get_enhanced_message()
 }
 
 /// Get quick fixes for an error
+#[must_use]
 pub fn get_quick_fixes(error: &RecognitionError) -> Vec<String> {
     error.get_quick_fixes()
 }
 
 /// Check if an error is recoverable
+#[must_use]
 pub fn is_error_recoverable(error: &RecognitionError) -> bool {
     error.is_recoverable()
 }
@@ -1719,10 +1719,10 @@ fn create_training_error_enhancement(message: &str) -> ErrorEnhancement {
                     "Ensure data splits are properly balanced".to_string(),
                 ],
                 code_example: Some(
-                    r#"
+                    r"
 # Validate training data
 cargo run --example validate_training_data --path ./data/train
-"#
+"
                     .to_string(),
                 ),
                 success_indicators: vec![
@@ -1763,6 +1763,60 @@ println!("Batch size: {}", config.batch_size);
             "Check training logs for detailed error information".to_string(),
             "Verify system has sufficient disk space for training artifacts".to_string(),
             "Ensure GPU memory is sufficient for model size".to_string(),
+        ],
+    }
+}
+
+fn create_synchronization_error_enhancement(message: &str) -> ErrorEnhancement {
+    ErrorEnhancement {
+        original_message: message.to_string(),
+        category: ErrorCategory::Resources,
+        severity: ErrorSeverity::Critical,
+        context: ErrorContext {
+            operation: "Synchronization".to_string(),
+            component: "Internal Mutex".to_string(),
+            input_summary: "concurrent access".to_string(),
+            system_state: "Mutex poisoned or lock failed".to_string(),
+            additional_info: HashMap::new(),
+            timestamp: std::time::SystemTime::now(),
+        },
+        solutions: vec![
+            Solution {
+                title: "Restart the application".to_string(),
+                description: "Critical internal synchronization error requires restart".to_string(),
+                priority: 1,
+                estimated_time: "1 minute".to_string(),
+                difficulty: SolutionDifficulty::Easy,
+                steps: vec![
+                    "Save any unsaved work".to_string(),
+                    "Gracefully shutdown the application".to_string(),
+                    "Restart the application".to_string(),
+                ],
+                code_example: None,
+                success_indicators: vec!["Application starts without errors".to_string()],
+            },
+            Solution {
+                title: "Report the issue".to_string(),
+                description: "This indicates an internal bug that should be reported".to_string(),
+                priority: 2,
+                estimated_time: "5 minutes".to_string(),
+                difficulty: SolutionDifficulty::Easy,
+                steps: vec![
+                    "Collect error logs and stack trace".to_string(),
+                    "Note the steps that led to this error".to_string(),
+                    "Report the issue to the development team".to_string(),
+                ],
+                code_example: None,
+                success_indicators: vec!["Issue is tracked and being investigated".to_string()],
+            },
+        ],
+        documentation_links: vec![
+            "https://docs.voirs.ai/troubleshooting/critical-errors".to_string()
+        ],
+        troubleshooting_steps: vec![
+            "Check system logs for any hardware or OS-level issues".to_string(),
+            "Verify system resources (CPU, memory) are not exhausted".to_string(),
+            "Try running with reduced concurrency settings".to_string(),
         ],
     }
 }

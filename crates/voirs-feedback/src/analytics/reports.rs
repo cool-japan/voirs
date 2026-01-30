@@ -1,7 +1,11 @@
 //! Report generation functionality for analytics
 
 use super::data::DataCollector;
-use super::types::*;
+use super::types::{
+    AnalyticsConfig, AnalyticsError, AnalyticsQuery, AnalyticsReport, AnalyticsResult,
+    ExecutiveSummary, ExportFormat, FeatureUsageReport, InteractionType, PerformanceAnalysis,
+    PerformanceMetrics, TimeRange, TrendPoint, UserEngagementReport, UserInteractionEvent,
+};
 use chrono::{DateTime, Duration, Utc};
 use std::collections::HashMap;
 
@@ -13,7 +17,7 @@ pub struct ReportGenerator {
 
 impl ReportGenerator {
     /// Create new report generator
-    pub async fn new(config: &AnalyticsConfig) -> AnalyticsResult<Self> {
+    pub fn new(config: &AnalyticsConfig) -> AnalyticsResult<Self> {
         Ok(Self {
             config: config.clone(),
         })
@@ -78,7 +82,7 @@ impl ReportGenerator {
             ExportFormat::Json => {
                 let report = self.generate_report(collector, query).await?;
                 serde_json::to_vec(&report).map_err(|e| AnalyticsError::ReportGenerationError {
-                    message: format!("JSON serialization failed: {}", e),
+                    message: format!("JSON serialization failed: {e}"),
                 })
             }
             ExportFormat::Csv => {
@@ -318,10 +322,7 @@ impl ReportGenerator {
                 .and_time(chrono::NaiveTime::MIN)
                 .and_utc()
                 .timestamp();
-            daily_engagement
-                .entry(day)
-                .or_insert_with(Vec::new)
-                .push(interaction);
+            daily_engagement.entry(day).or_default().push(interaction);
         }
 
         let mut trends = Vec::new();
@@ -350,10 +351,7 @@ impl ReportGenerator {
 
         for metric in performance {
             let hour = metric.timestamp.timestamp() / 3600;
-            hourly_performance
-                .entry(hour)
-                .or_insert_with(Vec::new)
-                .push(metric);
+            hourly_performance.entry(hour).or_default().push(metric);
         }
 
         let mut trends = Vec::new();
@@ -439,7 +437,7 @@ mod tests {
     #[tokio::test]
     async fn test_report_generator_creation() {
         let config = AnalyticsConfig::default();
-        let generator = ReportGenerator::new(&config).await;
+        let generator = ReportGenerator::new(&config);
         assert!(generator.is_ok());
     }
 

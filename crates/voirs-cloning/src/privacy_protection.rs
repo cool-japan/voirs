@@ -3,6 +3,8 @@
 //! This module provides comprehensive privacy protection features including data encryption,
 //! federated learning support, differential privacy, and voice data watermarking.
 
+#![allow(clippy::arc_with_non_send_sync)]
+
 use crate::{Error, Result};
 use aes_gcm::{
     aead::{Aead, AeadCore, KeyInit, OsRng},
@@ -13,7 +15,7 @@ use ring::digest;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -58,6 +60,8 @@ impl Default for PrivacyConfig {
 }
 
 /// Privacy protection manager
+#[derive(Clone)]
+#[allow(clippy::arc_with_non_send_sync)]
 pub struct PrivacyProtectionManager {
     config: PrivacyConfig,
     encryption_key: Arc<RwLock<Option<Key<Aes256Gcm>>>>,
@@ -122,7 +126,7 @@ impl PrivacyProtectionManager {
         let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
 
         // Serialize voice data
-        let plaintext = serde_json::to_vec(voice_data).map_err(|e| Error::Serialization(e))?;
+        let plaintext = serde_json::to_vec(voice_data).map_err(Error::Serialization)?;
 
         // Encrypt data
         let ciphertext = cipher
@@ -175,7 +179,7 @@ impl PrivacyProtectionManager {
 
         // Deserialize voice data
         let voice_data: VoiceData =
-            serde_json::from_slice(&plaintext).map_err(|e| Error::Serialization(e))?;
+            serde_json::from_slice(&plaintext).map_err(Error::Serialization)?;
 
         // Verify integrity
         let expected_hash = self.compute_integrity_hash(&voice_data.audio_data)?;
@@ -193,7 +197,7 @@ impl PrivacyProtectionManager {
     }
 
     /// Apply watermark to voice data
-    pub fn apply_watermark(&self, audio_data: &mut Vec<f32>, watermark_id: Uuid) -> Result<()> {
+    pub fn apply_watermark(&self, audio_data: &mut [f32], watermark_id: Uuid) -> Result<()> {
         if !self.config.watermarking {
             return Err(Error::Validation("Watermarking is disabled".to_string()));
         }
@@ -255,7 +259,7 @@ impl PrivacyProtectionManager {
     }
 
     /// Apply differential privacy to voice features
-    pub fn apply_differential_privacy(&self, features: &mut Vec<f32>) -> Result<()> {
+    pub fn apply_differential_privacy(&self, features: &mut [f32]) -> Result<()> {
         if !self.config.differential_privacy {
             return Ok(());
         }
@@ -371,7 +375,7 @@ impl PrivacyProtectionManager {
 
         // Convert f32 to bytes for hashing
         for &sample in data {
-            hasher.update(&sample.to_le_bytes());
+            hasher.update(sample.to_le_bytes());
         }
 
         let hash = hasher.finalize();
@@ -413,7 +417,7 @@ impl PrivacyProtectionManager {
     fn compute_watermark_hash(&self, pattern: &[f32]) -> Result<String> {
         let mut hasher = Sha256::new();
         for &sample in pattern {
-            hasher.update(&sample.to_le_bytes());
+            hasher.update(sample.to_le_bytes());
         }
         let hash = hasher.finalize();
         Ok(general_purpose::STANDARD.encode(hash))
@@ -469,7 +473,7 @@ impl PrivacyProtectionManager {
         let mut hasher = Sha256::new();
         hasher.update(b"device-identifier");
         hasher.update(
-            &SystemTime::now()
+            SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_err(|_| Error::Validation("Invalid timestamp".to_string()))?
                 .as_secs()
@@ -545,29 +549,32 @@ pub struct FederatedLearningData {
 }
 
 /// Differential privacy engine
+#[derive(Clone)]
+#[allow(clippy::arc_with_non_send_sync)]
 pub struct DifferentialPrivacyEngine {
     epsilon: f64,
-    rng: scirs2_core::random::CoreRandom,
+    rng: Arc<Mutex<scirs2_core::random::CoreRandom>>,
 }
 
 impl DifferentialPrivacyEngine {
+    #[allow(clippy::arc_with_non_send_sync)]
     fn new(epsilon: f64) -> Self {
         Self {
             epsilon,
-            rng: scirs2_core::random::thread_rng(),
+            rng: Arc::new(Mutex::new(scirs2_core::random::thread_rng())),
         }
     }
 
     /// Add Laplace noise for differential privacy
-    fn add_noise(&self, features: &mut Vec<f32>) -> Result<()> {
-        use scirs2_core::random::{thread_rng, Rng};
+    fn add_noise(&self, features: &mut [f32]) -> Result<()> {
+        use scirs2_core::random::Rng;
 
         let sensitivity = 1.0; // Assume L1 sensitivity of 1
         let scale = sensitivity / self.epsilon;
+        let mut rng = self.rng.lock().unwrap();
 
         for feature in features.iter_mut() {
             // Generate Laplace noise using uniform random variables
-            let mut rng = thread_rng();
             let u1: f64 = rng.gen_range(-0.5..0.5);
             let _u2: f64 = rng.gen_range(-0.5..0.5);
 

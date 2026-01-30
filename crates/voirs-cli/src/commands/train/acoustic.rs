@@ -10,14 +10,138 @@ use crate::GlobalOptions;
 use candle_core::Device;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-use voirs_acoustic::fastspeech::{FastSpeech2Config};
+use voirs_acoustic::fastspeech::FastSpeech2Config;
 use voirs_acoustic::fastspeech2_trainer::{FastSpeech2Trainer, FastSpeech2TrainingConfig};
 use voirs_acoustic::vits::{VitsConfig, VitsTrainer, VitsTrainingConfig};
 use voirs_sdk::Result;
 
+/// Arguments for acoustic model training
+///
+/// Consolidates all training parameters to improve maintainability.
+///
+/// # Example
+///
+/// ```no_run
+/// # use voirs_cli::commands::train::acoustic::AcousticModelTrainingArgs;
+/// # use std::path::PathBuf;
+/// let args = AcousticModelTrainingArgs {
+///     model_type: "vits".to_string(),
+///     data: PathBuf::from("./data/train"),
+///     output: PathBuf::from("./models/output"),
+///     config: None,
+///     epochs: 100,
+///     batch_size: 16,
+///     lr: 0.0002,
+///     resume: None,
+///     use_gpu: true,
+/// };
+/// ```
+#[derive(Debug, Clone)]
+pub struct AcousticModelTrainingArgs {
+    /// Model type ("vits" or "fastspeech2")
+    pub model_type: String,
+    /// Training data directory path
+    pub data: PathBuf,
+    /// Output directory for trained models
+    pub output: PathBuf,
+    /// Optional model configuration file path
+    pub config: Option<PathBuf>,
+    /// Number of training epochs
+    pub epochs: usize,
+    /// Batch size for training
+    pub batch_size: usize,
+    /// Learning rate
+    pub lr: f64,
+    /// Optional checkpoint path to resume from
+    pub resume: Option<PathBuf>,
+    /// Enable GPU acceleration
+    pub use_gpu: bool,
+}
+
 /// Run acoustic model training
+///
+/// # Arguments
+///
+/// * `args` - Training configuration and parameters
+/// * `global` - Global CLI options
 pub async fn run_train_acoustic(
-    model_type: String,
+    args: AcousticModelTrainingArgs,
+    global: &GlobalOptions,
+) -> Result<()> {
+    if !global.quiet {
+        println!("╔═══════════════════════════════════════════════════════════╗");
+        println!("║          🎤 VoiRS Acoustic Model Training                 ║");
+        println!("╠═══════════════════════════════════════════════════════════╣");
+        println!("║ Model type:    {:<40} ║", args.model_type);
+        println!("║ Data path:     {:<40} ║", truncate_path(&args.data, 40));
+        println!("║ Output path:   {:<40} ║", truncate_path(&args.output, 40));
+        println!("║ Epochs:        {:<40} ║", args.epochs);
+        println!("║ Batch size:    {:<40} ║", args.batch_size);
+        println!("║ Learning rate: {:<40} ║", args.lr);
+        println!(
+            "║ GPU enabled:   {:<40} ║",
+            if args.use_gpu { "Yes" } else { "No" }
+        );
+        if let Some(ref resume_path) = args.resume {
+            println!("║ Resume from:   {:<40} ║", truncate_path(resume_path, 40));
+        }
+        println!("╚═══════════════════════════════════════════════════════════╝");
+        println!();
+    }
+
+    // Validate input
+    if !args.data.exists() {
+        return Err(voirs_sdk::VoirsError::config_error(format!(
+            "Training data directory not found: {}",
+            args.data.display()
+        )));
+    }
+
+    // Create output directory
+    std::fs::create_dir_all(&args.output)?;
+
+    match args.model_type.as_str() {
+        "vits" => {
+            train_vits(
+                AcousticTrainingArgs {
+                    data: args.data,
+                    output: args.output,
+                    config: args.config,
+                    epochs: args.epochs,
+                    batch_size: args.batch_size,
+                    lr: args.lr,
+                    resume: args.resume,
+                    use_gpu: args.use_gpu,
+                },
+                global,
+            )
+            .await
+        }
+        "fastspeech2" => {
+            train_fastspeech2(
+                AcousticTrainingArgs {
+                    data: args.data,
+                    output: args.output,
+                    config: args.config,
+                    epochs: args.epochs,
+                    batch_size: args.batch_size,
+                    lr: args.lr,
+                    resume: args.resume,
+                    use_gpu: args.use_gpu,
+                },
+                global,
+            )
+            .await
+        }
+        _ => Err(voirs_sdk::VoirsError::config_error(format!(
+            "Unsupported acoustic model type: {}. Supported: vits, fastspeech2",
+            args.model_type
+        ))),
+    }
+}
+
+/// Configuration for acoustic model training
+struct AcousticTrainingArgs {
     data: PathBuf,
     output: PathBuf,
     config: Option<PathBuf>,
@@ -26,71 +150,21 @@ pub async fn run_train_acoustic(
     lr: f64,
     resume: Option<PathBuf>,
     use_gpu: bool,
-    global: &GlobalOptions,
-) -> Result<()> {
-    if !global.quiet {
-        println!("╔═══════════════════════════════════════════════════════════╗");
-        println!("║          🎤 VoiRS Acoustic Model Training                 ║");
-        println!("╠═══════════════════════════════════════════════════════════╣");
-        println!("║ Model type:    {:<40} ║", model_type);
-        println!("║ Data path:     {:<40} ║", truncate_path(&data, 40));
-        println!("║ Output path:   {:<40} ║", truncate_path(&output, 40));
-        println!("║ Epochs:        {:<40} ║", epochs);
-        println!("║ Batch size:    {:<40} ║", batch_size);
-        println!("║ Learning rate: {:<40} ║", lr);
-        println!(
-            "║ GPU enabled:   {:<40} ║",
-            if use_gpu { "Yes" } else { "No" }
-        );
-        if let Some(ref resume_path) = resume {
-            println!("║ Resume from:   {:<40} ║", truncate_path(resume_path, 40));
-        }
-        println!("╚═══════════════════════════════════════════════════════════╝");
-        println!();
-    }
-
-    // Validate input
-    if !data.exists() {
-        return Err(voirs_sdk::VoirsError::config_error(format!(
-            "Training data directory not found: {}",
-            data.display()
-        )));
-    }
-
-    // Create output directory
-    std::fs::create_dir_all(&output)?;
-
-    match model_type.as_str() {
-        "vits" => {
-            train_vits(
-                data, output, config, epochs, batch_size, lr, resume, use_gpu, global,
-            )
-            .await
-        }
-        "fastspeech2" => {
-            train_fastspeech2(
-                data, output, config, epochs, batch_size, lr, resume, use_gpu, global,
-            )
-            .await
-        }
-        _ => Err(voirs_sdk::VoirsError::config_error(format!(
-            "Unsupported acoustic model type: {}. Supported: vits, fastspeech2",
-            model_type
-        ))),
-    }
 }
 
-async fn train_vits(
-    data: PathBuf,
-    output: PathBuf,
-    _config: Option<PathBuf>,
-    epochs: usize,
-    batch_size: usize,
-    lr: f64,
-    _resume: Option<PathBuf>,
-    use_gpu: bool,
-    global: &GlobalOptions,
-) -> Result<()> {
+async fn train_vits(args: AcousticTrainingArgs, global: &GlobalOptions) -> Result<()> {
+    // Destructure args for convenience
+    let AcousticTrainingArgs {
+        data,
+        output,
+        config: _config,
+        epochs,
+        batch_size,
+        lr,
+        resume: _resume,
+        use_gpu,
+    } = args;
+
     if !global.quiet {
         println!("🔧 Initializing VITS training...\n");
     }
@@ -168,8 +242,8 @@ async fn train_vits(
             let train_result = trainer
                 .train_step(
                     &vec![vec![]; batch_size], // Placeholder phonemes
-                    &vec![],                    // Placeholder mel specs
-                    &vec![],                    // Placeholder audio
+                    &vec![],                   // Placeholder mel specs
+                    &vec![],                   // Placeholder audio
                 )
                 .await;
 
@@ -179,21 +253,31 @@ async fn train_vits(
                     epoch_disc_loss += metrics.discriminator_loss as f64;
 
                     // Combined loss for display
-                    let current_loss = (metrics.generator_loss + metrics.discriminator_loss) as f64 / 2.0;
+                    let current_loss =
+                        (metrics.generator_loss + metrics.discriminator_loss) as f64 / 2.0;
                     last_loss = Some(current_loss);
                     current_loss
                 }
                 Err(e) => {
                     error_count += 1;
                     if !global.quiet {
-                        eprintln!("⚠️  Training step {}/{} failed: {}", epoch + 1, batch + 1, e);
+                        eprintln!(
+                            "⚠️  Training step {}/{} failed: {}",
+                            epoch + 1,
+                            batch + 1,
+                            e
+                        );
                     }
                     // Use last known good loss or fail if too many errors
                     if error_count > batches_per_epoch / 2 {
                         return Err(CliError::InvalidParameter {
                             parameter: "training".to_string(),
-                            message: format!("Too many training errors ({}/{}), aborting", error_count, total_steps)
-                        }.into());
+                            message: format!(
+                                "Too many training errors ({}/{}), aborting",
+                                error_count, total_steps
+                            ),
+                        }
+                        .into());
                     }
                     last_loss.unwrap_or(2.5) // Use last known loss or reasonable default
                 }
@@ -233,7 +317,7 @@ async fn train_vits(
             let val_result = trainer
                 .validate_step(
                     &vec![vec![]; 32], // Placeholder phonemes
-                    &vec![],            // Placeholder mel specs
+                    &vec![],           // Placeholder mel specs
                 )
                 .await;
 
@@ -241,11 +325,11 @@ async fn train_vits(
                 Ok(val_metrics) => {
                     last_val_loss = Some(val_metrics.mel_loss as f64);
                     Some(val_metrics.mel_loss as f64)
-                },
+                }
                 Err(e) => {
                     eprintln!("⚠️  Validation failed for epoch {}: {}", epoch + 1, e);
                     last_val_loss // Use last known validation loss
-                },
+                }
             }
         } else {
             None
@@ -260,13 +344,10 @@ async fn train_vits(
                 }
 
                 // Save best checkpoint
-                let best_path = output
-                    .parent()
-                    .unwrap_or(output.as_path())
-                    .join(format!(
-                        "{}_best.safetensors",
-                        output.file_stem().unwrap().to_str().unwrap()
-                    ));
+                let best_path = output.parent().unwrap_or(output.as_path()).join(format!(
+                    "{}_best.safetensors",
+                    output.file_stem().unwrap().to_str().unwrap()
+                ));
                 if let Err(e) = trainer.save_checkpoint(&best_path, epoch) {
                     if !global.quiet {
                         println!("⚠️  Failed to save best checkpoint: {}", e);
@@ -345,7 +426,10 @@ async fn train_vits(
         println!("   - Total duration: {:.1}s", total_duration.as_secs_f64());
         println!("   - Total training steps: {}", total_steps);
         println!("   - Best validation loss: {:.4}", best_val_loss);
-        println!("   - Avg samples/sec: {:.1}", (total_steps * batch_size) as f64 / total_duration.as_secs_f64());
+        println!(
+            "   - Avg samples/sec: {:.1}",
+            (total_steps * batch_size) as f64 / total_duration.as_secs_f64()
+        );
         println!("\n✅ Real VITS training completed with GAN discriminators!");
         println!("   Architecture: Text Encoder + Posterior + Normalizing Flows + Decoder");
         println!("   Discriminators: Multi-Period (MPD) + Multi-Scale (MSD)");
@@ -354,17 +438,19 @@ async fn train_vits(
     Ok(())
 }
 
-async fn train_fastspeech2(
-    data: PathBuf,
-    output: PathBuf,
-    _config: Option<PathBuf>,
-    epochs: usize,
-    batch_size: usize,
-    lr: f64,
-    _resume: Option<PathBuf>,
-    use_gpu: bool,
-    global: &GlobalOptions,
-) -> Result<()> {
+async fn train_fastspeech2(args: AcousticTrainingArgs, global: &GlobalOptions) -> Result<()> {
+    // Destructure args for convenience
+    let AcousticTrainingArgs {
+        data,
+        output,
+        config: _config,
+        epochs,
+        batch_size,
+        lr,
+        resume: _resume,
+        use_gpu,
+    } = args;
+
     if !global.quiet {
         println!("🔧 Initializing FastSpeech2 training...\n");
     }
@@ -439,11 +525,11 @@ async fn train_fastspeech2(
             // In production, would load actual phoneme/mel/duration/pitch/energy data
             let train_result = trainer
                 .train_step(
-                    &vec![vec![]; batch_size], // Placeholder phonemes
-                    &vec![],                    // Placeholder mel specs
-                    &vec![vec![1.0; 100]; batch_size], // Placeholder durations
+                    &vec![vec![]; batch_size],           // Placeholder phonemes
+                    &vec![],                             // Placeholder mel specs
+                    &vec![vec![1.0; 100]; batch_size],   // Placeholder durations
                     &vec![vec![200.0; 100]; batch_size], // Placeholder pitches
-                    &vec![vec![0.5; 100]; batch_size],  // Placeholder energies
+                    &vec![vec![0.5; 100]; batch_size],   // Placeholder energies
                 )
                 .await;
 
@@ -457,14 +543,23 @@ async fn train_fastspeech2(
                 Err(e) => {
                     error_count += 1;
                     if !global.quiet {
-                        eprintln!("⚠️  Training step {}/{} failed: {}", epoch + 1, batch + 1, e);
+                        eprintln!(
+                            "⚠️  Training step {}/{} failed: {}",
+                            epoch + 1,
+                            batch + 1,
+                            e
+                        );
                     }
                     // Use last known good loss or fail if too many errors
                     if error_count > batches_per_epoch / 2 {
                         return Err(CliError::InvalidParameter {
                             parameter: "training".to_string(),
-                            message: format!("Too many training errors ({}/{}), aborting", error_count, total_steps)
-                        }.into());
+                            message: format!(
+                                "Too many training errors ({}/{}), aborting",
+                                error_count, total_steps
+                            ),
+                        }
+                        .into());
                     }
                     last_loss.unwrap_or(1.8) // Use last known loss or reasonable default
                 }
@@ -503,7 +598,7 @@ async fn train_fastspeech2(
             let val_result = trainer
                 .validate_step(
                     &vec![vec![]; 32], // Placeholder phonemes
-                    &vec![],            // Placeholder mel specs
+                    &vec![],           // Placeholder mel specs
                 )
                 .await;
 
@@ -511,11 +606,11 @@ async fn train_fastspeech2(
                 Ok(val_metrics) => {
                     last_val_loss = Some(val_metrics.mel_loss as f64);
                     Some(val_metrics.mel_loss as f64)
-                },
+                }
                 Err(e) => {
                     eprintln!("⚠️  Validation failed for epoch {}: {}", epoch + 1, e);
                     last_val_loss // Use last known validation loss
-                },
+                }
             }
         } else {
             None
@@ -530,13 +625,10 @@ async fn train_fastspeech2(
                 }
 
                 // Save best checkpoint
-                let best_path = output
-                    .parent()
-                    .unwrap_or(output.as_path())
-                    .join(format!(
-                        "{}_best.safetensors",
-                        output.file_stem().unwrap().to_str().unwrap()
-                    ));
+                let best_path = output.parent().unwrap_or(output.as_path()).join(format!(
+                    "{}_best.safetensors",
+                    output.file_stem().unwrap().to_str().unwrap()
+                ));
                 if let Err(e) = trainer.save_checkpoint(&best_path, epoch) {
                     if !global.quiet {
                         println!("⚠️  Failed to save best checkpoint: {}", e);
@@ -557,7 +649,10 @@ async fn train_fastspeech2(
         // Save checkpoint every 10 epochs
         if epoch % 10 == 0 {
             if !global.quiet {
-                println!("\n💾 Checkpoint saved: fastspeech2_epoch_{}.safetensors", epoch);
+                println!(
+                    "\n💾 Checkpoint saved: fastspeech2_epoch_{}.safetensors",
+                    epoch
+                );
             }
             let checkpoint_path = output
                 .parent()
@@ -601,7 +696,10 @@ async fn train_fastspeech2(
         println!("   - Total duration: {:.1}s", total_duration.as_secs_f64());
         println!("   - Total training steps: {}", total_steps);
         println!("   - Best validation loss: {:.4}", best_val_loss);
-        println!("   - Avg samples/sec: {:.1}", (total_steps * batch_size) as f64 / total_duration.as_secs_f64());
+        println!(
+            "   - Avg samples/sec: {:.1}",
+            (total_steps * batch_size) as f64 / total_duration.as_secs_f64()
+        );
 
         println!("\n📂 Model outputs:");
         println!("   - Final model: {}", output.display());

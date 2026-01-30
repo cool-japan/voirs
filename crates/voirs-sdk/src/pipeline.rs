@@ -17,6 +17,7 @@ use std::sync::Arc;
 use fastrand;
 
 // Module declarations for pipeline components
+pub mod convenience;
 pub mod init;
 pub mod state;
 pub mod synthesis;

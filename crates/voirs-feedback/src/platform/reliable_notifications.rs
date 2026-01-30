@@ -66,6 +66,7 @@ pub struct NotificationDelivery {
 
 impl NotificationDelivery {
     /// Create new delivery record
+    #[must_use]
     pub fn new(notification: Notification, scheduled_for: Option<SystemTime>) -> Self {
         let priority_score = match notification.priority {
             NotificationPriority::Critical => 1000,
@@ -88,6 +89,7 @@ impl NotificationDelivery {
     }
 
     /// Check if delivery should be attempted
+    #[must_use]
     pub fn should_attempt_delivery(&self) -> bool {
         // Check if scheduled time has passed
         if let Some(scheduled_time) = self.scheduled_for {
@@ -109,6 +111,7 @@ impl NotificationDelivery {
     }
 
     /// Check if notification has expired
+    #[must_use]
     pub fn is_expired(&self) -> bool {
         if let Some(auto_dismiss) = self.notification.auto_dismiss_after {
             let expiry_time = self.created_at + auto_dismiss;
@@ -119,6 +122,7 @@ impl NotificationDelivery {
     }
 
     /// Get retry count from failed status
+    #[must_use]
     pub fn retry_count(&self) -> u32 {
         match &self.status {
             DeliveryStatus::Failed { retry_count, .. } => *retry_count,
@@ -127,6 +131,7 @@ impl NotificationDelivery {
     }
 
     /// Check if max retries exceeded
+    #[must_use]
     pub fn can_retry(&self) -> bool {
         self.retry_count() < self.max_retries
     }
@@ -167,6 +172,7 @@ pub struct NotificationRateLimiter {
 
 impl NotificationRateLimiter {
     /// Create new rate limiter
+    #[must_use]
     pub fn new(config: RateLimitConfig) -> Self {
         Self {
             config,
@@ -217,6 +223,7 @@ impl NotificationRateLimiter {
     }
 
     /// Get current rate limiting status
+    #[must_use]
     pub fn get_status(&self) -> RateLimitStatus {
         let now = Instant::now();
         let recent_count = self
@@ -307,6 +314,7 @@ pub struct HealthStatus {
 
 impl ReliableNotificationManager {
     /// Create new reliable notification manager
+    #[must_use]
     pub fn new(
         platform: Platform,
         config: NotificationConfig,
@@ -428,6 +436,7 @@ impl ReliableNotificationManager {
     }
 
     /// Get delivery status
+    #[must_use]
     pub fn get_delivery_status(&self, notification_id: &str) -> Option<DeliveryStatus> {
         let history = self.delivery_history.read().unwrap();
         history.get(notification_id).map(|d| d.status.clone())
@@ -460,13 +469,22 @@ impl ReliableNotificationManager {
 
     /// Get comprehensive statistics
     pub async fn get_comprehensive_stats(&self) -> ReliableNotificationStats {
-        let history = self.delivery_history.read().unwrap();
+        // Clone history data to avoid holding lock across await
+        let (history_clone, total_notifications) = {
+            let history = self.delivery_history.read().unwrap();
+            let clone = history.clone();
+            let total = history.len();
+            drop(history); // Explicitly drop lock before awaiting
+            (clone, total)
+        };
+
+        // Now safe to await without holding locks
         let queue = self.delivery_queue.lock().await;
         let rate_status = self.rate_limiter.lock().await.get_status();
         let health = self.health_status.read().unwrap().clone();
 
         let mut stats = ReliableNotificationStats {
-            total_notifications: history.len(),
+            total_notifications,
             queued: 0,
             delivered: 0,
             failed: 0,
@@ -481,7 +499,7 @@ impl ReliableNotificationManager {
         let mut total_delivery_time = Duration::new(0, 0);
         let mut delivered_count = 0;
 
-        for delivery in history.values() {
+        for delivery in history_clone.values() {
             match &delivery.status {
                 DeliveryStatus::Queued | DeliveryStatus::Processing => stats.queued += 1,
                 DeliveryStatus::Delivered => {
@@ -617,7 +635,7 @@ impl ReliableNotificationManager {
                         queue.push_back(delivery.clone());
                     } else {
                         delivery.status = DeliveryStatus::Failed {
-                            reason: format!("Max retries exceeded: {}", error),
+                            reason: format!("Max retries exceeded: {error}"),
                             retry_count,
                         };
 

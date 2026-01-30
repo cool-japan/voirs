@@ -1,0 +1,154 @@
+# Network Policies for VoiRS Evaluation
+# Controls network traffic between components for security
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: voirs-evaluation-worker
+  labels:
+    app: voirs-evaluation
+spec:
+  podSelector:
+    matchLabels:
+      app: voirs-evaluation
+      component: worker
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow traffic from coordinator
+  - from:
+    - podSelector:
+        matchLabels:
+          app: voirs-evaluation
+          component: coordinator
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 9000
+  # Allow traffic from Prometheus for metrics scraping
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+      podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 9090
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow traffic to coordinator
+  - to:
+    - podSelector:
+        matchLabels:
+          app: voirs-evaluation
+          component: coordinator
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 9000
+  # Allow traffic to other workers (for peer communication)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: voirs-evaluation
+          component: worker
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 9000
+  # Allow HTTPS egress for external services
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: voirs-evaluation-coordinator
+  labels:
+    app: voirs-evaluation
+spec:
+  podSelector:
+    matchLabels:
+      app: voirs-evaluation
+      component: coordinator
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow traffic from workers
+  - from:
+    - podSelector:
+        matchLabels:
+          app: voirs-evaluation
+          component: worker
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 9000
+  # Allow traffic from ingress for external API access
+  - from:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          app: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8080
+  # Allow traffic from Prometheus
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+      podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 9090
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow traffic to workers
+  - to:
+    - podSelector:
+        matchLabels:
+          app: voirs-evaluation
+          component: worker
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 9000
+  # Allow HTTPS egress
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443

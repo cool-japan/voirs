@@ -1,4 +1,4 @@
-//! SQLite persistence backend
+//! `SQLite` persistence backend
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -13,14 +13,14 @@ use crate::persistence::{
 };
 use crate::traits::{FeedbackResponse, SessionState, UserPreferences, UserProgress};
 
-/// SQLite persistence manager
+/// `SQLite` persistence manager
 pub struct SQLitePersistenceManager {
     pool: SqlitePool,
     config: PersistenceConfig,
 }
 
 impl SQLitePersistenceManager {
-    /// Create a new SQLite persistence manager
+    /// Create a new `SQLite` persistence manager
     pub async fn new(config: PersistenceConfig) -> PersistenceResult<Self> {
         let database_url = format!(
             "sqlite:{connection_string}",
@@ -48,7 +48,7 @@ impl SQLitePersistenceManager {
 
         // Sessions table
         sqlx::query(
-            r#"
+            r"
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
@@ -58,7 +58,7 @@ impl SQLitePersistenceManager {
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
-            "#,
+            ",
         )
         .execute(&mut *tx)
         .await
@@ -68,14 +68,14 @@ impl SQLitePersistenceManager {
 
         // User progress table
         sqlx::query(
-            r#"
+            r"
             CREATE TABLE IF NOT EXISTS user_progress (
                 user_id TEXT PRIMARY KEY,
                 progress_data TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
-            "#,
+            ",
         )
         .execute(&mut *tx)
         .await
@@ -85,14 +85,14 @@ impl SQLitePersistenceManager {
 
         // User preferences table
         sqlx::query(
-            r#"
+            r"
             CREATE TABLE IF NOT EXISTS user_preferences (
                 user_id TEXT PRIMARY KEY,
                 preferences_data TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
-            "#,
+            ",
         )
         .execute(&mut *tx)
         .await
@@ -102,14 +102,14 @@ impl SQLitePersistenceManager {
 
         // Feedback history table
         sqlx::query(
-            r#"
+            r"
             CREATE TABLE IF NOT EXISTS feedback_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id TEXT NOT NULL,
                 feedback_data TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
-            "#,
+            ",
         )
         .execute(&mut *tx)
         .await
@@ -119,14 +119,14 @@ impl SQLitePersistenceManager {
 
         // Metadata table for key-value storage
         sqlx::query(
-            r#"
+            r"
             CREATE TABLE IF NOT EXISTS metadata (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
-            "#,
+            ",
         )
         .execute(&mut *tx)
         .await
@@ -188,11 +188,11 @@ impl PersistenceManager for SQLitePersistenceManager {
         let now = Utc::now().to_rfc3339();
 
         sqlx::query(
-            r#"
+            r"
             INSERT OR REPLACE INTO sessions 
             (session_id, user_id, start_time, last_activity, session_data, updated_at)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            "#,
+            ",
         )
         .bind(session.session_id.to_string())
         .bind(&session.user_id)
@@ -240,11 +240,11 @@ impl PersistenceManager for SQLitePersistenceManager {
         let now = Utc::now().to_rfc3339();
 
         sqlx::query(
-            r#"
+            r"
             INSERT OR REPLACE INTO user_progress 
             (user_id, progress_data, updated_at)
             VALUES (?1, ?2, ?3)
-            "#,
+            ",
         )
         .bind(user_id)
         .bind(progress_data)
@@ -255,7 +255,7 @@ impl PersistenceManager for SQLitePersistenceManager {
             message: format!("Failed to save user progress: {e}"),
         })?;
 
-        log::debug!("Saved progress for user: {}", user_id);
+        log::debug!("Saved progress for user: {user_id}");
         Ok(())
     }
 
@@ -288,10 +288,10 @@ impl PersistenceManager for SQLitePersistenceManager {
         let feedback_data = self.serialize(feedback)?;
 
         sqlx::query(
-            r#"
+            r"
             INSERT INTO feedback_history (user_id, feedback_data)
             VALUES (?1, ?2)
-            "#,
+            ",
         )
         .bind(user_id)
         .bind(feedback_data)
@@ -301,7 +301,7 @@ impl PersistenceManager for SQLitePersistenceManager {
             message: format!("Failed to save feedback: {e}"),
         })?;
 
-        log::debug!("Saved feedback for user: {}", user_id);
+        log::debug!("Saved feedback for user: {user_id}");
         Ok(())
     }
 
@@ -328,7 +328,7 @@ impl PersistenceManager for SQLitePersistenceManager {
             .fetch_all(&self.pool)
             .await
             .map_err(|e| PersistenceError::ConnectionError {
-                message: format!("Failed to load feedback history: {}", e),
+                message: format!("Failed to load feedback history: {e}"),
             })?;
 
         let mut feedback_history = Vec::new();
@@ -350,11 +350,11 @@ impl PersistenceManager for SQLitePersistenceManager {
         let now = Utc::now().to_rfc3339();
 
         sqlx::query(
-            r#"
+            r"
             INSERT OR REPLACE INTO user_preferences 
             (user_id, preferences_data, updated_at)
             VALUES (?1, ?2, ?3)
-            "#,
+            ",
         )
         .bind(user_id)
         .bind(preferences_data)
@@ -362,10 +362,10 @@ impl PersistenceManager for SQLitePersistenceManager {
         .execute(&self.pool)
         .await
         .map_err(|e| PersistenceError::ConnectionError {
-            message: format!("Failed to save user preferences: {}", e),
+            message: format!("Failed to save user preferences: {e}"),
         })?;
 
-        log::debug!("Saved preferences for user: {}", user_id);
+        log::debug!("Saved preferences for user: {user_id}");
         Ok(())
     }
 
@@ -375,7 +375,7 @@ impl PersistenceManager for SQLitePersistenceManager {
             .fetch_optional(&self.pool)
             .await
             .map_err(|e| PersistenceError::ConnectionError {
-                message: format!("Failed to load user preferences: {}", e),
+                message: format!("Failed to load user preferences: {e}"),
             })?;
 
         match row {
@@ -405,7 +405,7 @@ impl PersistenceManager for SQLitePersistenceManager {
             .execute(&mut *tx)
             .await
             .map_err(|e| PersistenceError::ConnectionError {
-                message: format!("Failed to delete user sessions: {}", e),
+                message: format!("Failed to delete user sessions: {e}"),
             })?;
 
         sqlx::query("DELETE FROM user_progress WHERE user_id = ?1")
@@ -413,7 +413,7 @@ impl PersistenceManager for SQLitePersistenceManager {
             .execute(&mut *tx)
             .await
             .map_err(|e| PersistenceError::ConnectionError {
-                message: format!("Failed to delete user progress: {}", e),
+                message: format!("Failed to delete user progress: {e}"),
             })?;
 
         sqlx::query("DELETE FROM user_preferences WHERE user_id = ?1")
@@ -421,7 +421,7 @@ impl PersistenceManager for SQLitePersistenceManager {
             .execute(&mut *tx)
             .await
             .map_err(|e| PersistenceError::ConnectionError {
-                message: format!("Failed to delete user preferences: {}", e),
+                message: format!("Failed to delete user preferences: {e}"),
             })?;
 
         sqlx::query("DELETE FROM feedback_history WHERE user_id = ?1")
@@ -429,7 +429,7 @@ impl PersistenceManager for SQLitePersistenceManager {
             .execute(&mut *tx)
             .await
             .map_err(|e| PersistenceError::ConnectionError {
-                message: format!("Failed to delete user feedback: {}", e),
+                message: format!("Failed to delete user feedback: {e}"),
             })?;
 
         tx.commit()
@@ -438,7 +438,7 @@ impl PersistenceManager for SQLitePersistenceManager {
                 message: format!("Failed to commit delete transaction: {e}"),
             })?;
 
-        log::info!("Deleted all data for user: {}", user_id);
+        log::info!("Deleted all data for user: {user_id}");
         Ok(())
     }
 
@@ -626,10 +626,10 @@ impl PersistenceManager for SQLitePersistenceManager {
 
         let now = Utc::now().to_rfc3339();
         sqlx::query(
-            r#"
+            r"
             INSERT OR REPLACE INTO metadata (key, value, updated_at)
             VALUES (?1, ?2, ?3)
-            "#,
+            ",
         )
         .bind("last_cleanup")
         .bind(metadata_str)
@@ -643,10 +643,7 @@ impl PersistenceManager for SQLitePersistenceManager {
         let cleanup_duration = start_time.elapsed();
 
         log::info!(
-            "Cleanup completed: {} sessions, {} feedback records removed in {:?}",
-            sessions_count,
-            feedback_count,
-            cleanup_duration
+            "Cleanup completed: {sessions_count} sessions, {feedback_count} feedback records removed in {cleanup_duration:?}"
         );
 
         Ok(CleanupResult {

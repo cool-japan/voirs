@@ -1,0 +1,154 @@
+//! Transform performance benchmarks
+//!
+//! Measures performance of core voice transformation operations.
+
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use std::time::Duration;
+use voirs_conversion::transforms::{
+    AgeTransform, GenderTransform, PitchTransform, SpeedTransform, Transform,
+};
+use voirs_conversion::Result;
+
+/// Generate test audio with harmonics
+fn generate_test_audio(samples: usize, frequency: f32, sample_rate: u32) -> Vec<f32> {
+    (0..samples)
+        .map(|i| {
+            let t = i as f32 / sample_rate as f32;
+            // Fundamental + 2 harmonics for realistic audio
+            let fundamental = (2.0 * std::f32::consts::PI * frequency * t).sin();
+            let harmonic2 = 0.5 * (2.0 * std::f32::consts::PI * frequency * 2.0 * t).sin();
+            let harmonic3 = 0.25 * (2.0 * std::f32::consts::PI * frequency * 3.0 * t).sin();
+            (fundamental + harmonic2 + harmonic3) * 0.3
+        })
+        .collect()
+}
+
+/// Benchmark pitch shifting performance
+fn bench_pitch_shift(c: &mut Criterion) {
+    let mut group = c.benchmark_group("pitch_shift");
+    let audio = generate_test_audio(44100, 200.0, 44100);
+    group.throughput(Throughput::Elements(audio.len() as u64));
+
+    for factor in [0.8, 1.0, 1.2, 1.5, 2.0].iter() {
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("{:.1}x", factor)),
+            factor,
+            |b, &factor| {
+                let transform = PitchTransform::new(factor);
+                b.iter(|| {
+                    let _ = transform.apply(black_box(&audio));
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Benchmark speed transformation
+fn bench_speed_transform(c: &mut Criterion) {
+    let mut group = c.benchmark_group("speed_transform");
+    let audio = generate_test_audio(44100, 200.0, 44100);
+    group.throughput(Throughput::Elements(audio.len() as u64));
+
+    for factor in [0.5, 0.8, 1.0, 1.2, 1.5].iter() {
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("{:.1}x", factor)),
+            factor,
+            |b, &factor| {
+                let transform = SpeedTransform::new(factor);
+                b.iter(|| {
+                    let _ = transform.apply(black_box(&audio));
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Benchmark age transformation
+fn bench_age_transform(c: &mut Criterion) {
+    let mut group = c.benchmark_group("age_transform");
+    let audio = generate_test_audio(44100, 200.0, 44100);
+    group.throughput(Throughput::Elements(audio.len() as u64));
+
+    // Transform from 30 years old to various ages
+    for age in [20.0, 40.0, 50.0, 70.0].iter() {
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("{}y", age)),
+            age,
+            |b, &age| {
+                let transform = AgeTransform::new(30.0, age);
+                b.iter(|| {
+                    let _ = transform.apply(black_box(&audio));
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Benchmark gender transformation
+fn bench_gender_transform(c: &mut Criterion) {
+    let mut group = c.benchmark_group("gender_transform");
+    let audio = generate_test_audio(44100, 200.0, 44100);
+    group.throughput(Throughput::Elements(audio.len() as u64));
+
+    // 1.0 = male, -1.0 = female
+    group.bench_function("male_to_female", |b| {
+        let transform = GenderTransform::new(-1.0);
+        b.iter(|| {
+            let _ = transform.apply(black_box(&audio));
+        });
+    });
+
+    group.bench_function("female_to_male", |b| {
+        let transform = GenderTransform::new(1.0);
+        b.iter(|| {
+            let _ = transform.apply(black_box(&audio));
+        });
+    });
+
+    group.finish();
+}
+
+/// Benchmark with different audio chunk sizes (latency simulation)
+fn bench_chunk_sizes(c: &mut Criterion) {
+    let mut group = c.benchmark_group("chunk_sizes");
+
+    for chunk_size in [256, 512, 1024, 2048, 4096].iter() {
+        let audio = generate_test_audio(*chunk_size, 200.0, 44100);
+        group.throughput(Throughput::Elements(*chunk_size as u64));
+
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("{}samples", chunk_size)),
+            &audio,
+            |b, audio| {
+                let transform = PitchTransform::new(1.2);
+                b.iter(|| {
+                    let _ = transform.apply(black_box(audio));
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+criterion_group! {
+    name = benches;
+    config = Criterion::default()
+        .sample_size(50)
+        .measurement_time(Duration::from_secs(5))
+        .warm_up_time(Duration::from_secs(2));
+    targets =
+        bench_pitch_shift,
+        bench_speed_transform,
+        bench_age_transform,
+        bench_gender_transform,
+        bench_chunk_sizes
+}
+
+criterion_main!(benches);

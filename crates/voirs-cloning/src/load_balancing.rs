@@ -18,6 +18,42 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::Semaphore;
 
+/// Type alias for performance history tracking
+type PerformanceHistory = Arc<RwLock<HashMap<String, VecDeque<(Duration, u64)>>>>;
+
+/// Weights for GPU selection scoring
+#[derive(Debug, Clone, Copy)]
+struct SelectionWeights {
+    utilization: f32,
+    performance: f32,
+    memory: f32,
+    reliability: f32,
+}
+
+impl SelectionWeights {
+    fn from_strategy(strategy: &LoadBalancingStrategy) -> Self {
+        match strategy {
+            LoadBalancingStrategy::Weighted {
+                utilization_weight,
+                performance_weight,
+                memory_weight,
+                reliability_weight,
+            } => Self {
+                utilization: *utilization_weight,
+                performance: *performance_weight,
+                memory: *memory_weight,
+                reliability: *reliability_weight,
+            },
+            _ => Self {
+                utilization: 0.4,
+                performance: 0.3,
+                memory: 0.2,
+                reliability: 0.1,
+            },
+        }
+    }
+}
+
 /// Load balancing strategies for GPU workload distribution
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum LoadBalancingStrategy {
@@ -223,7 +259,7 @@ pub struct GpuLoadBalancer {
     /// Round-robin counter
     round_robin_counter: Arc<Mutex<usize>>,
     /// Performance history for prediction
-    performance_history: Arc<RwLock<HashMap<String, VecDeque<(Duration, u64)>>>>,
+    performance_history: PerformanceHistory,
     /// Health monitoring active
     health_monitoring_active: Arc<RwLock<bool>>,
 }
@@ -623,6 +659,12 @@ impl GpuLoadBalancer {
         memory_weight: f32,
         reliability_weight: f32,
     ) -> usize {
+        let weights = SelectionWeights::from_strategy(&LoadBalancingStrategy::Weighted {
+            utilization_weight,
+            performance_weight,
+            memory_weight,
+            reliability_weight,
+        });
         let device_info = self.device_info.read().unwrap();
         let estimated_memory = self.estimate_operation_memory(operation);
 
@@ -632,25 +674,11 @@ impl GpuLoadBalancer {
                 let info_a = device_info.get(&a).unwrap();
                 let info_b = device_info.get(&b).unwrap();
 
-                let score_a = self.calculate_weighted_score(
-                    info_a,
-                    operation,
-                    estimated_memory,
-                    utilization_weight,
-                    performance_weight,
-                    memory_weight,
-                    reliability_weight,
-                );
+                let score_a =
+                    self.calculate_weighted_score(info_a, operation, estimated_memory, &weights);
 
-                let score_b = self.calculate_weighted_score(
-                    info_b,
-                    operation,
-                    estimated_memory,
-                    utilization_weight,
-                    performance_weight,
-                    memory_weight,
-                    reliability_weight,
-                );
+                let score_b =
+                    self.calculate_weighted_score(info_b, operation, estimated_memory, &weights);
 
                 score_a.partial_cmp(&score_b).unwrap()
             })
@@ -679,23 +707,20 @@ impl GpuLoadBalancer {
         info: &GpuDeviceInfo,
         operation: &TensorOperation,
         estimated_memory: u64,
-        utilization_weight: f32,
-        performance_weight: f32,
-        memory_weight: f32,
-        reliability_weight: f32,
+        weights: &SelectionWeights,
     ) -> f32 {
-        let utilization_score = (1.0 - info.utilization) * utilization_weight;
+        let utilization_score = (1.0 - info.utilization) * weights.utilization;
         let performance_score =
-            self.calculate_performance_score(info, operation) * performance_weight;
+            self.calculate_performance_score(info, operation) * weights.performance;
 
         let memory_score = if info.memory_stats.free_memory >= estimated_memory {
             (info.memory_stats.free_memory as f32 / info.memory_stats.total_memory as f32)
-                * memory_weight
+                * weights.memory
         } else {
             0.0 // Insufficient memory
         };
 
-        let reliability_score = info.success_rate * reliability_weight;
+        let reliability_score = info.success_rate * weights.reliability;
 
         utilization_score + performance_score + memory_score + reliability_score
     }
@@ -880,7 +905,7 @@ impl GpuLoadBalancer {
         let operation_key = metadata.operation_type.clone();
         let mut history = self.performance_history.write().unwrap();
 
-        let history_data = history.entry(operation_key).or_insert_with(VecDeque::new);
+        let history_data = history.entry(operation_key).or_default();
 
         // Add new data point
         history_data.push_back((result.execution_time, result.memory_used));
@@ -921,9 +946,8 @@ impl GpuLoadBalancer {
                 .entry(gpu_id)
                 .or_insert(Duration::from_millis(0));
             *current_latency = Duration::from_nanos(
-                (current_latency.as_nanos() as u64 * (gpu_ops - 1) as u64
-                    + latency.as_nanos() as u64)
-                    / gpu_ops as u64,
+                (current_latency.as_nanos() as u64 * (gpu_ops - 1) + latency.as_nanos() as u64)
+                    / gpu_ops,
             );
         }
 
@@ -1008,7 +1032,7 @@ impl GpuLoadBalancer {
                 let device_info_snapshot = device_info.read().unwrap().clone();
                 let mut needs_rebalancing = false;
 
-                for (_, info) in &device_info_snapshot {
+                for info in device_info_snapshot.values() {
                     if info.utilization > utilization_threshold
                         || (info.memory_stats.used_memory as f32
                             / info.memory_stats.total_memory as f32)
@@ -1110,7 +1134,8 @@ impl GpuLoadBalancer {
         let device_ids: Vec<usize> = { self.gpu_devices.read().unwrap().keys().copied().collect() };
 
         for device_id in device_ids {
-            if let Some(accelerator) = self.gpu_devices.read().unwrap().get(&device_id) {
+            let accelerator_opt = { self.gpu_devices.read().unwrap().get(&device_id).cloned() };
+            if let Some(accelerator) = accelerator_opt {
                 accelerator.clear_cache();
                 let _ = accelerator.synchronize().await;
             }

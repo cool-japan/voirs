@@ -43,6 +43,7 @@ pub struct PrivacyPreservingAnalytics {
 
 impl GdprEncryption {
     /// Create new GDPR encryption manager
+    #[must_use]
     pub fn new() -> Self {
         let mut master_key = [0u8; 32];
         let mut salt = [0u8; 16];
@@ -64,7 +65,7 @@ impl GdprEncryption {
             cipher
                 .encrypt(nonce, data.as_bytes())
                 .map_err(|e| GdprError::AnonymizationFailed {
-                    message: format!("Encryption failed: {}", e),
+                    message: format!("Encryption failed: {e}"),
                 })?;
 
         // Prepend nonce to ciphertext for decryption
@@ -90,43 +91,42 @@ impl GdprEncryption {
             cipher
                 .decrypt(nonce, ciphertext)
                 .map_err(|e| GdprError::AnonymizationFailed {
-                    message: format!("Decryption failed: {}", e),
+                    message: format!("Decryption failed: {e}"),
                 })?;
 
         String::from_utf8(plaintext).map_err(|e| GdprError::AnonymizationFailed {
-            message: format!("Invalid UTF-8 in decrypted data: {}", e),
+            message: format!("Invalid UTF-8 in decrypted data: {e}"),
         })
     }
 
     /// Generate pseudonymized identifier for analytics
+    #[must_use]
     pub fn pseudonymize_identifier(&self, original_id: &str) -> String {
         let mut hasher = Sha256::new();
-        hasher.update(&self.salt);
+        hasher.update(self.salt);
         hasher.update(original_id.as_bytes());
         let hash = hasher.finalize();
         format!("pseudo_{}", self.encode_hex(&hash[..8]))
     }
 
     /// Create secure hash of sensitive data for deduplication
+    #[must_use]
     pub fn secure_hash(&self, data: &str) -> String {
         let mut hasher = Sha256::new();
-        hasher.update(&self.master_key);
+        hasher.update(self.master_key);
         hasher.update(data.as_bytes());
         self.encode_hex(&hasher.finalize())
     }
 
     /// Helper function to encode bytes as hex string
     fn encode_hex(&self, bytes: &[u8]) -> String {
-        bytes
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<Vec<_>>()
-            .join("")
+        bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
     }
 }
 
 impl DifferentialPrivacy {
     /// Create new differential privacy manager
+    #[must_use]
     pub fn new(epsilon: f64, sensitivity: f64) -> Self {
         Self {
             epsilon,
@@ -135,6 +135,7 @@ impl DifferentialPrivacy {
     }
 
     /// Add Laplace noise for differential privacy
+    #[must_use]
     pub fn add_laplace_noise(&self, true_value: f64) -> f64 {
         let scale = self.sensitivity / self.epsilon;
         let noise = self.sample_laplace(scale);
@@ -148,6 +149,7 @@ impl DifferentialPrivacy {
     }
 
     /// Check if privacy budget allows for query
+    #[must_use]
     pub fn check_privacy_budget(&self, requested_epsilon: f64) -> bool {
         requested_epsilon <= self.epsilon
     }
@@ -155,6 +157,7 @@ impl DifferentialPrivacy {
 
 impl PrivacyPreservingAnalytics {
     /// Create new privacy-preserving analytics manager
+    #[must_use]
     pub fn new(epsilon: f64) -> Self {
         let mut encryption_key = vec![0u8; 32];
         thread_rng().fill(&mut encryption_key[..]);
@@ -167,6 +170,7 @@ impl PrivacyPreservingAnalytics {
     }
 
     /// Add differentially private noise to analytical queries
+    #[must_use]
     pub fn add_differential_privacy_noise(&self, true_value: f64) -> f64 {
         let dp = DifferentialPrivacy::new(self.epsilon, 1.0);
         dp.add_laplace_noise(true_value)

@@ -512,48 +512,54 @@ impl VisualVoiceEditor {
         parameter_id: &str,
         value: String,
     ) -> Result<()> {
-        let mut sessions = self.sessions.write().unwrap();
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| Error::Validation(format!("Session not found: {session_id}")))?;
+        // Determine if preview should be generated
+        let should_generate_preview = {
+            let mut sessions = self.sessions.write().unwrap();
+            let session = sessions
+                .get_mut(session_id)
+                .ok_or_else(|| Error::Validation(format!("Session not found: {session_id}")))?;
 
-        // Validate parameter exists
-        let parameter = self
-            .parameters
-            .get(parameter_id)
-            .ok_or_else(|| Error::Validation(format!("Parameter not found: {parameter_id}")))?;
+            // Validate parameter exists
+            let parameter = self
+                .parameters
+                .get(parameter_id)
+                .ok_or_else(|| Error::Validation(format!("Parameter not found: {parameter_id}")))?;
 
-        // Validate parameter value
-        self.validate_parameter_value(parameter, &value)?;
+            // Validate parameter value
+            self.validate_parameter_value(parameter, &value)?;
 
-        // Record change in history
-        if let Some(old_value) = session.current_parameters.get(parameter_id) {
-            let change = ParameterChange {
-                parameter_id: parameter_id.to_string(),
-                old_value: old_value.clone(),
-                new_value: value.clone(),
-                timestamp: SystemTime::now(),
-                comment: None,
-            };
+            // Record change in history
+            if let Some(old_value) = session.current_parameters.get(parameter_id) {
+                let change = ParameterChange {
+                    parameter_id: parameter_id.to_string(),
+                    old_value: old_value.clone(),
+                    new_value: value.clone(),
+                    timestamp: SystemTime::now(),
+                    comment: None,
+                };
 
-            // Trim history if at size limit
-            if session.change_history.len() >= self.config.parameter_history_size {
-                session.change_history.remove(0);
+                // Trim history if at size limit
+                if session.change_history.len() >= self.config.parameter_history_size {
+                    session.change_history.remove(0);
+                }
+
+                session.change_history.push(change);
+                session.history_position = session.change_history.len();
             }
 
-            session.change_history.push(change);
-            session.history_position = session.change_history.len();
-        }
+            // Update parameter value
+            session
+                .current_parameters
+                .insert(parameter_id.to_string(), value);
+            session.modified_at = SystemTime::now();
+            session.has_unsaved_changes = true;
 
-        // Update parameter value
-        session
-            .current_parameters
-            .insert(parameter_id.to_string(), value);
-        session.modified_at = SystemTime::now();
-        session.has_unsaved_changes = true;
+            // Check if preview should be generated
+            self.config.enable_realtime_preview && parameter.affects_audio
+        }; // Drop the write lock here
 
-        // Generate real-time preview if enabled
-        if self.config.enable_realtime_preview && parameter.affects_audio {
+        // Generate real-time preview if enabled (outside the lock)
+        if should_generate_preview {
             self.generate_preview(session_id).await?;
         }
 
@@ -615,16 +621,23 @@ impl VisualVoiceEditor {
     async fn generate_preview(&self, session_id: &str) -> Result<()> {
         let _preview_lock = self.preview_mutex.lock().await;
 
-        let sessions = self.sessions.read().unwrap();
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| Error::Validation(format!("Session not found: {session_id}")))?;
+        // Clone necessary data before async operations
+        let (speaker_profile, current_parameters) = {
+            let sessions = self.sessions.read().unwrap();
+            let session = sessions
+                .get(session_id)
+                .ok_or_else(|| Error::Validation(format!("Session not found: {session_id}")))?;
+            (
+                session.speaker_profile.clone(),
+                session.current_parameters.clone(),
+            )
+        }; // Drop the read lock here
 
         // Create preview request with current parameters
         let preview_text = "This is a voice cloning preview with current parameters.";
         let request = VoiceCloneRequest::new(
             format!("preview_{session_id}"),
-            crate::types::SpeakerData::new(session.speaker_profile.clone()),
+            crate::types::SpeakerData::new(speaker_profile.clone()),
             CloningMethod::FewShot,
             preview_text.to_string(),
         );
@@ -636,31 +649,30 @@ impl VisualVoiceEditor {
 
         let generation_time = start_time.elapsed();
 
-        // Assess quality if enabled
-        let quality_metrics = if self.config.enable_quality_assessment {
-            // Create voice samples for quality assessment
-            let original_sample = session.speaker_profile.samples.first().ok_or_else(|| {
-                Error::InsufficientData("No reference samples available".to_string())
-            })?;
-            let cloned_sample = VoiceSample::new(
-                "cloned_result".to_string(),
-                result.audio.clone(),
-                result.sample_rate,
-            );
-            let mut quality_assessor = CloningQualityAssessor::new()?;
-            quality_assessor
-                .assess_quality(original_sample, &cloned_sample)
-                .await?
-        } else {
-            QualityMetrics::default()
-        };
+        // Assess quality if enabled and samples are available
+        let quality_metrics =
+            if self.config.enable_quality_assessment && !speaker_profile.samples.is_empty() {
+                // Create voice samples for quality assessment
+                let original_sample = &speaker_profile.samples[0];
+                let cloned_sample = VoiceSample::new(
+                    "cloned_result".to_string(),
+                    result.audio.clone(),
+                    result.sample_rate,
+                );
+                let mut quality_assessor = CloningQualityAssessor::new()?;
+                quality_assessor
+                    .assess_quality(original_sample, &cloned_sample)
+                    .await?
+            } else {
+                QualityMetrics::default()
+            };
 
-        // Assess similarity if enabled
-        let similarity_metrics = if self.config.enable_similarity_comparison {
+        // Assess similarity if enabled and samples are available
+        let similarity_metrics = if self.config.enable_similarity_comparison
+            && !speaker_profile.samples.is_empty()
+        {
             // Create reference sample for comparison
-            let reference_sample = session.speaker_profile.samples.first().ok_or_else(|| {
-                Error::InsufficientData("No reference samples available".to_string())
-            })?;
+            let reference_sample = &speaker_profile.samples[0];
 
             // Create voice samples for similarity measurement
             let result_sample = VoiceSample::new(
@@ -699,7 +711,7 @@ impl VisualVoiceEditor {
             sample_rate: result.sample_rate,
             quality_metrics,
             similarity_metrics,
-            parameters_used: session.current_parameters.clone(),
+            parameters_used: current_parameters,
             generation_time,
             timestamp: SystemTime::now(),
         };
@@ -803,16 +815,18 @@ impl VisualVoiceEditor {
 
     /// Save session to file
     pub async fn save_session(&self, session_id: &str, file_path: &str) -> Result<()> {
-        let sessions = self.sessions.read().unwrap();
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| Error::Validation(format!("Session not found: {session_id}")))?;
+        // Clone session data before async operation
+        let session = {
+            let sessions = self.sessions.read().unwrap();
+            sessions
+                .get(session_id)
+                .ok_or_else(|| Error::Validation(format!("Session not found: {session_id}")))?
+                .clone()
+        }; // Drop the read lock here
 
-        let json = serde_json::to_string_pretty(session).map_err(|e| Error::Serialization(e))?;
+        let json = serde_json::to_string_pretty(&session).map_err(Error::Serialization)?;
 
-        tokio::fs::write(file_path, json)
-            .await
-            .map_err(|e| Error::Io(e))?;
+        tokio::fs::write(file_path, json).await.map_err(Error::Io)?;
 
         Ok(())
     }
@@ -821,10 +835,9 @@ impl VisualVoiceEditor {
     pub async fn load_session(&self, file_path: &str) -> Result<String> {
         let json = tokio::fs::read_to_string(file_path)
             .await
-            .map_err(|e| Error::Io(e))?;
+            .map_err(Error::Io)?;
 
-        let session: EditorSession =
-            serde_json::from_str(&json).map_err(|e| Error::Serialization(e))?;
+        let session: EditorSession = serde_json::from_str(&json).map_err(Error::Serialization)?;
 
         let session_id = session.session_id.clone();
 

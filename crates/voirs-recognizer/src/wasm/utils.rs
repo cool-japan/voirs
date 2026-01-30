@@ -28,10 +28,12 @@ macro_rules! console_error {
     ($($t:tt)*) => (crate::wasm::utils::error(&format_args!($($t)*).to_string()))
 }
 
+#[allow(unused_macros)]
 macro_rules! console_warn {
     ($($t:tt)*) => (crate::wasm::utils::warn(&format_args!($($t)*).to_string()))
 }
 
+#[allow(unused_macros)]
 macro_rules! console_info {
     ($($t:tt)*) => (crate::wasm::utils::info(&format_args!($($t)*).to_string()))
 }
@@ -73,20 +75,32 @@ pub fn get_wasm_memory_usage() -> JsValue {
 /// check browser compatibility
 pub fn check_browser_compatibility() -> JsValue {
     let mut features = std::collections::HashMap::new();
+    let global = js_sys::global();
 
     // Check for Web Audio API
-    features.insert("web_audio_api", js_sys::global().has_type_of("object"));
+    features.insert(
+        "web_audio_api",
+        js_sys::Reflect::has(&global, &JsValue::from_str("AudioContext")).unwrap_or(false)
+            || js_sys::Reflect::has(&global, &JsValue::from_str("webkitAudioContext"))
+                .unwrap_or(false),
+    );
 
     // Check for Web Workers
-    features.insert("web_workers", js_sys::global().has_type_of("object"));
+    features.insert(
+        "web_workers",
+        js_sys::Reflect::has(&global, &JsValue::from_str("Worker")).unwrap_or(false),
+    );
 
     // Check for AudioWorklet (modern browsers)
-    features.insert("audio_worklet", js_sys::global().has_type_of("object"));
+    features.insert(
+        "audio_worklet",
+        js_sys::Reflect::has(&global, &JsValue::from_str("AudioWorkletNode")).unwrap_or(false),
+    );
 
     // Check for WebAssembly support
     features.insert(
         "webassembly",
-        js_sys::WebAssembly::validate(&js_sys::Uint8Array::new(&js_sys::ArrayBuffer::new(0))),
+        js_sys::Reflect::has(&global, &JsValue::from_str("WebAssembly")).unwrap_or(false),
     );
 
     let compatibility = serde_json::json!({
@@ -271,7 +285,7 @@ mod tests {
     #[wasm_bindgen_test]
     fn test_chunk_size_calculation() {
         let chunk_size = get_optimal_chunk_size(16000, 100.0); // 100ms at 16kHz
-        assert!(chunk_size >= 64 && chunk_size <= 4096);
+        assert!((64..=4096).contains(&chunk_size));
         assert_eq!(chunk_size & (chunk_size - 1), 0); // Should be power of 2
     }
 

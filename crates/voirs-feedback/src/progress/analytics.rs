@@ -351,7 +351,7 @@ impl ComprehensiveAnalyticsFramework {
     /// Cleanup old metrics to prevent memory overflow
     pub fn cleanup_old_metrics(&mut self) {
         let now = Utc::now();
-        let retention_duration = chrono::Duration::days(self.config.data_retention_days as i64);
+        let retention_duration = chrono::Duration::days(i64::from(self.config.data_retention_days));
         let cutoff_time = now - retention_duration;
 
         // Remove old metrics
@@ -383,10 +383,11 @@ impl ComprehensiveAnalyticsFramework {
     }
 
     /// Check if cleanup is needed
+    #[must_use]
     pub fn needs_cleanup(&self) -> bool {
         let now = Utc::now();
         let cleanup_interval =
-            chrono::Duration::minutes(self.config.cleanup_interval_minutes as i64);
+            chrono::Duration::minutes(i64::from(self.config.cleanup_interval_minutes));
         let time_based_cleanup = now.signed_duration_since(self.last_cleanup) > cleanup_interval;
 
         // Also check memory usage threshold
@@ -449,6 +450,7 @@ impl ComprehensiveAnalyticsFramework {
     }
 
     /// Get memory usage statistics
+    #[must_use]
     pub fn get_memory_stats(&self) -> MemoryStats {
         let metrics_count = self.metrics.len();
         let aggregated_count = self.aggregated_metrics.len();
@@ -643,6 +645,7 @@ pub struct MemoryBoundedMetrics {
 
 impl MemoryBoundedMetrics {
     /// Create new memory-bounded metrics storage
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
         Self {
             storage: VecDeque::with_capacity(capacity),
@@ -672,6 +675,7 @@ impl MemoryBoundedMetrics {
     }
 
     /// Get metric by key
+    #[must_use]
     pub fn get(&self, key: &str) -> Option<&AnalyticsMetric> {
         if let Some(&index) = self.index.get(key) {
             if index < self.storage.len() {
@@ -711,16 +715,19 @@ impl MemoryBoundedMetrics {
     }
 
     /// Get number of stored metrics
+    #[must_use]
     pub fn len(&self) -> usize {
         self.storage.len()
     }
 
     /// Check if empty
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.storage.is_empty()
     }
 
     /// Get capacity
+    #[must_use]
     pub fn capacity(&self) -> usize {
         self.capacity
     }
@@ -749,6 +756,7 @@ pub struct AggregatedMetric {
 
 impl AggregatedMetric {
     /// Calculate mean
+    #[must_use]
     pub fn mean(&self) -> f64 {
         if self.count > 0 {
             self.sum / self.count as f64
@@ -758,6 +766,7 @@ impl AggregatedMetric {
     }
 
     /// Calculate variance
+    #[must_use]
     pub fn variance(&self) -> f64 {
         if self.count > 1 {
             let mean = self.mean();
@@ -768,6 +777,7 @@ impl AggregatedMetric {
     }
 
     /// Calculate standard deviation
+    #[must_use]
     pub fn std_dev(&self) -> f64 {
         self.variance().sqrt()
     }

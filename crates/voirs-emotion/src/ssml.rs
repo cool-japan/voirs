@@ -212,7 +212,7 @@ impl EmotionSSMLProcessor {
 
                 // Parse tag
                 let mut tag = String::new();
-                while let Some(tag_ch) = chars.next() {
+                for tag_ch in chars.by_ref() {
                     if tag_ch == '>' {
                         break;
                     }

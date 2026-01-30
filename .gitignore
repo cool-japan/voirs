@@ -39,8 +39,11 @@ models/**/*.bin
 
 # Temporary files
 /tmp/
-*.tmp
-*.temp
+**/*.tmp
+**/*.temp
+**/*.log
+**/*.bak
+**/*.backup
 
 # Documentation build artifacts
 docs/guide/book/
@@ -91,3 +94,4 @@ synthesis_results/
 security-reports/
 crates/voirs-recognizer/coverage-reports/
 crates/voirs-recognizer/coverage-report/
+crates/voirs-evaluation/audit_logs/*.jsonl

@@ -60,6 +60,12 @@ pub struct WasmVoirsPipeline {
     streaming_active: bool,
 }
 
+impl Default for WasmVoirsPipeline {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[wasm_bindgen]
 impl WasmVoirsPipeline {
     #[wasm_bindgen(constructor)]

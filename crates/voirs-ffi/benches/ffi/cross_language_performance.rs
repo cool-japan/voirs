@@ -12,13 +12,13 @@ use voirs_ffi::{voirs_free_audio_buffer, VoirsErrorCode, VoirsSynthesisConfig};
 ///
 /// Benchmarks performance characteristics across different language bindings
 /// to ensure consistent performance regardless of the calling language.
-
 /// Simulated Python FFI overhead
 struct PythonBindingSimulator {
     pipeline_id: u32,
 }
 
 impl PythonBindingSimulator {
+    #[allow(unused_unsafe)]
     fn new() -> Self {
         Self {
             pipeline_id: unsafe { voirs_create_pipeline() },
@@ -60,6 +60,7 @@ impl PythonBindingSimulator {
 }
 
 impl Drop for PythonBindingSimulator {
+    #[allow(unused_unsafe)]
     fn drop(&mut self) {
         if self.pipeline_id != 0 {
             unsafe {
@@ -75,6 +76,7 @@ struct NodeJSBindingSimulator {
 }
 
 impl NodeJSBindingSimulator {
+    #[allow(unused_unsafe)]
     fn new() -> Self {
         Self {
             pipeline_id: unsafe { voirs_create_pipeline() },
@@ -114,6 +116,7 @@ impl NodeJSBindingSimulator {
 }
 
 impl Drop for NodeJSBindingSimulator {
+    #[allow(unused_unsafe)]
     fn drop(&mut self) {
         if self.pipeline_id != 0 {
             unsafe {
@@ -129,6 +132,7 @@ struct DirectCAPIBenchmark {
 }
 
 impl DirectCAPIBenchmark {
+    #[allow(unused_unsafe)]
     fn new() -> Self {
         Self {
             pipeline_id: unsafe { voirs_create_pipeline() },
@@ -154,6 +158,7 @@ impl DirectCAPIBenchmark {
 }
 
 impl Drop for DirectCAPIBenchmark {
+    #[allow(unused_unsafe)]
     fn drop(&mut self) {
         if self.pipeline_id != 0 {
             unsafe {
@@ -412,6 +417,7 @@ fn benchmark_cross_language_error_handling(c: &mut Criterion) {
 }
 
 /// Benchmark language-specific optimization opportunities
+#[allow(unused_unsafe)]
 fn benchmark_optimization_opportunities(c: &mut Criterion) {
     let mut group = c.benchmark_group("optimization_opportunities");
 

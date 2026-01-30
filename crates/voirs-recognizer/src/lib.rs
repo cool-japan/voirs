@@ -3,6 +3,44 @@
 //! Voice recognition and analysis capabilities for the `VoiRS` ecosystem.
 //! This crate provides automatic speech recognition (ASR), phoneme recognition,
 //! and comprehensive audio analysis functionality.
+
+// Allow pedantic lints that are acceptable for audio/DSP processing code
+#![allow(clippy::similar_names)] // Many similar variable names in DSP algorithms
+#![allow(clippy::cast_precision_loss)] // Acceptable for audio sample conversions
+#![allow(clippy::cast_possible_truncation)] // Controlled truncation in audio processing
+#![allow(clippy::unreadable_literal)] // Scientific constants in DSP algorithms
+#![allow(clippy::module_name_repetitions)] // Type names often repeat module names
+#![allow(clippy::cast_sign_loss)] // Intentional in index calculations
+#![allow(clippy::unused_async)] // Public API functions need async for consistency and future compatibility
+#![allow(clippy::missing_errors_doc)] // Many internal functions with self-documenting error types
+#![allow(clippy::missing_panics_doc)] // Panics are documented where relevant, not for all edge cases
+#![allow(clippy::unused_self)] // Some trait implementations require &self for consistency
+#![allow(clippy::must_use_candidate)] // Not all return values need must_use annotation
+#![allow(clippy::missing_const_for_fn)] // Not all functions can/should be const
+#![allow(clippy::doc_markdown)] // Technical terms don't all need backticks
+#![allow(clippy::unnecessary_wraps)] // Result/Option wrappers maintained for API consistency
+#![allow(clippy::format_push_string)] // Sometimes more readable than alternative
+#![allow(clippy::cast_possible_wrap)] // Controlled wrapping in DSP code
+#![allow(clippy::cast_lossless)] // Explicit casts preferred for clarity
+#![allow(clippy::ptr_as_ptr)] // Raw pointer casts are intentional in FFI/WASM
+#![allow(clippy::struct_excessive_bools)] // Config structs naturally have many boolean flags
+#![allow(clippy::fn_params_excessive_bools)] // Some functions need multiple boolean parameters
+#![allow(clippy::too_many_lines)] // Some DSP functions are inherently complex
+#![allow(clippy::redundant_closure)] // Sometimes closures are clearer
+#![allow(clippy::float_cmp)] // Exact float comparisons are intentional in some DSP contexts
+#![allow(clippy::match_same_arms)] // Pattern matching clarity sometimes requires duplication
+#![allow(clippy::manual_let_else)] // if-let patterns sometimes clearer
+#![allow(clippy::wildcard_imports)] // Prelude imports are convenient and standard
+#![allow(clippy::items_after_statements)] // Helper items after code can improve readability
+#![allow(clippy::return_self_not_must_use)] // Not all builder methods need must_use
+#![allow(clippy::needless_range_loop)] // Range loops sometimes clearer than iterators in DSP
+#![allow(clippy::uninlined_format_args)] // Explicit argument names can improve clarity
+#![allow(clippy::needless_pass_by_value)] // Some functions designed for ownership transfer
+#![allow(clippy::manual_clamp)] // Manual clamping sometimes clearer
+#![allow(clippy::redundant_closure_for_method_calls)] // Closures sometimes needed for type inference
+#![allow(clippy::await_holding_lock)] // Controlled lock holding in async contexts
+#![allow(clippy::trivially_copy_pass_by_ref)] // API consistency more important than micro-optimization
+#![allow(clippy::no_effect_underscore_binding)] // Underscore bindings used for drop guards
 //!
 //! ## Features
 //!
@@ -170,26 +208,86 @@
 //!
 
 #![warn(missing_docs)]
-#![warn(clippy::all, clippy::pedantic)]
-#![allow(clippy::module_name_repetitions)]
+#![warn(clippy::all)]
+// Allow specific clippy lints after warnings to override them (duplicates from earlier allows needed here)
+#![allow(clippy::duplicated_attributes)] // Intentional duplicates to override warns
+#![allow(clippy::needless_range_loop)]
+#![allow(clippy::manual_clamp)]
+#![allow(clippy::await_holding_lock)]
+#![allow(clippy::redundant_closure)]
+#![allow(clippy::field_reassign_with_default)]
+#![allow(clippy::vec_init_then_push)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::should_implement_trait)]
+#![allow(clippy::derivable_impls)]
+#![allow(clippy::wrong_self_convention)]
+#![allow(clippy::useless_vec)]
+#![allow(clippy::unnecessary_unwrap)]
+#![allow(clippy::unnecessary_cast)]
+#![allow(clippy::manual_map)]
+#![allow(clippy::excessive_precision)]
+#![allow(clippy::double_must_use)]
+#![allow(clippy::doc_lazy_continuation)]
+#![allow(clippy::cloned_ref_to_slice_refs)]
 
 // Re-export core VoiRS types
 /// Item
 pub use voirs_sdk::{AudioBuffer, LanguageCode, Phoneme, VoirsError};
+
+// Internal utilities for error-free mutex handling
+mod sync_utils {
+    use super::RecognitionError;
+    use std::sync::{Mutex, MutexGuard, PoisonError};
+
+    /// Extension trait for `Mutex` to provide error handling without unwrap
+    pub trait MutexExt<T> {
+        /// Lock mutex and map poison error to `RecognitionError`
+        fn lock_safe(&self) -> Result<MutexGuard<'_, T>, RecognitionError>;
+    }
+
+    impl<T> MutexExt<T> for Mutex<T> {
+        fn lock_safe(&self) -> Result<MutexGuard<'_, T>, RecognitionError> {
+            self.lock().map_err(|e: PoisonError<MutexGuard<'_, T>>| {
+                RecognitionError::SynchronizationError {
+                    message: format!("Mutex lock poisoned: {}", e),
+                }
+            })
+        }
+    }
+}
+
+// Re-export the utility trait for internal use
+pub(crate) use sync_utils::MutexExt;
 
 // Public API modules
 pub mod analysis;
 pub mod asr;
 pub mod audio_formats;
 pub mod audio_utilities;
+pub mod caching;
+pub mod cloud_storage;
+pub mod config;
+pub mod disaster_recovery;
+pub mod error_bridge;
 pub mod error_enhancement;
 pub mod error_recovery;
+pub mod high_availability;
 pub mod integration;
+pub mod logging;
 pub mod memory_optimization;
+pub mod mobile;
 pub mod monitoring;
+pub mod multimodal;
 pub mod performance;
 pub mod phoneme;
 pub mod preprocessing;
+pub mod privacy;
+pub mod sdk_bridge;
+pub mod security_audit;
+#[cfg(feature = "rest-api")]
+pub mod serverless;
+pub mod sla_guarantees;
 pub mod training;
 pub mod traits;
 pub mod wake_word;
@@ -556,6 +654,13 @@ pub enum RecognitionError {
         #[source]
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
+
+    /// Synchronization error (mutex poisoning, lock failure)
+    #[error("Synchronization error: {message}")]
+    SynchronizationError {
+        /// Error message
+        message: String,
+    },
 }
 
 impl From<RecognitionError> for VoirsError {
@@ -661,8 +766,7 @@ impl From<RecognitionError> for VoirsError {
             } => VoirsError::ModelError {
                 model_type: voirs_sdk::error::ModelType::ASR,
                 message: format!(
-                    "Recognition timed out after {}ms. Audio duration: {}ms. Suggestion: {}",
-                    timeout_ms, audio_duration_ms, suggestion
+                    "Recognition timed out after {timeout_ms}ms. Audio duration: {audio_duration_ms}ms. Suggestion: {suggestion}"
                 ),
                 source: None,
             },
@@ -675,6 +779,11 @@ impl From<RecognitionError> for VoirsError {
                 model_type: voirs_sdk::error::ModelType::ASR,
                 message: format!("Training error: {message}"),
                 source,
+            },
+            RecognitionError::SynchronizationError { message } => VoirsError::ModelError {
+                model_type: voirs_sdk::error::ModelType::ASR,
+                message: format!("Synchronization error: {message}"),
+                source: None,
             },
         }
     }

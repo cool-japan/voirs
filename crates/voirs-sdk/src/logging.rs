@@ -308,8 +308,9 @@ pub mod metrics {
                     return HistogramStats::default();
                 }
 
-                let mut sorted = values.clone();
-                sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                // Filter out NaN values and sort
+                let mut sorted: Vec<f64> = values.iter().copied().filter(|v| !v.is_nan()).collect();
+                sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
                 let count = sorted.len();
                 let sum: f64 = sorted.iter().sum();

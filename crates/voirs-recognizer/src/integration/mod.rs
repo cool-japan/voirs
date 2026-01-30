@@ -1,7 +1,7 @@
-//! # VoiRS Ecosystem Integration
+//! # `VoiRS` Ecosystem Integration
 //!
-//! This module provides seamless integration between the VoiRS recognizer
-//! and the broader VoiRS ecosystem, including unified configuration management,
+//! This module provides seamless integration between the `VoiRS` recognizer
+//! and the broader `VoiRS` ecosystem, including unified configuration management,
 //! pipeline integration, and performance monitoring.
 
 pub mod config;
@@ -32,7 +32,7 @@ use crate::RecognitionError;
 use std::collections::HashMap;
 use voirs_sdk::config::PipelineConfig;
 
-/// Integration manager for VoiRS ecosystem components
+/// Integration manager for `VoiRS` ecosystem components
 #[derive(Debug)]
 pub struct VoirsIntegrationManager {
     /// Configuration hierarchy
@@ -86,21 +86,25 @@ impl VoirsIntegrationManager {
     }
 
     /// Get component information
+    #[must_use]
     pub fn get_component_info(&self, name: &str) -> Option<&ComponentInfo> {
         self.component_registry.get(name)
     }
 
     /// Get all registered components
+    #[must_use]
     pub fn get_all_components(&self) -> Vec<&ComponentInfo> {
         self.component_registry.values().collect()
     }
 
     /// Get configuration hierarchy
+    #[must_use]
     pub fn get_config_hierarchy(&self) -> &PipelineConfig {
         &self.config_hierarchy
     }
 
     /// Get performance monitor
+    #[must_use]
     pub fn get_performance_monitor(&self) -> &IntegratedPerformanceMonitor {
         &self.performance_monitor
     }

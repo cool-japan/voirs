@@ -126,11 +126,7 @@ impl BinaryPackager {
     }
 
     fn strip_debug_symbols(&self, binary_path: &PathBuf) -> Result<()> {
-        let strip_cmd = if cfg!(target_os = "macos") {
-            "strip"
-        } else {
-            "strip"
-        };
+        let strip_cmd = "strip";
 
         let output = Command::new(strip_cmd).arg(binary_path).output()?;
 

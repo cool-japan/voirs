@@ -241,24 +241,30 @@ impl PitchConfig {
     /// Validate pitch configuration
     pub fn validate(&self) -> Result<()> {
         if self.base_frequency < 50.0 || self.base_frequency > 500.0 {
-            return Err(AcousticError::ConfigError(format!(
-                "Base frequency {} Hz is out of range (50-500 Hz)",
-                self.base_frequency
-            )));
+            return Err(AcousticError::ConfigError {
+                message: format!(
+                    "Base frequency {} Hz is out of range (50-500 Hz)",
+                    self.base_frequency
+                ),
+            });
         }
 
         if self.range_semitones < 1.0 || self.range_semitones > 48.0 {
-            return Err(AcousticError::ConfigError(format!(
-                "Pitch range {} semitones is out of range (1-48)",
-                self.range_semitones
-            )));
+            return Err(AcousticError::ConfigError {
+                message: format!(
+                    "Pitch range {} semitones is out of range (1-48)",
+                    self.range_semitones
+                ),
+            });
         }
 
         if !(0.0..=1.0).contains(&self.smoothing) {
-            return Err(AcousticError::ConfigError(format!(
-                "Smoothing factor {} must be between 0.0 and 1.0",
-                self.smoothing
-            )));
+            return Err(AcousticError::ConfigError {
+                message: format!(
+                    "Smoothing factor {} must be between 0.0 and 1.0",
+                    self.smoothing
+                ),
+            });
         }
 
         self.vibrato.validate()?;
@@ -411,17 +417,21 @@ impl VibratoConfig {
     /// Validate vibrato configuration
     pub fn validate(&self) -> Result<()> {
         if self.frequency < 0.1 || self.frequency > 20.0 {
-            return Err(AcousticError::ConfigError(format!(
-                "Vibrato frequency {} Hz is out of range (0.1-20.0 Hz)",
-                self.frequency
-            )));
+            return Err(AcousticError::ConfigError {
+                message: format!(
+                    "Vibrato frequency {} Hz is out of range (0.1-20.0 Hz)",
+                    self.frequency
+                ),
+            });
         }
 
         if self.extent < 0.0 || self.extent > 3.0 {
-            return Err(AcousticError::ConfigError(format!(
-                "Vibrato extent {} semitones is out of range (0.0-3.0)",
-                self.extent
-            )));
+            return Err(AcousticError::ConfigError {
+                message: format!(
+                    "Vibrato extent {} semitones is out of range (0.0-3.0)",
+                    self.extent
+                ),
+            });
         }
 
         Ok(())

@@ -114,7 +114,7 @@ impl<T: Default + Copy> CacheMatrix<T> {
         // Pad row stride to cache line boundary
         let element_size = std::mem::size_of::<T>();
         let elements_per_cache_line = CACHE_LINE_SIZE / element_size;
-        let row_stride = ((cols + elements_per_cache_line - 1) / elements_per_cache_line)
+        let row_stride = cols.div_ceil(elements_per_cache_line)
             * elements_per_cache_line;
 
         let total_elements = rows * row_stride;

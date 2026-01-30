@@ -5,7 +5,7 @@
 //!
 //! The implementation has been modularized into several components:
 //! - `types`: Core types, enums, and data structures
-//! - `core`: Main ProgressAnalyzer implementation and analytics framework
+//! - `core`: Main `ProgressAnalyzer` implementation and analytics framework
 //! - `skills`: Skill taxonomy and sub-skill management
 //! - `analytics`: Comprehensive analytics framework and related types  
 //! - `metrics`: Core metrics calculation and measurement utilities

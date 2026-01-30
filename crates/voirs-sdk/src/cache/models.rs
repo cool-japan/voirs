@@ -5,13 +5,14 @@ use crate::{
     traits::{CacheStats, ModelCache},
 };
 use async_trait::async_trait;
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::{
     any::Any,
     collections::{HashMap, HashSet},
     hash::Hash,
     path::{Path, PathBuf},
-    sync::{Arc, RwLock},
+    sync::Arc,
     time::{Duration, Instant, SystemTime},
 };
 use tokio::fs;
@@ -387,7 +388,7 @@ impl AdvancedModelCache {
 
         // Update statistics
         {
-            let mut stats = self.stats.write().unwrap();
+            let mut stats = self.stats.write();
             stats.warming_time_ms = warming_time;
             stats.models_loaded += successful_loads;
             stats.load_failures += failed_loads;
@@ -410,7 +411,7 @@ impl AdvancedModelCache {
 
         // Check if model is in loading queue
         {
-            let loading_queue = self.loading_queue.read().unwrap();
+            let loading_queue = self.loading_queue.read();
             if loading_queue.contains(model_name) {
                 return Err(VoirsError::cache_error(format!(
                     "Model '{model_name}' is already being loaded"
@@ -420,7 +421,7 @@ impl AdvancedModelCache {
 
         // Add to loading queue
         {
-            let mut loading_queue = self.loading_queue.write().unwrap();
+            let mut loading_queue = self.loading_queue.write();
             loading_queue.insert(model_name.to_string());
         }
 
@@ -433,7 +434,7 @@ impl AdvancedModelCache {
 
         // Remove from loading queue
         {
-            let mut loading_queue = self.loading_queue.write().unwrap();
+            let mut loading_queue = self.loading_queue.write();
             loading_queue.remove(model_name);
         }
 
@@ -449,7 +450,7 @@ impl AdvancedModelCache {
 
     /// Check if model exists in cache
     pub async fn contains_key(&self, key: &str) -> bool {
-        let cache = self.memory_cache.read().unwrap();
+        let cache = self.memory_cache.read();
         cache.contains_key(key)
     }
 
@@ -477,11 +478,19 @@ impl AdvancedModelCache {
                 // Calculate checksum for integrity verification
                 let checksum = self.calculate_file_checksum(&model_path).await.ok();
 
+                // Get file size
+                let size_bytes = model_path
+                    .metadata()
+                    .map_err(|e| {
+                        VoirsError::cache_error(format!("Failed to get file metadata: {e}"))
+                    })?
+                    .len() as usize;
+
                 // Create cached model entry
                 let cached_model = CachedModel {
                     data: Box::new(model_data),
                     metadata: metadata.clone(),
-                    size_bytes: model_path.metadata().unwrap().len() as usize,
+                    size_bytes,
                     cached_at: SystemTime::now(),
                     expires_at: SystemTime::now()
                         + Duration::from_secs(self.config.model_ttl_seconds),
@@ -513,8 +522,8 @@ impl AdvancedModelCache {
 
         // Store model
         {
-            let mut cache = self.memory_cache.write().unwrap();
-            let mut current_usage = self.current_memory_usage.write().unwrap();
+            let mut cache = self.memory_cache.write();
+            let mut current_usage = self.current_memory_usage.write();
 
             let model_size = model.size_bytes;
             cache.insert(key.to_string(), model);
@@ -526,9 +535,9 @@ impl AdvancedModelCache {
 
         // Update statistics
         {
-            let mut stats = self.stats.write().unwrap();
+            let mut stats = self.stats.write();
             stats.basic_stats.total_entries += 1;
-            stats.basic_stats.memory_usage_bytes = *self.current_memory_usage.read().unwrap();
+            stats.basic_stats.memory_usage_bytes = *self.current_memory_usage.read();
             stats.models_loaded += 1;
         }
 
@@ -537,7 +546,7 @@ impl AdvancedModelCache {
 
     /// Ensure sufficient memory capacity
     async fn ensure_memory_capacity(&self, required_bytes: usize) -> Result<()> {
-        let current_usage = *self.current_memory_usage.read().unwrap();
+        let current_usage = *self.current_memory_usage.read();
 
         if current_usage + required_bytes > self.max_memory_bytes {
             self.evict_lru_models(required_bytes).await?;
@@ -569,7 +578,7 @@ impl AdvancedModelCache {
 
         // Update statistics
         {
-            let mut stats = self.stats.write().unwrap();
+            let mut stats = self.stats.write();
             stats.models_evicted += evicted_count;
         }
 
@@ -583,8 +592,8 @@ impl AdvancedModelCache {
 
     /// Get eviction candidates based on LRU and priority
     async fn get_eviction_candidates(&self, _required_bytes: usize) -> Vec<String> {
-        let cache = self.memory_cache.read().unwrap();
-        let access_order = self.access_order.read().unwrap();
+        let cache = self.memory_cache.read();
+        let access_order = self.access_order.read();
 
         let mut candidates = Vec::new();
 
@@ -620,28 +629,28 @@ impl AdvancedModelCache {
     /// Remove a model from cache
     async fn remove_model(&self, key: &str) -> Result<Option<CachedModel>> {
         let removed_model = {
-            let mut cache = self.memory_cache.write().unwrap();
+            let mut cache = self.memory_cache.write();
             cache.remove(key)
         };
 
         if let Some(ref model) = removed_model {
             // Update memory usage
             {
-                let mut current_usage = self.current_memory_usage.write().unwrap();
+                let mut current_usage = self.current_memory_usage.write();
                 *current_usage = current_usage.saturating_sub(model.size_bytes);
             }
 
             // Update access order
             {
-                let mut access_order = self.access_order.write().unwrap();
+                let mut access_order = self.access_order.write();
                 access_order.retain(|k| k != key);
             }
 
             // Update statistics
             {
-                let mut stats = self.stats.write().unwrap();
+                let mut stats = self.stats.write();
                 stats.basic_stats.total_entries = stats.basic_stats.total_entries.saturating_sub(1);
-                stats.basic_stats.memory_usage_bytes = *self.current_memory_usage.read().unwrap();
+                stats.basic_stats.memory_usage_bytes = *self.current_memory_usage.read();
             }
         }
 
@@ -650,7 +659,7 @@ impl AdvancedModelCache {
 
     /// Update access order for LRU tracking
     async fn update_access_order(&self, key: &str) {
-        let mut access_order = self.access_order.write().unwrap();
+        let mut access_order = self.access_order.write();
 
         // Remove existing entry
         access_order.retain(|k| k != key);
@@ -661,7 +670,7 @@ impl AdvancedModelCache {
 
     /// Pin a model to prevent eviction
     pub async fn pin_model(&self, key: &str) -> Result<()> {
-        let mut cache = self.memory_cache.write().unwrap();
+        let mut cache = self.memory_cache.write();
 
         if let Some(model) = cache.get_mut(key) {
             model.pinned = true;
@@ -676,7 +685,7 @@ impl AdvancedModelCache {
 
     /// Unpin a model to allow eviction
     pub async fn unpin_model(&self, key: &str) -> Result<()> {
-        let mut cache = self.memory_cache.write().unwrap();
+        let mut cache = self.memory_cache.write();
 
         if let Some(model) = cache.get_mut(key) {
             model.pinned = false;
@@ -691,20 +700,20 @@ impl AdvancedModelCache {
 
     /// Get model metadata
     pub async fn get_model_metadata(&self, key: &str) -> Option<ModelMetadata> {
-        let cache = self.memory_cache.read().unwrap();
+        let cache = self.memory_cache.read();
         cache.get(key).map(|model| model.metadata.clone())
     }
 
     /// List all cached models
     pub async fn list_cached_models(&self) -> Vec<String> {
-        let cache = self.memory_cache.read().unwrap();
+        let cache = self.memory_cache.read();
         cache.keys().cloned().collect()
     }
 
     /// Get cache usage summary
     pub async fn get_usage_summary(&self) -> CacheUsageSummary {
-        let cache = self.memory_cache.read().unwrap();
-        let current_usage = *self.current_memory_usage.read().unwrap();
+        let cache = self.memory_cache.read();
+        let current_usage = *self.current_memory_usage.read();
 
         let model_count = cache.len();
         let total_accesses: u64 = cache.values().map(|m| m.access_count).sum();
@@ -751,7 +760,7 @@ impl AdvancedModelCache {
 
         // Find expired models
         {
-            let cache = self.memory_cache.read().unwrap();
+            let cache = self.memory_cache.read();
             for (key, model) in cache.iter() {
                 if model.expires_at <= now && !model.pinned {
                     expired_keys.push(key.clone());
@@ -773,12 +782,12 @@ impl AdvancedModelCache {
 
     /// Update cache statistics
     async fn update_cache_statistics(&self) {
-        let cache = self.memory_cache.read().unwrap();
-        let mut stats = self.stats.write().unwrap();
+        let cache = self.memory_cache.read();
+        let mut stats = self.stats.write();
 
         // Update basic stats
         stats.basic_stats.total_entries = cache.len();
-        stats.basic_stats.memory_usage_bytes = *self.current_memory_usage.read().unwrap();
+        stats.basic_stats.memory_usage_bytes = *self.current_memory_usage.read();
 
         // Calculate memory fragmentation (simplified)
         let used_memory = stats.basic_stats.memory_usage_bytes;
@@ -799,7 +808,7 @@ impl AdvancedModelCache {
         }
 
         // Update queue size
-        stats.queue_size = self.loading_queue.read().unwrap().len();
+        stats.queue_size = self.loading_queue.read().len();
 
         // Identify hot and cold models
         let mut models_by_access: Vec<_> = cache
@@ -861,7 +870,7 @@ impl AdvancedModelCache {
 impl ModelCache for AdvancedModelCache {
     async fn get_any(&self, key: &str) -> Result<Option<Box<dyn Any + Send + Sync>>> {
         let result = {
-            let cache = self.memory_cache.read().unwrap();
+            let cache = self.memory_cache.read();
             cache.get(key).is_some()
         };
 
@@ -871,7 +880,7 @@ impl ModelCache for AdvancedModelCache {
 
             // Update access count
             {
-                let mut cache = self.memory_cache.write().unwrap();
+                let mut cache = self.memory_cache.write();
                 if let Some(model) = cache.get_mut(key) {
                     model.access_count += 1;
                     model.last_accessed = SystemTime::now();
@@ -880,7 +889,7 @@ impl ModelCache for AdvancedModelCache {
 
             // Update hit/miss statistics
             {
-                let mut stats = self.stats.write().unwrap();
+                let mut stats = self.stats.write();
                 let total_requests = stats.basic_stats.hit_rate + stats.basic_stats.miss_rate;
                 let hits = (stats.basic_stats.hit_rate / 100.0) * total_requests;
                 let new_total = total_requests + 1.0;
@@ -894,7 +903,7 @@ impl ModelCache for AdvancedModelCache {
         } else {
             // Update miss statistics
             {
-                let mut stats = self.stats.write().unwrap();
+                let mut stats = self.stats.write();
                 let total_requests = stats.basic_stats.hit_rate + stats.basic_stats.miss_rate;
                 let misses = (stats.basic_stats.miss_rate / 100.0) * total_requests;
                 let new_total = total_requests + 1.0;
@@ -960,9 +969,9 @@ impl ModelCache for AdvancedModelCache {
 
     async fn clear(&self) -> Result<()> {
         {
-            let mut cache = self.memory_cache.write().unwrap();
-            let mut current_usage = self.current_memory_usage.write().unwrap();
-            let mut access_order = self.access_order.write().unwrap();
+            let mut cache = self.memory_cache.write();
+            let mut current_usage = self.current_memory_usage.write();
+            let mut access_order = self.access_order.write();
 
             cache.clear();
             *current_usage = 0;
@@ -971,7 +980,7 @@ impl ModelCache for AdvancedModelCache {
 
         // Reset statistics
         {
-            let mut stats = self.stats.write().unwrap();
+            let mut stats = self.stats.write();
             stats.basic_stats.total_entries = 0;
             stats.basic_stats.memory_usage_bytes = 0;
         }
@@ -981,7 +990,7 @@ impl ModelCache for AdvancedModelCache {
     }
 
     fn stats(&self) -> CacheStats {
-        let stats = self.stats.read().unwrap();
+        let stats = self.stats.read();
         stats.basic_stats
     }
 }

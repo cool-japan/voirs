@@ -1,7 +1,7 @@
 //! Audio preprocessing and enhancement module
 //!
 //! This module provides real-time audio preprocessing and enhancement capabilities
-//! for the VoiRS recognition system. It includes:
+//! for the `VoiRS` recognition system. It includes:
 //!
 //! - Real-time noise suppression
 //! - Automatic gain control (AGC)
@@ -37,6 +37,8 @@ pub mod agc;
 pub mod bandwidth_extension;
 pub mod echo_cancellation;
 pub mod noise_suppression;
+pub mod optimizations;
+pub mod optimized_preprocessor;
 pub mod realtime_features;
 
 // Re-exports
@@ -46,6 +48,8 @@ pub use agc::*;
 pub use bandwidth_extension::*;
 pub use echo_cancellation::*;
 pub use noise_suppression::*;
+pub use optimizations::*;
+pub use optimized_preprocessor::*;
 pub use realtime_features::*;
 
 /// Audio preprocessing configuration
@@ -263,7 +267,7 @@ impl AudioPreprocessor {
             let result = {
                 let mut processor = noise_suppressor.lock().map_err(|e| {
                     RecognitionError::AudioProcessingError {
-                        message: format!("Failed to lock noise suppressor: {}", e),
+                        message: format!("Failed to lock noise suppressor: {e}"),
                         source: None,
                     }
                 })?;
@@ -280,7 +284,7 @@ impl AudioPreprocessor {
                     agc_processor
                         .lock()
                         .map_err(|e| RecognitionError::AudioProcessingError {
-                            message: format!("Failed to lock AGC processor: {}", e),
+                            message: format!("Failed to lock AGC processor: {e}"),
                             source: None,
                         })?;
                 processor.process(&enhanced_audio).await?
@@ -296,7 +300,7 @@ impl AudioPreprocessor {
                     echo_canceller
                         .lock()
                         .map_err(|e| RecognitionError::AudioProcessingError {
-                            message: format!("Failed to lock echo canceller: {}", e),
+                            message: format!("Failed to lock echo canceller: {e}"),
                             source: None,
                         })?;
                 processor.process(&enhanced_audio).await?
@@ -310,7 +314,7 @@ impl AudioPreprocessor {
             let (processed_audio, stats) = {
                 let mut processor = bandwidth_extender.lock().map_err(|e| {
                     RecognitionError::AudioProcessingError {
-                        message: format!("Failed to lock bandwidth extender: {}", e),
+                        message: format!("Failed to lock bandwidth extender: {e}"),
                         source: None,
                     }
                 })?;
@@ -327,7 +331,7 @@ impl AudioPreprocessor {
             let adaptive_result = {
                 let mut processor = adaptive_processor.lock().map_err(|e| {
                     RecognitionError::AudioProcessingError {
-                        message: format!("Failed to lock adaptive processor: {}", e),
+                        message: format!("Failed to lock adaptive processor: {e}"),
                         source: None,
                     }
                 })?;
@@ -344,7 +348,7 @@ impl AudioPreprocessor {
             let spectral_result = {
                 let mut processor = advanced_spectral_processor.lock().map_err(|e| {
                     RecognitionError::AudioProcessingError {
-                        message: format!("Failed to lock advanced spectral processor: {}", e),
+                        message: format!("Failed to lock advanced spectral processor: {e}"),
                         source: None,
                     }
                 })?;
@@ -645,7 +649,7 @@ impl AudioPreprocessor {
     #[cfg(target_arch = "aarch64")]
     #[target_feature(enable = "neon")]
     unsafe fn interleave_stereo_neon(&self, left: &[f32], right: &[f32], output: &mut [f32]) {
-        use std::arch::aarch64::*;
+        use std::arch::aarch64::{vld1q_f32, vst1q_f32, vzipq_f32};
 
         let len = left.len().min(right.len());
         let simd_len = len & !3; // Process 4 samples at a time
@@ -706,7 +710,7 @@ impl AudioPreprocessor {
                 feature_extractor
                     .lock()
                     .map_err(|e| RecognitionError::AudioProcessingError {
-                        message: format!("Failed to lock feature extractor: {}", e),
+                        message: format!("Failed to lock feature extractor: {e}"),
                         source: None,
                     })?;
             extractor.extract_features(audio)
@@ -719,6 +723,7 @@ impl AudioPreprocessor {
     }
 
     /// Get configuration
+    #[must_use]
     pub fn config(&self) -> &AudioPreprocessingConfig {
         &self.config
     }
@@ -730,7 +735,7 @@ impl AudioPreprocessor {
                 noise_suppressor
                     .lock()
                     .map_err(|e| RecognitionError::AudioProcessingError {
-                        message: format!("Failed to lock noise suppressor: {}", e),
+                        message: format!("Failed to lock noise suppressor: {e}"),
                         source: None,
                     })?;
             processor.reset()?;
@@ -740,7 +745,7 @@ impl AudioPreprocessor {
                 agc_processor
                     .lock()
                     .map_err(|e| RecognitionError::AudioProcessingError {
-                        message: format!("Failed to lock AGC processor: {}", e),
+                        message: format!("Failed to lock AGC processor: {e}"),
                         source: None,
                     })?;
             processor.reset()?;
@@ -750,7 +755,7 @@ impl AudioPreprocessor {
                 echo_canceller
                     .lock()
                     .map_err(|e| RecognitionError::AudioProcessingError {
-                        message: format!("Failed to lock echo canceller: {}", e),
+                        message: format!("Failed to lock echo canceller: {e}"),
                         source: None,
                     })?;
             processor.reset()?;

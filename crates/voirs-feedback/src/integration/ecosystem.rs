@@ -1,17 +1,17 @@
-//! # VoiRS Ecosystem Integration
+//! # `VoiRS` Ecosystem Integration
 //!
-//! This module provides seamless integration with the VoiRS ecosystem,
+//! This module provides seamless integration with the `VoiRS` ecosystem,
 //! including real-time data synchronization, shared configuration management,
 //! and cross-crate optimization.
 
-use crate::traits::*;
+use crate::traits::UserProgress;
 use crate::FeedbackError;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
-/// Configuration for VoiRS ecosystem integration
+/// Configuration for `VoiRS` ecosystem integration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EcosystemConfig {
     /// Enable real-time data synchronization
@@ -44,7 +44,7 @@ impl Default for EcosystemConfig {
     }
 }
 
-/// VoiRS ecosystem integration manager
+/// `VoiRS` ecosystem integration manager
 #[derive(Debug)]
 pub struct EcosystemIntegration {
     config: EcosystemConfig,
@@ -52,7 +52,7 @@ pub struct EcosystemIntegration {
     sync_manager: Arc<RwLock<SyncManager>>,
 }
 
-/// Shared state across VoiRS ecosystem
+/// Shared state across `VoiRS` ecosystem
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SharedState {
     /// User progress data
@@ -185,6 +185,7 @@ pub struct SyncStatistics {
 
 impl EcosystemIntegration {
     /// Create new ecosystem integration manager
+    #[must_use]
     pub fn new(config: EcosystemConfig) -> Self {
         let shared_state = Arc::new(RwLock::new(SharedState {
             user_progress: std::collections::HashMap::new(),
@@ -233,7 +234,7 @@ impl EcosystemIntegration {
 
                 // Perform synchronization
                 if let Err(e) = Self::perform_sync(&sync_manager, &shared_state).await {
-                    log::error!("Sync failed: {}", e);
+                    log::error!("Sync failed: {e}");
                 }
             }
         });
@@ -470,53 +471,62 @@ pub struct EcosystemIntegrationBuilder {
 
 impl EcosystemIntegrationBuilder {
     /// Create new builder
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Set synchronization enabled
+    #[must_use]
     pub fn with_sync(mut self, enabled: bool) -> Self {
         self.config.enable_sync = enabled;
         self
     }
 
     /// Set sync interval
+    #[must_use]
     pub fn with_sync_interval(mut self, interval: u64) -> Self {
         self.config.sync_interval = interval;
         self
     }
 
     /// Set maximum connections
+    #[must_use]
     pub fn with_max_connections(mut self, max: usize) -> Self {
         self.config.max_connections = max;
         self
     }
 
     /// Set connection timeout
+    #[must_use]
     pub fn with_connection_timeout(mut self, timeout: u64) -> Self {
         self.config.connection_timeout = timeout;
         self
     }
 
     /// Enable optimization
+    #[must_use]
     pub fn with_optimization(mut self, enabled: bool) -> Self {
         self.config.enable_optimization = enabled;
         self
     }
 
     /// Enable shared configuration
+    #[must_use]
     pub fn with_shared_config(mut self, enabled: bool) -> Self {
         self.config.shared_config = enabled;
         self
     }
 
     /// Enable unified error handling
+    #[must_use]
     pub fn with_unified_errors(mut self, enabled: bool) -> Self {
         self.config.unified_errors = enabled;
         self
     }
 
     /// Build ecosystem integration
+    #[must_use]
     pub fn build(self) -> EcosystemIntegration {
         EcosystemIntegration::new(self.config)
     }
@@ -525,6 +535,7 @@ impl EcosystemIntegrationBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{SessionScores, TrainingStatistics};
     use tokio::time::{sleep, Duration};
 
     #[tokio::test]

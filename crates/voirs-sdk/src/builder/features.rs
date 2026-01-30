@@ -25,11 +25,7 @@ impl VoirsPipelineBuilder {
     /// Enable emotion control with default settings
     #[cfg(feature = "emotion")]
     pub fn with_emotion_control_enabled(mut self, enabled: bool) -> Self {
-        if enabled {
-            self.config.default_synthesis.enable_emotion = true;
-        } else {
-            self.config.default_synthesis.enable_emotion = false;
-        }
+        self.config.default_synthesis.enable_emotion = enabled;
         self
     }
 
@@ -82,11 +78,7 @@ impl VoirsPipelineBuilder {
     /// Enable voice cloning with default settings
     #[cfg(feature = "cloning")]
     pub fn with_voice_cloning_enabled(mut self, enabled: bool) -> Self {
-        if enabled {
-            self.config.default_synthesis.enable_cloning = true;
-        } else {
-            self.config.default_synthesis.enable_cloning = false;
-        }
+        self.config.default_synthesis.enable_cloning = enabled;
         self
     }
 
@@ -127,11 +119,7 @@ impl VoirsPipelineBuilder {
     /// Enable voice conversion with default settings
     #[cfg(feature = "conversion")]
     pub fn with_voice_conversion_enabled(mut self, enabled: bool) -> Self {
-        if enabled {
-            self.config.default_synthesis.enable_conversion = true;
-        } else {
-            self.config.default_synthesis.enable_conversion = false;
-        }
+        self.config.default_synthesis.enable_conversion = enabled;
         self
     }
 
@@ -180,11 +168,7 @@ impl VoirsPipelineBuilder {
     /// Enable singing synthesis with default settings
     #[cfg(feature = "singing")]
     pub fn with_singing_synthesis_enabled(mut self, enabled: bool) -> Self {
-        if enabled {
-            self.config.default_synthesis.enable_singing = true;
-        } else {
-            self.config.default_synthesis.enable_singing = false;
-        }
+        self.config.default_synthesis.enable_singing = enabled;
         self
     }
 
@@ -245,11 +229,7 @@ impl VoirsPipelineBuilder {
     /// Enable 3D spatial audio with default settings
     #[cfg(feature = "spatial")]
     pub fn with_spatial_audio_enabled(mut self, enabled: bool) -> Self {
-        if enabled {
-            self.config.default_synthesis.enable_spatial = true;
-        } else {
-            self.config.default_synthesis.enable_spatial = false;
-        }
+        self.config.default_synthesis.enable_spatial = enabled;
         self
     }
 

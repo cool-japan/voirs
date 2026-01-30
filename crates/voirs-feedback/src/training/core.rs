@@ -1,6 +1,6 @@
-//! Core InteractiveTrainer implementation
+//! Core `InteractiveTrainer` implementation
 //!
-//! This module contains the main InteractiveTrainer struct and its core
+//! This module contains the main `InteractiveTrainer` struct and its core
 //! functionality including initialization, exercise recommendations,
 //! and learning optimization algorithms.
 
@@ -63,7 +63,7 @@ impl InteractiveTrainer {
             })?);
 
         let exercise_library = Arc::new(RwLock::new(ExerciseLibrary::create_default()));
-        let collaborative_learning = Arc::new(CollaborativeLearningSystem::new().await?);
+        let collaborative_learning = Arc::new(CollaborativeLearningSystem::new()?);
 
         Ok(Self {
             exercise_library,
@@ -92,7 +92,7 @@ impl InteractiveTrainer {
         let mut recommended = Vec::new();
 
         // Get user's exercise history for spaced repetition
-        let exercise_history = self.get_user_exercise_history(user_id).await?;
+        let exercise_history = self.get_user_exercise_history(user_id)?;
 
         // Filter exercises by skill level and focus areas
         for exercise in &exercises {
@@ -130,7 +130,7 @@ impl InteractiveTrainer {
     }
 
     /// Get user's exercise history for spaced repetition calculations
-    async fn get_user_exercise_history(
+    fn get_user_exercise_history(
         &self,
         user_id: &str,
     ) -> Result<HashMap<String, ExerciseHistory>, FeedbackError> {
@@ -257,7 +257,7 @@ impl InteractiveTrainer {
     }
 
     /// Update exercise history after completion
-    pub async fn update_exercise_history(
+    pub fn update_exercise_history(
         &self,
         user_id: &str,
         exercise_id: &str,
@@ -356,7 +356,7 @@ impl InteractiveTrainer {
         exercises: &[TrainingExercise],
         user_id: &str,
     ) -> Result<Vec<TrainingExercise>, FeedbackError> {
-        let history = self.get_user_exercise_history(user_id).await?;
+        let history = self.get_user_exercise_history(user_id)?;
         let mut optimized = exercises.to_vec();
 
         // Sort exercises to prioritize those at risk of being forgotten
@@ -413,12 +413,13 @@ impl InteractiveTrainer {
     }
 
     /// Get collaborative learning system
+    #[must_use]
     pub fn get_collaborative_learning_system(&self) -> Arc<CollaborativeLearningSystem> {
         self.collaborative_learning.clone()
     }
 
     /// Get training statistics
-    pub async fn get_statistics(&self) -> Result<TrainingSystemStats, FeedbackError> {
+    pub fn get_statistics(&self) -> Result<TrainingSystemStats, FeedbackError> {
         let metrics = self.metrics.read().unwrap();
         let exercise_library = self.exercise_library.read().unwrap();
 

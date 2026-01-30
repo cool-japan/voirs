@@ -628,7 +628,7 @@ mod tests {
         assert!(has_memory_leaks() || initial_count > 0);
         let leak_report = generate_leak_report();
         assert!(leak_report.total_leaked_bytes >= initial_bytes + 200);
-        assert!(leak_report.leaked_allocations.len() >= initial_count + 1);
+        assert!(leak_report.leaked_allocations.len() > initial_count);
 
         // Clean up our test allocation
         record_deallocation(0x2000 as *mut u8, layout2);

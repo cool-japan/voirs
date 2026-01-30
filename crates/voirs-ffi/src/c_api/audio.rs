@@ -48,6 +48,10 @@ impl Default for VoirsAudioEffectConfig {
 }
 
 /// Apply audio effects to a buffer
+///
+/// # Safety
+/// The `buffer` pointer must be valid and point to a properly initialized VoirsAudioBuffer.
+/// The `config` pointer must be valid and point to a properly initialized VoirsAudioEffectConfig.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_audio_apply_effects(
     buffer: *mut VoirsAudioBuffer,
@@ -87,6 +91,10 @@ pub unsafe extern "C" fn voirs_audio_apply_effects(
 }
 
 /// Get audio buffer statistics
+///
+/// # Safety
+/// The `buffer` pointer must be valid and point to a properly initialized VoirsAudioBuffer.
+/// The `peak_level`, `rms_level`, and `dynamic_range` pointers must be valid and point to properly allocated memory for c_float values.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_audio_get_statistics(
     buffer: *const VoirsAudioBuffer,
@@ -120,6 +128,10 @@ pub unsafe extern "C" fn voirs_audio_get_statistics(
 }
 
 /// Create a copy of an audio buffer
+///
+/// # Safety
+/// The `source` pointer must be valid and point to a properly initialized VoirsAudioBuffer.
+/// The `destination` pointer must be valid and point to properly allocated memory for a VoirsAudioBuffer.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_audio_duplicate(
     source: *const VoirsAudioBuffer,
@@ -164,6 +176,10 @@ pub unsafe extern "C" fn voirs_audio_duplicate(
 }
 
 /// Mix two audio buffers together
+///
+/// # Safety
+/// The `buffer1` pointer must be valid and point to a properly initialized VoirsAudioBuffer.
+/// The `buffer2` pointer must be valid and point to a properly initialized VoirsAudioBuffer.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_audio_mix(
     buffer1: *mut VoirsAudioBuffer,
@@ -202,6 +218,10 @@ pub unsafe extern "C" fn voirs_audio_mix(
 }
 
 /// Crossfade between two audio buffers
+///
+/// # Safety
+/// The `buffer1` pointer must be valid and point to a properly initialized VoirsAudioBuffer.
+/// The `buffer2` pointer must be valid and point to a properly initialized VoirsAudioBuffer.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_audio_crossfade(
     buffer1: *mut VoirsAudioBuffer,
@@ -242,6 +262,10 @@ pub unsafe extern "C" fn voirs_audio_crossfade(
 }
 
 /// Save audio buffer as FLAC file
+///
+/// # Safety
+/// The `buffer` pointer must be valid and point to a properly initialized VoirsAudioBuffer.
+/// The `filename` pointer must be valid and point to a null-terminated C string.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_audio_save_flac(
     buffer: *const VoirsAudioBuffer,
@@ -283,7 +307,11 @@ pub unsafe extern "C" fn voirs_audio_save_flac(
     }
 }
 
-/// Save audio buffer as MP3 file  
+/// Save audio buffer as MP3 file
+///
+/// # Safety
+/// The `buffer` pointer must be valid and point to a properly initialized VoirsAudioBuffer.
+/// The `filename` pointer must be valid and point to a null-terminated C string.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_audio_save_mp3(
     buffer: *const VoirsAudioBuffer,
@@ -333,6 +361,10 @@ pub unsafe extern "C" fn voirs_audio_save_mp3(
 }
 
 /// Get supported audio formats
+///
+/// # Safety
+/// The `formats` pointer must be valid and point to properly allocated memory for a pointer to c_char array.
+/// The `count` pointer must be valid and point to properly allocated memory for a c_uint value.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_audio_get_supported_formats(
     formats: *mut *const c_char,
@@ -347,13 +379,15 @@ pub unsafe extern "C" fn voirs_audio_get_supported_formats(
 
     // Thread-local storage for format pointers (safe for FFI)
     thread_local! {
-        static FORMAT_BUFFER: [*const c_char; 5] = [
-            FORMAT_STRINGS[0].as_ptr() as *const c_char,
-            FORMAT_STRINGS[1].as_ptr() as *const c_char,
-            FORMAT_STRINGS[2].as_ptr() as *const c_char,
-            FORMAT_STRINGS[3].as_ptr() as *const c_char,
-            FORMAT_STRINGS[4].as_ptr() as *const c_char,
-        ];
+        static FORMAT_BUFFER: [*const c_char; 5] = const {
+            [
+                FORMAT_STRINGS[0].as_ptr() as *const c_char,
+                FORMAT_STRINGS[1].as_ptr() as *const c_char,
+                FORMAT_STRINGS[2].as_ptr() as *const c_char,
+                FORMAT_STRINGS[3].as_ptr() as *const c_char,
+                FORMAT_STRINGS[4].as_ptr() as *const c_char,
+            ]
+        };
     }
 
     FORMAT_BUFFER.with(|buffer| {

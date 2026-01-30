@@ -283,27 +283,27 @@ pub fn get_formatter() -> &'static OutputFormatter {
 #[macro_export]
 macro_rules! success {
     ($($arg:tt)*) => {
-        crate::output::get_formatter().success(&format!($($arg)*))
+        $crate::output::get_formatter().success(&format!($($arg)*))
     };
 }
 
 #[macro_export]
 macro_rules! error {
     ($($arg:tt)*) => {
-        crate::output::get_formatter().error(&format!($($arg)*))
+        $crate::output::get_formatter().error(&format!($($arg)*))
     };
 }
 
 #[macro_export]
 macro_rules! warning {
     ($($arg:tt)*) => {
-        crate::output::get_formatter().warning(&format!($($arg)*))
+        $crate::output::get_formatter().warning(&format!($($arg)*))
     };
 }
 
 #[macro_export]
 macro_rules! info {
     ($($arg:tt)*) => {
-        crate::output::get_formatter().info(&format!($($arg)*))
+        $crate::output::get_formatter().info(&format!($($arg)*))
     };
 }

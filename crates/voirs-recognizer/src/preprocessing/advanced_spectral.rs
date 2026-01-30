@@ -482,7 +482,7 @@ impl AdvancedSpectralProcessor {
     fn real_fft(&mut self, input: &[f32]) {
         // This is a simplified implementation
         // In production, use rustfft or similar
-        for k in 0..self.config.fft_size / 2 + 1 {
+        for k in 0..=(self.config.fft_size / 2) {
             let mut real_sum = 0.0;
             let mut imag_sum = 0.0;
 
@@ -501,7 +501,7 @@ impl AdvancedSpectralProcessor {
         let mut output = vec![0.0; self.config.fft_size];
 
         for n in 0..self.config.fft_size {
-            for k in 0..self.config.fft_size / 2 + 1 {
+            for k in 0..=(self.config.fft_size / 2) {
                 let angle = 2.0 * PI * k as f32 * n as f32 / self.config.fft_size as f32;
                 let weight = if k == 0 || k == self.config.fft_size / 2 {
                     1.0
@@ -544,6 +544,7 @@ impl AdvancedSpectralProcessor {
     }
 
     /// Get current configuration
+    #[must_use]
     pub fn config(&self) -> &AdvancedSpectralConfig {
         &self.config
     }

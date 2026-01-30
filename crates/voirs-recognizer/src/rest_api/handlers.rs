@@ -154,15 +154,12 @@ async fn readiness_check(
     let mut status = HashMap::new();
 
     // Check if pipeline is accessible
-    match pipeline.try_read() {
-        Ok(_pipeline_guard) => {
-            status.insert("pipeline_accessible".to_string(), true);
-            status.insert("pipeline_ready".to_string(), true);
-        }
-        Err(_) => {
-            status.insert("pipeline_accessible".to_string(), false);
-            status.insert("pipeline_ready".to_string(), false);
-        }
+    if let Ok(_pipeline_guard) = pipeline.try_read() {
+        status.insert("pipeline_accessible".to_string(), true);
+        status.insert("pipeline_ready".to_string(), true);
+    } else {
+        status.insert("pipeline_accessible".to_string(), false);
+        status.insert("pipeline_ready".to_string(), false);
     }
 
     // Check memory usage
@@ -655,7 +652,7 @@ async fn start_streaming_impl(
 
         // Validate overlap duration
         if let Some(overlap_duration) = config.overlap_duration {
-            if overlap_duration < 0.0 || overlap_duration > 1.0 {
+            if !(0.0..=1.0).contains(&overlap_duration) {
                 return Err("Overlap duration must be between 0.0 and 1.0 seconds".into());
             }
         }
@@ -965,26 +962,48 @@ async fn process_batch_parallel(
     use futures::stream::{self, StreamExt};
 
     let max_concurrency = request.max_concurrency.unwrap_or(4).min(10); // Limit to prevent overload
+    let pipeline_clone = pipeline.clone();
+    let batch_config = request.config.clone();
 
-    let results: Vec<BatchResultResponse> = stream::iter(request.inputs.iter().enumerate())
-        .map(|(index, input)| async move {
-            let processing_start = std::time::Instant::now();
+    // Create owned vector of (index, input) tuples to avoid lifetime issues
+    let indexed_inputs: Vec<(usize, RecognitionRequest)> = request
+        .inputs
+        .iter()
+        .enumerate()
+        .map(|(idx, input)| (idx, input.clone()))
+        .collect();
 
-            match process_single_batch_input(input, request, pipeline).await {
-                Ok(result) => BatchResultResponse {
-                    index,
-                    success: true,
-                    result: Some(result),
-                    error: None,
-                    processing_time_ms: processing_start.elapsed().as_millis() as f64,
-                },
-                Err(e) => BatchResultResponse {
-                    index,
-                    success: false,
-                    result: None,
-                    error: Some(e.to_string()),
-                    processing_time_ms: processing_start.elapsed().as_millis() as f64,
-                },
+    let results: Vec<BatchResultResponse> = stream::iter(indexed_inputs)
+        .map(move |(index, input)| {
+            let pipeline = pipeline_clone.clone();
+            let batch_config = batch_config.clone();
+            async move {
+                let processing_start = std::time::Instant::now();
+
+                // Create a minimal batch request for processing
+                let minimal_batch_request = BatchRecognitionRequest {
+                    inputs: vec![],
+                    config: batch_config,
+                    parallel: None,
+                    max_concurrency: None,
+                };
+
+                match process_single_batch_input(&input, &minimal_batch_request, &pipeline).await {
+                    Ok(result) => BatchResultResponse {
+                        index,
+                        success: true,
+                        result: Some(result),
+                        error: None,
+                        processing_time_ms: processing_start.elapsed().as_millis() as f64,
+                    },
+                    Err(e) => BatchResultResponse {
+                        index,
+                        success: false,
+                        result: None,
+                        error: Some(e.to_string()),
+                        processing_time_ms: processing_start.elapsed().as_millis() as f64,
+                    },
+                }
             }
         })
         .buffer_unordered(max_concurrency)
@@ -1118,7 +1137,7 @@ async fn process_audio_with_pipeline(
 
     // Convert audio bytes to AudioBuffer
     let audio_buffer = convert_audio_data_to_buffer(audio_data, request)?;
-    let audio_duration = audio_buffer.duration().as_secs_f32() as f64;
+    let audio_duration = audio_buffer.duration() as f64;
 
     // Try to get pipeline access
     match pipeline.try_read() {

@@ -332,6 +332,7 @@ impl Default for DetectorConfig {
 
 impl AdvancedRegressionDetector {
     /// Create new advanced regression detector
+    #[must_use]
     pub fn new(config: DetectorConfig, data_path: String) -> Self {
         Self {
             analyzer: StatisticalAnalyzer::new(&config),
@@ -400,7 +401,7 @@ impl AdvancedRegressionDetector {
             }
             BaselineStrategy::RollingWindow { days } => {
                 let cutoff = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs()
-                    - (*days as u64 * 24 * 3600);
+                    - (u64::from(*days) * 24 * 3600);
 
                 self.data_store.update_rolling_baseline(cutoff).await?;
             }
@@ -420,6 +421,7 @@ impl AdvancedRegressionDetector {
     }
 
     /// Generate comprehensive regression report
+    #[must_use]
     pub fn generate_report(&self, analysis: &RegressionAnalysisResult) -> String {
         let mut report = String::new();
 
@@ -472,7 +474,7 @@ impl AdvancedRegressionDetector {
                     improvement.metric, improvement.percentage_improvement, improvement.p_value
                 ));
             }
-            report.push_str("\n");
+            report.push('\n');
         }
 
         // Trend analysis
@@ -495,7 +497,7 @@ impl AdvancedRegressionDetector {
             for (i, rec) in analysis.recommendations.iter().enumerate() {
                 report.push_str(&format!("{}. {}\n", i + 1, rec));
             }
-            report.push_str("\n");
+            report.push('\n');
         }
 
         // Statistical details
@@ -984,7 +986,7 @@ impl AlertManager {
             AlertChannelType::Webhook => {
                 // Implementation for webhook alerts
                 if let Some(url) = channel.config.get("url") {
-                    println!("Would send webhook alert to: {}", url);
+                    println!("Would send webhook alert to: {url}");
                 }
             }
             _ => {

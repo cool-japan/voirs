@@ -304,6 +304,12 @@ pub struct ReverbEffectPlugin {
     allpass_filters: Mutex<Vec<AllpassFilter>>,
 }
 
+impl Default for ReverbEffectPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ReverbEffectPlugin {
     pub fn new() -> Self {
         // Freeverb comb filter delay lengths (at 44.1kHz sample rate)
@@ -337,7 +343,10 @@ impl ReverbEffectPlugin {
         // Update comb filter parameters based on room_size and damping
         let feedback = 0.28 + self.room_size * 0.7;
 
-        let mut comb_filters = self.comb_filters.lock().unwrap();
+        let mut comb_filters = self
+            .comb_filters
+            .lock()
+            .expect("Reverb comb_filters mutex poisoned - unrecoverable error");
         for comb in comb_filters.iter_mut() {
             comb.set_feedback(feedback);
             comb.set_damping(self.damping);
@@ -436,8 +445,14 @@ impl EffectPlugin for ReverbEffectPlugin {
         // Real Freeverb implementation with comb and allpass filters
         self.update_filters();
 
-        let mut comb_filters = self.comb_filters.lock().unwrap();
-        let mut allpass_filters = self.allpass_filters.lock().unwrap();
+        let mut comb_filters = self
+            .comb_filters
+            .lock()
+            .expect("Reverb comb_filters mutex poisoned - unrecoverable error");
+        let mut allpass_filters = self
+            .allpass_filters
+            .lock()
+            .expect("Reverb allpass_filters mutex poisoned - unrecoverable error");
 
         for (i, &input_sample) in input.iter().enumerate() {
             // Process through parallel comb filters
@@ -547,12 +562,18 @@ impl EffectPlugin for ReverbEffectPlugin {
         self.dry_level = 0.7;
 
         // Clear all filter buffers
-        let mut comb_filters = self.comb_filters.lock().unwrap();
+        let mut comb_filters = self
+            .comb_filters
+            .lock()
+            .expect("Reverb comb_filters mutex poisoned - unrecoverable error");
         for comb in comb_filters.iter_mut() {
             comb.clear();
         }
 
-        let mut allpass_filters = self.allpass_filters.lock().unwrap();
+        let mut allpass_filters = self
+            .allpass_filters
+            .lock()
+            .expect("Reverb allpass_filters mutex poisoned - unrecoverable error");
         for allpass in allpass_filters.iter_mut() {
             allpass.clear();
         }
@@ -594,7 +615,9 @@ mod tests {
         let input = vec![1.0, 0.5, -0.5, -1.0];
         let mut output = vec![0.0; 4];
 
-        reverb.process_audio(&input, &mut output, &config).unwrap();
+        reverb
+            .process_audio(&input, &mut output, &config)
+            .expect("Failed to process audio with reverb");
 
         // Output should be processed (not just copied)
         assert_ne!(input, output);
@@ -604,12 +627,26 @@ mod tests {
     fn test_parameter_setting() {
         let mut reverb = ReverbEffectPlugin::new();
 
-        reverb.set_parameter("room_size", 0.8).unwrap();
-        assert_eq!(reverb.get_parameter("room_size").unwrap(), 0.8);
+        reverb
+            .set_parameter("room_size", 0.8)
+            .expect("Failed to set room_size parameter");
+        assert_eq!(
+            reverb
+                .get_parameter("room_size")
+                .expect("Failed to get room_size parameter"),
+            0.8
+        );
 
         // Test parameter clamping
-        reverb.set_parameter("room_size", 1.5).unwrap();
-        assert_eq!(reverb.get_parameter("room_size").unwrap(), 1.0);
+        reverb
+            .set_parameter("room_size", 1.5)
+            .expect("Failed to set room_size parameter");
+        assert_eq!(
+            reverb
+                .get_parameter("room_size")
+                .expect("Failed to get room_size parameter"),
+            1.0
+        );
 
         // Test invalid parameter
         assert!(reverb.set_parameter("invalid", 0.5).is_err());
@@ -625,7 +662,9 @@ mod tests {
         let mut output = vec![0.0; 4];
         let configs = HashMap::new();
 
-        chain.process(&input, &mut output, &configs).unwrap();
+        chain
+            .process(&input, &mut output, &configs)
+            .expect("Failed to process audio with effect chain");
 
         // Should process without error
         assert_eq!(output.len(), input.len());

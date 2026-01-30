@@ -60,6 +60,7 @@ cpal.workspace = true
 backtrace.workspace = true
 notify.workspace = true
 libc.workspace = true
+parking_lot.workspace = true
 
 # Audio codec dependencies
 claxon.workspace = true
@@ -99,6 +100,7 @@ wasmtime = { workspace = true, optional = true }
 tempfile.workspace = true
 wasm-bindgen-test = "0.3"
 tokio-tungstenite = "0.28"
+criterion.workspace = true
 
 [features]
 default = []
@@ -124,6 +126,14 @@ advanced-emotions = ["emotion", "voirs-emotion/acoustic-integration"]
 all-features = ["emotion", "cloning", "conversion", "gpu", "onnx", "http", "cloud", "plugins"]
 
 [[example]]
+name = "quick_start"
+path = "examples/basic/quick_start.rs"
+
+[[example]]
+name = "audio_workflows"
+path = "examples/basic/audio_workflows.rs"
+
+[[example]]
 name = "advanced_features_demo"
 path = "examples/advanced/advanced_features_demo.rs"
 required-features = ["emotion", "cloning", "conversion"]
@@ -142,5 +152,82 @@ required-features = ["singing", "spatial", "emotion"]
 name = "real_time_audio_device"
 path = "examples/advanced/real_time_audio_device.rs"
 required-features = ["emotion", "cloning", "conversion"]
+
+[[example]]
+name = "audio_analysis"
+path = "examples/advanced/audio_analysis.rs"
+
+[[example]]
+name = "production_features"
+path = "examples/advanced/production_features.rs"
+
+[[example]]
+name = "cache_warming_demo"
+path = "examples/advanced/cache_warming_demo.rs"
+
+[[example]]
+name = "advanced_spectral_analysis"
+path = "examples/advanced/advanced_spectral_analysis.rs"
+
+[[example]]
+name = "music_information_retrieval"
+path = "examples/advanced/music_information_retrieval.rs"
+
+[[example]]
+name = "simd_performance_demo"
+path = "examples/advanced/simd_performance_demo.rs"
+
+[[example]]
+name = "adaptive_enhancement_demo"
+path = "examples/advanced/adaptive_enhancement_demo.rs"
+
+[[example]]
+name = "audio_effects_demo"
+path = "examples/advanced/audio_effects_demo.rs"
+
+[[example]]
+name = "ml_quality_optimization"
+path = "examples/advanced/ml_quality_optimization.rs"
+
+[[example]]
+name = "quality_monitoring_demo"
+path = "examples/advanced/quality_monitoring_demo.rs"
+
+[[example]]
+name = "regression_detection_demo"
+path = "examples/advanced/regression_detection_demo.rs"
+
+[[bench]]
+name = "synthesis_benchmarks"
+harness = false
+
+[[bench]]
+name = "streaming_benchmarks"
+harness = false
+
+[[bench]]
+name = "pipeline_benchmarks"
+harness = false
+
+[[bench]]
+name = "concurrent_benchmarks"
+harness = false
+
+[[bench]]
+name = "memory_benchmarks"
+harness = false
+
+[[bench]]
+name = "simd_audio_benchmarks"
+harness = false
+
+[[bench]]
+name = "batch_benchmarks"
+harness = false
+
+[[bench]]
+name = "profiling_benchmarks"
+harness = false
+
 [lints]
 workspace = true

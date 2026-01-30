@@ -368,12 +368,13 @@ impl EmotionHistory {
             .map(|(emotion, count)| (Emotion::from_str(emotion), *count));
 
         let time_span = if count > 1 {
-            self.entries
-                .last()
-                .unwrap()
-                .timestamp
-                .duration_since(self.entries.first().unwrap().timestamp)
-                .unwrap_or_default()
+            if let (Some(last), Some(first)) = (self.entries.last(), self.entries.first()) {
+                last.timestamp
+                    .duration_since(first.timestamp)
+                    .unwrap_or_default()
+            } else {
+                Duration::default()
+            }
         } else {
             Duration::default()
         };
@@ -416,11 +417,14 @@ impl EmotionHistory {
             let mut pattern_counts: HashMap<Vec<String>, usize> = HashMap::new();
 
             for window in emotions.windows(pattern_length) {
-                if window.iter().all(|e| e.is_some()) {
-                    let pattern: Vec<String> = window
-                        .iter()
-                        .map(|e| e.as_ref().unwrap().as_str().to_string())
-                        .collect();
+                // Use filter_map to safely extract all Some values
+                let pattern: Vec<String> = window
+                    .iter()
+                    .filter_map(|e| e.as_ref().map(|s| s.as_str().to_string()))
+                    .collect();
+
+                // Only count patterns where all emotions were present
+                if pattern.len() == pattern_length {
                     *pattern_counts.entry(pattern).or_insert(0) += 1;
                 }
             }
@@ -433,11 +437,15 @@ impl EmotionHistory {
                         .map(|s| Emotion::from_str(s))
                         .collect();
 
+                    // Calculate average duration for this pattern
+                    let average_duration =
+                        self.calculate_pattern_duration(&pattern_emotions, pattern_length);
+
                     patterns.push(EmotionPattern {
                         description: format!("Repeating sequence: {:?}", pattern_emotions),
                         emotions,
                         frequency,
-                        average_duration: Duration::from_secs(60), // Placeholder
+                        average_duration,
                         confidence: (frequency as f32).min(1.0),
                     });
                 }
@@ -445,6 +453,70 @@ impl EmotionHistory {
         }
 
         patterns
+    }
+
+    /// Calculate average duration for a pattern
+    fn calculate_pattern_duration(
+        &self,
+        pattern_emotions: &[String],
+        pattern_length: usize,
+    ) -> Duration {
+        let mut durations = Vec::new();
+
+        // Get emotions from entries for pattern matching
+        let entry_emotions: Vec<Option<String>> = self
+            .entries
+            .iter()
+            .map(|entry| {
+                entry
+                    .state
+                    .current
+                    .emotion_vector
+                    .dominant_emotion()
+                    .map(|(e, _)| e.as_str().to_string())
+            })
+            .collect();
+
+        // Find all occurrences of this pattern and calculate their duration
+        for i in 0..=(entry_emotions.len().saturating_sub(pattern_length)) {
+            let window = &entry_emotions[i..i + pattern_length];
+
+            // Check if this window matches the pattern
+            let matches = window.iter().zip(pattern_emotions.iter()).all(
+                |(entry_emotion, pattern_emotion)| entry_emotion.as_ref() == Some(pattern_emotion),
+            );
+
+            if matches {
+                // Calculate duration from first to last entry in pattern
+                let start_time = self.entries[i].timestamp;
+                let end_idx = (i + pattern_length - 1).min(self.entries.len() - 1);
+                let end_time = self.entries[end_idx].timestamp;
+
+                // Add the duration of the last entry if available
+                let total_duration = if let Ok(elapsed) = end_time.duration_since(start_time) {
+                    if let Some(last_duration) = self.entries[end_idx].duration {
+                        elapsed + last_duration
+                    } else {
+                        elapsed
+                    }
+                } else {
+                    Duration::from_secs(0)
+                };
+
+                if total_duration > Duration::from_secs(0) {
+                    durations.push(total_duration);
+                }
+            }
+        }
+
+        // Calculate average duration
+        if durations.is_empty() {
+            // Default to 60 seconds if no durations found
+            Duration::from_secs(60)
+        } else {
+            let total_duration: Duration = durations.iter().sum();
+            total_duration / durations.len() as u32
+        }
     }
 
     /// Get all detected transitions

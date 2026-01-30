@@ -20,7 +20,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{Mutex, RwLock};
@@ -855,7 +855,7 @@ impl PluginRegistry {
     }
 
     /// Parse plugin manifest from file
-    async fn parse_plugin_manifest(&self, path: &PathBuf) -> Result<PluginManifest> {
+    async fn parse_plugin_manifest(&self, path: &Path) -> Result<PluginManifest> {
         // Look for plugin.json or plugin.toml manifest files
         let manifest_path = if path.join("plugin.json").exists() {
             path.join("plugin.json")
@@ -885,7 +885,7 @@ impl PluginRegistry {
 
         Ok(PluginManifest {
             config,
-            path: path.clone(),
+            path: path.to_path_buf(),
             last_modified: metadata.modified().unwrap_or(SystemTime::now()),
             size: metadata.len() as usize,
             checksum: format!("{:x}", content.len()), // Simple checksum
@@ -899,6 +899,12 @@ pub struct ExamplePlugin {
     initialized: bool,
     parameters: HashMap<String, ParameterValue>,
     metrics: PluginOperationMetrics,
+}
+
+impl Default for ExamplePlugin {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ExamplePlugin {

@@ -14,12 +14,23 @@ use voirs_feedback::realtime::{RealtimeConfig, RealtimeFeedbackSystem, RealtimeS
 use voirs_feedback::traits::{
     AdaptiveState, FocusArea, SessionState, SessionStatistics, SessionStats, UserPreferences,
 };
-use voirs_feedback::{AudioBuffer, FeedbackSystem};
+use voirs_feedback::{AudioBuffer, FeedbackError, FeedbackSystem, FeedbackSystemConfig};
+
+/// Helper to create FeedbackSystem with test database (in-memory for tests)
+async fn create_test_feedback_system() -> Result<FeedbackSystem, FeedbackError> {
+    let mut config = FeedbackSystemConfig::default();
+    #[cfg(feature = "persistence")]
+    {
+        // Use in-memory database for tests - faster and no file permission issues
+        config.database_path = Some(":memory:".to_string());
+    }
+    FeedbackSystem::with_config(config).await
+}
 
 #[tokio::test]
 async fn test_feedback_latency_performance() {
     // Test that feedback generation meets sub-100ms latency requirement
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let config = RealtimeConfig::default();
@@ -64,7 +75,7 @@ async fn test_feedback_latency_performance() {
 async fn test_concurrent_feedback_performance() {
     // Test system performance under concurrent load
     let feedback_system = Arc::new(
-        FeedbackSystem::new()
+        create_test_feedback_system()
             .await
             .expect("Failed to create feedback system"),
     );
@@ -147,7 +158,7 @@ async fn test_concurrent_feedback_performance() {
 #[tokio::test]
 async fn test_streaming_performance() {
     // Test streaming audio processing performance
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let config = RealtimeConfig::default();
@@ -218,7 +229,7 @@ async fn test_streaming_performance() {
 #[tokio::test]
 async fn test_memory_usage_performance() {
     // Test memory usage under load
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let mut session = feedback_system
@@ -272,7 +283,7 @@ async fn test_memory_usage_performance() {
 #[tokio::test]
 async fn test_throughput_performance() {
     // Test system throughput under sustained load
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let config = RealtimeConfig::default();
@@ -340,7 +351,7 @@ async fn test_throughput_performance() {
 #[tokio::test]
 async fn test_error_handling_performance() {
     // Test that error handling doesn't significantly impact performance
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let mut session = feedback_system
@@ -381,7 +392,7 @@ async fn test_error_handling_performance() {
 #[tokio::test]
 async fn test_performance_regression_detection() {
     // Test to detect performance regressions
-    let feedback_system = FeedbackSystem::new()
+    let feedback_system = create_test_feedback_system()
         .await
         .expect("Failed to create feedback system");
     let mut session = feedback_system

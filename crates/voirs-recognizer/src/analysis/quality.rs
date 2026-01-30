@@ -330,7 +330,7 @@ impl QualityAnalyzer {
         }
 
         // Convert to f64 for FFT computation
-        let padded_samples_f64: Vec<f64> = padded_samples.iter().map(|&x| x as f64).collect();
+        let padded_samples_f64: Vec<f64> = padded_samples.iter().map(|&x| f64::from(x)).collect();
 
         // Perform the real FFT using scirs2_fft functional API
         let spectrum_complex = scirs2_fft::rfft(&padded_samples_f64, None).map_err(|e| {

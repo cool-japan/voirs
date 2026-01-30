@@ -370,28 +370,32 @@ impl LongTermAdaptationEngine {
     }
 
     /// Create with default configuration
-    pub fn default() -> Self {
+    pub fn with_default_config() -> Self {
         Self::new(LongTermAdaptationConfig::default())
     }
 
     /// Submit user feedback for processing
     pub fn submit_feedback(&self, feedback: UserFeedback) -> Result<()> {
-        let mut store = self.feedback_store.write().unwrap();
-
-        // Maintain size limit
-        if store.len() >= self.config.max_feedback_history {
-            store.pop_front(); // Remove oldest feedback
-        }
-
-        store.push_back(feedback);
-
-        // Update statistics
+        // Add feedback to store within its own scope to release lock before triggering adaptation
         {
-            let mut stats = self.statistics.write().unwrap();
-            stats.total_feedback += 1;
-        }
+            let mut store = self.feedback_store.write().unwrap();
+
+            // Maintain size limit
+            if store.len() >= self.config.max_feedback_history {
+                store.pop_front(); // Remove oldest feedback
+            }
+
+            store.push_back(feedback);
+
+            // Update statistics
+            {
+                let mut stats = self.statistics.write().unwrap();
+                stats.total_feedback += 1;
+            }
+        } // Write lock on feedback_store is dropped here
 
         // Check if adaptation should be triggered
+        // IMPORTANT: This must be called after dropping the write lock to avoid deadlock
         if self.should_trigger_adaptation() {
             self.trigger_adaptation_cycle()?;
         }
@@ -558,9 +562,7 @@ impl LongTermAdaptationEngine {
         let mut speaker_store = self.speaker_store.write().unwrap();
 
         // Get or create speaker data
-        let speaker_data = speaker_store
-            .entry(speaker_id.to_string())
-            .or_insert_with(|| SpeakerData::default());
+        let speaker_data = speaker_store.entry(speaker_id.to_string()).or_default();
 
         // Calculate feedback-based adjustments
         let adjustments = self.calculate_speaker_adjustments(feedback_list)?;
@@ -878,7 +880,7 @@ mod tests {
 
     #[test]
     fn test_long_term_adaptation_engine_creation() {
-        let engine = LongTermAdaptationEngine::default();
+        let engine = LongTermAdaptationEngine::with_default_config();
         assert_eq!(engine.config.strategy.learning_rate(), 0.01); // Moderate strategy
         assert!(!engine.config.enable_auto_adaptation);
         assert_eq!(engine.config.min_feedback_for_adaptation, 10);
@@ -914,7 +916,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_feedback_submission() {
-        let engine = LongTermAdaptationEngine::default();
+        let engine = LongTermAdaptationEngine::with_default_config();
 
         let feedback = UserFeedback::new(
             "test_feedback_1".to_string(),

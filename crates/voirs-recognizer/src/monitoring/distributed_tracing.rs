@@ -1,4 +1,4 @@
-//! Distributed Tracing Support for VoiRS Recognition
+//! Distributed Tracing Support for `VoiRS` Recognition
 //!
 //! This module provides comprehensive distributed tracing capabilities using OpenTelemetry
 //! standards for monitoring speech recognition performance across distributed systems.
@@ -32,7 +32,7 @@ pub struct TraceContext {
 /// Trace Id
 pub struct TraceId(pub [u8; 16]);
 
-/// Unique span identifier  
+/// Unique span identifier\
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Span Id
 pub struct SpanId(pub [u8; 8]);
@@ -52,13 +52,21 @@ pub struct TraceFlags {
 /// Vendor-specific trace state
 #[derive(Debug, Clone)]
 /// Trace State
+#[derive(Default)]
 pub struct TraceState {
     /// Key-value pairs for vendor state
     pub entries: HashMap<String, String>,
 }
 
+impl Default for TraceContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TraceContext {
     /// Create a new root trace context
+    #[must_use]
     pub fn new() -> Self {
         Self {
             trace_id: TraceId::new(),
@@ -70,6 +78,7 @@ impl TraceContext {
     }
 
     /// Create a child span from this context
+    #[must_use]
     pub fn create_child_span(&self) -> Self {
         Self {
             trace_id: self.trace_id.clone(),
@@ -81,12 +90,13 @@ impl TraceContext {
     }
 
     /// Convert to W3C trace parent header format
+    #[must_use]
     pub fn to_trace_parent(&self) -> String {
-        let flags = if self.trace_flags.sampled { 1 } else { 0 };
+        let flags = i32::from(self.trace_flags.sampled);
         format!(
             "00-{}-{}-{:02x}",
-            hex::encode(&self.trace_id.0),
-            hex::encode(&self.span_id.0),
+            hex::encode(self.trace_id.0),
+            hex::encode(self.span_id.0),
             flags
         )
     }
@@ -134,16 +144,30 @@ impl TraceContext {
     }
 }
 
+impl Default for TraceId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TraceId {
     /// Generate a new random trace ID
+    #[must_use]
     pub fn new() -> Self {
         let uuid = Uuid::new_v4();
         Self(uuid.into_bytes())
     }
 }
 
+impl Default for SpanId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SpanId {
     /// Generate a new random span ID
+    #[must_use]
     pub fn new() -> Self {
         let bytes = scirs2_core::random::random::<u64>().to_be_bytes();
         Self(bytes)
@@ -160,23 +184,15 @@ impl Default for TraceFlags {
     }
 }
 
-impl Default for TraceState {
-    fn default() -> Self {
-        Self {
-            entries: HashMap::new(),
-        }
-    }
-}
-
 impl fmt::Display for TraceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", hex::encode(&self.0))
+        write!(f, "{}", hex::encode(self.0))
     }
 }
 
 impl fmt::Display for SpanId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", hex::encode(&self.0))
+        write!(f, "{}", hex::encode(self.0))
     }
 }
 
@@ -278,6 +294,7 @@ pub struct SpanLink {
 
 impl Span {
     /// Create a new span
+    #[must_use]
     pub fn new(name: String, kind: SpanKind, context: TraceContext) -> Self {
         Self {
             context,
@@ -327,12 +344,14 @@ impl Span {
     }
 
     /// Get span duration
+    #[must_use]
     pub fn duration(&self) -> Option<Duration> {
         self.end_time
             .map(|end| end.duration_since(self.start_time).unwrap_or_default())
     }
 
     /// Check if span is active
+    #[must_use]
     pub fn is_active(&self) -> bool {
         self.end_time.is_none()
     }
@@ -411,6 +430,7 @@ impl Tracer {
     }
 
     /// Start a new span
+    #[must_use]
     pub fn start_span(
         &self,
         name: String,
@@ -474,11 +494,13 @@ impl Tracer {
     }
 
     /// Get active span by ID
+    #[must_use]
     pub fn get_active_span(&self, span_id: &SpanId) -> Option<Span> {
         self.active_spans.lock().unwrap().get(span_id).cloned()
     }
 
     /// Get all active spans
+    #[must_use]
     pub fn get_active_spans(&self) -> Vec<Span> {
         self.active_spans
             .lock()
@@ -755,6 +777,7 @@ pub struct ProbabilitySampler {
 
 impl ProbabilitySampler {
     /// Create a new probability sampler
+    #[must_use]
     pub fn new(probability: f64) -> Self {
         Self {
             probability: probability.clamp(0.0, 1.0),
@@ -803,6 +826,7 @@ pub struct RateLimitingSampler {
 
 impl RateLimitingSampler {
     /// Create a new rate limiting sampler
+    #[must_use]
     pub fn new(max_spans_per_second: f64) -> Self {
         Self {
             max_spans_per_second,
@@ -857,6 +881,7 @@ pub struct SpeechRecognitionInstrumentation {
 
 impl SpeechRecognitionInstrumentation {
     /// Create new instrumentation
+    #[must_use]
     pub fn new(service_name: String, service_version: String) -> Self {
         let processor = Arc::new(BatchSpanProcessor::new(
             32,
@@ -872,6 +897,7 @@ impl SpeechRecognitionInstrumentation {
     }
 
     /// Instrument audio preprocessing
+    #[must_use]
     pub fn instrument_preprocessing(&self, parent_context: Option<TraceContext>) -> Span {
         let mut span = self.tracer.start_span(
             "audio.preprocessing".to_string(),
@@ -887,6 +913,7 @@ impl SpeechRecognitionInstrumentation {
     }
 
     /// Instrument feature extraction
+    #[must_use]
     pub fn instrument_feature_extraction(&self, parent_context: Option<TraceContext>) -> Span {
         let mut span = self.tracer.start_span(
             "audio.feature_extraction".to_string(),
@@ -902,6 +929,7 @@ impl SpeechRecognitionInstrumentation {
     }
 
     /// Instrument model inference
+    #[must_use]
     pub fn instrument_inference(
         &self,
         model_name: &str,
@@ -925,6 +953,7 @@ impl SpeechRecognitionInstrumentation {
     }
 
     /// Instrument post-processing
+    #[must_use]
     pub fn instrument_postprocessing(&self, parent_context: Option<TraceContext>) -> Span {
         let mut span = self.tracer.start_span(
             "audio.postprocessing".to_string(),

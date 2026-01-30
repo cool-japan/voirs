@@ -30,6 +30,7 @@ pub struct PointSystem {
 
 impl PointSystem {
     /// Create a new point system
+    #[must_use]
     pub fn new() -> Self {
         let mut system = Self {
             user_balances: HashMap::new(),
@@ -168,10 +169,7 @@ impl PointSystem {
         let final_amount = (amount as f32 * multiplier) as u32;
 
         // Update balance
-        let balance = self
-            .user_balances
-            .entry(user_id)
-            .or_insert_with(PointBalance::default);
+        let balance = self.user_balances.entry(user_id).or_default();
         match currency {
             PointCurrency::Experience => balance.experience += final_amount,
             PointCurrency::Achievement => balance.achievement += final_amount,
@@ -195,7 +193,7 @@ impl PointSystem {
 
         self.transactions
             .entry(user_id)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(transaction.clone());
 
         transaction
@@ -251,7 +249,7 @@ impl PointSystem {
 
         self.transactions
             .entry(user_id)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(transaction.clone());
 
         Ok(transaction)
@@ -283,7 +281,7 @@ impl PointSystem {
             user_id,
             from_currency,
             amount,
-            format!("Exchange to {:?}", to_currency),
+            format!("Exchange to {to_currency:?}"),
         )?;
 
         // Award to target currency
@@ -291,7 +289,7 @@ impl PointSystem {
             user_id,
             to_currency,
             received_amount,
-            format!("Exchange from {:?}", from_currency),
+            format!("Exchange from {from_currency:?}"),
         );
 
         Ok(transaction)
@@ -417,14 +415,14 @@ impl PointSystem {
             from_user,
             currency,
             amount,
-            format!("Transfer to {}: {}", to_user, transfer_message),
+            format!("Transfer to {to_user}: {transfer_message}"),
         )?;
 
         let credit_transaction = self.award_points(
             to_user,
             currency,
             amount,
-            format!("Transfer from {}: {}", from_user, transfer_message),
+            format!("Transfer from {from_user}: {transfer_message}"),
         );
 
         Ok((debit_transaction, credit_transaction))
@@ -436,6 +434,7 @@ impl PointSystem {
     }
 
     /// Get user's point balance
+    #[must_use]
     pub fn get_balance(&self, user_id: Uuid) -> PointBalance {
         self.user_balances
             .get(&user_id)
@@ -444,6 +443,7 @@ impl PointSystem {
     }
 
     /// Get user's transaction history
+    #[must_use]
     pub fn get_transaction_history(
         &self,
         user_id: Uuid,
@@ -464,6 +464,7 @@ impl PointSystem {
     }
 
     /// Get marketplace items
+    #[must_use]
     pub fn get_marketplace_items(&self, category: Option<ItemCategory>) -> Vec<&MarketplaceItem> {
         self.marketplace_items
             .values()
@@ -472,6 +473,7 @@ impl PointSystem {
     }
 
     /// Get point earning statistics
+    #[must_use]
     pub fn get_earning_stats(&self, user_id: Uuid) -> PointEarningStats {
         let empty_vec = Vec::new();
         let transactions = self.transactions.get(&user_id).unwrap_or(&empty_vec);
@@ -566,15 +568,12 @@ impl PointSystem {
     }
 
     fn get_user_purchase_count(&self, user_id: Uuid, item_id: Uuid) -> u32 {
-        self.transactions
-            .get(&user_id)
-            .map(|transactions| {
-                transactions
-                    .iter()
-                    .filter(|t| t.related_item == Some(item_id))
-                    .count() as u32
-            })
-            .unwrap_or(0)
+        self.transactions.get(&user_id).map_or(0, |transactions| {
+            transactions
+                .iter()
+                .filter(|t| t.related_item == Some(item_id))
+                .count() as u32
+        })
     }
 }
 
@@ -586,6 +585,7 @@ impl Default for PointSystem {
 
 /// Point currencies in the system
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(missing_docs)]
 pub enum PointCurrency {
     /// General experience points
     Experience,
@@ -620,6 +620,7 @@ pub struct PointBalance {
 
 impl PointBalance {
     /// Get balance for specific currency
+    #[must_use]
     pub fn get_currency_balance(&self, currency: PointCurrency) -> u32 {
         match currency {
             PointCurrency::Experience => self.experience,
@@ -632,6 +633,7 @@ impl PointBalance {
     }
 
     /// Get total points across all currencies
+    #[must_use]
     pub fn get_total_points(&self) -> u32 {
         self.experience + self.achievement + self.social + self.premium + self.event + self.skill
     }
@@ -660,6 +662,7 @@ pub struct PointTransaction {
 
 /// Transaction types
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[allow(missing_docs)]
 pub enum TransactionType {
     /// Description
     Award,
@@ -701,6 +704,7 @@ pub struct PointCost {
 
 /// Item categories
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[allow(missing_docs)]
 pub enum ItemCategory {
     /// Description
     PowerUp,
@@ -716,6 +720,7 @@ pub enum ItemCategory {
 
 /// Benefits provided by items
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(missing_docs)]
 pub enum Benefit {
     /// Description
     ExtraSession,
@@ -735,6 +740,7 @@ pub enum Benefit {
 
 /// Item availability
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(missing_docs)]
 pub enum ItemAvailability {
     /// Description
     Always,
@@ -780,6 +786,7 @@ pub struct BonusEvent {
 
 impl BonusEvent {
     /// Check if event is currently active
+    #[must_use]
     pub fn is_active(&self) -> bool {
         let now = Utc::now();
         now >= self.starts_at && now <= self.ends_at

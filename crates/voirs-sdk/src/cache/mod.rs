@@ -12,6 +12,7 @@ pub mod encryption;
 pub mod management;
 pub mod models;
 pub mod results;
+pub mod warming;
 
 // Re-export main types for convenience
 pub use distributed::{
@@ -27,6 +28,10 @@ pub use models::{
 pub use results::{
     CacheUsageSummary as ResultCacheUsageSummary, CachedSynthesisResult, QualityMetrics,
     ResultCacheConfig, SynthesisMetadata, SynthesisResultCache,
+};
+pub use warming::{
+    CacheWarmer, FrequencyStats, PatternAnalysis, WarmingConfig, WarmingPrediction,
+    WarmingStatistics, WarmingStats, WarmingStrategy,
 };
 
 // Legacy compatibility exports

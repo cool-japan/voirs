@@ -83,7 +83,11 @@ impl EmotionController {
     }
 
     /// Apply emotion from preset
-    pub async fn apply_preset(&self, preset_name: &str, intensity: Option<f32>) -> crate::Result<()> {
+    pub async fn apply_preset(
+        &self,
+        preset_name: &str,
+        intensity: Option<f32>,
+    ) -> crate::Result<()> {
         let config = self.config.read().await;
         if !config.enabled {
             return Ok(());

@@ -1,10 +1,10 @@
 //! Cross-platform synchronization support
 //!
-//! This module provides cross-platform synchronization capabilities for VoiRS feedback system
+//! This module provides cross-platform synchronization capabilities for `VoiRS` feedback system
 //! including data synchronization, conflict resolution, and offline support.
 
-use async_trait::async_trait;
 use crate::traits::UserProgress;
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -23,6 +23,7 @@ pub struct SyncManager {
 
 impl SyncManager {
     /// Create a new sync manager
+    #[must_use]
     pub fn new(config: SyncConfig) -> Self {
         Self {
             config,
@@ -51,6 +52,7 @@ impl SyncManager {
 
         // Get local changes with timeout
         let local_changes = {
+            // First acquire the lock (synchronously with timeout on the lock acquisition)
             let local_storage_guard = timeout(
                 Duration::from_secs(self.config.operation_timeout_seconds),
                 async {
@@ -66,11 +68,17 @@ impl SyncManager {
                 message: "Timeout acquiring local storage lock".to_string(),
             })??;
 
-            LocalStorage::get_pending_changes(&*local_storage_guard).await?
-        };
+            // Clone the changes while holding the lock, then drop the lock
+            let changes = local_storage_guard.changes.clone();
+            drop(local_storage_guard); // Explicitly drop the lock
+
+            // Now we can safely return without holding the lock
+            Ok::<_, SyncError>(changes)
+        }?;
 
         // Get remote changes with timeout
         let remote_changes = {
+            // First acquire the lock (synchronously with timeout on the lock acquisition)
             let remote_storage_guard = timeout(
                 Duration::from_secs(self.config.operation_timeout_seconds),
                 async {
@@ -86,8 +94,13 @@ impl SyncManager {
                 message: "Timeout acquiring remote storage lock".to_string(),
             })??;
 
-            RemoteStorage::get_remote_changes(&*remote_storage_guard).await?
-        };
+            // Clone the changes while holding the lock, then drop the lock
+            let changes = remote_storage_guard.changes.clone();
+            drop(remote_storage_guard); // Explicitly drop the lock
+
+            // Now we can safely return without holding the lock
+            Ok::<_, SyncError>(changes)
+        }?;
 
         // Resolve conflicts
         let resolved_changes = self
@@ -96,6 +109,7 @@ impl SyncManager {
 
         // Apply changes locally with timeout
         for change in &resolved_changes.local_changes {
+            // Acquire the lock
             let mut local_storage_guard = timeout(
                 Duration::from_secs(self.config.operation_timeout_seconds),
                 async {
@@ -111,12 +125,15 @@ impl SyncManager {
                 message: "Timeout acquiring local storage write lock".to_string(),
             })??;
 
-            local_storage_guard.apply_change(change).await?;
+            // Apply change synchronously (the method is async but doesn't actually await)
+            local_storage_guard.changes.push(change.clone());
+            drop(local_storage_guard); // Explicitly drop the lock
             sync_result.local_changes_applied += 1;
         }
 
         // Apply changes remotely with timeout
         for change in &resolved_changes.remote_changes {
+            // Acquire the lock
             let mut remote_storage_guard = timeout(
                 Duration::from_secs(self.config.operation_timeout_seconds),
                 async {
@@ -132,7 +149,9 @@ impl SyncManager {
                 message: "Timeout acquiring remote storage write lock".to_string(),
             })??;
 
-            remote_storage_guard.apply_change(change).await?;
+            // Apply change synchronously (the method is async but doesn't actually await)
+            remote_storage_guard.changes.push(change.clone());
+            drop(remote_storage_guard); // Explicitly drop the lock
             sync_result.remote_changes_applied += 1;
         }
 
@@ -144,6 +163,7 @@ impl SyncManager {
     }
 
     /// Check if sync is needed
+    #[must_use]
     pub fn needs_sync(&self) -> bool {
         // Don't sync if already syncing
         if self.is_syncing.load(std::sync::atomic::Ordering::Acquire) {
@@ -163,6 +183,7 @@ impl SyncManager {
     }
 
     /// Get last sync time
+    #[must_use]
     pub fn get_last_sync_time(&self) -> Option<DateTime<Utc>> {
         // This would be stored in local storage
         None
@@ -174,6 +195,7 @@ impl SyncManager {
     }
 
     /// Get sync status
+    #[must_use]
     pub fn get_sync_status(&self) -> SyncStatus {
         let pending_changes = self.get_pending_changes_count();
         SyncStatus {
@@ -218,7 +240,7 @@ pub struct SyncConfig {
     pub retry_delay_ms: u64,
     /// Enable conflict resolution
     pub enable_conflict_resolution: bool,
-    /// Sync only on WiFi
+    /// Sync only on `WiFi`
     pub wifi_only: bool,
     /// Operation timeout in seconds
     pub operation_timeout_seconds: u64,
@@ -320,8 +342,15 @@ pub struct ConflictResolver {
     resolution_strategy: ConflictResolutionStrategy,
 }
 
+impl Default for ConflictResolver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConflictResolver {
     /// Create a new conflict resolver
+    #[must_use]
     pub fn new() -> Self {
         Self {
             resolution_strategy: ConflictResolutionStrategy::LastWriteWins,
@@ -458,8 +487,15 @@ pub struct DefaultLocalStorage {
     user_progress: HashMap<String, UserProgress>,
 }
 
+impl Default for DefaultLocalStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DefaultLocalStorage {
     /// Create a new default local storage
+    #[must_use]
     pub fn new() -> Self {
         Self {
             changes: Vec::new(),
@@ -496,8 +532,15 @@ pub struct DefaultRemoteStorage {
     user_progress: HashMap<String, UserProgress>,
 }
 
+impl Default for DefaultRemoteStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DefaultRemoteStorage {
     /// Create a new default remote storage
+    #[must_use]
     pub fn new() -> Self {
         Self {
             changes: Vec::new(),

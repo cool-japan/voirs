@@ -29,25 +29,25 @@ pub enum GroupLearningError {
     #[error("Group not found: {group_id}")]
     GroupNotFound {
         /// Group identifier
-        group_id: String
+        group_id: String,
     },
     /// User not found in group error
     #[error("User not found in group: {user_id}")]
     UserNotInGroup {
         /// User identifier
-        user_id: String
+        user_id: String,
     },
     /// Exercise synchronization failed error
     #[error("Exercise synchronization failed: {reason}")]
     SynchronizationError {
         /// Reason for synchronization failure
-        reason: String
+        reason: String,
     },
     /// Insufficient permissions error
     #[error("Insufficient permissions for operation: {operation}")]
     InsufficientPermissions {
         /// Operation name
-        operation: String
+        operation: String,
     },
     /// Group capacity exceeded error
     #[error("Group capacity exceeded: current {current}, max {max}")]
@@ -55,13 +55,13 @@ pub enum GroupLearningError {
         /// Current participant count
         current: usize,
         /// Maximum participants allowed
-        max: usize
+        max: usize,
     },
     /// Session conflict error
     #[error("Session conflict: {details}")]
     SessionConflict {
         /// Conflict details
-        details: String
+        details: String,
     },
 }
 
@@ -583,21 +583,21 @@ pub enum GroupEvent {
     /// Group was created
     GroupCreated {
         /// Group identifier
-        group_id: String
+        group_id: String,
     },
     /// Participant joined group
     ParticipantJoined {
         /// Group identifier
         group_id: String,
         /// User identifier
-        user_id: String
+        user_id: String,
     },
     /// Participant left group
     ParticipantLeft {
         /// Group identifier
         group_id: String,
         /// User identifier
-        user_id: String
+        user_id: String,
     },
     /// Session started
     SessionStarted {
@@ -623,7 +623,7 @@ pub enum GroupEvent {
     /// Session completed
     SessionCompleted {
         /// Session identifier
-        session_id: String
+        session_id: String,
     },
     /// Sync status changed
     SyncStatusChanged {
@@ -643,8 +643,15 @@ pub enum GroupEvent {
     },
 }
 
+impl Default for GroupLearningOrchestrator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GroupLearningOrchestrator {
     /// Create a new group learning orchestrator
+    #[must_use]
     pub fn new() -> Self {
         let (event_broadcaster, _) = broadcast::channel(1000);
 
@@ -1072,8 +1079,15 @@ pub enum ClassroomStatus {
     Unavailable,
 }
 
+impl Default for ClassroomManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClassroomManager {
     /// Create new classroom manager
+    #[must_use]
     pub fn new() -> Self {
         Self {
             classrooms: RwLock::new(HashMap::new()),
@@ -1153,8 +1167,15 @@ pub struct ProgressSnapshot {
     pub events: Vec<String>,
 }
 
+impl Default for GroupProgressTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GroupProgressTracker {
     /// Create new progress tracker
+    #[must_use]
     pub fn new() -> Self {
         Self {
             progress_data: RwLock::new(HashMap::new()),
@@ -1295,7 +1316,7 @@ impl GroupProgressTracker {
                     } else {
                         p.training_stats.average_improvement.min(1.0).max(0.0)
                     };
-                    (activity_score.min(1.0) + training_momentum) / 2.0
+                    f32::midpoint(activity_score.min(1.0), training_momentum)
                 })
                 .sum::<f32>()
                 / participant_count
@@ -1324,14 +1345,13 @@ impl GroupProgressTracker {
         };
 
         // Weighted combination of factors
-        let weighted_effectiveness = (cohesion_factor * 0.3
+
+        (cohesion_factor * 0.3
             + consistency_factor * 0.25
             + engagement_factor * 0.25
             + velocity_compatibility * 0.2)
             .min(1.0)
-            .max(0.0);
-
-        weighted_effectiveness
+            .max(0.0)
     }
 
     /// Generate events that occurred between two collective metrics snapshots
@@ -1346,10 +1366,7 @@ impl GroupProgressTracker {
         let skill_change = current.average_skill_level - previous.average_skill_level;
         if skill_change.abs() > 0.1 {
             if skill_change > 0.0 {
-                events.push(format!(
-                    "Group skill level increased by {:.2}",
-                    skill_change
-                ));
+                events.push(format!("Group skill level increased by {skill_change:.2}"));
             } else {
                 events.push(format!(
                     "Group skill level decreased by {:.2}",
@@ -1384,8 +1401,7 @@ impl GroupProgressTracker {
             let new_achievements =
                 current.collective_achievements.len() - previous.collective_achievements.len();
             events.push(format!(
-                "Group earned {} new achievement(s)",
-                new_achievements
+                "Group earned {new_achievements} new achievement(s)"
             ));
         }
 
@@ -1502,8 +1518,15 @@ pub struct ChallengeRewards {
     pub additional_rewards: HashMap<String, String>,
 }
 
+impl Default for CollaborativeChallengeCoordinator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CollaborativeChallengeCoordinator {
     /// Create new challenge coordinator
+    #[must_use]
     pub fn new() -> Self {
         Self {
             challenges: RwLock::new(HashMap::new()),

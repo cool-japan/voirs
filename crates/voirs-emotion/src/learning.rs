@@ -17,9 +17,9 @@ use tokio::sync::RwLock;
 use tracing::{debug, info, trace, warn};
 
 #[cfg(feature = "gpu")]
-use candle_core::{Device, Tensor};
+use candle_core::{Device, Module, Tensor};
 #[cfg(feature = "gpu")]
-use candle_nn::{linear, ops, Linear, Optimizer, VarBuilder, VarMap};
+use candle_nn::{linear, Linear, Optimizer, VarBuilder, VarMap};
 
 /// User feedback for emotion learning
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,14 +156,16 @@ impl EmotionPreferenceModel {
             .linear1
             .forward(input)
             .map_err(|e| Error::Processing(format!("Forward pass linear1 failed: {}", e)))?;
-        let x = ops::relu(&x)
+        let x = x
+            .relu()
             .map_err(|e| Error::Processing(format!("ReLU activation failed: {}", e)))?;
 
         let x = self
             .linear2
             .forward(&x)
             .map_err(|e| Error::Processing(format!("Forward pass linear2 failed: {}", e)))?;
-        let x = ops::relu(&x)
+        let x = x
+            .relu()
             .map_err(|e| Error::Processing(format!("ReLU activation failed: {}", e)))?;
 
         let x = self
@@ -429,7 +431,7 @@ impl EmotionLearner {
         let (inputs, targets) = self.prepare_training_data(&history)?;
 
         #[cfg(feature = "gpu")]
-        if self.config.use_gpu && self.device != Device::Cpu {
+        if self.config.use_gpu && !self.device.is_cpu() {
             self.train_gpu_model(&inputs, &targets).await?;
         } else {
             self.train_cpu_model(&inputs, &targets).await?;
@@ -526,7 +528,9 @@ impl EmotionLearner {
             *model_guard = Some(EmotionPreferenceModel::new(&varmap, &self.device)?);
         }
 
-        let model = model_guard.as_ref().unwrap();
+        let model = model_guard
+            .as_ref()
+            .ok_or_else(|| Error::Processing("Model initialization failed".to_string()))?;
 
         // Convert training data to tensors
         let input_data: Vec<f32> = inputs.iter().cloned().collect();

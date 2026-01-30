@@ -177,9 +177,9 @@ pub struct LatencyAnalysis {
     pub first_token_latency_ms: f32,
     /// Streaming processing latency in milliseconds
     pub streaming_latency_ms: f32,
-    /// Latency by batch size (batch_size -> latency_ms)
+    /// Latency by batch size (`batch_size` -> `latency_ms`)
     pub batch_latency_ms: HashMap<usize, f32>,
-    /// Latency by language (language -> latency_ms)
+    /// Latency by language (language -> `latency_ms`)
     pub language_latency_ms: HashMap<String, f32>,
     /// Audio length impact on latency (duration, latency) pairs
     pub audio_length_impact: Vec<(f32, f32)>,

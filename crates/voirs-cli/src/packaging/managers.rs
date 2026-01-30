@@ -2,7 +2,7 @@ use crate::error::VoirsCLIError;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,15 +37,20 @@ impl Default for PackageMetadata {
 }
 
 pub trait PackageManager {
-    fn generate_package(&self, metadata: &PackageMetadata, output_dir: &PathBuf)
-        -> Result<PathBuf>;
-    fn validate_package(&self, package_path: &PathBuf) -> Result<bool>;
+    fn generate_package(&self, metadata: &PackageMetadata, output_dir: &Path) -> Result<PathBuf>;
+    fn validate_package(&self, package_path: &Path) -> Result<bool>;
     fn get_package_name(&self) -> &str;
     fn get_file_extension(&self) -> &str;
 }
 
 pub struct HomebrewManager {
     formula_template: String,
+}
+
+impl Default for HomebrewManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl HomebrewManager {
@@ -57,11 +62,7 @@ impl HomebrewManager {
 }
 
 impl PackageManager for HomebrewManager {
-    fn generate_package(
-        &self,
-        metadata: &PackageMetadata,
-        output_dir: &PathBuf,
-    ) -> Result<PathBuf> {
+    fn generate_package(&self, metadata: &PackageMetadata, output_dir: &Path) -> Result<PathBuf> {
         info!("Generating Homebrew formula");
 
         let formula_content = self
@@ -80,7 +81,7 @@ impl PackageManager for HomebrewManager {
         Ok(formula_path)
     }
 
-    fn validate_package(&self, package_path: &PathBuf) -> Result<bool> {
+    fn validate_package(&self, package_path: &Path) -> Result<bool> {
         debug!("Validating Homebrew formula");
 
         if !package_path.exists() {
@@ -105,6 +106,12 @@ pub struct ChocolateyManager {
     install_script_template: String,
 }
 
+impl Default for ChocolateyManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ChocolateyManager {
     pub fn new() -> Self {
         Self {
@@ -115,11 +122,7 @@ impl ChocolateyManager {
 }
 
 impl PackageManager for ChocolateyManager {
-    fn generate_package(
-        &self,
-        metadata: &PackageMetadata,
-        output_dir: &PathBuf,
-    ) -> Result<PathBuf> {
+    fn generate_package(&self, metadata: &PackageMetadata, output_dir: &Path) -> Result<PathBuf> {
         info!("Generating Chocolatey package");
 
         let package_dir = output_dir.join(&metadata.name);
@@ -156,7 +159,7 @@ impl PackageManager for ChocolateyManager {
         Ok(package_dir)
     }
 
-    fn validate_package(&self, package_path: &PathBuf) -> Result<bool> {
+    fn validate_package(&self, package_path: &Path) -> Result<bool> {
         debug!("Validating Chocolatey package");
 
         let nuspec_path = package_path.join("*.nuspec");
@@ -164,7 +167,7 @@ impl PackageManager for ChocolateyManager {
 
         Ok(tools_dir.exists()
             && fs::read_dir(package_path)?.any(|entry| {
-                entry.ok().map_or(false, |e| {
+                entry.ok().is_some_and(|e| {
                     e.path().extension().and_then(|ext| ext.to_str()) == Some("nuspec")
                 })
             }))
@@ -183,6 +186,12 @@ pub struct ScoopManager {
     manifest_template: String,
 }
 
+impl Default for ScoopManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ScoopManager {
     pub fn new() -> Self {
         Self {
@@ -192,11 +201,7 @@ impl ScoopManager {
 }
 
 impl PackageManager for ScoopManager {
-    fn generate_package(
-        &self,
-        metadata: &PackageMetadata,
-        output_dir: &PathBuf,
-    ) -> Result<PathBuf> {
+    fn generate_package(&self, metadata: &PackageMetadata, output_dir: &Path) -> Result<PathBuf> {
         info!("Generating Scoop manifest");
 
         let manifest_content = self
@@ -215,7 +220,7 @@ impl PackageManager for ScoopManager {
         Ok(manifest_path)
     }
 
-    fn validate_package(&self, package_path: &PathBuf) -> Result<bool> {
+    fn validate_package(&self, package_path: &Path) -> Result<bool> {
         debug!("Validating Scoop manifest");
 
         if !package_path.exists() {
@@ -241,6 +246,12 @@ pub struct DebianManager {
     control_template: String,
 }
 
+impl Default for DebianManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DebianManager {
     pub fn new() -> Self {
         Self {
@@ -250,11 +261,7 @@ impl DebianManager {
 }
 
 impl PackageManager for DebianManager {
-    fn generate_package(
-        &self,
-        metadata: &PackageMetadata,
-        output_dir: &PathBuf,
-    ) -> Result<PathBuf> {
+    fn generate_package(&self, metadata: &PackageMetadata, output_dir: &Path) -> Result<PathBuf> {
         info!("Generating Debian package");
 
         let package_dir = output_dir.join(format!("{}-{}", metadata.name, metadata.version));
@@ -295,7 +302,7 @@ impl PackageManager for DebianManager {
         Ok(package_dir)
     }
 
-    fn validate_package(&self, package_path: &PathBuf) -> Result<bool> {
+    fn validate_package(&self, package_path: &Path) -> Result<bool> {
         debug!("Validating Debian package");
 
         let debian_dir = package_path.join("DEBIAN");
@@ -337,7 +344,7 @@ impl PackageManagerFactory {
 
 pub fn generate_all_packages(
     metadata: &PackageMetadata,
-    output_dir: &PathBuf,
+    output_dir: &Path,
 ) -> Result<Vec<PathBuf>> {
     info!("Generating packages for all supported package managers");
 

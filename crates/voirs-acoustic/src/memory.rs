@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::Result;
+use crate::{AcousticError, Result};
 
 /// Tensor memory pool for reusing allocations
 pub struct TensorMemoryPool {
@@ -402,7 +402,9 @@ impl MemoryOptimizer {
         {
             use std::fs;
             let meminfo = fs::read_to_string("/proc/meminfo").map_err(|e| {
-                AcousticError::Processing(format!("Failed to read memory info: {}", e))
+                AcousticError::ProcessingError {
+                    message: format!("Failed to read memory info: {}", e),
+                }
             })?;
 
             let mut total_kb = 0;
@@ -554,17 +556,13 @@ pub mod lazy {
         /// Create memory-mapped file
         pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
             let path = path.as_ref().to_path_buf();
-            let file = File::open(&path).map_err(|e| {
-                AcousticError::FileError(format!("Failed to open file {}: {}", path.display(), e))
+            let file = File::open(&path).map_err(|e| AcousticError::FileError {
+                message: format!("Failed to open file {}: {}", path.display(), e),
             })?;
 
             let mmap = unsafe {
-                Mmap::map(&file).map_err(|e| {
-                    AcousticError::FileError(format!(
-                        "Failed to mmap file {}: {}",
-                        path.display(),
-                        e
-                    ))
+                Mmap::map(&file).map_err(|e| AcousticError::FileError {
+                    message: format!("Failed to mmap file {}: {}", path.display(), e),
                 })?
             };
 

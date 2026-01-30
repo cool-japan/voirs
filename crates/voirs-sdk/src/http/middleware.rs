@@ -237,6 +237,12 @@ pub struct ApiKeyInfo {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
+impl Default for ApiKeyValidator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ApiKeyValidator {
     pub fn new() -> Self {
         Self {

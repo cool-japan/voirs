@@ -515,6 +515,7 @@ pub struct UserResponse {
 
 impl MultiModalFeedbackManager {
     /// Create a new multi-modal feedback manager
+    #[must_use]
     pub fn new(config: MultiModalConfig) -> Self {
         let mut active_modalities = HashMap::new();
 

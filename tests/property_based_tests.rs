@@ -11,8 +11,7 @@ use voirs_acoustic::{
 };
 use voirs_g2p::{DummyG2p, G2p, LanguageCode};
 use voirs_vocoder::{
-    DummyVocoder, MelSpectrogram as VocoderMel, SynthesisConfig as VocoderConfig,
-    Vocoder,
+    DummyVocoder, MelSpectrogram as VocoderMel, SynthesisConfig as VocoderConfig, Vocoder,
 };
 
 /// Property-based test runner for VoiRS components
@@ -176,7 +175,7 @@ proptest! {
             let acoustic_model = DummyAcousticModel::new();
 
             let phonemes: Vec<AcousticPhoneme> = phoneme_symbols.iter()
-                .map(|s| AcousticPhoneme::new(s))
+                .map(AcousticPhoneme::new)
                 .collect();
 
             let config = AcousticConfig {
@@ -212,7 +211,7 @@ proptest! {
             for row in &mel.data {
                 for &value in row {
                     prop_assert!(value.is_finite());
-                    prop_assert!(value >= -20.0 && value <= 20.0); // Reasonable mel range
+                    prop_assert!((-20.0..=20.0).contains(&value)); // Reasonable mel range
                 }
             }
 
@@ -238,7 +237,7 @@ proptest! {
             let acoustic_model = DummyAcousticModel::new();
 
             let phonemes: Vec<AcousticPhoneme> = phoneme_symbols.iter()
-                .map(|s| AcousticPhoneme::new(s))
+                .map(AcousticPhoneme::new)
                 .collect();
 
             let slow_config = AcousticConfig {
@@ -282,7 +281,7 @@ proptest! {
             let acoustic_model = DummyAcousticModel::new();
 
             let phonemes: Vec<AcousticPhoneme> = phoneme_symbols.iter()
-                .map(|s| AcousticPhoneme::new(s))
+                .map(AcousticPhoneme::new)
                 .collect();
 
             let config = AcousticConfig {
@@ -340,7 +339,7 @@ proptest! {
             let audio = result.unwrap();
 
             // Property: Audio should have reasonable properties
-            prop_assert!(audio.samples().len() > 0);
+            prop_assert!(!audio.samples().is_empty());
             prop_assert!(audio.samples().len() <= 10_000_000); // Reasonable upper bound
             prop_assert!(audio.sample_rate() > 0);
             prop_assert!(audio.sample_rate() <= 96000);
@@ -348,13 +347,13 @@ proptest! {
             // Property: All audio samples should be in valid range
             for &sample in audio.samples() {
                 prop_assert!(sample.is_finite());
-                prop_assert!(sample >= -1.0 && sample <= 1.0);
+                prop_assert!((-1.0..=1.0).contains(&sample));
             }
 
             // Property: Audio length should be roughly proportional to mel frames
-            let expected_samples = (n_frames * hop_length) as f32 * (audio.sample_rate() as f32 / sample_rate as f32);
+            let expected_samples = (n_frames * hop_length) as f32 * (audio.sample_rate() as f32 / sample_rate);
             let tolerance = expected_samples * 0.5; // 50% tolerance for dummy implementation
-            prop_assert!((audio.samples().len() as f32 - expected_samples).abs() <= tolerance || audio.samples().len() > 0);
+            prop_assert!((audio.samples().len() as f32 - expected_samples).abs() <= tolerance || !audio.samples().is_empty());
             Ok(())
         })?;
     }
@@ -430,10 +429,10 @@ proptest! {
             let audio = result.unwrap();
 
             // Property: Output should still be valid audio
-            prop_assert!(audio.len() > 0);
+            prop_assert!(!audio.is_empty());
             for &sample in audio.samples() {
                 prop_assert!(sample.is_finite());
-                prop_assert!(sample >= -1.0 && sample <= 1.0);
+                prop_assert!((-1.0..=1.0).contains(&sample));
             }
 
             Ok(())
@@ -511,7 +510,7 @@ proptest! {
 
             // 1. Text with alphabetic characters should produce some phonemes
             if text.chars().any(|c| c.is_alphabetic()) {
-                prop_assert!(phonemes.len() > 0);
+                prop_assert!(!phonemes.is_empty());
             }
 
             // 2. Phonemes should produce mel spectrogram
@@ -521,7 +520,7 @@ proptest! {
             }
 
             // 3. Mel spectrogram should produce audio
-            prop_assert!(audio.len() > 0);
+            prop_assert!(!audio.is_empty());
 
             // 4. Data types should be consistent
             prop_assert!(mel.sample_rate > 0);
@@ -540,7 +539,7 @@ proptest! {
 
             for &sample in audio.samples() {
                 prop_assert!(sample.is_finite());
-                prop_assert!(sample >= -1.0 && sample <= 1.0);
+                prop_assert!((-1.0..=1.0).contains(&sample));
             }
 
             Ok(())
@@ -626,7 +625,7 @@ mod tests {
             .unwrap()
             .current();
         assert!(text.len() <= 100);
-        assert!(text.chars().all(|c| c.is_ascii()));
+        assert!(text.is_ascii());
 
         // Test phoneme strategy
         let phoneme_strategy = PropertyTests::phoneme_symbol_strategy();
@@ -643,7 +642,7 @@ mod tests {
             .new_tree(&mut proptest::test_runner::TestRunner::default())
             .unwrap()
             .current();
-        assert!(speed >= 0.1 && speed <= 3.0);
+        assert!((0.1..=3.0).contains(&speed));
 
         println!("Property test helpers validated successfully");
     }

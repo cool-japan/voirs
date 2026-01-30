@@ -361,7 +361,7 @@ async fn test_integration_streaming_synthesis() -> Result<()> {
 
             // Validate chunk properties
             assert!(chunk.duration() > 0.0, "Chunk duration should be positive");
-            assert!(chunk.samples().len() > 0, "Chunk should contain audio samples");
+            assert!(!chunk.samples().is_empty(), "Chunk should contain audio samples");
             assert!(chunk.sample_rate() > 0, "Sample rate should be positive");
 
             // Store samples for final validation
@@ -381,7 +381,7 @@ async fn test_integration_streaming_synthesis() -> Result<()> {
         // Validate overall results
         assert!(chunk_count > 0, "Should generate at least one audio chunk");
         assert!(total_duration > 0.0, "Total duration should be positive");
-        assert!(all_samples.len() > 0, "Should generate audio samples");
+        assert!(!all_samples.is_empty(), "Should generate audio samples");
 
         // Verify streaming works with expected number of chunks for this text
         assert!(chunk_count >= 1, "Should generate multiple chunks for long text");

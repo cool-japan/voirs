@@ -21,6 +21,7 @@ pub struct VoiceActivityDetector {
 
 impl VoiceActivityDetector {
     /// Create a new voice activity detector
+    #[must_use]
     pub fn new(config: VadConfig) -> Self {
         Self {
             energy_buffer: VecDeque::with_capacity(config.history_frames),
@@ -139,7 +140,7 @@ impl VoiceActivityDetector {
         let min_energy = self
             .energy_buffer
             .iter()
-            .cloned()
+            .copied()
             .fold(f32::INFINITY, f32::min);
         self.noise_floor = self.noise_floor * 0.95 + min_energy * 0.05;
 
@@ -181,10 +182,10 @@ impl VoiceActivityDetector {
     /// Combine VAD results using majority voting with weights
     fn combine_vad_results(&self, energy: bool, zcr: bool, spectral: bool, ml: bool) -> bool {
         let weights = self.config.algorithm_weights;
-        let weighted_score = (energy as u8 as f32) * weights[0]
-            + (zcr as u8 as f32) * weights[1]
-            + (spectral as u8 as f32) * weights[2]
-            + (ml as u8 as f32) * weights[3];
+        let weighted_score = f32::from(u8::from(energy)) * weights[0]
+            + f32::from(u8::from(zcr)) * weights[1]
+            + f32::from(u8::from(spectral)) * weights[2]
+            + f32::from(u8::from(ml)) * weights[3];
 
         let total_weight: f32 = weights.iter().sum();
         weighted_score / total_weight > self.config.decision_threshold
@@ -212,7 +213,7 @@ impl VoiceActivityDetector {
         }
 
         // Simple stability measure: low variance in recent energy
-        let recent_energies: Vec<f32> = self.energy_buffer.iter().rev().take(5).cloned().collect();
+        let recent_energies: Vec<f32> = self.energy_buffer.iter().rev().take(5).copied().collect();
         let mean: f32 = recent_energies.iter().sum::<f32>() / recent_energies.len() as f32;
         let variance: f32 = recent_energies
             .iter()
@@ -235,6 +236,7 @@ impl VoiceActivityDetector {
     }
 
     /// Get current statistics
+    #[must_use]
     pub fn get_statistics(&self) -> VadStatistics {
         VadStatistics {
             frames_processed: self.frame_count,
@@ -351,6 +353,7 @@ pub struct AudioProcessor {
 
 impl AudioProcessor {
     /// Create a new audio processor
+    #[must_use]
     pub fn new(config: AudioProcessorConfig) -> Self {
         Self {
             vad: VoiceActivityDetector::new(config.vad_config.clone()),
@@ -444,6 +447,7 @@ impl AudioProcessor {
     }
 
     /// Get VAD statistics
+    #[must_use]
     pub fn get_vad_statistics(&self) -> VadStatistics {
         self.vad.get_statistics()
     }
@@ -456,6 +460,7 @@ pub struct FeatureExtractor {
 
 impl FeatureExtractor {
     /// Create a new feature extractor
+    #[must_use]
     pub fn new(config: FeatureExtractionConfig) -> Self {
         Self { config }
     }

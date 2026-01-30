@@ -123,19 +123,31 @@ async fn validate_dataset(
     let stats = calculate_validation_stats(&audio_files);
 
     if !global.quiet {
-        println!("✅ Found {} audio files ({} valid, {} invalid)",
-            stats.total_files, stats.valid_files, stats.invalid_files);
+        println!(
+            "✅ Found {} audio files ({} valid, {} invalid)",
+            stats.total_files, stats.valid_files, stats.invalid_files
+        );
         println!("✅ Found {} text files", text_files);
 
         if stats.valid_files > 0 {
             println!("\n📊 Audio Statistics:");
-            println!("   - Total duration: {:.1} hours", stats.total_duration / 3600.0);
+            println!(
+                "   - Total duration: {:.1} hours",
+                stats.total_duration / 3600.0
+            );
             println!("   - Average duration: {:.2}s", stats.avg_duration);
-            println!("   - Duration range: {:.2}s - {:.2}s", stats.min_duration, stats.max_duration);
+            println!(
+                "   - Duration range: {:.2}s - {:.2}s",
+                stats.min_duration, stats.max_duration
+            );
 
             // Sample rate distribution
             if stats.sample_rates.len() == 1 {
-                let (sr, _) = stats.sample_rates.iter().next().unwrap();
+                let (sr, _) = stats
+                    .sample_rates
+                    .iter()
+                    .next()
+                    .expect("Sample rates map should have exactly one entry");
                 println!("   - Sample rate: {} Hz (consistent)", sr);
             } else {
                 println!("   - Sample rates (inconsistent):");
@@ -144,8 +156,14 @@ async fn validate_dataset(
                 }
             }
 
-            println!("   - Average peak level: {:.1} dB", 20.0 * stats.avg_peak_level.log10());
-            println!("   - Average RMS level: {:.1} dB", 20.0 * stats.avg_rms_level.log10());
+            println!(
+                "   - Average peak level: {:.1} dB",
+                20.0 * stats.avg_peak_level.log10()
+            );
+            println!(
+                "   - Average RMS level: {:.1} dB",
+                20.0 * stats.avg_rms_level.log10()
+            );
 
             if stats.clipped_files > 0 {
                 println!("   ⚠️  Clipping detected: {} files", stats.clipped_files);
@@ -166,19 +184,27 @@ async fn validate_dataset(
             }
 
             if stats.clipped_files > 0 {
-                println!("   ⚠️  Audio clipping: {} files affected ({:.1}%)",
+                println!(
+                    "   ⚠️  Audio clipping: {} files affected ({:.1}%)",
                     stats.clipped_files,
-                    (stats.clipped_files as f32 / stats.valid_files as f32) * 100.0);
+                    (stats.clipped_files as f32 / stats.valid_files as f32) * 100.0
+                );
             } else {
                 println!("   ✅ Audio quality: No clipping detected");
             }
 
             // Duration analysis
             if stats.min_duration < 0.5 {
-                println!("   ⚠️  Very short files detected (min: {:.2}s)", stats.min_duration);
+                println!(
+                    "   ⚠️  Very short files detected (min: {:.2}s)",
+                    stats.min_duration
+                );
             }
             if stats.max_duration > 20.0 {
-                println!("   ⚠️  Very long files detected (max: {:.2}s)", stats.max_duration);
+                println!(
+                    "   ⚠️  Very long files detected (max: {:.2}s)",
+                    stats.max_duration
+                );
             }
 
             // Text-audio pairing
@@ -186,14 +212,19 @@ async fn validate_dataset(
                 if text_files == stats.valid_files {
                     println!("   ✅ Text-audio pairing: Complete ({} pairs)", text_files);
                 } else {
-                    println!("   ⚠️  Text-audio mismatch: {} audio, {} text files",
-                        stats.valid_files, text_files);
+                    println!(
+                        "   ⚠️  Text-audio mismatch: {} audio, {} text files",
+                        stats.valid_files, text_files
+                    );
                 }
             }
         }
 
         if stats.invalid_files > 0 {
-            println!("\n⚠️  {} invalid/unreadable audio files found", stats.invalid_files);
+            println!(
+                "\n⚠️  {} invalid/unreadable audio files found",
+                stats.invalid_files
+            );
         }
 
         if stats.valid_files == 0 {
@@ -437,12 +468,8 @@ async fn analyze_dataset(
 }
 
 /// Validate audio files and return detailed information
-async fn validate_audio_files(
-    path: &Path,
-    global: &GlobalOptions,
-) -> Result<Vec<AudioFileInfo>> {
+async fn validate_audio_files(path: &Path, global: &GlobalOptions) -> Result<Vec<AudioFileInfo>> {
     let mut audio_files = Vec::new();
-    let mut total_files = 0;
 
     if path.is_dir() {
         for entry in std::fs::read_dir(path).map_err(|e| VoirsError::IoError {
@@ -459,12 +486,10 @@ async fn validate_audio_files(
             let file_path = entry.path();
             if let Some(ext) = file_path.extension() {
                 if ext == "wav" {
-                    total_files += 1;
                     if let Some(info) = validate_wav_file(&file_path, global).await {
                         audio_files.push(info);
                     }
                 } else if ext == "flac" || ext == "mp3" {
-                    total_files += 1;
                     // For now, count but don't validate non-WAV files
                     // Full implementation would use claxon/minimp3
                     if !global.quiet {
@@ -496,33 +521,35 @@ async fn validate_wav_file(path: &PathBuf, global: &GlobalOptions) -> Option<Aud
 
             // Read all samples to calculate duration and quality metrics
             let samples: Vec<f32> = match (sample_format, bits_per_sample) {
-                (hound::SampleFormat::Int, 16) => {
-                    reader.into_samples::<i16>()
-                        .filter_map(|s| s.ok())
-                        .map(|s| s as f32 / i16::MAX as f32)
-                        .collect()
-                }
+                (hound::SampleFormat::Int, 16) => reader
+                    .into_samples::<i16>()
+                    .filter_map(|s| s.ok())
+                    .map(|s| s as f32 / i16::MAX as f32)
+                    .collect(),
                 (hound::SampleFormat::Int, 24) => {
-                    reader.into_samples::<i32>()
+                    reader
+                        .into_samples::<i32>()
                         .filter_map(|s| s.ok())
                         .map(|s| s as f32 / 8388608.0) // 2^23
                         .collect()
                 }
-                (hound::SampleFormat::Int, 32) => {
-                    reader.into_samples::<i32>()
-                        .filter_map(|s| s.ok())
-                        .map(|s| s as f32 / i32::MAX as f32)
-                        .collect()
-                }
-                (hound::SampleFormat::Float, 32) => {
-                    reader.into_samples::<f32>()
-                        .filter_map(|s| s.ok())
-                        .collect()
-                }
+                (hound::SampleFormat::Int, 32) => reader
+                    .into_samples::<i32>()
+                    .filter_map(|s| s.ok())
+                    .map(|s| s as f32 / i32::MAX as f32)
+                    .collect(),
+                (hound::SampleFormat::Float, 32) => reader
+                    .into_samples::<f32>()
+                    .filter_map(|s| s.ok())
+                    .collect(),
                 _ => {
                     if !global.quiet {
-                        eprintln!("⚠️  Unsupported format: {} ({} bit, {:?})",
-                            path.display(), bits_per_sample, sample_format);
+                        eprintln!(
+                            "⚠️  Unsupported format: {} ({} bit, {:?})",
+                            path.display(),
+                            bits_per_sample,
+                            sample_format
+                        );
                     }
                     return None;
                 }
@@ -697,36 +724,36 @@ mod tests {
 
     #[test]
     fn test_scan_audio_files_empty_dir() {
-        let temp_dir = tempdir().unwrap();
-        let count = scan_audio_files(temp_dir.path()).unwrap();
+        let temp_dir = tempdir().expect("Failed to create temp directory");
+        let count = scan_audio_files(temp_dir.path()).expect("Failed to scan audio files");
         assert_eq!(count, 0);
     }
 
     #[test]
     fn test_scan_audio_files_with_files() {
-        let temp_dir = tempdir().unwrap();
+        let temp_dir = tempdir().expect("Failed to create temp directory");
 
         // Create some test files
-        fs::write(temp_dir.path().join("test1.wav"), b"test").unwrap();
-        fs::write(temp_dir.path().join("test2.flac"), b"test").unwrap();
-        fs::write(temp_dir.path().join("test3.mp3"), b"test").unwrap();
-        fs::write(temp_dir.path().join("test4.txt"), b"test").unwrap(); // Should be ignored
+        fs::write(temp_dir.path().join("test1.wav"), b"test").expect("Failed to write test1.wav");
+        fs::write(temp_dir.path().join("test2.flac"), b"test").expect("Failed to write test2.flac");
+        fs::write(temp_dir.path().join("test3.mp3"), b"test").expect("Failed to write test3.mp3");
+        fs::write(temp_dir.path().join("test4.txt"), b"test").expect("Failed to write test4.txt"); // Should be ignored
 
-        let count = scan_audio_files(temp_dir.path()).unwrap();
+        let count = scan_audio_files(temp_dir.path()).expect("Failed to scan audio files");
         assert_eq!(count, 3);
     }
 
     #[test]
     fn test_scan_text_files() {
-        let temp_dir = tempdir().unwrap();
+        let temp_dir = tempdir().expect("Failed to create temp directory");
 
         // Create some test files
-        fs::write(temp_dir.path().join("test1.txt"), b"test").unwrap();
-        fs::write(temp_dir.path().join("test2.csv"), b"test").unwrap();
-        fs::write(temp_dir.path().join("test3.json"), b"test").unwrap();
-        fs::write(temp_dir.path().join("test4.wav"), b"test").unwrap(); // Should be ignored
+        fs::write(temp_dir.path().join("test1.txt"), b"test").expect("Failed to write test1.txt");
+        fs::write(temp_dir.path().join("test2.csv"), b"test").expect("Failed to write test2.csv");
+        fs::write(temp_dir.path().join("test3.json"), b"test").expect("Failed to write test3.json");
+        fs::write(temp_dir.path().join("test4.wav"), b"test").expect("Failed to write test4.wav"); // Should be ignored
 
-        let count = scan_text_files(temp_dir.path()).unwrap();
+        let count = scan_text_files(temp_dir.path()).expect("Failed to scan text files");
         assert_eq!(count, 3);
     }
 }

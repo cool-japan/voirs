@@ -173,6 +173,9 @@ impl AudioDriverFactory {
             if core_audio::CoreAudioDriver::is_available() {
                 return Ok(Box::new(core_audio::CoreAudioDriver::new()?));
             }
+            Err(AudioDriverError::InternalError(
+                "Core Audio driver not available on this system".to_string(),
+            ))
         }
 
         #[cfg(target_os = "windows")]
@@ -187,12 +190,15 @@ impl AudioDriverFactory {
 
         #[cfg(target_os = "linux")]
         {
-            return linux::create_linux_driver();
+            linux::create_linux_driver()
         }
 
-        Err(AudioDriverError::InternalError(
-            "No audio driver available for this platform".to_string(),
-        ))
+        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+        {
+            Err(AudioDriverError::InternalError(
+                "No audio driver available for this platform".to_string(),
+            ))
+        }
     }
 
     /// List all available drivers on the current platform

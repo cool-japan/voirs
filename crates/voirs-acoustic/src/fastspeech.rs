@@ -262,10 +262,10 @@ impl FastSpeech2Model {
         }
 
         // Initialize speaker embeddings if multi-speaker
-        let speaker_embeddings = if config.speaker_embed_dim.is_some() {
+        let speaker_embeddings = if let Some(dim) = config.speaker_embed_dim {
             let mut embeddings = HashMap::new();
             for speaker_id in ["default", "speaker_1", "speaker_2"] {
-                let embedding = (0..config.speaker_embed_dim.unwrap())
+                let embedding = (0..dim)
                     .map(|i| (speaker_id.len() as f32 + i as f32 * 0.05) % 1.0 - 0.5)
                     .collect();
                 embeddings.insert(speaker_id.to_string(), embedding);
@@ -373,9 +373,9 @@ impl AcousticModel for FastSpeech2Model {
         config: Option<&SynthesisConfig>,
     ) -> Result<MelSpectrogram> {
         if phonemes.is_empty() {
-            return Err(AcousticError::ModelError(
-                "Cannot synthesize empty phoneme sequence".to_string(),
-            ));
+            return Err(AcousticError::ModelError {
+                message: "Cannot synthesize empty phoneme sequence".to_string(),
+            });
         }
 
         // 1. Encode phonemes
@@ -656,7 +656,7 @@ mod tests {
         let result = model.synthesize(&phonemes, None).await;
         assert!(result.is_err());
 
-        if let Err(AcousticError::ModelError(msg)) = result {
+        if let Err(AcousticError::ModelError { message: msg }) = result {
             assert!(msg.contains("empty phoneme sequence"));
         } else {
             panic!("Expected ModelError for empty input");

@@ -1,0 +1,32 @@
+apiVersion: v2
+name: voirs-evaluation
+description: A Helm chart for VoiRS Evaluation distributed system
+type: application
+version: 0.1.0
+appVersion: "0.1.0-alpha.3"
+
+keywords:
+  - voirs
+  - speech-synthesis
+  - evaluation
+  - tts
+  - quality-metrics
+
+home: https://github.com/cool-japan/voirs
+sources:
+  - https://github.com/cool-japan/voirs
+
+maintainers:
+  - name: VoiRS Team
+    email: voirs@example.com
+
+icon: https://raw.githubusercontent.com/cool-japan/voirs/main/assets/logo.png
+
+dependencies: []
+
+# This chart requires Kubernetes 1.19+
+kubeVersion: ">=1.19.0-0"
+
+annotations:
+  category: Analytics
+  licenses: Apache-2.0

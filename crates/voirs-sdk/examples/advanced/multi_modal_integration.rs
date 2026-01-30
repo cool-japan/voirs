@@ -198,14 +198,12 @@ async fn virtual_concert_demo() -> Result<()> {
     {
         println!("🎵 Recording {}: \"{}\"", singer_name, lyrics);
 
-        // Configure spatial positioning (simplified for compatibility)
-        // TODO: Implement spatial positioning when API is available
-
-        // Set emotional expression (simplified for compatibility)
-        // TODO: Implement emotion setting when API is available
+        // Set emotional expression
+        pipeline
+            .set_emotion(emotion.clone(), Some(*intensity))
+            .await?;
 
         // Configure singing voice and synthesize
-        // Using simplified API for compatibility
         let audio = pipeline.synthesize_singing_text(lyrics, "C", 120.0).await?;
 
         println!(
@@ -311,16 +309,17 @@ async fn interactive_storytelling_demo() -> Result<()> {
     for (i, scene) in story_scenes.iter().enumerate() {
         println!("🎭 Scene {}: {}", i + 1, scene.character);
 
-        // Configure character voice and position
-        // Spatial positioning and emotion setting simplified for compatibility
-        // TODO: Implement spatial positioning and emotion setting when API is available
+        // Set emotional expression for the scene
+        pipeline
+            .set_emotion(scene.emotion.clone(), Some(scene.intensity))
+            .await?;
 
         // Get voice style configuration
         let voice_config = get_voice_style_config(scene.voice_style);
 
         // Synthesize character dialogue with voice style
         let audio = pipeline
-            .synthesize_with_config(&scene.text, &voice_config)
+            .synthesize_with_config(scene.text, &voice_config)
             .await?;
 
         println!(
@@ -391,15 +390,18 @@ async fn emotional_spatial_choir_demo() -> Result<()> {
     ];
 
     // Cathedral acoustics for choir
-    let cathedral_acoustics = RoomAcoustics {
+    let _cathedral_acoustics = RoomAcoustics {
         reverb_time: 4.0,
         early_reflections: 0.4,
         diffusion: 0.9,
         room_size: (80.0, 120.0, 30.0),
     };
 
-    // TODO: Convert local RoomAcoustics to SDK RoomAcoustics format
-    // pipeline.set_room_acoustics(cathedral_acoustics).await?;
+    // Note: Room acoustics configuration would be set via spatial controller
+    // if let Some(spatial) = pipeline.spatial_controller() {
+    //     // Configure room acoustics through spatial audio controller
+    //     // spatial.set_room_size(cathedral_acoustics.room_size).await?;
+    // }
 
     println!("🏛️  Cathedral acoustics configured");
     println!(
@@ -425,12 +427,11 @@ async fn emotional_spatial_choir_demo() -> Result<()> {
 
         // Record each voice part
         for (voice_idx, position) in choir_positions.iter().enumerate() {
-            // TODO: Implement emotion setting when API is available
-            // pipeline.set_emotion(emotion, Some(intensity)).await?;
+            // Set emotion for this phrase
+            pipeline
+                .set_emotion(emotion.clone(), Some(*intensity))
+                .await?;
 
-            // TODO: Implement spatial positioning and singing configuration when API is available
-            // pipeline.set_spatial_position(*position).await?;
-            //
             // Configure voice type based on position
             let voice_type = match voice_idx {
                 0..=1 => VoiceType::Soprano,
@@ -440,7 +441,10 @@ async fn emotional_spatial_choir_demo() -> Result<()> {
             };
 
             let _singing_config = create_singing_config(voice_type);
-            // pipeline.set_singing_config(singing_config).await?;
+            // Note: Singing voice type would be configured through singing controller
+            // if let Some(singing) = pipeline.singing_controller() {
+            //     singing.set_voice_type(voice_type).await?;
+            // }
 
             // Synthesize with slight variation for natural choir effect
             let harmony_text = add_harmonic_variation(phrase, voice_idx);
@@ -548,14 +552,13 @@ async fn dynamic_voice_character_demo() -> Result<()> {
     for (i, character) in character_states.iter().enumerate() {
         println!("🎭 Transforming to: {}", character.name);
 
-        // TODO: Apply character transformation when API is available
-        // pipeline.set_spatial_position(character.position).await?;
-        // pipeline
-        //     .set_emotion(character.emotion, Some(character.intensity))
-        //     .await?;
+        // Apply character transformation with emotion
+        pipeline
+            .set_emotion(character.emotion.clone(), Some(character.intensity))
+            .await?;
 
         // Apply age and gender conversion
-        let base_audio = pipeline.synthesize(&character.text).await?;
+        let base_audio = pipeline.synthesize(character.text).await?;
 
         #[cfg(feature = "conversion")]
         {

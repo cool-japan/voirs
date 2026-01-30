@@ -467,8 +467,14 @@ impl PluginHost {
 
         // Store plugin and config
         {
-            let mut plugins = self.plugins.write().unwrap();
-            let mut configs = self.configs.write().unwrap();
+            let mut plugins = self
+                .plugins
+                .write()
+                .map_err(|e| VoirsError::internal("plugins", format!("Lock poisoned: {e}")))?;
+            let mut configs = self
+                .configs
+                .write()
+                .map_err(|e| VoirsError::internal("plugins", format!("Lock poisoned: {e}")))?;
 
             plugins.insert(name.to_string(), plugin);
             configs.insert(name.to_string(), default_config);
@@ -483,8 +489,14 @@ impl PluginHost {
     /// Unload plugin
     pub fn unload_plugin(&mut self, name: &str) -> Result<()> {
         {
-            let mut plugins = self.plugins.write().unwrap();
-            let mut configs = self.configs.write().unwrap();
+            let mut plugins = self
+                .plugins
+                .write()
+                .map_err(|e| VoirsError::internal("plugins", format!("Lock poisoned: {e}")))?;
+            let mut configs = self
+                .configs
+                .write()
+                .map_err(|e| VoirsError::internal("plugins", format!("Lock poisoned: {e}")))?;
 
             if let Some(plugin) = plugins.remove(name) {
                 plugin.shutdown().map_err(|e| {
@@ -503,14 +515,16 @@ impl PluginHost {
 
     /// Get plugin by name
     pub fn get_plugin(&self, name: &str) -> Option<Arc<dyn VoirsPlugin>> {
-        let plugins = self.plugins.read().unwrap();
+        let plugins = self.plugins.read().ok()?;
         plugins.get(name).cloned()
     }
 
     /// List all loaded plugins
     pub fn list_plugins(&self) -> Vec<String> {
-        let plugins = self.plugins.read().unwrap();
-        plugins.keys().cloned().collect()
+        self.plugins
+            .read()
+            .map(|plugins| plugins.keys().cloned().collect())
+            .unwrap_or_default()
     }
 
     /// Get plugin metadata
@@ -520,14 +534,17 @@ impl PluginHost {
 
     /// Configure plugin
     pub fn configure_plugin(&self, name: &str, config: PluginConfig) -> Result<()> {
-        let mut configs = self.configs.write().unwrap();
+        let mut configs = self
+            .configs
+            .write()
+            .map_err(|e| VoirsError::internal("plugins", format!("Lock poisoned: {e}")))?;
         configs.insert(name.to_string(), config);
         Ok(())
     }
 
     /// Get plugin configuration
     pub fn get_plugin_config(&self, name: &str) -> Option<PluginConfig> {
-        let configs = self.configs.read().unwrap();
+        let configs = self.configs.read().ok()?;
         configs.get(name).cloned()
     }
 }

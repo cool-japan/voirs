@@ -199,7 +199,6 @@ impl SafeTensorsLoader {
 
         let mut tensor_shapes = HashMap::new();
         let mut tensor_dtypes = HashMap::new();
-        let mut total_params = 0u64;
 
         for name in &tensor_names {
             if let Ok(tensor_view) = safetensors.tensor(name) {
@@ -208,8 +207,6 @@ impl SafeTensorsLoader {
 
                 tensor_shapes.insert(name.to_string(), shape.clone());
                 tensor_dtypes.insert(name.to_string(), dtype.clone());
-
-                total_params += shape.iter().product::<usize>() as u64;
             }
         }
 

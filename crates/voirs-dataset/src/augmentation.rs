@@ -1,12 +1,20 @@
 //! Data augmentation utilities for speech synthesis datasets
 //!
 //! This module provides audio augmentation techniques including speed perturbation,
-//! pitch shifting, noise injection, and room simulation.
+//! pitch shifting, noise injection, room simulation, codec simulation, VTLP,
+//! dynamic range compression, and modern techniques like SpecAugment and MixUp.
 
+pub mod codec;
+pub mod compression;
+pub mod formant;
+pub mod mixup;
 pub mod noise;
 pub mod pitch;
 pub mod room;
+pub mod specaugment;
 pub mod speed;
+pub mod timestretch;
+pub mod vtlp;
 
 use crate::{DatasetSample, Result};
 use serde::{Deserialize, Serialize};
@@ -30,6 +38,14 @@ pub struct AugmentationConfig {
     pub room_simulation: bool,
     /// Room types to simulate
     pub room_types: Vec<String>,
+    /// Enable VTLP (Vocal Tract Length Perturbation)
+    pub vtlp: bool,
+    /// VTLP warp factors (typically 0.8 to 1.2)
+    pub vtlp_warp_factors: Vec<f32>,
+    /// Enable dynamic range compression
+    pub compression: bool,
+    /// Compression presets to apply
+    pub compression_presets: Vec<String>,
 }
 
 impl Default for AugmentationConfig {
@@ -43,6 +59,10 @@ impl Default for AugmentationConfig {
             snr_range: (10.0, 30.0),
             room_simulation: false,
             room_types: vec!["small_room".to_string(), "large_room".to_string()],
+            vtlp: false,
+            vtlp_warp_factors: vec![0.9, 1.0, 1.1],
+            compression: false,
+            compression_presets: vec!["light".to_string(), "medium".to_string()],
         }
     }
 }
@@ -103,6 +123,25 @@ impl AudioAugmentor {
         if self.config.room_simulation {
             for room_type in &self.config.room_types {
                 let augmented = self.apply_room_simulation(sample, room_type)?;
+                augmented_samples.push(augmented);
+            }
+        }
+
+        // VTLP (Vocal Tract Length Perturbation)
+        if self.config.vtlp {
+            for &warp_factor in &self.config.vtlp_warp_factors {
+                if (warp_factor - 1.0).abs() > 1e-5 {
+                    // Skip identity transform
+                    let augmented = self.apply_vtlp(sample, warp_factor)?;
+                    augmented_samples.push(augmented);
+                }
+            }
+        }
+
+        // Dynamic Range Compression
+        if self.config.compression {
+            for preset in &self.config.compression_presets {
+                let augmented = self.apply_compression(sample, preset)?;
                 augmented_samples.push(augmented);
             }
         }
@@ -220,6 +259,71 @@ impl AudioAugmentor {
         let mut augmented = sample.clone();
         augmented.audio = augmented_audio;
         augmented.id = format!("{}_{}", sample.id, room_type);
+
+        Ok(augmented)
+    }
+
+    /// Apply VTLP (Vocal Tract Length Perturbation)
+    fn apply_vtlp(&self, sample: &DatasetSample, warp_factor: f32) -> Result<DatasetSample> {
+        use crate::augmentation::vtlp::{VtlpAugmentor, VtlpConfig};
+
+        let config = VtlpConfig {
+            warp_factors: vec![warp_factor],
+            sample_rate: sample.audio.sample_rate(),
+            window_size: 1024,
+            hop_size: 256,
+            lower_cutoff: 80.0, // Typical lower bound for speech
+            upper_cutoff: 0.0,  // Use Nyquist frequency
+        };
+
+        let augmentor = VtlpAugmentor::new(config);
+        let audio_samples = sample.audio.samples();
+        let augmented_samples = augmentor.apply_vtlp(audio_samples, warp_factor)?;
+
+        // Create new AudioData with augmented samples
+        let augmented_audio = crate::AudioData::new(
+            augmented_samples,
+            sample.audio.sample_rate(),
+            sample.audio.channels(),
+        );
+
+        let mut augmented = sample.clone();
+        augmented.audio = augmented_audio;
+        augmented.id = format!("{}_vtlp_{:.2}", sample.id, warp_factor);
+
+        Ok(augmented)
+    }
+
+    /// Apply dynamic range compression
+    fn apply_compression(&self, sample: &DatasetSample, preset: &str) -> Result<DatasetSample> {
+        use crate::augmentation::compression::{CompressionConfig, DynamicRangeCompressor};
+
+        let config = match preset.to_lowercase().as_str() {
+            "light" => CompressionConfig::light(),
+            "medium" => CompressionConfig::medium(),
+            "heavy" => CompressionConfig::heavy(),
+            "limiter" => CompressionConfig::limiter(),
+            _ => CompressionConfig::medium(),
+        };
+
+        // Update sample rate to match audio
+        let mut config = config;
+        config.sample_rate = sample.audio.sample_rate();
+
+        let mut compressor = DynamicRangeCompressor::new(config);
+        let audio_samples = sample.audio.samples();
+        let compressed_samples = compressor.apply(audio_samples)?;
+
+        // Create new AudioData with compressed samples
+        let compressed_audio = crate::AudioData::new(
+            compressed_samples,
+            sample.audio.sample_rate(),
+            sample.audio.channels(),
+        );
+
+        let mut augmented = sample.clone();
+        augmented.audio = compressed_audio;
+        augmented.id = format!("{}_comp_{}", sample.id, preset);
 
         Ok(augmented)
     }
@@ -347,6 +451,13 @@ mod tests {
             config.room_types,
             vec!["small_room".to_string(), "large_room".to_string()]
         );
+        assert!(!config.vtlp);
+        assert_eq!(config.vtlp_warp_factors, vec![0.9, 1.0, 1.1]);
+        assert!(!config.compression);
+        assert_eq!(
+            config.compression_presets,
+            vec!["light".to_string(), "medium".to_string()]
+        );
     }
 
     #[test]
@@ -391,6 +502,10 @@ mod tests {
             snr_range: (15.0, 25.0),
             room_simulation: true,
             room_types: vec!["small_room".to_string()],
+            vtlp: false,
+            vtlp_warp_factors: vec![0.9, 1.1],
+            compression: false,
+            compression_presets: vec!["light".to_string()],
         };
 
         let augmentor = AudioAugmentor::new(config);
@@ -562,5 +677,184 @@ mod tests {
             .collect();
 
         assert!(!room_variants.is_empty());
+    }
+
+    #[test]
+    fn test_vtlp_augmentation() {
+        let config = AugmentationConfig {
+            speed_perturbation: false,
+            pitch_shifting: false,
+            noise_injection: false,
+            room_simulation: false,
+            vtlp: true,
+            vtlp_warp_factors: vec![0.9, 1.1],
+            ..Default::default()
+        };
+
+        let augmentor = AudioAugmentor::new(config);
+        let sample = create_test_sample();
+        let augmented = augmentor.augment_sample(&sample).unwrap();
+
+        // Should include original + 2 VTLP variants (0.9 and 1.1, excluding 1.0)
+        assert_eq!(augmented.len(), 3);
+
+        // Check that IDs are properly set
+        assert_eq!(augmented[0].id, "test_sample_001");
+        assert!(augmented[1].id.contains("vtlp"));
+        assert!(augmented[2].id.contains("vtlp"));
+
+        // Check that audio lengths are preserved
+        for sample in &augmented {
+            assert!(sample.audio.samples().len() > 0);
+        }
+    }
+
+    #[test]
+    fn test_vtlp_warp_factor_filtering() {
+        let config = AugmentationConfig {
+            speed_perturbation: false,
+            pitch_shifting: false,
+            noise_injection: false,
+            room_simulation: false,
+            vtlp: true,
+            vtlp_warp_factors: vec![0.9, 1.0, 1.1], // 1.0 should be filtered out
+            ..Default::default()
+        };
+
+        let augmentor = AudioAugmentor::new(config);
+        let sample = create_test_sample();
+        let augmented = augmentor.augment_sample(&sample).unwrap();
+
+        // Should only include original + 2 variants (1.0 is identity, so filtered)
+        assert_eq!(augmented.len(), 3);
+
+        // Verify no identity transform was applied
+        let vtlp_samples: Vec<_> = augmented
+            .iter()
+            .filter(|s| s.id.contains("vtlp_1.00"))
+            .collect();
+        assert_eq!(vtlp_samples.len(), 0);
+    }
+
+    #[test]
+    fn test_combined_augmentation_with_vtlp() {
+        let config = AugmentationConfig {
+            speed_perturbation: true,
+            speed_factors: vec![0.9, 1.1],
+            pitch_shifting: false,
+            noise_injection: false,
+            room_simulation: false,
+            vtlp: true,
+            vtlp_warp_factors: vec![0.9, 1.1],
+            ..Default::default()
+        };
+
+        let augmentor = AudioAugmentor::new(config);
+        let sample = create_test_sample();
+        let augmented = augmentor.augment_sample(&sample).unwrap();
+
+        // Should include original + speed variants + VTLP variants
+        assert!(augmented.len() >= 5); // original + 2 speed + 2 VTLP
+
+        // Check that both augmentation types are present
+        let has_speed = augmented.iter().any(|s| s.id.contains("speed"));
+        let has_vtlp = augmented.iter().any(|s| s.id.contains("vtlp"));
+
+        assert!(has_speed);
+        assert!(has_vtlp);
+    }
+
+    #[test]
+    fn test_compression_augmentation() {
+        let config = AugmentationConfig {
+            speed_perturbation: false,
+            pitch_shifting: false,
+            noise_injection: false,
+            room_simulation: false,
+            vtlp: false,
+            compression: true,
+            compression_presets: vec!["light".to_string(), "medium".to_string()],
+            ..Default::default()
+        };
+
+        let augmentor = AudioAugmentor::new(config);
+        let sample = create_test_sample();
+        let augmented = augmentor.augment_sample(&sample).unwrap();
+
+        // Should include original + 2 compression variants
+        assert_eq!(augmented.len(), 3);
+
+        // Check that IDs are properly set
+        assert_eq!(augmented[0].id, "test_sample_001");
+        assert!(augmented[1].id.contains("comp_"));
+        assert!(augmented[2].id.contains("comp_"));
+
+        // Check that audio lengths are preserved
+        for sample in &augmented {
+            assert!(sample.audio.samples().len() > 0);
+        }
+    }
+
+    #[test]
+    fn test_compression_preset_matching() {
+        let config = AugmentationConfig {
+            speed_perturbation: false,
+            pitch_shifting: false,
+            noise_injection: false,
+            room_simulation: false,
+            vtlp: false,
+            compression: true,
+            compression_presets: vec![
+                "light".to_string(),
+                "heavy".to_string(),
+                "limiter".to_string(),
+            ],
+            ..Default::default()
+        };
+
+        let augmentor = AudioAugmentor::new(config);
+        let sample = create_test_sample();
+        let augmented = augmentor.augment_sample(&sample).unwrap();
+
+        // Should create compression variants
+        let comp_variants: Vec<_> = augmented
+            .iter()
+            .filter(|s| {
+                s.id.contains("comp_light")
+                    || s.id.contains("comp_heavy")
+                    || s.id.contains("comp_limiter")
+            })
+            .collect();
+
+        assert_eq!(comp_variants.len(), 3);
+    }
+
+    #[test]
+    fn test_combined_augmentation_with_compression() {
+        let config = AugmentationConfig {
+            speed_perturbation: true,
+            speed_factors: vec![0.9, 1.1],
+            pitch_shifting: false,
+            noise_injection: false,
+            room_simulation: false,
+            vtlp: false,
+            compression: true,
+            compression_presets: vec!["medium".to_string()],
+            ..Default::default()
+        };
+
+        let augmentor = AudioAugmentor::new(config);
+        let sample = create_test_sample();
+        let augmented = augmentor.augment_sample(&sample).unwrap();
+
+        // Should include original + speed variants + compression variants
+        assert!(augmented.len() >= 4); // original + 2 speed + 1 compression
+
+        // Check that both augmentation types are present
+        let has_speed = augmented.iter().any(|s| s.id.contains("speed"));
+        let has_compression = augmented.iter().any(|s| s.id.contains("comp_"));
+
+        assert!(has_speed);
+        assert!(has_compression);
     }
 }

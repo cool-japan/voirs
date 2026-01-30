@@ -1,0 +1,36 @@
+# Persistent Volume Claims for VoiRS Evaluation
+# Storage for coordinator state and shared data
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: voirs-coordinator-state
+  labels:
+    app: voirs-evaluation
+    component: coordinator
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: fast-ssd  # Adjust based on your cluster
+  volumeMode: Filesystem
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: voirs-shared-cache
+  labels:
+    app: voirs-evaluation
+    component: shared-storage
+spec:
+  accessModes:
+  - ReadWriteMany
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: nfs  # Requires NFS or similar for ReadWriteMany
+  volumeMode: Filesystem

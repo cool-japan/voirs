@@ -3,7 +3,6 @@
 //! Provides vectorized implementations for audio processing operations
 //! optimized for x86_64 architecture with AVX2 and AVX-512 support.
 
-#![cfg(target_arch = "x86_64")]
 
 use std::arch::x86_64::*;
 
@@ -107,8 +106,8 @@ unsafe fn sum_f32_avx2(input: &[f32]) -> f32 {
     let mut total = result.iter().sum::<f32>();
 
     // Add remaining elements
-    for i in (chunks * 8)..len {
-        total += input[i];
+    for &value in input.iter().skip(chunks * 8) {
+        total += value;
     }
 
     total

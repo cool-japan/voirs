@@ -150,6 +150,7 @@ pub struct StudentModelConfig {
 
 impl StudentModelConfig {
     /// Create student config from teacher config with compression ratio
+    #[must_use]
     pub fn from_teacher_config(
         teacher_n_layers: usize,
         teacher_n_state: usize,
@@ -174,7 +175,7 @@ impl StudentModelConfig {
 }
 
 /// Dynamic quantization parameters
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct DynamicQuantParams {
     /// Minimum values observed
     pub min_vals: Vec<f32>,
@@ -186,16 +187,4 @@ pub struct DynamicQuantParams {
     pub calibration_steps: usize,
     /// Whether calibration is complete
     pub calibrated: bool,
-}
-
-impl Default for DynamicQuantParams {
-    fn default() -> Self {
-        Self {
-            min_vals: Vec::new(),
-            max_vals: Vec::new(),
-            scale_history: Vec::new(),
-            calibration_steps: 0,
-            calibrated: false,
-        }
-    }
 }

@@ -55,6 +55,10 @@ pub enum VoirsEndianness {
 }
 
 /// Convert floating point samples to 16-bit signed integers
+///
+/// # Safety
+/// The `input` pointer must be valid and point to an array of at least `sample_count` floats.
+/// The `output` pointer must be valid and point to a writable buffer of at least `sample_count` i16 values.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_convert_float_to_int16(
     input: *const c_float,
@@ -91,6 +95,10 @@ pub unsafe extern "C" fn voirs_convert_float_to_int16(
 }
 
 /// Convert floating point samples to 32-bit signed integers
+///
+/// # Safety
+/// The `input` pointer must be valid and point to an array of at least `sample_count` floats.
+/// The `output` pointer must be valid and point to a writable buffer of at least `sample_count` i32 values.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_convert_float_to_int32(
     input: *const c_float,
@@ -126,6 +134,10 @@ pub unsafe extern "C" fn voirs_convert_float_to_int32(
 }
 
 /// Convert 16-bit signed integers to floating point samples
+///
+/// # Safety
+/// The `input` pointer must be valid and point to an array of at least `sample_count` i16 values.
+/// The `output` pointer must be valid and point to a writable buffer of at least `sample_count` floats.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_convert_int16_to_float(
     input: *const i16,
@@ -156,6 +168,10 @@ pub unsafe extern "C" fn voirs_convert_int16_to_float(
 }
 
 /// Convert floating point samples to 64-bit floating point samples
+///
+/// # Safety
+/// The `input` pointer must be valid and point to an array of at least `sample_count` f32 values.
+/// The `output` pointer must be valid and point to a writable buffer of at least `sample_count` f64 values.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_convert_float_to_double(
     input: *const c_float,
@@ -177,6 +193,10 @@ pub unsafe extern "C" fn voirs_convert_float_to_double(
 }
 
 /// Convert 64-bit floating point samples to 32-bit floating point samples
+///
+/// # Safety
+/// The `input` pointer must be valid and point to an array of at least `sample_count` f64 values.
+/// The `output` pointer must be valid and point to a writable buffer of at least `sample_count` f32 values.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_convert_double_to_float(
     input: *const c_double,
@@ -198,6 +218,10 @@ pub unsafe extern "C" fn voirs_convert_double_to_float(
 }
 
 /// Convert floating point samples to 24-bit signed integers (stored as i32)
+///
+/// # Safety
+/// The `input` pointer must be valid and point to an array of at least `sample_count` floats.
+/// The `output` pointer must be valid and point to a writable buffer of at least `sample_count` i32 values.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_convert_float_to_int24(
     input: *const c_float,
@@ -243,6 +267,10 @@ pub unsafe extern "C" fn voirs_convert_float_to_int24(
 }
 
 /// Convert 24-bit signed integers (stored as i32) to floating point samples
+///
+/// # Safety
+/// The `input` pointer must be valid and point to an array of at least `sample_count` i32 values.
+/// The `output` pointer must be valid and point to a writable buffer of at least `sample_count` floats.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_convert_int24_to_float(
     input: *const i32,
@@ -275,6 +303,10 @@ pub unsafe extern "C" fn voirs_convert_int24_to_float(
 }
 
 /// Convert floating point samples to 8-bit unsigned integers
+///
+/// # Safety
+/// The `input` pointer must be valid and point to an array of at least `sample_count` floats.
+/// The `output` pointer must be valid and point to a writable buffer of at least `sample_count` u8 values.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_convert_float_to_uint8(
     input: *const c_float,
@@ -299,6 +331,10 @@ pub unsafe extern "C" fn voirs_convert_float_to_uint8(
 }
 
 /// Convert 8-bit unsigned integers to floating point samples
+///
+/// # Safety
+/// The `input` pointer must be valid and point to an array of at least `sample_count` u8 values.
+/// The `output` pointer must be valid and point to a writable buffer of at least `sample_count` floats.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_convert_uint8_to_float(
     input: *const u8,
@@ -321,6 +357,10 @@ pub unsafe extern "C" fn voirs_convert_uint8_to_float(
 }
 
 /// Convert floating point samples to 16-bit unsigned integers
+///
+/// # Safety
+/// The `input` pointer must be valid and point to an array of at least `sample_count` floats.
+/// The `output` pointer must be valid and point to a writable buffer of at least `sample_count` u16 values.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_convert_float_to_uint16(
     input: *const c_float,
@@ -354,6 +394,10 @@ pub unsafe extern "C" fn voirs_convert_float_to_uint16(
 }
 
 /// Convert 16-bit unsigned integers to floating point samples
+///
+/// # Safety
+/// The `input` pointer must be valid and point to an array of at least `sample_count` u16 values.
+/// The `output` pointer must be valid and point to a writable buffer of at least `sample_count` floats.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_convert_uint16_to_float(
     input: *const u16,
@@ -384,6 +428,10 @@ pub unsafe extern "C" fn voirs_convert_uint16_to_float(
 }
 
 /// Convert floating point samples to 32-bit unsigned integers
+///
+/// # Safety
+/// The `input` pointer must be valid and point to an array of at least `sample_count` floats.
+/// The `output` pointer must be valid and point to a writable buffer of at least `sample_count` u32 values.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_convert_float_to_uint32(
     input: *const c_float,
@@ -417,6 +465,10 @@ pub unsafe extern "C" fn voirs_convert_float_to_uint32(
 }
 
 /// Convert 32-bit unsigned integers to floating point samples
+///
+/// # Safety
+/// The `input` pointer must be valid and point to an array of at least `sample_count` u32 values.
+/// The `output` pointer must be valid and point to a writable buffer of at least `sample_count` floats.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_convert_uint32_to_float(
     input: *const u32,
@@ -447,6 +499,10 @@ pub unsafe extern "C" fn voirs_convert_uint32_to_float(
 }
 
 /// Convert mono audio to stereo by duplicating channels
+///
+/// # Safety
+/// The `input` pointer must be valid and point to an array of at least `sample_count` floats.
+/// The `output` pointer must be valid and point to a writable buffer of at least `sample_count * 2` floats.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_convert_mono_to_stereo(
     input: *const c_float,
@@ -469,6 +525,10 @@ pub unsafe extern "C" fn voirs_convert_mono_to_stereo(
 }
 
 /// Convert stereo audio to mono by averaging channels
+///
+/// # Safety
+/// The `input` pointer must be valid and point to an array of at least `sample_count * 2` floats (interleaved stereo).
+/// The `output` pointer must be valid and point to a writable buffer of at least `sample_count` floats.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_convert_stereo_to_mono(
     input: *const c_float,
@@ -492,6 +552,11 @@ pub unsafe extern "C" fn voirs_convert_stereo_to_mono(
 }
 
 /// Simple nearest-neighbor sample rate conversion
+///
+/// # Safety
+/// The `input` pointer must be valid and point to an array of at least `input_samples` floats.
+/// The `output` pointer must be valid and point to a writable buffer large enough for the resampled audio.
+/// The `output_samples` pointer must be valid and point to a writable c_uint where the output sample count will be stored.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_convert_sample_rate(
     input: *const c_float,
@@ -525,6 +590,8 @@ pub unsafe extern "C" fn voirs_convert_sample_rate(
     let output_slice = std::slice::from_raw_parts_mut(output, output_length);
     *output_samples = output_length as c_uint;
 
+    // Note: Cannot use iterator here due to complex index calculations for channel interleaving
+    #[allow(clippy::needless_range_loop)]
     for i in 0..output_length {
         let frame_index = i / channels as usize;
         let channel_index = i % channels as usize;
@@ -544,6 +611,9 @@ pub unsafe extern "C" fn voirs_convert_sample_rate(
 }
 
 /// Convert audio buffer format in-place
+///
+/// # Safety
+/// The `buffer` pointer must be valid and point to a properly initialized VoirsAudioBuffer.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_audio_convert_format(
     buffer: *mut VoirsAudioBuffer,

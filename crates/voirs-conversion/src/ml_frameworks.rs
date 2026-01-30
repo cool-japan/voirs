@@ -957,7 +957,7 @@ mod tests {
         };
 
         match cpu_preference {
-            DevicePreference::Cpu => assert!(true),
+            DevicePreference::Cpu => {}
             _ => panic!("Expected CPU preference"),
         }
 
@@ -965,7 +965,7 @@ mod tests {
             DevicePreference::Gpu {
                 device_index: Some(0),
                 memory_limit_mb: Some(4096),
-            } => assert!(true),
+            } => {}
             _ => panic!("Expected GPU preference with specific settings"),
         }
     }

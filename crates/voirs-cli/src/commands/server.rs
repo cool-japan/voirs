@@ -86,6 +86,18 @@ pub struct AccessLogEntry {
     pub bytes_transferred: u64,
 }
 
+/// Parameters for logging HTTP requests
+#[derive(Debug, Clone)]
+pub struct LogRequestParams<'a> {
+    pub client_ip: &'a str,
+    pub api_key: Option<String>,
+    pub method: &'a str,
+    pub path: &'a str,
+    pub status_code: u16,
+    pub start_time: Instant,
+    pub bytes_transferred: u64,
+}
+
 /// Server application state
 #[derive(Clone)]
 pub struct AppState {
@@ -281,7 +293,19 @@ pub async fn auth_middleware(
         || path == "/api/v1/health/live"
     {
         let response = next.run(request).await;
-        log_request(&state, &client_ip, None, &method, &path, 200, start_time, 0).await;
+        log_request(
+            &state,
+            LogRequestParams {
+                client_ip: &client_ip,
+                api_key: None,
+                method: &method,
+                path: &path,
+                status_code: 200,
+                start_time,
+                bytes_transferred: 0,
+            },
+        )
+        .await;
         return Ok(response);
     }
 
@@ -327,13 +351,15 @@ pub async fn auth_middleware(
             // Log request
             log_request(
                 &state,
-                &client_ip,
-                api_key_config.as_ref().map(|k| k.key.clone()),
-                &method,
-                &path,
-                status_code,
-                start_time,
-                bytes_transferred,
+                LogRequestParams {
+                    client_ip: &client_ip,
+                    api_key: api_key_config.as_ref().map(|k| k.key.clone()),
+                    method: &method,
+                    path: &path,
+                    status_code,
+                    start_time,
+                    bytes_transferred,
+                },
             )
             .await;
 
@@ -342,13 +368,15 @@ pub async fn auth_middleware(
         Err(error) => {
             log_request(
                 &state,
-                &client_ip,
-                api_key,
-                &method,
-                &path,
-                error.status.as_u16(),
-                start_time,
-                0,
+                LogRequestParams {
+                    client_ip: &client_ip,
+                    api_key,
+                    method: &method,
+                    path: &path,
+                    status_code: error.status.as_u16(),
+                    start_time,
+                    bytes_transferred: 0,
+                },
             )
             .await;
             Err(error)
@@ -383,13 +411,10 @@ pub fn extract_api_key(headers: &HeaderMap) -> Option<String> {
         .get("authorization")
         .and_then(|header| header.to_str().ok())
         .and_then(|auth_str| {
-            if auth_str.starts_with("Bearer ") {
-                Some(auth_str[7..].to_string())
-            } else if auth_str.starts_with("ApiKey ") {
-                Some(auth_str[7..].to_string())
-            } else {
-                None
-            }
+            auth_str
+                .strip_prefix("Bearer ")
+                .or_else(|| auth_str.strip_prefix("ApiKey "))
+                .map(|s| s.to_string())
         })
         .or_else(|| {
             headers
@@ -548,27 +573,18 @@ async fn update_usage_stats_with_audio(
 }
 
 /// Log request
-async fn log_request(
-    state: &AppState,
-    client_ip: &str,
-    api_key: Option<String>,
-    method: &str,
-    path: &str,
-    status_code: u16,
-    start_time: Instant,
-    bytes_transferred: u64,
-) {
+async fn log_request(state: &AppState, params: LogRequestParams<'_>) {
     let mut auth_state = state.auth.lock().unwrap();
 
     let log_entry = AccessLogEntry {
         timestamp: SystemTime::now(),
-        ip_address: client_ip.to_string(),
-        api_key,
-        method: method.to_string(),
-        path: path.to_string(),
-        status_code,
-        response_time_ms: start_time.elapsed().as_millis() as u64,
-        bytes_transferred,
+        ip_address: params.client_ip.to_string(),
+        api_key: params.api_key,
+        method: params.method.to_string(),
+        path: params.path.to_string(),
+        status_code: params.status_code,
+        response_time_ms: params.start_time.elapsed().as_millis() as u64,
+        bytes_transferred: params.bytes_transferred,
     };
 
     auth_state.access_logs.push(log_entry);
@@ -627,7 +643,7 @@ pub async fn run_server(host: &str, port: u16, config: &AppConfig) -> Result<()>
     // Parse address
     let addr: SocketAddr = format!("{}:{}", host, port)
         .parse()
-        .map_err(|e| voirs_sdk::VoirsError::config_error(&format!("Invalid address: {}", e)))?;
+        .map_err(|e| voirs_sdk::VoirsError::config_error(format!("Invalid address: {}", e)))?;
 
     println!("Starting VoiRS server on http://{}", addr);
     println!("API endpoints:");
@@ -655,7 +671,7 @@ pub async fn run_server(host: &str, port: u16, config: &AppConfig) -> Result<()>
 
     // Start the server with graceful shutdown
     let listener = tokio::net::TcpListener::bind(&addr).await.map_err(|e| {
-        voirs_sdk::VoirsError::config_error(&format!("Failed to bind to {}: {}", addr, e))
+        voirs_sdk::VoirsError::config_error(format!("Failed to bind to {}: {}", addr, e))
     })?;
 
     // Set up graceful shutdown signal
@@ -679,7 +695,7 @@ pub async fn run_server(host: &str, port: u16, config: &AppConfig) -> Result<()>
             println!("Graceful shutdown complete");
         })
         .await
-        .map_err(|e| voirs_sdk::VoirsError::config_error(&format!("Server error: {}", e)))?;
+        .map_err(|e| voirs_sdk::VoirsError::config_error(format!("Server error: {}", e)))?;
 
     Ok(())
 }
@@ -939,20 +955,13 @@ async fn voices_handler(
     Query(query): Query<VoicesQuery>,
 ) -> std::result::Result<Json<VoicesResponse>, ApiError> {
     // Get available voices from pipeline
-    let voice_configs = state
-        .pipeline
-        .list_voices()
-        .await
-        .map_err(|e| ApiError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: format!("Failed to list voices: {}", e),
-        })?;
+    let voice_configs = state.pipeline.list_voices().await.map_err(|e| ApiError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        message: format!("Failed to list voices: {}", e),
+    })?;
 
     // Convert VoiceConfig to VoiceInfo
-    let mut voices: Vec<VoiceInfo> = voice_configs
-        .iter()
-        .map(|vc| voice_config_to_info(vc))
-        .collect();
+    let mut voices: Vec<VoiceInfo> = voice_configs.iter().map(voice_config_to_info).collect();
 
     // Apply filters
     if let Some(language) = &query.language {
@@ -963,7 +972,7 @@ async fn voices_handler(
         voices.retain(|v| {
             v.gender
                 .as_ref()
-                .map_or(false, |g| g.eq_ignore_ascii_case(gender))
+                .is_some_and(|g| g.eq_ignore_ascii_case(gender))
         });
     }
 
@@ -1030,10 +1039,7 @@ async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
     let uptime_seconds = state.start_time.elapsed().as_secs();
 
     // Check pipeline status by testing if it can list voices
-    let pipeline_ready = match state.pipeline.list_voices().await {
-        Ok(_) => true,
-        Err(_) => false,
-    };
+    let pipeline_ready = (state.pipeline.list_voices().await).is_ok();
 
     Json(HealthResponse {
         status: if pipeline_ready {
@@ -1138,10 +1144,7 @@ async fn detailed_health_handler(State(state): State<AppState>) -> Json<Detailed
 /// Readiness probe endpoint (K8s style)
 async fn readiness_handler(State(state): State<AppState>) -> impl IntoResponse {
     // Check if the service is ready to serve traffic
-    let pipeline_ready = match state.pipeline.list_voices().await {
-        Ok(_) => true,
-        Err(_) => false,
-    };
+    let pipeline_ready = (state.pipeline.list_voices().await).is_ok();
 
     let auth_ready = {
         let auth_state = state.auth.lock().unwrap();
@@ -1358,8 +1361,10 @@ fn get_cpu_usage() -> f32 {
             if libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) == 0 {
                 let usage = usage.assume_init();
                 // ru_utime and ru_stime are in microseconds on some platforms
-                let user_time = usage.ru_utime.tv_sec as f32 + usage.ru_utime.tv_usec as f32 / 1_000_000.0;
-                let sys_time = usage.ru_stime.tv_sec as f32 + usage.ru_stime.tv_usec as f32 / 1_000_000.0;
+                let user_time =
+                    usage.ru_utime.tv_sec as f32 + usage.ru_utime.tv_usec as f32 / 1_000_000.0;
+                let sys_time =
+                    usage.ru_stime.tv_sec as f32 + usage.ru_stime.tv_usec as f32 / 1_000_000.0;
                 let total_time = user_time + sys_time;
 
                 // Rough estimate: normalize by CPU count
@@ -1524,7 +1529,7 @@ async fn auth_info_handler(
 
     let (requests_used, requests_remaining, window_reset_seconds) = if let Some(bucket) = bucket {
         let elapsed = bucket.window_start.elapsed().as_secs();
-        let reset_seconds = if elapsed >= 60 { 0 } else { 60 - elapsed };
+        let reset_seconds = 60u64.saturating_sub(elapsed);
 
         (
             bucket.requests,
@@ -1781,6 +1786,6 @@ mod tests {
         let data = b"Hello, world!";
         let encoded = base64::encode(data);
         assert!(!encoded.is_empty());
-        assert!(encoded.chars().all(|c| c.is_ascii()));
+        assert!(encoded.is_ascii());
     }
 }

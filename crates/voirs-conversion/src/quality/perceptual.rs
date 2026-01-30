@@ -587,6 +587,7 @@ impl PerceptualOptimizer {
         let mut spectrum = vec![0.0; num_bins];
 
         // Simple energy-based spectrum calculation
+        #[allow(clippy::needless_range_loop)]
         for i in 0..window_size.min(audio.len()) {
             let bin = i * num_bins / window_size;
             if bin < spectrum.len() {
@@ -750,7 +751,7 @@ impl MaskingCalculator {
                 continue;
             }
 
-            let distance = (other_band as i32 - band_idx as i32).abs() as usize;
+            let distance = (other_band as i32 - band_idx as i32).unsigned_abs() as usize;
             let spreading = if distance < self.spreading_coefficients.len() {
                 self.spreading_coefficients[distance]
             } else {

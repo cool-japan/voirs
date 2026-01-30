@@ -196,7 +196,11 @@ impl VoiceConverter {
     }
 
     /// Cache conversion target
-    pub async fn cache_target(&self, target_id: String, target: ConversionTarget) -> crate::Result<()> {
+    pub async fn cache_target(
+        &self,
+        target_id: String,
+        target: ConversionTarget,
+    ) -> crate::Result<()> {
         let config = self.config.read().await;
         let mut cache = self.target_cache.write().await;
 

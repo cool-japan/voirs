@@ -467,7 +467,7 @@ impl ErrorRecoveryManager {
     }
 
     /// Create with default configuration
-    pub fn default() -> Self {
+    pub fn with_default_config() -> Self {
         Self::new(RecoveryConfig::default())
     }
 
@@ -538,6 +538,7 @@ impl ErrorRecoveryManager {
             Error::Authentication(_) => ErrorClassification::Security,
             Error::UsageTracking(_) => ErrorClassification::System,
             Error::Ethics(_) => ErrorClassification::Security,
+            Error::LockError(_) => ErrorClassification::System,
             Error::Io(_) => ErrorClassification::System,
             Error::Serialization(_) => ErrorClassification::Data,
             Error::Candle(_) => ErrorClassification::Resource,
@@ -1147,7 +1148,7 @@ mod tests {
 
     #[test]
     fn test_error_classification_mapping() {
-        let manager = ErrorRecoveryManager::default();
+        let manager = ErrorRecoveryManager::with_default_config();
 
         assert_eq!(
             manager.classify_error(&Error::Config("test".to_string())),
@@ -1171,7 +1172,7 @@ mod tests {
 
     #[test]
     fn test_error_severity_determination() {
-        let manager = ErrorRecoveryManager::default();
+        let manager = ErrorRecoveryManager::with_default_config();
 
         // Ethics errors should be fatal
         assert_eq!(
@@ -1212,7 +1213,7 @@ mod tests {
 
     #[test]
     fn test_recovery_strategy_determination() {
-        let manager = ErrorRecoveryManager::default();
+        let manager = ErrorRecoveryManager::with_default_config();
 
         // Transient low severity should use retry with backoff
         let strategy = manager
@@ -1253,7 +1254,7 @@ mod tests {
 
     #[test]
     fn test_recommended_actions_generation() {
-        let manager = ErrorRecoveryManager::default();
+        let manager = ErrorRecoveryManager::with_default_config();
 
         let actions = manager.generate_recommended_actions(
             &ErrorClassification::Configuration,
@@ -1275,7 +1276,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_error_analysis() {
-        let manager = ErrorRecoveryManager::default();
+        let manager = ErrorRecoveryManager::with_default_config();
         let error = Error::Processing("Test processing error".to_string());
         let context = HashMap::from([("operation".to_string(), "test_op".to_string())]);
 
@@ -1294,7 +1295,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_recoverable_error() {
-        let mut manager = ErrorRecoveryManager::default();
+        let mut manager = ErrorRecoveryManager::with_default_config();
         let error = Error::Processing("Transient error".to_string());
         let context = HashMap::new();
 
@@ -1314,7 +1315,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_non_recoverable_error() {
-        let mut manager = ErrorRecoveryManager::default();
+        let mut manager = ErrorRecoveryManager::with_default_config();
         let error = Error::Ethics("Ethics violation".to_string());
         let context = HashMap::new();
 
@@ -1365,7 +1366,7 @@ mod tests {
 
     #[test]
     fn test_backoff_delay_with_jitter() {
-        let manager = ErrorRecoveryManager::default(); // Jitter enabled by default
+        let manager = ErrorRecoveryManager::with_default_config(); // Jitter enabled by default
 
         let initial_delay = Duration::from_millis(100);
         let max_delay = Duration::from_secs(10);
@@ -1387,7 +1388,7 @@ mod tests {
 
     #[test]
     fn test_error_statistics_update() {
-        let mut manager = ErrorRecoveryManager::default();
+        let mut manager = ErrorRecoveryManager::with_default_config();
 
         let context1 = ErrorContext {
             error: "Error 1".to_string(),
@@ -1437,7 +1438,7 @@ mod tests {
 
     #[test]
     fn test_error_report_generation() {
-        let mut manager = ErrorRecoveryManager::default();
+        let mut manager = ErrorRecoveryManager::with_default_config();
 
         // Add some test errors
         let context = ErrorContext {
@@ -1474,7 +1475,7 @@ mod tests {
 
     #[test]
     fn test_recovery_operation_management() {
-        let mut manager = ErrorRecoveryManager::default();
+        let mut manager = ErrorRecoveryManager::with_default_config();
 
         // Test that initially there are no active recoveries
         assert_eq!(manager.get_active_recoveries().len(), 0);
@@ -1490,7 +1491,7 @@ mod tests {
 
     #[test]
     fn test_system_recommendations() {
-        let mut manager = ErrorRecoveryManager::default();
+        let mut manager = ErrorRecoveryManager::with_default_config();
 
         // Test with no errors
         let recommendations = manager.generate_system_recommendations();

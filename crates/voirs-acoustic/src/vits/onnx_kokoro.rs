@@ -37,11 +37,13 @@ impl KokoroOnnxInference {
         voice_dim: usize,
     ) -> Result<Self> {
         let session = Session::builder()
-            .map_err(|e| {
-                AcousticError::ModelError(format!("Failed to create session builder: {}", e))
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to create session builder: {}", e),
             })?
             .commit_from_file(model_path)
-            .map_err(|e| AcousticError::ModelError(format!("Failed to load ONNX model: {}", e)))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to load ONNX model: {}", e),
+            })?;
 
         Ok(Self {
             session,
@@ -57,25 +59,27 @@ impl KokoroOnnxInference {
         use std::fs::File;
         use std::io::BufReader;
 
-        let file = File::open(config_path)
-            .map_err(|e| AcousticError::ModelError(format!("Failed to open config.json: {}", e)))?;
+        let file = File::open(config_path).map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to open config.json: {}", e),
+        })?;
         let reader = BufReader::new(file);
 
-        let config: serde_json::Value = serde_json::from_reader(reader).map_err(|e| {
-            AcousticError::ModelError(format!("Failed to parse config.json: {}", e))
-        })?;
+        let config: serde_json::Value =
+            serde_json::from_reader(reader).map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to parse config.json: {}", e),
+            })?;
 
         let vocab_obj = config
             .get("vocab")
             .and_then(|v| v.as_object())
-            .ok_or_else(|| {
-                AcousticError::ModelError("No 'vocab' field in config.json".to_string())
+            .ok_or_else(|| AcousticError::ModelError {
+                message: "No 'vocab' field in config.json".to_string(),
             })?;
 
         let mut vocab = HashMap::new();
         for (phoneme, id) in vocab_obj {
-            let id_val = id.as_i64().ok_or_else(|| {
-                AcousticError::ModelError(format!("Invalid ID for phoneme: {}", phoneme))
+            let id_val = id.as_i64().ok_or_else(|| AcousticError::ModelError {
+                message: format!("Invalid ID for phoneme: {}", phoneme),
             })?;
             vocab.insert(phoneme.clone(), id_val);
         }
@@ -88,12 +92,15 @@ impl KokoroOnnxInference {
         use std::fs::File;
         use std::io::Read;
 
-        let mut file = File::open(voices_path)
-            .map_err(|e| AcousticError::ModelError(format!("Failed to open voices.bin: {}", e)))?;
+        let mut file = File::open(voices_path).map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to open voices.bin: {}", e),
+        })?;
 
         let mut buffer = Vec::new();
         file.read_to_end(&mut buffer)
-            .map_err(|e| AcousticError::ModelError(format!("Failed to read voices.bin: {}", e)))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to read voices.bin: {}", e),
+            })?;
 
         // Convert bytes to f32 (little-endian)
         let floats: Vec<f32> = buffer
@@ -122,11 +129,13 @@ impl KokoroOnnxInference {
         use std::fs::File;
 
         // List all arrays in the NPZ file
-        let file = File::open(npz_path.as_ref())
-            .map_err(|e| AcousticError::ModelError(format!("Failed to open NPZ file: {}", e)))?;
+        let file = File::open(npz_path.as_ref()).map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to open NPZ file: {}", e),
+        })?;
 
-        let mut array_names = list_npz_arrays(file)
-            .map_err(|e| AcousticError::ModelError(format!("Failed to list NPZ arrays: {}", e)))?;
+        let mut array_names = list_npz_arrays(file).map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to list NPZ arrays: {}", e),
+        })?;
 
         // Sort alphabetically to ensure consistent ordering
         array_names.sort();
@@ -137,12 +146,14 @@ impl KokoroOnnxInference {
         let mut all_voices = Vec::new();
 
         for voice_name in &array_names {
-            let file = File::open(npz_path.as_ref()).map_err(|e| {
-                AcousticError::ModelError(format!("Failed to open NPZ file: {}", e))
+            let file = File::open(npz_path.as_ref()).map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to open NPZ file: {}", e),
             })?;
 
             let voice_array = load_npz_array::<f32, _>(file, voice_name).map_err(|e| {
-                AcousticError::ModelError(format!("Failed to load voice '{}': {}", voice_name, e))
+                AcousticError::ModelError {
+                    message: format!("Failed to load voice '{}': {}", voice_name, e),
+                }
             })?;
 
             let shape = voice_array.shape();
@@ -155,10 +166,12 @@ impl KokoroOnnxInference {
                 // Shape is (N, 1, voice_dim) - average over first dimension
                 let n = shape[0];
                 if shape[1] != 1 || shape[2] != voice_dim {
-                    return Err(AcousticError::ModelError(format!(
-                        "Voice '{}' has unexpected shape {:?}, expected (N, 1, {})",
-                        voice_name, shape, voice_dim
-                    )));
+                    return Err(AcousticError::ModelError {
+                        message: format!(
+                            "Voice '{}' has unexpected shape {:?}, expected (N, 1, {})",
+                            voice_name, shape, voice_dim
+                        ),
+                    });
                 }
 
                 // Average over first dimension
@@ -177,10 +190,12 @@ impl KokoroOnnxInference {
                 // Already the right shape
                 data
             } else {
-                return Err(AcousticError::ModelError(format!(
-                    "Voice '{}' has unsupported shape {:?}, expected (N, 1, {}) or ({})",
-                    voice_name, shape, voice_dim, voice_dim
-                )));
+                return Err(AcousticError::ModelError {
+                    message: format!(
+                        "Voice '{}' has unsupported shape {:?}, expected (N, 1, {}) or ({})",
+                        voice_name, shape, voice_dim, voice_dim
+                    ),
+                });
             };
 
             all_voices.extend(voice_embedding);
@@ -222,10 +237,11 @@ impl KokoroOnnxInference {
                     tracing::info!("Loading voices from voices-v1.0.bin (NPZ format)");
                     Self::load_voices_from_npz(&npz_path, 256)?
                 } else {
-                    return Err(AcousticError::ModelError(
-                        "No voice file found. Expected voices_averaged.bin or voices-v1.0.bin"
-                            .to_string(),
-                    ));
+                    return Err(AcousticError::ModelError {
+                        message:
+                            "No voice file found. Expected voices_averaged.bin or voices-v1.0.bin"
+                                .to_string(),
+                    });
                 }
             }
         };
@@ -279,11 +295,13 @@ impl KokoroOnnxInference {
         let end_idx = start_idx + self.voice_dim;
 
         if end_idx > self.voices.len() {
-            return Err(AcousticError::ModelError(format!(
-                "Voice index {} out of bounds (max: {})",
-                voice_idx,
-                self.voices.len() / self.voice_dim
-            )));
+            return Err(AcousticError::ModelError {
+                message: format!(
+                    "Voice index {} out of bounds (max: {})",
+                    voice_idx,
+                    self.voices.len() / self.voice_dim
+                ),
+            });
         }
 
         Ok(self.voices[start_idx..end_idx].to_vec())
@@ -325,17 +343,22 @@ impl KokoroOnnxInference {
         // Create input tensors
         let tokens_shape = vec![1, token_ids.len()];
         let tokens_tensor = Value::from_array((tokens_shape, token_ids)).map_err(|e| {
-            AcousticError::ModelError(format!("Failed to create tokens tensor: {}", e))
+            AcousticError::ModelError {
+                message: format!("Failed to create tokens tensor: {}", e),
+            }
         })?;
 
         let voice_shape = vec![1, self.voice_dim];
         let voice_tensor = Value::from_array((voice_shape, voice_embedding)).map_err(|e| {
-            AcousticError::ModelError(format!("Failed to create voice tensor: {}", e))
+            AcousticError::ModelError {
+                message: format!("Failed to create voice tensor: {}", e),
+            }
         })?;
 
-        let speed_tensor = Value::from_array((vec![1], vec![speed])).map_err(|e| {
-            AcousticError::ModelError(format!("Failed to create speed tensor: {}", e))
-        })?;
+        let speed_tensor =
+            Value::from_array((vec![1], vec![speed])).map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to create speed tensor: {}", e),
+            })?;
 
         // Run inference
         let inputs_vec = inputs![
@@ -347,19 +370,26 @@ impl KokoroOnnxInference {
         let outputs = self
             .session
             .run(inputs_vec)
-            .map_err(|e| AcousticError::ModelError(format!("Inference failed: {}", e)))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Inference failed: {}", e),
+            })?;
 
         // Extract audio output (first output)
         let audio_tensor = outputs
             .iter()
             .next()
-            .ok_or_else(|| AcousticError::ModelError("No output from model".to_string()))?
+            .ok_or_else(|| AcousticError::ModelError {
+                message: "No output from model".to_string(),
+            })?
             .1;
 
         // Convert to Vec<f32>
-        let (_, audio_slice) = audio_tensor
-            .try_extract_tensor::<f32>()
-            .map_err(|e| AcousticError::ModelError(format!("Failed to extract audio: {}", e)))?;
+        let (_, audio_slice) =
+            audio_tensor
+                .try_extract_tensor::<f32>()
+                .map_err(|e| AcousticError::ModelError {
+                    message: format!("Failed to extract audio: {}", e),
+                })?;
 
         let mut audio_data: Vec<f32> = audio_slice.to_vec();
 
@@ -390,17 +420,22 @@ impl KokoroOnnxInference {
         // Create input tensors
         let tokens_shape = vec![1, token_ids.len()];
         let tokens_tensor = Value::from_array((tokens_shape, token_ids)).map_err(|e| {
-            AcousticError::ModelError(format!("Failed to create tokens tensor: {}", e))
+            AcousticError::ModelError {
+                message: format!("Failed to create tokens tensor: {}", e),
+            }
         })?;
 
         let voice_shape = vec![1, self.voice_dim];
         let voice_tensor = Value::from_array((voice_shape, voice_embedding)).map_err(|e| {
-            AcousticError::ModelError(format!("Failed to create voice tensor: {}", e))
+            AcousticError::ModelError {
+                message: format!("Failed to create voice tensor: {}", e),
+            }
         })?;
 
-        let speed_tensor = Value::from_array((vec![1], vec![speed])).map_err(|e| {
-            AcousticError::ModelError(format!("Failed to create speed tensor: {}", e))
-        })?;
+        let speed_tensor =
+            Value::from_array((vec![1], vec![speed])).map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to create speed tensor: {}", e),
+            })?;
 
         // Run inference
         let inputs_vec = inputs![
@@ -412,19 +447,26 @@ impl KokoroOnnxInference {
         let outputs = self
             .session
             .run(inputs_vec)
-            .map_err(|e| AcousticError::ModelError(format!("Inference failed: {}", e)))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Inference failed: {}", e),
+            })?;
 
         // Extract audio output (first output)
         let audio_tensor = outputs
             .iter()
             .next()
-            .ok_or_else(|| AcousticError::ModelError("No output from model".to_string()))?
+            .ok_or_else(|| AcousticError::ModelError {
+                message: "No output from model".to_string(),
+            })?
             .1;
 
         // Convert to Vec<f32>
-        let (_, audio_slice) = audio_tensor
-            .try_extract_tensor::<f32>()
-            .map_err(|e| AcousticError::ModelError(format!("Failed to extract audio: {}", e)))?;
+        let (_, audio_slice) =
+            audio_tensor
+                .try_extract_tensor::<f32>()
+                .map_err(|e| AcousticError::ModelError {
+                    message: format!("Failed to extract audio: {}", e),
+                })?;
 
         let audio_data: Vec<f32> = audio_slice.to_vec();
 
@@ -479,15 +521,15 @@ pub struct KokoroOnnxInference;
 #[cfg(not(feature = "onnx"))]
 impl KokoroOnnxInference {
     pub fn from_kokoro_files<P: AsRef<Path>>(_model_dir: P) -> Result<Self> {
-        Err(AcousticError::ModelError(
-            "ONNX feature not enabled. Enable with --features onnx".to_string(),
-        ))
+        Err(AcousticError::ModelError {
+            message: "ONNX feature not enabled. Enable with --features onnx".to_string(),
+        })
     }
 
     pub fn synthesize(&self, _phonemes: &str, _voice_idx: usize, _speed: f32) -> Result<Vec<f32>> {
-        Err(AcousticError::ModelError(
-            "ONNX feature not enabled".to_string(),
-        ))
+        Err(AcousticError::ModelError {
+            message: "ONNX feature not enabled".to_string(),
+        })
     }
 
     pub fn sample_rate(&self) -> u32 {

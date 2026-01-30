@@ -1525,16 +1525,18 @@ mod tests {
         let config = VehicleAudioConfigBuilder::new()
             .vehicle_type(VehicleType::Sedan)
             .build()
-            .unwrap();
+            .expect("Failed to build config");
 
-        let processor = VehicleAudioProcessor::new(config).unwrap();
+        let processor = VehicleAudioProcessor::new(config).expect("Failed to create processor");
         assert_eq!(processor.zones.len(), 1); // Default driver zone
     }
 
     #[test]
     fn test_vehicle_state_update() {
-        let config = VehicleAudioConfigBuilder::new().build().unwrap();
-        let mut processor = VehicleAudioProcessor::new(config).unwrap();
+        let config = VehicleAudioConfigBuilder::new()
+            .build()
+            .expect("Failed to build config");
+        let mut processor = VehicleAudioProcessor::new(config).expect("Failed to create processor");
 
         let new_state = VehicleState {
             speed_kmh: 60.0,
@@ -1543,15 +1545,19 @@ mod tests {
             ..Default::default()
         };
 
-        processor.update_vehicle_state(new_state).unwrap();
+        processor
+            .update_vehicle_state(new_state)
+            .expect("Failed to update vehicle state");
         assert_eq!(processor.vehicle_state.speed_kmh, 60.0);
         assert_eq!(processor.vehicle_state.engine_rpm, 2000);
     }
 
     #[test]
     fn test_passenger_management() {
-        let config = VehicleAudioConfigBuilder::new().build().unwrap();
-        let mut processor = VehicleAudioProcessor::new(config).unwrap();
+        let config = VehicleAudioConfigBuilder::new()
+            .build()
+            .expect("Failed to build config");
+        let mut processor = VehicleAudioProcessor::new(config).expect("Failed to create processor");
 
         let passenger = PassengerInfo {
             id: "passenger1".to_string(),
@@ -1565,10 +1571,14 @@ mod tests {
             activity: PassengerActivity::Music,
         };
 
-        processor.add_passenger(passenger).unwrap();
+        processor
+            .add_passenger(passenger)
+            .expect("Failed to add passenger");
         assert_eq!(processor.passenger_manager.passengers.len(), 1);
 
-        processor.remove_passenger("passenger1").unwrap();
+        processor
+            .remove_passenger("passenger1")
+            .expect("Failed to remove passenger");
         assert_eq!(processor.passenger_manager.passengers.len(), 0);
     }
 
@@ -1608,7 +1618,7 @@ mod tests {
             },
         };
 
-        let mut compensator = NoiseCompensator::new(&config).unwrap();
+        let mut compensator = NoiseCompensator::new(&config).expect("Failed to create compensator");
 
         // Initially no filters (they are created during update)
         assert!(compensator.compensation_filters.is_empty());
@@ -1634,7 +1644,9 @@ mod tests {
         };
 
         // Update compensation filters with vehicle state
-        compensator.update_compensation(&vehicle_state).unwrap();
+        compensator
+            .update_compensation(&vehicle_state)
+            .expect("Failed to update compensation");
 
         // Now filters should be populated
         assert!(!compensator.compensation_filters.is_empty());

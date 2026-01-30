@@ -509,7 +509,7 @@ impl AdaptiveProcessor {
             let recent: Vec<AudioContentType> = self
                 .content_type_history
                 .range((i - window_size)..i)
-                .cloned()
+                .copied()
                 .collect();
             let most_common = Self::most_common_content_type(&recent);
 
@@ -616,11 +616,13 @@ impl AdaptiveProcessor {
     }
 
     /// Get current configuration
+    #[must_use]
     pub fn config(&self) -> &AdaptiveConfig {
         &self.config
     }
 
     /// Get current parameters
+    #[must_use]
     pub fn current_parameters(&self) -> &AdaptiveParameters {
         &self.last_parameters
     }

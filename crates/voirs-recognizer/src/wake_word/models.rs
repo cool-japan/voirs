@@ -92,6 +92,7 @@ pub struct TemplateWakeWordModel {
 
 impl TemplateWakeWordModel {
     /// Create new template-based model
+    #[must_use]
     pub fn new(threshold: f32) -> Self {
         let metadata = ModelMetadata {
             name: "TemplateWakeWordModel".to_string(),
@@ -119,7 +120,7 @@ impl TemplateWakeWordModel {
     pub fn add_template(&mut self, word: &str, template: Vec<f32>) {
         self.templates
             .entry(word.to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(template);
     }
 
@@ -261,15 +262,15 @@ impl WakeWordModel for TemplateWakeWordModel {
 
 /// Neural network-based wake word model with multi-layer architecture
 pub struct NeuralWakeWordModel {
-    /// Input layer weights (input_size x hidden1_size)
+    /// Input layer weights (`input_size` x `hidden1_size`)
     input_weights: Vec<Vec<f32>>,
     /// Input layer biases
     input_biases: Vec<f32>,
-    /// Hidden layer weights (hidden1_size x hidden2_size)
+    /// Hidden layer weights (`hidden1_size` x `hidden2_size`)
     hidden_weights: Vec<Vec<f32>>,
     /// Hidden layer biases
     hidden_biases: Vec<f32>,
-    /// Output layer weights (hidden2_size x output_size)
+    /// Output layer weights (`hidden2_size` x `output_size`)
     output_weights: Vec<Vec<f32>>,
     /// Output layer biases
     output_biases: Vec<f32>,
@@ -293,6 +294,7 @@ struct NeuralConfig {
 
 impl NeuralWakeWordModel {
     /// Create new neural wake word model
+    #[must_use]
     pub fn new() -> Self {
         let supported_words = vec!["hey".to_string(), "wake".to_string(), "listen".to_string()];
 
@@ -320,7 +322,8 @@ impl NeuralWakeWordModel {
         };
 
         // Initialize weights with Xavier initialization
-        let mut model = Self {
+
+        Self {
             input_weights: Self::init_weights(config.input_size, config.hidden1_size),
             input_biases: vec![0.0; config.hidden1_size],
             hidden_weights: Self::init_weights(config.hidden1_size, config.hidden2_size),
@@ -330,9 +333,7 @@ impl NeuralWakeWordModel {
             metadata,
             supported_words,
             config,
-        };
-
-        model
+        }
     }
 
     /// Initialize weights using Xavier initialization
@@ -404,7 +405,7 @@ impl NeuralWakeWordModel {
             .collect()
     }
 
-    /// ReLU activation function
+    /// `ReLU` activation function
     fn relu_activation(&self, input: &[f32]) -> Vec<f32> {
         input.iter().map(|&x| x.max(0.0)).collect()
     }
@@ -508,6 +509,7 @@ pub struct MockWakeWordModel {
 
 impl MockWakeWordModel {
     /// Create a new mock wake word model for testing
+    #[must_use]
     pub fn new() -> Self {
         let metadata = ModelMetadata {
             name: "MockWakeWordModel".to_string(),
@@ -617,7 +619,7 @@ mod tests {
 
         let a = vec![1.0, 2.0, 3.0];
         let b = vec![1.0, 2.0, 3.0];
-        assert_eq!(model.dtw_distance(&a, &b), 0.0);
+        assert!(model.dtw_distance(&a, &b).abs() < f32::EPSILON);
 
         let c = vec![2.0, 3.0, 4.0];
         let distance = model.dtw_distance(&a, &c);

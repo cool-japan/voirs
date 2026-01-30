@@ -56,7 +56,7 @@ impl MemoryMappedAudio {
         let total_samples = mmap.len() / std::mem::size_of::<f32>();
 
         // Validate that samples are compatible with channel count
-        if total_samples % channels as usize != 0 {
+        if !total_samples.is_multiple_of(channels as usize) {
             return Err(DatasetError::FormatError(format!(
                 "Total samples ({total_samples}) not divisible by channel count ({channels})"
             )));

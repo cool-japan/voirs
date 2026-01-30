@@ -3,6 +3,38 @@
 //! Command-line interface for VoiRS speech synthesis framework.
 //! Provides easy-to-use commands for synthesis, voice management, and more.
 
+// Allow pedantic lints that are acceptable for audio/DSP processing code
+#![allow(clippy::cast_precision_loss)] // Acceptable for audio sample conversions
+#![allow(clippy::cast_possible_truncation)] // Controlled truncation in audio processing
+#![allow(clippy::cast_sign_loss)] // Intentional in index calculations
+#![allow(clippy::missing_errors_doc)] // Many internal functions with self-documenting error types
+#![allow(clippy::missing_panics_doc)] // Panics are documented where relevant
+#![allow(clippy::unused_self)] // Some trait implementations require &self for consistency
+#![allow(clippy::must_use_candidate)] // Not all return values need must_use annotation
+#![allow(clippy::doc_markdown)] // Technical terms don't all need backticks
+#![allow(clippy::unnecessary_wraps)] // Result wrappers maintained for API consistency
+#![allow(clippy::float_cmp)] // Exact float comparisons are intentional in some contexts
+#![allow(clippy::match_same_arms)] // Pattern matching clarity sometimes requires duplication
+#![allow(clippy::module_name_repetitions)] // Type names often repeat module names
+#![allow(clippy::struct_excessive_bools)] // Config structs naturally have many boolean flags
+#![allow(clippy::too_many_lines)] // Some functions are inherently complex
+#![allow(clippy::needless_pass_by_value)] // Some functions designed for ownership transfer
+#![allow(clippy::similar_names)] // Many similar variable names in algorithms
+#![allow(clippy::unused_async)] // Public API functions may need async for consistency
+#![allow(clippy::needless_range_loop)] // Range loops sometimes clearer than iterators
+#![allow(clippy::uninlined_format_args)] // Explicit argument names can improve clarity
+#![allow(clippy::manual_clamp)] // Manual clamping sometimes clearer
+#![allow(clippy::return_self_not_must_use)] // Not all builder methods need must_use
+#![allow(clippy::cast_possible_wrap)] // Controlled wrapping in processing code
+#![allow(clippy::cast_lossless)] // Explicit casts preferred for clarity
+#![allow(clippy::wildcard_imports)] // Prelude imports are convenient and standard
+#![allow(clippy::format_push_string)] // Sometimes more readable than alternative
+#![allow(clippy::redundant_closure_for_method_calls)] // Closures sometimes needed for type inference
+#![allow(clippy::too_many_arguments)] // Some functions naturally need many parameters
+#![allow(clippy::field_reassign_with_default)] // Sometimes clearer than builder pattern
+#![allow(clippy::trivially_copy_pass_by_ref)] // API consistency more important
+#![allow(clippy::await_holding_lock)] // Controlled lock holding in async contexts
+
 use crate::cli_types::{CliAudioFormat, CliQualityLevel};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -17,6 +49,7 @@ pub mod completion;
 pub mod config;
 pub mod error;
 pub mod help;
+pub mod lsp;
 pub mod model_types;
 pub mod output;
 pub mod packaging;
@@ -26,6 +59,9 @@ pub mod plugins;
 pub mod progress;
 pub mod ssml;
 pub mod synthesis;
+pub mod telemetry;
+pub mod validation;
+pub mod workflow;
 
 // Re-export important types are already imported above
 
@@ -319,6 +355,10 @@ pub enum Commands {
         /// Play audio after synthesis
         #[arg(short, long)]
         play: bool,
+
+        /// Auto-detect input format (SSML, Markdown, JSON, or plain text)
+        #[arg(long)]
+        auto_detect: bool,
     },
 
     /// Synthesize from file
@@ -366,6 +406,24 @@ pub enum Commands {
         force: bool,
     },
 
+    /// Preview a voice with a sample text
+    PreviewVoice {
+        /// Voice ID to preview
+        voice_id: String,
+
+        /// Custom preview text (default: "This is a preview of this voice.")
+        #[arg(long)]
+        text: Option<String>,
+
+        /// Save preview to file instead of just playing
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+
+        /// Skip audio playback (only save to file)
+        #[arg(long)]
+        no_play: bool,
+    },
+
     /// Compare multiple voices side by side
     CompareVoices {
         /// Voice IDs to compare
@@ -392,6 +450,28 @@ pub enum Commands {
         /// Save detailed test report to file
         #[arg(long)]
         save_report: bool,
+    },
+
+    /// Test API endpoints for VoiRS server
+    TestApi {
+        /// Server URL (e.g., http://localhost:8080)
+        server_url: String,
+
+        /// API key for authentication
+        #[arg(long)]
+        api_key: Option<String>,
+
+        /// Number of concurrent requests for load testing
+        #[arg(long)]
+        concurrent: Option<usize>,
+
+        /// Path to save test report (JSON or Markdown)
+        #[arg(long)]
+        report: Option<String>,
+
+        /// Enable verbose output
+        #[arg(long)]
+        verbose: bool,
     },
 
     /// Show configuration
@@ -570,11 +650,32 @@ pub enum Commands {
         command: DatasetCommands,
     },
 
+    /// Real-time monitoring dashboard
+    Dashboard {
+        /// Update interval in milliseconds
+        #[arg(short, long, default_value = "500")]
+        interval: u64,
+    },
+
     /// Cloud integration commands
     Cloud {
         /// Cloud subcommand to execute
         #[command(subcommand)]
         command: CloudCommands,
+    },
+
+    /// Telemetry management commands
+    Telemetry {
+        /// Telemetry subcommand to execute
+        #[command(subcommand)]
+        command: commands::telemetry::TelemetryCommands,
+    },
+
+    /// Start Language Server Protocol (LSP) server for editor integrations
+    Lsp {
+        /// Enable verbose logging
+        #[arg(long)]
+        verbose: bool,
     },
 
     /// Kokoro multilingual TTS commands (requires onnx feature)
@@ -705,7 +806,167 @@ pub enum Commands {
         /// Number of diffusion sampling steps
         #[arg(long, default_value = "50")]
         steps: usize,
+
+        /// Quality preset (fast, balanced, high)
+        #[arg(long)]
+        quality: Option<String>,
+
+        /// Batch processing: input directory
+        #[arg(long)]
+        batch_input: Option<PathBuf>,
+
+        /// Batch processing: output directory
+        #[arg(long)]
+        batch_output: Option<PathBuf>,
+
+        /// Show performance metrics
+        #[arg(long)]
+        metrics: bool,
     },
+
+    /// Stream real-time text-to-speech synthesis
+    Stream {
+        /// Initial text to synthesize
+        text: Option<String>,
+
+        /// Target latency in milliseconds
+        #[arg(long, default_value = "100")]
+        latency: u64,
+
+        /// Chunk size in frames
+        #[arg(long, default_value = "512")]
+        chunk_size: usize,
+
+        /// Buffer size in chunks
+        #[arg(long, default_value = "4")]
+        buffer_chunks: usize,
+
+        /// Enable audio output
+        #[arg(long)]
+        play: bool,
+    },
+
+    /// Inspect and analyze model files
+    ModelInspect {
+        /// Model file path
+        model: PathBuf,
+
+        /// Show detailed layer information
+        #[arg(long)]
+        detailed: bool,
+
+        /// Export architecture to file
+        #[arg(long)]
+        export: Option<PathBuf>,
+
+        /// Verify model integrity
+        #[arg(long)]
+        verify: bool,
+    },
+
+    /// Export voice profile or preset
+    Export {
+        /// Export type (voice-profile, emotion-preset, config)
+        #[arg(long)]
+        export_type: String,
+
+        /// Source identifier (voice ID, preset name, etc.)
+        source: String,
+
+        /// Output file path
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Include model weights
+        #[arg(long)]
+        include_weights: bool,
+    },
+
+    /// Import voice profile or preset
+    Import {
+        /// Import file path
+        input: PathBuf,
+
+        /// Installation name/identifier
+        #[arg(long)]
+        name: Option<String>,
+
+        /// Force overwrite if exists
+        #[arg(long)]
+        force: bool,
+
+        /// Validate before importing
+        #[arg(long, default_value = "true")]
+        validate: bool,
+    },
+
+    /// View command history and get suggestions
+    History {
+        /// Number of recent commands to show
+        #[arg(short = 'n', long, default_value = "20")]
+        limit: usize,
+
+        /// Show usage statistics
+        #[arg(long)]
+        stats: bool,
+
+        /// Show command suggestions based on history
+        #[arg(long)]
+        suggest: bool,
+
+        /// Clear all history
+        #[arg(long)]
+        clear: bool,
+    },
+
+    /// Workflow automation commands
+    Workflow {
+        /// Workflow subcommand to execute
+        #[command(subcommand)]
+        command: commands::workflow::WorkflowCommands,
+    },
+
+    /// Manage command aliases
+    Alias {
+        /// Alias subcommand
+        #[command(subcommand)]
+        command: AliasCommand,
+    },
+}
+
+/// Alias management subcommands
+#[derive(Subcommand)]
+pub enum AliasCommand {
+    /// Add a new alias
+    Add {
+        /// Alias name
+        name: String,
+
+        /// Command to execute (without 'voirs' prefix)
+        command: String,
+
+        /// Optional description
+        #[arg(short, long)]
+        description: Option<String>,
+    },
+
+    /// Remove an alias
+    Remove {
+        /// Alias name to remove
+        name: String,
+    },
+
+    /// List all aliases
+    List,
+
+    /// Show details of a specific alias
+    Show {
+        /// Alias name to show
+        name: String,
+    },
+
+    /// Clear all aliases
+    Clear,
 }
 
 /// CLI application implementation
@@ -901,20 +1162,20 @@ impl CliApp {
                 quality,
                 enhance,
                 play,
+                auto_detect,
             } => {
-                commands::synthesize::run_synthesize(
+                let args = commands::synthesize::SynthesizeArgs {
                     text,
-                    output.as_deref(),
-                    *rate,
-                    *pitch,
-                    *volume,
-                    (*quality).into(),
-                    *enhance,
-                    *play,
-                    &config,
-                    &self.global,
-                )
-                .await
+                    output: output.as_deref(),
+                    rate: *rate,
+                    pitch: *pitch,
+                    volume: *volume,
+                    quality: (*quality).into(),
+                    enhance: *enhance,
+                    play: *play,
+                    auto_detect: *auto_detect,
+                };
+                commands::synthesize::run_synthesize(args, &config, &self.global).await
             }
 
             Commands::SynthesizeFile {
@@ -946,6 +1207,23 @@ impl CliApp {
                 commands::voices::run_download_voice(voice_id, *force, &config).await
             }
 
+            Commands::PreviewVoice {
+                voice_id,
+                text,
+                output,
+                no_play,
+            } => {
+                commands::voices::run_preview_voice(
+                    voice_id,
+                    text.as_deref(),
+                    output.as_ref(),
+                    *no_play,
+                    &config,
+                    &self.global,
+                )
+                .await
+            }
+
             Commands::CompareVoices { voice_ids } => {
                 commands::voices::run_compare_voices(voice_ids.clone(), &config).await
             }
@@ -966,6 +1244,25 @@ impl CliApp {
                 )
                 .await
             }
+
+            Commands::TestApi {
+                server_url,
+                api_key,
+                concurrent,
+                report,
+                verbose,
+            } => commands::test_api::run_api_tests(
+                server_url.clone(),
+                api_key.clone(),
+                *concurrent,
+                report.clone(),
+                *verbose,
+            )
+            .await
+            .map_err(|e| voirs_sdk::VoirsError::InternalError {
+                component: "API Tester".to_string(),
+                message: e.to_string(),
+            }),
 
             Commands::Config { show, init, path } => {
                 commands::config::run_config(*show, *init, path.as_deref(), &config).await
@@ -1026,14 +1323,16 @@ impl CliApp {
                 resume,
             } => {
                 commands::batch::run_batch_process(
-                    input,
-                    output_dir.as_ref(),
-                    *workers,
-                    (*quality).into(),
-                    *rate,
-                    *pitch,
-                    *volume,
-                    *resume,
+                    commands::batch::BatchProcessArgs {
+                        input,
+                        output_dir: output_dir.as_deref(),
+                        workers: *workers,
+                        quality: (*quality).into(),
+                        rate: *rate,
+                        pitch: *pitch,
+                        volume: *volume,
+                        resume: *resume,
+                    },
                     &config,
                     &self.global,
                 )
@@ -1123,8 +1422,32 @@ impl CliApp {
                 commands::dataset::execute_dataset_command(command, &config, &self.global).await
             }
 
+            Commands::Dashboard { interval } => commands::dashboard::run_dashboard(*interval)
+                .await
+                .map_err(|e| voirs_sdk::VoirsError::InternalError {
+                    component: "Dashboard".to_string(),
+                    message: e.to_string(),
+                }),
+
             Commands::Cloud { command } => {
                 commands::cloud::execute_cloud_command(command, &config, &self.global).await
+            }
+
+            Commands::Telemetry { command } => commands::telemetry::execute(command.clone())
+                .await
+                .map_err(|e| {
+                    voirs_sdk::VoirsError::config_error(format!("Telemetry command failed: {}", e))
+                }),
+
+            Commands::Lsp { verbose } => {
+                if *verbose {
+                    eprintln!("Starting VoiRS LSP server in verbose mode...");
+                }
+
+                let server = crate::lsp::LspServer::new();
+                server.start().await.map_err(|e| {
+                    voirs_sdk::VoirsError::config_error(format!("LSP server failed: {}", e))
+                })
             }
 
             #[cfg(feature = "onnx")]
@@ -1298,17 +1621,215 @@ impl CliApp {
                 mel,
                 output,
                 steps,
-            } => commands::vocoder_inference::run_vocoder_inference(
-                checkpoint.as_path(),
-                mel.as_deref(),
-                output.as_path(),
-                *steps,
-                &self.global,
-            )
-            .await
-            .map_err(|e| {
-                voirs_sdk::VoirsError::config_error(format!("Vocoder inference failed: {}", e))
-            }),
+                quality,
+                batch_input,
+                batch_output,
+                metrics,
+            } => {
+                let config = commands::vocoder_inference::VocoderInferenceConfig {
+                    checkpoint: checkpoint.as_path(),
+                    mel_path: mel.as_deref(),
+                    output: output.as_path(),
+                    steps: *steps,
+                    quality: quality.as_deref(),
+                    batch_input: batch_input.as_ref(),
+                    batch_output: batch_output.as_ref(),
+                    show_metrics: *metrics,
+                };
+                commands::vocoder_inference::run_vocoder_inference(config, &self.global)
+                    .await
+                    .map_err(|e| {
+                        voirs_sdk::VoirsError::config_error(format!(
+                            "Vocoder inference failed: {}",
+                            e
+                        ))
+                    })
+            }
+
+            Commands::Stream {
+                text,
+                latency,
+                chunk_size,
+                buffer_chunks,
+                play,
+            } => {
+                commands::streaming::run_streaming_synthesis(
+                    text.as_deref(),
+                    *latency,
+                    *chunk_size,
+                    *buffer_chunks,
+                    *play,
+                    &config,
+                    &self.global,
+                )
+                .await
+            }
+
+            Commands::ModelInspect {
+                model,
+                detailed,
+                export,
+                verify,
+            } => {
+                commands::model_inspect::run_model_inspect(
+                    model,
+                    *detailed,
+                    export.as_ref(),
+                    *verify,
+                    &self.global,
+                )
+                .await
+            }
+
+            Commands::Export {
+                export_type,
+                source,
+                output,
+                include_weights,
+            } => {
+                commands::export_import::run_export(
+                    export_type,
+                    source,
+                    output,
+                    *include_weights,
+                    &config,
+                    &self.global,
+                )
+                .await
+            }
+
+            Commands::Import {
+                input,
+                name,
+                force,
+                validate,
+            } => {
+                commands::export_import::run_import(
+                    input,
+                    name.as_deref(),
+                    *force,
+                    *validate,
+                    &config,
+                    &self.global,
+                )
+                .await
+            }
+
+            Commands::History {
+                limit,
+                stats,
+                suggest,
+                clear,
+            } => commands::history::run_history(*limit, *stats, *suggest, *clear).await,
+
+            Commands::Workflow { command } => {
+                use commands::workflow::WorkflowCommands;
+                match command {
+                    WorkflowCommands::Execute {
+                        workflow_file,
+                        variables,
+                        max_parallel,
+                        resume,
+                        state_dir,
+                    } => commands::workflow::run_workflow_execute(
+                        workflow_file.clone(),
+                        variables.clone(),
+                        *max_parallel,
+                        *resume,
+                        state_dir.clone(),
+                    )
+                    .await
+                    .map_err(|e| voirs_sdk::VoirsError::InternalError {
+                        component: "Workflow".to_string(),
+                        message: e.to_string(),
+                    }),
+                    WorkflowCommands::Validate {
+                        workflow_file,
+                        detailed,
+                        format,
+                    } => commands::workflow::run_workflow_validate(
+                        workflow_file.clone(),
+                        *detailed,
+                        format.clone(),
+                    )
+                    .await
+                    .map_err(|e| voirs_sdk::VoirsError::InternalError {
+                        component: "Workflow".to_string(),
+                        message: e.to_string(),
+                    }),
+                    WorkflowCommands::List {
+                        registry_dir,
+                        detailed,
+                    } => commands::workflow::run_workflow_list(registry_dir.clone(), *detailed)
+                        .await
+                        .map_err(|e| voirs_sdk::VoirsError::InternalError {
+                            component: "Workflow".to_string(),
+                            message: e.to_string(),
+                        }),
+                    WorkflowCommands::Status {
+                        workflow_name,
+                        state_dir,
+                        format,
+                    } => commands::workflow::run_workflow_status(
+                        workflow_name.clone(),
+                        state_dir.clone(),
+                        format.clone(),
+                    )
+                    .await
+                    .map_err(|e| voirs_sdk::VoirsError::InternalError {
+                        component: "Workflow".to_string(),
+                        message: e.to_string(),
+                    }),
+                    WorkflowCommands::Resume {
+                        workflow_name,
+                        state_dir,
+                        max_parallel,
+                    } => commands::workflow::run_workflow_resume(
+                        workflow_name.clone(),
+                        state_dir.clone(),
+                        *max_parallel,
+                    )
+                    .await
+                    .map_err(|e| voirs_sdk::VoirsError::InternalError {
+                        component: "Workflow".to_string(),
+                        message: e.to_string(),
+                    }),
+                    WorkflowCommands::Stop {
+                        workflow_name,
+                        state_dir,
+                        force,
+                    } => commands::workflow::run_workflow_stop(
+                        workflow_name.clone(),
+                        state_dir.clone(),
+                        *force,
+                    )
+                    .await
+                    .map_err(|e| voirs_sdk::VoirsError::InternalError {
+                        component: "Workflow".to_string(),
+                        message: e.to_string(),
+                    }),
+                }
+            }
+
+            Commands::Alias { command } => {
+                use commands::alias::AliasSubcommand;
+                let subcommand = match command {
+                    AliasCommand::Add {
+                        name,
+                        command,
+                        description,
+                    } => AliasSubcommand::Add {
+                        name: name.clone(),
+                        command: command.clone(),
+                        description: description.clone(),
+                    },
+                    AliasCommand::Remove { name } => AliasSubcommand::Remove { name: name.clone() },
+                    AliasCommand::List => AliasSubcommand::List,
+                    AliasCommand::Show { name } => AliasSubcommand::Show { name: name.clone() },
+                    AliasCommand::Clear => AliasSubcommand::Clear,
+                };
+                commands::alias::run_alias(subcommand).await
+            }
         }
     }
 }

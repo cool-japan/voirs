@@ -405,7 +405,7 @@ pub struct BatchRecognitionRequest {
 }
 
 /// Batch configuration
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 /// Batch Config Request
 pub struct BatchConfigRequest {
     /// Default recognition config for all inputs

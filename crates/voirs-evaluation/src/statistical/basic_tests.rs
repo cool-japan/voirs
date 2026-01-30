@@ -322,7 +322,7 @@ impl StatisticalAnalyzer {
 
         let denominator = (x_var * y_var).sqrt();
         let correlation = if denominator > 0.0 && denominator.is_finite() {
-            numerator / denominator
+            (numerator / denominator).clamp(-1.0, 1.0)
         } else {
             0.0 // No variation means no correlation
         };

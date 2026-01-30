@@ -499,12 +499,10 @@ pub fn detect_silence(audio: &AudioData, threshold_db: f32) -> Result<(usize, us
     let silence_regions = SilenceDetector::detect_silence(audio, threshold);
 
     // Return the start of first silence and end of last silence
-    if silence_regions.is_empty() {
-        Ok((0, audio.samples().len()))
+    if let (Some(first), Some(last)) = (silence_regions.first(), silence_regions.last()) {
+        Ok((first.0, last.1))
     } else {
-        let start = silence_regions.first().unwrap().0;
-        let end = silence_regions.last().unwrap().1;
-        Ok((start, end))
+        Ok((0, audio.samples().len()))
     }
 }
 

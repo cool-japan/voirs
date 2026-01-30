@@ -665,7 +665,9 @@ impl CacheManager {
         // Update task handles after all async operations are complete
         let task_count = task_handles.len();
         {
-            let mut stored_handles = self.task_controller.task_handles.write().unwrap();
+            let mut stored_handles = self.task_controller.task_handles.write().map_err(|e| {
+                VoirsError::internal("cache_management", format!("Lock poisoned: {e}"))
+            })?;
             stored_handles.extend(task_handles);
         }
 
@@ -686,7 +688,10 @@ impl CacheManager {
 
             // Initialize task status
             {
-                let mut status = task_status.write().unwrap();
+                let Ok(mut status) = task_status.write() else {
+                    error!("Failed to acquire task status lock for maintenance task");
+                    return;
+                };
                 status.insert(
                     "maintenance".to_string(),
                     TaskStatus {
@@ -709,15 +714,18 @@ impl CacheManager {
                             error!("Maintenance cycle failed: {}", e);
 
                             // Update error count
-                            let mut status = task_status.write().unwrap();
-                            if let Some(task_status) = status.get_mut("maintenance") {
-                                task_status.error_count += 1;
+                            if let Ok(mut status) = task_status.write() {
+                                if let Some(task_status) = status.get_mut("maintenance") {
+                                    task_status.error_count += 1;
+                                }
                             }
                         }
 
                         // Update task status
                         let duration = start_time.elapsed().as_millis() as f64;
-                        let mut status = task_status.write().unwrap();
+                        let Ok(mut status) = task_status.write() else {
+                            continue;
+                        };
                         if let Some(task_status) = status.get_mut("maintenance") {
                             task_status.last_execution = Some(SystemTime::now());
                             task_status.execution_count += 1;
@@ -735,9 +743,10 @@ impl CacheManager {
             }
 
             // Mark task as stopped
-            let mut status = task_status.write().unwrap();
-            if let Some(task_status) = status.get_mut("maintenance") {
-                task_status.running = false;
+            if let Ok(mut status) = task_status.write() {
+                if let Some(task_status) = status.get_mut("maintenance") {
+                    task_status.running = false;
+                }
             }
         })
     }
@@ -862,12 +871,13 @@ impl CacheManager {
 
         // Store health result
         {
-            let mut history = health_monitor.health_history.write().unwrap();
-            history.push(health_result);
+            if let Ok(mut history) = health_monitor.health_history.write() {
+                history.push(health_result);
 
-            // Keep only recent history
-            if history.len() > 100 {
-                history.remove(0);
+                // Keep only recent history
+                if history.len() > 100 {
+                    history.remove(0);
+                }
             }
         }
 
@@ -1013,13 +1023,14 @@ impl CacheManager {
 
         // Store metrics
         {
-            let mut stored_metrics = metrics_collector.metrics.write().unwrap();
-            stored_metrics.extend(metrics);
+            if let Ok(mut stored_metrics) = metrics_collector.metrics.write() {
+                stored_metrics.extend(metrics);
 
-            // Keep only recent metrics (last 1000 points)
-            let len = stored_metrics.len();
-            if len > 1000 {
-                stored_metrics.drain(0..len - 1000);
+                // Keep only recent metrics (last 1000 points)
+                let len = stored_metrics.len();
+                if len > 1000 {
+                    stored_metrics.drain(0..len - 1000);
+                }
             }
         }
 
@@ -1106,7 +1117,10 @@ impl CacheManager {
 
         // Wait for tasks to complete
         let task_handles = {
-            let mut handles = self.task_controller.task_handles.write().unwrap();
+            let Ok(mut handles) = self.task_controller.task_handles.write() else {
+                warn!("Failed to acquire task handles lock during shutdown");
+                return Ok(());
+            };
             std::mem::take(&mut *handles)
         };
 
@@ -1122,26 +1136,38 @@ impl CacheManager {
 
     /// Get cache health status
     pub fn get_health_status(&self) -> Vec<HealthCheckResult> {
-        let history = self.health_monitor.health_history.read().unwrap();
-        history.clone()
+        self.health_monitor
+            .health_history
+            .read()
+            .map(|history| history.clone())
+            .unwrap_or_default()
     }
 
     /// Get active alerts
     pub fn get_active_alerts(&self) -> Vec<CacheAlert> {
-        let alerts = self.health_monitor.active_alerts.read().unwrap();
-        alerts.clone()
+        self.health_monitor
+            .active_alerts
+            .read()
+            .map(|alerts| alerts.clone())
+            .unwrap_or_default()
     }
 
     /// Get performance metrics
     pub fn get_performance_metrics(&self) -> Vec<MetricPoint> {
-        let metrics = self.metrics_collector.metrics.read().unwrap();
-        metrics.clone()
+        self.metrics_collector
+            .metrics
+            .read()
+            .map(|metrics| metrics.clone())
+            .unwrap_or_default()
     }
 
     /// Get task status
     pub fn get_task_status(&self) -> HashMap<String, TaskStatus> {
-        let status = self.task_controller.task_status.read().unwrap();
-        status.clone()
+        self.task_controller
+            .task_status
+            .read()
+            .map(|status| status.clone())
+            .unwrap_or_default()
     }
 }
 

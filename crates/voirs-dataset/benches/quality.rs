@@ -286,8 +286,9 @@ fn bench_signal_degradation(c: &mut Criterion) {
     group.throughput(Throughput::Elements(reference.samples().len() as u64));
 
     // Pre-generate random noise to avoid expensive random calls in benchmark loop
-    use rand::{Rng, SeedableRng};
-    let mut rng = scirs2_core::random::Random::seed(42); // Fixed seed for reproducibility
+    use scirs2_core::random::*;
+    use scirs2_core::Rng;
+    let mut rng = Random::seed(42); // Fixed seed for reproducibility
     let noise_samples: Vec<f32> = (0..reference.samples().len())
         .map(|_| rng.r#gen::<f32>() - 0.5)
         .collect();

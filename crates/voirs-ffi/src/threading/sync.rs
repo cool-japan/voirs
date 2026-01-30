@@ -132,6 +132,12 @@ struct CondvarState {
     wait_count: u32,
 }
 
+impl Default for VoirsCondvar {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VoirsCondvar {
     /// Create a new condition variable
     pub fn new() -> Self {

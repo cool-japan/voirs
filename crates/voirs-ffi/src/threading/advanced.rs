@@ -23,6 +23,12 @@ pub struct WorkStealingQueue<T> {
     steals: AtomicUsize,
 }
 
+impl<T> Default for WorkStealingQueue<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> WorkStealingQueue<T> {
     /// Create a new work stealing queue
     pub fn new() -> Self {
@@ -179,6 +185,12 @@ pub struct PriorityScheduler {
     completed_jobs: AtomicUsize,
     expired_jobs: AtomicUsize,
     deadline_misses: AtomicUsize,
+}
+
+impl Default for PriorityScheduler {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PriorityScheduler {
@@ -379,6 +391,15 @@ impl<T> Ord for CallbackEntry<T> {
         self.priority
             .cmp(&other.priority)
             .then_with(|| self.timestamp.cmp(&other.timestamp))
+    }
+}
+
+impl<T> Default for CallbackQueue<T>
+where
+    T: Send + 'static,
+{
+    fn default() -> Self {
+        Self::new()
     }
 }
 

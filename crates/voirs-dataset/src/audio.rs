@@ -5,12 +5,16 @@
 
 pub mod advanced_analysis;
 pub mod data;
+pub mod fingerprint;
 pub mod io;
 pub mod multimodal;
 pub mod processing;
 pub mod psychoacoustic;
 pub mod realtime;
 pub mod simd;
+
+// Re-export enhanced SIMD operations
+pub use simd::{EnhancedSimdProcessor, SimdAudioProcessor};
 
 use crate::{AudioData, AudioFormat, DatasetError, Result};
 use std::path::Path;

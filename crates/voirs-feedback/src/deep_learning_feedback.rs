@@ -209,9 +209,9 @@ pub struct TokenizerConfig {
 pub enum TokenizationStrategy {
     /// Byte Pair Encoding
     BPE,
-    /// WordPiece
+    /// `WordPiece`
     WordPiece,
-    /// SentencePiece
+    /// `SentencePiece`
     SentencePiece,
     /// Character-level
     Character,
@@ -1001,7 +1001,7 @@ impl DeepLearningFeedbackSystem {
         .min(1.0)
     }
 
-    /// Convert preferences to HashMap
+    /// Convert preferences to `HashMap`
     fn convert_preferences_to_map(preferences: &FeedbackPreferences) -> HashMap<String, String> {
         let mut map = HashMap::new();
         map.insert(
@@ -1037,11 +1037,11 @@ impl DeepLearningFeedbackSystem {
 
     /// Calculate time since last feedback
     fn calculate_last_feedback_time(previous_feedback: &[UserFeedback]) -> f32 {
-        if !previous_feedback.is_empty() {
+        if previous_feedback.is_empty() {
+            f32::INFINITY // No previous feedback
+        } else {
             // Since UserFeedback doesn't have timestamp, use a default value
             30.0 // Default 30 seconds since last feedback
-        } else {
-            f32::INFINITY // No previous feedback
         }
     }
 
@@ -1130,7 +1130,7 @@ impl DeepLearningFeedbackSystem {
         {
             use std::process::Command;
             if let Ok(output) = Command::new("ps")
-                .args(&["-o", "rss=", "-p"])
+                .args(["-o", "rss=", "-p"])
                 .arg(std::process::id().to_string())
                 .output()
             {
@@ -1190,19 +1190,19 @@ impl FeedbackModel for TransformerFeedbackModel {
             .spectral_features
             .centroid
             .as_ref()
-            .map(|centroid| centroid.iter().sum::<f32>() / centroid.len() as f32 / 1000.0)
-            .unwrap_or(0.8);
+            .map_or(0.8, |centroid| {
+                centroid.iter().sum::<f32>() / centroid.len() as f32 / 1000.0
+            });
 
         let pronunciation_score = features
             .audio_features
             .prosodic_features
             .pitch
             .as_ref()
-            .map(|pitch| {
+            .map_or(0.7, |pitch| {
                 let avg_pitch = pitch.iter().sum::<f32>() / pitch.len() as f32;
                 (avg_pitch / 200.0).min(1.0).max(0.0)
-            })
-            .unwrap_or(0.7);
+            });
 
         let feedback_items = vec![UserFeedback {
             message: format!(
@@ -1232,7 +1232,7 @@ impl FeedbackModel for TransformerFeedbackModel {
             },
         }];
 
-        let overall_score = (quality_score + pronunciation_score) / 2.0;
+        let overall_score = f32::midpoint(quality_score, pronunciation_score);
 
         Ok(FeedbackResponse {
             feedback_items,
@@ -1315,6 +1315,7 @@ pub struct MockFeedbackModel {
 
 impl MockFeedbackModel {
     /// Description
+    #[must_use]
     pub fn new(config: ModelConfig) -> Self {
         let info = ModelInfo {
             name: "MockFeedback".to_string(),
@@ -1388,8 +1389,15 @@ pub struct MockFeatureExtractor {
     supported_features: Vec<FeatureType>,
 }
 
+impl Default for MockFeatureExtractor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockFeatureExtractor {
     /// Description
+    #[must_use]
     pub fn new() -> Self {
         Self {
             supported_features: vec![
@@ -1523,6 +1531,7 @@ impl FeatureExtractor for MockFeatureExtractor {
 
 impl ModelCache {
     /// Description
+    #[must_use]
     pub fn new(max_size_mb: usize) -> Self {
         Self {
             cached_models: HashMap::new(),
@@ -1533,8 +1542,15 @@ impl ModelCache {
     }
 }
 
+impl Default for InferenceStatistics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InferenceStatistics {
     /// Description
+    #[must_use]
     pub fn new() -> Self {
         Self {
             total_inferences: 0,

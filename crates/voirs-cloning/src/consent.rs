@@ -503,6 +503,12 @@ pub enum ViolationSeverity {
     Critical,
 }
 
+impl Default for ConsentManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConsentManager {
     /// Create a new consent manager
     pub fn new() -> Self {
@@ -571,7 +577,7 @@ impl ConsentManager {
         // Index by subject ID
         self.subject_index
             .entry(subject_identity.subject_id)
-            .or_insert_with(HashSet::new)
+            .or_default()
             .insert(consent_id);
 
         // Store consent
@@ -898,7 +904,7 @@ impl ConsentManager {
             .get(&consent_id)
             .ok_or_else(|| Error::Validation("Consent record not found".to_string()))?;
 
-        serde_json::to_string_pretty(consent).map_err(|e| Error::Serialization(e))
+        serde_json::to_string_pretty(consent).map_err(Error::Serialization)
     }
 
     /// Get consent statistics for a specific consent

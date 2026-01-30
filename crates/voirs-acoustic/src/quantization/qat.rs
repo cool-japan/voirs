@@ -186,7 +186,9 @@ impl QuantizationAwareTrainer {
     /// Forward pass through fake quantization
     pub fn forward(&self, layer_name: &str, input: &[f32], training: bool) -> Result<Vec<f32>> {
         let layer = self.fake_quant_layers.get(layer_name).ok_or_else(|| {
-            AcousticError::Processing(format!("No fake quantization layer found: {layer_name}"))
+            AcousticError::ProcessingError {
+                message: format!("No fake quantization layer found: {layer_name}"),
+            }
         })?;
 
         Ok(layer.forward(input, training))
@@ -215,9 +217,9 @@ impl QuantizationAwareTrainer {
         let (qmin, qmax) = self.get_quantization_range();
 
         if activations.is_empty() {
-            return Err(AcousticError::Processing(
-                "Cannot calibrate from empty activations".to_string(),
-            ));
+            return Err(AcousticError::ProcessingError {
+                message: "Cannot calibrate from empty activations".to_string(),
+            });
         }
 
         let min_val = activations.iter().copied().fold(f32::INFINITY, f32::min);

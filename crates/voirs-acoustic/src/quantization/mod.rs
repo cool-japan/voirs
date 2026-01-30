@@ -240,9 +240,9 @@ impl ModelQuantizer {
     /// Calculate quantization parameters from calibration data
     fn calculate_quantization_params(&self, data: &[f32]) -> Result<QuantizationParams> {
         if data.is_empty() {
-            return Err(AcousticError::Processing(
-                "Cannot calculate quantization params from empty data".to_string(),
-            ));
+            return Err(AcousticError::ProcessingError {
+                message: "Cannot calculate quantization params from empty data".to_string(),
+            });
         }
 
         let min_val = data.iter().copied().fold(f32::INFINITY, f32::min);
@@ -276,11 +276,11 @@ impl ModelQuantizer {
         shape: Vec<usize>,
     ) -> Result<QuantizedTensor> {
         let params = self.layer_params.lock().unwrap();
-        let qparams = params.get(layer_name).ok_or_else(|| {
-            AcousticError::Processing(format!(
-                "No quantization parameters found for layer: {layer_name}"
-            ))
-        })?;
+        let qparams = params
+            .get(layer_name)
+            .ok_or_else(|| AcousticError::ProcessingError {
+                message: format!("No quantization parameters found for layer: {layer_name}"),
+            })?;
 
         let quantized_data = qparams.quantize_tensor(data);
         Ok(QuantizedTensor::new(

@@ -1,4 +1,4 @@
-//! Offline capability support for VoiRS feedback system
+//! Offline capability support for `VoiRS` feedback system
 //!
 //! This module provides offline functionality including data caching, offline-first
 //! operations, and seamless online/offline transitions.
@@ -21,6 +21,7 @@ pub struct OfflineManager {
 
 impl OfflineManager {
     /// Create a new offline manager
+    #[must_use]
     pub fn new(config: OfflineConfig) -> Self {
         Self {
             config,
@@ -31,6 +32,7 @@ impl OfflineManager {
     }
 
     /// Check if system is currently offline
+    #[must_use]
     pub fn is_offline(&self) -> bool {
         // This would check network connectivity
         // For now, simulate offline state
@@ -100,7 +102,7 @@ impl OfflineManager {
 
         let feedback_response = FeedbackResponse {
             feedback_items: vec![crate::traits::UserFeedback {
-                message: format!("Offline feedback for: {}", text),
+                message: format!("Offline feedback for: {text}"),
                 suggestion: Some("Continue practicing to improve".to_string()),
                 confidence: 0.7,
                 score: 0.75,
@@ -159,7 +161,7 @@ impl OfflineManager {
 
         for operation in operations {
             match self.sync_operation(&operation).await {
-                Ok(_) => {
+                Ok(()) => {
                     self.queue.mark_completed(&operation.id);
                 }
                 Err(e) => {
@@ -198,6 +200,7 @@ impl OfflineManager {
     }
 
     /// Get offline status
+    #[must_use]
     pub fn get_offline_status(&self) -> OfflineStatus {
         OfflineStatus {
             is_offline: self.is_offline(),
@@ -257,8 +260,15 @@ pub struct OfflineCache {
     total_size: u64,
 }
 
+impl Default for OfflineCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OfflineCache {
     /// Create a new offline cache
+    #[must_use]
     pub fn new() -> Self {
         Self {
             cached_models: HashMap::new(),
@@ -268,6 +278,7 @@ impl OfflineCache {
     }
 
     /// Check if essential models are cached
+    #[must_use]
     pub fn has_cached_models(&self) -> bool {
         // Check if we have the essential models for offline operation
         self.cached_models.contains_key("pronunciation_model")
@@ -357,6 +368,7 @@ impl OfflineCache {
     }
 
     /// Get cache usage
+    #[must_use]
     pub fn get_usage(&self) -> CacheUsage {
         CacheUsage {
             total_size: self.total_size,
@@ -390,8 +402,15 @@ pub struct OperationQueue {
     last_sync: Option<DateTime<Utc>>,
 }
 
+impl Default for OperationQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OperationQueue {
     /// Create a new operation queue
+    #[must_use]
     pub fn new() -> Self {
         Self {
             operations: HashMap::new(),
@@ -405,6 +424,7 @@ impl OperationQueue {
     }
 
     /// Get pending operations
+    #[must_use]
     pub fn get_pending_operations(&self) -> Vec<QueuedOperation> {
         self.operations
             .values()
@@ -432,11 +452,13 @@ impl OperationQueue {
     }
 
     /// Get pending operations count
+    #[must_use]
     pub fn get_pending_count(&self) -> u32 {
         self.operations.len() as u32
     }
 
     /// Get last sync time
+    #[must_use]
     pub fn get_last_sync_time(&self) -> Option<DateTime<Utc>> {
         self.last_sync
     }
@@ -481,8 +503,15 @@ pub struct OfflineStorage {
     user_progress: HashMap<String, UserProgress>,
 }
 
+impl Default for OfflineStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OfflineStorage {
     /// Create a new offline storage
+    #[must_use]
     pub fn new() -> Self {
         Self {
             storage_directory: std::env::temp_dir().join("voirs_offline_data"),
@@ -491,6 +520,7 @@ impl OfflineStorage {
     }
 
     /// Create a new offline storage with custom directory
+    #[must_use]
     pub fn with_directory(storage_directory: PathBuf) -> Self {
         Self {
             storage_directory,
@@ -514,7 +544,7 @@ impl OfflineStorage {
         if !self.storage_directory.exists() {
             std::fs::create_dir_all(&self.storage_directory).map_err(|e| {
                 OfflineError::StorageError {
-                    message: format!("Failed to create storage directory: {}", e),
+                    message: format!("Failed to create storage directory: {e}"),
                 }
             })?;
         }
@@ -531,7 +561,7 @@ impl OfflineStorage {
         // Try to persist to disk (optional, graceful fallback)
         if let Err(e) = self.try_persist_to_disk(progress) {
             // Log the error but don't fail the operation
-            eprintln!("Warning: Could not persist to disk: {}", e);
+            eprintln!("Warning: Could not persist to disk: {e}");
         }
 
         Ok(())
@@ -542,7 +572,7 @@ impl OfflineStorage {
         // Ensure storage directory exists
         std::fs::create_dir_all(&self.storage_directory).map_err(|e| {
             OfflineError::StorageError {
-                message: format!("Failed to create storage directory: {}", e),
+                message: format!("Failed to create storage directory: {e}"),
             }
         })?;
 
@@ -550,18 +580,16 @@ impl OfflineStorage {
         let safe_user_id = progress
             .user_id
             .replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
-        let file_path = self
-            .storage_directory
-            .join(format!("{}.json", safe_user_id));
+        let file_path = self.storage_directory.join(format!("{safe_user_id}.json"));
 
         let json_data = serde_json::to_string_pretty(progress).map_err(|e| {
             OfflineError::SerializationError {
-                message: format!("Failed to serialize user progress: {}", e),
+                message: format!("Failed to serialize user progress: {e}"),
             }
         })?;
 
         std::fs::write(&file_path, json_data).map_err(|e| OfflineError::StorageError {
-            message: format!("Failed to write user progress: {}", e),
+            message: format!("Failed to write user progress: {e}"),
         })?;
 
         Ok(())
@@ -575,16 +603,16 @@ impl OfflineStorage {
         }
 
         // Then check persistent storage
-        let file_path = self.storage_directory.join(format!("{}.json", user_id));
+        let file_path = self.storage_directory.join(format!("{user_id}.json"));
         if file_path.exists() {
             let json_data =
                 std::fs::read_to_string(&file_path).map_err(|e| OfflineError::StorageError {
-                    message: format!("Failed to read user progress: {}", e),
+                    message: format!("Failed to read user progress: {e}"),
                 })?;
 
             let progress: UserProgress =
                 serde_json::from_str(&json_data).map_err(|e| OfflineError::SerializationError {
-                    message: format!("Failed to deserialize user progress: {}", e),
+                    message: format!("Failed to deserialize user progress: {e}"),
                 })?;
 
             Ok(Some(progress))
@@ -594,6 +622,7 @@ impl OfflineStorage {
     }
 
     /// Get storage usage
+    #[must_use]
     pub fn get_storage_usage(&self) -> StorageUsage {
         // In a real implementation, this would calculate actual disk usage
         StorageUsage {
@@ -610,12 +639,10 @@ impl OfflineStorage {
         if self.storage_directory.exists() {
             // Remove all files in the directory
             if let Ok(entries) = std::fs::read_dir(&self.storage_directory) {
-                for entry in entries {
-                    if let Ok(entry) = entry {
-                        let path = entry.path();
-                        if path.is_file() {
-                            let _ = std::fs::remove_file(&path);
-                        }
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        let _ = std::fs::remove_file(&path);
                     }
                 }
             }

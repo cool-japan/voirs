@@ -1276,7 +1276,6 @@ mod tests {
 
         handle.abort();
 
-        // Test passes if monitoring can be started
-        assert!(true);
+        // Test passes if monitoring can be started without errors
     }
 }

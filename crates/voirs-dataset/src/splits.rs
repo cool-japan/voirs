@@ -71,12 +71,17 @@ impl SplitConfig {
 
     /// Create default 80/10/10 split
     pub fn default_split() -> Self {
-        Self::new(0.8, 0.1, 0.1, SplitStrategy::Random).unwrap()
+        // These ratios are known to be valid, so we can safely unwrap
+        // or use expect with a clear message
+        Self::new(0.8, 0.1, 0.1, SplitStrategy::Random)
+            .expect("Default split ratios (0.8/0.1/0.1) should always be valid")
     }
 
     /// Create 90/10 split (no test set)
     pub fn train_val_split() -> Self {
-        Self::new(0.9, 0.1, 0.0, SplitStrategy::Random).unwrap()
+        // These ratios are known to be valid
+        Self::new(0.9, 0.1, 0.0, SplitStrategy::Random)
+            .expect("Train/val split ratios (0.9/0.1/0.0) should always be valid")
     }
 }
 
@@ -399,12 +404,15 @@ fn create_random_indices(
     let mut rng = if let Some(seed) = config.seed {
         scirs2_core::random::Random::seed(seed)
     } else {
-        scirs2_core::random::Random::seed(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-        )
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or_else(|_| {
+                // Fallback to a fixed seed if system time is before UNIX_EPOCH
+                // This is extremely rare but theoretically possible
+                0
+            });
+        scirs2_core::random::Random::seed(seed)
     };
 
     let mut indices: Vec<usize> = (0..samples.len()).collect();
@@ -423,12 +431,15 @@ fn create_stratified_indices(
     let mut rng = if let Some(seed) = config.seed {
         scirs2_core::random::Random::seed(seed)
     } else {
-        scirs2_core::random::Random::seed(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-        )
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or_else(|_| {
+                // Fallback to a fixed seed if system time is before UNIX_EPOCH
+                // This is extremely rare but theoretically possible
+                0
+            });
+        scirs2_core::random::Random::seed(seed)
     };
 
     // Group samples by speaker ID
@@ -481,12 +492,15 @@ fn create_duration_indices(
     let mut rng = if let Some(seed) = config.seed {
         scirs2_core::random::Random::seed(seed)
     } else {
-        scirs2_core::random::Random::seed(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-        )
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or_else(|_| {
+                // Fallback to a fixed seed if system time is before UNIX_EPOCH
+                // This is extremely rare but theoretically possible
+                0
+            });
+        scirs2_core::random::Random::seed(seed)
     };
 
     // Sort samples by duration and group into balanced buckets
@@ -495,7 +509,7 @@ fn create_duration_indices(
         .enumerate()
         .map(|(i, sample)| (i, sample.audio.duration()))
         .collect();
-    indexed_samples.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+    indexed_samples.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
     // Distribute samples in round-robin fashion to balance durations
     let mut train_indices = Vec::new();
@@ -531,12 +545,15 @@ fn create_text_length_indices(
     let mut rng = if let Some(seed) = config.seed {
         scirs2_core::random::Random::seed(seed)
     } else {
-        scirs2_core::random::Random::seed(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-        )
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or_else(|_| {
+                // Fallback to a fixed seed if system time is before UNIX_EPOCH
+                // This is extremely rare but theoretically possible
+                0
+            });
+        scirs2_core::random::Random::seed(seed)
     };
 
     // Sort samples by text length and group into balanced buckets

@@ -369,6 +369,251 @@ fn get_speaker_prosody_bias(speaker_id: u32, prosody_idx: usize) -> f32 {
     normalized * 0.6 - 0.3
 }
 
+/// Analyze mel spectrogram quality metrics
+///
+/// Returns a quality score tuple: (spectral_density, temporal_variance, dynamic_range)
+pub fn analyze_mel_quality(mel: &MelSpectrogram) -> (f32, f32, f32) {
+    if mel.n_frames == 0 || mel.n_mels == 0 {
+        return (0.0, 0.0, 0.0);
+    }
+
+    // Spectral density: measure of how much information is in the spectrum
+    let spectral_density = mel
+        .data
+        .iter()
+        .map(|channel| channel.iter().map(|v| v.abs()).sum::<f32>() / channel.len() as f32)
+        .sum::<f32>()
+        / mel.n_mels as f32;
+
+    // Temporal variance: how much the signal changes over time
+    let temporal_variance = mel
+        .data
+        .iter()
+        .map(|channel| {
+            if channel.len() < 2 {
+                return 0.0;
+            }
+            let diffs: Vec<f32> = channel.windows(2).map(|w| (w[1] - w[0]).abs()).collect();
+            diffs.iter().sum::<f32>() / diffs.len() as f32
+        })
+        .sum::<f32>()
+        / mel.n_mels as f32;
+
+    // Dynamic range: difference between max and min values
+    let all_values: Vec<f32> = mel.data.iter().flat_map(|c| c.iter().copied()).collect();
+    let min_val = all_values.iter().copied().fold(f32::INFINITY, f32::min);
+    let max_val = all_values.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let dynamic_range = max_val - min_val;
+
+    (spectral_density, temporal_variance, dynamic_range)
+}
+
+/// Validate phoneme sequence for common issues
+///
+/// Returns an error message if validation fails, None if valid
+pub fn validate_phoneme_sequence(phonemes: &[Phoneme]) -> Option<String> {
+    if phonemes.is_empty() {
+        return Some("Phoneme sequence is empty".to_string());
+    }
+
+    if phonemes.len() > 1000 {
+        return Some(format!(
+            "Phoneme sequence too long: {} phonemes (max 1000)",
+            phonemes.len()
+        ));
+    }
+
+    // Check for invalid durations
+    for (i, phoneme) in phonemes.iter().enumerate() {
+        if let Some(duration) = phoneme.duration {
+            if duration <= 0.0 {
+                return Some(format!(
+                    "Invalid duration at position {}: {} (must be > 0)",
+                    i, duration
+                ));
+            }
+            if duration > 2.0 {
+                return Some(format!(
+                    "Unusually long duration at position {}: {:.2}s",
+                    i, duration
+                ));
+            }
+        }
+    }
+
+    // Check for valid symbols (basic validation)
+    for (i, phoneme) in phonemes.iter().enumerate() {
+        if phoneme.symbol.is_empty() {
+            return Some(format!("Empty phoneme symbol at position {}", i));
+        }
+        if phoneme.symbol.len() > 5 {
+            return Some(format!(
+                "Unusually long phoneme symbol at position {}: '{}'",
+                i, phoneme.symbol
+            ));
+        }
+    }
+
+    None
+}
+
+/// Synthesis configuration presets for common use cases
+pub mod presets {
+    use super::*;
+    use crate::speaker::emotion::{EmotionConfig, EmotionIntensity, EmotionType};
+
+    /// Natural, conversational speech
+    pub fn natural_speech() -> SynthesisConfig {
+        SynthesisConfig {
+            speed: 1.0,
+            pitch_shift: 0.0,
+            energy: 1.0,
+            speaker_id: None,
+            seed: None,
+            emotion: None,
+            voice_style: None,
+        }
+    }
+
+    /// Expressive, emotional speech
+    pub fn expressive_speech() -> SynthesisConfig {
+        use std::collections::HashMap;
+        SynthesisConfig {
+            speed: 0.95,      // Slightly slower for expressiveness
+            pitch_shift: 2.0, // Slightly higher pitch
+            energy: 1.15,     // More energy
+            speaker_id: None,
+            seed: None,
+            emotion: Some(EmotionConfig {
+                emotion_type: EmotionType::Excited,
+                intensity: EmotionIntensity::Medium,
+                secondary_emotions: Vec::new(),
+                custom_params: HashMap::new(),
+            }),
+            voice_style: None,
+        }
+    }
+
+    /// Fast, energetic speech (e.g., for sports commentary)
+    pub fn fast_energetic() -> SynthesisConfig {
+        use std::collections::HashMap;
+        SynthesisConfig {
+            speed: 1.3,       // 30% faster
+            pitch_shift: 3.0, // Higher pitch for excitement
+            energy: 1.3,      // High energy
+            speaker_id: None,
+            seed: None,
+            emotion: Some(EmotionConfig {
+                emotion_type: EmotionType::Excited,
+                intensity: EmotionIntensity::High,
+                secondary_emotions: Vec::new(),
+                custom_params: HashMap::new(),
+            }),
+            voice_style: None,
+        }
+    }
+
+    /// Slow, calm, meditative speech
+    pub fn calm_meditative() -> SynthesisConfig {
+        use std::collections::HashMap;
+        SynthesisConfig {
+            speed: 0.7,        // 30% slower
+            pitch_shift: -2.0, // Slightly lower pitch for calmness
+            energy: 0.8,       // Softer energy
+            speaker_id: None,
+            seed: None,
+            emotion: Some(EmotionConfig {
+                emotion_type: EmotionType::Calm,
+                intensity: EmotionIntensity::High,
+                secondary_emotions: Vec::new(),
+                custom_params: HashMap::new(),
+            }),
+            voice_style: None,
+        }
+    }
+
+    /// Professional, news anchor style
+    pub fn professional_news() -> SynthesisConfig {
+        use std::collections::HashMap;
+        SynthesisConfig {
+            speed: 0.95,      // Slightly slower for clarity
+            pitch_shift: 0.0, // Neutral pitch
+            energy: 1.05,     // Clear projection
+            speaker_id: None,
+            seed: None,
+            emotion: Some(EmotionConfig {
+                emotion_type: EmotionType::Neutral,
+                intensity: EmotionIntensity::Low,
+                secondary_emotions: Vec::new(),
+                custom_params: HashMap::new(),
+            }),
+            voice_style: None,
+        }
+    }
+}
+
+/// Performance estimation for synthesis operations
+#[derive(Debug, Clone)]
+pub struct PerformanceEstimate {
+    /// Estimated mel frames to be generated
+    pub estimated_frames: usize,
+    /// Estimated synthesis time in milliseconds
+    pub estimated_time_ms: f32,
+    /// Estimated memory usage in MB
+    pub estimated_memory_mb: f32,
+    /// Real-time factor estimate
+    pub rtf_estimate: f32,
+}
+
+/// Estimate performance for a given phoneme sequence
+pub fn estimate_synthesis_performance(
+    phonemes: &[Phoneme],
+    config: &SynthesisConfig,
+) -> PerformanceEstimate {
+    // Calculate total duration
+    let total_duration: f32 = phonemes.iter().filter_map(|p| p.duration).sum();
+
+    let adjusted_duration = total_duration / config.speed;
+
+    // Estimate mel frames (typically ~80 frames per second at 22kHz with 256 hop length)
+    let frames_per_second = 86.0; // 22050 / 256
+    let estimated_frames = (adjusted_duration * frames_per_second) as usize;
+
+    // Estimate synthesis time based on typical RTF of 0.25 on CPU
+    let base_rtf = 0.25;
+    let rtf_estimate = base_rtf * config.speed; // Faster speech -> faster synthesis
+    let estimated_time_ms = adjusted_duration * 1000.0 * rtf_estimate;
+
+    // Estimate memory usage
+    // Mel spectrogram: n_mels (80) * n_frames * 4 bytes (f32)
+    // Plus overhead for intermediate tensors (~3x)
+    let mel_memory_bytes = 80 * estimated_frames * 4;
+    let total_memory_bytes = mel_memory_bytes * 3;
+    let estimated_memory_mb = total_memory_bytes as f32 / (1024.0 * 1024.0);
+
+    PerformanceEstimate {
+        estimated_frames,
+        estimated_time_ms,
+        estimated_memory_mb,
+        rtf_estimate,
+    }
+}
+
+/// Calculate optimal batch size based on available memory
+pub fn calculate_optimal_batch_size(avg_phoneme_count: usize, available_memory_mb: f32) -> usize {
+    // Estimate memory per utterance
+    let frames_per_utterance = avg_phoneme_count * 5; // Rough estimate
+    let memory_per_utterance_mb = (80 * frames_per_utterance * 4 * 3) as f32 / (1024.0 * 1024.0);
+
+    // Leave 20% headroom
+    let usable_memory = available_memory_mb * 0.8;
+
+    let batch_size = (usable_memory / memory_per_utterance_mb) as usize;
+
+    // Clamp to reasonable range
+    batch_size.clamp(1, 128)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

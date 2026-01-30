@@ -3,7 +3,7 @@
 //! Provides energy-efficient detection algorithms for always-on listening
 //! with battery optimization and adaptive processing.
 
-use crate::RecognitionError;
+use crate::{MutexExt, RecognitionError};
 use scirs2_core::random::{thread_rng, Rng};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -226,6 +226,7 @@ impl SystemResourceMonitor {
 
 impl EnergyOptimizer {
     /// Create new energy optimizer
+    #[must_use]
     pub fn new(energy_saving_enabled: bool) -> Self {
         let mut config = EnergyConfig::default();
         config.energy_saving_enabled = energy_saving_enabled;
@@ -252,7 +253,7 @@ impl EnergyOptimizer {
 
         // Initialize resource monitoring
         {
-            let mut monitor = self.resource_monitor.lock().unwrap();
+            let mut monitor = self.resource_monitor.lock_safe()?;
             monitor.update_measurements();
         }
 
@@ -266,80 +267,84 @@ impl EnergyOptimizer {
     }
 
     /// Check if processing should be skipped for energy saving
-    pub async fn should_skip_processing(&self) -> bool {
+    pub async fn should_skip_processing(&self) -> Result<bool, RecognitionError> {
         if !self.config.energy_saving_enabled {
-            return false;
+            return Ok(false);
         }
 
         let now = Instant::now();
 
         // Check if enough time has passed since last processing
         {
-            let last_processing = self.last_processing.lock().unwrap();
-            let current_interval = *self.current_interval.lock().unwrap();
+            let last_processing = self.last_processing.lock_safe()?;
+            let current_interval = *self.current_interval.lock_safe()?;
 
             if let Some(last) = *last_processing {
                 if now.duration_since(last) < current_interval {
-                    self.increment_skipped_cycles();
-                    return true;
+                    self.increment_skipped_cycles()?;
+                    return Ok(true);
                 }
             }
         }
 
         // Update resource measurements
         {
-            let mut monitor = self.resource_monitor.lock().unwrap();
+            let mut monitor = self.resource_monitor.lock_safe()?;
             monitor.update_measurements();
         }
 
         // Check CPU usage threshold
         if self.config.adaptive_processing {
             let cpu_usage = {
-                let monitor = self.resource_monitor.lock().unwrap();
+                let monitor = self.resource_monitor.lock_safe()?;
                 monitor.get_current_cpu_usage()
             };
 
             if cpu_usage > self.config.cpu_usage_threshold {
-                self.adapt_processing_interval(true).await;
-                self.increment_skipped_cycles();
-                return true;
+                self.adapt_processing_interval(true).await?;
+                self.increment_skipped_cycles()?;
+                return Ok(true);
             }
         }
 
         // Check battery level for aggressive optimization
-        if let Some(battery_level) = self.get_battery_level() {
+        if let Some(battery_level) = self.get_battery_level()? {
             if battery_level < self.config.battery_threshold {
                 // More aggressive energy saving
                 let extended_interval =
                     Duration::from_millis(self.config.max_processing_interval_ms * 2);
                 {
-                    let mut current_interval = self.current_interval.lock().unwrap();
+                    let mut current_interval = self.current_interval.lock_safe()?;
                     *current_interval = extended_interval;
                 }
 
-                let last_processing = self.last_processing.lock().unwrap();
+                let last_processing = self.last_processing.lock_safe()?;
                 if let Some(last) = *last_processing {
                     if now.duration_since(last) < extended_interval {
-                        self.increment_skipped_cycles();
-                        return true;
+                        self.increment_skipped_cycles()?;
+                        return Ok(true);
                     }
                 }
             }
         }
 
-        false
+        Ok(false)
     }
 
     /// Update processing result for adaptation
-    pub async fn update_processing_result(&self, processing_time: Duration, had_detection: bool) {
+    pub async fn update_processing_result(
+        &self,
+        processing_time: Duration,
+        had_detection: bool,
+    ) -> Result<(), RecognitionError> {
         // Update last processing time
         {
-            let mut last_processing = self.last_processing.lock().unwrap();
+            let mut last_processing = self.last_processing.lock_safe()?;
             *last_processing = Some(Instant::now());
         }
 
         // Record detection event
-        let audio_level = self.get_current_audio_level();
+        let audio_level = self.get_current_audio_level()?;
         let event = DetectionEvent {
             timestamp: Instant::now(),
             was_detection: had_detection,
@@ -348,7 +353,7 @@ impl EnergyOptimizer {
         };
 
         {
-            let mut history = self.detection_history.lock().unwrap();
+            let mut history = self.detection_history.lock_safe()?;
             history.push_back(event);
 
             // Keep only recent history (last 100 events)
@@ -358,22 +363,24 @@ impl EnergyOptimizer {
         }
 
         // Update statistics
-        self.update_stats(processing_time).await;
+        self.update_stats(processing_time).await?;
 
         // Adapt processing interval based on results
         if self.config.adaptive_processing {
-            self.adapt_processing_interval(false).await;
+            self.adapt_processing_interval(false).await?;
         }
+
+        Ok(())
     }
 
     /// Adapt processing interval based on recent activity
-    async fn adapt_processing_interval(&self, cpu_pressure: bool) {
+    async fn adapt_processing_interval(&self, cpu_pressure: bool) -> Result<(), RecognitionError> {
         let mut should_increase_interval = cpu_pressure;
         let mut should_decrease_interval = false;
 
         // Analyze recent detection history
         {
-            let history = self.detection_history.lock().unwrap();
+            let history = self.detection_history.lock_safe()?;
             let recent_events: Vec<_> = history
                 .iter()
                 .filter(|event| event.timestamp.elapsed() < Duration::from_secs(30))
@@ -399,7 +406,7 @@ impl EnergyOptimizer {
 
         // Adjust interval
         {
-            let mut current_interval = self.current_interval.lock().unwrap();
+            let mut current_interval = self.current_interval.lock_safe()?;
             let current_ms = current_interval.as_millis() as u64;
 
             if should_decrease_interval {
@@ -410,34 +417,39 @@ impl EnergyOptimizer {
                 *current_interval = Duration::from_millis(new_ms);
             }
         }
+
+        Ok(())
     }
 
     /// Update audio level for noise estimation
-    pub async fn update_audio_level(&self, audio_level: f32) {
+    pub async fn update_audio_level(&self, audio_level: f32) -> Result<(), RecognitionError> {
         if !self.config.noise_estimation {
-            return;
+            return Ok(());
         }
 
-        let mut history = self.audio_level_history.lock().unwrap();
+        let mut history = self.audio_level_history.lock_safe()?;
         history.push_back(audio_level);
 
         // Keep only recent history (last 300 measurements ~30 seconds at 10Hz)
         while history.len() > 300 {
             history.pop_front();
         }
+
+        Ok(())
     }
 
     /// Get current audio level estimate
-    fn get_current_audio_level(&self) -> f32 {
-        let history = self.audio_level_history.lock().unwrap();
-        history.back().copied().unwrap_or(0.0)
+    fn get_current_audio_level(&self) -> Result<f32, RecognitionError> {
+        let history = self.audio_level_history.lock_safe()?;
+        Ok(history.back().copied().unwrap_or(0.0))
     }
 
     /// Get background noise level estimate
-    pub fn get_background_noise_level(&self) -> f32 {
-        let history = self.audio_level_history.lock().unwrap();
+    #[must_use]
+    pub fn get_background_noise_level(&self) -> Result<f32, RecognitionError> {
+        let history = self.audio_level_history.lock_safe()?;
         if history.is_empty() {
-            return 0.0;
+            return Ok(0.0);
         }
 
         // Use 10th percentile as background noise estimate
@@ -445,13 +457,13 @@ impl EnergyOptimizer {
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let percentile_10_idx = (sorted.len() as f32 * 0.1) as usize;
-        sorted.get(percentile_10_idx).copied().unwrap_or(0.0)
+        Ok(sorted.get(percentile_10_idx).copied().unwrap_or(0.0))
     }
 
     /// Get battery level
-    fn get_battery_level(&self) -> Option<f32> {
-        let monitor = self.resource_monitor.lock().unwrap();
-        monitor.battery_level
+    fn get_battery_level(&self) -> Result<Option<f32>, RecognitionError> {
+        let monitor = self.resource_monitor.lock_safe()?;
+        Ok(monitor.battery_level)
     }
 
     /// Set energy saving mode
@@ -466,21 +478,22 @@ impl EnergyOptimizer {
     }
 
     /// Increment skipped cycles counter
-    fn increment_skipped_cycles(&self) {
-        let mut stats = self.stats.lock().unwrap();
+    fn increment_skipped_cycles(&self) -> Result<(), RecognitionError> {
+        let mut stats = self.stats.lock_safe()?;
         stats.skipped_cycles += 1;
         stats.total_cycles += 1;
+        Ok(())
     }
 
     /// Update energy statistics
-    async fn update_stats(&self, _processing_time: Duration) {
-        let mut stats = self.stats.lock().unwrap();
+    async fn update_stats(&self, _processing_time: Duration) -> Result<(), RecognitionError> {
+        let mut stats = self.stats.lock_safe()?;
         stats.total_cycles += 1;
 
         // Update processing interval
         {
-            let mut interval_history = self.interval_history.lock().unwrap();
-            let current_interval = *self.current_interval.lock().unwrap();
+            let mut interval_history = self.interval_history.lock_safe()?;
+            let current_interval = *self.current_interval.lock_safe()?;
             interval_history.push_back(current_interval);
 
             // Keep only recent history
@@ -503,7 +516,7 @@ impl EnergyOptimizer {
 
         // Update CPU usage stats
         {
-            let monitor = self.resource_monitor.lock().unwrap();
+            let monitor = self.resource_monitor.lock_safe()?;
             stats.cpu_usage_stats.current_usage = monitor.get_current_cpu_usage();
             stats.cpu_usage_stats.avg_usage = monitor.get_avg_cpu_usage();
             stats.cpu_usage_stats.peak_usage = monitor.get_peak_cpu_usage();
@@ -512,13 +525,15 @@ impl EnergyOptimizer {
         }
 
         // Update background noise level
-        stats.background_noise_level = self.get_background_noise_level();
+        stats.background_noise_level = self.get_background_noise_level()?;
+
+        Ok(())
     }
 
     /// Get energy optimization statistics
-    pub async fn get_stats(&self) -> EnergyStats {
-        let stats = self.stats.lock().unwrap();
-        stats.clone()
+    pub async fn get_stats(&self) -> Result<EnergyStats, RecognitionError> {
+        let stats = self.stats.lock_safe()?;
+        Ok(stats.clone())
     }
 }
 
@@ -531,7 +546,7 @@ mod tests {
         let optimizer = EnergyOptimizer::new(true);
         assert!(optimizer.config.energy_saving_enabled);
 
-        let stats = optimizer.get_stats().await;
+        let stats = optimizer.get_stats().await.unwrap();
         assert_eq!(stats.total_cycles, 0);
         assert_eq!(stats.skipped_cycles, 0);
     }
@@ -541,15 +556,16 @@ mod tests {
         let optimizer = EnergyOptimizer::new(true);
 
         // First call should not skip (no previous processing)
-        assert!(!optimizer.should_skip_processing().await);
+        assert!(!optimizer.should_skip_processing().await.unwrap());
 
         // Update with processing result
         optimizer
             .update_processing_result(Duration::from_millis(50), false)
-            .await;
+            .await
+            .unwrap();
 
         // Immediate second call should skip due to interval
-        assert!(optimizer.should_skip_processing().await);
+        assert!(optimizer.should_skip_processing().await.unwrap());
     }
 
     #[tokio::test]
@@ -557,11 +573,12 @@ mod tests {
         let optimizer = EnergyOptimizer::new(false);
 
         // Should never skip when energy saving is disabled
-        assert!(!optimizer.should_skip_processing().await);
+        assert!(!optimizer.should_skip_processing().await.unwrap());
         optimizer
             .update_processing_result(Duration::from_millis(50), false)
-            .await;
-        assert!(!optimizer.should_skip_processing().await);
+            .await
+            .unwrap();
+        assert!(!optimizer.should_skip_processing().await.unwrap());
     }
 
     #[tokio::test]
@@ -569,12 +586,12 @@ mod tests {
         let optimizer = EnergyOptimizer::new(true);
 
         // Update audio levels
-        optimizer.update_audio_level(0.1).await;
-        optimizer.update_audio_level(0.05).await;
-        optimizer.update_audio_level(0.2).await;
+        optimizer.update_audio_level(0.1).await.unwrap();
+        optimizer.update_audio_level(0.05).await.unwrap();
+        optimizer.update_audio_level(0.2).await.unwrap();
 
-        let noise_level = optimizer.get_background_noise_level();
-        assert!(noise_level >= 0.0 && noise_level <= 0.2);
+        let noise_level = optimizer.get_background_noise_level().unwrap();
+        assert!((0.0..=0.2).contains(&noise_level));
     }
 
     #[tokio::test]
@@ -582,9 +599,9 @@ mod tests {
         let optimizer = EnergyOptimizer::new(true);
 
         // Simulate high CPU usage
-        optimizer.adapt_processing_interval(true).await;
+        optimizer.adapt_processing_interval(true).await.unwrap();
 
-        let stats = optimizer.get_stats().await;
+        let stats = optimizer.get_stats().await.unwrap();
         assert!(stats.avg_processing_interval_ms >= 100.0);
     }
 
@@ -594,7 +611,7 @@ mod tests {
         monitor.update_measurements();
 
         let cpu_usage = monitor.get_current_cpu_usage();
-        assert!(cpu_usage >= 0.0 && cpu_usage <= 1.0);
+        assert!((0.0..=1.0).contains(&cpu_usage));
 
         let avg_usage = monitor.get_avg_cpu_usage();
         assert!(avg_usage >= 0.0);

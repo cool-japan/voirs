@@ -6,6 +6,7 @@
 
 pub mod ab_testing;
 pub mod basic_tests;
+pub mod bayesian;
 pub mod causal_inference;
 pub mod correlation;
 pub mod experimental_design;
@@ -16,6 +17,10 @@ pub mod utils;
 
 // Re-export commonly used types
 pub use basic_tests::*;
+pub use bayesian::{
+    BayesianABTestResult, BayesianAnalyzer, BayesianEstimation, BayesianModelComparison,
+    PriorParameters, PriorType,
+};
 pub use correlation::{
     CorrelationAnalyzer, CorrelationMatrix, CorrelationMethod, CorrelationResult,
     PartialCorrelationResult,

@@ -287,7 +287,10 @@ impl ProcessingPipeline {
 
     /// Get current processing progress
     pub fn get_progress(&self) -> ProcessingProgress {
-        self.progress.lock().unwrap().clone()
+        self.progress
+            .lock()
+            .map(|p| p.clone())
+            .unwrap_or_else(|_| ProcessingProgress::new(0))
     }
 
     /// Process a batch of dataset samples
@@ -297,7 +300,9 @@ impl ProcessingPipeline {
     ) -> Result<Vec<ProcessingResult>> {
         // Update progress tracking
         {
-            let mut progress = self.progress.lock().unwrap();
+            let mut progress = self.progress.lock().map_err(|e| {
+                DatasetError::PreprocessingError(format!("Failed to lock progress mutex: {}", e))
+            })?;
             progress.total_items = samples.len();
             progress.processed_items = 0;
             progress.failed_items = 0;
@@ -346,20 +351,21 @@ impl ProcessingPipeline {
             let failed_count = batch_results.iter().filter(|r| !r.success).count();
 
             {
-                let mut progress = self.progress.lock().unwrap();
-                progress.update(
-                    processed_count,
-                    failed_count,
-                    format!(
-                        "Processing batch {}/{}",
-                        batch_idx + 1,
-                        (samples.len() + batch_size - 1) / batch_size
-                    ),
-                );
+                if let Ok(mut progress) = self.progress.lock() {
+                    progress.update(
+                        processed_count,
+                        failed_count,
+                        format!(
+                            "Processing batch {}/{}",
+                            batch_idx + 1,
+                            samples.len().div_ceil(batch_size)
+                        ),
+                    );
 
-                // Send progress update if sender is available
-                if let Some(ref sender) = self.progress_sender {
-                    let _ = sender.send(progress.clone());
+                    // Send progress update if sender is available
+                    if let Some(ref sender) = self.progress_sender {
+                        let _ = sender.send(progress.clone());
+                    }
                 }
             }
 
@@ -553,7 +559,10 @@ impl ProcessingPipeline {
 
     /// Get pipeline statistics
     pub fn get_statistics(&self) -> HashMap<String, f64> {
-        let progress = self.progress.lock().unwrap();
+        let progress = match self.progress.lock() {
+            Ok(p) => p,
+            Err(_) => return HashMap::new(), // Return empty stats if lock is poisoned
+        };
         let mut stats = HashMap::new();
 
         stats.insert("total_items".to_string(), progress.total_items as f64);

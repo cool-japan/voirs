@@ -757,8 +757,15 @@ pub struct InMemoryEnterpriseManager {
     enterprises: Arc<RwLock<HashMap<Uuid, Enterprise>>>,
 }
 
+impl Default for InMemoryEnterpriseManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InMemoryEnterpriseManager {
     /// Creates a new in-memory enterprise manager
+    #[must_use]
     pub fn new() -> Self {
         Self {
             enterprises: Arc::new(RwLock::new(HashMap::new())),
@@ -820,8 +827,15 @@ pub struct InMemoryUserManager {
     bulk_operations: Arc<RwLock<HashMap<Uuid, BulkUserOperation>>>,
 }
 
+impl Default for InMemoryUserManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InMemoryUserManager {
     /// Creates a new in-memory user manager
+    #[must_use]
     pub fn new() -> Self {
         Self {
             users: Arc::new(RwLock::new(HashMap::new())),
@@ -974,7 +988,7 @@ impl UserManager for InMemoryUserManager {
                         || user
                             .department
                             .as_ref()
-                            .map_or(false, |d| d.to_lowercase().contains(&query_lower)))
+                            .is_some_and(|d| d.to_lowercase().contains(&query_lower)))
             })
             .cloned()
             .collect();
@@ -993,8 +1007,15 @@ pub struct InMemoryComplianceManager {
     completions: Arc<RwLock<HashMap<(Uuid, Uuid), SystemTime>>>,
 }
 
+impl Default for InMemoryComplianceManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InMemoryComplianceManager {
     /// Creates a new in-memory compliance manager
+    #[must_use]
     pub fn new() -> Self {
         Self {
             trainings: Arc::new(RwLock::new(HashMap::new())),
@@ -1062,10 +1083,10 @@ impl ComplianceManager for InMemoryComplianceManager {
             training_completion_rates.insert(training.id, completion_rate);
         }
 
-        let overall_score = if !training_completion_rates.is_empty() {
-            training_completion_rates.values().sum::<f32>() / training_completion_rates.len() as f32
-        } else {
+        let overall_score = if training_completion_rates.is_empty() {
             0.0
+        } else {
+            training_completion_rates.values().sum::<f32>() / training_completion_rates.len() as f32
         };
 
         let risk_level = if overall_score >= 0.9 {
@@ -1211,7 +1232,7 @@ impl DashboardService for InMemoryDashboardService {
         let active_users_today = users
             .iter()
             .filter(|user| {
-                user.last_active.map_or(false, |last_active| {
+                user.last_active.is_some_and(|last_active| {
                     SystemTime::now()
                         .duration_since(last_active)
                         .unwrap_or_default()
@@ -1330,8 +1351,15 @@ pub struct EnterpriseSystem {
     dashboard_service: Arc<dyn DashboardService>,
 }
 
+impl Default for EnterpriseSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EnterpriseSystem {
     /// Creates a new enterprise system with in-memory implementations
+    #[must_use]
     pub fn new() -> Self {
         let user_manager = Arc::new(InMemoryUserManager::new());
         let compliance_manager = Arc::new(InMemoryComplianceManager::new());
@@ -1469,21 +1497,25 @@ impl EnterpriseSystem {
     }
 
     /// Returns a reference to the enterprise manager
+    #[must_use]
     pub fn enterprise_manager(&self) -> &dyn EnterpriseManager {
         &*self.enterprise_manager
     }
 
     /// Returns a reference to the user manager
+    #[must_use]
     pub fn user_manager(&self) -> &dyn UserManager {
         &*self.user_manager
     }
 
     /// Returns a reference to the compliance manager
+    #[must_use]
     pub fn compliance_manager(&self) -> &dyn ComplianceManager {
         &*self.compliance_manager
     }
 
     /// Returns a reference to the dashboard service
+    #[must_use]
     pub fn dashboard_service(&self) -> &dyn DashboardService {
         &*self.dashboard_service
     }

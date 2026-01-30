@@ -1,7 +1,7 @@
 //! GDPR Compliance Module
 //!
 //! This module provides comprehensive GDPR (General Data Protection Regulation)
-//! compliance functionality for the VoiRS feedback system, including:
+//! compliance functionality for the `VoiRS` feedback system, including:
 //!
 //! - Data subject rights management
 //! - Consent tracking and validation
@@ -40,26 +40,31 @@ pub use types::{
 };
 
 /// Create a new GDPR compliance manager with default settings
+#[must_use]
 pub fn create_gdpr_manager() -> GdprComplianceManager {
     GdprComplianceManager::new()
 }
 
 /// Create a new data retention manager
+#[must_use]
 pub fn create_retention_manager() -> DataRetentionManager {
     DataRetentionManager::new()
 }
 
 /// Create GDPR encryption utilities
+#[must_use]
 pub fn create_gdpr_encryption() -> GdprEncryption {
     GdprEncryption::new()
 }
 
 /// Create privacy-preserving analytics with default epsilon
+#[must_use]
 pub fn create_privacy_analytics() -> PrivacyPreservingAnalytics {
     PrivacyPreservingAnalytics::new(1.0)
 }
 
 /// Create privacy-preserving analytics with custom epsilon
+#[must_use]
 pub fn create_privacy_analytics_with_epsilon(epsilon: f64) -> PrivacyPreservingAnalytics {
     PrivacyPreservingAnalytics::new(epsilon)
 }

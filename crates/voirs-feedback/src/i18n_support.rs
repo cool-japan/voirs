@@ -1,4 +1,4 @@
-//! Internationalization (i18n) Support for VoiRS Feedback System
+//! Internationalization (i18n) Support for `VoiRS` Feedback System
 //!
 //! This module provides comprehensive internationalization support including
 //! multi-language UI, locale-specific formatting, cultural adaptation,
@@ -64,6 +64,17 @@ pub enum I18nError {
 /// Result type for i18n operations
 pub type I18nResult<T> = Result<T, I18nError>;
 
+/// Negative number formatting pattern
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NegativePattern {
+    /// -1234.56
+    MinusPrefix,
+    /// (1234.56)
+    Parentheses,
+    /// 1234.56-
+    MinusSuffix,
+}
+
 /// Supported languages
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Language {
@@ -109,6 +120,7 @@ pub enum Language {
 
 impl Language {
     /// Get language code (ISO 639-1)
+    #[must_use]
     pub fn code(&self) -> &str {
         match self {
             Language::English => "en",
@@ -134,6 +146,7 @@ impl Language {
     }
 
     /// Get language name in English
+    #[must_use]
     pub fn english_name(&self) -> &str {
         match self {
             Language::English => "English",
@@ -159,6 +172,7 @@ impl Language {
     }
 
     /// Get language name in native script
+    #[must_use]
     pub fn native_name(&self) -> &str {
         match self {
             Language::English => "English",
@@ -184,6 +198,7 @@ impl Language {
     }
 
     /// Check if language is right-to-left
+    #[must_use]
     pub fn is_rtl(&self) -> bool {
         matches!(
             self,
@@ -192,6 +207,7 @@ impl Language {
     }
 
     /// From language code
+    #[must_use]
     pub fn from_code(code: &str) -> Option<Self> {
         match code.to_lowercase().as_str() {
             "en" | "en-us" => Some(Language::English),
@@ -249,6 +265,12 @@ pub struct Locale {
     pub time_format: String,
     /// First day of week (0 = Sunday, 1 = Monday, etc.)
     pub first_day_of_week: u8,
+    /// Currency position (true = before number, false = after)
+    pub currency_before: bool,
+    /// Space between currency and number
+    pub currency_space: bool,
+    /// Negative number format pattern (-x, (x), x-)
+    pub negative_pattern: NegativePattern,
 }
 
 impl Default for Locale {
@@ -259,6 +281,7 @@ impl Default for Locale {
 
 impl Locale {
     /// English (US) locale
+    #[must_use]
     pub fn english_us() -> Self {
         Self {
             language: Language::English,
@@ -271,10 +294,14 @@ impl Locale {
             date_format: String::from("MM/dd/yyyy"),
             time_format: String::from("h:mm a"),
             first_day_of_week: 0, // Sunday
+            currency_before: true,
+            currency_space: false,
+            negative_pattern: NegativePattern::MinusPrefix,
         }
     }
 
     /// French locale
+    #[must_use]
     pub fn french() -> Self {
         Self {
             language: Language::French,
@@ -287,10 +314,14 @@ impl Locale {
             date_format: String::from("dd/MM/yyyy"),
             time_format: String::from("HH:mm"),
             first_day_of_week: 1, // Monday
+            currency_before: false,
+            currency_space: true,
+            negative_pattern: NegativePattern::MinusPrefix,
         }
     }
 
     /// German locale
+    #[must_use]
     pub fn german() -> Self {
         Self {
             language: Language::German,
@@ -303,10 +334,14 @@ impl Locale {
             date_format: String::from("dd.MM.yyyy"),
             time_format: String::from("HH:mm"),
             first_day_of_week: 1, // Monday
+            currency_before: false,
+            currency_space: true,
+            negative_pattern: NegativePattern::MinusPrefix,
         }
     }
 
     /// Japanese locale
+    #[must_use]
     pub fn japanese() -> Self {
         Self {
             language: Language::Japanese,
@@ -319,10 +354,14 @@ impl Locale {
             date_format: String::from("yyyy/MM/dd"),
             time_format: String::from("H:mm"),
             first_day_of_week: 0, // Sunday
+            currency_before: true,
+            currency_space: false,
+            negative_pattern: NegativePattern::MinusPrefix,
         }
     }
 
     /// Arabic locale
+    #[must_use]
     pub fn arabic() -> Self {
         Self {
             language: Language::Arabic,
@@ -335,10 +374,14 @@ impl Locale {
             date_format: String::from("dd/MM/yyyy"),
             time_format: String::from("h:mm a"),
             first_day_of_week: 6, // Saturday
+            currency_before: false,
+            currency_space: true,
+            negative_pattern: NegativePattern::MinusPrefix,
         }
     }
 
     /// Hebrew locale
+    #[must_use]
     pub fn hebrew() -> Self {
         Self {
             language: Language::Hebrew,
@@ -351,10 +394,14 @@ impl Locale {
             date_format: String::from("dd/MM/yyyy"),
             time_format: String::from("H:mm"),
             first_day_of_week: 0, // Sunday
+            currency_before: false,
+            currency_space: true,
+            negative_pattern: NegativePattern::MinusPrefix,
         }
     }
 
     /// Persian locale
+    #[must_use]
     pub fn persian() -> Self {
         Self {
             language: Language::Persian,
@@ -367,10 +414,14 @@ impl Locale {
             date_format: String::from("dd/MM/yyyy"),
             time_format: String::from("H:mm"),
             first_day_of_week: 6, // Saturday
+            currency_before: false,
+            currency_space: true,
+            negative_pattern: NegativePattern::MinusPrefix,
         }
     }
 
     /// Urdu locale
+    #[must_use]
     pub fn urdu() -> Self {
         Self {
             language: Language::Urdu,
@@ -383,10 +434,14 @@ impl Locale {
             date_format: String::from("dd/MM/yyyy"),
             time_format: String::from("h:mm a"),
             first_day_of_week: 1, // Monday
+            currency_before: false,
+            currency_space: true,
+            negative_pattern: NegativePattern::MinusPrefix,
         }
     }
 
     /// Get locale identifier string
+    #[must_use]
     pub fn identifier(&self) -> String {
         let mut parts = vec![self.language.code()];
 
@@ -417,6 +472,7 @@ pub struct Translation {
 
 impl Translation {
     /// Create simple translation
+    #[must_use]
     pub fn simple(text: &str) -> Self {
         Self {
             singular: text.to_string(),
@@ -427,6 +483,7 @@ impl Translation {
     }
 
     /// Create translation with plural forms
+    #[must_use]
     pub fn with_plural(singular: &str, plural: &str) -> Self {
         let mut plural_forms = HashMap::new();
         plural_forms.insert(String::from("other"), plural.to_string());
@@ -440,6 +497,7 @@ impl Translation {
     }
 
     /// Get appropriate form for count
+    #[must_use]
     pub fn get_form(&self, count: i64, language: &Language) -> &str {
         if let Some(plural_forms) = &self.plural {
             let rule = get_plural_rule(language, count);
@@ -508,6 +566,7 @@ pub struct I18nManager {
 
 impl I18nManager {
     /// Create new i18n manager
+    #[must_use]
     pub fn new(fallback_language: Language) -> Self {
         Self {
             current_language: Arc::new(RwLock::new(fallback_language.clone())),
@@ -604,7 +663,7 @@ impl I18nManager {
         if let Some(params) = params {
             let mut result = text.to_string();
             for (key, value) in params {
-                result = result.replace(&format!("{{{}}}", key), &value);
+                result = result.replace(&format!("{{{key}}}"), &value);
             }
             result
         } else {
@@ -617,29 +676,124 @@ impl I18nManager {
         self.bundles.read().await.keys().cloned().collect()
     }
 
-    /// Format number according to locale
+    /// Format number according to locale with proper thousands separators
     pub async fn format_number(&self, number: f64) -> I18nResult<String> {
+        self.format_number_with_decimals(number, 2).await
+    }
+
+    /// Format number with specific decimal places
+    pub async fn format_number_with_decimals(
+        &self,
+        number: f64,
+        decimals: usize,
+    ) -> I18nResult<String> {
         let locale = self.get_locale().await?;
 
-        // Simple formatting - in production would use proper locale formatting
-        let formatted = if number.fract() == 0.0 {
-            format!("{}", number as i64)
-        } else {
-            format!("{:.2}", number)
-        };
+        // Handle negative numbers
+        let is_negative = number < 0.0;
+        let abs_number = number.abs();
 
-        // Replace decimal separator
-        let formatted = formatted.replace('.', &locale.decimal_separator);
+        // Split into integer and decimal parts
+        let integer_part = abs_number.trunc() as u64;
+        let decimal_part = abs_number.fract();
 
-        Ok(formatted)
+        // Format integer part with thousands separators
+        let mut integer_str = integer_part.to_string();
+        let mut result = String::new();
+        let chars: Vec<char> = integer_str.chars().collect();
+
+        for (i, ch) in chars.iter().enumerate() {
+            if i > 0 && (chars.len() - i).is_multiple_of(3) {
+                result.push_str(&locale.thousands_separator);
+            }
+            result.push(*ch);
+        }
+
+        // Add decimal part if needed
+        if decimals > 0 && decimal_part > 0.0 {
+            result.push_str(&locale.decimal_separator);
+            let decimal_str = format!("{decimal_part:.decimals$}")
+                .trim_start_matches("0.")
+                .to_string();
+            result.push_str(&decimal_str);
+        }
+
+        // Apply negative pattern
+        if is_negative {
+            result = match locale.negative_pattern {
+                NegativePattern::MinusPrefix => format!("-{result}"),
+                NegativePattern::Parentheses => format!("({result})"),
+                NegativePattern::MinusSuffix => format!("{result}-"),
+            };
+        }
+
+        Ok(result)
     }
 
     /// Format currency according to locale
     pub async fn format_currency(&self, amount: f64) -> I18nResult<String> {
-        let locale = self.get_locale().await?;
-        let formatted_number = self.format_number(amount).await?;
+        self.format_currency_with_decimals(amount, 2).await
+    }
 
-        Ok(format!("{}{}", locale.currency_symbol, formatted_number))
+    /// Format currency with specific decimal places
+    pub async fn format_currency_with_decimals(
+        &self,
+        amount: f64,
+        decimals: usize,
+    ) -> I18nResult<String> {
+        let locale = self.get_locale().await?;
+        let formatted_number = self
+            .format_number_with_decimals(amount.abs(), decimals)
+            .await?;
+
+        let is_negative = amount < 0.0;
+
+        // Build currency string based on locale preferences
+        let currency_str = if locale.currency_before {
+            if locale.currency_space {
+                format!("{} {}", locale.currency_symbol, formatted_number)
+            } else {
+                format!("{}{}", locale.currency_symbol, formatted_number)
+            }
+        } else if locale.currency_space {
+            format!("{} {}", formatted_number, locale.currency_symbol)
+        } else {
+            format!("{}{}", formatted_number, locale.currency_symbol)
+        };
+
+        // Apply negative pattern
+        if is_negative {
+            Ok(match locale.negative_pattern {
+                NegativePattern::MinusPrefix => format!("-{currency_str}"),
+                NegativePattern::Parentheses => format!("({currency_str})"),
+                NegativePattern::MinusSuffix => format!("{currency_str}-"),
+            })
+        } else {
+            Ok(currency_str)
+        }
+    }
+
+    /// Format percentage according to locale
+    pub async fn format_percentage(&self, value: f64) -> I18nResult<String> {
+        let formatted_number = self.format_number_with_decimals(value * 100.0, 1).await?;
+        Ok(format!("{formatted_number}%"))
+    }
+
+    /// Format number in compact notation (e.g., 1K, 1.5M, 2.3B)
+    pub async fn format_compact(&self, number: f64) -> I18nResult<String> {
+        let abs_number = number.abs();
+        let (value, suffix) = if abs_number >= 1_000_000_000.0 {
+            (number / 1_000_000_000.0, "B")
+        } else if abs_number >= 1_000_000.0 {
+            (number / 1_000_000.0, "M")
+        } else if abs_number >= 1_000.0 {
+            (number / 1_000.0, "K")
+        } else {
+            (number, "")
+        };
+
+        let formatted = self.format_number_with_decimals(value, 1).await?;
+        Ok(format!("{formatted}{suffix}"))
     }
 
     /// Format date according to locale
@@ -713,9 +867,9 @@ impl I18nManager {
     /// Apply text direction to CSS class string
     pub async fn apply_direction_class(&self, base_class: &str) -> String {
         if self.requires_rtl_layout().await {
-            format!("{} rtl", base_class)
+            format!("{base_class} rtl")
         } else {
-            format!("{} ltr", base_class)
+            format!("{base_class} ltr")
         }
     }
 
@@ -901,6 +1055,9 @@ fn create_spanish_bundle() -> LanguageBundle {
             date_format: String::from("dd/MM/yyyy"),
             time_format: String::from("HH:mm"),
             first_day_of_week: 1,
+            currency_before: false,
+            currency_space: true,
+            negative_pattern: NegativePattern::MinusPrefix,
         },
         translations,
         metadata: BundleMetadata {
@@ -1213,9 +1370,9 @@ mod tests {
         let manager = I18nManager::new(Language::English);
         manager.initialize_default_bundles().await.unwrap();
 
-        // Test number formatting
+        // Test number formatting with thousands separator
         let formatted_number = manager.format_number(1234.56).await.unwrap();
-        assert_eq!(formatted_number, "1234.56");
+        assert_eq!(formatted_number, "1,234.56");
 
         // Test currency formatting
         let formatted_currency = manager.format_currency(99.99).await.unwrap();
@@ -1301,5 +1458,168 @@ mod tests {
         let urdu_locale = Locale::urdu();
         assert_eq!(urdu_locale.text_direction, TextDirection::Rtl);
         assert_eq!(urdu_locale.currency_symbol, "₨");
+    }
+
+    #[tokio::test]
+    async fn test_enhanced_number_formatting() {
+        // Test with English locale directly
+        let manager = I18nManager::new(Language::English);
+        manager.initialize_default_bundles().await.unwrap();
+
+        // Test thousands separators (English: 1,234.56)
+        let formatted = manager.format_number(1234.56).await.unwrap();
+        assert!(formatted.contains(","), "Should have thousands separator");
+        assert!(formatted.contains("."), "Should have decimal separator");
+
+        // Test with French locale
+        manager.set_language(Language::French).await.unwrap();
+        let formatted_fr = manager.format_number(1234.56).await.unwrap();
+        assert!(
+            formatted_fr.contains(" "),
+            "French should use space separator"
+        );
+        assert!(
+            formatted_fr.contains(","),
+            "French should use comma for decimal"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_negative_number_formatting() {
+        let manager = I18nManager::new(Language::English);
+        manager.initialize_default_bundles().await.unwrap();
+
+        // Test negative with minus prefix
+        let formatted = manager.format_number(-1234.56).await.unwrap();
+        assert!(formatted.starts_with("-"), "Should have minus prefix");
+    }
+
+    #[tokio::test]
+    async fn test_enhanced_currency_formatting() {
+        let manager = I18nManager::new(Language::English);
+        manager.initialize_default_bundles().await.unwrap();
+
+        // Test English currency (before, no space: $1,234.56)
+        let formatted_en = manager.format_currency(1234.56).await.unwrap();
+        assert!(
+            formatted_en.starts_with("$"),
+            "English currency should be before"
+        );
+        assert!(
+            !formatted_en.starts_with("$ "),
+            "English currency should have no space"
+        );
+
+        // Test French currency (after, with space: 1 234,56 €)
+        manager.set_language(Language::French).await.unwrap();
+        let formatted_fr = manager.format_currency(1234.56).await.unwrap();
+        assert!(
+            formatted_fr.ends_with("€"),
+            "French currency should be after"
+        );
+        assert!(
+            formatted_fr.contains(" €"),
+            "French currency should have space"
+        );
+
+        // Test negative currency
+        manager.set_language(Language::English).await.unwrap();
+        let formatted_neg = manager.format_currency(-99.99).await.unwrap();
+        assert!(
+            formatted_neg.starts_with("-"),
+            "Negative currency should have minus"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_percentage_formatting() {
+        let manager = I18nManager::new(Language::English);
+        manager.initialize_default_bundles().await.unwrap();
+
+        let formatted = manager.format_percentage(0.125).await.unwrap();
+        assert!(formatted.contains("12"), "Should convert to percentage");
+        assert!(formatted.ends_with("%"), "Should have percent sign");
+
+        let formatted_high = manager.format_percentage(0.9999).await.unwrap();
+        assert!(
+            formatted_high.contains("99"),
+            "Should handle high percentages"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_compact_number_formatting() {
+        let manager = I18nManager::new(Language::English);
+        manager.initialize_default_bundles().await.unwrap();
+
+        // Test thousands
+        let formatted_k = manager.format_compact(1500.0).await.unwrap();
+        assert!(formatted_k.contains("K"), "Should use K suffix");
+        assert!(formatted_k.contains("1"), "Should show 1.5K");
+
+        // Test millions
+        let formatted_m = manager.format_compact(2500000.0).await.unwrap();
+        assert!(formatted_m.contains("M"), "Should use M suffix");
+        assert!(formatted_m.contains("2"), "Should show 2.5M");
+
+        // Test billions
+        let formatted_b = manager.format_compact(3200000000.0).await.unwrap();
+        assert!(formatted_b.contains("B"), "Should use B suffix");
+        assert!(formatted_b.contains("3"), "Should show 3.2B");
+
+        // Test small numbers (no suffix)
+        let formatted_small = manager.format_compact(999.0).await.unwrap();
+        assert!(
+            !formatted_small.contains("K"),
+            "Small numbers should have no suffix"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_custom_decimal_places() {
+        let manager = I18nManager::new(Language::English);
+        manager.initialize_default_bundles().await.unwrap();
+
+        // Test with 0 decimal places
+        let formatted_0 = manager
+            .format_number_with_decimals(1234.5678, 0)
+            .await
+            .unwrap();
+        assert!(!formatted_0.contains("."), "Should have no decimal places");
+
+        // Test with 3 decimal places
+        let formatted_3 = manager
+            .format_number_with_decimals(1234.5678, 3)
+            .await
+            .unwrap();
+        let parts: Vec<&str> = formatted_3.split('.').collect();
+        if parts.len() > 1 {
+            assert!(parts[1].len() <= 3, "Should have at most 3 decimal places");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_rtl_currency_formatting() {
+        let manager = I18nManager::new(Language::Arabic);
+        manager.initialize_default_bundles().await.unwrap();
+
+        // Test Arabic currency formatting
+        let formatted_ar = manager.format_currency(1234.56).await.unwrap();
+        assert!(
+            formatted_ar.contains("ر.س"),
+            "Should contain Arabic currency symbol"
+        );
+        assert!(
+            formatted_ar.ends_with("ر.س"),
+            "Arabic currency should be after number"
+        );
+
+        // Test Hebrew currency formatting
+        manager.set_language(Language::Hebrew).await.unwrap();
+        let formatted_he = manager.format_currency(1234.56).await.unwrap();
+        assert!(
+            formatted_he.contains("₪"),
+            "Should contain Hebrew currency symbol"
+        );
     }
 }

@@ -4,7 +4,8 @@
 //! motion modeling, and adaptive algorithms to minimize motion-to-sound latency
 //! in VR/AR and gaming applications.
 
-use crate::position::{HeadTracker, MotionSnapshot, Position3D};
+use crate::position::{HeadTracker, MotionSnapshot};
+use crate::types::Position3D;
 use crate::{Error, Result};
 use candle_core::{Device, Tensor};
 use candle_nn::{linear, Linear, Module, VarBuilder, VarMap};
@@ -987,15 +988,6 @@ impl NeuralPredictionModel {
     fn retrain(&mut self) -> Result<()> {
         // Placeholder for neural model retraining
         Ok(())
-    }
-}
-
-impl HeadTracker {
-    /// Get position history for advanced prediction
-    pub fn position_history(&self) -> &[crate::position::PositionSnapshot] {
-        // This would need to be implemented in the HeadTracker
-        // For now, return empty slice
-        &[]
     }
 }
 

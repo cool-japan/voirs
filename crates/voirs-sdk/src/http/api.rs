@@ -141,7 +141,7 @@ pub fn create_api_routes() -> Router {
         .route("/stats", get(get_stats))
         .route("/synthesize", post(synthesize))
         .route("/voices", get(get_voices))
-        .route("/voices/:voice_id", get(get_voice))
+        .route("/voices/{voice_id}", get(get_voice))
         .route("/voice", put(switch_voice))
         .route("/config", get(get_config))
         .route("/config", put(update_config))
@@ -409,6 +409,7 @@ mod tests {
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use serde_json::json;
+    use tokio::sync::RwLock;
     use tower::ServiceExt;
 
     #[tokio::test]

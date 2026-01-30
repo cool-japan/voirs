@@ -1,6 +1,6 @@
 //! # Integration Traits
 //!
-//! This module defines traits for VoiRS ecosystem integration, providing
+//! This module defines traits for `VoiRS` ecosystem integration, providing
 //! standardized interfaces for component coordination and communication.
 
 use crate::RecognitionError;
@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Trait for VoiRS ecosystem components that can be integrated
+/// Trait for `VoiRS` ecosystem components that can be integrated
 #[async_trait]
 pub trait EcosystemComponent: Send + Sync {
     /// Get component name

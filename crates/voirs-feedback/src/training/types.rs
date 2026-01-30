@@ -497,7 +497,7 @@ pub struct CollaborativeLearningSystem {
 
 impl CollaborativeLearningSystem {
     /// Create new collaborative learning system
-    pub async fn new() -> Result<Self, crate::FeedbackError> {
+    pub fn new() -> Result<Self, crate::FeedbackError> {
         Ok(Self {
             peer_sessions: std::sync::Arc::new(std::sync::RwLock::new(HashMap::new())),
             group_exercises: std::sync::Arc::new(std::sync::RwLock::new(HashMap::new())),
@@ -593,8 +593,15 @@ pub struct PeerFeedbackSystem {
     pub feedback_history: HashMap<String, Vec<PeerFeedback>>,
 }
 
+impl Default for PeerFeedbackSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PeerFeedbackSystem {
     /// Create a new peer feedback system
+    #[must_use]
     pub fn new() -> Self {
         Self {
             feedback_history: HashMap::new(),
@@ -605,7 +612,7 @@ impl PeerFeedbackSystem {
     pub fn add_feedback(&mut self, session_id: &str, feedback: PeerFeedback) {
         self.feedback_history
             .entry(session_id.to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(feedback);
     }
 }

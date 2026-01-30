@@ -27,7 +27,7 @@ where
     D: serde::Deserializer<'de>,
 {
     let duration = Duration::deserialize(deserializer)?;
-    Ok(Instant::now() - duration)
+    Ok(Instant::now().checked_sub(duration).unwrap())
 }
 
 /// Enhanced delivery status with more granular states
@@ -117,7 +117,7 @@ where
     D: serde::Deserializer<'de>,
 {
     let duration_opt = Option::<Duration>::deserialize(deserializer)?;
-    Ok(duration_opt.map(|d| Instant::now() - d))
+    Ok(duration_opt.map(|d| Instant::now().checked_sub(d).unwrap()))
 }
 
 /// Comprehensive notification record with reliability tracking
@@ -155,6 +155,7 @@ pub struct ReliableNotification {
 
 impl ReliableNotification {
     /// Create a new reliable notification
+    #[must_use]
     pub fn new(notification: Notification, scheduled_for: Option<Instant>) -> Self {
         let priority_score = match notification.priority {
             NotificationPriority::Critical => 1000,
@@ -185,6 +186,7 @@ impl ReliableNotification {
     }
 
     /// Check if notification should be delivered now
+    #[must_use]
     pub fn should_deliver_now(&self) -> bool {
         // Check if scheduled time has passed
         if let Some(scheduled_time) = self.scheduled_for {
@@ -210,6 +212,7 @@ impl ReliableNotification {
     }
 
     /// Calculate next retry time with exponential backoff
+    #[must_use]
     pub fn calculate_next_retry(&self, attempt: u32) -> Option<Instant> {
         if attempt >= self.max_retries {
             return None;
@@ -385,6 +388,7 @@ impl Default for ReliabilityConfig {
 
 impl NotificationReliabilityManager {
     /// Create a new reliability manager
+    #[must_use]
     pub fn new(config: ReliabilityConfig) -> Self {
         Self {
             notifications: Arc::new(RwLock::new(HashMap::new())),
@@ -432,7 +436,7 @@ impl NotificationReliabilityManager {
             stats.current_queue_size += 1;
         }
 
-        log::debug!("Enqueued notification {} for reliable delivery", id);
+        log::debug!("Enqueued notification {id} for reliable delivery");
         Ok(id)
     }
 
@@ -457,15 +461,11 @@ impl NotificationReliabilityManager {
             stats.successful_deliveries += 1;
             stats.total_processed += 1;
 
-            log::debug!(
-                "Marked notification {} as delivered after {} attempts",
-                id,
-                attempts
-            );
+            log::debug!("Marked notification {id} as delivered after {attempts} attempts");
             Ok(())
         } else {
             Err(PlatformError::ConfigurationError {
-                message: format!("notification {} not found", id),
+                message: format!("notification {id} not found"),
             })
         }
     }
@@ -521,7 +521,7 @@ impl NotificationReliabilityManager {
             Ok(will_retry)
         } else {
             Err(PlatformError::ConfigurationError {
-                message: format!("notification {} not found", id),
+                message: format!("notification {id} not found"),
             })
         }
     }
@@ -580,10 +580,7 @@ impl NotificationReliabilityManager {
         stats.current_queue_size = final_count;
         stats.last_cleanup = Some(start_time);
 
-        log::info!(
-            "Cleaned up {} expired/completed notifications",
-            cleaned_count
-        );
+        log::info!("Cleaned up {cleaned_count} expired/completed notifications");
         Ok(cleaned_count as u32)
     }
 

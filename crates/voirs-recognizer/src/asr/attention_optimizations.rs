@@ -85,6 +85,7 @@ pub struct KVCache {
 
 impl KVCache {
     /// Create new KV cache
+    #[must_use]
     pub fn new(num_heads: usize, head_dim: usize, max_length: usize) -> Self {
         Self {
             keys: vec![Vec::new(); num_heads],
@@ -115,6 +116,7 @@ impl KVCache {
     }
 
     /// Get cached keys and values
+    #[must_use]
     pub fn get(&self) -> (&[Vec<Vec<f32>>], &[Vec<Vec<f32>>]) {
         (&self.keys, &self.values)
     }
@@ -122,6 +124,7 @@ impl KVCache {
 
 impl OptimizedMultiHeadAttention {
     /// Create optimized multi-head attention
+    #[must_use]
     pub fn new(
         num_heads: usize,
         model_dim: usize,
@@ -216,11 +219,11 @@ impl OptimizedMultiHeadAttention {
 
                 // Update global statistics and compute block output
                 for (q_idx, score_row) in block_scores.iter().enumerate() {
-                    let global_q_idx = i + q_idx;
+                    let global_query_idx = i + q_idx;
 
                     // Find max for numerical stability
-                    let block_max = score_row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-                    let new_max = row_maxes[global_q_idx].max(block_max);
+                    let block_max = score_row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                    let new_max = row_maxes[global_query_idx].max(block_max);
 
                     // Compute exponentials and sum
                     let mut block_sum = 0.0;
@@ -231,26 +234,27 @@ impl OptimizedMultiHeadAttention {
                             let prob = (score - new_max).exp();
                             block_sum += prob;
 
-                            let global_k_idx = j + k_idx;
-                            for (dim, &val) in value[global_k_idx].iter().enumerate() {
+                            let global_key_idx = j + k_idx;
+                            for (dim, &val) in value[global_key_idx].iter().enumerate() {
                                 block_weighted_values[dim] += prob * val;
                             }
                         }
                     }
 
                     // Update global output with stability correction
-                    let correction = (row_maxes[global_q_idx] - new_max).exp();
-                    let new_sum = row_sums[global_q_idx] * correction + block_sum;
+                    let correction = (row_maxes[global_query_idx] - new_max).exp();
+                    let new_sum = row_sums[global_query_idx] * correction + block_sum;
 
                     for dim in 0..self.head_dim {
-                        output[global_q_idx][dim] =
-                            (output[global_q_idx][dim] * row_sums[global_q_idx] * correction
-                                + block_weighted_values[dim])
-                                / new_sum;
+                        output[global_query_idx][dim] = (output[global_query_idx][dim]
+                            * row_sums[global_query_idx]
+                            * correction
+                            + block_weighted_values[dim])
+                            / new_sum;
                     }
 
-                    row_maxes[global_q_idx] = new_max;
-                    row_sums[global_q_idx] = new_sum;
+                    row_maxes[global_query_idx] = new_max;
+                    row_sums[global_query_idx] = new_sum;
                 }
             }
         }
@@ -259,6 +263,7 @@ impl OptimizedMultiHeadAttention {
     }
 
     /// Sparse attention computation
+    #[must_use]
     pub fn sparse_attention(
         &self,
         query: &[Vec<f32>],
@@ -335,7 +340,7 @@ impl OptimizedMultiHeadAttention {
 
             // Apply softmax
             if !scores.is_empty() {
-                let max_score = scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                let max_score = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
                 let exp_scores: Vec<f32> = scores.iter().map(|&s| (s - max_score).exp()).collect();
                 let sum_exp: f32 = exp_scores.iter().sum();
 
@@ -393,7 +398,7 @@ impl OptimizedMultiHeadAttention {
 
             // Apply softmax
             if !scores.is_empty() {
-                let max_score = scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                let max_score = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
                 let exp_scores: Vec<f32> = scores.iter().map(|&s| (s - max_score).exp()).collect();
                 let sum_exp: f32 = exp_scores.iter().sum();
 
@@ -451,7 +456,7 @@ impl OptimizedMultiHeadAttention {
 
             // Apply softmax
             if !scores.is_empty() {
-                let max_score = scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                let max_score = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
                 let exp_scores: Vec<f32> = scores.iter().map(|&s| (s - max_score).exp()).collect();
                 let sum_exp: f32 = exp_scores.iter().sum();
 
@@ -483,17 +488,17 @@ impl OptimizedMultiHeadAttention {
         let mut output = vec![vec![0.0; self.head_dim]; seq_len];
 
         for block_i in (0..seq_len).step_by(block_size) {
-            let block_i_end = (block_i + block_size).min(seq_len);
+            let block_i_limit = (block_i + block_size).min(seq_len);
 
             for block_j in (0..seq_len).step_by(block_size) {
-                let block_j_end = (block_j + block_size).min(seq_len);
+                let block_j_limit = (block_j + block_size).min(seq_len);
 
                 // Compute block attention
-                for i in block_i..block_i_end {
+                for i in block_i..block_i_limit {
                     let mut scores = Vec::new();
                     let mut indices = Vec::new();
 
-                    for j in block_j..block_j_end {
+                    for j in block_j..block_j_limit {
                         if let Some(mask) = mask {
                             if mask[i][j] {
                                 continue;
@@ -510,7 +515,7 @@ impl OptimizedMultiHeadAttention {
 
                     // Apply softmax within block
                     if !scores.is_empty() {
-                        let max_score = scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                        let max_score = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
                         let exp_scores: Vec<f32> =
                             scores.iter().map(|&s| (s - max_score).exp()).collect();
                         let sum_exp: f32 = exp_scores.iter().sum();
@@ -590,7 +595,7 @@ impl OptimizedMultiHeadAttention {
 
             // Apply softmax
             if !scores.is_empty() {
-                let max_score = scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                let max_score = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
                 let exp_scores: Vec<f32> = scores.iter().map(|&s| (s - max_score).exp()).collect();
                 let sum_exp: f32 = exp_scores.iter().sum();
 
@@ -638,7 +643,7 @@ impl OptimizedMultiHeadAttention {
         let v_heads = self.reshape_for_heads(&v);
 
         // Get keys and values (from cache or current)
-        let (final_k_heads, final_v_heads) = if use_cache && self.kv_cache.is_some() {
+        let (final_keys, final_values) = if use_cache && self.kv_cache.is_some() {
             let (cached_k, cached_v) = self.kv_cache.as_ref().unwrap().get();
             (cached_k.to_vec(), cached_v.to_vec())
         } else {
@@ -652,19 +657,14 @@ impl OptimizedMultiHeadAttention {
                 // Use sparse attention
                 self.sparse_attention(
                     &q_heads[head],
-                    &final_k_heads[head],
-                    &final_v_heads[head],
+                    &final_keys[head],
+                    &final_values[head],
                     pattern,
                     mask,
                 )
             } else {
                 // Use flash attention for efficiency
-                self.flash_attention(
-                    &q_heads[head],
-                    &final_k_heads[head],
-                    &final_v_heads[head],
-                    mask,
-                )
+                self.flash_attention(&q_heads[head], &final_keys[head], &final_values[head], mask)
             };
             head_outputs.push(attention_output);
         }
@@ -745,6 +745,7 @@ pub struct MultiScaleAttention {
 
 impl MultiScaleAttention {
     /// Create multi-scale attention
+    #[must_use]
     pub fn new(num_heads: usize, model_dim: usize, dropout: f32, scales: Vec<usize>) -> Self {
         let mut attention_scales = Vec::new();
         let mut pooling_sizes = Vec::new();

@@ -5,6 +5,7 @@
 
 pub mod filters;
 pub mod metrics;
+pub mod perceptual;
 pub mod review;
 
 use crate::{DatasetSample, QualityMetrics, Result};

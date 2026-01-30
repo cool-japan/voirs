@@ -1,0 +1,85 @@
+# Multi-Voice Comparison Workflow
+#
+# This workflow demonstrates parallel synthesis with multiple voices
+# and conditional quality validation
+#
+# Usage: voirs workflow execute examples/workflows/multi_voice_comparison.yaml
+
+name: "multi-voice-comparison"
+version: "1.0"
+description: "Compare multiple voices with quality validation"
+
+variables:
+  text: "The quick brown fox jumps over the lazy dog."
+  voices:
+    - "en-US-neural-1"
+    - "en-US-neural-2"
+    - "en-GB-neural-1"
+  output_dir: "voice_comparison"
+  quality_threshold: 4.0
+
+config:
+  max_parallel: 3
+  timeout_seconds: 600
+
+steps:
+  # Step 1: Create output directory
+  - name: "create_output_dir"
+    type: "command"
+    description: "Create output directory for voice samples"
+    parameters:
+      command: "mkdir"
+      args:
+        - "-p"
+        - "${output_dir}"
+
+  # Step 2: Synthesize with each voice in parallel
+  - name: "synthesize_voices"
+    type: "synthesize"
+    description: "Generate audio with all voices"
+    for_each: "${voices}"
+    parallel: true
+    depends_on:
+      - step_name: "create_output_dir"
+        must_succeed: true
+    parameters:
+      text: "${text}"
+      voice: "${item}"
+      output: "${output_dir}/${item}.wav"
+      quality: "high"
+      rate: 1.0
+    retry:
+      max_attempts: 3
+      strategy: "exponential"
+      backoff_multiplier: 2.0
+      initial_delay_ms: 1000
+      max_delay_ms: 10000
+
+  # Step 3: Validate quality (conditional on synthesis success)
+  - name: "validate_quality"
+    type: "validate"
+    description: "Check audio quality meets threshold"
+    depends_on:
+      - step_name: "synthesize_voices"
+        must_succeed: true
+    condition:
+      left: "${synthesize_voices.success}"
+      operator: "equals"
+      right: "true"
+    parameters:
+      input_dir: "${output_dir}"
+      min_quality: "${quality_threshold}"
+      check_duration: true
+      check_naturalness: true
+
+  # Step 4: Generate report
+  - name: "generate_report"
+    type: "command"
+    description: "Create comparison report"
+    depends_on:
+      - step_name: "validate_quality"
+        must_succeed: false  # Continue even if validation fails
+    parameters:
+      command: "echo"
+      args:
+        - "Voice comparison complete. Results in ${output_dir}/"

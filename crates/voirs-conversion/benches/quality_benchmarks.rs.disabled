@@ -1,0 +1,255 @@
+//! Quality assessment and artifact detection benchmarks
+//!
+//! Benchmarks for quality control operations including:
+//! - Artifact detection
+//! - Quality metrics calculation
+//! - Adaptive quality control
+//! - Perceptual analysis
+
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use std::time::Duration;
+use voirs_conversion::{
+    quality::{
+        adaptive_controller::AdaptiveQualityController, ArtifactDetector, PerceptualOptimizer,
+        QualityMetrics,
+    },
+    ConversionConfig, ConversionType,
+};
+
+/// Generate sample audio for benchmarking
+fn generate_audio(f0: f32, duration_samples: usize) -> Vec<f32> {
+    use std::f32::consts::PI;
+    (0..duration_samples)
+        .map(|i| {
+            let t = i as f32 / 16000.0;
+            let fundamental = (2.0 * PI * f0 * t).sin() * 0.5;
+            let harmonic2 = (2.0 * PI * f0 * 2.0 * t).sin() * 0.25;
+            let harmonic3 = (2.0 * PI * f0 * 3.0 * t).sin() * 0.15;
+
+            // Add some noise for realism
+            let noise = (t * 1000.0).sin() * 0.05;
+
+            fundamental + harmonic2 + harmonic3 + noise
+        })
+        .collect()
+}
+
+/// Benchmark artifact detection
+fn bench_artifact_detection(c: &mut Criterion) {
+    let mut group = c.benchmark_group("artifact_detection");
+
+    // Test different audio durations
+    for duration_ms in [100, 500, 1000, 2000].iter() {
+        let sample_count = (16000 * duration_ms) / 1000;
+        group.throughput(Throughput::Elements(sample_count as u64));
+
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("{}ms", duration_ms)),
+            duration_ms,
+            |b, &duration_ms| {
+                let sample_count = (16000 * duration_ms) / 1000;
+                let audio = generate_audio(200.0, sample_count);
+                let detector = ArtifactDetector::new();
+
+                b.iter(|| {
+                    black_box(detector.detect_artifacts(&audio, 16000).unwrap());
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Benchmark quality metrics calculation
+fn bench_quality_metrics(c: &mut Criterion) {
+    let mut group = c.benchmark_group("quality_metrics");
+
+    let source_audio = generate_audio(180.0, 16000);
+    let converted_audio = generate_audio(220.0, 16000);
+
+    group.throughput(Throughput::Elements(source_audio.len() as u64));
+
+    group.bench_function("calculate_all_metrics", |b| {
+        let metrics = QualityMetrics::new();
+
+        b.iter(|| {
+            black_box(
+                metrics
+                    .calculate_all(&source_audio, &converted_audio, 16000)
+                    .unwrap(),
+            );
+        });
+    });
+
+    group.bench_function("calculate_snr", |b| {
+        let metrics = QualityMetrics::new();
+
+        b.iter(|| {
+            black_box(
+                metrics
+                    .calculate_snr(&source_audio, &converted_audio)
+                    .unwrap(),
+            );
+        });
+    });
+
+    group.bench_function("calculate_spectral_distance", |b| {
+        let metrics = QualityMetrics::new();
+
+        b.iter(|| {
+            black_box(
+                metrics
+                    .calculate_spectral_distance(&source_audio, &converted_audio, 16000)
+                    .unwrap(),
+            );
+        });
+    });
+
+    group.bench_function("calculate_temporal_consistency", |b| {
+        let metrics = QualityMetrics::new();
+
+        b.iter(|| {
+            black_box(
+                metrics
+                    .calculate_temporal_consistency(&converted_audio, 16000)
+                    .unwrap(),
+            );
+        });
+    });
+
+    group.finish();
+}
+
+/// Benchmark perceptual optimization
+fn bench_perceptual_optimization(c: &mut Criterion) {
+    let mut group = c.benchmark_group("perceptual_optimization");
+
+    let audio = generate_audio(180.0, 16000);
+    group.throughput(Throughput::Elements(audio.len() as u64));
+
+    group.bench_function("optimize_parameters", |b| {
+        let optimizer = PerceptualOptimizer::new();
+        let config = ConversionConfig {
+            conversion_type: ConversionType::PitchShift { factor: 1.2 },
+            quality_level: 0.85,
+            preserve_prosody: true,
+            preserve_emotion: true,
+            ..Default::default()
+        };
+
+        b.iter(|| {
+            black_box(optimizer.optimize(&audio, &config, 16000).unwrap());
+        });
+    });
+
+    group.bench_function("analyze_perceptual_quality", |b| {
+        let optimizer = PerceptualOptimizer::new();
+
+        b.iter(|| {
+            black_box(optimizer.analyze_perceptual_quality(&audio, 16000).unwrap());
+        });
+    });
+
+    group.finish();
+}
+
+/// Benchmark adaptive quality controller
+fn bench_adaptive_quality(c: &mut Criterion) {
+    let mut group = c.benchmark_group("adaptive_quality");
+
+    let source_audio = generate_audio(180.0, 16000);
+    let converted_audio = generate_audio(220.0, 16000);
+
+    group.throughput(Throughput::Elements(source_audio.len() as u64));
+
+    group.bench_function("assess_and_improve", |b| {
+        let controller = AdaptiveQualityController::new();
+
+        b.iter(|| {
+            black_box(
+                controller
+                    .assess_and_improve(&source_audio, &converted_audio, 16000)
+                    .unwrap(),
+            );
+        });
+    });
+
+    group.bench_function("detect_issues", |b| {
+        let controller = AdaptiveQualityController::new();
+
+        b.iter(|| {
+            black_box(
+                controller
+                    .detect_quality_issues(&source_audio, &converted_audio, 16000)
+                    .unwrap(),
+            );
+        });
+    });
+
+    group.finish();
+}
+
+/// Benchmark different audio qualities
+fn bench_audio_quality_impact(c: &mut Criterion) {
+    let mut group = c.benchmark_group("audio_quality_impact");
+
+    // Clean audio
+    let clean_audio = generate_audio(200.0, 16000);
+
+    // Noisy audio
+    let noisy_audio: Vec<f32> = clean_audio
+        .iter()
+        .enumerate()
+        .map(|(i, &sample)| {
+            let noise = ((i as f32 / 100.0).sin() * 0.2) + ((i as f32 / 50.0).cos() * 0.15);
+            sample + noise
+        })
+        .collect();
+
+    // Distorted audio
+    let distorted_audio: Vec<f32> = clean_audio
+        .iter()
+        .map(|&sample| sample.clamp(-0.7, 0.7))
+        .collect();
+
+    group.throughput(Throughput::Elements(clean_audio.len() as u64));
+
+    let mut detector = ArtifactDetector::new();
+
+    group.bench_function("clean_audio", |b| {
+        b.iter(|| {
+            black_box(detector.detect_artifacts(&clean_audio, 16000).unwrap());
+        });
+    });
+
+    group.bench_function("noisy_audio", |b| {
+        b.iter(|| {
+            black_box(detector.detect_artifacts(&noisy_audio, 16000).unwrap());
+        });
+    });
+
+    group.bench_function("distorted_audio", |b| {
+        b.iter(|| {
+            black_box(detector.detect_artifacts(&distorted_audio, 16000).unwrap());
+        });
+    });
+
+    group.finish();
+}
+
+criterion_group! {
+    name = benches;
+    config = Criterion::default()
+        .sample_size(20)
+        .measurement_time(Duration::from_secs(10))
+        .warm_up_time(Duration::from_secs(3));
+    targets =
+        bench_artifact_detection,
+        bench_quality_metrics,
+        bench_perceptual_optimization,
+        bench_adaptive_quality,
+        bench_audio_quality_impact
+}
+
+criterion_main!(benches);

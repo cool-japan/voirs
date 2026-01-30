@@ -120,6 +120,7 @@ pub enum ASRBackend {
 
 impl ASRBackend {
     /// Create a default Whisper backend
+    #[must_use]
     pub fn default_whisper() -> Self {
         Self::Whisper {
             model_size: WhisperModelSize::Base,
@@ -128,6 +129,7 @@ impl ASRBackend {
     }
 
     /// Create a Whisper backend with specific model size
+    #[must_use]
     pub fn whisper(model_size: WhisperModelSize) -> Self {
         Self::Whisper {
             model_size,
@@ -135,7 +137,8 @@ impl ASRBackend {
         }
     }
 
-    /// Create a DeepSpeech backend
+    /// Create a `DeepSpeech` backend
+    #[must_use]
     pub fn deepspeech(model_path: String) -> Self {
         Self::DeepSpeech {
             model_path,
@@ -143,7 +146,8 @@ impl ASRBackend {
         }
     }
 
-    /// Create a Wav2Vec2 backend
+    /// Create a `Wav2Vec2` backend
+    #[must_use]
     pub fn wav2vec2(model_id: String) -> Self {
         Self::Wav2Vec2 {
             model_id,

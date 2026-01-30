@@ -26,6 +26,7 @@ pub struct AchievementSystem {
 
 impl AchievementSystem {
     /// Create a new achievement system
+    #[must_use]
     pub fn new() -> Self {
         let mut system = Self {
             achievements: HashMap::new(),
@@ -189,7 +190,7 @@ impl AchievementSystem {
 
                 self.user_achievements
                     .entry(user_id)
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(user_achievement);
 
                 unlocked.push(UnlockedAchievement {
@@ -204,18 +205,19 @@ impl AchievementSystem {
     }
 
     /// Check if achievement is already unlocked
+    #[must_use]
     pub fn is_achievement_unlocked(&self, user_id: Uuid, achievement_id: &str) -> bool {
         self.user_achievements
             .get(&user_id)
-            .map(|achievements| {
+            .is_some_and(|achievements| {
                 achievements
                     .iter()
                     .any(|a| a.achievement_id == achievement_id)
             })
-            .unwrap_or(false)
     }
 
     /// Get user's achievement progress
+    #[must_use]
     pub fn get_achievement_progress(
         &self,
         user_id: Uuid,
@@ -234,6 +236,7 @@ impl AchievementSystem {
     }
 
     /// Get all achievements for a category
+    #[must_use]
     pub fn get_achievements_by_category(&self, category: AchievementCategory) -> Vec<&Achievement> {
         self.achievements
             .values()
@@ -242,6 +245,7 @@ impl AchievementSystem {
     }
 
     /// Get user's unlocked achievements
+    #[must_use]
     pub fn get_user_achievements(&self, user_id: Uuid) -> Vec<&Achievement> {
         self.user_achievements
             .get(&user_id)
@@ -255,13 +259,13 @@ impl AchievementSystem {
     }
 
     /// Get achievement completion statistics
+    #[must_use]
     pub fn get_completion_stats(&self, user_id: Uuid) -> AchievementStats {
         let total_achievements = self.achievements.len();
         let unlocked_achievements = self
             .user_achievements
             .get(&user_id)
-            .map(|a| a.len())
-            .unwrap_or(0);
+            .map_or(0, std::vec::Vec::len);
 
         let completion_rate = if total_achievements > 0 {
             unlocked_achievements as f32 / total_achievements as f32
@@ -321,8 +325,7 @@ impl AchievementSystem {
             UnlockCondition::FocusAreaMastery(focus_area) => progress
                 .skill_breakdown
                 .get(focus_area)
-                .map(|&score| score >= 0.9)
-                .unwrap_or(false),
+                .is_some_and(|&score| score >= 0.9),
         }
     }
 
@@ -343,7 +346,7 @@ impl AchievementSystem {
                     (progress.training_stats.total_sessions as f32 / *sessions as f32).min(1.0);
                 let accuracy_progress =
                     (progress.average_scores.average_pronunciation / threshold).min(1.0);
-                (session_progress + accuracy_progress) / 2.0
+                f32::midpoint(session_progress, accuracy_progress)
             }
             UnlockCondition::SpeedChallenge { count, .. } => {
                 (progress.training_stats.total_sessions as f32 / *count as f32).min(1.0)
@@ -401,6 +404,7 @@ pub struct Achievement {
 
 /// Achievement categories
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(missing_docs)]
 pub enum AchievementCategory {
     /// Description
     Progress,
@@ -431,6 +435,7 @@ pub struct UserAchievement {
 
 /// Unlock conditions for achievements
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(missing_docs)]
 pub enum UnlockCondition {
     /// Complete a certain number of sessions
     SessionCount(u32),
@@ -457,6 +462,7 @@ pub enum UnlockCondition {
 
 /// Achievement rewards
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(missing_docs)]
 pub enum Reward {
     /// Point reward
     Points(u32),
@@ -503,6 +509,7 @@ pub struct BadgeManager {
 
 impl BadgeManager {
     /// Create a new badge manager
+    #[must_use]
     pub fn new() -> Self {
         Self {
             badges: HashMap::new(),
@@ -518,7 +525,7 @@ impl BadgeManager {
     /// Award badge to user
     pub fn award_badge(&mut self, user_id: Uuid, badge_id: &str) -> Result<(), String> {
         if !self.badges.contains_key(badge_id) {
-            return Err(format!("Badge '{}' not found", badge_id));
+            return Err(format!("Badge '{badge_id}' not found"));
         }
 
         let user_badge = UserBadge {
@@ -529,13 +536,14 @@ impl BadgeManager {
 
         self.user_badges
             .entry(user_id)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(user_badge);
 
         Ok(())
     }
 
     /// Get user's badges
+    #[must_use]
     pub fn get_user_badges(&self, user_id: Uuid) -> Vec<(&Badge, DateTime<Utc>)> {
         self.user_badges
             .get(&user_id)
@@ -587,6 +595,7 @@ pub struct Badge {
 
 /// Badge rarity levels
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[allow(missing_docs)]
 pub enum BadgeRarity {
     /// Description
     Common,

@@ -67,7 +67,10 @@ async fn train_g2p_model(
 ) -> Result<()> {
     if !global.quiet {
         println!("🔧 Initializing G2P training for language: {}\n", language);
-        println!("📚 Loading pronunciation dictionary from {}...", dictionary.display());
+        println!(
+            "📚 Loading pronunciation dictionary from {}...",
+            dictionary.display()
+        );
     }
 
     // Load and validate dictionary
@@ -94,13 +97,13 @@ async fn train_g2p_model(
 
     // Configure LSTM model
     let lstm_config = LstmConfig {
-        vocab_size: 256,           // Character vocabulary
-        phoneme_vocab_size: 128,   // Phoneme vocabulary
-        hidden_size: 256,          // Hidden layer size
-        num_layers: 3,             // 3 LSTM layers
-        dropout: 0.1,              // 10% dropout
-        use_attention: true,       // Enable attention mechanism
-        max_seq_len: 100,          // Maximum sequence length
+        vocab_size: 256,         // Character vocabulary
+        phoneme_vocab_size: 128, // Phoneme vocabulary
+        hidden_size: 256,        // Hidden layer size
+        num_layers: 3,           // 3 LSTM layers
+        dropout: 0.1,            // 10% dropout
+        use_attention: true,     // Enable attention mechanism
+        max_seq_len: 100,        // Maximum sequence length
     };
 
     // Create LSTM trainer
@@ -228,7 +231,8 @@ async fn train_g2p_model(
                             .trim_end_matches(".safetensors")
                             .to_string()
                             + "_best.safetensors";
-                        if let Err(e) = trainer.save_model(&encoder, &decoder, Path::new(&best_path))
+                        if let Err(e) =
+                            trainer.save_model(&encoder, &decoder, Path::new(&best_path))
                         {
                             if !global.quiet {
                                 println!("⚠️  Failed to save best model: {}", e);
@@ -257,7 +261,8 @@ async fn train_g2p_model(
                             .trim_end_matches(".safetensors"),
                         epoch
                     );
-                    if let Err(e) = trainer.save_model(&encoder, &decoder, Path::new(&checkpoint_path))
+                    if let Err(e) =
+                        trainer.save_model(&encoder, &decoder, Path::new(&checkpoint_path))
                     {
                         if !global.quiet {
                             println!("⚠️  Failed to save checkpoint: {}", e);
@@ -364,13 +369,14 @@ async fn load_pronunciation_dictionary(
     }
 
     // Read file contents
-    let contents = tokio::fs::read_to_string(path).await.map_err(|e| {
-        voirs_sdk::VoirsError::IoError {
-            path: path.clone(),
-            operation: voirs_sdk::error::IoOperation::Read,
-            source: e,
-        }
-    })?;
+    let contents =
+        tokio::fs::read_to_string(path)
+            .await
+            .map_err(|e| voirs_sdk::VoirsError::IoError {
+                path: path.clone(),
+                operation: voirs_sdk::error::IoOperation::Read,
+                source: e,
+            })?;
 
     // Parse dictionary entries
     let mut entries = Vec::new();

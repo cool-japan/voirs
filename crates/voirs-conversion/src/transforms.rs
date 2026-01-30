@@ -830,7 +830,7 @@ impl MultiChannelAudio {
             });
         }
 
-        if data.len() % num_channels != 0 {
+        if !data.len().is_multiple_of(num_channels) {
             return Err(Error::Transform {
                 transform_type: "interleaved_validation".to_string(),
                 message: "Data length must be divisible by number of channels".to_string(),

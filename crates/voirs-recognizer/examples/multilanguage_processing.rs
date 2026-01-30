@@ -34,12 +34,7 @@ async fn main() -> Result<(), RecognitionError> {
     ];
 
     for (lang_code, lang_name, sample_text) in &supported_languages {
-        println!(
-            "   • {} ({}): \"{}\"",
-            lang_name,
-            format!("{:?}", lang_code),
-            sample_text
-        );
+        println!("   • {} ({:?}): \"{}\"", lang_name, lang_code, sample_text);
     }
 
     // Step 2: Create language-specific audio samples

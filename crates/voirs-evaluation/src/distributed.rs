@@ -19,6 +19,8 @@ use voirs_sdk::AudioBuffer;
 pub struct DistributedConfig {
     /// Maximum number of worker nodes
     pub max_workers: usize,
+    /// Minimum number of worker nodes
+    pub min_workers: usize,
     /// Task timeout in seconds
     pub task_timeout_seconds: u64,
     /// Heartbeat interval in seconds
@@ -29,19 +31,161 @@ pub struct DistributedConfig {
     pub load_balancing: LoadBalancingStrategy,
     /// Fault tolerance configuration
     pub fault_tolerance: FaultToleranceConfig,
+    /// Auto-scaling configuration
+    pub auto_scaling: AutoScalingConfig,
+    /// Edge computing configuration
+    pub edge_computing: EdgeComputingConfig,
+    /// Cluster configuration
+    pub cluster_config: ClusterConfig,
 }
 
 impl Default for DistributedConfig {
     fn default() -> Self {
         Self {
             max_workers: 10,
+            min_workers: 1,
             task_timeout_seconds: 300,
             heartbeat_interval_seconds: 30,
             max_retries: 3,
             load_balancing: LoadBalancingStrategy::RoundRobin,
             fault_tolerance: FaultToleranceConfig::default(),
+            auto_scaling: AutoScalingConfig::default(),
+            edge_computing: EdgeComputingConfig::default(),
+            cluster_config: ClusterConfig::default(),
         }
     }
+}
+
+/// Auto-scaling configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoScalingConfig {
+    /// Enable auto-scaling
+    pub enabled: bool,
+    /// Target CPU utilization percentage (0-100)
+    pub target_cpu_utilization: f32,
+    /// Target memory utilization percentage (0-100)
+    pub target_memory_utilization: f32,
+    /// Target queue depth before scaling up
+    pub target_queue_depth: usize,
+    /// Scale up threshold (consecutive checks before scaling up)
+    pub scale_up_threshold: u32,
+    /// Scale down threshold (consecutive checks before scaling down)
+    pub scale_down_threshold: u32,
+    /// Cooldown period in seconds after scaling
+    pub cooldown_seconds: u64,
+    /// Scale up increment (number of workers to add)
+    pub scale_up_increment: usize,
+    /// Scale down decrement (number of workers to remove)
+    pub scale_down_decrement: usize,
+}
+
+impl Default for AutoScalingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            target_cpu_utilization: 70.0,
+            target_memory_utilization: 80.0,
+            target_queue_depth: 20,
+            scale_up_threshold: 3,
+            scale_down_threshold: 5,
+            cooldown_seconds: 300,
+            scale_up_increment: 2,
+            scale_down_decrement: 1,
+        }
+    }
+}
+
+/// Edge computing configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EdgeComputingConfig {
+    /// Enable edge computing optimizations
+    pub enabled: bool,
+    /// Enable bandwidth-aware task assignment
+    pub bandwidth_aware: bool,
+    /// Enable local result caching at edge nodes
+    pub edge_caching: bool,
+    /// Maximum bandwidth per edge node (MB/s)
+    pub max_bandwidth_mbps: f32,
+    /// Enable task compression for network transfer
+    pub compress_transfers: bool,
+    /// Enable edge-to-edge communication
+    pub edge_to_edge_enabled: bool,
+    /// Latency threshold for edge classification (ms)
+    pub edge_latency_threshold_ms: u64,
+}
+
+impl Default for EdgeComputingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bandwidth_aware: true,
+            edge_caching: true,
+            max_bandwidth_mbps: 100.0,
+            compress_transfers: true,
+            edge_to_edge_enabled: false,
+            edge_latency_threshold_ms: 50,
+        }
+    }
+}
+
+/// Cluster configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClusterConfig {
+    /// Enable cluster mode
+    pub enabled: bool,
+    /// Cluster name
+    pub cluster_name: String,
+    /// Enable consensus protocol
+    pub consensus_enabled: bool,
+    /// Consensus algorithm
+    pub consensus_algorithm: ConsensusAlgorithm,
+    /// Enable data replication
+    pub replication_enabled: bool,
+    /// Replication factor
+    pub replication_factor: usize,
+    /// Enable partition tolerance
+    pub partition_tolerance: bool,
+    /// Cluster discovery method
+    pub discovery_method: ClusterDiscoveryMethod,
+}
+
+impl Default for ClusterConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            cluster_name: "voirs-eval-cluster".to_string(),
+            consensus_enabled: false,
+            consensus_algorithm: ConsensusAlgorithm::Raft,
+            replication_enabled: false,
+            replication_factor: 3,
+            partition_tolerance: true,
+            discovery_method: ClusterDiscoveryMethod::Static,
+        }
+    }
+}
+
+/// Consensus algorithms for cluster coordination
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum ConsensusAlgorithm {
+    /// Raft consensus algorithm
+    Raft,
+    /// Paxos consensus algorithm
+    Paxos,
+    /// Simple leader election
+    LeaderElection,
+}
+
+/// Cluster discovery methods
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum ClusterDiscoveryMethod {
+    /// Static configuration
+    Static,
+    /// DNS-based discovery
+    Dns,
+    /// Kubernetes service discovery
+    Kubernetes,
+    /// Consul service discovery
+    Consul,
 }
 
 /// Load balancing strategies for distributing tasks
@@ -55,6 +199,12 @@ pub enum LoadBalancingStrategy {
     Random,
     /// Weighted distribution based on worker capacity
     Weighted,
+    /// Latency-aware distribution (for edge computing)
+    LatencyAware,
+    /// Bandwidth-aware distribution
+    BandwidthAware,
+    /// Adaptive distribution based on performance
+    Adaptive,
 }
 
 /// Fault tolerance configuration
@@ -211,6 +361,12 @@ pub struct WorkerInfo {
     pub last_heartbeat: std::time::SystemTime,
     /// Performance metrics
     pub performance_metrics: PerformanceMetrics,
+    /// Network metrics for edge computing
+    pub network_metrics: NetworkMetrics,
+    /// Worker location (for edge computing)
+    pub location: Option<WorkerLocation>,
+    /// Is this an edge node
+    pub is_edge_node: bool,
 }
 
 /// Worker capabilities
@@ -241,6 +397,46 @@ pub enum WorkerStatus {
     Failed,
     /// Worker is being drained (no new tasks)
     Draining,
+}
+
+/// Network metrics for worker nodes
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkMetrics {
+    /// Average latency to coordinator (ms)
+    pub latency_ms: f32,
+    /// Available bandwidth (MB/s)
+    pub bandwidth_mbps: f32,
+    /// Packet loss percentage
+    pub packet_loss: f32,
+    /// Network jitter (ms)
+    pub jitter_ms: f32,
+    /// Total data transferred (MB)
+    pub total_data_transferred_mb: f32,
+}
+
+impl Default for NetworkMetrics {
+    fn default() -> Self {
+        Self {
+            latency_ms: 10.0,
+            bandwidth_mbps: 100.0,
+            packet_loss: 0.0,
+            jitter_ms: 1.0,
+            total_data_transferred_mb: 0.0,
+        }
+    }
+}
+
+/// Worker location information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkerLocation {
+    /// Geographic region
+    pub region: String,
+    /// Data center or availability zone
+    pub zone: Option<String>,
+    /// Latitude
+    pub latitude: Option<f64>,
+    /// Longitude
+    pub longitude: Option<f64>,
 }
 
 /// Performance metrics for workers
@@ -278,6 +474,52 @@ pub struct DistributedEvaluator {
     shutdown_sender: broadcast::Sender<()>,
     /// Statistics
     stats: Arc<RwLock<SystemStatistics>>,
+    /// Auto-scaling state
+    scaling_state: Arc<RwLock<AutoScalingState>>,
+    /// Cluster state
+    cluster_state: Arc<RwLock<ClusterState>>,
+}
+
+/// Auto-scaling state tracking
+#[derive(Debug, Clone, Default)]
+pub struct AutoScalingState {
+    /// Last scaling action timestamp
+    pub last_scaling_action: Option<std::time::SystemTime>,
+    /// Scale up counter (consecutive checks above threshold)
+    pub scale_up_counter: u32,
+    /// Scale down counter (consecutive checks below threshold)
+    pub scale_down_counter: u32,
+    /// Current system load percentage
+    pub current_system_load: f32,
+    /// Scaling recommendations
+    pub scaling_recommendation: ScalingRecommendation,
+}
+
+/// Scaling recommendation
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ScalingRecommendation {
+    /// Scale up recommended
+    ScaleUp,
+    /// Scale down recommended
+    ScaleDown,
+    /// No scaling needed
+    #[default]
+    NoAction,
+}
+
+/// Cluster state for coordination
+#[derive(Debug, Clone, Default)]
+pub struct ClusterState {
+    /// Is this node the leader
+    pub is_leader: bool,
+    /// Current leader ID
+    pub leader_id: Option<WorkerId>,
+    /// Cluster members
+    pub members: Vec<WorkerId>,
+    /// Last election timestamp
+    pub last_election: Option<std::time::SystemTime>,
+    /// Election term
+    pub term: u64,
 }
 
 /// System-wide statistics
@@ -309,19 +551,31 @@ impl DistributedEvaluator {
         let (shutdown_sender, _) = broadcast::channel(1);
 
         let evaluator = Self {
-            config,
+            config: config.clone(),
             workers: Arc::new(RwLock::new(HashMap::new())),
             task_queue: Arc::new(RwLock::new(Vec::new())),
             running_tasks: Arc::new(RwLock::new(HashMap::new())),
             completed_tasks: Arc::new(RwLock::new(HashMap::new())),
             task_sender,
             result_receiver: Arc::new(RwLock::new(result_receiver)),
-            shutdown_sender,
+            shutdown_sender: shutdown_sender.clone(),
             stats: Arc::new(RwLock::new(SystemStatistics::default())),
+            scaling_state: Arc::new(RwLock::new(AutoScalingState::default())),
+            cluster_state: Arc::new(RwLock::new(ClusterState::default())),
         };
 
         // Start background task management
         evaluator.start_background_tasks(task_receiver, result_sender);
+
+        // Start auto-scaling monitor if enabled
+        if config.auto_scaling.enabled {
+            evaluator.start_auto_scaling_monitor();
+        }
+
+        // Start cluster management if enabled
+        if config.cluster_config.enabled {
+            evaluator.start_cluster_management();
+        }
 
         evaluator
     }
@@ -535,7 +789,60 @@ impl DistributedEvaluator {
                     .max_by_key(|w| w.capabilities.max_concurrent_tasks)
                     .map(|w| w.id)
             }
+            LoadBalancingStrategy::LatencyAware => {
+                // Select worker with lowest latency
+                available_workers
+                    .iter()
+                    .min_by(|a, b| {
+                        a.network_metrics
+                            .latency_ms
+                            .partial_cmp(&b.network_metrics.latency_ms)
+                            .unwrap()
+                    })
+                    .map(|w| w.id)
+            }
+            LoadBalancingStrategy::BandwidthAware => {
+                // Select worker with highest available bandwidth
+                available_workers
+                    .iter()
+                    .max_by(|a, b| {
+                        a.network_metrics
+                            .bandwidth_mbps
+                            .partial_cmp(&b.network_metrics.bandwidth_mbps)
+                            .unwrap()
+                    })
+                    .map(|w| w.id)
+            }
+            LoadBalancingStrategy::Adaptive => {
+                // Adaptive strategy combining multiple factors
+                available_workers
+                    .iter()
+                    .min_by(|a, b| {
+                        let score_a = Self::calculate_worker_score(a);
+                        let score_b = Self::calculate_worker_score(b);
+                        score_a.partial_cmp(&score_b).unwrap()
+                    })
+                    .map(|w| w.id)
+            }
         }
+    }
+
+    /// Calculate adaptive worker score (lower is better)
+    fn calculate_worker_score(worker: &WorkerInfo) -> f32 {
+        let load_weight = 0.4;
+        let latency_weight = 0.3;
+        let bandwidth_weight = 0.2;
+        let success_rate_weight = 0.1;
+
+        let load_score = worker.current_load * 100.0;
+        let latency_score = worker.network_metrics.latency_ms;
+        let bandwidth_score = 100.0 - worker.network_metrics.bandwidth_mbps.min(100.0);
+        let success_rate_score = (1.0 - worker.performance_metrics.success_rate) * 100.0;
+
+        load_weight * load_score
+            + latency_weight * latency_score
+            + bandwidth_weight * bandwidth_score
+            + success_rate_weight * success_rate_score
     }
 
     /// Execute task on a worker (simulated)
@@ -619,6 +926,201 @@ impl DistributedEvaluator {
     pub async fn get_workers(&self) -> Vec<WorkerInfo> {
         let workers = self.workers.read().await;
         workers.values().cloned().collect()
+    }
+
+    /// Start auto-scaling monitor
+    fn start_auto_scaling_monitor(&self) {
+        let workers = Arc::clone(&self.workers);
+        let task_queue = Arc::clone(&self.task_queue);
+        let scaling_state = Arc::clone(&self.scaling_state);
+        let config = self.config.clone();
+        let mut shutdown_receiver = self.shutdown_sender.subscribe();
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        Self::evaluate_scaling_needs(
+                            Arc::clone(&workers),
+                            Arc::clone(&task_queue),
+                            Arc::clone(&scaling_state),
+                            &config.auto_scaling,
+                            config.min_workers,
+                            config.max_workers,
+                        ).await;
+                    }
+                    _ = shutdown_receiver.recv() => {
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    /// Evaluate scaling needs and update recommendations
+    async fn evaluate_scaling_needs(
+        workers: Arc<RwLock<HashMap<WorkerId, WorkerInfo>>>,
+        task_queue: Arc<RwLock<Vec<EvaluationTask>>>,
+        scaling_state: Arc<RwLock<AutoScalingState>>,
+        config: &AutoScalingConfig,
+        min_workers: usize,
+        max_workers: usize,
+    ) {
+        let workers_read = workers.read().await;
+        let queue_read = task_queue.read().await;
+        let mut state = scaling_state.write().await;
+
+        // Calculate system metrics
+        let active_workers = workers_read
+            .values()
+            .filter(|w| w.status == WorkerStatus::Online)
+            .count();
+        let queue_depth = queue_read.len();
+
+        // Calculate average CPU and memory utilization
+        let total_cpu: f32 = workers_read.values().map(|w| w.current_load).sum();
+        let avg_cpu = if active_workers > 0 {
+            total_cpu / active_workers as f32 * 100.0
+        } else {
+            0.0
+        };
+
+        let total_memory: f32 = workers_read
+            .values()
+            .map(|w| {
+                (w.capabilities.available_memory - w.performance_metrics.throughput)
+                    / w.capabilities.available_memory
+                    * 100.0
+            })
+            .sum();
+        let avg_memory = if active_workers > 0 {
+            total_memory / active_workers as f32
+        } else {
+            0.0
+        };
+
+        state.current_system_load = (avg_cpu + avg_memory) / 2.0;
+
+        // Check cooldown period
+        let in_cooldown = if let Some(last_action) = state.last_scaling_action {
+            let elapsed = std::time::SystemTime::now()
+                .duration_since(last_action)
+                .unwrap_or_default();
+            elapsed < Duration::from_secs(config.cooldown_seconds)
+        } else {
+            false
+        };
+
+        if in_cooldown {
+            return;
+        }
+
+        // Evaluate scale up conditions
+        let should_scale_up = active_workers < max_workers
+            && (avg_cpu > config.target_cpu_utilization
+                || avg_memory > config.target_memory_utilization
+                || queue_depth > config.target_queue_depth);
+
+        // Evaluate scale down conditions
+        let should_scale_down = active_workers > min_workers
+            && avg_cpu < config.target_cpu_utilization * 0.5
+            && avg_memory < config.target_memory_utilization * 0.5
+            && queue_depth < config.target_queue_depth / 2;
+
+        // Update counters and recommendations
+        if should_scale_up {
+            state.scale_up_counter += 1;
+            state.scale_down_counter = 0;
+
+            if state.scale_up_counter >= config.scale_up_threshold {
+                state.scaling_recommendation = ScalingRecommendation::ScaleUp;
+                state.scale_up_counter = 0;
+                state.last_scaling_action = Some(std::time::SystemTime::now());
+            }
+        } else if should_scale_down {
+            state.scale_down_counter += 1;
+            state.scale_up_counter = 0;
+
+            if state.scale_down_counter >= config.scale_down_threshold {
+                state.scaling_recommendation = ScalingRecommendation::ScaleDown;
+                state.scale_down_counter = 0;
+                state.last_scaling_action = Some(std::time::SystemTime::now());
+            }
+        } else {
+            state.scale_up_counter = 0;
+            state.scale_down_counter = 0;
+            state.scaling_recommendation = ScalingRecommendation::NoAction;
+        }
+    }
+
+    /// Get auto-scaling recommendation
+    pub async fn get_scaling_recommendation(&self) -> ScalingRecommendation {
+        let state = self.scaling_state.read().await;
+        state.scaling_recommendation
+    }
+
+    /// Get auto-scaling state
+    pub async fn get_scaling_state(&self) -> AutoScalingState {
+        self.scaling_state.read().await.clone()
+    }
+
+    /// Start cluster management
+    fn start_cluster_management(&self) {
+        let cluster_state = Arc::clone(&self.cluster_state);
+        let config = self.config.cluster_config.clone();
+        let mut shutdown_receiver = self.shutdown_sender.subscribe();
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(10));
+
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        Self::perform_cluster_maintenance(
+                            Arc::clone(&cluster_state),
+                            &config,
+                        ).await;
+                    }
+                    _ = shutdown_receiver.recv() => {
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    /// Perform cluster maintenance
+    async fn perform_cluster_maintenance(
+        cluster_state: Arc<RwLock<ClusterState>>,
+        config: &ClusterConfig,
+    ) {
+        if !config.consensus_enabled {
+            return;
+        }
+
+        let mut state = cluster_state.write().await;
+
+        // Simple leader election logic (simplified Raft-like)
+        if state.leader_id.is_none() {
+            // Trigger election
+            state.term += 1;
+            state.is_leader = true; // In a real implementation, this would be voted on
+            state.leader_id = Some(Uuid::new_v4());
+            state.last_election = Some(std::time::SystemTime::now());
+        }
+    }
+
+    /// Get cluster state
+    pub async fn get_cluster_state(&self) -> ClusterState {
+        self.cluster_state.read().await.clone()
+    }
+
+    /// Check if this node is the cluster leader
+    pub async fn is_cluster_leader(&self) -> bool {
+        let state = self.cluster_state.read().await;
+        state.is_leader
     }
 
     /// Shutdown the distributed evaluator
@@ -731,6 +1233,9 @@ mod tests {
                 success_rate: 0.0,
                 throughput: 0.0,
             },
+            network_metrics: NetworkMetrics::default(),
+            location: None,
+            is_edge_node: false,
         };
 
         evaluator.register_worker(worker_info).await.unwrap();
@@ -793,5 +1298,287 @@ mod tests {
         let restored_audio = deserialized.unwrap();
         assert_eq!(restored_audio.sample_rate(), 16000);
         assert_eq!(restored_audio.channels(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_auto_scaling_config() {
+        let config = AutoScalingConfig::default();
+        assert!(config.enabled);
+        assert_eq!(config.target_cpu_utilization, 70.0);
+        assert_eq!(config.target_memory_utilization, 80.0);
+        assert_eq!(config.scale_up_threshold, 3);
+        assert_eq!(config.scale_down_threshold, 5);
+    }
+
+    #[tokio::test]
+    async fn test_auto_scaling_state() {
+        let config = DistributedConfig {
+            auto_scaling: AutoScalingConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let evaluator = DistributedEvaluator::new(config);
+
+        let state = evaluator.get_scaling_state().await;
+        assert_eq!(state.scale_up_counter, 0);
+        assert_eq!(state.scale_down_counter, 0);
+        assert_eq!(
+            state.scaling_recommendation,
+            ScalingRecommendation::NoAction
+        );
+    }
+
+    #[tokio::test]
+    async fn test_cluster_state() {
+        let config = DistributedConfig {
+            cluster_config: ClusterConfig {
+                enabled: true,
+                consensus_enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let evaluator = DistributedEvaluator::new(config);
+
+        // Wait for cluster initialization
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let state = evaluator.get_cluster_state().await;
+        // After initialization, the term should be >= 1 after leader election
+        assert!(state.term >= 1);
+        assert!(state.leader_id.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_edge_computing_config() {
+        let config = EdgeComputingConfig::default();
+        assert!(!config.enabled); // Disabled by default
+        assert!(config.bandwidth_aware);
+        assert!(config.edge_caching);
+        assert_eq!(config.max_bandwidth_mbps, 100.0);
+    }
+
+    #[tokio::test]
+    async fn test_network_metrics() {
+        let metrics = NetworkMetrics::default();
+        assert_eq!(metrics.latency_ms, 10.0);
+        assert_eq!(metrics.bandwidth_mbps, 100.0);
+        assert_eq!(metrics.packet_loss, 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_worker_location() {
+        let location = WorkerLocation {
+            region: "us-east-1".to_string(),
+            zone: Some("us-east-1a".to_string()),
+            latitude: Some(40.7128),
+            longitude: Some(-74.0060),
+        };
+
+        assert_eq!(location.region, "us-east-1");
+        assert_eq!(location.zone, Some("us-east-1a".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_latency_aware_load_balancing() {
+        let config = DistributedConfig {
+            load_balancing: LoadBalancingStrategy::LatencyAware,
+            ..Default::default()
+        };
+        let evaluator = DistributedEvaluator::new(config);
+
+        // Create workers with different latencies
+        let worker1 = WorkerInfo {
+            id: Uuid::new_v4(),
+            name: "high-latency".to_string(),
+            capabilities: WorkerCapabilities {
+                max_concurrent_tasks: 4,
+                supported_task_types: vec![TaskType::QualityMetrics],
+                available_memory: 1024.0,
+                cpu_cores: 4,
+                specialized_hardware: vec![],
+            },
+            status: WorkerStatus::Online,
+            current_load: 0.5,
+            last_heartbeat: std::time::SystemTime::now(),
+            performance_metrics: PerformanceMetrics {
+                tasks_completed: 10,
+                tasks_failed: 0,
+                avg_execution_time: Duration::from_secs(2),
+                success_rate: 1.0,
+                throughput: 5.0,
+            },
+            network_metrics: NetworkMetrics {
+                latency_ms: 50.0,
+                bandwidth_mbps: 100.0,
+                packet_loss: 0.0,
+                jitter_ms: 1.0,
+                total_data_transferred_mb: 100.0,
+            },
+            location: None,
+            is_edge_node: false,
+        };
+
+        let worker2 = WorkerInfo {
+            id: Uuid::new_v4(),
+            name: "low-latency".to_string(),
+            capabilities: WorkerCapabilities {
+                max_concurrent_tasks: 4,
+                supported_task_types: vec![TaskType::QualityMetrics],
+                available_memory: 1024.0,
+                cpu_cores: 4,
+                specialized_hardware: vec![],
+            },
+            status: WorkerStatus::Online,
+            current_load: 0.5,
+            last_heartbeat: std::time::SystemTime::now(),
+            performance_metrics: PerformanceMetrics {
+                tasks_completed: 10,
+                tasks_failed: 0,
+                avg_execution_time: Duration::from_secs(2),
+                success_rate: 1.0,
+                throughput: 5.0,
+            },
+            network_metrics: NetworkMetrics {
+                latency_ms: 10.0, // Lower latency
+                bandwidth_mbps: 100.0,
+                packet_loss: 0.0,
+                jitter_ms: 1.0,
+                total_data_transferred_mb: 100.0,
+            },
+            location: None,
+            is_edge_node: false,
+        };
+
+        evaluator.register_worker(worker1).await.unwrap();
+        evaluator.register_worker(worker2).await.unwrap();
+
+        let workers = evaluator.get_workers().await;
+        assert_eq!(workers.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_bandwidth_aware_load_balancing() {
+        let config = DistributedConfig {
+            load_balancing: LoadBalancingStrategy::BandwidthAware,
+            ..Default::default()
+        };
+        let evaluator = DistributedEvaluator::new(config);
+
+        let worker = WorkerInfo {
+            id: Uuid::new_v4(),
+            name: "high-bandwidth".to_string(),
+            capabilities: WorkerCapabilities {
+                max_concurrent_tasks: 4,
+                supported_task_types: vec![TaskType::QualityMetrics],
+                available_memory: 1024.0,
+                cpu_cores: 4,
+                specialized_hardware: vec![],
+            },
+            status: WorkerStatus::Online,
+            current_load: 0.5,
+            last_heartbeat: std::time::SystemTime::now(),
+            performance_metrics: PerformanceMetrics {
+                tasks_completed: 10,
+                tasks_failed: 0,
+                avg_execution_time: Duration::from_secs(2),
+                success_rate: 1.0,
+                throughput: 5.0,
+            },
+            network_metrics: NetworkMetrics {
+                latency_ms: 10.0,
+                bandwidth_mbps: 1000.0, // High bandwidth
+                packet_loss: 0.0,
+                jitter_ms: 1.0,
+                total_data_transferred_mb: 100.0,
+            },
+            location: None,
+            is_edge_node: false,
+        };
+
+        evaluator.register_worker(worker).await.unwrap();
+
+        let workers = evaluator.get_workers().await;
+        assert_eq!(workers.len(), 1);
+        assert_eq!(workers[0].network_metrics.bandwidth_mbps, 1000.0);
+    }
+
+    #[tokio::test]
+    async fn test_adaptive_load_balancing() {
+        let config = DistributedConfig {
+            load_balancing: LoadBalancingStrategy::Adaptive,
+            ..Default::default()
+        };
+        let evaluator = DistributedEvaluator::new(config);
+
+        let worker = WorkerInfo {
+            id: Uuid::new_v4(),
+            name: "adaptive-worker".to_string(),
+            capabilities: WorkerCapabilities {
+                max_concurrent_tasks: 4,
+                supported_task_types: vec![TaskType::QualityMetrics],
+                available_memory: 1024.0,
+                cpu_cores: 4,
+                specialized_hardware: vec![],
+            },
+            status: WorkerStatus::Online,
+            current_load: 0.3,
+            last_heartbeat: std::time::SystemTime::now(),
+            performance_metrics: PerformanceMetrics {
+                tasks_completed: 100,
+                tasks_failed: 2,
+                avg_execution_time: Duration::from_secs(1),
+                success_rate: 0.98,
+                throughput: 10.0,
+            },
+            network_metrics: NetworkMetrics {
+                latency_ms: 15.0,
+                bandwidth_mbps: 500.0,
+                packet_loss: 0.1,
+                jitter_ms: 2.0,
+                total_data_transferred_mb: 1000.0,
+            },
+            location: Some(WorkerLocation {
+                region: "us-west-2".to_string(),
+                zone: Some("us-west-2a".to_string()),
+                latitude: Some(45.5231),
+                longitude: Some(-122.6765),
+            }),
+            is_edge_node: true,
+        };
+
+        evaluator.register_worker(worker).await.unwrap();
+
+        let workers = evaluator.get_workers().await;
+        assert_eq!(workers.len(), 1);
+        assert!(workers[0].is_edge_node);
+    }
+
+    #[test]
+    fn test_scaling_recommendation() {
+        assert_eq!(
+            ScalingRecommendation::default(),
+            ScalingRecommendation::NoAction
+        );
+    }
+
+    #[test]
+    fn test_consensus_algorithm() {
+        let config = ClusterConfig::default();
+        assert!(matches!(
+            config.consensus_algorithm,
+            ConsensusAlgorithm::Raft
+        ));
+    }
+
+    #[test]
+    fn test_cluster_discovery_method() {
+        let config = ClusterConfig::default();
+        assert!(matches!(
+            config.discovery_method,
+            ClusterDiscoveryMethod::Static
+        ));
     }
 }

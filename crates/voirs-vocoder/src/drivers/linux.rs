@@ -108,7 +108,7 @@ impl LinuxAudioDriver {
         let mut devices = Vec::new();
 
         // Get default device
-        if let Ok(default_device) = host.default_output_device() {
+        if let Some(default_device) = host.default_output_device() {
             let device_info = Self::device_info_from_cpal(&default_device, true)?;
             devices.push(device_info);
         }
@@ -180,7 +180,7 @@ impl super::AudioDriver for LinuxAudioDriver {
         // Find the device to use
         let device = if let Some(device_id) = device_id {
             // Find device by ID
-            let devices = self.host.output_devices().map_err(|e| {
+            let mut devices = self.host.output_devices().map_err(|e| {
                 AudioDriverError::InternalError(format!("Failed to enumerate devices: {e}"))
             })?;
 
@@ -213,7 +213,7 @@ impl super::AudioDriver for LinuxAudioDriver {
         };
 
         // Validate the configuration is supported
-        let supported_configs = device.supported_output_configs().map_err(|e| {
+        let mut supported_configs = device.supported_output_configs().map_err(|e| {
             AudioDriverError::InternalError(format!("Failed to get supported configs: {e}"))
         })?;
 
@@ -273,7 +273,7 @@ impl super::AudioDriver for LinuxAudioDriver {
                     &config,
                     move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                         // Call our callback to get audio data
-                        if let Err(_) = callback_clone(data) {
+                        if callback_clone(data).is_err() {
                             // Handle callback error - for now just fill with silence
                             data.fill(0.0);
                         }
@@ -296,7 +296,7 @@ impl super::AudioDriver for LinuxAudioDriver {
                         // Create a temporary f32 buffer for our callback
                         let mut f32_buffer = vec![0.0f32; data.len()];
 
-                        if let Err(_) = callback_clone(&mut f32_buffer) {
+                        if callback_clone(&mut f32_buffer).is_err() {
                             data.fill(0);
                             return;
                         }
@@ -324,7 +324,7 @@ impl super::AudioDriver for LinuxAudioDriver {
                         // Create a temporary f32 buffer for our callback
                         let mut f32_buffer = vec![0.0f32; data.len()];
 
-                        if let Err(_) = callback_clone(&mut f32_buffer) {
+                        if callback_clone(&mut f32_buffer).is_err() {
                             data.fill(0);
                             return;
                         }
@@ -345,6 +345,12 @@ impl super::AudioDriver for LinuxAudioDriver {
                     },
                     None,
                 )
+            }
+            sample_format => {
+                return Err(AudioDriverError::StreamInitFailed(format!(
+                    "Unsupported sample format: {:?}",
+                    sample_format
+                )));
             }
         }
         .map_err(|e| AudioDriverError::StreamInitFailed(format!("Failed to build stream: {e}")))?;

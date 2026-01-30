@@ -1182,6 +1182,7 @@ pub struct GenerationStatistics {
 
 impl NaturalLanguageGenerator {
     /// Create a new natural language generator
+    #[must_use]
     pub fn new(config: NLGConfig) -> Self {
         Self {
             template_manager: Arc::new(RwLock::new(TemplateManager::new())),
@@ -1639,7 +1640,7 @@ impl NaturalLanguageGenerator {
 
         stats.total_generations += 1;
 
-        let strategy_name = format!("{:?}", strategy);
+        let strategy_name = format!("{strategy:?}");
         *stats
             .generations_by_strategy
             .entry(strategy_name)
@@ -1657,8 +1658,15 @@ impl NaturalLanguageGenerator {
     }
 }
 
+impl Default for TemplateManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TemplateManager {
     /// Description
+    #[must_use]
     pub fn new() -> Self {
         Self {
             templates: HashMap::new(),
@@ -1668,8 +1676,15 @@ impl TemplateManager {
     }
 }
 
+impl Default for LanguageManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LanguageManager {
     /// Description
+    #[must_use]
     pub fn new() -> Self {
         Self {
             languages: HashMap::new(),
@@ -1679,8 +1694,15 @@ impl LanguageManager {
     }
 }
 
+impl Default for ToneAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ToneAdapter {
     /// Description
+    #[must_use]
     pub fn new() -> Self {
         Self {
             tone_profiles: HashMap::new(),
@@ -1690,8 +1712,15 @@ impl ToneAdapter {
     }
 }
 
+impl Default for ContextAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ContextAnalyzer {
     /// Description
+    #[must_use]
     pub fn new() -> Self {
         Self {
             patterns: HashMap::new(),
@@ -1701,8 +1730,15 @@ impl ContextAnalyzer {
     }
 }
 
+impl Default for GenerationStatistics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GenerationStatistics {
     /// Description
+    #[must_use]
     pub fn new() -> Self {
         Self {
             total_generations: 0,

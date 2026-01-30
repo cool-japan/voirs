@@ -609,7 +609,7 @@ impl ErrorListener for ConsoleErrorListener {
     }
 
     fn on_statistics_update(&self, statistics: &ErrorStatistics) {
-        if statistics.total_errors % 10 == 0 {
+        if statistics.total_errors.is_multiple_of(10) {
             eprintln!("Error statistics: {} total errors", statistics.total_errors);
         }
     }

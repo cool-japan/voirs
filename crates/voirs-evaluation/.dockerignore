@@ -1,0 +1,50 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Rust
+target/
+**/*.rs.bk
+*.pdb
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation
+*.md
+docs/
+examples/
+benches/
+
+# Tests
+tests/
+test-data/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Kubernetes
+k8s/
+helm/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local

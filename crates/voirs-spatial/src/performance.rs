@@ -187,14 +187,20 @@ impl ResourceMonitor {
 
         // Start monitoring thread
         thread::spawn(move || {
-            while !*stop_clone.lock().unwrap() {
+            while !*stop_clone
+                .lock()
+                .expect("Failed to acquire lock on stop flag in monitor thread")
+            {
                 let sample = ResourceSample {
                     timestamp: Instant::now(),
                     cpu_usage: Self::get_cpu_usage(),
                     memory_usage: Self::get_memory_usage(),
                 };
 
-                samples_clone.lock().unwrap().push(sample);
+                samples_clone
+                    .lock()
+                    .expect("Failed to acquire lock on samples in monitor thread")
+                    .push(sample);
                 thread::sleep(Duration::from_millis(100)); // 10Hz sampling
             }
         });
@@ -208,10 +214,17 @@ impl ResourceMonitor {
 
     /// Stop monitoring and return statistics
     pub fn stop(self) -> ResourceStatistics {
-        *self.stop_flag.lock().unwrap() = true;
+        *self
+            .stop_flag
+            .lock()
+            .expect("Failed to acquire lock on stop flag") = true;
         thread::sleep(Duration::from_millis(200)); // Allow thread to finish
 
-        let samples = self.samples.lock().unwrap().clone();
+        let samples = self
+            .samples
+            .lock()
+            .expect("Failed to acquire lock on samples")
+            .clone();
         ResourceStatistics::from_samples(samples, self.start_time)
     }
 
@@ -265,7 +278,11 @@ impl ResourceStatistics {
         let avg_memory = samples.iter().map(|s| s.memory_usage).sum::<usize>() / samples.len();
         let peak_memory = samples.iter().map(|s| s.memory_usage).max().unwrap_or(0);
 
-        let duration = samples.last().unwrap().timestamp - start_time;
+        let duration = samples
+            .last()
+            .expect("Samples should not be empty at this point")
+            .timestamp
+            - start_time;
 
         Self {
             avg_cpu_usage: avg_cpu,

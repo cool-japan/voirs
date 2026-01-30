@@ -73,6 +73,12 @@ pub struct ScoreRenderer {
     config: RenderConfig,
 }
 
+impl Default for ScoreRenderer {
+    fn default() -> Self {
+        Self::with_default_config()
+    }
+}
+
 impl ScoreRenderer {
     /// Create a new score renderer
     pub fn new(config: RenderConfig) -> Self {

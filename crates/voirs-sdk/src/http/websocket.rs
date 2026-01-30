@@ -189,7 +189,7 @@ async fn handle_socket(
         while let Some(msg) = rx.recv().await {
             match serde_json::to_string(&msg) {
                 Ok(json) => {
-                    if sender.send(Message::Text(json)).await.is_err() {
+                    if sender.send(Message::Text(json.into())).await.is_err() {
                         break;
                     }
                 }
@@ -209,7 +209,9 @@ async fn handle_socket(
         while let Some(msg) = receiver.next().await {
             match msg {
                 Ok(Message::Text(text)) => {
-                    if let Err(e) = handle_client_message(text, session_clone.clone()).await {
+                    if let Err(e) =
+                        handle_client_message(text.to_string(), session_clone.clone()).await
+                    {
                         tracing::error!("Error handling message: {}", e);
                         break;
                     }
@@ -453,8 +455,8 @@ mod tests {
             config: WebSocketConfig {
                 session_id: "test-session".to_string(),
                 voice_id: Some("test-voice".to_string()),
-                language: Some(LanguageCode::English),
-                quality: Some(Quality::High),
+                language: Some(LanguageCode::EnUs),
+                quality: Some(QualityLevel::High),
                 streaming_config: StreamingConfig::default(),
             },
         };

@@ -216,22 +216,28 @@ impl CLIAnnotationInterface {
 
         // Get overall quality
         print!("Overall quality (0.0-1.0): ");
-        io::stdout().flush().unwrap();
+        io::stdout().flush().map_err(DatasetError::IoError)?;
         let mut input = String::new();
-        io::stdin().read_line(&mut input).unwrap();
+        io::stdin()
+            .read_line(&mut input)
+            .map_err(DatasetError::IoError)?;
         let overall_quality: f32 = input.trim().parse().unwrap_or(0.5);
 
         // Get SNR estimate
         print!("SNR estimate (dB): ");
-        io::stdout().flush().unwrap();
+        io::stdout().flush().map_err(DatasetError::IoError)?;
         input.clear();
-        io::stdin().read_line(&mut input).unwrap();
+        io::stdin()
+            .read_line(&mut input)
+            .map_err(DatasetError::IoError)?;
         let snr: f32 = input.trim().parse().unwrap_or(20.0);
 
         // Check for issues
         println!("\nAny audio issues? (y/n): ");
         input.clear();
-        io::stdin().read_line(&mut input).unwrap();
+        io::stdin()
+            .read_line(&mut input)
+            .map_err(DatasetError::IoError)?;
         let mut issues = vec![];
 
         if input.trim().to_lowercase() == "y" {
@@ -247,7 +253,9 @@ impl CLIAnnotationInterface {
             println!("9. Speech Quality");
 
             input.clear();
-            io::stdin().read_line(&mut input).unwrap();
+            io::stdin()
+                .read_line(&mut input)
+                .map_err(DatasetError::IoError)?;
 
             for choice in input.trim().split(',') {
                 match choice.trim().parse::<u32>() {
@@ -267,9 +275,11 @@ impl CLIAnnotationInterface {
 
         // Get text corrections
         print!("Any text corrections? (leave empty if none): ");
-        io::stdout().flush().unwrap();
+        io::stdout().flush().map_err(DatasetError::IoError)?;
         input.clear();
-        io::stdin().read_line(&mut input).unwrap();
+        io::stdin()
+            .read_line(&mut input)
+            .map_err(DatasetError::IoError)?;
         let text_corrections = if input.trim().is_empty() {
             None
         } else {
@@ -278,9 +288,11 @@ impl CLIAnnotationInterface {
 
         // Get confidence
         print!("Confidence in annotation (0.0-1.0): ");
-        io::stdout().flush().unwrap();
+        io::stdout().flush().map_err(DatasetError::IoError)?;
         input.clear();
-        io::stdin().read_line(&mut input).unwrap();
+        io::stdin()
+            .read_line(&mut input)
+            .map_err(DatasetError::IoError)?;
         let confidence: f32 = input.trim().parse().unwrap_or(0.8);
 
         // Create annotation result
@@ -374,7 +386,9 @@ impl AnnotationInterface for CLIAnnotationInterface {
         // Check if we should do interactive or quick annotation
         println!("Annotation mode: (i)nteractive or (q)uick? [q]: ");
         let mut input = String::new();
-        io::stdin().read_line(&mut input).unwrap();
+        io::stdin()
+            .read_line(&mut input)
+            .map_err(DatasetError::IoError)?;
 
         match input.trim().to_lowercase().as_str() {
             "i" | "interactive" => self.interactive_annotation(sample).await,

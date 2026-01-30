@@ -399,7 +399,8 @@ fn calculate_quality_score(model_id: &str, real_time_factor: &f64, success_rate:
         model_quality_baseline
     } else if *real_time_factor <= model_speed_expectation * 2.0 {
         // Linear decay for slightly slower than expected
-        model_quality_baseline * (1.0 - (real_time_factor - model_speed_expectation) / model_speed_expectation)
+        model_quality_baseline
+            * (1.0 - (real_time_factor - model_speed_expectation) / model_speed_expectation)
     } else {
         0.0 // No bonus if significantly slower than expected
     };
@@ -407,7 +408,7 @@ fn calculate_quality_score(model_id: &str, real_time_factor: &f64, success_rate:
     // Weighted average: 40% performance, 40% reliability, 20% model-specific
     let total_score = performance_score * 0.4 + reliability_score * 0.4 + speed_bonus * 0.2;
 
-    total_score.min(5.0).max(0.0)
+    total_score.clamp(0.0, 5.0)
 }
 
 /// Display benchmark results
@@ -690,10 +691,8 @@ async fn load_model_pipeline(
         if !global.quiet {
             println!("      GPU acceleration: enabled");
         }
-    } else {
-        if !global.quiet {
-            println!("      GPU acceleration: disabled");
-        }
+    } else if !global.quiet {
+        println!("      GPU acceleration: disabled");
     }
 
     // Set thread count based on configuration

@@ -28,6 +28,7 @@ pub struct RealtimeWidget {
 #[cfg(feature = "ui")]
 impl RealtimeWidget {
     /// Create a new real-time widget
+    #[must_use]
     pub fn new() -> Self {
         Self {
             values: HashMap::new(),
@@ -40,7 +41,7 @@ impl RealtimeWidget {
     pub fn update_value(&mut self, key: &str, value: f32) {
         self.values.insert(key.to_string(), value);
 
-        let history = self.history.entry(key.to_string()).or_insert_with(Vec::new);
+        let history = self.history.entry(key.to_string()).or_default();
         history.push(value);
 
         // Limit history size
@@ -61,7 +62,7 @@ impl RealtimeWidget {
                         ui.add_space(10.0);
 
                         // Current value
-                        ui.strong(format!("{:.2}", value));
+                        ui.strong(format!("{value:.2}"));
 
                         // Sparkline
                         if let Some(history) = self.history.get(key) {
@@ -202,7 +203,7 @@ impl RealtimeDashboard {
     fn render_live_meter(ui: &mut Ui, label: &str, value: f32, icon: &str) {
         ui.group(|ui| {
             ui.vertical_centered(|ui| {
-                ui.label(format!("{} {}", icon, label));
+                ui.label(format!("{icon} {label}"));
 
                 // Circular progress meter
                 let meter_size = 60.0;

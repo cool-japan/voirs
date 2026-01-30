@@ -309,7 +309,7 @@ async fn execute_list_profiles(
 
     match args.format.as_str() {
         "table" => {
-            println!("{:<20} {:<30} {}", "Speaker ID", "Description", "Samples");
+            println!("{:<20} {:<30} Samples", "Speaker ID", "Description");
             println!("{}", "-".repeat(60));
             for profile in profiles {
                 println!(
@@ -423,10 +423,7 @@ async fn execute_validate(
     // Display results
     match args.format.as_str() {
         "table" => {
-            println!(
-                "{:<10} {:<30} {:<12} {}",
-                "File", "Name", "Status", "Quality"
-            );
+            println!("{:<10} {:<30} {:<12} Quality", "File", "Name", "Status");
             println!("{}", "-".repeat(70));
             for (file_num, name, status, quality) in validation_results {
                 println!(

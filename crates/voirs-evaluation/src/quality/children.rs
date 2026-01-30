@@ -1317,8 +1317,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_age_appropriateness_assessment() {
-        let mut config = ChildrenEvaluationConfig::default();
-        config.target_age_group = AgeGroup::EarlyChildhood;
+        let config = ChildrenEvaluationConfig {
+            target_age_group: AgeGroup::EarlyChildhood,
+            ..Default::default()
+        };
         let evaluator = ChildrenSpeechEvaluator::with_config(config).await.unwrap();
 
         // Create audio with child-appropriate F0 (300 Hz)

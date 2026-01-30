@@ -9,6 +9,7 @@ use crate::quality::{CloningQualityAssessor, QualityMetrics};
 use crate::similarity::SimilarityMeasurer;
 use crate::types::{CloningMethod, SpeakerProfile, VoiceCloneResult, VoiceSample};
 use crate::usage_tracking::SimilarityMetrics;
+use crate::utils::RwLockExt;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -365,9 +366,7 @@ impl VoiceLibraryManager {
         let library_path = library_path.as_ref().to_path_buf();
 
         // Ensure library directory exists
-        fs::create_dir_all(&library_path)
-            .await
-            .map_err(|e| Error::Io(e))?;
+        fs::create_dir_all(&library_path).await.map_err(Error::Io)?;
 
         let quality_assessor = Arc::new(CloningQualityAssessor::new()?);
         let similarity_config = crate::similarity::SimilarityConfig::default();
@@ -397,32 +396,30 @@ impl VoiceLibraryManager {
 
         // Load voices
         if voices_file.exists() {
-            let content = fs::read_to_string(&voices_file)
-                .await
-                .map_err(|e| Error::Io(e))?;
+            let content = fs::read_to_string(&voices_file).await.map_err(Error::Io)?;
 
             let voices: HashMap<String, VoiceLibraryEntry> =
-                serde_json::from_str(&content).map_err(|e| Error::Serialization(e))?;
+                serde_json::from_str(&content).map_err(Error::Serialization)?;
 
             {
-                let mut voices_lock = self.voices.write().unwrap();
+                let mut voices_lock = self.voices.safe_write()?;
                 *voices_lock = voices;
             }
 
             // Rebuild search index
-            self.rebuild_search_index().await;
+            self.rebuild_search_index().await?;
         }
 
         // Load collections
         if collections_file.exists() {
             let content = fs::read_to_string(&collections_file)
                 .await
-                .map_err(|e| Error::Io(e))?;
+                .map_err(Error::Io)?;
 
             let collections: HashMap<String, VoiceCollection> =
-                serde_json::from_str(&content).map_err(|e| Error::Serialization(e))?;
+                serde_json::from_str(&content).map_err(Error::Serialization)?;
 
-            let mut collections_lock = self.collections.write().unwrap();
+            let mut collections_lock = self.collections.safe_write()?;
             *collections_lock = collections;
         }
 
@@ -435,26 +432,22 @@ impl VoiceLibraryManager {
         let collections_file = self.library_path.join("collections.json");
 
         // Save voices
-        {
-            let voices = self.voices.read().unwrap();
-            let content =
-                serde_json::to_string_pretty(&*voices).map_err(|e| Error::Serialization(e))?;
-
-            fs::write(&voices_file, content)
-                .await
-                .map_err(|e| Error::Io(e))?;
-        }
+        let voices_content = {
+            let voices = self.voices.safe_read()?;
+            serde_json::to_string_pretty(&*voices).map_err(Error::Serialization)?
+        };
+        fs::write(&voices_file, voices_content)
+            .await
+            .map_err(Error::Io)?;
 
         // Save collections
-        {
-            let collections = self.collections.read().unwrap();
-            let content =
-                serde_json::to_string_pretty(&*collections).map_err(|e| Error::Serialization(e))?;
-
-            fs::write(&collections_file, content)
-                .await
-                .map_err(|e| Error::Io(e))?;
-        }
+        let collections_content = {
+            let collections = self.collections.safe_read()?;
+            serde_json::to_string_pretty(&*collections).map_err(Error::Serialization)?
+        };
+        fs::write(&collections_file, collections_content)
+            .await
+            .map_err(Error::Io)?;
 
         Ok(())
     }
@@ -467,7 +460,7 @@ impl VoiceLibraryManager {
                 "voice_{}",
                 SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
+                    .unwrap_or_else(|_| Duration::from_secs(0))
                     .as_nanos()
             );
         }
@@ -480,9 +473,7 @@ impl VoiceLibraryManager {
 
         // Create storage directory for voice files
         let voice_dir = self.library_path.join("voices").join(&entry.id);
-        fs::create_dir_all(&voice_dir)
-            .await
-            .map_err(|e| Error::Io(e))?;
+        fs::create_dir_all(&voice_dir).await.map_err(Error::Io)?;
 
         entry.storage_path = voice_dir;
 
@@ -498,12 +489,12 @@ impl VoiceLibraryManager {
 
         // Add to library
         {
-            let mut voices = self.voices.write().unwrap();
+            let mut voices = self.voices.safe_write()?;
             voices.insert(voice_id.clone(), entry);
         }
 
         // Update search index
-        self.update_search_index(&voice_id).await;
+        self.update_search_index(&voice_id).await?;
 
         // Save library
         self.save_library().await?;
@@ -513,7 +504,7 @@ impl VoiceLibraryManager {
 
     /// Get voice by ID
     pub async fn get_voice(&self, voice_id: &str) -> Result<Option<VoiceLibraryEntry>> {
-        let voices = self.voices.read().unwrap();
+        let voices = self.voices.safe_read()?;
         if let Some(mut entry) = voices.get(voice_id).cloned() {
             // Update access statistics
             entry.last_accessed = SystemTime::now();
@@ -532,90 +523,93 @@ impl VoiceLibraryManager {
         voice_id: &str,
         updates: HashMap<String, serde_json::Value>,
     ) -> Result<()> {
-        let mut voices = self.voices.write().unwrap();
-        if let Some(entry) = voices.get_mut(voice_id) {
-            // Apply updates
-            for (key, value) in updates {
-                match key.as_str() {
-                    "name" => {
-                        if let Some(name) = value.as_str() {
-                            entry.name = name.to_string();
+        // Apply updates within a limited lock scope
+        {
+            let mut voices = self.voices.safe_write()?;
+            if let Some(entry) = voices.get_mut(voice_id) {
+                // Apply updates
+                for (key, value) in updates {
+                    match key.as_str() {
+                        "name" => {
+                            if let Some(name) = value.as_str() {
+                                entry.name = name.to_string();
+                            }
                         }
-                    }
-                    "description" => {
-                        entry.description = value.as_str().map(|s| s.to_string());
-                    }
-                    "tags" => {
-                        if let Some(tags_array) = value.as_array() {
-                            entry.tags = tags_array
-                                .iter()
-                                .filter_map(|v| v.as_str())
-                                .map(|s| s.to_string())
-                                .collect();
+                        "description" => {
+                            entry.description = value.as_str().map(|s| s.to_string());
                         }
-                    }
-                    "rating" => {
-                        if let Some(rating) = value.as_u64() {
-                            entry.rating = Some(rating.min(5) as u8);
+                        "tags" => {
+                            if let Some(tags_array) = value.as_array() {
+                                entry.tags = tags_array
+                                    .iter()
+                                    .filter_map(|v| v.as_str())
+                                    .map(|s| s.to_string())
+                                    .collect();
+                            }
                         }
-                    }
-                    "notes" => {
-                        entry.notes = value.as_str().map(|s| s.to_string());
-                    }
-                    "category" => {
-                        if let Ok(category) = serde_json::from_value::<VoiceCategory>(value) {
-                            entry.category = category;
+                        "rating" => {
+                            if let Some(rating) = value.as_u64() {
+                                entry.rating = Some(rating.min(5) as u8);
+                            }
                         }
+                        "notes" => {
+                            entry.notes = value.as_str().map(|s| s.to_string());
+                        }
+                        "category" => {
+                            if let Ok(category) = serde_json::from_value::<VoiceCategory>(value) {
+                                entry.category = category;
+                            }
+                        }
+                        _ => {} // Ignore unknown fields
                     }
-                    _ => {} // Ignore unknown fields
                 }
+
+                entry.modified_at = SystemTime::now();
+            } else {
+                return Err(Error::Validation(format!("Voice not found: {voice_id}")));
             }
+        } // Drop the write lock here before async operations
 
-            entry.modified_at = SystemTime::now();
+        // Update search index
+        self.update_search_index(voice_id).await?;
 
-            // Update search index
-            drop(voices); // Release lock
-            self.update_search_index(voice_id).await;
+        // Save library
+        self.save_library().await?;
 
-            // Save library
-            self.save_library().await?;
-
-            Ok(())
-        } else {
-            Err(Error::Validation(format!("Voice not found: {voice_id}")))
-        }
+        Ok(())
     }
 
     /// Delete voice from library
     pub async fn delete_voice(&self, voice_id: &str) -> Result<()> {
-        let mut voices = self.voices.write().unwrap();
-        if let Some(entry) = voices.remove(voice_id) {
-            // Delete voice files
-            if entry.storage_path.exists() {
-                fs::remove_dir_all(&entry.storage_path)
-                    .await
-                    .map_err(|e| Error::Io(e))?;
+        let storage_path = {
+            let mut voices = self.voices.safe_write()?;
+            if let Some(entry) = voices.remove(voice_id) {
+                entry.storage_path.clone()
+            } else {
+                return Err(Error::Validation(format!("Voice not found: {voice_id}")));
             }
+        };
 
-            // Remove from collections
-            drop(voices); // Release lock
-            self.remove_voice_from_collections(voice_id).await?;
-
-            // Update search index
-            self.remove_from_search_index(voice_id).await;
-
-            // Save library
-            self.save_library().await?;
-
-            Ok(())
-        } else {
-            Err(Error::Validation(format!("Voice not found: {voice_id}")))
+        // Delete voice files (after lock is released)
+        if storage_path.exists() {
+            fs::remove_dir_all(&storage_path).await.map_err(Error::Io)?;
         }
+
+        // Remove from collections
+        self.remove_voice_from_collections(voice_id).await?;
+
+        // Update search index
+        self.remove_from_search_index(voice_id).await?;
+
+        // Save library
+        self.save_library().await?;
+
+        Ok(())
     }
 
     /// Search voices in library
     pub async fn search_voices(&self, query: &VoiceSearchQuery) -> Result<Vec<VoiceLibraryEntry>> {
-        let voices = self.voices.read().unwrap();
+        let voices = self.voices.safe_read()?;
         let mut results: Vec<VoiceLibraryEntry> = voices
             .values()
             .filter(|entry| self.matches_query(entry, query))
@@ -650,7 +644,7 @@ impl VoiceLibraryManager {
                 || entry
                     .description
                     .as_ref()
-                    .map_or(false, |d| d.to_lowercase().contains(&text_lower))
+                    .is_some_and(|d| d.to_lowercase().contains(&text_lower))
                 || entry
                     .tags
                     .iter()
@@ -751,7 +745,7 @@ impl VoiceLibraryManager {
     /// Sort search results
     fn sort_results(
         &self,
-        results: &mut Vec<VoiceLibraryEntry>,
+        results: &mut [VoiceLibraryEntry],
         sort_by: &SortCriteria,
         sort_order: &SortOrder,
     ) {
@@ -810,10 +804,11 @@ impl VoiceLibraryManager {
             icon_path: None,
         };
 
-        let mut collections = self.collections.write().unwrap();
-        collections.insert(collection_id.clone(), collection);
+        {
+            let mut collections = self.collections.safe_write()?;
+            collections.insert(collection_id.clone(), collection);
+        }
 
-        drop(collections);
         self.save_library().await?;
 
         Ok(collection_id)
@@ -823,34 +818,35 @@ impl VoiceLibraryManager {
     pub async fn add_voice_to_collection(&self, collection_id: &str, voice_id: &str) -> Result<()> {
         // Verify voice exists
         {
-            let voices = self.voices.read().unwrap();
+            let voices = self.voices.safe_read()?;
             if !voices.contains_key(voice_id) {
                 return Err(Error::Validation(format!("Voice not found: {voice_id}")));
             }
         }
 
         // Add to collection
-        let mut collections = self.collections.write().unwrap();
-        if let Some(collection) = collections.get_mut(collection_id) {
-            if !collection.voice_ids.contains(&voice_id.to_string()) {
-                collection.voice_ids.push(voice_id.to_string());
-                collection.modified_at = SystemTime::now();
+        {
+            let mut collections = self.collections.safe_write()?;
+            if let Some(collection) = collections.get_mut(collection_id) {
+                if !collection.voice_ids.contains(&voice_id.to_string()) {
+                    collection.voice_ids.push(voice_id.to_string());
+                    collection.modified_at = SystemTime::now();
+                }
+            } else {
+                return Err(Error::Validation(format!(
+                    "Collection not found: {}",
+                    collection_id
+                )));
             }
-
-            drop(collections);
-            self.save_library().await?;
-            Ok(())
-        } else {
-            Err(Error::Validation(format!(
-                "Collection not found: {}",
-                collection_id
-            )))
         }
+
+        self.save_library().await?;
+        Ok(())
     }
 
     /// Remove voice from collections
     async fn remove_voice_from_collections(&self, voice_id: &str) -> Result<()> {
-        let mut collections = self.collections.write().unwrap();
+        let mut collections = self.collections.safe_write()?;
         for collection in collections.values_mut() {
             collection.voice_ids.retain(|id| id != voice_id);
             collection.modified_at = SystemTime::now();
@@ -859,8 +855,8 @@ impl VoiceLibraryManager {
     }
 
     /// Get library statistics
-    pub async fn get_statistics(&self) -> LibraryStatistics {
-        let voices = self.voices.read().unwrap();
+    pub async fn get_statistics(&self) -> Result<LibraryStatistics> {
+        let voices = self.voices.safe_read()?;
 
         let total_voices = voices.len();
         let total_storage_size = voices.values().map(|v| v.file_size).sum();
@@ -925,7 +921,7 @@ impl VoiceLibraryManager {
                 .or_insert(0) += 1;
         }
 
-        LibraryStatistics {
+        Ok(LibraryStatistics {
             total_voices,
             total_storage_size,
             voices_by_category,
@@ -935,7 +931,7 @@ impl VoiceLibraryManager {
             recently_added,
             quality_distribution,
             consent_distribution,
-        }
+        })
     }
 
     /// Perform batch operation
@@ -944,7 +940,7 @@ impl VoiceLibraryManager {
             "batch_{}",
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_else(|_| Duration::from_secs(0))
                 .as_nanos()
         );
 
@@ -1130,31 +1126,30 @@ impl VoiceLibraryManager {
     /// Save voice files to storage
     async fn save_voice_files(&self, entry: &VoiceLibraryEntry) -> Result<()> {
         let profile_file = entry.storage_path.join("profile.json");
-        let profile_json = serde_json::to_string_pretty(&entry.speaker_profile)
-            .map_err(|e| Error::Serialization(e))?;
+        let profile_json =
+            serde_json::to_string_pretty(&entry.speaker_profile).map_err(Error::Serialization)?;
 
         fs::write(&profile_file, profile_json)
             .await
-            .map_err(|e| Error::Io(e))?;
+            .map_err(Error::Io)?;
 
         // Save individual samples
         for (i, sample) in entry.speaker_profile.samples.iter().enumerate() {
             let sample_file = entry.storage_path.join(format!("sample_{i}.json"));
-            let sample_json =
-                serde_json::to_string_pretty(sample).map_err(|e| Error::Serialization(e))?;
+            let sample_json = serde_json::to_string_pretty(sample).map_err(Error::Serialization)?;
 
             fs::write(&sample_file, sample_json)
                 .await
-                .map_err(|e| Error::Io(e))?;
+                .map_err(Error::Io)?;
         }
 
         Ok(())
     }
 
     /// Rebuild search index
-    async fn rebuild_search_index(&self) {
-        let voices = self.voices.read().unwrap();
-        let mut search_index = self.search_index.write().unwrap();
+    async fn rebuild_search_index(&self) -> Result<()> {
+        let voices = self.voices.safe_read()?;
+        let mut search_index = self.search_index.safe_write()?;
         search_index.clear();
 
         for (voice_id, entry) in voices.iter() {
@@ -1185,17 +1180,18 @@ impl VoiceLibraryManager {
             for term in terms {
                 search_index
                     .entry(term)
-                    .or_insert_with(HashSet::new)
+                    .or_default()
                     .insert(voice_id.clone());
             }
         }
+        Ok(())
     }
 
     /// Update search index for specific voice
-    async fn update_search_index(&self, voice_id: &str) {
-        let voices = self.voices.read().unwrap();
+    async fn update_search_index(&self, voice_id: &str) -> Result<()> {
+        let voices = self.voices.safe_read()?;
         if let Some(entry) = voices.get(voice_id) {
-            let mut search_index = self.search_index.write().unwrap();
+            let mut search_index = self.search_index.safe_write()?;
 
             // Remove old entries for this voice
             for voice_set in search_index.values_mut() {
@@ -1230,29 +1226,31 @@ impl VoiceLibraryManager {
             for term in terms {
                 search_index
                     .entry(term)
-                    .or_insert_with(HashSet::new)
+                    .or_default()
                     .insert(voice_id.to_string());
             }
         }
+        Ok(())
     }
 
     /// Remove voice from search index
-    async fn remove_from_search_index(&self, voice_id: &str) {
-        let mut search_index = self.search_index.write().unwrap();
+    async fn remove_from_search_index(&self, voice_id: &str) -> Result<()> {
+        let mut search_index = self.search_index.safe_write()?;
         for voice_set in search_index.values_mut() {
             voice_set.remove(voice_id);
         }
+        Ok(())
     }
 
     /// Get all collections
-    pub async fn get_collections(&self) -> Vec<VoiceCollection> {
-        let collections = self.collections.read().unwrap();
-        collections.values().cloned().collect()
+    pub async fn get_collections(&self) -> Result<Vec<VoiceCollection>> {
+        let collections = self.collections.safe_read()?;
+        Ok(collections.values().cloned().collect())
     }
 
     /// Get collection by ID
     pub async fn get_collection(&self, collection_id: &str) -> Result<Option<VoiceCollection>> {
-        let collections = self.collections.read().unwrap();
+        let collections = self.collections.safe_read()?;
         Ok(collections.get(collection_id).cloned())
     }
 }
@@ -1431,7 +1429,7 @@ mod tests {
             ..Default::default()
         };
         let results = library.search_voices(&query).await.unwrap();
-        assert_eq!(results.len(), 2); // Voices 3, 4
+        assert_eq!(results.len(), 3); // Voices 2, 3, 4 (scores 0.7, 0.8, 0.9)
     }
 
     #[tokio::test]
@@ -1601,7 +1599,7 @@ mod tests {
         }
 
         // Get statistics
-        let stats = library.get_statistics().await;
+        let stats = library.get_statistics().await.unwrap();
 
         assert_eq!(stats.total_voices, 5);
         assert_eq!(stats.total_storage_size, 1024 + 2048 + 3072 + 4096 + 5120); // Sum of file sizes

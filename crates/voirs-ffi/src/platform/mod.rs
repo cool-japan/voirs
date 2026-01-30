@@ -125,7 +125,7 @@ impl PlatformInfo {
         #[cfg(target_os = "macos")]
         {
             use std::process::Command;
-            if let Ok(output) = Command::new("sysctl").args(&["-n", "hw.memsize"]).output() {
+            if let Ok(output) = Command::new("sysctl").args(["-n", "hw.memsize"]).output() {
                 if let Ok(mem_str) = String::from_utf8(output.stdout) {
                     if let Ok(mem_bytes) = mem_str.trim().parse::<u64>() {
                         return mem_bytes;
@@ -158,10 +158,7 @@ impl PlatformInfo {
 
         #[cfg(target_arch = "aarch64")]
         {
-            match feature {
-                "neon" => cfg!(target_feature = "neon"),
-                _ => false,
-            }
+            matches!(feature, "neon") && cfg!(target_feature = "neon")
         }
 
         #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
@@ -174,7 +171,7 @@ impl PlatformInfo {
     /// Get optimal number of threads for audio processing
     pub fn optimal_threads(&self) -> usize {
         // Use 75% of available cores, minimum 1, maximum 8
-        (self.cpu_cores * 3 / 4).max(1).min(8)
+        (self.cpu_cores * 3 / 4).clamp(1, 8)
     }
 
     /// Get optimal buffer size for audio processing
@@ -192,7 +189,7 @@ impl PlatformInfo {
         #[cfg(target_os = "macos")]
         {
             // macOS has Metal Performance Shaders and Accelerate framework
-            return true;
+            true
         }
 
         #[cfg(target_os = "windows")]

@@ -564,10 +564,10 @@ impl StreamingSynthesisOptimizer {
                 text: text.to_string(),
                 text_length: text.len(),
                 stage: crate::error::types::SynthesisStage::G2pConversion,
-                cause: Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Phoneme preprocessing failed: {}", e),
-                )),
+                cause: Box::new(std::io::Error::other(format!(
+                    "Phoneme preprocessing failed: {}",
+                    e
+                ))),
             })?;
 
         let preprocessing_time = preprocessing_start.elapsed();
@@ -882,6 +882,12 @@ impl VocoderPipeline {
     }
 }
 
+impl Default for QualityController {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl QualityController {
     pub fn new() -> Self {
         Self {
@@ -932,6 +938,12 @@ impl MemoryMappedModel {
             config: ModelConfig::default(),
             stats: Arc::new(RwLock::new(ModelAccessStats::default())),
         })
+    }
+}
+
+impl Default for PronunciationPredictor {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

@@ -182,7 +182,9 @@ impl DurationPredictor {
             },
             vb.pp("input_conv"),
         )
-        .map_err(|e| AcousticError::ModelError(format!("Failed to create input_conv: {e}")))?;
+        .map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to create input_conv: {e}"),
+        })?;
 
         // Convolutional blocks
         let mut conv_blocks = Vec::new();
@@ -194,8 +196,8 @@ impl DurationPredictor {
                 config.dropout,
                 vb.pp(format!("conv_block_{i}")),
             )
-            .map_err(|e| {
-                AcousticError::ModelError(format!("Failed to create conv block {i}: {e}"))
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to create conv block {i}: {e}"),
             })?;
 
             conv_blocks.push(block);
@@ -209,7 +211,9 @@ impl DurationPredictor {
             Default::default(),
             vb.pp("output_conv"),
         )
-        .map_err(|e| AcousticError::ModelError(format!("Failed to create output_conv: {e}")))?;
+        .map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to create output_conv: {e}"),
+        })?;
 
         Ok(Self {
             config,
@@ -231,20 +235,27 @@ impl DurationPredictor {
         // Validate input shape
         let input_shape = text_encoding.dims();
         if input_shape.len() != 3 {
-            return Err(AcousticError::InputError(format!(
-                "Expected 3D tensor [batch, input_dim, seq_len], got {input_shape:?}"
-            )));
+            return Err(AcousticError::InputError {
+                message: format!(
+                    "Expected 3D tensor [batch, input_dim, seq_len], got {input_shape:?}"
+                ),
+            });
         }
 
-        let (batch_size, input_dim, seq_len) = text_encoding.dims3().map_err(|e| {
-            AcousticError::ModelError(format!("Failed to get tensor dimensions: {e}"))
-        })?;
+        let (batch_size, input_dim, seq_len) =
+            text_encoding
+                .dims3()
+                .map_err(|e| AcousticError::ModelError {
+                    message: format!("Failed to get tensor dimensions: {e}"),
+                })?;
 
         if input_dim != self.config.input_dim {
-            return Err(AcousticError::InputError(format!(
-                "Expected {} input dimensions, got {}",
-                self.config.input_dim, input_dim
-            )));
+            return Err(AcousticError::InputError {
+                message: format!(
+                    "Expected {} input dimensions, got {}",
+                    self.config.input_dim, input_dim
+                ),
+            });
         }
 
         tracing::debug!(
@@ -255,27 +266,31 @@ impl DurationPredictor {
         );
 
         // Input convolution
-        let mut h = self
-            .input_conv
-            .forward(text_encoding)
-            .map_err(|e| AcousticError::ModelError(format!("Input convolution failed: {e}")))?;
+        let mut h =
+            self.input_conv
+                .forward(text_encoding)
+                .map_err(|e| AcousticError::ModelError {
+                    message: format!("Input convolution failed: {e}"),
+                })?;
 
         tracing::debug!("After input_conv: {:?}", h.dims());
 
         // Apply convolutional blocks
         for (i, block) in self.conv_blocks.iter().enumerate() {
-            h = block
-                .forward(&h)
-                .map_err(|e| AcousticError::ModelError(format!("Conv block {i} failed: {e}")))?;
+            h = block.forward(&h).map_err(|e| AcousticError::ModelError {
+                message: format!("Conv block {i} failed: {e}"),
+            })?;
         }
 
         tracing::debug!("After conv blocks: {:?}", h.dims());
 
         // Output convolution to predict log-durations
-        let log_durations = self
-            .output_conv
-            .forward(&h)
-            .map_err(|e| AcousticError::ModelError(format!("Output convolution failed: {e}")))?;
+        let log_durations =
+            self.output_conv
+                .forward(&h)
+                .map_err(|e| AcousticError::ModelError {
+                    message: format!("Output convolution failed: {e}"),
+                })?;
 
         tracing::debug!("Log durations shape: {:?}", log_durations.dims());
 
@@ -294,24 +309,30 @@ impl DurationPredictor {
         let log_durations = self.forward(text_encoding)?;
 
         // Convert log-durations to durations
-        let mut durations = log_durations
-            .exp()
-            .map_err(|e| AcousticError::ModelError(format!("Exponential failed: {e}")))?;
+        let mut durations = log_durations.exp().map_err(|e| AcousticError::ModelError {
+            message: format!("Exponential failed: {e}"),
+        })?;
 
         if inference {
             // During inference, apply noise reduction and rounding
             let noise_scale = 0.667; // Empirical noise scale for inference
-            durations = (durations * noise_scale)
-                .map_err(|e| AcousticError::ModelError(format!("Noise scaling failed: {e}")))?;
+            durations = (durations * noise_scale).map_err(|e| AcousticError::ModelError {
+                message: format!("Noise scaling failed: {e}"),
+            })?;
         }
 
         // Ensure minimum duration (at least 1 frame)
-        let ones = Tensor::ones(durations.dims(), DType::F32, &self.device)
-            .map_err(|e| AcousticError::ModelError(format!("Creating ones tensor failed: {e}")))?;
+        let ones = Tensor::ones(durations.dims(), DType::F32, &self.device).map_err(|e| {
+            AcousticError::ModelError {
+                message: format!("Creating ones tensor failed: {e}"),
+            }
+        })?;
 
         durations = durations
             .maximum(&ones)
-            .map_err(|e| AcousticError::ModelError(format!("Maximum operation failed: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Maximum operation failed: {e}"),
+            })?;
 
         Ok(durations)
     }
@@ -385,25 +406,33 @@ impl DurationPredictor {
     /// # Returns
     /// * Aligned text encoding [batch, input_dim, total_frames]
     pub fn align_text_to_mel(&self, text_encoding: &Tensor, durations: &Tensor) -> Result<Tensor> {
-        let (batch_size, input_dim, seq_len) = text_encoding.dims3().map_err(|e| {
-            AcousticError::ModelError(format!("Failed to get text encoding dimensions: {e}"))
-        })?;
+        let (batch_size, input_dim, seq_len) =
+            text_encoding
+                .dims3()
+                .map_err(|e| AcousticError::ModelError {
+                    message: format!("Failed to get text encoding dimensions: {e}"),
+                })?;
 
-        let (dur_batch, dur_channels, dur_seq) = durations.dims3().map_err(|e| {
-            AcousticError::ModelError(format!("Failed to get duration dimensions: {e}"))
-        })?;
+        let (dur_batch, dur_channels, dur_seq) =
+            durations.dims3().map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to get duration dimensions: {e}"),
+            })?;
 
         // Validate dimensions
         if batch_size != dur_batch || seq_len != dur_seq || dur_channels != 1 {
-            return Err(AcousticError::InputError(format!(
-                "Dimension mismatch: text [{batch_size}, {input_dim}, {seq_len}], durations [{dur_batch}, {dur_channels}, {dur_seq}]"
-            )));
+            return Err(AcousticError::InputError {
+                message: format!(
+                    "Dimension mismatch: text [{batch_size}, {input_dim}, {seq_len}], durations [{dur_batch}, {dur_channels}, {dur_seq}]"
+                ),
+            });
         }
 
         // Squeeze duration channel dimension
         let durations = durations
             .squeeze(1)
-            .map_err(|e| AcousticError::ModelError(format!("Failed to squeeze durations: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to squeeze durations: {e}"),
+            })?;
 
         // For simplicity, use a basic upsampling approach
         // In a full implementation, this would use more sophisticated alignment algorithms
@@ -411,10 +440,13 @@ impl DurationPredictor {
         // Calculate total frames needed
         let total_frames = durations
             .sum_all()
-            .map_err(|e| AcousticError::ModelError(format!("Failed to sum durations: {e}")))?
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to sum durations: {e}"),
+            })?
             .to_scalar::<f32>()
-            .map_err(|e| AcousticError::ModelError(format!("Failed to convert to scalar: {e}")))?
-            as usize;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to convert to scalar: {e}"),
+            })? as usize;
 
         tracing::debug!("Aligning {} phonemes to {} frames", seq_len, total_frames);
 
@@ -422,7 +454,9 @@ impl DurationPredictor {
         // This is a placeholder - a full implementation would use differentiable upsampling
         let repeat_factor = total_frames / seq_len.max(1);
         let aligned = text_encoding.repeat(&[1, 1, repeat_factor]).map_err(|e| {
-            AcousticError::ModelError(format!("Failed to align text encoding: {e}"))
+            AcousticError::ModelError {
+                message: format!("Failed to align text encoding: {e}"),
+            }
         })?;
 
         Ok(aligned)
@@ -435,17 +469,23 @@ pub fn duration_based_upsampling(
     durations: &Tensor,
     _device: &Device,
 ) -> Result<Tensor> {
-    let (batch_size, _channels, seq_len) = text_encoding
-        .dims3()
-        .map_err(|e| AcousticError::ModelError(format!("Invalid text encoding shape: {e}")))?;
+    let (batch_size, _channels, seq_len) =
+        text_encoding
+            .dims3()
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Invalid text encoding shape: {e}"),
+            })?;
 
     // Calculate total output length
     let _total_frames = durations
         .sum_all()
-        .map_err(|e| AcousticError::ModelError(format!("Failed to sum durations: {e}")))?
+        .map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to sum durations: {e}"),
+        })?
         .to_scalar::<f32>()
-        .map_err(|e| AcousticError::ModelError(format!("Failed to convert to scalar: {e}")))?
-        as usize;
+        .map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to convert to scalar: {e}"),
+        })? as usize;
 
     // Simple implementation: repeat each phoneme encoding for its duration
     // In practice, this would use more sophisticated interpolation
@@ -459,8 +499,8 @@ pub fn duration_based_upsampling(
                 .get(batch_idx)?
                 .get(seq_idx)?
                 .to_scalar::<f32>()
-                .map_err(|e| {
-                    AcousticError::ModelError(format!("Failed to get duration scalar: {e}"))
+                .map_err(|e| AcousticError::ModelError {
+                    message: format!("Failed to get duration scalar: {e}"),
                 })? as usize;
 
             let frame_encoding = text_encoding.get(batch_idx)?.narrow(1, seq_idx, 1)?; // [channels, 1]
@@ -475,21 +515,24 @@ pub fn duration_based_upsampling(
         if !batch_output.is_empty() {
             let batch_tensor =
                 Tensor::cat(&batch_output.iter().collect::<Vec<_>>(), 1).map_err(|e| {
-                    AcousticError::ModelError(format!("Failed to concatenate frames: {e}"))
+                    AcousticError::ModelError {
+                        message: format!("Failed to concatenate frames: {e}"),
+                    }
                 })?;
             output_data.push(batch_tensor);
         }
     }
 
     if output_data.is_empty() {
-        return Err(AcousticError::ModelError(
-            "No output data generated".to_string(),
-        ));
+        return Err(AcousticError::ModelError {
+            message: "No output data generated".to_string(),
+        });
     }
 
     // Stack all batches
-    let result = Tensor::stack(&output_data, 0)
-        .map_err(|e| AcousticError::ModelError(format!("Failed to stack batches: {e}")))?;
+    let result = Tensor::stack(&output_data, 0).map_err(|e| AcousticError::ModelError {
+        message: format!("Failed to stack batches: {e}"),
+    })?;
 
     Ok(result)
 }

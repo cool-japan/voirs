@@ -10,13 +10,18 @@ use voirs_acoustic::{
 };
 use voirs_g2p::{DummyG2p, G2p, LanguageCode};
 use voirs_vocoder::{
-    DummyVocoder, MelSpectrogram as VocoderMel, SynthesisConfig as VocoderConfig,
-    Vocoder,
+    DummyVocoder, MelSpectrogram as VocoderMel, SynthesisConfig as VocoderConfig, Vocoder,
 };
 
 /// API contract test suite for all VoiRS components
 pub struct ApiContractTests {
     _timeout_duration: Duration,
+}
+
+impl Default for ApiContractTests {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ApiContractTests {
@@ -225,8 +230,8 @@ impl ApiContractTests {
             .await
         {
             Ok(_) => {
-                results.empty_input_handling = false; // Should not succeed with empty phonemes
-                assert!(false, "Empty input should return error, not success");
+                // Should not succeed with empty phonemes
+                panic!("Empty input should return error, not success");
             }
             Err(_) => {
                 results.empty_input_handling = true; // Expected behavior: return error
@@ -261,7 +266,7 @@ impl ApiContractTests {
             for &value in mel_frame {
                 assert!(value.is_finite(), "Mel values should be finite");
                 assert!(
-                    value >= -10.0 && value <= 10.0,
+                    (-10.0..=10.0).contains(&value),
                     "Mel values should be in reasonable range"
                 );
             }
@@ -347,14 +352,14 @@ impl ApiContractTests {
         results.mel_to_audio_success = true;
 
         // Contract 2: Audio should have valid properties
-        assert!(audio.len() > 0, "Audio should have samples");
+        assert!(!audio.is_empty(), "Audio should have samples");
         assert!(audio.sample_rate() > 0, "Sample rate should be positive");
         results.audio_property_validation = true;
 
         // Contract 3: Audio values should be within valid range (-1.0 to 1.0)
         for &sample in audio.samples() {
             assert!(
-                sample >= -1.0 && sample <= 1.0,
+                (-1.0..=1.0).contains(&sample),
                 "Audio samples should be in [-1.0, 1.0] range"
             );
             assert!(sample.is_finite(), "Audio samples should be finite");
@@ -369,7 +374,7 @@ impl ApiContractTests {
             Ok(minimal_audio) => {
                 results.minimal_input_handling = true;
                 assert!(
-                    minimal_audio.len() > 0,
+                    !minimal_audio.is_empty(),
                     "Minimal input should still produce some audio"
                 );
             }
@@ -535,11 +540,11 @@ impl ApiContractTests {
 
             // Validate pipeline integrity
             assert!(
-                phonemes.len() > 0 || text.is_empty(),
+                !phonemes.is_empty() || text.is_empty(),
                 "Should produce phonemes for non-empty text"
             );
             assert!(mel.n_frames > 0, "Should produce non-empty mel");
-            assert!(audio.len() > 0, "Should produce non-empty audio");
+            assert!(!audio.is_empty(), "Should produce non-empty audio");
 
             results
                 .pipeline_integrity_tests
@@ -664,6 +669,12 @@ pub struct ApiContractResults {
     pub compatibility_contracts: CompatibilityContractResults,
 }
 
+impl Default for ApiContractResults {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ApiContractResults {
     pub fn new() -> Self {
         Self {
@@ -719,6 +730,12 @@ pub struct G2pContractResults {
     pub language_parameter_respect: bool,
     pub determinism_check: bool,
     pub special_char_tests: Vec<SpecialCharTest>,
+}
+
+impl Default for G2pContractResults {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl G2pContractResults {
@@ -777,6 +794,12 @@ pub struct AcousticContractResults {
     pub output_bounds_validation: bool,
 }
 
+impl Default for AcousticContractResults {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AcousticContractResults {
     pub fn new() -> Self {
         Self {
@@ -826,6 +849,12 @@ pub struct VocoderContractResults {
     pub config_effect_validation: bool,
     pub determinism_validation: bool,
     pub proportional_output: bool,
+}
+
+impl Default for VocoderContractResults {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl VocoderContractResults {
@@ -879,6 +908,12 @@ pub struct CompatibilityContractResults {
     pub pipeline_integrity_tests: Vec<PipelineIntegrityTest>,
     pub config_consistency_tests: Vec<ConfigConsistencyTest>,
     pub configuration_consistency: bool,
+}
+
+impl Default for CompatibilityContractResults {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CompatibilityContractResults {

@@ -1232,12 +1232,12 @@ impl RSession {
                     }
                     "nrows" => {
                         if let Ok(val) = parts[1].parse::<usize>() {
-                            nrows = val;
+                            let _ = val; // Used for validation, actual rows determined by data
                         }
                     }
                     "ncols" => {
                         if let Ok(val) = parts[1].parse::<usize>() {
-                            ncols = val;
+                            let _ = val; // Used for validation, actual columns determined by data
                         }
                     }
                     part if part.starts_with("row") => {

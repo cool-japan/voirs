@@ -2,25 +2,162 @@
 
 use crate::GlobalOptions;
 use candle_core::{Device, Tensor};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use voirs_sdk::Result;
 use voirs_vocoder::models::diffwave::{DiffWave, SamplingMethod};
+
+/// Configuration for vocoder inference operations
+///
+/// Consolidates parameters for converting mel spectrograms to audio waveforms
+/// using trained vocoder models. Supports both single-file and batch processing.
+///
+/// # Examples
+///
+/// Single file inference:
+/// ```no_run
+/// use voirs_cli::commands::vocoder_inference::VocoderInferenceConfig;
+/// use std::path::Path;
+///
+/// let config = VocoderInferenceConfig {
+///     checkpoint: Path::new("./checkpoints/vocoder.safetensors"),
+///     mel_path: Some(Path::new("./input.mel")),
+///     output: Path::new("./output.wav"),
+///     steps: 50,
+///     quality: Some("balanced"),
+///     batch_input: None,
+///     batch_output: None,
+///     show_metrics: false,
+/// };
+/// ```
+///
+/// Batch processing:
+/// ```no_run
+/// use voirs_cli::commands::vocoder_inference::VocoderInferenceConfig;
+/// use std::path::{Path, PathBuf};
+///
+/// let config = VocoderInferenceConfig {
+///     checkpoint: Path::new("./checkpoints/vocoder.safetensors"),
+///     mel_path: None,
+///     output: Path::new("./output_dir"),
+///     steps: 50,
+///     quality: Some("high"),
+///     batch_input: Some(&PathBuf::from("./mel_dir")),
+///     batch_output: Some(&PathBuf::from("./audio_dir")),
+///     show_metrics: true,
+/// };
+/// ```
+#[derive(Debug)]
+pub struct VocoderInferenceConfig<'a> {
+    /// Path to trained vocoder checkpoint file
+    pub checkpoint: &'a Path,
+    /// Optional path to input mel spectrogram file (single file mode)
+    pub mel_path: Option<&'a Path>,
+    /// Output path for generated audio file or batch directory
+    pub output: &'a Path,
+    /// Number of diffusion steps for generation (higher = better quality, slower)
+    pub steps: usize,
+    /// Quality preset: "fast" (20 steps), "balanced" (50 steps), or "high" (100 steps)
+    pub quality: Option<&'a str>,
+    /// Optional directory for batch input (batch mode)
+    pub batch_input: Option<&'a PathBuf>,
+    /// Optional directory for batch output (batch mode)
+    pub batch_output: Option<&'a PathBuf>,
+    /// Whether to display performance metrics after inference
+    pub show_metrics: bool,
+}
+
+/// Quality preset for vocoder inference
+#[derive(Debug, Clone, Copy)]
+enum QualityPreset {
+    Fast,     // 20 steps, faster generation
+    Balanced, // 50 steps, balance of speed and quality
+    High,     // 100 steps, best quality
+}
+
+impl QualityPreset {
+    fn from_str(s: &str) -> Result<Self> {
+        match s.to_lowercase().as_str() {
+            "fast" => Ok(Self::Fast),
+            "balanced" => Ok(Self::Balanced),
+            "high" => Ok(Self::High),
+            _ => Err(voirs_sdk::VoirsError::config_error(format!(
+                "Invalid quality preset: {}. Use 'fast', 'balanced', or 'high'",
+                s
+            ))),
+        }
+    }
+
+    fn steps(&self) -> usize {
+        match self {
+            Self::Fast => 20,
+            Self::Balanced => 50,
+            Self::High => 100,
+        }
+    }
+}
 
 /// Run vocoder inference: mel spectrogram → audio waveform
 ///
 /// # Arguments
-/// * `checkpoint` - Path to SafeTensors checkpoint file
-/// * `mel_path` - Path to mel spectrogram file (optional, will use dummy if None)
-/// * `output` - Output audio file path
-/// * `steps` - Number of diffusion steps for sampling
+/// * `config` - Vocoder inference configuration
 /// * `global` - Global CLI options
 pub async fn run_vocoder_inference(
+    config: VocoderInferenceConfig<'_>,
+    global: &GlobalOptions,
+) -> Result<()> {
+    // Check for batch mode
+    if config.batch_input.is_some() || config.batch_output.is_some() {
+        if config.batch_input.is_none() || config.batch_output.is_none() {
+            return Err(voirs_sdk::VoirsError::config_error(
+                "Batch mode requires both --batch-input and --batch-output",
+            ));
+        }
+        return run_batch_inference(
+            config.checkpoint,
+            config.batch_input.unwrap(),
+            config.batch_output.unwrap(),
+            config.steps,
+            config.quality,
+            config.show_metrics,
+            global,
+        )
+        .await;
+    }
+
+    // Single file mode
+    run_single_inference(
+        config.checkpoint,
+        config.mel_path,
+        config.output,
+        config.steps,
+        config.quality,
+        config.show_metrics,
+        global,
+    )
+    .await
+}
+
+/// Run single file inference
+async fn run_single_inference(
     checkpoint: &Path,
     mel_path: Option<&Path>,
     output: &Path,
-    steps: usize,
+    mut steps: usize,
+    quality: Option<&str>,
+    show_metrics: bool,
     global: &GlobalOptions,
 ) -> Result<()> {
+    // Apply quality preset if specified
+    if let Some(quality_str) = quality {
+        let preset = QualityPreset::from_str(quality_str)?;
+        steps = preset.steps();
+        if !global.quiet {
+            println!("Using quality preset: {:?} ({} steps)", preset, steps);
+        }
+    }
+    use std::time::Instant;
+    let total_start = Instant::now();
+
     if !global.quiet {
         println!("🎵 VoiRS Vocoder Inference");
         println!("═══════════════════════════════════════");
@@ -111,9 +248,28 @@ pub async fn run_vocoder_inference(
 
     save_audio_tensor(&audio_tensor, output, 22050)?;
 
+    let total_time = total_start.elapsed();
+
     if !global.quiet {
         println!("✅ Vocoder inference complete!");
         println!("  Output: {}", output.display());
+    }
+
+    // Show metrics if requested
+    if show_metrics {
+        println!();
+        println!("╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌");
+        println!("Performance Metrics:");
+        println!("╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌");
+        println!("Total time:        {:.3}s", total_time.as_secs_f64());
+        if let Ok(dims) = audio_tensor.dims3() {
+            let (_, _, samples) = dims;
+            let duration_sec = samples as f64 / 22050.0;
+            let rtf = total_time.as_secs_f64() / duration_sec;
+            println!("Audio duration:    {:.2}s", duration_sec);
+            println!("Real-time factor:  {:.3}x", rtf);
+        }
+        println!("╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌");
     }
 
     Ok(())
@@ -188,9 +344,8 @@ fn load_numpy_file(path: &Path, device: &Device) -> Result<Tensor> {
     }
 
     // Parse header (Python dict-like string)
-    let header_str = std::str::from_utf8(&data[header_start..header_end]).map_err(|_| {
-        voirs_sdk::VoirsError::config_error("Invalid NumPy header: not UTF-8")
-    })?;
+    let header_str = std::str::from_utf8(&data[header_start..header_end])
+        .map_err(|_| voirs_sdk::VoirsError::config_error("Invalid NumPy header: not UTF-8"))?;
 
     // Extract shape from header (format: 'shape': (dim0, dim1, ...), )
     let shape = parse_numpy_shape(header_str)?;
@@ -223,7 +378,10 @@ fn load_numpy_file(path: &Path, device: &Device) -> Result<Tensor> {
 
     // Create tensor
     let tensor = Tensor::from_vec(f32_data, shape.as_slice(), device).map_err(|e| {
-        voirs_sdk::VoirsError::config_error(format!("Failed to create tensor from NumPy data: {}", e))
+        voirs_sdk::VoirsError::config_error(format!(
+            "Failed to create tensor from NumPy data: {}",
+            e
+        ))
     })?;
 
     Ok(tensor)
@@ -233,14 +391,17 @@ fn load_numpy_file(path: &Path, device: &Device) -> Result<Tensor> {
 fn parse_numpy_shape(header: &str) -> Result<Vec<usize>> {
     // Header format: {'descr': '<f4', 'fortran_order': False, 'shape': (80, 100), }
     // Extract shape tuple
-    let shape_start = header.find("'shape':")
+    let shape_start = header
+        .find("'shape':")
         .or_else(|| header.find("\"shape\":"))
         .ok_or_else(|| voirs_sdk::VoirsError::config_error("NumPy header missing 'shape' field"))?;
 
     let shape_str = &header[shape_start..];
-    let tuple_start = shape_str.find('(')
+    let tuple_start = shape_str
+        .find('(')
         .ok_or_else(|| voirs_sdk::VoirsError::config_error("NumPy shape malformed"))?;
-    let tuple_end = shape_str.find(')')
+    let tuple_end = shape_str
+        .find(')')
         .ok_or_else(|| voirs_sdk::VoirsError::config_error("NumPy shape malformed"))?;
 
     let tuple_content = &shape_str[tuple_start + 1..tuple_end];
@@ -255,9 +416,9 @@ fn parse_numpy_shape(header: &str) -> Result<Vec<usize>> {
         .split(',')
         .filter(|s| !s.trim().is_empty())
         .map(|s| {
-            s.trim()
-                .parse::<usize>()
-                .map_err(|_| voirs_sdk::VoirsError::config_error(format!("Invalid dimension: {}", s)))
+            s.trim().parse::<usize>().map_err(|_| {
+                voirs_sdk::VoirsError::config_error(format!("Invalid dimension: {}", s))
+            })
         })
         .collect();
 
@@ -267,19 +428,22 @@ fn parse_numpy_shape(header: &str) -> Result<Vec<usize>> {
 /// Parse dtype from NumPy header
 fn parse_numpy_dtype(header: &str) -> Result<String> {
     // Extract descr field
-    let descr_start = header.find("'descr':")
+    let descr_start = header
+        .find("'descr':")
         .or_else(|| header.find("\"descr\":"))
         .ok_or_else(|| voirs_sdk::VoirsError::config_error("NumPy header missing 'descr' field"))?;
 
     let descr_str = &header[descr_start..];
 
     // Find the value (between quotes)
-    let value_start = descr_str.find('\'')
+    let value_start = descr_str
+        .find('\'')
         .or_else(|| descr_str.find('"'))
         .ok_or_else(|| voirs_sdk::VoirsError::config_error("NumPy descr malformed"))?;
 
     let value_str = &descr_str[value_start + 1..];
-    let value_end = value_str.find('\'')
+    let value_end = value_str
+        .find('\'')
         .or_else(|| value_str.find('"'))
         .ok_or_else(|| voirs_sdk::VoirsError::config_error("NumPy descr malformed"))?;
 
@@ -412,6 +576,190 @@ fn save_audio_tensor(tensor: &Tensor, output: &Path, sample_rate: u32) -> Result
             operation: voirs_sdk::error::IoOperation::Write,
             source: std::io::Error::new(std::io::ErrorKind::Other, e),
         })?;
+
+    Ok(())
+}
+
+/// Run batch inference on directory of mel spectrograms
+async fn run_batch_inference(
+    checkpoint: &Path,
+    input_dir: &Path,
+    output_dir: &Path,
+    mut steps: usize,
+    quality: Option<&str>,
+    show_metrics: bool,
+    global: &GlobalOptions,
+) -> Result<()> {
+    use std::time::Instant;
+
+    // Apply quality preset
+    if let Some(quality_str) = quality {
+        let preset = QualityPreset::from_str(quality_str)?;
+        steps = preset.steps();
+    }
+
+    if !global.quiet {
+        println!("🎵 VoiRS Batch Vocoder Inference");
+        println!("═══════════════════════════════════════");
+        println!("Checkpoint:  {}", checkpoint.display());
+        println!("Input dir:   {}", input_dir.display());
+        println!("Output dir:  {}", output_dir.display());
+        println!("Steps:       {}", steps);
+        if let Some(q) = quality {
+            println!("Quality:     {}", q);
+        }
+        println!("═══════════════════════════════════════\n");
+    }
+
+    // Validate input directory
+    if !input_dir.is_dir() {
+        return Err(voirs_sdk::VoirsError::config_error(format!(
+            "Input directory not found: {}",
+            input_dir.display()
+        )));
+    }
+
+    // Create output directory
+    std::fs::create_dir_all(output_dir)?;
+
+    // Find all mel spectrogram files
+    let mel_files: Vec<_> = std::fs::read_dir(input_dir)
+        .map_err(|e| voirs_sdk::VoirsError::IoError {
+            path: input_dir.to_path_buf(),
+            operation: voirs_sdk::error::IoOperation::Read,
+            source: e,
+        })?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension()
+                .and_then(|e| e.to_str())
+                .map(|ext| matches!(ext, "npy" | "safetensors" | "pt" | "pth"))
+                .unwrap_or(false)
+        })
+        .collect();
+
+    if mel_files.is_empty() {
+        return Err(voirs_sdk::VoirsError::config_error(
+            "No mel spectrogram files found in input directory",
+        ));
+    }
+
+    if !global.quiet {
+        println!("Found {} mel spectrogram files", mel_files.len());
+        println!();
+    }
+
+    // Load model once
+    let device = if global.gpu {
+        #[cfg(feature = "cuda")]
+        {
+            Device::new_cuda(0).unwrap_or(Device::Cpu)
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            Device::Cpu
+        }
+    } else {
+        Device::Cpu
+    };
+
+    let model = DiffWave::load_from_safetensors(checkpoint, device.clone())?;
+
+    // Performance tracking
+    let mut total_time = 0.0;
+    let mut successful = 0;
+    let mut failed = 0;
+    let batch_start = Instant::now();
+
+    // Process each file
+    for (idx, mel_file) in mel_files.iter().enumerate() {
+        let file_start = Instant::now();
+
+        let output_name = mel_file
+            .file_stem()
+            .and_then(|n| n.to_str())
+            .unwrap_or("output");
+        let output_path = output_dir.join(format!("{}.wav", output_name));
+
+        if !global.quiet {
+            println!(
+                "[{}/{}] Processing {}...",
+                idx + 1,
+                mel_files.len(),
+                mel_file.display()
+            );
+        }
+
+        // Process file
+        let result =
+            process_single_mel(&model, mel_file, &output_path, steps, &device, global).await;
+
+        let file_time = file_start.elapsed().as_secs_f64();
+        total_time += file_time;
+
+        match result {
+            Ok(_) => {
+                successful += 1;
+                if !global.quiet {
+                    println!("  ✓ Complete in {:.2}s", file_time);
+                }
+            }
+            Err(e) => {
+                failed += 1;
+                eprintln!("  ✗ Failed: {}", e);
+            }
+        }
+    }
+
+    let total_elapsed = batch_start.elapsed().as_secs_f64();
+
+    // Display results
+    if !global.quiet || show_metrics {
+        println!();
+        println!("╔═══════════════════════════════════════╗");
+        println!("║       Batch Inference Complete        ║");
+        println!("╠═══════════════════════════════════════╣");
+        println!("║ Total files:    {:<21} ║", mel_files.len());
+        println!("║ Successful:     {:<21} ║", successful);
+        println!("║ Failed:         {:<21} ║", failed);
+        println!("║ Total time:     {:<18.2}s ║", total_elapsed);
+        println!(
+            "║ Avg time/file:  {:<18.2}s ║",
+            total_time / mel_files.len() as f64
+        );
+        if successful > 0 {
+            println!(
+                "║ Throughput:     {:<18.2}/s ║",
+                successful as f64 / total_elapsed
+            );
+        }
+        println!("╚═══════════════════════════════════════╝");
+    }
+
+    Ok(())
+}
+
+/// Process a single mel spectrogram file
+async fn process_single_mel(
+    model: &DiffWave,
+    mel_path: &Path,
+    output_path: &Path,
+    steps: usize,
+    device: &Device,
+    _global: &GlobalOptions,
+) -> Result<()> {
+    // Load mel spectrogram
+    let mel_tensor = load_mel_spectrogram(mel_path, device)?;
+
+    // Run inference
+    let sampling_method = SamplingMethod::DDIM { steps, eta: 0.0 };
+    let audio_tensor = model
+        .inference(&mel_tensor, sampling_method)
+        .map_err(|e| voirs_sdk::VoirsError::config_error(format!("Inference failed: {}", e)))?;
+
+    // Save audio
+    save_audio_tensor(&audio_tensor, output_path, 22050)?;
 
     Ok(())
 }

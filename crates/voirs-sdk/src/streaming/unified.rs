@@ -441,6 +441,12 @@ impl Default for PerformanceMetrics {
     }
 }
 
+impl Default for UnifiedStreamingPipeline {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UnifiedStreamingPipeline {
     /// Create a new unified streaming pipeline
     pub fn new() -> Self {

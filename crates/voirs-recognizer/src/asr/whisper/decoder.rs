@@ -40,7 +40,7 @@ pub enum SamplingStrategy {
 pub struct SamplingConfig {
     /// Sampling strategy to use
     pub strategy: SamplingStrategy,
-    /// Temperature scaling (handled externally in generate_tokens)
+    /// Temperature scaling (handled externally in `generate_tokens`)
     pub temperature: f32,
     /// Length penalty factor (> 1.0 encourages longer sequences, < 1.0 discourages)
     pub length_penalty: f32,
@@ -61,6 +61,7 @@ impl Default for SamplingConfig {
 
 impl SamplingConfig {
     /// Create config for nucleus sampling
+    #[must_use]
     pub fn nucleus(p: f32) -> Self {
         Self {
             strategy: SamplingStrategy::TopP { p },
@@ -69,6 +70,7 @@ impl SamplingConfig {
     }
 
     /// Create config for top-k sampling
+    #[must_use]
     pub fn top_k(k: usize) -> Self {
         Self {
             strategy: SamplingStrategy::TopK { k },
@@ -77,6 +79,7 @@ impl SamplingConfig {
     }
 
     /// Create config for combined top-k and nucleus sampling
+    #[must_use]
     pub fn top_k_nucleus(k: usize, p: f32) -> Self {
         Self {
             strategy: SamplingStrategy::TopKP { k, p },
@@ -85,6 +88,7 @@ impl SamplingConfig {
     }
 
     /// Set temperature for this config
+    #[must_use]
     pub fn with_temperature(mut self, temperature: f32) -> Self {
         self.temperature = temperature;
         self
@@ -92,6 +96,7 @@ impl SamplingConfig {
 
     /// Set length penalty for this config
     /// Values > 1.0 encourage longer sequences, < 1.0 discourage them
+    #[must_use]
     pub fn with_length_penalty(mut self, length_penalty: f32) -> Self {
         self.length_penalty = length_penalty;
         self
@@ -99,6 +104,7 @@ impl SamplingConfig {
 
     /// Set repetition penalty for this config
     /// Values > 1.0 discourage repetition, < 1.0 encourage it
+    #[must_use]
     pub fn with_repetition_penalty(mut self, repetition_penalty: f32) -> Self {
         self.repetition_penalty = repetition_penalty;
         self
@@ -118,6 +124,7 @@ pub struct BeamHypothesis {
 
 impl BeamHypothesis {
     /// Creates a new beam hypothesis with the starting token
+    #[must_use]
     pub fn new(start_token: u32) -> Self {
         Self {
             tokens: vec![start_token],
@@ -127,6 +134,7 @@ impl BeamHypothesis {
     }
 
     /// Get the score for ranking beams (with length penalty applied)
+    #[must_use]
     pub fn score(&self, length_penalty: f32) -> f32 {
         if length_penalty == 1.0 {
             self.log_prob
@@ -149,6 +157,7 @@ impl BeamHypothesis {
     }
 
     /// Add a token to this hypothesis
+    #[must_use]
     pub fn extend(&self, token: u32, log_prob_delta: f32, is_end_token: bool) -> Self {
         let mut new_tokens = self.tokens.clone();
         new_tokens.push(token);
@@ -923,8 +932,7 @@ impl WhisperDecoder {
                 .iter()
                 .enumerate()
                 .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                .map(|(idx, _)| idx)
-                .unwrap_or(0);
+                .map_or(0, |(idx, _)| idx);
             return Ok(max_idx as u32);
         }
 

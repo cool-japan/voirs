@@ -366,14 +366,24 @@ impl PluginManager {
 
     /// Get plugin names
     pub fn get_plugin_names(&self) -> Vec<String> {
-        let plugins = self.plugins.read().unwrap();
-        plugins.keys().cloned().collect()
+        match self.plugins.read() {
+            Ok(plugins) => plugins.keys().cloned().collect(),
+            Err(_) => {
+                tracing::warn!("Plugin lock poisoned, returning empty list");
+                Vec::new()
+            }
+        }
     }
 
     /// Check if plugin exists
     pub fn has_plugin(&self, name: &str) -> bool {
-        let plugins = self.plugins.read().unwrap();
-        plugins.contains_key(name)
+        match self.plugins.read() {
+            Ok(plugins) => plugins.contains_key(name),
+            Err(_) => {
+                tracing::warn!("Plugin lock poisoned, assuming plugin doesn't exist");
+                false
+            }
+        }
     }
 
     /// Process audio through a specific plugin
@@ -480,8 +490,13 @@ impl PluginManager {
 
     /// Get plugin capabilities
     pub fn get_plugin_capabilities(&self, name: &str) -> Option<PluginCapabilities> {
-        let plugins = self.plugins.read().unwrap();
-        plugins.get(name).map(|plugin| plugin.capabilities())
+        match self.plugins.read() {
+            Ok(plugins) => plugins.get(name).map(|plugin| plugin.capabilities()),
+            Err(_) => {
+                tracing::warn!("Plugin lock poisoned, returning None for capabilities");
+                None
+            }
+        }
     }
 
     /// Update plugin parameters

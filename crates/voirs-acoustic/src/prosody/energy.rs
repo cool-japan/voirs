@@ -270,24 +270,30 @@ impl EnergyConfig {
     /// Validate energy configuration
     pub fn validate(&self) -> Result<()> {
         if !(0.0..=1.0).contains(&self.base_energy) {
-            return Err(AcousticError::ConfigError(format!(
-                "Base energy {} must be between 0.0 and 1.0",
-                self.base_energy
-            )));
+            return Err(AcousticError::ConfigError {
+                message: format!(
+                    "Base energy {} must be between 0.0 and 1.0",
+                    self.base_energy
+                ),
+            });
         }
 
         if self.dynamic_range < 1.0 || self.dynamic_range > 60.0 {
-            return Err(AcousticError::ConfigError(format!(
-                "Dynamic range {} dB is out of range (1-60 dB)",
-                self.dynamic_range
-            )));
+            return Err(AcousticError::ConfigError {
+                message: format!(
+                    "Dynamic range {} dB is out of range (1-60 dB)",
+                    self.dynamic_range
+                ),
+            });
         }
 
         if !(0.0..=1.0).contains(&self.breathiness) {
-            return Err(AcousticError::ConfigError(format!(
-                "Breathiness {} must be between 0.0 and 1.0",
-                self.breathiness
-            )));
+            return Err(AcousticError::ConfigError {
+                message: format!(
+                    "Breathiness {} must be between 0.0 and 1.0",
+                    self.breathiness
+                ),
+            });
         }
 
         self.voice_quality.validate()?;
@@ -419,17 +425,19 @@ impl VoiceQualityConfig {
 
         for (name, value) in &fields {
             if !(0.0..=1.0).contains(value) {
-                return Err(AcousticError::ConfigError(format!(
-                    "{name} {value} must be between 0.0 and 1.0"
-                )));
+                return Err(AcousticError::ConfigError {
+                    message: format!("{name} {value} must be between 0.0 and 1.0"),
+                });
             }
         }
 
         if self.formant_shift < -12.0 || self.formant_shift > 12.0 {
-            return Err(AcousticError::ConfigError(format!(
-                "Formant shift {} semitones is out of range (-12 to 12)",
-                self.formant_shift
-            )));
+            return Err(AcousticError::ConfigError {
+                message: format!(
+                    "Formant shift {} semitones is out of range (-12 to 12)",
+                    self.formant_shift
+                ),
+            });
         }
 
         Ok(())

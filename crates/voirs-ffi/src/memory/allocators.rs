@@ -35,12 +35,22 @@ pub struct AllocationInfo {
 /// Trait for pluggable allocators
 pub trait VoirsAllocator: Send + Sync {
     /// Allocate memory with given layout
+    ///
+    /// # Safety
+    /// The layout must be valid (non-zero size, valid alignment).
     unsafe fn alloc(&self, layout: Layout) -> *mut u8;
 
     /// Deallocate memory with given layout
+    ///
+    /// # Safety
+    /// The `ptr` must have been allocated with the same allocator using the same `layout`.
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout);
 
     /// Reallocate memory (optional, falls back to alloc+copy+dealloc)
+    ///
+    /// # Safety
+    /// The `ptr` must have been allocated with the same allocator using the same `layout`.
+    /// The `new_size` must be non-zero.
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         let new_layout = Layout::from_size_align_unchecked(new_size, layout.align());
         let new_ptr = self.alloc(new_layout);
@@ -429,6 +439,9 @@ pub fn get_global_allocator_name() -> Option<&'static str> {
 }
 
 /// Allocate memory using global allocator
+///
+/// # Safety
+/// The layout must be valid (non-zero size, valid alignment).
 pub unsafe fn global_alloc(layout: Layout) -> *mut u8 {
     let global = GLOBAL_ALLOCATOR.read();
     if let Some(alloc) = global.as_ref() {
@@ -439,6 +452,9 @@ pub unsafe fn global_alloc(layout: Layout) -> *mut u8 {
 }
 
 /// Deallocate memory using global allocator
+///
+/// # Safety
+/// The `ptr` must have been allocated with `global_alloc` using the same `layout`.
 pub unsafe fn global_dealloc(ptr: *mut u8, layout: Layout) {
     let global = GLOBAL_ALLOCATOR.read();
     if let Some(alloc) = global.as_ref() {

@@ -195,8 +195,8 @@ impl SpeakerVerifier {
         })
     }
 
-    /// Create default verifier
-    pub fn default() -> Result<Self> {
+    /// Create verifier with default configuration
+    pub fn with_default_config() -> Result<Self> {
         Self::new(VerificationConfig::default())
     }
 
@@ -513,13 +513,13 @@ impl SpeakerVerifier {
 
     /// Extract acoustic features from audio
     fn extract_acoustic_features(&self, audio: &[f32], sample_rate: u32) -> Result<Vec<f32>> {
-        let mut features = Vec::new();
-
         // Energy features
-        features.push(self.compute_rms_energy(audio));
-        features.push(self.compute_spectral_centroid(audio, sample_rate));
-        features.push(self.compute_spectral_rolloff(audio, sample_rate));
-        features.push(self.compute_zero_crossing_rate(audio));
+        let mut features = vec![
+            self.compute_rms_energy(audio),
+            self.compute_spectral_centroid(audio, sample_rate),
+            self.compute_spectral_rolloff(audio, sample_rate),
+            self.compute_zero_crossing_rate(audio),
+        ];
 
         // MFCC-like features (simplified)
         features.extend(self.compute_mel_features(audio, sample_rate)?);
@@ -682,10 +682,15 @@ impl SpeakerVerifier {
         let mut best_period = min_period;
         let mut best_value = autocorr[min_period];
 
-        for period in min_period..=max_period {
-            if autocorr[period] > best_value {
-                best_value = autocorr[period];
-                best_period = period;
+        for (offset, &value) in autocorr
+            .iter()
+            .enumerate()
+            .skip(min_period)
+            .take(max_period - min_period + 1)
+        {
+            if value > best_value {
+                best_value = value;
+                best_period = offset;
             }
         }
 

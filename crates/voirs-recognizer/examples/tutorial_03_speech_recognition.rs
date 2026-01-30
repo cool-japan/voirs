@@ -223,7 +223,7 @@ async fn perform_recognition(
     println!("   🔄 Processing audio...");
 
     // Simulate processing time based on model size
-    let processing_delay = match config.whisper_model_size.as_ref().map(|s| s.as_str()) {
+    let processing_delay = match config.whisper_model_size.as_deref() {
         Some("tiny") => 100,
         Some("base") => 200,
         Some("small") => 400,
@@ -233,7 +233,7 @@ async fn perform_recognition(
     tokio::time::sleep(tokio::time::Duration::from_millis(processing_delay)).await;
 
     // Create mock recognition result
-    let transcript = match config.whisper_model_size.as_ref().map(|s| s.as_str()) {
+    let transcript = match config.whisper_model_size.as_deref() {
         Some("tiny") => "Hello world this is a test",
         Some("base") => "Hello world, this is a test.",
         Some("small") => "Hello world, this is a test of speech recognition.",
@@ -245,14 +245,14 @@ async fn perform_recognition(
     Ok(MockRecognitionResult {
         text: transcript.to_string(),
         words,
-        confidence: match config.whisper_model_size.as_ref().map(|s| s.as_str()) {
+        confidence: match config.whisper_model_size.as_deref() {
             Some("tiny") => 0.75,
             Some("base") => 0.85,
             Some("small") => 0.92,
             _ => 0.80,
         },
-        language: config.language.clone(),
-        processing_time: std::time::Duration::from_millis(processing_delay as u64),
+        language: config.language,
+        processing_time: std::time::Duration::from_millis(processing_delay),
     })
 }
 

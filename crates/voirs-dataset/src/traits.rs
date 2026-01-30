@@ -181,12 +181,13 @@ pub trait Dataset: Send + Sync {
                 let mut rng = if let Some(seed) = config.seed {
                     scirs2_core::random::Random::seed(seed)
                 } else {
-                    scirs2_core::random::Random::seed(
-                        std::time::SystemTime::now()
+                    {
+                        let seed = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs(),
-                    )
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+                        scirs2_core::random::Random::seed(seed)
+                    }
                 };
                 indices.shuffle(&mut rng);
             }
@@ -196,12 +197,13 @@ pub trait Dataset: Send + Sync {
                 let mut rng = if let Some(seed) = config.seed {
                     scirs2_core::random::Random::seed(seed)
                 } else {
-                    scirs2_core::random::Random::seed(
-                        std::time::SystemTime::now()
+                    {
+                        let seed = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs(),
-                    )
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+                        scirs2_core::random::Random::seed(seed)
+                    }
                 };
                 indices.shuffle(&mut rng);
             }
@@ -211,12 +213,13 @@ pub trait Dataset: Send + Sync {
                 let mut rng = if let Some(seed) = config.seed {
                     scirs2_core::random::Random::seed(seed)
                 } else {
-                    scirs2_core::random::Random::seed(
-                        std::time::SystemTime::now()
+                    {
+                        let seed = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs(),
-                    )
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+                        scirs2_core::random::Random::seed(seed)
+                    }
                 };
                 indices.shuffle(&mut rng);
             }

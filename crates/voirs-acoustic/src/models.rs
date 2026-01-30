@@ -102,9 +102,9 @@ impl AcousticModel for DummyAcousticModel {
     ) -> Result<MelSpectrogram> {
         // Return error for empty phoneme sequences
         if phonemes.is_empty() {
-            return Err(AcousticError::InputError(
-                "Cannot synthesize empty phoneme sequence".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Cannot synthesize empty phoneme sequence".to_string(),
+            });
         }
 
         let phoneme_count = phonemes.len();

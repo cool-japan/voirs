@@ -198,21 +198,21 @@ impl DurationConfig {
     /// Validate duration configuration
     pub fn validate(&self) -> Result<()> {
         if self.speed_factor <= 0.0 {
-            return Err(AcousticError::ConfigError(
-                "Speed factor must be positive".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Speed factor must be positive".to_string(),
+            });
         }
 
         if self.min_duration_ms <= 0.0 {
-            return Err(AcousticError::ConfigError(
-                "Minimum duration must be positive".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Minimum duration must be positive".to_string(),
+            });
         }
 
         if self.max_duration_ms <= self.min_duration_ms {
-            return Err(AcousticError::ConfigError(
-                "Maximum duration must be greater than minimum duration".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Maximum duration must be greater than minimum duration".to_string(),
+            });
         }
 
         Ok(())

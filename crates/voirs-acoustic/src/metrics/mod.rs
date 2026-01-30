@@ -390,17 +390,17 @@ impl QualityEvaluator {
     fn audio_to_mel_spectrogram(&self, _samples: &[f32]) -> Result<MelSpectrogram> {
         // This would typically use a mel computation module
         // For now, return a placeholder implementation
-        Err(AcousticError::Processing(
-            "Audio to mel conversion not yet implemented".to_string(),
-        ))
+        Err(AcousticError::ProcessingError {
+            message: "Audio to mel conversion not yet implemented".to_string(),
+        })
     }
 
     fn mel_to_audio_samples(&self, _mel_spec: &MelSpectrogram) -> Result<Vec<f32>> {
         // This would typically use a vocoder
         // For now, return a placeholder implementation
-        Err(AcousticError::Processing(
-            "Mel to audio conversion not yet implemented".to_string(),
-        ))
+        Err(AcousticError::ProcessingError {
+            message: "Mel to audio conversion not yet implemented".to_string(),
+        })
     }
 
     fn compute_statistics(&self, values: &[f32]) -> MetricStatistics {
@@ -414,11 +414,12 @@ impl QualityEvaluator {
         let std_dev = variance.sqrt();
 
         let mut sorted_values = values.to_vec();
-        sorted_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        // Sort with NaN handling for statistical calculations
+        sorted_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let min = sorted_values[0];
         let max = sorted_values[sorted_values.len() - 1];
-        let median = if sorted_values.len() % 2 == 0 {
+        let median = if sorted_values.len().is_multiple_of(2) {
             (sorted_values[sorted_values.len() / 2 - 1] + sorted_values[sorted_values.len() / 2])
                 / 2.0
         } else {

@@ -32,7 +32,7 @@ pub struct OptimizationPipeline {
 }
 
 /// Optimization pipeline results
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OptimizationResults {
     /// Original model statistics
     pub original_stats: ModelStats,
@@ -127,6 +127,7 @@ pub struct OptimizationSummary {
 
 impl OptimizationPipeline {
     /// Create new optimization pipeline
+    #[must_use]
     pub fn new(config: AdvancedOptimizationConfig, device: Device) -> Self {
         Self {
             kd_optimizer: if config.enable_knowledge_distillation {
@@ -312,8 +313,7 @@ impl OptimizationPipeline {
             .temperature_sensitivity
             .iter()
             .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-            .map(|&(temp, _)| temp)
-            .unwrap_or(4.0);
+            .map_or(4.0, |&(temp, _)| temp);
 
         // Measure final accuracy
         let final_stats = validation_fn(model_layers)?;
@@ -418,6 +418,7 @@ impl OptimizationPipeline {
     }
 
     /// Generate optimization report
+    #[must_use]
     pub fn generate_report(&self) -> String {
         let results = &self.results;
         let mut report = String::new();
@@ -503,9 +504,9 @@ impl OptimizationPipeline {
         // Techniques Applied
         report.push_str("## Optimization Techniques Applied\n");
         for technique in &results.summary.techniques_applied {
-            report.push_str(&format!("- {}\n", technique));
+            report.push_str(&format!("- {technique}\n"));
         }
-        report.push_str("\n");
+        report.push('\n');
 
         // Detailed Results
         if let Some(distillation) = &results.distillation_results {
@@ -559,30 +560,18 @@ impl OptimizationPipeline {
             ));
             report.push_str("- Precision Distribution:\n");
             for (precision, count) in &mixed_precision.precision_distribution {
-                report.push_str(&format!("  - {}: {} layers\n", precision, count));
+                report.push_str(&format!("  - {precision}: {count} layers\n"));
             }
-            report.push_str("\n");
+            report.push('\n');
         }
 
         report
     }
 
     /// Get optimization results
+    #[must_use]
     pub fn get_results(&self) -> &OptimizationResults {
         &self.results
-    }
-}
-
-impl Default for OptimizationResults {
-    fn default() -> Self {
-        Self {
-            original_stats: ModelStats::default(),
-            optimized_stats: ModelStats::default(),
-            distillation_results: None,
-            pruning_results: None,
-            mixed_precision_results: None,
-            summary: OptimizationSummary::default(),
-        }
     }
 }
 

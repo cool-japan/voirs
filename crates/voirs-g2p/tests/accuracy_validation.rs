@@ -140,8 +140,8 @@ fn edit_distance(s1: &str, s2: &str) -> usize {
     for (i, row) in dp.iter_mut().enumerate().take(len1 + 1) {
         row[0] = i;
     }
-    for j in 0..=len2 {
-        dp[0][j] = j;
+    for (j, cell) in dp[0].iter_mut().enumerate().take(len2 + 1) {
+        *cell = j;
     }
 
     // Fill the DP table

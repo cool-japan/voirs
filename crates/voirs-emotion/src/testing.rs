@@ -90,7 +90,7 @@ impl ABTestVariant {
         key: String,
         value: T,
     ) -> crate::Result<Self> {
-        let json_value = serde_json::to_value(value).map_err(|e| Error::Serialization(e))?;
+        let json_value = serde_json::to_value(value).map_err(Error::Serialization)?;
         self.parameters.insert(key, json_value);
         Ok(self)
     }
@@ -135,6 +135,7 @@ pub struct ABComparison {
 
 impl ABComparison {
     /// Create new comparison
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         evaluator_id: String,
         test_emotion: Emotion,
@@ -567,7 +568,7 @@ impl ABTestManager {
                 .as_secs()
         });
 
-        serde_json::to_string_pretty(&export_data).map_err(|e| Error::Serialization(e))
+        serde_json::to_string_pretty(&export_data).map_err(Error::Serialization)
     }
 
     /// Get test progress summary

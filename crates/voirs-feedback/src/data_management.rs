@@ -1,10 +1,12 @@
-//! Comprehensive Data Management System for VoiRS Feedback
+//! Comprehensive Data Management System for `VoiRS` Feedback
 //!
 //! This module provides data export, import, backup, restore, and migration
-//! capabilities for all VoiRS feedback system data including user progress,
+//! capabilities for all `VoiRS` feedback system data including user progress,
 //! analytics, settings, and system configurations.
 
-use crate::traits::*;
+use crate::traits::{
+    AdaptiveConfig, FeedbackConfig, FeedbackProvider, TrainingExercise, UserFeedback, UserProgress,
+};
 // Note: We'll define our own export-friendly versions of these types
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -162,22 +164,22 @@ pub enum TransformationType {
         /// Source value
         from: String,
         /// Target value
-        to: String
+        to: String,
     },
     /// Apply mathematical operation
     MathOperation {
         /// Mathematical operation string
-        operation: String
+        operation: String,
     },
     /// Convert data type
     TypeConversion {
         /// Target type name
-        target_type: String
+        target_type: String,
     },
     /// Apply custom function
     CustomFunction {
         /// Function name to apply
-        function_name: String
+        function_name: String,
     },
 }
 
@@ -209,7 +211,7 @@ pub struct ExportMetadata {
     pub created_at: DateTime<Utc>,
     /// Export format
     pub format: ExportFormat,
-    /// VoiRS version
+    /// `VoiRS` version
     pub voris_version: String,
     /// Export version for compatibility
     pub export_version: String,
@@ -527,7 +529,7 @@ pub struct Badge {
     pub earned_at: DateTime<Utc>,
 }
 
-/// Quality metrics (re-export from quality_monitor module)
+/// Quality metrics (re-export from `quality_monitor` module)
 use crate::quality_monitor::{QualityAlert, QualityMetrics, QualityReport};
 
 /// Data Management System
@@ -609,6 +611,7 @@ pub struct FileDataStorage {
 
 impl FileDataStorage {
     /// Description
+    #[must_use]
     pub fn new(base_directory: String) -> Self {
         Self { base_directory }
     }
@@ -635,7 +638,7 @@ impl DataStorage for FileDataStorage {
                 let binary_data =
                     bincode::serde::encode_to_vec(package, bincode::config::standard()).map_err(
                         |e| DataManagementError::ExportError {
-                            message: format!("Binary serialization failed: {}", e),
+                            message: format!("Binary serialization failed: {e}"),
                         },
                     )?;
                 fs::write(path, binary_data).await?;
@@ -670,7 +673,7 @@ impl DataStorage for FileDataStorage {
             ExportFormat::Json => {
                 let json_str =
                     String::from_utf8(data).map_err(|e| DataManagementError::ImportError {
-                        message: format!("Invalid UTF-8 data: {}", e),
+                        message: format!("Invalid UTF-8 data: {e}"),
                     })?;
                 serde_json::from_str(&json_str)?
             }
@@ -678,14 +681,14 @@ impl DataStorage for FileDataStorage {
                 bincode::serde::decode_from_slice(&data, bincode::config::standard())
                     .map(|(v, _)| v)
                     .map_err(|e| DataManagementError::ImportError {
-                        message: format!("Binary deserialization failed: {}", e),
+                        message: format!("Binary deserialization failed: {e}"),
                     })?
             }
             ExportFormat::CompressedJson => {
                 let decompressed = Self::decompress_data(&data)?;
                 let json_str = String::from_utf8(decompressed).map_err(|e| {
                     DataManagementError::ImportError {
-                        message: format!("Invalid UTF-8 data after decompression: {}", e),
+                        message: format!("Invalid UTF-8 data after decompression: {e}"),
                     }
                 })?;
                 serde_json::from_str(&json_str)?
@@ -694,13 +697,13 @@ impl DataStorage for FileDataStorage {
                 let decrypted = Self::decrypt_data(&data, "default_key")?;
                 let json_str =
                     String::from_utf8(decrypted).map_err(|e| DataManagementError::ImportError {
-                        message: format!("Invalid UTF-8 data after decryption: {}", e),
+                        message: format!("Invalid UTF-8 data after decryption: {e}"),
                     })?;
                 serde_json::from_str(&json_str)?
             }
             _ => {
                 return Err(DataManagementError::ImportError {
-                    message: format!("Unsupported import format: {:?}", format),
+                    message: format!("Unsupported import format: {format:?}"),
                 });
             }
         };
@@ -722,10 +725,7 @@ impl DataStorage for FileDataStorage {
 
             if path.is_file() {
                 if let Some(extension) = path.extension() {
-                    if matches!(
-                        extension.to_str(),
-                        Some("json") | Some("bin") | Some("backup")
-                    ) {
+                    if matches!(extension.to_str(), Some("json" | "bin" | "backup")) {
                         let metadata = fs::metadata(&path).await?;
                         let size_bytes = metadata.len();
 
@@ -841,9 +841,9 @@ impl FileDataStorage {
         if let Some(extension) = path.extension() {
             match extension.to_str() {
                 Some("json") => return Ok(ExportFormat::Json),
-                Some("bin") | Some("binary") => return Ok(ExportFormat::Binary),
-                Some("gz") | Some("zip") => return Ok(ExportFormat::CompressedJson),
-                Some("enc") | Some("encrypted") => return Ok(ExportFormat::EncryptedJson),
+                Some("bin" | "binary") => return Ok(ExportFormat::Binary),
+                Some("gz" | "zip") => return Ok(ExportFormat::CompressedJson),
+                Some("enc" | "encrypted") => return Ok(ExportFormat::EncryptedJson),
                 _ => {}
             }
         }
@@ -956,9 +956,7 @@ impl DataManager {
         let package = storage.load_package(input_path).await?;
 
         // Validate data if not skipped
-        let validation_report = if !import_options.skip_validation {
-            storage.validate_data(&package).await?
-        } else {
+        let validation_report = if import_options.skip_validation {
             ValidationReport {
                 is_valid: true,
                 errors: Vec::new(),
@@ -966,6 +964,8 @@ impl DataManager {
                 record_counts: HashMap::new(),
                 integrity_checks: HashMap::new(),
             }
+        } else {
+            storage.validate_data(&package).await?
         };
 
         if !validation_report.is_valid && !import_options.skip_validation {
@@ -1106,17 +1106,16 @@ impl DataManager {
         // Import user progress
         for (user_id, progress) in &package.user_progress {
             match self.import_user_progress(user_id, progress, options).await {
-                Ok(_) => {
+                Ok(()) => {
                     *result
                         .records_imported
                         .entry("user_progress".to_string())
                         .or_insert(0) += 1;
                 }
                 Err(e) => {
-                    result.errors.push(format!(
-                        "Failed to import progress for user {}: {}",
-                        user_id, e
-                    ));
+                    result
+                        .errors
+                        .push(format!("Failed to import progress for user {user_id}: {e}"));
                     *result
                         .records_skipped
                         .entry("user_progress".to_string())
@@ -1127,8 +1126,8 @@ impl DataManager {
 
         // Import feedback history
         for feedback in &package.feedback_history {
-            match self.import_feedback(&feedback, options).await {
-                Ok(_) => {
+            match self.import_feedback(feedback, options).await {
+                Ok(()) => {
                     *result
                         .records_imported
                         .entry("feedback".to_string())
@@ -1137,7 +1136,7 @@ impl DataManager {
                 Err(e) => {
                     result
                         .errors
-                        .push(format!("Failed to import feedback: {}", e));
+                        .push(format!("Failed to import feedback: {e}"));
                     *result
                         .records_skipped
                         .entry("feedback".to_string())
@@ -1157,7 +1156,7 @@ impl DataManager {
         _options: &ImportOptions,
     ) -> DataManagementResult<()> {
         // In a real implementation, this would save to the actual data store
-        log::info!("Importing progress for user: {}", user_id);
+        log::info!("Importing progress for user: {user_id}");
         log::debug!(
             "Progress data: overall_score={}",
             progress.average_scores.overall_score
@@ -1179,7 +1178,7 @@ impl DataManager {
     /// Generate backup file path
     async fn generate_backup_path(&self) -> DataManagementResult<std::path::PathBuf> {
         let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
-        let filename = format!("voris_backup_{}.json.gz", timestamp);
+        let filename = format!("voris_backup_{timestamp}.json.gz");
         Ok(std::path::PathBuf::from("backups").join(filename))
     }
 }

@@ -87,9 +87,9 @@ impl AcousticModelLoader {
             self.default_backend = backend_type;
             Ok(())
         } else {
-            Err(AcousticError::ConfigError(format!(
-                "Backend {backend_type:?} not available"
-            )))
+            Err(AcousticError::ConfigError {
+                message: format!("Backend {backend_type:?} not available"),
+            })
         }
     }
 
@@ -114,9 +114,12 @@ impl AcousticModelLoader {
         }
 
         // Get backend
-        let backend = self.backends.get(&backend_type).ok_or_else(|| {
-            AcousticError::ConfigError(format!("Backend {backend_type:?} not found"))
-        })?;
+        let backend =
+            self.backends
+                .get(&backend_type)
+                .ok_or_else(|| AcousticError::ConfigError {
+                    message: format!("Backend {backend_type:?} not found"),
+                })?;
 
         // Determine source type and load model
         let model = if self.is_url(source) {
@@ -160,19 +163,21 @@ impl AcousticModelLoader {
     ) -> Result<Box<dyn AcousticModel>> {
         // Validate file exists
         if !Path::new(path).exists() {
-            return Err(AcousticError::ModelError(format!(
-                "Model file not found: {path}"
-            )));
+            return Err(AcousticError::ModelError {
+                message: format!("Model file not found: {path}"),
+            });
         }
 
         // Validate model format
         let model_info = backend.validate_model(path)?;
         if !model_info.compatible {
-            return Err(AcousticError::ModelError(format!(
-                "Model format {:?} not compatible with backend {}",
-                model_info.format,
-                backend.name()
-            )));
+            return Err(AcousticError::ModelError {
+                message: format!(
+                    "Model format {:?} not compatible with backend {}",
+                    model_info.format,
+                    backend.name()
+                ),
+            });
         }
 
         // Load model
@@ -211,8 +216,9 @@ impl AcousticModelLoader {
     async fn download_from_hub(&self, repo_id: &str, _cache_dir: &Path) -> Result<String> {
         use hf_hub::api::tokio::Api;
 
-        let api = Api::new()
-            .map_err(|e| AcousticError::ModelError(format!("Failed to create HF API: {e}")))?;
+        let api = Api::new().map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to create HF API: {e}"),
+        })?;
 
         let repo = api.model(repo_id.to_string());
 
@@ -229,9 +235,9 @@ impl AcousticModelLoader {
             }
         }
 
-        Err(AcousticError::ModelError(format!(
-            "No compatible model file found in repository: {repo_id}"
-        )))
+        Err(AcousticError::ModelError {
+            message: format!("No compatible model file found in repository: {repo_id}"),
+        })
     }
 
     /// Download model from URL
@@ -239,8 +245,9 @@ impl AcousticModelLoader {
         use std::io::Write;
 
         // Create cache directory if it doesn't exist
-        std::fs::create_dir_all(cache_dir)
-            .map_err(|e| AcousticError::ModelError(format!("Failed to create cache dir: {e}")))?;
+        std::fs::create_dir_all(cache_dir).map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to create cache dir: {e}"),
+        })?;
 
         // Generate filename from URL
         let filename = self.url_to_filename(url);
@@ -257,26 +264,33 @@ impl AcousticModelLoader {
 
         let response = reqwest::get(url)
             .await
-            .map_err(|e| AcousticError::ModelError(format!("Failed to download: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to download: {e}"),
+            })?;
 
         if !response.status().is_success() {
-            return Err(AcousticError::ModelError(format!(
-                "Download failed with status: {}",
-                response.status()
-            )));
+            return Err(AcousticError::ModelError {
+                message: format!("Download failed with status: {}", response.status()),
+            });
         }
 
         let bytes = response
             .bytes()
             .await
-            .map_err(|e| AcousticError::ModelError(format!("Failed to read response: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to read response: {e}"),
+            })?;
 
         // Write to cache file
-        let mut file = std::fs::File::create(&file_path)
-            .map_err(|e| AcousticError::ModelError(format!("Failed to create file: {e}")))?;
+        let mut file =
+            std::fs::File::create(&file_path).map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to create file: {e}"),
+            })?;
 
         file.write_all(&bytes)
-            .map_err(|e| AcousticError::ModelError(format!("Failed to write file: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to write file: {e}"),
+            })?;
 
         tracing::info!("Downloaded and cached model: {:?}", file_path);
         Ok(file_path.to_string_lossy().to_string())
@@ -340,8 +354,8 @@ impl AcousticModelLoader {
         let backend = self
             .backends
             .get(&backend_type)
-            .ok_or_else(|| {
-                AcousticError::ConfigError(format!("Backend {backend_type:?} not found"))
+            .ok_or_else(|| AcousticError::ConfigError {
+                message: format!("Backend {backend_type:?} not found"),
             })?
             .clone();
 
@@ -468,25 +482,34 @@ impl AcousticModelLoader {
 #[async_trait]
 impl ModelLoader for AcousticModelLoader {
     async fn load_from_file(&self, path: &str) -> Result<Box<dyn AcousticModel>> {
-        let backend = self.backends.get(&self.default_backend).ok_or_else(|| {
-            AcousticError::ConfigError("No default backend available".to_string())
-        })?;
+        let backend =
+            self.backends
+                .get(&self.default_backend)
+                .ok_or_else(|| AcousticError::ConfigError {
+                    message: "No default backend available".to_string(),
+                })?;
 
         self.load_from_file_impl(path, backend.as_ref()).await
     }
 
     async fn load_from_hub(&self, repo_id: &str) -> Result<Box<dyn AcousticModel>> {
-        let backend = self.backends.get(&self.default_backend).ok_or_else(|| {
-            AcousticError::ConfigError("No default backend available".to_string())
-        })?;
+        let backend =
+            self.backends
+                .get(&self.default_backend)
+                .ok_or_else(|| AcousticError::ConfigError {
+                    message: "No default backend available".to_string(),
+                })?;
 
         self.load_from_hub_impl(repo_id, backend.as_ref()).await
     }
 
     async fn load_from_url(&self, url: &str) -> Result<Box<dyn AcousticModel>> {
-        let backend = self.backends.get(&self.default_backend).ok_or_else(|| {
-            AcousticError::ConfigError("No default backend available".to_string())
-        })?;
+        let backend =
+            self.backends
+                .get(&self.default_backend)
+                .ok_or_else(|| AcousticError::ConfigError {
+                    message: "No default backend available".to_string(),
+                })?;
 
         self.load_from_url_impl(url, backend.as_ref()).await
     }
@@ -494,19 +517,21 @@ impl ModelLoader for AcousticModelLoader {
     fn list_models(&self, directory: &str) -> Result<Vec<ModelInfo>> {
         let dir_path = Path::new(directory);
         if !dir_path.exists() {
-            return Err(AcousticError::ModelError(format!(
-                "Directory not found: {directory}"
-            )));
+            return Err(AcousticError::ModelError {
+                message: format!("Directory not found: {directory}"),
+            });
         }
 
         let mut models = Vec::new();
 
-        let entries = std::fs::read_dir(dir_path)
-            .map_err(|e| AcousticError::ModelError(format!("Failed to read directory: {e}")))?;
+        let entries = std::fs::read_dir(dir_path).map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to read directory: {e}"),
+        })?;
 
         for entry in entries {
-            let entry = entry
-                .map_err(|e| AcousticError::ModelError(format!("Failed to read entry: {e}")))?;
+            let entry = entry.map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to read entry: {e}"),
+            })?;
 
             let path = entry.path();
             if path.is_file() {
@@ -533,9 +558,12 @@ impl ModelLoader for AcousticModelLoader {
     }
 
     async fn validate_model(&self, source: &str) -> Result<ModelInfo> {
-        let backend = self.backends.get(&self.default_backend).ok_or_else(|| {
-            AcousticError::ConfigError("No default backend available".to_string())
-        })?;
+        let backend =
+            self.backends
+                .get(&self.default_backend)
+                .ok_or_else(|| AcousticError::ConfigError {
+                    message: "No default backend available".to_string(),
+                })?;
 
         if self.is_url(source) || self.is_hub_id(source) {
             // For remote sources, we'd need to download first to validate
@@ -831,9 +859,9 @@ pub fn create_default_loader() -> Result<AcousticModelLoader> {
     let backends = backend_manager.list_backends();
 
     if backends.is_empty() {
-        return Err(AcousticError::ConfigError(
-            "No backends available".to_string(),
-        ));
+        return Err(AcousticError::ConfigError {
+            message: "No backends available".to_string(),
+        });
     }
 
     let _backend_map = HashMap::new();

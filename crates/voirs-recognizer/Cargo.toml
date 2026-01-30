@@ -41,6 +41,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 hex = "0.4"
+bincode.workspace = true
 
 # Error handling
 anyhow.workspace = true
@@ -82,6 +83,9 @@ half.workspace = true  # For F16 support
 
 # Compression
 flate2.workspace = true
+
+# Configuration
+toml = "0.8"
 
 # Python bindings (optional)
 pyo3 = { workspace = true, features = ["extension-module", "abi3-py38"], optional = true }
@@ -134,5 +138,11 @@ gpu = ["ort/cuda"]
 # Windows-specific dependencies
 [target.'cfg(windows)'.dependencies]
 winapi = { workspace = true }
+
+# Benchmarks
+[[bench]]
+name = "preprocessing_benchmarks"
+harness = false
+
 [lints]
 workspace = true

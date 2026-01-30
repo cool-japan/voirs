@@ -19,15 +19,15 @@ impl SimdMatrix {
         let n = b[0].len();
 
         if b.len() != k {
-            return Err(AcousticError::InputError(
-                "Matrix dimensions don't match for multiplication".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Matrix dimensions don't match for multiplication".to_string(),
+            });
         }
 
         if result.len() != m || result[0].len() != n {
-            return Err(AcousticError::InputError(
-                "Result matrix has incorrect dimensions".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Result matrix has incorrect dimensions".to_string(),
+            });
         }
 
         // Transpose B for better cache locality
@@ -52,9 +52,9 @@ impl SimdMatrix {
         result_batch: &mut [Vec<Vec<f32>>],
     ) -> Result<()> {
         if a_batch.len() != b_batch.len() || a_batch.len() != result_batch.len() {
-            return Err(AcousticError::InputError(
-                "Batch sizes must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Batch sizes must match".to_string(),
+            });
         }
 
         for (i, ((a, b), result)) in a_batch
@@ -63,8 +63,9 @@ impl SimdMatrix {
             .zip(result_batch.iter_mut())
             .enumerate()
         {
-            Self::matmul_f32(a, b, result)
-                .map_err(|e| AcousticError::InputError(format!("Batch item {i}: {e}")))?;
+            Self::matmul_f32(a, b, result).map_err(|e| AcousticError::InputError {
+                message: format!("Batch item {i}: {e}"),
+            })?;
         }
 
         Ok(())
@@ -76,15 +77,15 @@ impl SimdMatrix {
         let n = matrix[0].len();
 
         if vector.len() != n {
-            return Err(AcousticError::InputError(
-                "Vector length doesn't match matrix columns".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Vector length doesn't match matrix columns".to_string(),
+            });
         }
 
         if result.len() != m {
-            return Err(AcousticError::InputError(
-                "Result vector has incorrect length".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Result vector has incorrect length".to_string(),
+            });
         }
 
         for (i, row) in matrix.iter().enumerate() {
@@ -107,9 +108,9 @@ impl SimdMatrix {
         let output_len = (input_len + 2 * padding - kernel_len) / stride + 1;
 
         if result.len() != output_len {
-            return Err(AcousticError::InputError(
-                "Result length doesn't match expected output length".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Result length doesn't match expected output length".to_string(),
+            });
         }
 
         // Create padded input
@@ -139,9 +140,9 @@ impl SimdMatrix {
         padding: usize,
     ) -> Result<()> {
         if input_batch.len() != kernels.len() || input_batch.len() != result_batch.len() {
-            return Err(AcousticError::InputError(
-                "Batch sizes must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Batch sizes must match".to_string(),
+            });
         }
 
         for ((input, kernel), result) in input_batch
@@ -162,9 +163,9 @@ impl SimdMatrix {
         result: &mut [Vec<f32>],
     ) -> Result<()> {
         if a.len() != b.len() || a.len() != result.len() {
-            return Err(AcousticError::InputError(
-                "Matrix dimensions must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Matrix dimensions must match".to_string(),
+            });
         }
 
         for ((a_row, b_row), result_row) in a.iter().zip(b.iter()).zip(result.iter_mut()) {
@@ -181,9 +182,9 @@ impl SimdMatrix {
         result: &mut [Vec<f32>],
     ) -> Result<()> {
         if a.len() != b.len() || a.len() != result.len() {
-            return Err(AcousticError::InputError(
-                "Matrix dimensions must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Matrix dimensions must match".to_string(),
+            });
         }
 
         for ((a_row, b_row), result_row) in a.iter().zip(b.iter()).zip(result.iter_mut()) {
@@ -200,9 +201,9 @@ impl SimdMatrix {
         activation: ActivationFunction,
     ) -> Result<()> {
         if input.len() != result.len() {
-            return Err(AcousticError::InputError(
-                "Input and result dimensions must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Input and result dimensions must match".to_string(),
+            });
         }
 
         for (input_row, result_row) in input.iter().zip(result.iter_mut()) {
@@ -219,9 +220,9 @@ impl SimdMatrix {
         activation: ActivationFunction,
     ) -> Result<()> {
         if input.len() != result.len() {
-            return Err(AcousticError::InputError(
-                "Input and result lengths must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Input and result lengths must match".to_string(),
+            });
         }
 
         match activation {
@@ -248,9 +249,9 @@ impl SimdMatrix {
     /// Softmax activation with SIMD acceleration
     pub fn softmax_f32(input: &[f32], result: &mut [f32]) -> Result<()> {
         if input.len() != result.len() {
-            return Err(AcousticError::InputError(
-                "Input and result lengths must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Input and result lengths must match".to_string(),
+            });
         }
 
         // Find maximum for numerical stability
@@ -284,9 +285,9 @@ impl SimdMatrix {
         eps: f32,
     ) -> Result<()> {
         if input.len() != result.len() || input.len() != gamma.len() || input.len() != beta.len() {
-            return Err(AcousticError::InputError(
-                "All arrays must have the same length".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "All arrays must have the same length".to_string(),
+            });
         }
 
         // Compute mean
@@ -472,9 +473,9 @@ impl SimdLinearLayer {
 
         if let Some(ref b) = bias {
             if b.len() != output_dim {
-                return Err(AcousticError::ConfigError(
-                    "Bias length must match output dimension".to_string(),
-                ));
+                return Err(AcousticError::ConfigError {
+                    message: "Bias length must match output dimension".to_string(),
+                });
             }
         }
 
@@ -489,19 +490,23 @@ impl SimdLinearLayer {
     /// Forward pass with SIMD acceleration
     pub fn forward(&self, input: &[f32], output: &mut [f32]) -> Result<()> {
         if input.len() != self.input_dim {
-            return Err(AcousticError::InputError(format!(
-                "Expected input dimension {}, got {}",
-                self.input_dim,
-                input.len()
-            )));
+            return Err(AcousticError::InputError {
+                message: format!(
+                    "Expected input dimension {}, got {}",
+                    self.input_dim,
+                    input.len()
+                ),
+            });
         }
 
         if output.len() != self.output_dim {
-            return Err(AcousticError::InputError(format!(
-                "Expected output dimension {}, got {}",
-                self.output_dim,
-                output.len()
-            )));
+            return Err(AcousticError::InputError {
+                message: format!(
+                    "Expected output dimension {}, got {}",
+                    self.output_dim,
+                    output.len()
+                ),
+            });
         }
 
         // Compute matrix-vector multiplication
@@ -524,9 +529,9 @@ impl SimdLinearLayer {
         output_batch: &mut [Vec<f32>],
     ) -> Result<()> {
         if input_batch.len() != output_batch.len() {
-            return Err(AcousticError::InputError(
-                "Batch sizes must match".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Batch sizes must match".to_string(),
+            });
         }
 
         for (input, output) in input_batch.iter().zip(output_batch.iter_mut()) {

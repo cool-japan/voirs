@@ -1,4 +1,4 @@
-//! API framework for VoiRS feedback integration
+//! API framework for `VoiRS` feedback integration
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -145,6 +145,7 @@ struct RateLimitEntry {
 
 impl FeedbackApiManager {
     /// Create a new feedback API manager
+    #[must_use]
     pub fn new(auth_config: AuthConfig, rate_limit_config: RateLimitConfig) -> Self {
         Self {
             auth_config,
@@ -179,7 +180,7 @@ impl FeedbackApiManager {
             (total_time + response_time_ms as f64) / self.statistics.total_requests as f64;
 
         // Update endpoint statistics
-        let endpoint_name = format!("{:?}", endpoint);
+        let endpoint_name = format!("{endpoint:?}");
         *self
             .statistics
             .requests_by_endpoint
@@ -332,7 +333,7 @@ impl ApiManager for FeedbackApiManager {
         let processing_time = start_time.elapsed().as_millis() as u64;
 
         match result {
-            Ok(_) => Ok(ApiResponse {
+            Ok(()) => Ok(ApiResponse {
                 response_id,
                 request_id: request.request_id,
                 success: true,
@@ -395,7 +396,7 @@ impl ApiManager for FeedbackApiManager {
 
 /// API request builders for common operations
 pub mod builders {
-    use super::*;
+    use super::{ApiRequest, Deserialize, HashMap, Serialize, Utc};
 
     /// Session creation request data
     #[derive(Debug, Clone, Serialize, Deserialize)]

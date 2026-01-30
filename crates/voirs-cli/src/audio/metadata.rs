@@ -259,7 +259,7 @@ impl MetadataWriter {
         // This is a simplified implementation that handles basic ID3v2.4 tags
 
         // Read existing file content if it exists
-        let mut file_content = std::fs::read(file_path).map_err(|e| MetadataError::IoError(e))?;
+        let mut file_content = std::fs::read(file_path).map_err(MetadataError::IoError)?;
 
         // Create ID3v2.4 tag
         let id3_tag = self.create_id3_tag_bytes()?;
@@ -280,7 +280,7 @@ impl MetadataWriter {
         new_content.extend_from_slice(&file_content);
 
         // Write back to file
-        std::fs::write(file_path, new_content).map_err(|e| MetadataError::IoError(e))?;
+        std::fs::write(file_path, new_content).map_err(MetadataError::IoError)?;
 
         tracing::info!("Successfully wrote ID3 tags to {}", file_path.display());
         Ok(())
@@ -913,7 +913,7 @@ impl AudioMetadata {
             || self
                 .custom_tags
                 .get("SYNTHESIS_ENGINE")
-                .map_or(false, |v| v == "VoiRS")
+                .is_some_and(|v| v == "VoiRS")
     }
 
     /// Get the original text used for synthesis
@@ -982,7 +982,7 @@ impl AlbumArt {
         picture_type: PictureType,
     ) -> Result<Self, MetadataError> {
         let path = file_path.as_ref();
-        let data = std::fs::read(path).map_err(|e| MetadataError::IoError(e))?;
+        let data = std::fs::read(path).map_err(MetadataError::IoError)?;
 
         let mime_type = match path.extension().and_then(|ext| ext.to_str()) {
             Some("jpg") | Some("jpeg") => "image/jpeg".to_string(),
@@ -1034,7 +1034,7 @@ impl AlbumArt {
         }
 
         // Check for JPEG signature
-        if &self.data[0..2] != &[0xFF, 0xD8] {
+        if self.data[0..2] != [0xFF, 0xD8] {
             return None;
         }
 
@@ -1048,18 +1048,17 @@ impl AlbumArt {
             offset += 2;
 
             // SOF markers contain image dimensions
-            if (0xC0..=0xC3).contains(&marker)
+            if ((0xC0..=0xC3).contains(&marker)
                 || (0xC5..=0xC7).contains(&marker)
                 || (0xC9..=0xCB).contains(&marker)
-                || (0xCD..=0xCF).contains(&marker)
+                || (0xCD..=0xCF).contains(&marker))
+                && offset + 5 < self.data.len()
             {
-                if offset + 5 < self.data.len() {
-                    let height =
-                        u16::from_be_bytes([self.data[offset + 3], self.data[offset + 4]]) as u32;
-                    let width =
-                        u16::from_be_bytes([self.data[offset + 5], self.data[offset + 6]]) as u32;
-                    return Some((width, height));
-                }
+                let height =
+                    u16::from_be_bytes([self.data[offset + 3], self.data[offset + 4]]) as u32;
+                let width =
+                    u16::from_be_bytes([self.data[offset + 5], self.data[offset + 6]]) as u32;
+                return Some((width, height));
             }
 
             // Get segment length and skip
@@ -1081,7 +1080,7 @@ impl AlbumArt {
         }
 
         // Check PNG signature
-        if &self.data[0..8] != &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] {
+        if self.data[0..8] != [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] {
             return None;
         }
 
@@ -1152,7 +1151,7 @@ pub enum MetadataError {
 }
 
 /// Convenience functions for common metadata operations
-
+///
 /// Create metadata for a synthesized audio file
 pub fn create_synthesis_metadata(
     text: &str,

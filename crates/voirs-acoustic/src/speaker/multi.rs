@@ -56,10 +56,12 @@ impl MultiSpeakerModel {
         embedding: SpeakerEmbedding,
     ) -> Result<()> {
         if embedding.dimension != self.config.embedding_dim {
-            return Err(AcousticError::ConfigError(format!(
-                "Speaker embedding dimension {} does not match model dimension {}",
-                embedding.dimension, self.config.embedding_dim
-            )));
+            return Err(AcousticError::ConfigError {
+                message: format!(
+                    "Speaker embedding dimension {} does not match model dimension {}",
+                    embedding.dimension, self.config.embedding_dim
+                ),
+            });
         }
 
         self.speaker_embeddings.insert(speaker_id, embedding);
@@ -69,10 +71,9 @@ impl MultiSpeakerModel {
     /// Remove speaker
     pub fn remove_speaker(&mut self, speaker_id: SpeakerId) -> Result<()> {
         if !self.speaker_embeddings.contains_key(&speaker_id) {
-            return Err(AcousticError::InputError(format!(
-                "Speaker {} not found",
-                speaker_id.id()
-            )));
+            return Err(AcousticError::InputError {
+                message: format!("Speaker {} not found", speaker_id.id()),
+            });
         }
 
         self.speaker_embeddings.remove(&speaker_id);
@@ -88,10 +89,9 @@ impl MultiSpeakerModel {
     /// Set current speaker
     pub fn set_current_speaker(&mut self, speaker_id: SpeakerId) -> Result<()> {
         if !self.speaker_embeddings.contains_key(&speaker_id) {
-            return Err(AcousticError::InputError(format!(
-                "Speaker {} not found",
-                speaker_id.id()
-            )));
+            return Err(AcousticError::InputError {
+                message: format!("Speaker {} not found", speaker_id.id()),
+            });
         }
 
         self.current_speaker = Some(speaker_id);
@@ -105,16 +105,20 @@ impl MultiSpeakerModel {
 
     /// Get speaker embedding
     pub fn get_speaker_embedding(&self, speaker_id: SpeakerId) -> Result<&SpeakerEmbedding> {
-        self.speaker_embeddings.get(&speaker_id).ok_or_else(|| {
-            AcousticError::InputError(format!("Speaker {} not found", speaker_id.id()))
-        })
+        self.speaker_embeddings
+            .get(&speaker_id)
+            .ok_or_else(|| AcousticError::InputError {
+                message: format!("Speaker {} not found", speaker_id.id()),
+            })
     }
 
     /// Get current speaker embedding
     pub fn get_current_speaker_embedding(&self) -> Result<&SpeakerEmbedding> {
         let speaker_id = self
             .get_current_speaker()
-            .ok_or_else(|| AcousticError::ConfigError("No current speaker set".to_string()))?;
+            .ok_or_else(|| AcousticError::ConfigError {
+                message: "No current speaker set".to_string(),
+            })?;
 
         self.get_speaker_embedding(speaker_id)
     }
@@ -145,9 +149,9 @@ impl MultiSpeakerModel {
     /// Find most similar speaker to given embedding
     pub fn find_similar_speaker(&self, target_embedding: &SpeakerEmbedding) -> Result<SpeakerId> {
         if self.speaker_embeddings.is_empty() {
-            return Err(AcousticError::ConfigError(
-                "No speakers registered".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "No speakers registered".to_string(),
+            });
         }
 
         let mut best_speaker = None;
@@ -161,8 +165,8 @@ impl MultiSpeakerModel {
             }
         }
 
-        best_speaker.ok_or_else(|| {
-            AcousticError::InferenceError("Failed to find similar speaker".to_string())
+        best_speaker.ok_or_else(|| AcousticError::InferenceError {
+            message: "Failed to find similar speaker".to_string(),
         })
     }
 

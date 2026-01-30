@@ -1,9 +1,12 @@
 //! Core adaptive feedback engine implementation
 //!
-//! This module contains the main AdaptiveFeedbackEngine and its core functionality.
+//! This module contains the main `AdaptiveFeedbackEngine` and its core functionality.
 
-use super::models::*;
-use super::types::*;
+use super::models::{
+    AdaptiveMetrics, AdaptiveSystemStats, FeatureVector, FeedbackStrategy, LearningAlgorithm,
+    PersonalizedRecommendation, UserModel,
+};
+use super::types::{FeedbackTone, RecommendationType, StrategyType};
 use crate::progress::TrendDirection;
 use crate::traits::{
     AdaptiveConfig, AdaptiveLearner, AdaptiveState, FeedbackContext, FeedbackProvider,
@@ -292,7 +295,7 @@ impl AdaptiveFeedbackEngine {
         let energy_score = (1.0 - energy_variance).max(0.0);
         let articulation_score = (zero_crossing_rate * 2.0).min(1.0);
 
-        (energy_score + articulation_score) / 2.0
+        f32::midpoint(energy_score, articulation_score)
     }
 
     /// Analyze fluency metrics
@@ -308,7 +311,7 @@ impl AdaptiveFeedbackEngine {
         let speaking_rate = word_count as f32 / duration_seconds;
 
         // Optimal speaking rate is around 150-180 words per minute (2.5-3 words per second)
-        let rate_score = if speaking_rate >= 2.0 && speaking_rate <= 3.5 {
+        let rate_score = if (2.0..=3.5).contains(&speaking_rate) {
             1.0 - (speaking_rate - 2.75).abs() / 0.75
         } else {
             0.3 // Outside optimal range
@@ -317,7 +320,7 @@ impl AdaptiveFeedbackEngine {
         // Analyze pause patterns
         let pause_score = self.analyze_pause_patterns(samples);
 
-        (rate_score + pause_score) / 2.0
+        f32::midpoint(rate_score, pause_score)
     }
 
     /// Calculate energy variance for pronunciation analysis
@@ -385,7 +388,7 @@ impl AdaptiveFeedbackEngine {
         let pause_ratio = pauses as f32 / total_windows as f32;
 
         // Optimal pause ratio is around 10-20%
-        if pause_ratio >= 0.1 && pause_ratio <= 0.2 {
+        if (0.1..=0.2).contains(&pause_ratio) {
             1.0 - (pause_ratio - 0.15).abs() / 0.05
         } else {
             0.5 // Outside optimal range
@@ -535,7 +538,10 @@ impl FeedbackProvider for AdaptiveFeedbackEngine {
         };
 
         // Combine quality and pronunciation scores for comprehensive analysis
-        let overall_score = (quality_score.overall_score + pronunciation_score.overall_score) / 2.0;
+        let overall_score = f32::midpoint(
+            quality_score.overall_score,
+            pronunciation_score.overall_score,
+        );
 
         let mut feedback_items = Vec::new();
         let mut immediate_actions = Vec::new();
@@ -718,12 +724,12 @@ impl AdaptiveLearner for AdaptiveFeedbackEngine {
             timestamp: Utc::now(),
             interaction_type: InteractionType::Practice,
             audio: voirs_sdk::AudioBuffer::new(vec![0.0; 1000], 16000, 1),
-            text: "".to_string(),
+            text: String::new(),
             feedback: FeedbackResponse {
                 feedback_items: Vec::new(),
                 overall_score: performance_data
                     .quality_scores
-                    .get(0)
+                    .first()
                     .copied()
                     .unwrap_or(0.5),
                 immediate_actions: Vec::new(),

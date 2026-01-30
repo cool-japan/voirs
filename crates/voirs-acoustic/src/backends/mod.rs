@@ -57,9 +57,9 @@ impl BackendManager {
             self.default_backend = Some(backend_type);
             Ok(())
         } else {
-            Err(AcousticError::ConfigError(format!(
-                "Backend {backend_type:?} not available"
-            )))
+            Err(AcousticError::ConfigError {
+                message: format!("Backend {backend_type:?} not available"),
+            })
         }
     }
 
@@ -73,8 +73,8 @@ impl BackendManager {
         self.backends
             .get(&backend_type)
             .map(|b| b.as_ref())
-            .ok_or_else(|| {
-                AcousticError::ConfigError(format!("Backend {backend_type:?} not found"))
+            .ok_or_else(|| AcousticError::ConfigError {
+                message: format!("Backend {backend_type:?} not found"),
             })
     }
 
@@ -82,7 +82,9 @@ impl BackendManager {
     pub fn get_default_backend(&self) -> Result<&dyn Backend> {
         let backend_type = self
             .default_backend
-            .ok_or_else(|| AcousticError::ConfigError("No default backend set".to_string()))?;
+            .ok_or_else(|| AcousticError::ConfigError {
+                message: "No default backend set".to_string(),
+            })?;
         self.get_backend(backend_type)
     }
 
@@ -143,7 +145,9 @@ impl BackendManager {
         preferred_order
             .into_iter()
             .find(|&bt| self.backends.contains_key(&bt))
-            .ok_or_else(|| AcousticError::ConfigError("No suitable backend found".to_string()))
+            .ok_or_else(|| AcousticError::ConfigError {
+                message: "No suitable backend found".to_string(),
+            })
     }
 }
 
@@ -443,12 +447,12 @@ impl BackendFactory {
             #[cfg(feature = "onnx")]
             BackendType::Onnx => Self::create_onnx(config),
             #[cfg(not(feature = "onnx"))]
-            BackendType::Onnx => Err(AcousticError::ConfigError(
-                "ONNX backend not available (feature not enabled)".to_string(),
-            )),
-            BackendType::Custom(_) => Err(AcousticError::ConfigError(
-                "Custom backends not yet supported".to_string(),
-            )),
+            BackendType::Onnx => Err(AcousticError::ConfigError {
+                message: "ONNX backend not available (feature not enabled)".to_string(),
+            }),
+            BackendType::Custom(_) => Err(AcousticError::ConfigError {
+                message: "Custom backends not yet supported".to_string(),
+            }),
         }
     }
 }

@@ -1,4 +1,115 @@
 //! Speaker control and voice characteristics management.
+//!
+//! This module provides comprehensive speaker control capabilities including:
+//! - Multi-speaker synthesis with voice interpolation
+//! - Emotion control and expression modeling
+//! - Voice cloning and speaker adaptation
+//! - Voice characteristics customization (age, gender, accent, quality, personality)
+//!
+//! # Features
+//!
+//! ## Multi-Speaker Models
+//!
+//! Support for models trained on multiple speakers with:
+//! - Speaker embedding lookup and management
+//! - Voice morphing and interpolation between speakers
+//! - Speaker similarity computation
+//! - Speaker verification
+//!
+//! ## Emotion Control
+//!
+//! Advanced emotion modeling with:
+//! - 10 basic emotion types (Neutral, Happy, Sad, Angry, etc.)
+//! - 5 intensity levels (VeryLow to VeryHigh)
+//! - Emotion blending and smooth transitions
+//! - Custom emotion specifications
+//!
+//! ## Voice Cloning
+//!
+//! Few-shot voice cloning capabilities:
+//! - Speaker adaptation from limited audio samples
+//! - Cross-language speaker transfer
+//! - Quality assessment and verification
+//!
+//! ## Voice Characteristics
+//!
+//! Detailed speaker characteristic modeling:
+//! - Age groups (Child, Teenager, YoungAdult, MiddleAged, Senior)
+//! - Gender (Male, Female, NonBinary, Unspecified)
+//! - Accent/dialect support
+//! - Voice quality (Clear, Warm, Bright, Deep, etc.)
+//! - Personality traits (Energetic, Calm, Confident, etc.)
+//!
+//! # Examples
+//!
+//! ## Multi-Speaker Synthesis
+//!
+//! ```ignore
+//! use voirs_acoustic::speaker::{MultiSpeakerModel, SpeakerId};
+//!
+//! async fn multi_speaker_example() -> Result<()> {
+//!     let mut model = MultiSpeakerModel::new(256)?;
+//!
+//!     // Add speakers
+//!     model.add_speaker(SpeakerId::new(0), "Alice", vec![0.5; 256])?;
+//!     model.add_speaker(SpeakerId::new(1), "Bob", vec![-0.3; 256])?;
+//!
+//!     // Synthesize with specific speaker
+//!     let embedding = model.get_speaker_embedding(SpeakerId::new(0))?;
+//!
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## Emotion Control
+//!
+//! ```ignore
+//! use voirs_acoustic::speaker::{EmotionConfig, EmotionType, EmotionIntensity};
+//!
+//! fn emotion_example() -> EmotionConfig {
+//!     // Happy emotion with high intensity
+//!     EmotionConfig {
+//!         primary: EmotionType::Happy,
+//!         intensity: EmotionIntensity::High,
+//!         secondary: Some((EmotionType::Excited, 0.3)),
+//!         custom_values: None,
+//!     }
+//! }
+//! ```
+//!
+//! ## Voice Morphing
+//!
+//! ```ignore
+//! use voirs_acoustic::speaker::{MultiSpeakerModel, SpeakerId};
+//!
+//! async fn voice_morphing() -> Result<()> {
+//!     let model = MultiSpeakerModel::new(256)?;
+//!
+//!     // Morph between two speakers (50% blend)
+//!     let morphed = model.morph_voice(
+//!         SpeakerId::new(0),
+//!         SpeakerId::new(1),
+//!         0.5
+//!     )?;
+//!
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## Voice Characteristics
+//!
+//! ```ignore
+//! use voirs_acoustic::speaker::{VoiceCharacteristics, AgeGroup, Gender, VoiceQuality};
+//!
+//! fn create_voice_profile() -> VoiceCharacteristics {
+//!     VoiceCharacteristics {
+//!         age_group: AgeGroup::YoungAdult,
+//!         gender: Gender::Female,
+//!         voice_quality: vec![VoiceQuality::Warm, VoiceQuality::Clear],
+//!         ..Default::default()
+//!     }
+//! }
+//! ```
 
 pub mod characteristics;
 pub mod cloning;
@@ -81,9 +192,9 @@ impl SpeakerEmbedding {
     /// Interpolate with another embedding
     pub fn interpolate(&self, other: &SpeakerEmbedding, alpha: f32) -> Result<SpeakerEmbedding> {
         if self.dimension != other.dimension {
-            return Err(crate::AcousticError::InputError(
-                "Speaker embeddings must have the same dimension".to_string(),
-            ));
+            return Err(crate::AcousticError::InputError {
+                message: "Speaker embeddings must have the same dimension".to_string(),
+            });
         }
 
         let mut interpolated = Vec::with_capacity(self.dimension);
@@ -157,12 +268,16 @@ impl SpeakerRegistry {
         speaker2: SpeakerId,
         alpha: f32,
     ) -> Result<SpeakerEmbedding> {
-        let embedding1 = self.get_embedding(speaker1).ok_or_else(|| {
-            crate::AcousticError::InputError(format!("Speaker {} not found", speaker1.id()))
-        })?;
-        let embedding2 = self.get_embedding(speaker2).ok_or_else(|| {
-            crate::AcousticError::InputError(format!("Speaker {} not found", speaker2.id()))
-        })?;
+        let embedding1 =
+            self.get_embedding(speaker1)
+                .ok_or_else(|| crate::AcousticError::InputError {
+                    message: format!("Speaker {} not found", speaker1.id()),
+                })?;
+        let embedding2 =
+            self.get_embedding(speaker2)
+                .ok_or_else(|| crate::AcousticError::InputError {
+                    message: format!("Speaker {} not found", speaker2.id()),
+                })?;
 
         embedding1.interpolate(embedding2, alpha)
     }
@@ -205,18 +320,19 @@ impl SpeakerEmbeddingTable {
         embedding: &SpeakerEmbedding,
     ) -> Result<()> {
         if embedding.dimension != self.embedding_dim {
-            return Err(crate::AcousticError::InputError(format!(
-                "Embedding dimension mismatch: expected {}, got {}",
-                self.embedding_dim, embedding.dimension
-            )));
+            return Err(crate::AcousticError::InputError {
+                message: format!(
+                    "Embedding dimension mismatch: expected {}, got {}",
+                    self.embedding_dim, embedding.dimension
+                ),
+            });
         }
 
         // Check if speaker already exists
         if self.lookup_table.contains_key(&speaker_id) {
-            return Err(crate::AcousticError::InputError(format!(
-                "Speaker {} already exists in lookup table",
-                speaker_id.id()
-            )));
+            return Err(crate::AcousticError::InputError {
+                message: format!("Speaker {} already exists in lookup table", speaker_id.id()),
+            });
         }
 
         // Add to lookup table

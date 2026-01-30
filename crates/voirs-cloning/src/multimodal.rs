@@ -207,7 +207,7 @@ impl MultimodalCloner {
     }
 
     /// Create with default configuration
-    pub fn default() -> Self {
+    pub fn with_default_config() -> Self {
         Self::new(MultimodalConfig::default())
     }
 
@@ -987,7 +987,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multimodal_cloner_creation() {
-        let cloner = MultimodalCloner::default();
+        let cloner = MultimodalCloner::with_default_config();
         assert!(cloner.config.enable_va_alignment);
         assert!(cloner.config.enable_geometry_adaptation);
         assert!(cloner.config.enable_lip_conditioning);
@@ -1011,7 +1011,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_visual_feature_extraction() {
-        let cloner = MultimodalCloner::default();
+        let cloner = MultimodalCloner::with_default_config();
         let sample = VisualSample::new(
             "test_extraction".to_string(),
             VisualDataType::FacialImage,
@@ -1028,7 +1028,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multimodal_request_creation() {
-        let cloner = MultimodalCloner::default();
+        let cloner = MultimodalCloner::with_default_config();
         let audio_sample = VoiceSample::new(
             "audio_test".to_string(),
             vec![0.0; 16000], // 1 second at 16kHz

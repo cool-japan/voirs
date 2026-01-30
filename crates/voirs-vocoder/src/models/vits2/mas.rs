@@ -289,6 +289,7 @@ impl MonotonicAlignmentSearch {
         // Find best ending position
         let mut best_j = 0;
         let mut best_score = dp[text_len - 1][0];
+        #[allow(clippy::needless_range_loop)]
         for j in 1..audio_len {
             if dp[text_len - 1][j] > best_score {
                 best_score = dp[text_len - 1][j];
@@ -339,8 +340,7 @@ impl MonotonicAlignmentSearch {
                 let mut log_sum = f32::NEG_INFINITY;
 
                 // Sum over all previous positions (with monotonicity constraint)
-                for prev_j in 0..=j {
-                    let score = alpha[i - 1][prev_j];
+                for &score in alpha[i - 1].iter().take(j + 1) {
                     if score > f32::NEG_INFINITY {
                         log_sum = log_sum_exp(log_sum, score);
                     }

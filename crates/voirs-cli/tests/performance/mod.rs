@@ -368,7 +368,6 @@ fn test_resource_cleanup() {
     let mut cmd = Command::cargo_bin("voirs").unwrap();
     cmd.arg("synthesize")
         .arg("Resource cleanup test")
-        .arg("--output")
         .arg(output_file.to_str().unwrap())
         .timeout(Duration::from_secs(30))
         .assert()

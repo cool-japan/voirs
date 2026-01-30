@@ -28,6 +28,7 @@ pub struct ChallengeSystem {
 
 impl ChallengeSystem {
     /// Create new challenge system
+    #[must_use]
     pub fn new() -> Self {
         let mut system = Self {
             active_challenges: HashMap::new(),
@@ -134,11 +135,7 @@ impl ChallengeSystem {
             .filter(|t| self.check_requirements(user_progress, &t.requirements))
             .min_by_key(|t| {
                 // Prioritize challenges for weak areas
-                if t.focus_areas.iter().any(|area| weak_areas.contains(area)) {
-                    0
-                } else {
-                    1
-                }
+                i32::from(!t.focus_areas.iter().any(|area| weak_areas.contains(area)))
             })?;
 
         let challenge = self.create_challenge_from_template(user_id, template, user_progress);
@@ -227,6 +224,7 @@ impl ChallengeSystem {
     }
 
     /// Get user's active challenges
+    #[must_use]
     pub fn get_user_challenges(&self, user_id: Uuid) -> Vec<&Challenge> {
         self.active_challenges
             .values()
@@ -344,15 +342,15 @@ impl ChallengeSystem {
 
     fn personalize_name(&self, name: &str, target_value: f32) -> String {
         name.replace("{target_accuracy}", &format!("{:.0}", target_value * 100.0))
-            .replace("{target_days}", &format!("{:.0}", target_value))
-            .replace("{target_sessions}", &format!("{:.0}", target_value))
+            .replace("{target_days}", &format!("{target_value:.0}"))
+            .replace("{target_sessions}", &format!("{target_value:.0}"))
     }
 
     fn personalize_description(&self, description: &str, target_value: f32) -> String {
         description
             .replace("{target_accuracy}", &format!("{:.0}", target_value * 100.0))
-            .replace("{target_days}", &format!("{:.0}", target_value))
-            .replace("{target_sessions}", &format!("{:.0}", target_value))
+            .replace("{target_days}", &format!("{target_value:.0}"))
+            .replace("{target_sessions}", &format!("{target_value:.0}"))
             .replace("{time_limit}", "120")
     }
 
@@ -496,14 +494,14 @@ pub enum DifficultyScaling {
         /// Base target value
         base_target: f32,
         /// Increment per level
-        increment: f32
+        increment: f32,
     },
     /// Linear scaling between min and max
     Linear {
         /// Minimum target
         min_target: u32,
         /// Maximum target
-        max_target: u32
+        max_target: u32,
     },
     /// Adaptive scaling based on user performance
     Adaptive,
@@ -528,7 +526,7 @@ pub enum ChallengeReward {
         /// Currency type
         currency: String,
         /// Amount of currency
-        amount: u32
+        amount: u32,
     },
     /// Badge reward
     Badge(String),

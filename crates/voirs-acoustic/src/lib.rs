@@ -3,6 +3,24 @@
 //! Neural acoustic models for converting phonemes to mel spectrograms.
 //! Supports VITS, FastSpeech2, and other state-of-the-art architectures.
 
+// Allow pedantic lints that are acceptable for audio/DSP processing code
+#![allow(clippy::cast_precision_loss)] // Acceptable for audio sample conversions
+#![allow(clippy::cast_possible_truncation)] // Controlled truncation in audio processing
+#![allow(clippy::cast_sign_loss)] // Intentional in index calculations
+#![allow(clippy::missing_errors_doc)] // Many internal functions with self-documenting error types
+#![allow(clippy::missing_panics_doc)] // Panics are documented where relevant
+#![allow(clippy::unused_self)] // Some trait implementations require &self for consistency
+#![allow(clippy::must_use_candidate)] // Not all return values need must_use annotation
+#![allow(clippy::doc_markdown)] // Technical terms don't all need backticks
+#![allow(clippy::unnecessary_wraps)] // Result wrappers maintained for API consistency
+#![allow(clippy::float_cmp)] // Exact float comparisons are intentional in some contexts
+#![allow(clippy::match_same_arms)] // Pattern matching clarity sometimes requires duplication
+#![allow(clippy::module_name_repetitions)] // Type names often repeat module names
+#![allow(clippy::struct_excessive_bools)] // Config structs naturally have many boolean flags
+#![allow(clippy::too_many_lines)] // Some DSP functions are inherently complex
+#![allow(clippy::needless_pass_by_value)] // Some functions designed for ownership transfer
+#![allow(clippy::similar_names)] // Many similar variable names in DSP algorithms
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -11,37 +29,39 @@ use thiserror::Error;
 /// Result type for acoustic model operations
 pub type Result<T> = std::result::Result<T, AcousticError>;
 
-/// Acoustic model specific error types
+/// Acoustic model specific error types with enhanced diagnostic information
 #[derive(Error, Debug)]
 pub enum AcousticError {
-    #[error("Model inference failed: {0}")]
-    InferenceError(String),
+    /// Model inference failed during synthesis or processing
+    #[error("Model inference failed: {message}")]
+    InferenceError { message: String },
 
-    #[error("Model loading failed: {0}")]
-    ModelError(String),
+    /// Model loading or initialization failed
+    #[error("Model loading failed: {message}")]
+    ModelError { message: String },
 
-    #[error("Invalid input: {0}")]
-    InputError(String),
+    /// Invalid input provided to the model
+    #[error("Invalid input: {message}")]
+    InputError { message: String },
 
-    #[error("Configuration error: {0}")]
-    ConfigError(String),
+    /// Configuration validation or parsing error
+    #[error("Configuration error: {message}")]
+    ConfigError { message: String },
 
-    #[error("Invalid configuration: {0}")]
-    InvalidConfiguration(String),
-
-    #[error("Processing error: {0}")]
-    Processing(String),
-
+    /// Processing error during synthesis pipeline
     #[error("Processing error: {message}")]
     ProcessingError { message: String },
 
-    #[error("File operation error: {0}")]
-    FileError(String),
+    /// File operation error (reading, writing, or parsing)
+    #[error("File operation error: {message}")]
+    FileError { message: String },
 
+    /// Backend-specific error from Candle framework
     #[cfg(feature = "candle")]
     #[error("Candle error: {0}")]
     CandleError(#[from] candle_core::Error),
 
+    /// Grapheme-to-Phoneme conversion error
     #[error("G2P error: {0}")]
     G2pError(#[from] voirs_g2p::G2pError),
 }
@@ -49,54 +69,101 @@ pub enum AcousticError {
 impl Clone for AcousticError {
     fn clone(&self) -> Self {
         match self {
-            AcousticError::InferenceError(msg) => AcousticError::InferenceError(msg.clone()),
-            AcousticError::ModelError(msg) => AcousticError::ModelError(msg.clone()),
-            AcousticError::InputError(msg) => AcousticError::InputError(msg.clone()),
-            AcousticError::ConfigError(msg) => AcousticError::ConfigError(msg.clone()),
-            AcousticError::InvalidConfiguration(msg) => {
-                AcousticError::InvalidConfiguration(msg.clone())
-            }
-            AcousticError::Processing(msg) => AcousticError::Processing(msg.clone()),
+            AcousticError::InferenceError { message } => AcousticError::InferenceError {
+                message: message.clone(),
+            },
+            AcousticError::ModelError { message } => AcousticError::ModelError {
+                message: message.clone(),
+            },
+            AcousticError::InputError { message } => AcousticError::InputError {
+                message: message.clone(),
+            },
+            AcousticError::ConfigError { message } => AcousticError::ConfigError {
+                message: message.clone(),
+            },
             AcousticError::ProcessingError { message } => AcousticError::ProcessingError {
                 message: message.clone(),
             },
-            AcousticError::FileError(msg) => AcousticError::FileError(msg.clone()),
+            AcousticError::FileError { message } => AcousticError::FileError {
+                message: message.clone(),
+            },
             #[cfg(feature = "candle")]
-            AcousticError::CandleError(err) => {
-                AcousticError::InferenceError(format!("Candle error: {err}"))
-            }
-            AcousticError::G2pError(err) => {
-                AcousticError::InferenceError(format!("G2P error: {err}"))
-            }
+            AcousticError::CandleError(err) => AcousticError::InferenceError {
+                message: format!("Candle error: {err}"),
+            },
+            AcousticError::G2pError(err) => AcousticError::InferenceError {
+                message: format!("G2P error: {err}"),
+            },
         }
     }
 }
 
 /// Language codes supported by VoiRS
+///
+/// This enum represents the complete set of languages supported by the VoiRS acoustic models.
+/// Each language may have region-specific variations (e.g., en-US vs en-GB).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum LanguageCode {
-    /// English (US)
+    /// English (United States)
     EnUs,
-    /// English (UK)
+    /// English (United Kingdom)
     EnGb,
-    /// Japanese
+    /// Japanese (Japan)
     JaJp,
-    /// Mandarin Chinese
+    /// Mandarin Chinese (China)
     ZhCn,
-    /// Korean
+    /// Korean (South Korea)
     KoKr,
-    /// German
+    /// German (Germany)
     DeDe,
-    /// French
+    /// French (France)
     FrFr,
-    /// Spanish
+    /// Spanish (Spain)
     EsEs,
-    /// Italian
+    /// Italian (Italy)
     ItIt,
+    /// Portuguese (Brazil)
+    PtBr,
+    /// Portuguese (Portugal)
+    PtPt,
+    /// Russian (Russia)
+    RuRu,
+    /// Dutch (Netherlands)
+    NlNl,
+    /// Polish (Poland)
+    PlPl,
+    /// Turkish (Turkey)
+    TrTr,
+    /// Arabic (Saudi Arabia)
+    ArSa,
+    /// Hindi (India)
+    HiIn,
+    /// Swedish (Sweden)
+    SvSe,
+    /// Norwegian (Norway)
+    NoNo,
+    /// Finnish (Finland)
+    FiFi,
+    /// Danish (Denmark)
+    DaDk,
+    /// Czech (Czech Republic)
+    CsCz,
+    /// Greek (Greece)
+    ElGr,
+    /// Hebrew (Israel)
+    HeIl,
+    /// Thai (Thailand)
+    ThTh,
+    /// Vietnamese (Vietnam)
+    ViVn,
+    /// Indonesian (Indonesia)
+    IdId,
+    /// Malay (Malaysia)
+    MsMy,
 }
 
 impl LanguageCode {
-    /// Get string representation
+    /// Get string representation in BCP 47 format
     pub fn as_str(&self) -> &'static str {
         match self {
             LanguageCode::EnUs => "en-US",
@@ -108,7 +175,144 @@ impl LanguageCode {
             LanguageCode::FrFr => "fr-FR",
             LanguageCode::EsEs => "es-ES",
             LanguageCode::ItIt => "it-IT",
+            LanguageCode::PtBr => "pt-BR",
+            LanguageCode::PtPt => "pt-PT",
+            LanguageCode::RuRu => "ru-RU",
+            LanguageCode::NlNl => "nl-NL",
+            LanguageCode::PlPl => "pl-PL",
+            LanguageCode::TrTr => "tr-TR",
+            LanguageCode::ArSa => "ar-SA",
+            LanguageCode::HiIn => "hi-IN",
+            LanguageCode::SvSe => "sv-SE",
+            LanguageCode::NoNo => "no-NO",
+            LanguageCode::FiFi => "fi-FI",
+            LanguageCode::DaDk => "da-DK",
+            LanguageCode::CsCz => "cs-CZ",
+            LanguageCode::ElGr => "el-GR",
+            LanguageCode::HeIl => "he-IL",
+            LanguageCode::ThTh => "th-TH",
+            LanguageCode::ViVn => "vi-VN",
+            LanguageCode::IdId => "id-ID",
+            LanguageCode::MsMy => "ms-MY",
         }
+    }
+
+    /// Get ISO 639-1 language code (2-letter code)
+    pub fn language_code(&self) -> &'static str {
+        &self.as_str()[..2]
+    }
+
+    /// Get full language name in English
+    pub fn language_name(&self) -> &'static str {
+        match self {
+            LanguageCode::EnUs | LanguageCode::EnGb => "English",
+            LanguageCode::JaJp => "Japanese",
+            LanguageCode::ZhCn => "Chinese",
+            LanguageCode::KoKr => "Korean",
+            LanguageCode::DeDe => "German",
+            LanguageCode::FrFr => "French",
+            LanguageCode::EsEs => "Spanish",
+            LanguageCode::ItIt => "Italian",
+            LanguageCode::PtBr | LanguageCode::PtPt => "Portuguese",
+            LanguageCode::RuRu => "Russian",
+            LanguageCode::NlNl => "Dutch",
+            LanguageCode::PlPl => "Polish",
+            LanguageCode::TrTr => "Turkish",
+            LanguageCode::ArSa => "Arabic",
+            LanguageCode::HiIn => "Hindi",
+            LanguageCode::SvSe => "Swedish",
+            LanguageCode::NoNo => "Norwegian",
+            LanguageCode::FiFi => "Finnish",
+            LanguageCode::DaDk => "Danish",
+            LanguageCode::CsCz => "Czech",
+            LanguageCode::ElGr => "Greek",
+            LanguageCode::HeIl => "Hebrew",
+            LanguageCode::ThTh => "Thai",
+            LanguageCode::ViVn => "Vietnamese",
+            LanguageCode::IdId => "Indonesian",
+            LanguageCode::MsMy => "Malay",
+        }
+    }
+
+    /// Parse from BCP 47 language tag string (case-insensitive)
+    ///
+    /// Accepts language tags in any case and normalizes to standard format:
+    /// - "en-US", "EN-US", "en-us", "En-Us" all parse to EnUs
+    pub fn parse(s: &str) -> Option<Self> {
+        // Normalize to standard BCP 47 format: lowercase language, uppercase region
+        // Split on hyphen, lowercase first part, uppercase second part
+        let parts: Vec<&str> = s.split('-').collect();
+        if parts.len() != 2 {
+            return None;
+        }
+
+        let normalized = format!("{}-{}", parts[0].to_lowercase(), parts[1].to_uppercase());
+
+        match normalized.as_str() {
+            "en-US" => Some(LanguageCode::EnUs),
+            "en-GB" => Some(LanguageCode::EnGb),
+            "ja-JP" => Some(LanguageCode::JaJp),
+            "zh-CN" => Some(LanguageCode::ZhCn),
+            "ko-KR" => Some(LanguageCode::KoKr),
+            "de-DE" => Some(LanguageCode::DeDe),
+            "fr-FR" => Some(LanguageCode::FrFr),
+            "es-ES" => Some(LanguageCode::EsEs),
+            "it-IT" => Some(LanguageCode::ItIt),
+            "pt-BR" => Some(LanguageCode::PtBr),
+            "pt-PT" => Some(LanguageCode::PtPt),
+            "ru-RU" => Some(LanguageCode::RuRu),
+            "nl-NL" => Some(LanguageCode::NlNl),
+            "pl-PL" => Some(LanguageCode::PlPl),
+            "tr-TR" => Some(LanguageCode::TrTr),
+            "ar-SA" => Some(LanguageCode::ArSa),
+            "hi-IN" => Some(LanguageCode::HiIn),
+            "sv-SE" => Some(LanguageCode::SvSe),
+            "no-NO" => Some(LanguageCode::NoNo),
+            "fi-FI" => Some(LanguageCode::FiFi),
+            "da-DK" => Some(LanguageCode::DaDk),
+            "cs-CZ" => Some(LanguageCode::CsCz),
+            "el-GR" => Some(LanguageCode::ElGr),
+            "he-IL" => Some(LanguageCode::HeIl),
+            "th-TH" => Some(LanguageCode::ThTh),
+            "vi-VN" => Some(LanguageCode::ViVn),
+            "id-ID" => Some(LanguageCode::IdId),
+            "ms-MY" => Some(LanguageCode::MsMy),
+            _ => None,
+        }
+    }
+
+    /// Get all supported language codes
+    pub fn all() -> &'static [LanguageCode] {
+        &[
+            LanguageCode::EnUs,
+            LanguageCode::EnGb,
+            LanguageCode::JaJp,
+            LanguageCode::ZhCn,
+            LanguageCode::KoKr,
+            LanguageCode::DeDe,
+            LanguageCode::FrFr,
+            LanguageCode::EsEs,
+            LanguageCode::ItIt,
+            LanguageCode::PtBr,
+            LanguageCode::PtPt,
+            LanguageCode::RuRu,
+            LanguageCode::NlNl,
+            LanguageCode::PlPl,
+            LanguageCode::TrTr,
+            LanguageCode::ArSa,
+            LanguageCode::HiIn,
+            LanguageCode::SvSe,
+            LanguageCode::NoNo,
+            LanguageCode::FiFi,
+            LanguageCode::DaDk,
+            LanguageCode::CsCz,
+            LanguageCode::ElGr,
+            LanguageCode::HeIl,
+            LanguageCode::ThTh,
+            LanguageCode::ViVn,
+            LanguageCode::IdId,
+            LanguageCode::MsMy,
+        ]
     }
 }
 
@@ -314,27 +518,52 @@ pub use streaming::{
 pub use traits::{AcousticModel, AcousticModelFeature, AcousticModelMetadata};
 pub use vits::{TextEncoder, TextEncoderConfig, VitsConfig, VitsModel, VitsStreamingState};
 
+// Advanced modules (0.1.0-alpha.3 additions)
+pub mod acoustic_utils;
+pub mod latency_optimizer;
+pub mod neural_codec;
+pub mod vad;
+
+// Re-export advanced features
+pub use latency_optimizer::{
+    ChunkStrategy, LatencyBudget, LatencyMeasurement, LatencyOptimizer as AdvancedLatencyOptimizer,
+    LatencyStatistics, ProcessingPriority,
+};
+pub use neural_codec::{CodecQualityMetrics, CodecType, NeuralCodec, NeuralCodecConfig};
+pub use vad::{VadConfig, VadSegment, VoiceActivity, VoiceActivityDetector};
+
 pub mod backends;
 pub mod batch_processor;
 pub mod batching;
+pub mod cache;
 pub mod conditioning;
 pub mod config;
+pub mod diagnostics;
+pub mod error;
 pub mod fastspeech;
 pub mod fastspeech2_trainer;
+pub mod fusion;
 pub mod mel;
 pub mod memory;
 pub mod metrics;
 pub mod model_manager;
+pub mod model_warmup;
 pub mod models;
 pub mod optimization;
 pub mod parallel_attention;
 pub mod performance_targets;
+pub mod production;
+pub mod production_monitoring;
+pub mod profiling;
+pub mod profiling_integration;
 pub mod prosody;
 pub mod quantization;
+pub mod scirs2_ops;
 pub mod simd;
 pub mod singing;
 pub mod speaker;
 pub mod streaming;
+pub mod synthesis_cache;
 pub mod traits;
 pub mod unified_conditioning;
 pub mod utils;
@@ -350,10 +579,20 @@ pub mod prelude {
         BatchStats, DynamicBatchConfig, DynamicBatcher, MemoryOptimization, PaddingStrategy,
         PendingSequence, ProcessingBatch,
     };
+    pub use crate::cache::{
+        AdaptiveCache, AdaptiveCacheStats, CacheStats, CacheStrategy, LfuCache, PredictiveCache,
+    };
+    pub use crate::error::{
+        ErrorCategory, ErrorContext, ErrorContextBuilder, ErrorSeverity, RecoverySuggestion,
+    };
     pub use crate::model_manager::{ModelManager, ModelRegistry, TtsPipeline};
     pub use crate::parallel_attention::{
         AttentionCache, AttentionMemoryOptimization, AttentionStats, AttentionStrategy,
         ParallelAttentionConfig, ParallelMultiHeadAttention,
+    };
+    pub use crate::production::{
+        CircuitBreaker, CircuitState, HealthChecker, HealthStatus, RateLimiter, ResourceLimits,
+        RetryPolicy,
     };
     pub use crate::{
         AcousticError, AcousticModel, AcousticModelFeature, AcousticModelManager,
@@ -401,14 +640,19 @@ impl AcousticModelManager {
         self.models
             .get(name)
             .map(|m| m.as_ref())
-            .ok_or_else(|| AcousticError::ModelError(format!("Acoustic model '{name}' not found")))
+            .ok_or_else(|| AcousticError::ModelError {
+                message: format!("Acoustic model '{name}' not found"),
+            })
     }
 
     /// Get default model
     pub fn get_default_model(&self) -> Result<&dyn AcousticModel> {
-        let name = self.default_model.as_ref().ok_or_else(|| {
-            AcousticError::ConfigError("No default acoustic model set".to_string())
-        })?;
+        let name = self
+            .default_model
+            .as_ref()
+            .ok_or_else(|| AcousticError::ConfigError {
+                message: "No default acoustic model set".to_string(),
+            })?;
         self.get_model(name)
     }
 
@@ -471,18 +715,114 @@ impl AcousticModel for AcousticModelManager {
 
     async fn set_speaker(&mut self, speaker_id: Option<u32>) -> Result<()> {
         // Forward speaker setting to the default model
-        let default_name = self.default_model.as_ref().ok_or_else(|| {
-            AcousticError::ConfigError("No default acoustic model set".to_string())
-        })?;
+        let default_name =
+            self.default_model
+                .as_ref()
+                .ok_or_else(|| AcousticError::ConfigError {
+                    message: "No default acoustic model set".to_string(),
+                })?;
 
         if let Some(model) = self.models.get_mut(default_name) {
             model.set_speaker(speaker_id).await
         } else {
-            Err(AcousticError::ModelError(format!(
-                "Default acoustic model '{default_name}' not found"
-            )))
+            Err(AcousticError::ModelError {
+                message: format!("Default acoustic model '{default_name}' not found"),
+            })
         }
     }
 }
 
 // Type conversions are handled at the SDK level to avoid circular dependencies
+
+#[cfg(test)]
+mod language_tests {
+    use super::*;
+
+    #[test]
+    fn test_language_code_string_representation() {
+        assert_eq!(LanguageCode::EnUs.as_str(), "en-US");
+        assert_eq!(LanguageCode::PtBr.as_str(), "pt-BR");
+        assert_eq!(LanguageCode::RuRu.as_str(), "ru-RU");
+        assert_eq!(LanguageCode::ArSa.as_str(), "ar-SA");
+    }
+
+    #[test]
+    fn test_language_code_parsing() {
+        assert_eq!(LanguageCode::parse("en-US"), Some(LanguageCode::EnUs));
+        assert_eq!(LanguageCode::parse("pt-BR"), Some(LanguageCode::PtBr));
+        assert_eq!(LanguageCode::parse("ru-RU"), Some(LanguageCode::RuRu));
+        assert_eq!(LanguageCode::parse("invalid"), None);
+    }
+
+    #[test]
+    fn test_language_names() {
+        assert_eq!(LanguageCode::EnUs.language_name(), "English");
+        assert_eq!(LanguageCode::PtBr.language_name(), "Portuguese");
+        assert_eq!(LanguageCode::RuRu.language_name(), "Russian");
+        assert_eq!(LanguageCode::ArSa.language_name(), "Arabic");
+        assert_eq!(LanguageCode::HiIn.language_name(), "Hindi");
+    }
+
+    #[test]
+    fn test_iso_language_codes() {
+        assert_eq!(LanguageCode::EnUs.language_code(), "en");
+        assert_eq!(LanguageCode::PtBr.language_code(), "pt");
+        assert_eq!(LanguageCode::RuRu.language_code(), "ru");
+        assert_eq!(LanguageCode::ArSa.language_code(), "ar");
+    }
+
+    #[test]
+    fn test_all_languages() {
+        let all = LanguageCode::all();
+        assert_eq!(all.len(), 28); // Total number of supported languages
+        assert!(all.contains(&LanguageCode::EnUs));
+        assert!(all.contains(&LanguageCode::PtBr));
+        assert!(all.contains(&LanguageCode::RuRu));
+        assert!(all.contains(&LanguageCode::MsMy));
+    }
+
+    #[test]
+    fn test_language_code_roundtrip() {
+        for &lang in LanguageCode::all() {
+            let string_repr = lang.as_str();
+            let parsed = LanguageCode::parse(string_repr);
+            assert_eq!(parsed, Some(lang), "Roundtrip failed for {:?}", lang);
+        }
+    }
+
+    #[test]
+    fn test_language_sorting() {
+        let mut languages = vec![
+            LanguageCode::ZhCn,
+            LanguageCode::ArSa,
+            LanguageCode::EnUs,
+            LanguageCode::JaJp,
+        ];
+        languages.sort();
+        // Should be sorted by enum order
+        assert_eq!(languages[0], LanguageCode::EnUs);
+        assert_eq!(languages[1], LanguageCode::JaJp);
+    }
+
+    #[test]
+    fn test_new_language_support() {
+        // Test newly added languages
+        let new_languages = vec![
+            (LanguageCode::PtBr, "pt-BR", "Portuguese"),
+            (LanguageCode::RuRu, "ru-RU", "Russian"),
+            (LanguageCode::NlNl, "nl-NL", "Dutch"),
+            (LanguageCode::PlPl, "pl-PL", "Polish"),
+            (LanguageCode::TrTr, "tr-TR", "Turkish"),
+            (LanguageCode::ArSa, "ar-SA", "Arabic"),
+            (LanguageCode::HiIn, "hi-IN", "Hindi"),
+            (LanguageCode::SvSe, "sv-SE", "Swedish"),
+            (LanguageCode::NoNo, "no-NO", "Norwegian"),
+            (LanguageCode::FiFi, "fi-FI", "Finnish"),
+        ];
+
+        for (code, expected_str, expected_name) in new_languages {
+            assert_eq!(code.as_str(), expected_str);
+            assert_eq!(code.language_name(), expected_name);
+        }
+    }
+}

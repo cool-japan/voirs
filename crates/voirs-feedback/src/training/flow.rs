@@ -18,7 +18,7 @@ trait F32Midpoint {
 
 impl F32Midpoint for f32 {
     fn midpoint(a: f32, b: f32) -> f32 {
-        (a + b) / 2.0
+        f32::midpoint(a, b)
     }
 }
 

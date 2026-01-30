@@ -493,6 +493,7 @@ pub struct CompressedSkillStats {
 
 impl CompressedSkillStats {
     /// Create from a collection of values
+    #[must_use]
     pub fn from_values(values: &[f32]) -> Self {
         if values.is_empty() {
             return Self {
@@ -550,6 +551,7 @@ impl CompressedSkillStats {
     }
 
     /// Get memory usage in bytes
+    #[must_use]
     pub fn memory_usage() -> usize {
         std::mem::size_of::<Self>()
     }

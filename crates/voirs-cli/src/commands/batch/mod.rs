@@ -4,13 +4,14 @@
 //! supporting various input formats (TXT, CSV, JSON) and parallel processing.
 
 use crate::GlobalOptions;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use voirs_sdk::config::AppConfig;
 use voirs_sdk::{AudioFormat, QualityLevel, Result};
 
 pub mod files;
 pub mod parallel;
 pub mod resume;
+pub mod templates;
 
 /// Batch processing configuration
 #[derive(Debug, Clone)]
@@ -54,35 +55,40 @@ impl Default for BatchConfig {
     }
 }
 
+/// Configuration for batch processing operations
+pub struct BatchProcessArgs<'a> {
+    pub input: &'a Path,
+    pub output_dir: Option<&'a Path>,
+    pub workers: Option<usize>,
+    pub quality: QualityLevel,
+    pub rate: f32,
+    pub pitch: f32,
+    pub volume: f32,
+    pub resume: bool,
+}
+
 /// Run batch processing command
 pub async fn run_batch_process(
-    input: &PathBuf,
-    output_dir: Option<&PathBuf>,
-    workers: Option<usize>,
-    quality: QualityLevel,
-    rate: f32,
-    pitch: f32,
-    volume: f32,
-    resume: bool,
+    args: BatchProcessArgs<'_>,
     config: &AppConfig,
     global: &GlobalOptions,
 ) -> Result<()> {
     // Create batch configuration
     let mut batch_config = BatchConfig {
-        input_path: input.clone(),
-        output_dir: output_dir.cloned().unwrap_or_else(|| {
-            input
+        input_path: args.input.to_path_buf(),
+        output_dir: args.output_dir.map(|p| p.to_path_buf()).unwrap_or_else(|| {
+            args.input
                 .parent()
                 .unwrap_or(std::path::Path::new("."))
                 .to_path_buf()
         }),
-        workers: workers.unwrap_or_else(num_cpus::get),
-        quality,
-        speaking_rate: rate,
-        pitch,
-        volume,
+        workers: args.workers.unwrap_or_else(num_cpus::get),
+        quality: args.quality,
+        speaking_rate: args.rate,
+        pitch: args.pitch,
+        volume: args.volume,
         format: AudioFormat::Wav, // Default to WAV format
-        enable_resume: resume,
+        enable_resume: args.resume,
         max_retries: 3,
     };
 
@@ -106,7 +112,7 @@ pub async fn run_batch_process(
     } else if batch_config.input_path.is_dir() {
         files::process_directory(&batch_config, config, global).await
     } else {
-        Err(voirs_sdk::VoirsError::config_error(&format!(
+        Err(voirs_sdk::VoirsError::config_error(format!(
             "Input path does not exist: {}",
             batch_config.input_path.display()
         )))
@@ -119,7 +125,7 @@ pub fn get_supported_extensions() -> Vec<&'static str> {
 }
 
 /// Check if file extension is supported
-pub fn is_supported_extension(path: &PathBuf) -> bool {
+pub fn is_supported_extension(path: &Path) -> bool {
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         get_supported_extensions().contains(&ext.to_lowercase().as_str())
     } else {

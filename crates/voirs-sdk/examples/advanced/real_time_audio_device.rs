@@ -308,7 +308,7 @@ async fn low_latency_streaming_demo() -> Result<()> {
             }
 
             // Queue chunk for immediate playback
-            audio_system.queue_audio_chunk(&chunk).await?;
+            audio_system.queue_audio_chunk(chunk).await?;
             total_chunks += 1;
         }
 
@@ -388,15 +388,37 @@ async fn multi_device_demo() -> Result<()> {
 
         #[cfg(feature = "spatial")]
         {
-            // TODO: Implement spatial positioning when VoirsPipeline supports it
-            // use voirs_spatial::Position3D;
-            // let position = match zone_name {
-            //     "Main Speakers" => Position3D::new(0.0, 0.0, 0.0),
-            //     "Headphones" => Position3D::new(0.0, 0.0, -1.0),
-            //     "Secondary" => Position3D::new(2.0, 0.0, 0.0),
-            //     _ => Position3D::new(0.0, 0.0, 0.0),
-            // };
-            // pipeline.set_spatial_position(position).await?;
+            use voirs_sdk::spatial::{Orientation3D, Position3D};
+            let position = match zone_name {
+                "Main Speakers" => Position3D {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                "Headphones" => Position3D {
+                    x: 0.0,
+                    y: 0.0,
+                    z: -1.0,
+                },
+                "Secondary" => Position3D {
+                    x: 2.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                _ => Position3D {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            };
+            let orientation = Orientation3D {
+                yaw: 0.0,
+                pitch: 0.0,
+                roll: 0.0,
+            };
+            pipeline
+                .set_listener_position(position, orientation)
+                .await?;
         }
 
         let audio = pipeline.synthesize(message).await?;
@@ -420,6 +442,7 @@ impl LiveAudioSystem {
     async fn new(pipeline: VoirsPipeline) -> Result<Self> {
         let (command_sender, mut command_receiver) = mpsc::unbounded_channel();
 
+        #[allow(clippy::arc_with_non_send_sync)]
         // Initialize audio device manager
         let device_manager = Arc::new(RwLock::new(AudioDeviceManager::new().await?));
         let is_playing = Arc::new(RwLock::new(false));

@@ -85,7 +85,7 @@ impl WasmRecognizerWorker {
                     .initialize(JsValue::from_serde(&worker_msg.data).unwrap())
                     .await
                 {
-                    Ok(_) => WorkerResponse {
+                    Ok(()) => WorkerResponse {
                         id: worker_msg.id,
                         success: true,
                         data: Some(serde_json::json!({"initialized": true})),
@@ -136,7 +136,7 @@ impl WasmRecognizerWorker {
                     .start_streaming(JsValue::from_serde(&worker_msg.data).unwrap())
                     .await
                 {
-                    Ok(_) => WorkerResponse {
+                    Ok(()) => WorkerResponse {
                         id: worker_msg.id,
                         success: true,
                         data: Some(serde_json::json!({"streaming": true})),
@@ -229,7 +229,7 @@ impl WasmRecognizerWorker {
             "switch_model" => {
                 if let Some(model_name) = worker_msg.data.as_str() {
                     match self.recognizer.switch_model(model_name).await {
-                        Ok(_) => WorkerResponse {
+                        Ok(()) => WorkerResponse {
                             id: worker_msg.id,
                             success: true,
                             data: Some(serde_json::json!({"model": model_name})),

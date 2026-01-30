@@ -752,10 +752,7 @@ impl GpuAccelerator {
             Device::Cpu => false,
             _ => {
                 // Try to create a simple tensor to test GPU functionality
-                match Tensor::zeros((2, 2), DType::F32, device) {
-                    Ok(_) => true,
-                    Err(_) => false,
-                }
+                Tensor::zeros((2, 2), DType::F32, device).is_ok()
             }
         }
     }
@@ -982,8 +979,7 @@ mod tests {
     #[test]
     fn test_gpu_utils() {
         let devices = GpuUtils::list_gpu_devices();
-        // Should not panic
-        assert!(devices.len() >= 0);
+        // Should not panic - devices is a Vec, len() is always valid
 
         let config = GpuUtils::get_optimal_config();
         assert!(

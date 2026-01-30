@@ -27,6 +27,7 @@ pub struct MotivationSystem {
 
 impl MotivationSystem {
     /// Create new motivation system
+    #[must_use]
     pub fn new() -> Self {
         let mut system = Self {
             personality_profiles: HashMap::new(),
@@ -178,6 +179,7 @@ impl MotivationSystem {
     }
 
     /// Generate personalized message
+    #[must_use]
     pub fn generate_personalized_message(
         &self,
         user_id: Uuid,
@@ -247,7 +249,7 @@ impl MotivationSystem {
         // Record intervention
         self.intervention_history
             .entry(user_id)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(intervention.clone());
 
         // In a real implementation, this would trigger actual intervention actions
@@ -296,14 +298,33 @@ impl MotivationSystem {
     }
 
     fn calculate_risk_level(&self, tracker: &MotivationTracker) -> RiskLevel {
-        let recent_engagement = tracker.engagement_history.iter().rev().take(5).sum::<f32>() / 5.0;
-        let recent_frustration = tracker
+        // Calculate average of up to last 5 items, dividing by actual count
+        let engagement_items: Vec<f32> = tracker
+            .engagement_history
+            .iter()
+            .rev()
+            .take(5)
+            .copied()
+            .collect();
+        let frustration_items: Vec<f32> = tracker
             .frustration_history
             .iter()
             .rev()
             .take(5)
-            .sum::<f32>()
-            / 5.0;
+            .copied()
+            .collect();
+
+        let recent_engagement = if engagement_items.is_empty() {
+            0.5 // Default neutral value if no history
+        } else {
+            engagement_items.iter().sum::<f32>() / engagement_items.len() as f32
+        };
+
+        let recent_frustration = if frustration_items.is_empty() {
+            0.0 // Default low frustration if no history
+        } else {
+            frustration_items.iter().sum::<f32>() / frustration_items.len() as f32
+        };
 
         if recent_engagement < 0.3 || recent_frustration > 0.7 {
             RiskLevel::High

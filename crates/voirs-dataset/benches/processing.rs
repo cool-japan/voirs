@@ -137,7 +137,8 @@ fn bench_dataset_access(c: &mut Criterion) {
                 rt.block_on(async {
                     let len = dataset.len();
                     let indices: Vec<usize> = {
-                        use rand::{thread_rng, Rng};
+                        use scirs2_core::random::*;
+                        use scirs2_core::Rng;
                         let mut rng = thread_rng();
                         (0..len).map(|_| rng.gen_range(0..len)).collect()
                     };

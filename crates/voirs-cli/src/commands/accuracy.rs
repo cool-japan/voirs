@@ -350,10 +350,7 @@ async fn run_comprehensive_benchmarks(
 async fn run_dataset_benchmark(
     args: DatasetAccuracyArgs,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!(
-        "🎯 Running {} Dataset Benchmark",
-        format!("{:?}", args.dataset)
-    );
+    println!("🎯 Running {:?} Dataset Benchmark", args.dataset);
     println!("{}", "=".repeat(40));
 
     let dataset_config = DatasetConfig {
@@ -567,7 +564,7 @@ fn generate_text_report(
     // Overall metrics
     report.push_str("OVERALL METRICS\n");
     report.push_str(&"-".repeat(30));
-    report.push_str("\n");
+    report.push('\n');
     report.push_str(&format!(
         "Total test cases: {}\n",
         results.overall_metrics.total_cases
@@ -590,16 +587,16 @@ fn generate_text_report(
     // Language-specific results
     report.push_str("LANGUAGE-SPECIFIC RESULTS\n");
     report.push_str(&"-".repeat(30));
-    report.push_str("\n");
+    report.push('\n');
     for (language, accuracy) in &results.overall_metrics.language_accuracies {
         report.push_str(&format!("{:?}: {:.2}%\n", language, accuracy * 100.0));
     }
-    report.push_str("\n");
+    report.push('\n');
 
     // Dataset results
     report.push_str("DATASET RESULTS\n");
     report.push_str(&"-".repeat(30));
-    report.push_str("\n");
+    report.push('\n');
     for (dataset_name, dataset_result) in &results.dataset_results {
         let status = if dataset_result.target_met {
             "✅ PASS"
@@ -640,7 +637,7 @@ fn generate_text_report(
     // Performance statistics
     report.push_str("PERFORMANCE STATISTICS\n");
     report.push_str(&"-".repeat(30));
-    report.push_str("\n");
+    report.push('\n');
     report.push_str(&format!(
         "Average processing time: {:.2} ms\n",
         results.performance_stats.avg_processing_time_ms

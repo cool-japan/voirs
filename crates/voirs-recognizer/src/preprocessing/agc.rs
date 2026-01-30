@@ -7,7 +7,10 @@ use crate::RecognitionError;
 use voirs_sdk::AudioBuffer;
 
 #[cfg(target_arch = "aarch64")]
-use std::arch::aarch64::*;
+use std::arch::aarch64::{
+    vaddq_f32, vdupq_n_f32, vget_high_f32, vget_lane_f32, vget_low_f32, vld1q_f32, vmulq_f32,
+    vpadd_f32,
+};
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
@@ -118,7 +121,7 @@ impl AGCProcessor {
         let enhanced_audio = AudioBuffer::mono(enhanced_samples, audio.sample_rate());
 
         // Calculate output level
-        let output_level_db = self.calculate_rms_level(&enhanced_audio.samples());
+        let output_level_db = self.calculate_rms_level(enhanced_audio.samples());
 
         // Calculate statistics
         let current_gain_db = 20.0 * self.current_gain.log10();
@@ -318,11 +321,13 @@ impl AGCProcessor {
     }
 
     /// Get current gain in dB
+    #[must_use]
     pub fn get_current_gain_db(&self) -> f32 {
         self.linear_to_db(self.current_gain)
     }
 
     /// Get current input level in dB
+    #[must_use]
     pub fn get_current_input_level_db(&self) -> f32 {
         self.linear_to_db(self.rms_detector.sqrt())
     }

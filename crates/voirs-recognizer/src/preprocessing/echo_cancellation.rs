@@ -201,9 +201,8 @@ impl EchoCancellationProcessor {
         self.update_filter_coefficients(error_signal);
 
         // Apply non-linear processing if needed
-        let enhanced_sample = self.apply_nonlinear_processing(error_signal);
 
-        enhanced_sample
+        self.apply_nonlinear_processing(error_signal)
     }
 
     /// Calculate echo estimate using current filter coefficients
@@ -301,6 +300,7 @@ impl EchoCancellationProcessor {
     }
 
     /// Get current convergence status
+    #[must_use]
     pub fn get_convergence(&self) -> f32 {
         self.convergence_tracker
     }

@@ -67,6 +67,7 @@ pub struct RateLimiter {
 
 impl RateLimiter {
     /// Description
+    #[must_use]
     pub fn new(max_notifications_per_minute: u32) -> Self {
         Self {
             tokens: max_notifications_per_minute,
@@ -133,6 +134,7 @@ pub struct NotificationManager {
 
 impl NotificationManager {
     /// Create a new notification manager with reliability features
+    #[must_use]
     pub fn new(platform: Platform, config: NotificationConfig) -> Self {
         Self {
             platform,
@@ -206,7 +208,7 @@ impl NotificationManager {
 
         // Update notification status based on result
         let success = match delivery_result {
-            Ok(Ok(_)) => {
+            Ok(Ok(())) => {
                 self.mark_notification_delivered(&notification_id).await;
                 true
             }
@@ -374,34 +376,31 @@ impl NotificationManager {
 
         // Process retry notifications
         for mut retry_notif in retry_notifications {
-            match self
+            if let Ok(()) = self
                 .deliver_notification(&retry_notif.id, &retry_notif.notification)
                 .await
             {
-                Ok(_) => {
-                    self.mark_notification_delivered(&retry_notif.id).await;
-                    processed += 1;
+                self.mark_notification_delivered(&retry_notif.id).await;
+                processed += 1;
 
-                    // Update stats
-                    {
-                        let mut stats = self.stats.write().await;
-                        stats.total_delivered += 1;
-                        stats.total_retries += 1;
-                    }
+                // Update stats
+                {
+                    let mut stats = self.stats.write().await;
+                    stats.total_delivered += 1;
+                    stats.total_retries += 1;
                 }
-                Err(_) => {
-                    // Retry failed, add back to queue with increased delay
-                    retry_notif.retry_count += 1;
-                    let delay_seconds =
-                        (5.0 * self
-                            .config
-                            .retry_delay_multiplier
-                            .powi(retry_notif.retry_count as i32)) as u64;
-                    retry_notif.next_retry = now + Duration::from_secs(delay_seconds);
+            } else {
+                // Retry failed, add back to queue with increased delay
+                retry_notif.retry_count += 1;
+                let delay_seconds =
+                    (5.0 * self
+                        .config
+                        .retry_delay_multiplier
+                        .powi(retry_notif.retry_count as i32)) as u64;
+                retry_notif.next_retry = now + Duration::from_secs(delay_seconds);
 
-                    let mut retry_queue = self.retry_queue.lock().await;
-                    retry_queue.push_back(retry_notif);
-                }
+                let mut retry_queue = self.retry_queue.lock().await;
+                retry_queue.push_back(retry_notif);
             }
         }
 
@@ -428,11 +427,11 @@ impl NotificationManager {
 
             // Simulate platform-specific notification display
             if let Some(icon_path) = &notification.icon {
-                println!("  Icon: {}", icon_path);
+                println!("  Icon: {icon_path}");
             }
 
             if let Some(duration) = notification.auto_dismiss_after {
-                println!("  Auto-dismiss after: {:?}", duration);
+                println!("  Auto-dismiss after: {duration:?}");
             }
         }
 
@@ -545,15 +544,15 @@ impl NotificationManager {
             match self.platform {
                 Platform::Desktop => {
                     // Cancel desktop notification
-                    println!("Cancelled desktop notification: {}", notification_id);
+                    println!("Cancelled desktop notification: {notification_id}");
                 }
                 Platform::Web => {
                     // Close web notification
-                    println!("Cancelled web notification: {}", notification_id);
+                    println!("Cancelled web notification: {notification_id}");
                 }
                 Platform::Mobile => {
                     // Cancel mobile notification
-                    println!("Cancelled mobile notification: {}", notification_id);
+                    println!("Cancelled mobile notification: {notification_id}");
                 }
                 Platform::Embedded => {
                     // No-op for embedded
@@ -562,12 +561,13 @@ impl NotificationManager {
             Ok(())
         } else {
             Err(PlatformError::ConfigurationError {
-                message: format!("Notification {} not found", notification_id),
+                message: format!("Notification {notification_id} not found"),
             })
         }
     }
 
     /// Check if notifications are supported on current platform
+    #[must_use]
     pub fn is_supported(&self) -> bool {
         match self.platform {
             Platform::Desktop => true,
@@ -634,6 +634,7 @@ impl NotificationManager {
     }
 
     /// Create a notification for session feedback
+    #[must_use]
     pub fn create_feedback_notification(
         &self,
         title: &str,

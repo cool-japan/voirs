@@ -61,7 +61,7 @@ pub fn create_websocket_routes() -> Router {
     Router::new()
         .route("/ws", get(websocket_handler))
         .route("/ws/sessions", get(list_active_sessions))
-        .route("/ws/sessions/:session_id", get(get_session_info))
+        .route("/ws/sessions/{session_id}", get(get_session_info))
 }
 
 /// WebSocket upgrade handler
@@ -156,7 +156,7 @@ async fn handle_websocket(
         while let Some(message) = rx.recv().await {
             match serde_json::to_string(&message) {
                 Ok(json) => {
-                    if sender.send(Message::Text(json)).await.is_err() {
+                    if sender.send(Message::Text(json.into())).await.is_err() {
                         error!(
                             "Failed to send WebSocket message for session: {}",
                             session_id_clone
@@ -422,71 +422,68 @@ async fn process_audio_chunk(
         sessions.get(session_id).map(|s| s.config.clone())
     };
 
-    match session_config {
-        Some(config) => {
-            // Try to process audio with the pipeline
-            match process_with_pipeline(audio_data, &config, pipeline).await {
-                Ok((text, confidence, is_final)) => {
-                    let processing_time = start_time.elapsed().as_millis() as f64;
+    if let Some(config) = session_config {
+        // Try to process audio with the pipeline
+        match process_with_pipeline(audio_data, &config, pipeline).await {
+            Ok((text, confidence, is_final)) => {
+                let processing_time = start_time.elapsed().as_millis() as f64;
 
-                    Ok(StreamingRecognitionResponse {
-                        session_id: session_id.to_string(),
-                        is_interim: !is_final,
-                        is_final,
-                        text: text.clone(),
-                        confidence,
-                        segment: if is_final {
-                            Some(SegmentResponse {
-                                start_time: 0.0,
-                                end_time: 1.0, // Approximate chunk duration
-                                text: text.clone(),
-                                confidence,
-                                no_speech_prob: 1.0 - confidence,
-                                tokens: None,
-                            })
-                        } else {
-                            None
-                        },
-                        processing_time_ms: processing_time,
-                        sequence_number,
-                    })
-                }
-                Err(e) => {
-                    warn!(
-                        "Pipeline processing failed for session {}: {}",
-                        session_id, e
-                    );
-                    // Fall back to mock response with error indication
-                    let processing_time = start_time.elapsed().as_millis() as f64;
+                Ok(StreamingRecognitionResponse {
+                    session_id: session_id.to_string(),
+                    is_interim: !is_final,
+                    is_final,
+                    text: text.clone(),
+                    confidence,
+                    segment: if is_final {
+                        Some(SegmentResponse {
+                            start_time: 0.0,
+                            end_time: 1.0, // Approximate chunk duration
+                            text: text.clone(),
+                            confidence,
+                            no_speech_prob: 1.0 - confidence,
+                            tokens: None,
+                        })
+                    } else {
+                        None
+                    },
+                    processing_time_ms: processing_time,
+                    sequence_number,
+                })
+            }
+            Err(e) => {
+                warn!(
+                    "Pipeline processing failed for session {}: {}",
+                    session_id, e
+                );
+                // Fall back to mock response with error indication
+                let processing_time = start_time.elapsed().as_millis() as f64;
 
-                    Ok(StreamingRecognitionResponse {
-                        session_id: session_id.to_string(),
-                        is_interim: true,
-                        is_final: false,
-                        text: "[Processing temporarily unavailable]".to_string(),
-                        confidence: 0.1,
-                        segment: None,
-                        processing_time_ms: processing_time,
-                        sequence_number,
-                    })
-                }
+                Ok(StreamingRecognitionResponse {
+                    session_id: session_id.to_string(),
+                    is_interim: true,
+                    is_final: false,
+                    text: "[Processing temporarily unavailable]".to_string(),
+                    confidence: 0.1,
+                    segment: None,
+                    processing_time_ms: processing_time,
+                    sequence_number,
+                })
             }
         }
-        None => {
-            // No session config found, return error response
-            let processing_time = start_time.elapsed().as_millis() as f64;
+    } else {
+        // No session config found, return error response
+        let processing_time = start_time.elapsed().as_millis() as f64;
 
-            Ok(StreamingRecognitionResponse {
-                session_id: session_id.to_string(),
-                is_interim: true,
-                is_final: false,
-                text: "[Session not found]".to_string(),
-                confidence: 0.0,
-                segment: None,
-                processing_time_ms: processing_time,
-                sequence_number,
-            })
-        }
+        Ok(StreamingRecognitionResponse {
+            session_id: session_id.to_string(),
+            is_interim: true,
+            is_final: false,
+            text: "[Session not found]".to_string(),
+            confidence: 0.0,
+            segment: None,
+            processing_time_ms: processing_time,
+            sequence_number,
+        })
     }
 }
 
@@ -506,8 +503,11 @@ async fn process_with_pipeline(
             match pipeline_guard.process(&audio_buffer).await {
                 Ok(result) => {
                     // Extract text and confidence from the result
-                    let text = result.transcript.text;
-                    let confidence = result.transcript.confidence;
+                    let (text, confidence) = if let Some(transcription) = result.transcription {
+                        (transcription.text, transcription.confidence)
+                    } else {
+                        (String::new(), 0.0)
+                    };
 
                     // Determine if this is a final result based on confidence and silence detection
                     let is_final = confidence > 0.7

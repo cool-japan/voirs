@@ -272,6 +272,8 @@ fn convert_language_code_to_sdk(lang: voirs_g2p::LanguageCode) -> LanguageCode {
         voirs_g2p::LanguageCode::ZhCn => LanguageCode::ZhCn,
         voirs_g2p::LanguageCode::It => LanguageCode::ItIt,
         voirs_g2p::LanguageCode::Pt => LanguageCode::PtBr,
+        voirs_g2p::LanguageCode::Ru => LanguageCode::RuRu,
+        voirs_g2p::LanguageCode::Ar => LanguageCode::EnUs, // Fallback, Arabic TBD
     }
 }
 
@@ -575,6 +577,25 @@ fn convert_acoustic_language_code_to_sdk(lang: acoustic::LanguageCode) -> Langua
         acoustic::LanguageCode::FrFr => LanguageCode::FrFr,
         acoustic::LanguageCode::EsEs => LanguageCode::EsEs,
         acoustic::LanguageCode::ItIt => LanguageCode::ItIt,
+        acoustic::LanguageCode::PtBr => LanguageCode::PtBr,
+        acoustic::LanguageCode::PtPt => LanguageCode::PtBr, // Map PtPt to PtBr
+        acoustic::LanguageCode::RuRu => LanguageCode::RuRu,
+        acoustic::LanguageCode::NlNl => LanguageCode::NlNl,
+        acoustic::LanguageCode::PlPl => LanguageCode::EnUs, // Fallback
+        acoustic::LanguageCode::SvSe => LanguageCode::SvSe,
+        acoustic::LanguageCode::TrTr => LanguageCode::EnUs, // Fallback
+        acoustic::LanguageCode::ArSa => LanguageCode::EnUs, // Fallback
+        acoustic::LanguageCode::HiIn => LanguageCode::EnUs, // Fallback
+        acoustic::LanguageCode::ViVn => LanguageCode::EnUs, // Fallback
+        acoustic::LanguageCode::ThTh => LanguageCode::EnUs, // Fallback
+        acoustic::LanguageCode::IdId => LanguageCode::EnUs, // Fallback
+        acoustic::LanguageCode::FiFi => LanguageCode::EnUs, // Fallback
+        acoustic::LanguageCode::CsCz => LanguageCode::EnUs, // Fallback
+        acoustic::LanguageCode::ElGr => LanguageCode::EnUs, // Fallback
+        acoustic::LanguageCode::HeIl => LanguageCode::EnUs, // Fallback
+        acoustic::LanguageCode::NoNo => LanguageCode::NoNo,
+        acoustic::LanguageCode::DaDk => LanguageCode::DaDk,
+        acoustic::LanguageCode::MsMy => LanguageCode::EnUs, // Fallback
     }
 }
 

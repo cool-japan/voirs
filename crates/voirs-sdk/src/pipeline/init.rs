@@ -183,18 +183,18 @@ impl PipelineInitializer {
 
         #[cfg(not(target_os = "macos"))]
         {
-            return Err(VoirsError::DeviceNotAvailable {
+            Err(VoirsError::DeviceNotAvailable {
                 device: "metal".to_string(),
-            });
+                alternatives: vec!["cpu".to_string(), "cuda".to_string()],
+            })
         }
 
         #[cfg(target_os = "macos")]
         {
             // In real implementation, would initialize Metal context
             info!("Metal device initialized");
+            Ok(())
         }
-
-        Ok(())
     }
 
     /// Setup Vulkan device

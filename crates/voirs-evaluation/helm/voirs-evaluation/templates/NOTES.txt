@@ -1,0 +1,56 @@
+Thank you for installing {{ .Chart.Name }}!
+
+Your VoiRS Evaluation distributed system has been deployed.
+
+Release name: {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+To verify the deployment:
+
+  kubectl --namespace {{ .Release.Namespace }} get pods -l "app.kubernetes.io/name={{ include "voirs-evaluation.name" . }}"
+
+{{ if .Values.coordinator.enabled }}
+To access the coordinator:
+
+  {{- if .Values.ingress.enabled }}
+  The coordinator is available at:
+  {{- range .Values.ingress.hosts }}
+    https://{{ .host }}
+  {{- end }}
+  {{- else if contains "LoadBalancer" .Values.service.type }}
+
+  NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+
+  Watch the status with:
+    kubectl get --namespace {{ .Release.Namespace }} svc {{ include "voirs-evaluation.fullname" . }}-coordinator --watch
+
+  Once available, you can access it at:
+    export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "voirs-evaluation.fullname" . }}-coordinator --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+    echo "Coordinator URL: http://$SERVICE_IP:{{ .Values.service.port }}"
+  {{- else if contains "ClusterIP" .Values.service.type }}
+
+  Access the coordinator using port-forwarding:
+    kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "voirs-evaluation.fullname" . }}-coordinator {{ .Values.service.port }}:{{ .Values.service.port }}
+    echo "Coordinator URL: http://127.0.0.1:{{ .Values.service.port }}"
+  {{- end }}
+{{- end }}
+
+{{ if .Values.monitoring.enabled }}
+Metrics are available at:
+  http://COORDINATOR_IP:{{ .Values.coordinator.service.metricsPort }}/metrics
+  http://WORKER_IP:{{ .Values.coordinator.service.metricsPort }}/metrics
+{{- end }}
+
+{{ if .Values.autoscaling.enabled }}
+Autoscaling is enabled:
+  Min replicas: {{ .Values.autoscaling.minReplicas }}
+  Max replicas: {{ .Values.autoscaling.maxReplicas }}
+  Target CPU: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}%
+  Target Memory: {{ .Values.autoscaling.targetMemoryUtilizationPercentage }}%
+{{- end }}
+
+For more information, visit:
+  Documentation: https://github.com/cool-japan/voirs/tree/main/crates/voirs-evaluation
+  Issues: https://github.com/cool-japan/voirs/issues
+
+Happy evaluating!

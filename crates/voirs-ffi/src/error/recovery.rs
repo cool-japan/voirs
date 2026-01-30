@@ -147,13 +147,19 @@ pub enum RecoveryResult {
     Success,
 
     /// Recovery failed after all attempts
-    Failed(VoirsStructuredError),
+    Failed(Box<VoirsStructuredError>),
 
     /// Recovery not attempted (fail fast)
     NotAttempted,
 
     /// Graceful degradation applied
     Degraded(DegradationLevel),
+}
+
+impl Default for ErrorRecoveryManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ErrorRecoveryManager {
@@ -317,11 +323,12 @@ impl ErrorRecoveryManager {
             }
         } else {
             // No recovery strategy configured - fail fast
-            RecoveryResult::Failed(error)
+            RecoveryResult::Failed(Box::new(error))
         }
     }
 
     /// Attempt retry recovery
+    #[allow(clippy::too_many_arguments)]
     fn attempt_retry<F>(
         &mut self,
         error: VoirsStructuredError,
@@ -377,13 +384,13 @@ impl ErrorRecoveryManager {
                             attempt,
                             start_time.elapsed(),
                         );
-                        return RecoveryResult::Failed(error);
+                        return RecoveryResult::Failed(Box::new(error));
                     }
                 }
             }
         }
 
-        RecoveryResult::Failed(error)
+        RecoveryResult::Failed(Box::new(error))
     }
 
     /// Attempt fallback recovery
@@ -412,7 +419,7 @@ impl ErrorRecoveryManager {
                     1,
                     start_time.elapsed(),
                 );
-                RecoveryResult::Failed(error)
+                RecoveryResult::Failed(Box::new(error))
             }
         }
     }
@@ -524,8 +531,8 @@ pub struct RecoveryStats {
 }
 
 /// Global error recovery manager
-static ERROR_RECOVERY_MANAGER: std::sync::LazyLock<Mutex<ErrorRecoveryManager>> =
-    std::sync::LazyLock::new(|| Mutex::new(ErrorRecoveryManager::new()));
+static ERROR_RECOVERY_MANAGER: once_cell::sync::Lazy<Mutex<ErrorRecoveryManager>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(ErrorRecoveryManager::new()));
 
 /// Attempt recovery using global manager
 pub fn attempt_error_recovery<F>(error: VoirsStructuredError, operation: F) -> RecoveryResult
@@ -581,12 +588,16 @@ pub extern "C" fn voirs_attempt_recovery(
 
     match result {
         RecoveryResult::Success => crate::VoirsErrorCode::Success,
-        RecoveryResult::Failed(err) => err.to_error_code(),
+        RecoveryResult::Failed(err) => (*err).to_error_code(),
         RecoveryResult::NotAttempted => crate::VoirsErrorCode::InternalError,
         RecoveryResult::Degraded(_) => crate::VoirsErrorCode::Success,
     }
 }
 
+/// Get error recovery statistics
+///
+/// # Safety
+/// All pointer parameters must be valid and point to properly allocated memory for usize values.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_get_recovery_stats(
     total_attempts: *mut usize,

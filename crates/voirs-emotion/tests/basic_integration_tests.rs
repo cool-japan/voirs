@@ -12,7 +12,6 @@ use voirs_emotion::{
 async fn test_basic_api_functionality() -> Result<()> {
     // Test processor creation
     let processor = EmotionProcessor::new()?;
-    assert!(true); // If we get here, creation worked
 
     // Test emotion setting
     let mut proc = processor;
@@ -39,8 +38,7 @@ async fn test_configuration_builder() -> Result<()> {
         .build()
         .map_err(|e| voirs_emotion::Error::Config(e.to_string()))?;
 
-    let processor = EmotionProcessor::with_config(config)?;
-    assert!(true); // If we get here, config worked
+    let _processor = EmotionProcessor::with_config(config)?;
 
     Ok(())
 }
@@ -143,7 +141,7 @@ async fn test_custom_emotion_creation() -> Result<()> {
     let mut registry = CustomEmotionRegistry::new();
     registry
         .register(custom_emotion)
-        .map_err(|e| voirs_emotion::Error::Config(e))?;
+        .map_err(voirs_emotion::Error::Config)?;
 
     Ok(())
 }

@@ -57,7 +57,7 @@ pub struct HybridG2p {
     fallback_order: Vec<String>,
     /// Enable pronunciation caching
     enable_caching: bool,
-    /// Pronunciation cache (using Arc<RwLock> for thread safety)
+    /// Pronunciation cache (using `Arc<RwLock>` for thread safety)
     cache: Arc<RwLock<HashMap<String, Vec<Phoneme>>>>,
     /// Maximum cache size
     max_cache_size: usize,

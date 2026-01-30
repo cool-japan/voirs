@@ -5,13 +5,25 @@
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+use uuid;
 use voirs_feedback::integration::PerformanceMetrics;
 use voirs_feedback::realtime::types::RealtimeConfig;
 use voirs_feedback::traits::{
     AdaptiveState, FeedbackResponse, SessionState, SessionStats, UserPreferences, UserProgress,
 };
-use voirs_feedback::FeedbackSystem;
+use voirs_feedback::{FeedbackError, FeedbackSystem, FeedbackSystemConfig};
 use voirs_sdk::AudioBuffer;
+
+/// Helper to create FeedbackSystem with test database (in-memory for tests)
+async fn create_test_feedback_system() -> Result<FeedbackSystem, FeedbackError> {
+    let mut config = FeedbackSystemConfig::default();
+    #[cfg(feature = "persistence")]
+    {
+        // Use in-memory database for tests - faster and no file permission issues
+        config.database_path = Some(":memory:".to_string());
+    }
+    FeedbackSystem::with_config(config).await
+}
 
 /// Create test audio data for testing
 fn create_test_audio_data() -> AudioBuffer {
@@ -32,7 +44,7 @@ mod workflow_tests {
 
     #[tokio::test]
     async fn test_user_onboarding_flow() {
-        let system = FeedbackSystem::new().await.unwrap();
+        let system = create_test_feedback_system().await.unwrap();
         let user_id = "new_user_123";
 
         // 1. New user session creation should be smooth
@@ -66,7 +78,7 @@ mod workflow_tests {
 
     #[tokio::test]
     async fn test_session_continuity() {
-        let system = FeedbackSystem::new().await.unwrap();
+        let system = create_test_feedback_system().await.unwrap();
         let user_id = "continuing_user";
 
         // Create multiple sessions to test continuity
@@ -89,7 +101,7 @@ mod workflow_tests {
 
     #[tokio::test]
     async fn test_adaptive_difficulty_progression() {
-        let system = FeedbackSystem::new().await.unwrap();
+        let system = create_test_feedback_system().await.unwrap();
         let user_id = "adaptive_user";
 
         // Simulate user improvement over time
@@ -113,7 +125,7 @@ mod workflow_tests {
 
     #[tokio::test]
     async fn test_error_recovery_flow() {
-        let system = FeedbackSystem::new().await.unwrap();
+        let system = create_test_feedback_system().await.unwrap();
         let user_id = "error_recovery_user";
 
         // Test graceful handling of various error conditions
@@ -134,7 +146,7 @@ mod workflow_tests {
 
     #[tokio::test]
     async fn test_motivation_maintenance() {
-        let system = FeedbackSystem::new().await.unwrap();
+        let system = create_test_feedback_system().await.unwrap();
         let user_id = "motivation_user";
 
         // Simulate a user session

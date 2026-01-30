@@ -487,7 +487,7 @@ fn output_capability_report(
                 .map_err(|e| CliError::SerializationError(e.to_string()))?;
             output_formatter.info(&yaml);
         }
-        "text" | _ => {
+        _ => {
             output_text_report(report, detailed, output_formatter)?;
         }
     }
@@ -596,7 +596,7 @@ fn output_feature_check(
                     .map_err(|e| CliError::SerializationError(e.to_string()))?;
                 output_formatter.info(&yaml);
             }
-            "text" | _ => {
+            _ => {
                 let status_str = match &feature_info.status {
                     FeatureStatus::Available => "Available",
                     FeatureStatus::Limited(reason) => &format!("Limited: {}", reason),
@@ -638,7 +638,7 @@ fn output_feature_requirements(
                         .map_err(|e| CliError::SerializationError(e.to_string()))?;
                     output_formatter.info(&yaml);
                 }
-                "text" | _ => {
+                _ => {
                     output_formatter.info(&format!("Requirements for '{}':", feature_name));
                     for req in &feature_info.requirements {
                         output_formatter.info(&format!("  - {}", req));
@@ -671,7 +671,7 @@ fn output_feature_requirements(
                     .map_err(|e| CliError::SerializationError(e.to_string()))?;
                 output_formatter.info(&yaml);
             }
-            "text" | _ => {
+            _ => {
                 output_formatter.info("Feature Requirements:");
                 for (name, info) in &report.features {
                     if !info.requirements.is_empty() {
@@ -708,7 +708,7 @@ fn output_feature_config(
                         .map_err(|e| CliError::SerializationError(e.to_string()))?;
                     output_formatter.info(&yaml);
                 }
-                "text" | _ => {
+                _ => {
                     output_formatter.info(&format!("Configuration for '{}':", feature_name));
                     if feature_info.config_required.is_empty() {
                         output_formatter.info("  No configuration required");
@@ -745,7 +745,7 @@ fn output_feature_config(
                     .map_err(|e| CliError::SerializationError(e.to_string()))?;
                 output_formatter.info(&yaml);
             }
-            "text" | _ => {
+            _ => {
                 output_formatter.info("Feature Configuration:");
                 for (name, info) in &report.features {
                     output_formatter.info(&format!("{}:", name));

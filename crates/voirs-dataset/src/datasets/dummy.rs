@@ -100,12 +100,11 @@ impl DummyDataset {
         let mut rng = if let Some(seed) = config.seed {
             Random::seed(seed)
         } else {
-            Random::seed(
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
-            )
+            let seed = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            Random::seed(seed)
         };
 
         let mut samples = Vec::with_capacity(config.num_samples);
@@ -572,7 +571,7 @@ impl Dataset for DummyDataset {
             }
         } else {
             let mut sorted_durations = durations.clone();
-            sorted_durations.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            sorted_durations.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
             let min = sorted_durations[0];
             let max = sorted_durations[sorted_durations.len() - 1];

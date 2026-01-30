@@ -326,7 +326,7 @@ impl DiffWave {
         let mel_length = mel.dim(2)?;
         let mel_upsampled = if mel_length != audio_length {
             // Simple repeat upsampling
-            let upsample_factor = (audio_length + mel_length - 1) / mel_length;
+            let upsample_factor = audio_length.div_ceil(mel_length);
             let mel_repeated = mel.repeat(&[1, 1, upsample_factor])?;
             // Crop to exact length
             mel_repeated.narrow(2, 0, audio_length)?
@@ -825,8 +825,8 @@ mod tests {
 
         assert_eq!(betas.dims(), &[10]);
         // First beta should be close to beta_start
-        let first_beta = betas.get(0).unwrap().to_scalar::<f64>().unwrap();
-        assert!((first_beta - config.beta_start).abs() < 1e-6);
+        let first_beta = betas.get(0).unwrap().to_scalar::<f32>().unwrap();
+        assert!((first_beta as f64 - config.beta_start).abs() < 1e-6);
     }
 
     #[test]

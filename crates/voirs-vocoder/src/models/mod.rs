@@ -1,9 +1,20 @@
 //! Vocoder model definitions and implementations.
+//!
+//! This module contains different neural vocoder architectures:
+//! - **BigVGAN**: State-of-the-art vocoder with anti-aliased periodic activations
+//! - **UnivNet**: Universal neural vocoder with location-variable convolutions (NEW!)
+//! - **HiFi-GAN**: Fast and high-quality GAN-based vocoder
+//! - **DiffWave**: Diffusion-based vocoder for high fidelity
+//! - **VITS2**: End-to-end TTS with improved vocoding
+//! - **Singing**: Specialized models for singing voice synthesis
+//! - **Spatial**: 3D spatial audio processing models
 
+pub mod bigvgan;
 pub mod diffwave;
 pub mod hifigan;
 pub mod singing;
 pub mod spatial;
+pub mod univnet;
 pub mod vits2;
 
 use crate::{Result, VocoderError};

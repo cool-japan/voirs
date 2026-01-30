@@ -678,6 +678,7 @@ pub struct MemoryBoundedMetrics {
 
 impl MemoryBoundedMetrics {
     /// Create new memory-bounded metrics storage
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
         Self {
             storage: VecDeque::with_capacity(capacity),
@@ -707,6 +708,7 @@ impl MemoryBoundedMetrics {
     }
 
     /// Get metric by key
+    #[must_use]
     pub fn get(&self, key: &str) -> Option<&AnalyticsMetric> {
         if let Some(&index) = self.index.get(key) {
             if index < self.storage.len() {
@@ -746,16 +748,19 @@ impl MemoryBoundedMetrics {
     }
 
     /// Get number of stored metrics
+    #[must_use]
     pub fn len(&self) -> usize {
         self.storage.len()
     }
 
     /// Check if empty
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.storage.is_empty()
     }
 
     /// Get capacity
+    #[must_use]
     pub fn capacity(&self) -> usize {
         self.capacity
     }
@@ -784,6 +789,7 @@ pub struct AggregatedMetric {
 
 impl AggregatedMetric {
     /// Calculate mean
+    #[must_use]
     pub fn mean(&self) -> f64 {
         if self.count > 0 {
             self.sum / self.count as f64
@@ -793,6 +799,7 @@ impl AggregatedMetric {
     }
 
     /// Calculate variance
+    #[must_use]
     pub fn variance(&self) -> f64 {
         if self.count > 1 {
             let mean = self.mean();
@@ -803,6 +810,7 @@ impl AggregatedMetric {
     }
 
     /// Calculate standard deviation
+    #[must_use]
     pub fn std_dev(&self) -> f64 {
         self.variance().sqrt()
     }
@@ -838,6 +846,7 @@ pub struct CircularProgressHistory {
 
 impl CircularProgressHistory {
     /// Create new circular buffer with specified capacity
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
         let mut buffer = Vec::with_capacity(capacity);
         buffer.resize_with(capacity, || ProgressSnapshot {
@@ -864,12 +873,13 @@ impl CircularProgressHistory {
     }
 
     /// Get most recent snapshots up to specified count
+    #[must_use]
     pub fn get_recent(&self, count: usize) -> Vec<ProgressSnapshot> {
         let actual_count = count.min(self.len());
         let mut result = Vec::with_capacity(actual_count);
 
         for i in 0..actual_count {
-            let pos = if self.write_pos >= i + 1 {
+            let pos = if self.write_pos > i {
                 self.write_pos - i - 1
             } else {
                 self.capacity - (i + 1 - self.write_pos)
@@ -881,16 +891,19 @@ impl CircularProgressHistory {
     }
 
     /// Get number of items stored (up to capacity)
+    #[must_use]
     pub fn len(&self) -> usize {
         self.items_written.min(self.capacity)
     }
 
     /// Check if buffer is empty
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.items_written == 0
     }
 
     /// Get memory usage in bytes (approximate)
+    #[must_use]
     pub fn memory_usage(&self) -> usize {
         self.capacity * std::mem::size_of::<ProgressSnapshot>()
     }
@@ -953,6 +966,7 @@ pub struct AnalyticsMemoryManager {
 
 impl AnalyticsMemoryManager {
     /// Create new memory manager with specified limit
+    #[must_use]
     pub fn new(memory_limit_mb: usize) -> Self {
         Self {
             memory_limit: memory_limit_mb * 1024 * 1024,
@@ -967,16 +981,19 @@ impl AnalyticsMemoryManager {
     }
 
     /// Check if cleanup is needed
+    #[must_use]
     pub fn needs_cleanup(&self) -> bool {
         self.current_usage as f64 / self.memory_limit as f64 > self.cleanup_threshold
     }
 
     /// Get memory utilization percentage
+    #[must_use]
     pub fn utilization(&self) -> f64 {
         self.current_usage as f64 / self.memory_limit as f64
     }
 
     /// Suggest cleanup actions
+    #[must_use]
     pub fn suggest_cleanup_actions(&self) -> Vec<CleanupAction> {
         let mut actions = Vec::new();
 

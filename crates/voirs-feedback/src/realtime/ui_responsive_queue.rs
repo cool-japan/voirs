@@ -60,6 +60,7 @@ where
     T: Send + Sync + 'static,
 {
     /// Create a new UI-responsive queue
+    #[must_use]
     pub fn new(max_size: usize) -> Self {
         Self {
             queue: Arc::new(RwLock::new(VecDeque::new())),
@@ -71,6 +72,7 @@ where
     }
 
     /// Create a queue with custom UI timeout
+    #[must_use]
     pub fn with_ui_timeout(max_size: usize, ui_timeout: Duration) -> Self {
         Self {
             queue: Arc::new(RwLock::new(VecDeque::new())),
@@ -156,11 +158,13 @@ where
     }
 
     /// Get current queue size without blocking
+    #[must_use]
     pub fn size_non_blocking(&self) -> Option<usize> {
         self.queue.try_read().ok().map(|q| q.len())
     }
 
     /// Check if queue is empty without blocking
+    #[must_use]
     pub fn is_empty_non_blocking(&self) -> Option<bool> {
         self.queue.try_read().ok().map(|q| q.is_empty())
     }
@@ -196,15 +200,14 @@ where
     /// Wait for items without blocking UI (with timeout)
     pub async fn wait_for_items(&self) -> Result<(), FeedbackError> {
         // Use notification system with timeout
-        match timeout(self.ui_timeout, self.notify.notified()).await {
-            Ok(_) => Ok(()),
-            Err(_) => {
-                // Update timeout statistics
-                if let Ok(mut stats) = self.stats.try_write() {
-                    stats.timeouts += 1;
-                }
-                Err(FeedbackError::Timeout)
+        if let Ok(()) = timeout(self.ui_timeout, self.notify.notified()).await {
+            Ok(())
+        } else {
+            // Update timeout statistics
+            if let Ok(mut stats) = self.stats.try_write() {
+                stats.timeouts += 1;
             }
+            Err(FeedbackError::Timeout)
         }
     }
 
@@ -239,6 +242,7 @@ where
 pub type FeedbackQueue<T> = UiResponsiveQueue<T>;
 
 /// Create a standard feedback processing queue
+#[must_use]
 pub fn create_feedback_queue<T>() -> FeedbackQueue<T>
 where
     T: Send + Sync + 'static,
@@ -247,6 +251,7 @@ where
 }
 
 /// Create a high-priority UI queue with lower latency
+#[must_use]
 pub fn create_ui_priority_queue<T>() -> FeedbackQueue<T>
 where
     T: Send + Sync + 'static,

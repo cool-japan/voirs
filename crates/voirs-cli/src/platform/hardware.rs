@@ -401,7 +401,8 @@ fn detect_windows_cpu() -> CpuInfo {
         let processor_id = output_str.trim().to_lowercase();
 
         // Infer common instruction sets based on processor info
-        let mut instruction_sets = vec!["x86-64".to_string(), "SSE".to_string(), "SSE2".to_string()];
+        let mut instruction_sets =
+            vec!["x86-64".to_string(), "SSE".to_string(), "SSE2".to_string()];
 
         // Most modern Intel/AMD processors support these
         if processor_id.contains("intel") || processor_id.contains("amd") {
@@ -491,7 +492,11 @@ fn detect_macos_gpu() -> GpuInfo {
 
             // Extract vendor from chipset name
             if in_chipset_section && !name.is_empty() {
-                vendor = if name.contains("Apple") || name.contains("M1") || name.contains("M2") || name.contains("M3") {
+                vendor = if name.contains("Apple")
+                    || name.contains("M1")
+                    || name.contains("M2")
+                    || name.contains("M3")
+                {
                     "Apple".to_string()
                 } else if name.contains("AMD") || name.contains("Radeon") {
                     "AMD".to_string()
@@ -523,7 +528,9 @@ fn detect_macos_gpu() -> GpuInfo {
             }
 
             // Apple Silicon unified memory detection
-            if (name.contains("M1") || name.contains("M2") || name.contains("M3")) && trimmed.starts_with("Metal:") {
+            if (name.contains("M1") || name.contains("M2") || name.contains("M3"))
+                && trimmed.starts_with("Metal:")
+            {
                 // For Apple Silicon, VRAM is shared with system memory
                 // Try to estimate from Metal Support section
                 if let Some(value_str) = trimmed.split(':').nth(1) {
@@ -1048,7 +1055,8 @@ fn get_temperature_info() -> TemperatureInfo {
     // Platform-specific temperature monitoring
     let mut cpu_temp = 45.0; // Default fallback
     let mut gpu_temp = 50.0; // Default fallback
-    #[allow(unused_assignments)] // Initial value used as fallback for non-linux/macos/windows platforms
+    #[allow(unused_assignments)]
+    // Initial value used as fallback for non-linux/macos/windows platforms
     let mut thermal_throttling = false;
 
     #[cfg(target_os = "linux")]
@@ -1075,7 +1083,13 @@ fn get_temperature_info() -> TemperatureInfo {
         if let Ok(entries) = fs::read_dir("/sys/class/thermal") {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.file_name().unwrap().to_str().unwrap_or("").starts_with("thermal_zone") {
+                if path
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap_or("")
+                    .starts_with("thermal_zone")
+                {
                     let temp_path = path.join("temp");
                     if let Ok(temp_str) = fs::read_to_string(&temp_path) {
                         if let Ok(temp_millidegrees) = temp_str.trim().parse::<i32>() {

@@ -232,6 +232,7 @@ impl QualityMeasurement {
 }
 
 /// Automated quality analyzer
+#[derive(Debug)]
 pub struct QualityAnalyzer {
     targets: QualityTargets,
     processor: EmotionProcessor,
@@ -425,7 +426,12 @@ impl QualityAnalyzer {
         // High consistency means low variance
         let consistency_score = mean_consistency * (1.0 - (std_dev / 100.0).min(0.3));
 
-        Ok(consistency_score.max(0.0).min(100.0))
+        // Handle NaN cases (e.g., empty windows) and clamp to valid range
+        if consistency_score.is_nan() || consistency_score.is_infinite() {
+            Ok(0.0)
+        } else {
+            Ok(consistency_score.clamp(0.0, 100.0))
+        }
     }
 
     /// Estimate user satisfaction percentage
@@ -444,7 +450,12 @@ impl QualityAnalyzer {
                           (clarity * 35.0) +              // 35% weight on clarity
                           (appropriateness * 25.0); // 25% weight on appropriateness
 
-        Ok(satisfaction.max(0.0).min(100.0))
+        // Handle NaN/Inf cases and clamp to valid range
+        if satisfaction.is_nan() || satisfaction.is_infinite() {
+            Ok(0.0)
+        } else {
+            Ok(satisfaction.clamp(0.0, 100.0))
+        }
     }
 
     /// Measure audio quality score (MOS 1-5)
@@ -505,7 +516,7 @@ impl QualityAnalyzer {
 
             // High intensity emotions should have more pronounced prosody
             let prosody_match = expected_prosody * intensity_factor;
-            Ok(prosody_match.max(0.5).min(1.0)) // Ensure reasonable range
+            Ok(prosody_match.clamp(0.5, 1.0)) // Ensure reasonable range
         } else {
             Ok(0.7) // Neutral prosody naturalness
         }

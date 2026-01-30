@@ -19,13 +19,13 @@ trait F32Midpoint {
 
 impl F32Midpoint for f32 {
     fn midpoint(a: f32, b: f32) -> f32 {
-        (a + b) / 2.0
+        f32::midpoint(a, b)
     }
 }
 
 impl InteractiveTrainer {
     /// Generate detailed feedback for an exercise attempt
-    pub async fn generate_attempt_feedback(
+    pub fn generate_attempt_feedback(
         &self,
         quality_score: &voirs_evaluation::QualityScore,
         pronunciation_score: &voirs_evaluation::PronunciationScore,
@@ -87,6 +87,7 @@ impl InteractiveTrainer {
     }
 
     /// Generate encouraging message based on performance score
+    #[must_use]
     pub fn generate_encouragement(&self, score: f32) -> String {
         match score {
             s if s > 0.9 => "Outstanding performance! You're mastering this!".to_string(),
@@ -98,6 +99,7 @@ impl InteractiveTrainer {
     }
 
     /// Check if an attempt meets the success criteria
+    #[must_use]
     pub fn check_success_criteria(
         &self,
         attempt: &ExerciseAttempt,
@@ -108,6 +110,7 @@ impl InteractiveTrainer {
     }
 
     /// Analyze how well an attempt meets the success criteria
+    #[must_use]
     pub fn analyze_criteria_compliance(
         &self,
         attempt: &ExerciseAttempt,
@@ -123,6 +126,7 @@ impl InteractiveTrainer {
     }
 
     /// Generate next steps for the user based on attempt results
+    #[must_use]
     pub fn generate_next_steps(
         &self,
         attempt: &ExerciseAttempt,
@@ -148,6 +152,7 @@ impl InteractiveTrainer {
     }
 
     /// Generate specific improvement suggestions for an attempt
+    #[must_use]
     pub fn generate_improvement_suggestions(
         &self,
         attempt: &ExerciseAttempt,
@@ -189,6 +194,7 @@ impl InteractiveTrainer {
     }
 
     /// Calculate consistency score across multiple attempts
+    #[must_use]
     pub fn calculate_consistency_score(&self, attempts: &[ExerciseAttempt]) -> f32 {
         if attempts.len() < 2 {
             return 0.5;
@@ -207,6 +213,7 @@ impl InteractiveTrainer {
     }
 
     /// Calculate improvement score from first to last attempt
+    #[must_use]
     pub fn calculate_improvement_score(&self, attempts: &[ExerciseAttempt]) -> f32 {
         if attempts.len() < 2 {
             return 0.0;
@@ -222,6 +229,7 @@ impl InteractiveTrainer {
     }
 
     /// Calculate improvement trend across a session
+    #[must_use]
     pub fn calculate_session_improvement_trend(&self, exercises: &[ExerciseResult]) -> f32 {
         if exercises.len() < 2 {
             return 0.0;
@@ -254,7 +262,7 @@ impl InteractiveTrainer {
     }
 
     /// Check for session achievements based on performance
-    pub async fn check_session_achievements(
+    pub fn check_session_achievements(
         &self,
         exercises: &[ExerciseResult],
     ) -> Result<Vec<String>, FeedbackError> {
@@ -275,6 +283,7 @@ impl InteractiveTrainer {
     }
 
     /// Generate session-level recommendations for improvement
+    #[must_use]
     pub fn generate_session_recommendations(&self, exercises: &[ExerciseResult]) -> Vec<String> {
         let mut recommendations = Vec::new();
 
@@ -316,6 +325,7 @@ impl InteractiveTrainer {
     }
 
     /// Suggest next learning path based on session performance
+    #[must_use]
     pub fn suggest_next_learning_path(&self, exercises: &[ExerciseResult]) -> LearningPath {
         if exercises.is_empty() {
             return LearningPath {

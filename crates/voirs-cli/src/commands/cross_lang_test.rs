@@ -284,7 +284,7 @@ async fn check_c_api_availability() -> BindingStatus {
 /// Check Python bindings availability
 async fn check_python_availability() -> BindingStatus {
     let output = Command::new("python3")
-        .args(&["-c", "import voirs_ffi; print(voirs_ffi.__version__ if hasattr(voirs_ffi, '__version__') else 'unknown')"])
+        .args(["-c", "import voirs_ffi; print(voirs_ffi.__version__ if hasattr(voirs_ffi, '__version__') else 'unknown')"])
         .output();
 
     match output {
@@ -318,7 +318,7 @@ async fn check_python_availability() -> BindingStatus {
 /// Check Node.js bindings availability
 async fn check_nodejs_availability() -> BindingStatus {
     let output = Command::new("node")
-        .args(&["-e", "try { const voirs = require('./voirs-ffi'); console.log('available'); } catch(e) { console.error(e.message); process.exit(1); }"])
+        .args(["-e", "try { const voirs = require('./voirs-ffi'); console.log('available'); } catch(e) { console.error(e.message); process.exit(1); }"])
         .output();
 
     match output {

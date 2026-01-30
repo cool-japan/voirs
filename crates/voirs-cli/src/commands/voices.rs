@@ -1,5 +1,6 @@
 //! Voice management command implementations.
 
+use chrono::Utc;
 use indicatif::{ProgressBar, ProgressStyle};
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
@@ -193,7 +194,7 @@ pub async fn run_download_voice(voice_id: &str, force: bool, config: &AppConfig)
     }
 
     // Create voice directory
-    std::fs::create_dir_all(&voice_dir).map_err(|e| voirs_sdk::VoirsError::from(e))?;
+    std::fs::create_dir_all(&voice_dir).map_err(voirs_sdk::VoirsError::from)?;
 
     println!("Preparing to download voice models...");
 
@@ -219,7 +220,7 @@ pub async fn run_download_voice(voice_id: &str, force: bool, config: &AppConfig)
 
         // Create parent directories if needed
         if let Some(parent) = local_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| voirs_sdk::VoirsError::from(e))?;
+            std::fs::create_dir_all(parent).map_err(voirs_sdk::VoirsError::from)?;
         }
 
         println!("  Downloading {} model...", model_type);
@@ -241,7 +242,7 @@ pub async fn run_download_voice(voice_id: &str, force: bool, config: &AppConfig)
                 repository
             );
 
-            match download_model_file(&download_url, &local_path, &config).await {
+            match download_model_file(&download_url, &local_path, config).await {
                 Ok(_) => {
                     println!("    ✓ Downloaded successfully from {}", repository);
                     download_success = true;
@@ -261,7 +262,7 @@ pub async fn run_download_voice(voice_id: &str, force: bool, config: &AppConfig)
                 &local_path,
                 format!("Placeholder for {} model: {}", model_type, model_path),
             )
-            .map_err(|e| voirs_sdk::VoirsError::from(e))?;
+            .map_err(voirs_sdk::VoirsError::from)?;
 
             println!("    ⚠ Placeholder created: {}", local_path.display());
         }
@@ -273,7 +274,7 @@ pub async fn run_download_voice(voice_id: &str, force: bool, config: &AppConfig)
         voirs_sdk::VoirsError::config_error(format!("Failed to serialize voice config: {}", e))
     })?;
 
-    std::fs::write(&voice_config_path, voice_json).map_err(|e| voirs_sdk::VoirsError::from(e))?;
+    std::fs::write(&voice_config_path, voice_json).map_err(voirs_sdk::VoirsError::from)?;
 
     println!();
     println!("Voice '{}' downloaded successfully!", voice_id);
@@ -513,7 +514,7 @@ fn verify_file_checksum(file_path: &std::path::Path) -> Result<()> {
     }
 
     let expected_checksum = std::fs::read_to_string(&checksum_path)
-        .or_else(|_| std::fs::read_to_string(&file_path.with_extension("sha256")))
+        .or_else(|_| std::fs::read_to_string(file_path.with_extension("sha256")))
         .map_err(|e| {
             voirs_sdk::VoirsError::config_error(format!("Failed to read checksum file: {}", e))
         })?
@@ -753,4 +754,87 @@ fn estimate_voice_size(voice_dir: &std::path::Path) -> String {
     } else {
         format!("{:.1} GB", total_size as f64 / (1024.0 * 1024.0 * 1024.0))
     }
+}
+
+/// Run voice preview command
+///
+/// Generates a short audio sample with the specified voice to let users
+/// quickly hear what it sounds like before using it for synthesis.
+pub async fn run_preview_voice(
+    voice_id: &str,
+    text: Option<&str>,
+    output: Option<&std::path::PathBuf>,
+    no_play: bool,
+    config: &AppConfig,
+    global: &crate::GlobalOptions,
+) -> Result<()> {
+    use crate::commands::synthesize::SynthesizeArgs;
+
+    // Default preview text if none provided
+    let preview_text = text.unwrap_or("This is a preview of this voice.");
+
+    println!("🎤 Voice Preview");
+    println!("Voice ID: {}", voice_id);
+    println!("Preview text: \"{}\"", preview_text);
+    println!();
+
+    // Verify voice exists
+    let pipeline = VoirsPipeline::builder().build().await?;
+    let voices = pipeline.list_voices().await?;
+    let voice = voices.iter().find(|v| v.id == voice_id).ok_or_else(|| {
+        voirs_sdk::VoirsError::audio_error(format!(
+            "Voice '{}' not found. Use 'voirs list-voices' to see available voices.",
+            voice_id
+        ))
+    })?;
+
+    // Show voice info
+    println!("Voice: {}", voice.name);
+    println!("Language: {}", voice.language.as_str());
+    if let Some(gender) = voice.characteristics.gender {
+        println!("Gender: {:?}", gender);
+    }
+    println!();
+
+    // Determine output path
+    let temp_dir = std::env::temp_dir();
+    let output_path = if let Some(out) = output {
+        out.clone()
+    } else {
+        temp_dir.join(format!(
+            "voirs_preview_{}_{}.wav",
+            voice_id,
+            chrono::Utc::now().timestamp()
+        ))
+    };
+
+    // Use the existing synthesize implementation
+    let synthesize_args = SynthesizeArgs {
+        text: preview_text,
+        output: Some(&output_path),
+        rate: 1.0,
+        pitch: 0.0,
+        volume: 0.0,
+        quality: voirs_sdk::QualityLevel::High,
+        enhance: false,
+        play: !no_play && output.is_none(), // Play if not explicitly disabled and no custom output
+        auto_detect: false,                 // Don't auto-detect for previews
+    };
+
+    // Temporarily override voice in config
+    let mut config_override = config.clone();
+    config_override.cli.default_voice = Some(voice_id.to_string());
+
+    println!("🎵 Synthesizing preview...");
+    crate::commands::synthesize::run_synthesize(synthesize_args, &config_override, global).await?;
+
+    // If user specified an output file, let them know where it is
+    if output.is_some() {
+        println!("✅ Preview saved to: {}", output_path.display());
+    } else if no_play {
+        println!("✅ Preview saved to: {}", output_path.display());
+        println!("   (temporary file - will be cleaned up by system)");
+    }
+
+    Ok(())
 }

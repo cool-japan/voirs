@@ -591,7 +591,7 @@ fn generate_clipped_audio(sample_rate: u32, frequency: f32, duration: f32) -> Ve
                 .sin()
                 * 0.8;
             // Introduce clipping artifacts
-            signal.max(-0.6).min(0.6)
+            signal.clamp(-0.6, 0.6)
         })
         .collect()
 }

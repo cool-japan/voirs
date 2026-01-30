@@ -76,7 +76,7 @@ impl TextEncoderConfig {
             ));
         }
 
-        if self.hidden_channels % self.n_heads != 0 {
+        if !self.hidden_channels.is_multiple_of(self.n_heads) {
             return Err(VocoderError::ModelError(
                 "Hidden channels must be divisible by number of heads".to_string(),
             ));
@@ -505,15 +505,15 @@ impl TextEncoder {
             current_output = layer.forward(&current_output, None)?;
         }
 
-        // Apply output projection
+        // Apply output projection (matrix multiplication)
         let mut final_output = vec![vec![0.0; hidden_dim]; seq_len];
-        for i in 0..seq_len {
-            for j in 0..hidden_dim {
+        for (i, output_row) in final_output.iter_mut().enumerate().take(seq_len) {
+            for (j, output_cell) in output_row.iter_mut().enumerate().take(hidden_dim) {
                 let mut sum = 0.0;
-                for k in 0..hidden_dim {
-                    sum += current_output[i][k] * self.output_projection[k][j];
+                for (k, &input_val) in current_output[i].iter().enumerate().take(hidden_dim) {
+                    sum += input_val * self.output_projection[k][j];
                 }
-                final_output[i][j] = sum;
+                *output_cell = sum;
             }
         }
 

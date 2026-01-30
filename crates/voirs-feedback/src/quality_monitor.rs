@@ -1,4 +1,4 @@
-//! Automated Quality Monitoring System for VoiRS Feedback
+//! Automated Quality Monitoring System for `VoiRS` Feedback
 //!
 //! This module provides comprehensive automated monitoring of system quality,
 //! performance metrics, user experience indicators, and reliability measures.
@@ -562,7 +562,7 @@ impl QualityMonitor {
         let email_result = Message::builder()
             .from(smtp_username.parse().unwrap_or_else(|_| "noreply@voirs.ai".parse().unwrap()))
             .to(recipient.parse().unwrap_or_else(|_| "admin@voirs.ai".parse().unwrap()))
-            .subject(&format!("VoiRS Quality Alert: {}", alert.title))
+            .subject(format!("VoiRS Quality Alert: {}", alert.title))
             .body(format!(
                 "Quality Alert Details:\n\nTitle: {}\nMessage: {}\nSeverity: {:?}\nTimestamp: {}\nMetric: {}\nCurrent Value: {}\nThreshold: {}",
                 alert.title, alert.message, alert.severity, alert.timestamp, alert.metric, alert.current_value, alert.threshold_value
@@ -571,21 +571,20 @@ impl QualityMonitor {
         match email_result {
             Ok(email) => {
                 let creds = Credentials::new(smtp_username, smtp_password);
-                let mailer = match SmtpTransport::relay(&smtp_server) {
-                    Ok(builder) => builder.credentials(creds).build(),
-                    Err(_) => {
-                        log::warn!("Failed to connect to SMTP server, using localhost fallback");
-                        SmtpTransport::builder_dangerous("localhost")
-                            .port(25)
-                            .credentials(creds)
-                            .build()
-                    }
+                let mailer = if let Ok(builder) = SmtpTransport::relay(&smtp_server) {
+                    builder.credentials(creds).build()
+                } else {
+                    log::warn!("Failed to connect to SMTP server, using localhost fallback");
+                    SmtpTransport::builder_dangerous("localhost")
+                        .port(25)
+                        .credentials(creds)
+                        .build()
                 };
 
                 match mailer.send(&email) {
                     Ok(_) => log::info!("Email alert sent successfully: {}", alert.title),
                     Err(e) => {
-                        log::error!("Failed to send email alert: {}", e);
+                        log::error!("Failed to send email alert: {e}");
                         // Fallback to logging
                         log::warn!(
                             "EMAIL ALERT (fallback): {} - {}",
@@ -596,7 +595,7 @@ impl QualityMonitor {
                 }
             }
             Err(e) => {
-                log::error!("Failed to create email message: {}", e);
+                log::error!("Failed to create email message: {e}");
                 log::warn!(
                     "EMAIL ALERT (fallback): {} - {}",
                     alert.title,
@@ -661,7 +660,7 @@ impl QualityMonitor {
                     }
                 }
                 Err(e) => {
-                    log::error!("Failed to send webhook alert: {}", e);
+                    log::error!("Failed to send webhook alert: {e}");
                     log::warn!(
                         "WEBHOOK ALERT (fallback): {} - {}",
                         alert.title,
@@ -709,7 +708,7 @@ impl QualityMonitor {
             Ok(())
         } else {
             Err(QualityMonitorError::MonitoringFailure {
-                message: format!("Alert {} not found", alert_id),
+                message: format!("Alert {alert_id} not found"),
             })
         }
     }
@@ -729,7 +728,7 @@ impl QualityMonitor {
             Ok(())
         } else {
             Err(QualityMonitorError::MonitoringFailure {
-                message: format!("Alert {} not found", alert_id),
+                message: format!("Alert {alert_id} not found"),
             })
         }
     }

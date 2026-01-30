@@ -1,7 +1,7 @@
-//! Core FeedbackVisualizer implementation
+//! Core `FeedbackVisualizer` implementation
 
 #[cfg(feature = "ui")]
-use crate::traits::*;
+use crate::traits::{Achievement, FeedbackResponse, FocusArea, ProgressSnapshot, UserFeedback};
 #[cfg(feature = "ui")]
 use crate::visualization::config::{CachedChart, VisualizationConfig, VisualizationTheme};
 #[cfg(feature = "ui")]
@@ -42,11 +42,13 @@ pub struct FeedbackVisualizer {
 #[cfg(feature = "ui")]
 impl FeedbackVisualizer {
     /// Create a new feedback visualizer
+    #[must_use]
     pub fn new() -> Self {
         Self::with_config(VisualizationConfig::default())
     }
 
     /// Create with custom configuration
+    #[must_use]
     pub fn with_config(config: VisualizationConfig) -> Self {
         Self {
             config,
@@ -82,14 +84,14 @@ impl FeedbackVisualizer {
                 if !feedback.progress_indicators.improving_areas.is_empty() {
                     ui.heading("📈 Improving Areas");
                     for area in &feedback.progress_indicators.improving_areas {
-                        ui.label(format!("✅ {}", area));
+                        ui.label(format!("✅ {area}"));
                     }
                 }
 
                 if !feedback.progress_indicators.attention_areas.is_empty() {
                     ui.heading("⚠️ Needs Attention");
                     for area in &feedback.progress_indicators.attention_areas {
-                        ui.label(format!("🔍 {}", area));
+                        ui.label(format!("🔍 {area}"));
                     }
                 }
 
@@ -193,7 +195,7 @@ impl FeedbackVisualizer {
                 ui.vertical(|ui| {
                     ui.heading("🎯 Next Steps");
                     for recommendation in &session_data.recommendations {
-                        ui.label(format!("• {}", recommendation));
+                        ui.label(format!("• {recommendation}"));
                     }
                 });
             });
@@ -209,7 +211,7 @@ impl FeedbackVisualizer {
     pub fn render_waveform(&self, ui: &mut Ui, audio_data: &[f32], title: &str) {
         ui.group(|ui| {
             ui.vertical(|ui| {
-                ui.heading(format!("🎵 {}", title));
+                ui.heading(format!("🎵 {title}"));
 
                 if audio_data.is_empty() {
                     ui.label("No audio data available");
@@ -234,7 +236,7 @@ impl FeedbackVisualizer {
     ) {
         ui.group(|ui| {
             ui.vertical(|ui| {
-                ui.heading(format!("🎧 {}", title));
+                ui.heading(format!("🎧 {title}"));
 
                 if audio_data.is_empty() {
                     ui.label("No audio data available");
@@ -347,7 +349,7 @@ impl FeedbackVisualizer {
                 ui.vertical(|ui| {
                     ui.label(&item.message);
                     if let Some(suggestion) = &item.suggestion {
-                        ui.small(format!("💡 {}", suggestion));
+                        ui.small(format!("💡 {suggestion}"));
                     }
                 });
             });
@@ -386,7 +388,7 @@ impl FeedbackVisualizer {
         let total_seconds = duration.as_secs();
         let minutes = total_seconds / 60;
         let seconds = total_seconds % 60;
-        format!("{}:{:02}", minutes, seconds)
+        format!("{minutes}:{seconds:02}")
     }
 
     // ========================================================================
@@ -685,8 +687,8 @@ impl FeedbackVisualizer {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            config: crate::visualization::config::VisualizationConfig::default(),
-            theme: crate::visualization::config::VisualizationTheme::default(),
+            config: crate::visualization::config::VisualizationConfig,
+            theme: crate::visualization::config::VisualizationTheme,
             chart_cache: std::sync::Arc::new(std::sync::RwLock::new(HashMap::new())),
         }
     }

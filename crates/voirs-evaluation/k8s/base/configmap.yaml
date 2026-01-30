@@ -1,0 +1,175 @@
+# VoiRS Evaluation Configuration
+# ConfigMap containing application configuration
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: voirs-evaluation-config
+  labels:
+    app: voirs-evaluation
+data:
+  # Application configuration
+  config.yaml: |
+    # VoiRS Evaluation Configuration
+    distributed:
+      max_workers: 20
+      min_workers: 1
+      task_timeout_seconds: 300
+      heartbeat_interval_seconds: 30
+      max_retries: 3
+
+      load_balancing:
+        strategy: "adaptive"  # Options: round_robin, least_loaded, random, weighted, latency_aware, bandwidth_aware, adaptive
+
+      auto_scaling:
+        enabled: true
+        target_cpu_utilization: 70.0
+        target_memory_utilization: 80.0
+        target_queue_depth: 20
+        scale_up_threshold: 3
+        scale_down_threshold: 5
+        cooldown_seconds: 300
+        scale_up_increment: 2
+        scale_down_decrement: 1
+
+      fault_tolerance:
+        enable_checkpointing: true
+        checkpoint_interval_seconds: 600
+        enable_result_replication: false
+        replication_factor: 2
+        retry_backoff_seconds: 10
+
+      edge_computing:
+        enabled: false
+        bandwidth_aware: true
+        edge_caching: true
+        max_bandwidth_mbps: 100.0
+        compress_transfers: true
+        edge_to_edge_enabled: false
+        edge_latency_threshold_ms: 50
+
+      cluster_config:
+        enabled: true
+        cluster_name: "voirs-eval-cluster"
+        consensus_enabled: false
+        consensus_algorithm: "raft"
+        replication_enabled: false
+        replication_factor: 3
+        partition_tolerance: true
+        discovery_method: "kubernetes"
+
+    quality:
+      # Quality evaluation settings
+      default_sample_rate: 16000
+      enable_gpu: false
+      cache_results: true
+      cache_ttl_seconds: 3600
+
+      metrics:
+        pesq:
+          enabled: true
+          mode: "wb"  # narrow-band (nb) or wide-band (wb)
+        stoi:
+          enabled: true
+          extended: true
+        mcd:
+          enabled: true
+          use_dtw: true
+        polqa:
+          enabled: false
+          bandwidth: "wideband"  # narrowband, wideband, superwideband, fullband
+
+    logging:
+      level: "info"
+      format: "json"
+      output: "stdout"
+      include_timestamps: true
+      include_caller: true
+
+    metrics:
+      enabled: true
+      port: 9090
+      path: "/metrics"
+      include_runtime_metrics: true
+      include_custom_metrics: true
+
+    api:
+      # REST API configuration
+      enable_rest_api: true
+      rest_port: 8080
+      enable_cors: true
+      cors_allowed_origins: ["*"]
+      max_request_size_mb: 100
+
+      # Rate limiting
+      rate_limiting:
+        enabled: true
+        requests_per_minute: 60
+        burst_size: 10
+
+      # Authentication
+      authentication:
+        enabled: false
+        require_api_key: false
+        api_key_header: "X-API-Key"
+
+      # WebSocket configuration
+      enable_websocket: true
+      websocket_path: "/ws"
+      websocket_max_connections: 100
+      websocket_ping_interval_seconds: 30
+
+    storage:
+      # Data storage configuration
+      backend: "filesystem"  # Options: filesystem, s3, gcs, azure
+      base_path: "/data"
+      enable_compression: true
+      compression_level: 6
+
+      # S3 configuration (if using S3 backend)
+      s3:
+        bucket: ""
+        region: ""
+        endpoint: ""
+        access_key: ""
+        secret_key: ""
+
+      # Retention policy
+      retention:
+        enabled: true
+        max_age_days: 90
+        max_size_gb: 100
+        cleanup_interval_hours: 24
+
+  # Additional configuration files
+  prometheus.yaml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+
+    scrape_configs:
+    - job_name: 'voirs-evaluation'
+      kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+          - default
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: pod
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: namespace

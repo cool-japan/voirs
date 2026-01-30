@@ -335,8 +335,8 @@ mod tests {
 
         // Note: This might fail if PipelineConfig::from_file is not implemented
         // but the API should work
-        if result.is_ok() {
-            let pipeline = result.unwrap().with_validation(false).build().await;
+        if let Ok(builder) = result {
+            let pipeline = builder.with_validation(false).build().await;
             assert!(pipeline.is_ok());
         }
     }

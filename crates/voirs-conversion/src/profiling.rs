@@ -274,7 +274,7 @@ impl ConversionProfiler {
             performance_score: 0.0,
         };
 
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().expect("RwLock write poisoned");
         sessions.insert(session_id.clone(), session);
 
         // Limit session count
@@ -292,7 +292,7 @@ impl ConversionProfiler {
 
     /// End a profiling session and perform analysis
     pub fn end_session(&self, session_id: &str) -> Result<ProfilingReport> {
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().expect("RwLock write poisoned");
 
         if let Some(session) = sessions.get_mut(session_id) {
             session.end_time = Some(SystemTime::now());
@@ -318,7 +318,7 @@ impl ConversionProfiler {
 
     /// Record timing for a specific stage
     pub fn record_stage_timing(&self, session_id: &str, stage_name: &str, duration: Duration) {
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().expect("RwLock write poisoned");
 
         if let Some(session) = sessions.get_mut(session_id) {
             let stage_info = session
@@ -342,7 +342,7 @@ impl ConversionProfiler {
             return;
         }
 
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().expect("RwLock write poisoned");
 
         if let Some(session) = sessions.get_mut(session_id) {
             let sample = MemorySample {
@@ -371,7 +371,7 @@ impl ConversionProfiler {
             return;
         }
 
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().expect("RwLock write poisoned");
 
         if let Some(session) = sessions.get_mut(session_id) {
             let sample = CpuSample {
@@ -406,12 +406,15 @@ impl ConversionProfiler {
 
     /// Get global performance metrics
     pub fn get_global_metrics(&self) -> GlobalMetrics {
-        self.global_metrics.read().unwrap().clone()
+        self.global_metrics
+            .read()
+            .expect("RwLock read poisoned")
+            .clone()
     }
 
     /// Get detailed report for a specific session
     pub fn get_session_report(&self, session_id: &str) -> Result<ProfilingReport> {
-        let sessions = self.sessions.read().unwrap();
+        let sessions = self.sessions.read().expect("RwLock read poisoned");
 
         if let Some(session) = sessions.get(session_id) {
             Ok(ProfilingReport::from_session(session))
@@ -422,7 +425,7 @@ impl ConversionProfiler {
 
     /// Get performance trends over time
     pub fn get_performance_trends(&self) -> Vec<TrendDataPoint> {
-        let metrics = self.global_metrics.read().unwrap();
+        let metrics = self.global_metrics.read().expect("RwLock read poisoned");
         metrics.performance_trends.iter().cloned().collect()
     }
 
@@ -462,7 +465,7 @@ impl ConversionProfiler {
 
     /// Update global metrics with session data
     fn update_global_metrics(&self, session: &ProfilingSession) {
-        let mut metrics = self.global_metrics.write().unwrap();
+        let mut metrics = self.global_metrics.write().expect("RwLock write poisoned");
 
         metrics.total_conversions += 1;
 

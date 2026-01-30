@@ -466,7 +466,7 @@ impl EnhancedRtScheduler {
             .and_then(|s| s.parse().ok())
             .unwrap_or(1);
 
-        let cores_per_node = (num_cores + numa_node_count - 1) / numa_node_count;
+        let cores_per_node = num_cores.div_ceil(numa_node_count);
         let mut nodes = Vec::new();
         let mut core_to_node = HashMap::new();
 

@@ -23,11 +23,13 @@ pub struct DataAnonymizer;
 
 impl DataAnonymizer {
     /// Create a new data anonymizer
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
 
     /// Anonymize user ID
+    #[must_use]
     pub fn anonymize_user_id(&self, user_id: &str) -> String {
         // If already anonymized, return as-is (idempotent)
         if user_id.starts_with("anon_") {
@@ -147,13 +149,14 @@ impl EncryptionService {
         let mut key = [0u8; 32];
         rng.fill(&mut key)
             .map_err(|e| PersistenceError::EncryptionError {
-                message: format!("Failed to generate encryption key: {:?}", e),
+                message: format!("Failed to generate encryption key: {e:?}"),
             })?;
 
         Ok(Self { key })
     }
 
     /// Create encryption service with existing key
+    #[must_use]
     pub fn with_key(key: [u8; 32]) -> Self {
         Self { key }
     }
@@ -165,7 +168,7 @@ impl EncryptionService {
 
         let cipher = Aes256Gcm::new_from_slice(&self.key).map_err(|e| {
             PersistenceError::EncryptionError {
-                message: format!("Failed to create cipher: {}", e),
+                message: format!("Failed to create cipher: {e}"),
             }
         })?;
 
@@ -174,7 +177,7 @@ impl EncryptionService {
             cipher
                 .encrypt(&nonce, data)
                 .map_err(|e| PersistenceError::EncryptionError {
-                    message: format!("Encryption failed: {}", e),
+                    message: format!("Encryption failed: {e}"),
                 })?;
 
         // Prepend nonce to ciphertext
@@ -196,7 +199,7 @@ impl EncryptionService {
 
         let cipher = Aes256Gcm::new_from_slice(&self.key).map_err(|e| {
             PersistenceError::EncryptionError {
-                message: format!("Failed to create cipher: {}", e),
+                message: format!("Failed to create cipher: {e}"),
             }
         })?;
 
@@ -206,7 +209,7 @@ impl EncryptionService {
         cipher
             .decrypt(nonce, ciphertext)
             .map_err(|e| PersistenceError::EncryptionError {
-                message: format!("Decryption failed: {}", e),
+                message: format!("Decryption failed: {e}"),
             })
     }
 
@@ -214,7 +217,7 @@ impl EncryptionService {
     pub fn encrypt_json<T: Serialize>(&self, data: &T) -> PersistenceResult<Vec<u8>> {
         let json_data =
             serde_json::to_vec(data).map_err(|e| PersistenceError::SerializationError {
-                message: format!("JSON serialization failed: {}", e),
+                message: format!("JSON serialization failed: {e}"),
             })?;
 
         self.encrypt(&json_data)
@@ -228,11 +231,12 @@ impl EncryptionService {
         let decrypted_data = self.decrypt(encrypted_data)?;
 
         serde_json::from_slice(&decrypted_data).map_err(|e| PersistenceError::SerializationError {
-            message: format!("JSON deserialization failed: {}", e),
+            message: format!("JSON deserialization failed: {e}"),
         })
     }
 
     /// Get key for backup/restore (be careful with this!)
+    #[must_use]
     pub fn get_key(&self) -> &[u8; 32] {
         &self.key
     }
@@ -270,7 +274,7 @@ impl PasswordHasher {
             .hash_password(password.as_bytes(), &salt)
             .map(|hash| hash.to_string())
             .map_err(|e| PersistenceError::EncryptionError {
-                message: format!("Password hashing failed: {}", e),
+                message: format!("Password hashing failed: {e}"),
             })
     }
 
@@ -281,7 +285,7 @@ impl PasswordHasher {
 
         let parsed_hash =
             PasswordHash::new(hash).map_err(|e| PersistenceError::EncryptionError {
-                message: format!("Invalid password hash: {}", e),
+                message: format!("Invalid password hash: {e}"),
             })?;
 
         let argon2 = Argon2::default();
@@ -342,6 +346,7 @@ pub struct PrivacyExportService {
 
 impl PrivacyExportService {
     /// Create a new privacy export service
+    #[must_use]
     pub fn new(config: PrivacyConfig) -> Self {
         Self {
             anonymizer: DataAnonymizer::new(),
@@ -359,7 +364,7 @@ impl PrivacyExportService {
         // Check if format is allowed
         if !self.config.allowed_export_formats.contains(&format) {
             return Err(PersistenceError::ConfigError {
-                message: format!("Export format {:?} not allowed", format),
+                message: format!("Export format {format:?} not allowed"),
             });
         }
 
@@ -399,7 +404,7 @@ impl PrivacyExportService {
         match format {
             ExportFormat::Json => serde_json::to_vec_pretty(&export_data).map_err(|e| {
                 PersistenceError::SerializationError {
-                    message: format!("JSON export failed: {}", e),
+                    message: format!("JSON export failed: {e}"),
                 }
             }),
             ExportFormat::Csv => {
@@ -414,7 +419,7 @@ impl PrivacyExportService {
                 Ok(csv_data.into_bytes())
             }
             ExportFormat::Xml | ExportFormat::Pdf => Err(PersistenceError::ConfigError {
-                message: format!("Export format {:?} not yet implemented", format),
+                message: format!("Export format {format:?} not yet implemented"),
             }),
         }
     }

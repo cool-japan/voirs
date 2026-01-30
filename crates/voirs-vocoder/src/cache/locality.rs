@@ -93,7 +93,7 @@ impl LocalityOptimizer {
         let in_tile_r = row % tile_rows;
         let in_tile_c = col % tile_cols;
 
-        let tiles_per_row = (total_cols + tile_cols - 1) / tile_cols;
+        let tiles_per_row = total_cols.div_ceil(tile_cols);
         let tile_idx = tile_r * tiles_per_row + tile_c;
         let tile_offset = tile_idx * tile_rows * tile_cols;
         let in_tile_offset = in_tile_r * tile_cols + in_tile_c;
@@ -162,7 +162,7 @@ impl LocalityOptimizer {
         let in_block_r = row % block_height;
         let in_block_c = col % block_width;
 
-        let blocks_per_row = (total_width + block_width - 1) / block_width;
+        let blocks_per_row = total_width.div_ceil(block_width);
         let block_idx = block_r * blocks_per_row + block_c;
         let block_offset = block_idx * block_height * block_width;
         let in_block_offset = in_block_r * block_width + in_block_c;
@@ -174,9 +174,8 @@ impl LocalityOptimizer {
     pub fn optimize_streaming_layout<T: Copy>(&self, data: &[T], chunk_size: usize) -> Vec<T> {
         // Ensure chunks are aligned to cache lines for optimal streaming
         let elements_per_cache_line = CACHE_LINE_SIZE / std::mem::size_of::<T>();
-        let aligned_chunk_size = ((chunk_size + elements_per_cache_line - 1)
-            / elements_per_cache_line)
-            * elements_per_cache_line;
+        let aligned_chunk_size =
+            chunk_size.div_ceil(elements_per_cache_line) * elements_per_cache_line;
 
         let mut optimized = Vec::with_capacity(data.len());
 

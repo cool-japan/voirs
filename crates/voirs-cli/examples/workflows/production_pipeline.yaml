@@ -1,0 +1,166 @@
+# Production Pipeline Workflow
+#
+# This workflow demonstrates a complete production pipeline with:
+# - Multiple synthesis attempts with fallback voices
+# - Quality validation
+# - Automatic retry with exponential backoff
+# - Error handling and recovery
+#
+# Usage: voirs workflow execute examples/workflows/production_pipeline.yaml \
+#          --var text="Your custom text here"
+
+name: "production-pipeline"
+version: "1.0"
+description: "Robust production synthesis pipeline with fallback and quality checks"
+
+variables:
+  text: "Welcome to VoiRS, a pure Rust speech synthesis framework."
+  primary_voice: "en-US-premium-neural"
+  fallback_voice: "en-US-standard-neural"
+  output_file: "production_output.wav"
+  temp_file: "temp_output.wav"
+  quality_target: 4.5
+  min_acceptable_quality: 4.0
+
+config:
+  max_parallel: 2
+  timeout_seconds: 900
+
+steps:
+  # Step 1: Primary synthesis attempt
+  - name: "primary_synthesis"
+    type: "synthesize"
+    description: "Attempt synthesis with primary (premium) voice"
+    parameters:
+      text: "${text}"
+      voice: "${primary_voice}"
+      output: "${temp_file}"
+      quality: "high"
+      rate: 1.0
+      pitch: 0.0
+      enhance: true
+    retry:
+      max_attempts: 3
+      strategy: "exponential_jitter"
+      backoff_multiplier: 2.0
+      initial_delay_ms: 500
+      max_delay_ms: 5000
+
+  # Step 2: Quality check for primary synthesis
+  - name: "primary_quality_check"
+    type: "validate"
+    description: "Validate primary synthesis meets quality target"
+    depends_on:
+      - step_name: "primary_synthesis"
+        must_succeed: true
+    condition:
+      left: "${primary_synthesis.success}"
+      operator: "equals"
+      right: "true"
+    parameters:
+      input: "${temp_file}"
+      min_mos_score: "${quality_target}"
+      check_artifacts: true
+      check_naturalness: true
+
+  # Step 3: Use primary output if quality check passed
+  - name: "finalize_primary"
+    type: "command"
+    description: "Copy primary output to final location"
+    depends_on:
+      - step_name: "primary_quality_check"
+        must_succeed: true
+    condition:
+      left: "${primary_quality_check.success}"
+      operator: "equals"
+      right: "true"
+    parameters:
+      command: "cp"
+      args:
+        - "${temp_file}"
+        - "${output_file}"
+
+  # Step 4: Fallback synthesis (if primary failed or quality low)
+  - name: "fallback_synthesis"
+    type: "synthesize"
+    description: "Fallback to standard voice if primary failed"
+    depends_on:
+      - step_name: "primary_synthesis"
+        must_succeed: false
+    condition:
+      left: "${primary_quality_check.success}"
+      operator: "not_equals"
+      right: "true"
+    parameters:
+      text: "${text}"
+      voice: "${fallback_voice}"
+      output: "${temp_file}"
+      quality: "high"
+      rate: 1.0
+      enhance: true
+    retry:
+      max_attempts: 5
+      strategy: "exponential"
+      backoff_multiplier: 1.5
+      initial_delay_ms: 1000
+      max_delay_ms: 8000
+
+  # Step 5: Quality check for fallback
+  - name: "fallback_quality_check"
+    type: "validate"
+    description: "Validate fallback synthesis meets minimum quality"
+    depends_on:
+      - step_name: "fallback_synthesis"
+        must_succeed: true
+    condition:
+      left: "${fallback_synthesis.success}"
+      operator: "equals"
+      right: "true"
+    parameters:
+      input: "${temp_file}"
+      min_mos_score: "${min_acceptable_quality}"
+      check_artifacts: true
+
+  # Step 6: Finalize fallback output
+  - name: "finalize_fallback"
+    type: "command"
+    description: "Copy fallback output to final location"
+    depends_on:
+      - step_name: "fallback_quality_check"
+        must_succeed: true
+    condition:
+      left: "${fallback_quality_check.success}"
+      operator: "equals"
+      right: "true"
+    parameters:
+      command: "cp"
+      args:
+        - "${temp_file}"
+        - "${output_file}"
+
+  # Step 7: Cleanup temporary files
+  - name: "cleanup"
+    type: "command"
+    description: "Remove temporary files"
+    depends_on:
+      - step_name: "finalize_primary"
+        must_succeed: false
+      - step_name: "finalize_fallback"
+        must_succeed: false
+    parameters:
+      command: "rm"
+      args:
+        - "-f"
+        - "${temp_file}"
+
+  # Step 8: Generate success report
+  - name: "report_success"
+    type: "command"
+    description: "Log successful completion"
+    depends_on:
+      - step_name: "cleanup"
+        must_succeed: false
+    parameters:
+      command: "echo"
+      args:
+        - "Production synthesis completed successfully: ${output_file}"

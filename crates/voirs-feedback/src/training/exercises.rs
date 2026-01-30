@@ -10,6 +10,7 @@ use std::time::Duration;
 /// Exercise library implementation
 impl ExerciseLibrary {
     /// Create the default comprehensive exercise library with 500+ exercises
+    #[must_use]
     pub fn create_default() -> Self {
         let mut exercises = Vec::new();
 

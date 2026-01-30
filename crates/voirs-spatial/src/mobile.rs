@@ -492,136 +492,6 @@ pub mod android {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_mobile_config_creation() {
-        let config = MobileConfig::default();
-        assert_eq!(config.platform, MobilePlatform::Generic);
-        assert!(config.adaptive_quality);
-    }
-
-    #[test]
-    fn test_quality_preset_values() {
-        assert_eq!(QualityPreset::Ultra.as_float(), 1.0);
-        assert_eq!(QualityPreset::Low.as_float(), 0.4);
-        assert_eq!(QualityPreset::Ultra.max_sources(), 32);
-        assert_eq!(QualityPreset::Minimal.max_sources(), 4);
-    }
-
-    #[test]
-    fn test_mobile_optimizer_creation() {
-        let config = MobileConfig::default();
-        let device = MobileDevice::default();
-        let optimizer = MobileOptimizer::new(config, device);
-
-        assert_eq!(optimizer.current_power_state, PowerState::Balanced);
-        assert_eq!(optimizer.battery_level, 1.0);
-    }
-
-    #[test]
-    fn test_power_state_determination() {
-        let config = MobileConfig::default();
-        let device = MobileDevice::default();
-        let mut optimizer = MobileOptimizer::new(config, device);
-
-        // Test low battery
-        optimizer.update_state(0.05, 25.0, 10.0);
-        assert_eq!(optimizer.get_power_state(), PowerState::UltraLowPower);
-
-        // Test thermal throttling
-        optimizer.update_state(0.8, 45.0, 10.0);
-        assert_eq!(optimizer.get_power_state(), PowerState::Throttled);
-
-        // Test normal conditions
-        optimizer.update_state(0.6, 30.0, 15.0);
-        assert_eq!(optimizer.get_power_state(), PowerState::Balanced);
-    }
-
-    #[test]
-    fn test_quality_adaptation() {
-        let config = MobileConfig {
-            adaptive_quality: true,
-            ..Default::default()
-        };
-        let device = MobileDevice::default();
-        let mut optimizer = MobileOptimizer::new(config, device);
-
-        // High CPU usage should reduce quality
-        optimizer.update_state(0.5, 30.0, 35.0);
-        let quality = optimizer.get_quality_preset();
-        assert!(matches!(
-            quality,
-            QualityPreset::Low | QualityPreset::Medium
-        ));
-    }
-
-    #[test]
-    fn test_optimized_config_generation() {
-        let config = MobileConfig::default();
-        let device = MobileDevice::default();
-        let optimizer = MobileOptimizer::new(config, device);
-
-        let spatial_config = optimizer.get_optimized_config();
-        assert!(spatial_config.quality_level > 0.0);
-        assert!(spatial_config.max_sources > 0);
-    }
-
-    #[test]
-    fn test_ios_device_detection() {
-        let device = ios::detect_device();
-        assert_eq!(device.model, "iOS Device");
-        assert!(device.has_audio_hardware);
-        assert!(device.native_spatial_support);
-    }
-
-    #[test]
-    fn test_android_device_detection() {
-        let device = android::detect_device();
-        assert_eq!(device.model, "Android Device");
-        assert!(device.has_audio_hardware);
-        assert!(!device.native_spatial_support);
-    }
-
-    #[tokio::test]
-    async fn test_mobile_audio_processing() {
-        let config = MobileConfig::default();
-        let device = MobileDevice::default();
-        let mut optimizer = MobileOptimizer::new(config, device);
-
-        // Mock spatial processor (would be real in actual implementation)
-        let spatial_config = SpatialConfig::default();
-        let mut processor = SpatialProcessor::new(spatial_config).await.unwrap();
-
-        let audio_data = vec![0.5; 1024];
-        let listener_pos = Position3D::new(0.0, 0.0, 0.0);
-        let sources = vec![
-            (Position3D::new(1.0, 0.0, 0.0), audio_data.as_slice()),
-            (Position3D::new(-1.0, 0.0, 0.0), audio_data.as_slice()),
-        ];
-
-        let result =
-            optimizer.process_mobile_audio(&mut processor, &audio_data, listener_pos, &sources);
-        assert!(result.is_ok());
-
-        let output = result.unwrap();
-        assert_eq!(output.len(), audio_data.len());
-    }
-
-    #[test]
-    fn test_metrics_collection() {
-        let config = MobileConfig::default();
-        let device = MobileDevice::default();
-        let optimizer = MobileOptimizer::new(config, device);
-
-        let metrics = optimizer.get_metrics();
-        assert!(metrics.cpu_usage >= 0.0);
-        assert!(metrics.quality_level >= 0.0 && metrics.quality_level <= 1.0);
-    }
-}
-
 /// Platform-specific optimizations for iOS devices
 #[cfg(target_os = "ios")]
 pub mod ios_optimizations {
@@ -1003,5 +873,134 @@ impl MobilePlatformOptimizer {
         {
             false
         }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mobile_config_creation() {
+        let config = MobileConfig::default();
+        assert_eq!(config.platform, MobilePlatform::Generic);
+        assert!(config.adaptive_quality);
+    }
+
+    #[test]
+    fn test_quality_preset_values() {
+        assert_eq!(QualityPreset::Ultra.as_float(), 1.0);
+        assert_eq!(QualityPreset::Low.as_float(), 0.4);
+        assert_eq!(QualityPreset::Ultra.max_sources(), 32);
+        assert_eq!(QualityPreset::Minimal.max_sources(), 4);
+    }
+
+    #[test]
+    fn test_mobile_optimizer_creation() {
+        let config = MobileConfig::default();
+        let device = MobileDevice::default();
+        let optimizer = MobileOptimizer::new(config, device);
+
+        assert_eq!(optimizer.current_power_state, PowerState::Balanced);
+        assert_eq!(optimizer.battery_level, 1.0);
+    }
+
+    #[test]
+    fn test_power_state_determination() {
+        let config = MobileConfig::default();
+        let device = MobileDevice::default();
+        let mut optimizer = MobileOptimizer::new(config, device);
+
+        // Test low battery
+        optimizer.update_state(0.05, 25.0, 10.0);
+        assert_eq!(optimizer.get_power_state(), PowerState::UltraLowPower);
+
+        // Test thermal throttling
+        optimizer.update_state(0.8, 45.0, 10.0);
+        assert_eq!(optimizer.get_power_state(), PowerState::Throttled);
+
+        // Test normal conditions
+        optimizer.update_state(0.6, 30.0, 15.0);
+        assert_eq!(optimizer.get_power_state(), PowerState::Balanced);
+    }
+
+    #[test]
+    fn test_quality_adaptation() {
+        let config = MobileConfig {
+            adaptive_quality: true,
+            ..Default::default()
+        };
+        let device = MobileDevice::default();
+        let mut optimizer = MobileOptimizer::new(config, device);
+
+        // High CPU usage should reduce quality
+        optimizer.update_state(0.5, 30.0, 35.0);
+        let quality = optimizer.get_quality_preset();
+        assert!(matches!(
+            quality,
+            QualityPreset::Low | QualityPreset::Medium
+        ));
+    }
+
+    #[test]
+    fn test_optimized_config_generation() {
+        let config = MobileConfig::default();
+        let device = MobileDevice::default();
+        let optimizer = MobileOptimizer::new(config, device);
+
+        let spatial_config = optimizer.get_optimized_config();
+        assert!(spatial_config.quality_level > 0.0);
+        assert!(spatial_config.max_sources > 0);
+    }
+
+    #[test]
+    fn test_ios_device_detection() {
+        let device = ios::detect_device();
+        assert_eq!(device.model, "iOS Device");
+        assert!(device.has_audio_hardware);
+        assert!(device.native_spatial_support);
+    }
+
+    #[test]
+    fn test_android_device_detection() {
+        let device = android::detect_device();
+        assert_eq!(device.model, "Android Device");
+        assert!(device.has_audio_hardware);
+        assert!(!device.native_spatial_support);
+    }
+
+    #[tokio::test]
+    async fn test_mobile_audio_processing() {
+        let config = MobileConfig::default();
+        let device = MobileDevice::default();
+        let mut optimizer = MobileOptimizer::new(config, device);
+
+        // Mock spatial processor (would be real in actual implementation)
+        let spatial_config = SpatialConfig::default();
+        let mut processor = SpatialProcessor::new(spatial_config).await.unwrap();
+
+        let audio_data = vec![0.5; 1024];
+        let listener_pos = Position3D::new(0.0, 0.0, 0.0);
+        let sources = vec![
+            (Position3D::new(1.0, 0.0, 0.0), audio_data.as_slice()),
+            (Position3D::new(-1.0, 0.0, 0.0), audio_data.as_slice()),
+        ];
+
+        let result =
+            optimizer.process_mobile_audio(&mut processor, &audio_data, listener_pos, &sources);
+        assert!(result.is_ok());
+
+        let output = result.unwrap();
+        assert_eq!(output.len(), audio_data.len());
+    }
+
+    #[test]
+    fn test_metrics_collection() {
+        let config = MobileConfig::default();
+        let device = MobileDevice::default();
+        let optimizer = MobileOptimizer::new(config, device);
+
+        let metrics = optimizer.get_metrics();
+        assert!(metrics.cpu_usage >= 0.0);
+        assert!(metrics.quality_level >= 0.0 && metrics.quality_level <= 1.0);
     }
 }

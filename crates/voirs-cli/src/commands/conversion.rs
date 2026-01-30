@@ -545,8 +545,8 @@ async fn execute_list_models(
     match args.format.as_str() {
         "table" => {
             println!(
-                "{:<20} {:<15} {:<30} {}",
-                "Model ID", "Type", "Description", "Version"
+                "{:<20} {:<15} {:<30} Version",
+                "Model ID", "Type", "Description"
             );
             println!("{}", "-".repeat(80));
             for model in models {

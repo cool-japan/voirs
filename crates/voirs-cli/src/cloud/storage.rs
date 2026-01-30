@@ -135,8 +135,8 @@ impl CloudStorageManager {
         for item in &self.sync_manifest.items {
             match item.sync_direction {
                 SyncDirection::Upload => {
-                    if self.should_upload(&item).await? {
-                        match self.upload_file(&item).await {
+                    if self.should_upload(item).await? {
+                        match self.upload_file(item).await {
                             Ok(_) => result.uploaded_files += 1,
                             Err(e) => {
                                 result.failed_uploads += 1;
@@ -150,8 +150,8 @@ impl CloudStorageManager {
                     }
                 }
                 SyncDirection::Download => {
-                    if self.should_download(&item).await? {
-                        match self.download_file(&item).await {
+                    if self.should_download(item).await? {
+                        match self.download_file(item).await {
                             Ok(_) => result.downloaded_files += 1,
                             Err(e) => {
                                 result.failed_downloads += 1;
@@ -165,9 +165,9 @@ impl CloudStorageManager {
                 }
                 SyncDirection::Bidirectional => {
                     // Determine sync direction based on timestamps
-                    let sync_direction = self.determine_sync_direction(&item).await?;
+                    let sync_direction = self.determine_sync_direction(item).await?;
                     match sync_direction {
-                        Some(SyncDirection::Upload) => match self.upload_file(&item).await {
+                        Some(SyncDirection::Upload) => match self.upload_file(item).await {
                             Ok(_) => result.uploaded_files += 1,
                             Err(e) => {
                                 result.failed_uploads += 1;
@@ -178,7 +178,7 @@ impl CloudStorageManager {
                                 ));
                             }
                         },
-                        Some(SyncDirection::Download) => match self.download_file(&item).await {
+                        Some(SyncDirection::Download) => match self.download_file(item).await {
                             Ok(_) => result.downloaded_files += 1,
                             Err(e) => {
                                 result.failed_downloads += 1;
@@ -474,7 +474,7 @@ impl CloudStorageManager {
         // Implementation for AWS S3 upload using AWS SDK
         // This would use the aws-sdk-s3 crate in a real implementation
 
-        let client = self.create_aws_client().await?;
+        self.create_aws_client().await?;
         let bucket = &self.config.bucket_name;
 
         // Simulate AWS S3 upload with realistic behavior
@@ -492,7 +492,7 @@ impl CloudStorageManager {
 
     /// Download from AWS S3
     async fn download_from_aws(&self, remote_path: &str) -> Result<Vec<u8>> {
-        let client = self.create_aws_client().await?;
+        self.create_aws_client().await?;
         let bucket = &self.config.bucket_name;
 
         tracing::debug!("Downloading from AWS S3: s3://{}/{}", bucket, remote_path);
@@ -505,7 +505,7 @@ impl CloudStorageManager {
 
     /// Upload to Azure Blob Storage
     async fn upload_to_azure(&self, remote_path: &str, content: &[u8]) -> Result<()> {
-        let client = self.create_azure_client().await?;
+        self.create_azure_client().await?;
 
         tracing::debug!("Uploading to Azure Blob Storage: {}", remote_path);
 
@@ -517,7 +517,7 @@ impl CloudStorageManager {
 
     /// Download from Azure Blob Storage
     async fn download_from_azure(&self, remote_path: &str) -> Result<Vec<u8>> {
-        let client = self.create_azure_client().await?;
+        self.create_azure_client().await?;
 
         tracing::debug!("Downloading from Azure Blob Storage: {}", remote_path);
 
@@ -528,7 +528,7 @@ impl CloudStorageManager {
 
     /// Upload to Google Cloud Storage
     async fn upload_to_gcp(&self, remote_path: &str, content: &[u8]) -> Result<()> {
-        let client = self.create_gcp_client().await?;
+        self.create_gcp_client().await?;
 
         tracing::debug!("Uploading to Google Cloud Storage: {}", remote_path);
 
@@ -539,7 +539,7 @@ impl CloudStorageManager {
 
     /// Download from Google Cloud Storage
     async fn download_from_gcp(&self, remote_path: &str) -> Result<Vec<u8>> {
-        let client = self.create_gcp_client().await?;
+        self.create_gcp_client().await?;
 
         tracing::debug!("Downloading from Google Cloud Storage: {}", remote_path);
 
@@ -550,7 +550,7 @@ impl CloudStorageManager {
 
     /// Upload to S3-compatible storage (MinIO, etc.)
     async fn upload_to_s3_compatible(&self, remote_path: &str, content: &[u8]) -> Result<()> {
-        let client = self.create_s3_compatible_client().await?;
+        self.create_s3_compatible_client().await?;
 
         tracing::debug!("Uploading to S3-compatible storage: {}", remote_path);
 
@@ -561,7 +561,7 @@ impl CloudStorageManager {
 
     /// Download from S3-compatible storage
     async fn download_from_s3_compatible(&self, remote_path: &str) -> Result<Vec<u8>> {
-        let client = self.create_s3_compatible_client().await?;
+        self.create_s3_compatible_client().await?;
 
         tracing::debug!("Downloading from S3-compatible storage: {}", remote_path);
 

@@ -81,24 +81,24 @@ pub mod utils {
     /// Validate calibration dataset
     pub fn validate_calibration_dataset(dataset: &CalibrationDataset) -> Result<()> {
         if dataset.data.is_empty() {
-            return Err(AcousticError::Processing(
-                "Calibration dataset is empty".to_string(),
-            ));
+            return Err(AcousticError::ProcessingError {
+                message: "Calibration dataset is empty".to_string(),
+            });
         }
 
         for (layer_name, samples) in &dataset.data {
             if samples.is_empty() {
-                return Err(AcousticError::Processing(format!(
-                    "No calibration samples for layer: {layer_name}"
-                )));
+                return Err(AcousticError::ProcessingError {
+                    message: format!("No calibration samples for layer: {layer_name}"),
+                });
             }
 
             // Check for invalid values
             for &sample in samples {
                 if !sample.is_finite() {
-                    return Err(AcousticError::Processing(format!(
-                        "Invalid calibration sample in layer: {layer_name}"
-                    )));
+                    return Err(AcousticError::ProcessingError {
+                        message: format!("Invalid calibration sample in layer: {layer_name}"),
+                    });
                 }
             }
         }

@@ -1,4 +1,4 @@
-//! Cloud deployment and orchestration for VoiRS feedback microservices
+//! Cloud deployment and orchestration for `VoiRS` feedback microservices
 //!
 //! This module provides comprehensive cloud deployment functionality including
 //! container orchestration, service mesh integration, auto-scaling, and
@@ -497,6 +497,7 @@ pub struct KubernetesOrchestrator {
 
 impl KubernetesOrchestrator {
     /// Create a new Kubernetes orchestrator
+    #[must_use]
     pub fn new(provider: CloudProvider) -> Self {
         Self {
             deployments: Arc::new(RwLock::new(HashMap::new())),
@@ -508,7 +509,7 @@ impl KubernetesOrchestrator {
     async fn generate_manifest(&self, config: &DeploymentConfig) -> CloudDeploymentResult<String> {
         // Generate Kubernetes YAML manifest
         let manifest = format!(
-            r#"
+            r"
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -549,7 +550,7 @@ spec:
   - port: {}
     targetPort: {}
   type: ClusterIP
-"#,
+",
             config.service_name,
             config.service_name,
             config.replicas,
@@ -558,23 +559,15 @@ spec:
             config.service_name,
             config.image,
             config.tag,
-            config
-                .ports
-                .first()
-                .map(|p| p.container_port)
-                .unwrap_or(8080),
+            config.ports.first().map_or(8080, |p| p.container_port),
             config.resources.cpu_request,
             config.resources.memory_request,
             config.resources.cpu_limit,
             config.resources.memory_limit,
             config.service_name,
             config.service_name,
-            config.ports.first().map(|p| p.service_port).unwrap_or(8080),
-            config
-                .ports
-                .first()
-                .map(|p| p.container_port)
-                .unwrap_or(8080),
+            config.ports.first().map_or(8080, |p| p.service_port),
+            config.ports.first().map_or(8080, |p| p.container_port),
         );
 
         Ok(manifest)
@@ -668,7 +661,7 @@ impl CloudOrchestrator for KubernetesOrchestrator {
             Ok(())
         } else {
             Err(CloudDeploymentError::DeploymentFailed {
-                message: format!("Deployment {} not found", deployment_id),
+                message: format!("Deployment {deployment_id} not found"),
             })
         }
     }
@@ -687,7 +680,7 @@ impl CloudOrchestrator for KubernetesOrchestrator {
             deployment.events.push(DeploymentEvent {
                 timestamp: Utc::now(),
                 event_type: "Scale".to_string(),
-                message: format!("Scaling to {} replicas", replicas),
+                message: format!("Scaling to {replicas} replicas"),
                 severity: EventSeverity::Info,
             });
 
@@ -695,7 +688,7 @@ impl CloudOrchestrator for KubernetesOrchestrator {
         } else {
             Err(CloudDeploymentError::ScalingFailed {
                 operation: "scale".to_string(),
-                reason: format!("Deployment {} not found", deployment_id),
+                reason: format!("Deployment {deployment_id} not found"),
             })
         }
     }
@@ -707,7 +700,7 @@ impl CloudOrchestrator for KubernetesOrchestrator {
             Ok(())
         } else {
             Err(CloudDeploymentError::DeploymentFailed {
-                message: format!("Deployment {} not found", deployment_id),
+                message: format!("Deployment {deployment_id} not found"),
             })
         }
     }
@@ -720,7 +713,7 @@ impl CloudOrchestrator for KubernetesOrchestrator {
 
         deployments.get(&deployment_id).cloned().ok_or_else(|| {
             CloudDeploymentError::DeploymentFailed {
-                message: format!("Deployment {} not found", deployment_id),
+                message: format!("Deployment {deployment_id} not found"),
             }
         })
     }
@@ -746,7 +739,7 @@ impl CloudOrchestrator for KubernetesOrchestrator {
             Ok(logs)
         } else {
             Err(CloudDeploymentError::DeploymentFailed {
-                message: format!("Deployment {} not found", deployment_id),
+                message: format!("Deployment {deployment_id} not found"),
             })
         }
     }
@@ -762,13 +755,12 @@ impl CloudOrchestrator for KubernetesOrchestrator {
         if deployments.contains_key(&deployment_id) {
             // Simulate command execution
             let result = format!(
-                "Executed command {:?} on pod {} in deployment {}",
-                command, pod_name, deployment_id
+                "Executed command {command:?} on pod {pod_name} in deployment {deployment_id}"
             );
             Ok(result)
         } else {
             Err(CloudDeploymentError::DeploymentFailed {
-                message: format!("Deployment {} not found", deployment_id),
+                message: format!("Deployment {deployment_id} not found"),
             })
         }
     }

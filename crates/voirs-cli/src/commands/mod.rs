@@ -38,6 +38,7 @@
 //! - [`cross_lang_test`]: Cross-language testing utilities
 
 pub mod accuracy;
+pub mod alias;
 pub mod batch;
 pub mod capabilities;
 pub mod checkpoint;
@@ -45,16 +46,21 @@ pub mod checkpoint;
 pub mod cloning;
 pub mod cloud;
 pub mod config;
+pub mod config_migrate;
 #[cfg(feature = "conversion")]
 pub mod conversion;
 pub mod convert_model;
 pub mod cross_lang_test;
+pub mod dashboard;
 pub mod dataset;
 #[cfg(feature = "emotion")]
 pub mod emotion;
+pub mod export_import;
+pub mod history;
 pub mod interactive;
 #[cfg(feature = "onnx")]
 pub mod kokoro;
+pub mod model_inspect;
 pub mod models;
 pub mod monitoring;
 pub mod performance;
@@ -63,9 +69,14 @@ pub mod server;
 pub mod singing;
 #[cfg(feature = "spatial")]
 pub mod spatial;
+pub mod streaming;
 pub mod synthesize;
+pub mod telemetry;
+pub mod telemetry_analyze;
 pub mod test;
+pub mod test_api;
 pub mod train;
 pub mod vocoder_inference;
 pub mod voice_search;
 pub mod voices;
+pub mod workflow;

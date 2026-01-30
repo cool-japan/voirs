@@ -1,7 +1,7 @@
 //! Model optimization command implementation.
 
 use crate::GlobalOptions;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use voirs_sdk::config::AppConfig;
 use voirs_sdk::Result;
 
@@ -88,7 +88,7 @@ fn determine_optimization_strategy(
         "quality" => Ok(OptimizationStrategy::Quality),
         "memory" => Ok(OptimizationStrategy::Memory),
         "balanced" => Ok(OptimizationStrategy::Balanced),
-        _ => Err(voirs_sdk::VoirsError::config_error(&format!(
+        _ => Err(voirs_sdk::VoirsError::config_error(format!(
             "Invalid optimization strategy '{}'. Valid options: speed, quality, memory, balanced",
             strategy_str
         ))),
@@ -175,7 +175,12 @@ fn analyze_model_components(model_path: &PathBuf) -> Result<Vec<ModelComponent>>
     for entry in std::fs::read_dir(model_path)? {
         let entry = entry?;
         let path = entry.path();
-        let filename = path.file_name().unwrap().to_string_lossy();
+        let filename = path
+            .file_name()
+            .ok_or_else(|| {
+                voirs_sdk::VoirsError::model_error(format!("Invalid file path: {}", path.display()))
+            })?
+            .to_string_lossy();
 
         if path.is_file() {
             let size = entry.metadata()?.len() as f64 / 1024.0 / 1024.0;
@@ -213,10 +218,13 @@ async fn perform_optimization(
     let output_path = if let Some(path) = output_path {
         PathBuf::from(path)
     } else {
-        model_path
-            .parent()
-            .unwrap()
-            .join(format!("{}_optimized", model_id))
+        let parent = model_path.parent().ok_or_else(|| {
+            voirs_sdk::VoirsError::model_error(format!(
+                "Cannot determine parent directory for: {}",
+                model_path.display()
+            ))
+        })?;
+        parent.join(format!("{}_optimized", model_id))
     };
 
     // Create output directory
@@ -422,14 +430,19 @@ async fn quantize_model_files(
         }
     });
 
-    std::fs::write(
-        output_path.join("quantization_info.json"),
-        serde_json::to_string_pretty(&metadata).unwrap(),
-    )
-    .map_err(|e| voirs_sdk::VoirsError::IoError {
-        path: output_path.join("quantization_info.json"),
-        operation: voirs_sdk::error::IoOperation::Write,
-        source: e,
+    let json_content = serde_json::to_string_pretty(&metadata).map_err(|e| {
+        voirs_sdk::VoirsError::serialization(
+            "json",
+            format!("Failed to serialize quantization metadata: {}", e),
+        )
+    })?;
+
+    std::fs::write(output_path.join("quantization_info.json"), json_content).map_err(|e| {
+        voirs_sdk::VoirsError::IoError {
+            path: output_path.join("quantization_info.json"),
+            operation: voirs_sdk::error::IoOperation::Write,
+            source: e,
+        }
     })?;
 
     if !global.quiet {
@@ -499,14 +512,19 @@ async fn optimize_model_graph(
         }
     });
 
-    std::fs::write(
-        output_path.join("optimization_info.json"),
-        serde_json::to_string_pretty(&metadata).unwrap(),
-    )
-    .map_err(|e| voirs_sdk::VoirsError::IoError {
-        path: output_path.join("optimization_info.json"),
-        operation: voirs_sdk::error::IoOperation::Write,
-        source: e,
+    let json_content = serde_json::to_string_pretty(&metadata).map_err(|e| {
+        voirs_sdk::VoirsError::serialization(
+            "json",
+            format!("Failed to serialize optimization metadata: {}", e),
+        )
+    })?;
+
+    std::fs::write(output_path.join("optimization_info.json"), json_content).map_err(|e| {
+        voirs_sdk::VoirsError::IoError {
+            path: output_path.join("optimization_info.json"),
+            operation: voirs_sdk::error::IoOperation::Write,
+            source: e,
+        }
     })?;
 
     if !global.quiet {
@@ -608,14 +626,19 @@ async fn compress_model_files(
         }
     });
 
-    std::fs::write(
-        output_path.join("compression_info.json"),
-        serde_json::to_string_pretty(&metadata).unwrap(),
-    )
-    .map_err(|e| voirs_sdk::VoirsError::IoError {
-        path: output_path.join("compression_info.json"),
-        operation: voirs_sdk::error::IoOperation::Write,
-        source: e,
+    let json_content = serde_json::to_string_pretty(&metadata).map_err(|e| {
+        voirs_sdk::VoirsError::serialization(
+            "json",
+            format!("Failed to serialize compression metadata: {}", e),
+        )
+    })?;
+
+    std::fs::write(output_path.join("compression_info.json"), json_content).map_err(|e| {
+        voirs_sdk::VoirsError::IoError {
+            path: output_path.join("compression_info.json"),
+            operation: voirs_sdk::error::IoOperation::Write,
+            source: e,
+        }
     })?;
 
     if !global.quiet {
@@ -628,7 +651,7 @@ async fn compress_model_files(
 }
 
 /// Optimize configuration
-fn optimize_configuration(input_path: &PathBuf, output_path: &PathBuf) -> Result<()> {
+fn optimize_configuration(input_path: &Path, output_path: &Path) -> Result<()> {
     let config_src = input_path.join("config.json");
     let config_dst = output_path.join("config.json");
 
@@ -642,7 +665,7 @@ fn optimize_configuration(input_path: &PathBuf, output_path: &PathBuf) -> Result
 }
 
 /// Compress model artifacts
-fn compress_model_artifacts(input_path: &PathBuf, output_path: &PathBuf) -> Result<()> {
+fn compress_model_artifacts(input_path: &Path, output_path: &Path) -> Result<()> {
     // Create a marker file to indicate compression
     std::fs::write(output_path.join("compressed.marker"), "optimized")?;
     Ok(())
@@ -728,11 +751,15 @@ async fn quantize_tensor_file(
     // Create quantization metadata
     let metadata = create_quantization_metadata(&original_data, &quantized_data, &file_ext);
     let metadata_path = dst.with_extension(format!("{}.quant_meta", file_ext));
-    std::fs::write(
-        &metadata_path,
-        serde_json::to_string_pretty(&metadata).unwrap(),
-    )
-    .map_err(|e| voirs_sdk::VoirsError::IoError {
+
+    let json_content = serde_json::to_string_pretty(&metadata).map_err(|e| {
+        voirs_sdk::VoirsError::serialization(
+            "json",
+            format!("Failed to serialize quantization file metadata: {}", e),
+        )
+    })?;
+
+    std::fs::write(&metadata_path, json_content).map_err(|e| voirs_sdk::VoirsError::IoError {
         path: metadata_path,
         operation: voirs_sdk::error::IoOperation::Write,
         source: e,
@@ -740,10 +767,18 @@ async fn quantize_tensor_file(
 
     if !global.quiet {
         let compression_ratio = original_data.len() as f64 / quantized_data.len() as f64;
+        let filename = src
+            .file_name()
+            .ok_or_else(|| {
+                voirs_sdk::VoirsError::model_error(format!(
+                    "Invalid source file path: {}",
+                    src.display()
+                ))
+            })?
+            .to_string_lossy();
         println!(
             "        Quantized tensor file: {} ({:.1}x compression)",
-            src.file_name().unwrap().to_string_lossy(),
-            compression_ratio
+            filename, compression_ratio
         );
     }
     Ok(())
@@ -758,7 +793,10 @@ fn quantize_safetensors_format(data: &[u8]) -> Result<Vec<u8>> {
     }
 
     // Read header size (first 8 bytes in safetensors format)
-    let header_size = u64::from_le_bytes(data[0..8].try_into().unwrap()) as usize;
+    let header_bytes: [u8; 8] = data[0..8]
+        .try_into()
+        .map_err(|_| voirs_sdk::VoirsError::model_error("Invalid safetensors header format"))?;
+    let header_size = u64::from_le_bytes(header_bytes) as usize;
 
     if header_size + 8 > data.len() {
         return Ok(data.to_vec());
@@ -894,11 +932,15 @@ async fn quantize_onnx_model(
     // Create ONNX quantization metadata
     let metadata = create_onnx_quantization_metadata(&original_data, &quantized_data);
     let metadata_path = dst.with_extension("onnx.quant_meta");
-    std::fs::write(
-        &metadata_path,
-        serde_json::to_string_pretty(&metadata).unwrap(),
-    )
-    .map_err(|e| voirs_sdk::VoirsError::IoError {
+
+    let json_content = serde_json::to_string_pretty(&metadata).map_err(|e| {
+        voirs_sdk::VoirsError::serialization(
+            "json",
+            format!("Failed to serialize ONNX quantization metadata: {}", e),
+        )
+    })?;
+
+    std::fs::write(&metadata_path, json_content).map_err(|e| voirs_sdk::VoirsError::IoError {
         path: metadata_path,
         operation: voirs_sdk::error::IoOperation::Write,
         source: e,
@@ -906,10 +948,18 @@ async fn quantize_onnx_model(
 
     if !global.quiet {
         let compression_ratio = original_data.len() as f64 / quantized_data.len() as f64;
+        let filename = src
+            .file_name()
+            .ok_or_else(|| {
+                voirs_sdk::VoirsError::model_error(format!(
+                    "Invalid source file path: {}",
+                    src.display()
+                ))
+            })?
+            .to_string_lossy();
         println!(
             "        Quantized ONNX model: {} ({:.1}x compression)",
-            src.file_name().unwrap().to_string_lossy(),
-            compression_ratio
+            filename, compression_ratio
         );
     }
     Ok(())
@@ -1098,11 +1148,15 @@ async fn optimize_onnx_graph(
     // Create graph optimization metadata
     let metadata = create_graph_optimization_metadata(&original_data, &optimized_data);
     let metadata_path = dst.with_extension("onnx.graph_opt_meta");
-    std::fs::write(
-        &metadata_path,
-        serde_json::to_string_pretty(&metadata).unwrap(),
-    )
-    .map_err(|e| voirs_sdk::VoirsError::IoError {
+
+    let json_content = serde_json::to_string_pretty(&metadata).map_err(|e| {
+        voirs_sdk::VoirsError::serialization(
+            "json",
+            format!("Failed to serialize graph optimization metadata: {}", e),
+        )
+    })?;
+
+    std::fs::write(&metadata_path, json_content).map_err(|e| voirs_sdk::VoirsError::IoError {
         path: metadata_path,
         operation: voirs_sdk::error::IoOperation::Write,
         source: e,
@@ -1111,9 +1165,18 @@ async fn optimize_onnx_graph(
     if !global.quiet {
         let size_reduction =
             (original_data.len() as f64 - optimized_data.len() as f64) / original_data.len() as f64;
+        let filename = src
+            .file_name()
+            .ok_or_else(|| {
+                voirs_sdk::VoirsError::model_error(format!(
+                    "Invalid source file path: {}",
+                    src.display()
+                ))
+            })?
+            .to_string_lossy();
         println!(
             "        Optimized ONNX graph: {} ({:.1}% size reduction)",
-            src.file_name().unwrap().to_string_lossy(),
+            filename,
             size_reduction * 100.0
         );
     }
@@ -1399,21 +1462,26 @@ mod tests {
         };
 
         // Test default balanced strategy
-        let strategy = determine_optimization_strategy(None, &config, &global).unwrap();
+        let strategy = determine_optimization_strategy(None, &config, &global)
+            .expect("Should determine balanced strategy");
         assert!(matches!(strategy, OptimizationStrategy::Balanced));
 
         // Test explicit strategies
-        let strategy = determine_optimization_strategy(Some("speed"), &config, &global).unwrap();
+        let strategy = determine_optimization_strategy(Some("speed"), &config, &global)
+            .expect("Should determine speed strategy");
         assert!(matches!(strategy, OptimizationStrategy::Speed));
 
-        let strategy = determine_optimization_strategy(Some("quality"), &config, &global).unwrap();
+        let strategy = determine_optimization_strategy(Some("quality"), &config, &global)
+            .expect("Should determine quality strategy");
         assert!(matches!(strategy, OptimizationStrategy::Quality));
 
-        let strategy = determine_optimization_strategy(Some("memory"), &config, &global).unwrap();
+        let strategy = determine_optimization_strategy(Some("memory"), &config, &global)
+            .expect("Should determine memory strategy");
         assert!(matches!(strategy, OptimizationStrategy::Memory));
 
         // Test case insensitivity
-        let strategy = determine_optimization_strategy(Some("SPEED"), &config, &global).unwrap();
+        let strategy = determine_optimization_strategy(Some("SPEED"), &config, &global)
+            .expect("Should handle case-insensitive strategy");
         assert!(matches!(strategy, OptimizationStrategy::Speed));
 
         // Test invalid strategy

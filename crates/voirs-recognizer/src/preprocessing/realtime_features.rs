@@ -127,12 +127,12 @@ impl RealTimeFeatureExtractor {
                 (0..n_fft)
                     .map(|j| {
                         let mel_freq = 2595.0 * (1.0 + j as f32 / n_fft as f32).ln();
-                        let filter_val = if i == 0 {
+
+                        if i == 0 {
                             1.0 - (j as f32 / n_fft as f32)
                         } else {
                             (mel_freq / (i + 1) as f32).sin().abs()
-                        };
-                        filter_val
+                        }
                     })
                     .collect()
             })
@@ -245,7 +245,7 @@ impl RealTimeFeatureExtractor {
     fn extract_mfcc(&self, windowed_frame: &[f32]) -> Result<Vec<f32>, RecognitionError> {
         // Simplified MFCC extraction
         let fft = self.simple_fft(windowed_frame);
-        let power_spectrum: Vec<f32> = fft.iter().map(|c| c.norm_sqr()).collect();
+        let power_spectrum: Vec<f32> = fft.iter().map(scirs2_core::Complex::norm_sqr).collect();
 
         // Apply mel filterbank
         let mel_energies: Vec<f32> = self
@@ -281,7 +281,7 @@ impl RealTimeFeatureExtractor {
     /// Extract spectral centroid
     fn extract_spectral_centroid(&self, windowed_frame: &[f32]) -> Result<f32, RecognitionError> {
         let fft = self.simple_fft(windowed_frame);
-        let power_spectrum: Vec<f32> = fft.iter().map(|c| c.norm_sqr()).collect();
+        let power_spectrum: Vec<f32> = fft.iter().map(scirs2_core::Complex::norm_sqr).collect();
 
         let numerator: f32 = power_spectrum
             .iter()
@@ -311,7 +311,7 @@ impl RealTimeFeatureExtractor {
     /// Extract spectral rolloff
     fn extract_spectral_rolloff(&self, windowed_frame: &[f32]) -> Result<f32, RecognitionError> {
         let fft = self.simple_fft(windowed_frame);
-        let power_spectrum: Vec<f32> = fft.iter().map(|c| c.norm_sqr()).collect();
+        let power_spectrum: Vec<f32> = fft.iter().map(scirs2_core::Complex::norm_sqr).collect();
 
         let total_energy: f32 = power_spectrum.iter().sum();
         let threshold = 0.85 * total_energy;
@@ -367,7 +367,7 @@ impl RealTimeFeatureExtractor {
     /// Calculate spectral flatness
     fn calculate_spectral_flatness(&self, samples: &[f32]) -> f32 {
         let fft = self.simple_fft(samples);
-        let power_spectrum: Vec<f32> = fft.iter().map(|c| c.norm_sqr()).collect();
+        let power_spectrum: Vec<f32> = fft.iter().map(scirs2_core::Complex::norm_sqr).collect();
 
         let geometric_mean = power_spectrum
             .iter()
@@ -385,6 +385,7 @@ impl RealTimeFeatureExtractor {
     }
 
     /// Get current configuration
+    #[must_use]
     pub fn config(&self) -> &RealTimeFeatureConfig {
         &self.config
     }

@@ -3,6 +3,10 @@
 use super::buffer::AudioBuffer;
 use crate::{error::Result, VoirsError};
 
+// Import SciRS2 SIMD operations for performance optimization
+use scirs2_core::ndarray::Array1;
+use scirs2_core::simd_ops::SimdUnifiedOps;
+
 impl AudioBuffer {
     /// Convert to different sample rate
     pub fn resample(&self, target_rate: u32) -> Result<AudioBuffer> {
@@ -30,13 +34,28 @@ impl AudioBuffer {
     }
 
     /// Apply gain to audio (in dB)
+    ///
+    /// Uses SIMD acceleration for improved performance on large buffers.
     pub fn apply_gain(&mut self, gain_db: f32) -> Result<()> {
         let gain_linear = 10.0_f32.powf(gain_db / 20.0);
 
-        for sample in &mut self.samples {
-            *sample *= gain_linear;
-            // Prevent clipping
-            *sample = sample.clamp(-1.0, 1.0);
+        // Use SIMD optimization for buffers larger than 64 samples
+        if self.samples.len() > 64 && f32::simd_available() {
+            // Convert to Array1 for SIMD operations
+            let samples_array = Array1::from_vec(self.samples.clone());
+
+            // SIMD scalar multiplication
+            let gained = f32::simd_scalar_mul(&samples_array.view(), gain_linear);
+
+            // Clamp values to prevent clipping
+            self.samples = gained.iter().map(|&s| s.clamp(-1.0, 1.0)).collect();
+        } else {
+            // Fallback to scalar implementation for small buffers
+            for sample in &mut self.samples {
+                *sample *= gain_linear;
+                // Prevent clipping
+                *sample = sample.clamp(-1.0, 1.0);
+            }
         }
 
         // Update metadata
@@ -45,13 +64,30 @@ impl AudioBuffer {
     }
 
     /// Normalize audio to peak amplitude
+    ///
+    /// Uses SIMD acceleration for improved performance on large buffers.
     pub fn normalize(&mut self, target_peak: f32) -> Result<()> {
-        let current_peak = self.samples.iter().map(|&s| s.abs()).fold(0.0, f32::max);
+        // Use SIMD optimization for buffers larger than 64 samples
+        let current_peak = if self.samples.len() > 64 && f32::simd_available() {
+            let samples_array = Array1::from_vec(self.samples.clone());
+            let abs_samples = f32::simd_abs(&samples_array.view());
+            f32::simd_max_element(&abs_samples.view())
+        } else {
+            self.samples.iter().map(|&s| s.abs()).fold(0.0, f32::max)
+        };
 
         if current_peak > 0.0 {
             let gain = target_peak / current_peak;
-            for sample in &mut self.samples {
-                *sample *= gain;
+
+            // Use SIMD for gain application if buffer is large enough
+            if self.samples.len() > 64 && f32::simd_available() {
+                let samples_array = Array1::from_vec(self.samples.clone());
+                let normalized = f32::simd_scalar_mul(&samples_array.view(), gain);
+                self.samples = normalized.to_vec();
+            } else {
+                for sample in &mut self.samples {
+                    *sample *= gain;
+                }
             }
             self.update_metadata();
         }
@@ -60,6 +96,8 @@ impl AudioBuffer {
     }
 
     /// Mix with another audio buffer
+    ///
+    /// Uses SIMD acceleration (FMA - fused multiply-add) for improved performance on large buffers.
     pub fn mix(&mut self, other: &AudioBuffer, gain: f32) -> Result<()> {
         if self.sample_rate != other.sample_rate {
             return Err(VoirsError::audio_error(
@@ -69,10 +107,33 @@ impl AudioBuffer {
 
         let mix_length = self.samples.len().min(other.samples.len());
 
-        for i in 0..mix_length {
-            self.samples[i] += other.samples[i] * gain;
-            // Prevent clipping
-            self.samples[i] = self.samples[i].clamp(-1.0, 1.0);
+        // Use SIMD optimization for buffers larger than 64 samples
+        if mix_length > 64 && f32::simd_available() {
+            // Extract the portions to mix
+            let self_portion = Array1::from_vec(self.samples[..mix_length].to_vec());
+            let other_portion = Array1::from_vec(other.samples[..mix_length].to_vec());
+
+            // Create gain vector for SIMD multiplication
+            let gain_vec = Array1::from_elem(mix_length, gain);
+
+            // Use SIMD FMA: self + other * gain
+            let mixed = f32::simd_fma(
+                &other_portion.view(),
+                &gain_vec.view(),
+                &self_portion.view(),
+            );
+
+            // Clamp and update
+            for (i, &sample) in mixed.iter().enumerate() {
+                self.samples[i] = sample.clamp(-1.0, 1.0);
+            }
+        } else {
+            // Fallback to scalar implementation for small buffers
+            for i in 0..mix_length {
+                self.samples[i] += other.samples[i] * gain;
+                // Prevent clipping
+                self.samples[i] = self.samples[i].clamp(-1.0, 1.0);
+            }
         }
 
         self.update_metadata();
@@ -599,18 +660,36 @@ impl AudioBuffer {
     }
 
     /// Calculate RMS (Root Mean Square) value for loudness
+    ///
+    /// Uses SIMD acceleration for improved performance on large buffers.
     pub fn rms(&self) -> f32 {
         if self.samples.is_empty() {
             return 0.0;
         }
 
-        let sum_squares: f32 = self.samples.iter().map(|&s| s * s).sum();
+        // Use SIMD optimization for buffers larger than 64 samples
+        let sum_squares = if self.samples.len() > 64 && f32::simd_available() {
+            let samples_array = Array1::from_vec(self.samples.clone());
+            f32::simd_sum_squares(&samples_array.view())
+        } else {
+            self.samples.iter().map(|&s| s * s).sum()
+        };
+
         (sum_squares / self.samples.len() as f32).sqrt()
     }
 
     /// Calculate peak amplitude
+    ///
+    /// Uses SIMD acceleration for improved performance on large buffers.
     pub fn peak(&self) -> f32 {
-        self.samples.iter().map(|&s| s.abs()).fold(0.0, f32::max)
+        // Use SIMD optimization for buffers larger than 64 samples
+        if self.samples.len() > 64 && f32::simd_available() {
+            let samples_array = Array1::from_vec(self.samples.clone());
+            let abs_samples = f32::simd_abs(&samples_array.view());
+            f32::simd_max_element(&abs_samples.view())
+        } else {
+            self.samples.iter().map(|&s| s.abs()).fold(0.0, f32::max)
+        }
     }
 
     /// Check if audio contains clipping

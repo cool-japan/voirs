@@ -54,7 +54,7 @@ chrono = { workspace = true }
 flate2 = { workspace = true }
 
 # HTTP client for IoT cloud connectivity
-reqwest = { version = "0.12.23", default-features = false, features = ["json", "rustls-tls"], optional = true }
+reqwest = { version = "0.12.28", default-features = false, features = ["json", "rustls-tls"], optional = true }
 
 # VoiRS dependencies
 voirs-acoustic = { workspace = true, optional = true }
@@ -63,10 +63,11 @@ voirs-emotion = { workspace = true, optional = true }
 voirs-spatial = { workspace = true, optional = true }
 
 # WebAssembly dependencies
-wasm-bindgen = { version = "0.2.104", optional = true }
-wasm-bindgen-futures = { version = "0.4.54", optional = true }
-js-sys = { version = "0.3.81", optional = true }
-web-sys = { version = "0.3.81", optional = true, features = [
+wasm-bindgen = { version = "0.2.105", optional = true }
+wasm-bindgen-futures = { version = "0.4.55", optional = true }
+serde-wasm-bindgen = { version = "0.6", optional = true }
+js-sys = { version = "0.3.82", optional = true }
+web-sys = { version = "0.3.82", optional = true, features = [
     "console",
     "AudioContext",
     "AudioContextState",
@@ -87,11 +88,15 @@ web-sys = { version = "0.3.81", optional = true, features = [
 #   RUSTFLAGS='--cfg getrandom_backend="wasm_js"'
 # (The feature alone only makes the backend available.)
 getrandom = { version = "0.3", features = ["wasm_js"], optional = true }
+# Also add getrandom 0.2 with js feature for transitive dependencies from scirs2-core
+getrandom_v2 = { package = "getrandom", version = "0.2", features = ["js"], optional = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }
 criterion = { workspace = true }
-tempfile = "3.23"
+proptest = { workspace = true }
+tempfile = "3.24"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [features]
 default = ["real-time"]
@@ -102,12 +107,15 @@ emotion-integration = ["voirs-emotion"]
 spatial-integration = ["voirs-spatial"]
 gpu = []
 cuda = ["candle-core/cuda"]
-metal = ["candle-core/metal"]
+metal = ["dep:metal-rs"]
 streaming = ["real-time"]
-wasm = ["wasm-bindgen", "wasm-bindgen-futures", "js-sys", "web-sys", "getrandom"]
+wasm = ["wasm-bindgen", "wasm-bindgen-futures", "serde-wasm-bindgen", "js-sys", "web-sys", "getrandom", "getrandom_v2"]
 iot = ["reqwest"]
 all-integrations = ["acoustic-integration", "cloning-integration", "emotion-integration", "spatial-integration"]
 
+
+[target.'cfg(target_os = "macos")'.dependencies]
+metal-rs = { version = "0.27", optional = true, package = "metal" }
 
 [lints]
 workspace = true

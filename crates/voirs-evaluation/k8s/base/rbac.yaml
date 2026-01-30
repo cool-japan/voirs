@@ -1,0 +1,93 @@
+# RBAC Configuration for VoiRS Evaluation
+# Role-Based Access Control for service accounts and permissions
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: voirs-evaluation
+  labels:
+    app: voirs-evaluation
+automountServiceAccountToken: true
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: voirs-evaluation
+  labels:
+    app: voirs-evaluation
+rules:
+# Pod management for auto-scaling and service discovery
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+
+# ConfigMap access for dynamic configuration
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+
+# Service discovery
+- apiGroups: [""]
+  resources: ["services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+
+# Events for logging and debugging
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+
+# Access to secrets for API keys and credentials
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch"]
+  resourceNames: ["voirs-evaluation-secrets"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: voirs-evaluation
+  labels:
+    app: voirs-evaluation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: voirs-evaluation
+subjects:
+- kind: ServiceAccount
+  name: voirs-evaluation
+  namespace: default
+
+---
+# ClusterRole for cross-namespace discovery (optional)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: voirs-evaluation-discovery
+  labels:
+    app: voirs-evaluation
+rules:
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: voirs-evaluation-discovery
+  labels:
+    app: voirs-evaluation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: voirs-evaluation-discovery
+subjects:
+- kind: ServiceAccount
+  name: voirs-evaluation
+  namespace: default

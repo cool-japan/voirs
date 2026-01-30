@@ -41,7 +41,7 @@ impl Default for PerformanceRequirements {
 /// Performance metrics collected during validation
 #[derive(Debug, Clone)]
 pub struct PerformanceMetrics {
-    /// Real-time factor (processing_time / audio_duration)
+    /// Real-time factor (`processing_time` / `audio_duration`)
     pub rtf: f32,
     /// Memory usage in bytes
     pub memory_usage: u64,
@@ -103,11 +103,13 @@ impl PerformanceValidator {
     }
 
     /// Get the performance requirements
+    #[must_use]
     pub fn requirements(&self) -> &PerformanceRequirements {
         &self.requirements
     }
 
     /// Validate real-time factor performance
+    #[must_use]
     pub fn validate_rtf(&self, audio: &AudioBuffer, processing_time: Duration) -> (f32, bool) {
         let audio_duration_seconds = audio.duration();
         let processing_seconds = processing_time.as_secs_f32();
@@ -173,6 +175,7 @@ impl PerformanceValidator {
     }
 
     /// Validate streaming latency
+    #[must_use]
     pub fn validate_streaming_latency(&self, latency: Duration) -> (u64, bool) {
         let latency_ms = latency.as_millis() as u64;
         let passed = latency_ms <= self.requirements.max_streaming_latency_ms;
@@ -190,6 +193,7 @@ impl PerformanceValidator {
     }
 
     /// Calculate processing throughput
+    #[must_use]
     pub fn calculate_throughput(&self, samples_processed: usize, processing_time: Duration) -> f64 {
         let processing_seconds = processing_time.as_secs_f64();
         if processing_seconds > 0.0 {
@@ -293,8 +297,8 @@ impl PerformanceValidator {
                     }
                 );
             }
-            println!("Throughput: {:.0} samples/sec", throughput_samples_per_sec);
-            println!("CPU Utilization: {:.1}%", cpu_utilization);
+            println!("Throughput: {throughput_samples_per_sec:.0} samples/sec");
+            println!("CPU Utilization: {cpu_utilization:.1}%");
         }
 
         Ok(ValidationResult {

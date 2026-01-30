@@ -95,6 +95,7 @@ pub struct UserInteractionEvent {
 
 impl UserInteractionEvent {
     /// Estimate memory usage of this interaction event
+    #[must_use]
     pub fn estimated_memory_size(&self) -> usize {
         self.user_id.len()
             + self.feature_used.len()
@@ -161,6 +162,7 @@ pub struct PerformanceMetrics {
 
 impl PerformanceMetrics {
     /// Estimate memory usage of this performance metrics entry
+    #[must_use]
     pub fn estimated_memory_size(&self) -> usize {
         std::mem::size_of::<Self>() // All fields are fixed-size types
     }
@@ -183,6 +185,7 @@ pub struct SessionData {
 
 impl SessionData {
     /// Create new session data
+    #[must_use]
     pub fn new(user_id: &str) -> Self {
         let now = Utc::now();
         Self {
@@ -206,6 +209,7 @@ impl SessionData {
     }
 
     /// Estimate memory usage of this session data
+    #[must_use]
     pub fn estimated_memory_size(&self) -> usize {
         self.user_id.len() +
         std::mem::size_of::<u32>() + // session_count
@@ -220,6 +224,7 @@ impl SessionData {
     }
 
     /// Check if this session is important and should be retained
+    #[must_use]
     pub fn is_important(&self) -> bool {
         // Keep sessions with high engagement or recent activity
         self.total_duration > 3600 || // More than 1 hour total
@@ -519,6 +524,7 @@ pub struct InteractionSummary {
 
 impl InteractionSummary {
     /// Create a new empty summary
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -543,16 +549,18 @@ impl InteractionSummary {
             self.avg_feedback_score = total / self.interaction_count as f32;
         }
 
-        self.total_engagement = self.total_engagement
-            + chrono::Duration::from_std(interaction.engagement_duration).unwrap_or_default();
+        self.total_engagement +=
+            chrono::Duration::from_std(interaction.engagement_duration).unwrap_or_default();
     }
 
     /// Check if summary is empty
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.interaction_count == 0
     }
 
     /// Get memory footprint of this summary
+    #[must_use]
     pub fn memory_size(&self) -> usize {
         std::mem::size_of::<Self>()
             + self.type_distribution.len()
@@ -576,6 +584,7 @@ pub struct StringPool {
 
 impl StringPool {
     /// Create a new string pool
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -596,16 +605,22 @@ impl StringPool {
     }
 
     /// Get statistics about the string pool
+    #[must_use]
     pub fn stats(&self) -> &StringPoolStats {
         &self.stats
     }
 
     /// Calculate memory savings from interning
+    #[must_use]
     pub fn memory_savings(&self) -> usize {
         let total_requests = self.stats.total_requests as usize;
         let unique_strings = self.stats.unique_strings as usize;
-        let avg_string_size =
-            self.strings.keys().map(|s| s.len()).sum::<usize>() / unique_strings.max(1);
+        let avg_string_size = self
+            .strings
+            .keys()
+            .map(std::string::String::len)
+            .sum::<usize>()
+            / unique_strings.max(1);
 
         // Memory saved = (total requests - unique strings) * average string size
         (total_requests.saturating_sub(unique_strings)) * avg_string_size
@@ -625,6 +640,7 @@ pub struct StringPoolStats {
 
 impl StringPoolStats {
     /// Calculate cache hit ratio
+    #[must_use]
     pub fn hit_ratio(&self) -> f64 {
         if self.total_requests == 0 {
             0.0

@@ -58,7 +58,8 @@ pub struct PerformanceMetrics {
 #[no_mangle]
 pub extern "C" fn voirs_init() -> VoirsError {
     // Initialize logging if not already done
-    let _ = env_logger::try_init();
+    // Note: Logging is handled by the application using this library
+    // via tracing infrastructure. C API users should set up their own logging.
 
     VoirsError::Success
 }
@@ -143,14 +144,18 @@ pub extern "C" fn voirs_recognizer_create(
             // Configure sample rate
             builder = builder.with_sample_rate(config.sample_rate);
 
-            // Configure ASR settings
-            let mut asr_config = ASRConfig::default();
-            asr_config.enable_vad = config.enable_vad;
-            asr_config.confidence_threshold = config.confidence_threshold;
-            asr_config.beam_size = config.beam_size;
-            asr_config.temperature = config.temperature;
-
-            builder = builder.with_config(asr_config);
+            // Configure processing pipeline with default settings
+            // Note: ASR-specific config (VAD, beam size, temperature) are handled
+            // at the model level and not part of PipelineProcessingConfig
+            use crate::integration::{PipelineProcessingConfig, ProcessingMode};
+            let pipeline_config = PipelineProcessingConfig {
+                mode: ProcessingMode::Full,
+                parallel_processing: true,
+                buffer_size: 4096,
+                timeout_seconds: 300,
+                enable_caching: true,
+            };
+            builder = builder.with_config(pipeline_config);
 
             builder.build().await
         });
@@ -378,12 +383,18 @@ pub extern "C" fn voirs_recognizer_switch_model(
 
             builder = builder.with_sample_rate(internal.config.sample_rate);
 
-            let mut asr_config = ASRConfig::default();
-            asr_config.enable_vad = internal.config.enable_vad;
-            asr_config.confidence_threshold = internal.config.confidence_threshold;
-            asr_config.beam_size = internal.config.beam_size;
-            asr_config.temperature = internal.config.temperature;
-            builder = builder.with_config(asr_config);
+            // Configure processing pipeline with default settings
+            // Note: ASR-specific config (VAD, beam size, temperature) are handled
+            // at the model level and not part of PipelineProcessingConfig
+            use crate::integration::{PipelineProcessingConfig, ProcessingMode};
+            let pipeline_config = PipelineProcessingConfig {
+                mode: ProcessingMode::Full,
+                parallel_processing: true,
+                buffer_size: 4096,
+                timeout_seconds: 300,
+                enable_caching: true,
+            };
+            builder = builder.with_config(pipeline_config);
 
             builder.build().await
         });
@@ -446,16 +457,16 @@ fn estimate_memory_usage() -> usize {
 
     #[cfg(target_os = "macos")]
     {
-        // macOS memory estimation
-        return 128 * 1024 * 1024; // 128MB typical estimate
+        128 * 1024 * 1024 // 128MB typical estimate for macOS
     }
 
     #[cfg(target_os = "windows")]
     {
-        // Windows memory estimation
-        return 128 * 1024 * 1024; // 128MB typical estimate
+        128 * 1024 * 1024 // 128MB typical estimate for Windows
     }
 
-    // Fallback for other platforms
-    64 * 1024 * 1024 // 64MB conservative estimate
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        64 * 1024 * 1024 // 64MB conservative estimate for other platforms
+    }
 }

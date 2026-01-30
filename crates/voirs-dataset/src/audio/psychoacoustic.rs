@@ -1466,8 +1466,8 @@ impl PsychoacousticAnalyzerImpl {
         let mut count = 0;
 
         for i in 1..bark_frames.len() {
-            for j in 0..bark_frames[i].len() {
-                let diff = (bark_frames[i][j] - bark_frames[i - 1][j]).abs();
+            for (j, &current_val) in bark_frames[i].iter().enumerate() {
+                let diff = (current_val - bark_frames[i - 1][j]).abs();
                 total_distortion += diff;
                 count += 1;
             }

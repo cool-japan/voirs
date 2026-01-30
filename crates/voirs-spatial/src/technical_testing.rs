@@ -494,7 +494,7 @@ impl TechnicalTestSuite {
             iteration_count += 1;
 
             // Check for error rate increase
-            if iteration_count % 1000 == 0 {
+            if iteration_count.is_multiple_of(1000) {
                 let current_error_count = errors.len();
                 let error_increase = current_error_count - last_error_count;
 
@@ -529,7 +529,7 @@ impl TechnicalTestSuite {
     )> {
         let mut platform_results = HashMap::new();
         let mut errors = Vec::new();
-        let mut successful_platforms = 0;
+        let mut _successful_platforms = 0;
 
         for platform_type in &config.parameters.target_platforms {
             let platform_result = self.test_platform_compatibility(*platform_type).await;
@@ -537,7 +537,7 @@ impl TechnicalTestSuite {
             match platform_result {
                 Ok(result) => {
                     if result.success {
-                        successful_platforms += 1;
+                        _successful_platforms += 1;
                     }
                     platform_results.insert(*platform_type, result);
                 }
@@ -748,7 +748,7 @@ impl TechnicalTestSuite {
                 .await;
 
             // Sample memory usage every 1000 iterations
-            if iteration % 1000 == 0 {
+            if iteration.is_multiple_of(1000) {
                 let current_memory = 100.0 + (iteration as f32 * 0.1); // Simulated memory usage
                 memory_samples.push((start_time.elapsed().as_secs() as u32, current_memory));
             }
@@ -1340,8 +1340,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_technical_test_suite() {
-        let processor = SpatialProcessorBuilder::new().build().await.unwrap();
-        let mut suite = TechnicalTestSuite::new(processor).unwrap();
+        let processor = SpatialProcessorBuilder::new()
+            .build()
+            .await
+            .expect("Should successfully build spatial processor");
+        let mut suite = TechnicalTestSuite::new(processor)
+            .expect("Should successfully create technical test suite");
 
         let configs = create_standard_technical_configs();
         for config in configs {
@@ -1350,7 +1354,10 @@ mod tests {
 
         // Run a single test to verify functionality
         if let Some(config) = suite.configs.first().cloned() {
-            let result = suite.run_test(&config).await.unwrap();
+            let result = suite
+                .run_test(&config)
+                .await
+                .expect("Should successfully run test");
             assert!(matches!(
                 result.outcome,
                 TestOutcome::Passed | TestOutcome::Failed | TestOutcome::Inconclusive
@@ -1360,8 +1367,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_latency_test() {
-        let processor = SpatialProcessorBuilder::new().build().await.unwrap();
-        let mut suite = TechnicalTestSuite::new(processor).unwrap();
+        let processor = SpatialProcessorBuilder::new()
+            .build()
+            .await
+            .expect("Should successfully build spatial processor");
+        let mut suite = TechnicalTestSuite::new(processor)
+            .expect("Should successfully create technical test suite");
 
         let config = TechnicalTestConfig {
             name: "Test Latency".to_string(),
@@ -1398,7 +1409,10 @@ mod tests {
             iterations: 10,
         };
 
-        let result = suite.run_test(&config).await.unwrap();
+        let result = suite
+            .run_test(&config)
+            .await
+            .expect("Should successfully run latency test");
         assert!(result.errors.is_empty() || result.outcome != TestOutcome::Error);
     }
 
@@ -1410,7 +1424,7 @@ mod tests {
         let latency_config = configs
             .iter()
             .find(|c| c.test_type == TechnicalTestType::LatencyTesting)
-            .unwrap();
+            .expect("Should find latency testing config in standard configs");
         assert_eq!(latency_config.success_criteria.max_latency_ms, 20.0);
     }
 }

@@ -1,6 +1,6 @@
 //! Configuration management and system settings
 
-use super::types::*;
+use super::types::RealtimeConfig;
 use crate::FeedbackError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -31,6 +31,7 @@ pub enum ConfigValue {
 
 impl RealtimeConfigManager {
     /// Create a new configuration manager
+    #[must_use]
     pub fn new(config: RealtimeConfig) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),

@@ -11,8 +11,8 @@ use std::time::{Duration, SystemTime};
 use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
 
-use crate::traits::{FeedbackContext, SessionScores};
 use crate::adaptive::models::UserModel;
+use crate::traits::{FeedbackContext, SessionScores};
 
 /// User profile for peer matching
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -390,8 +390,15 @@ impl Default for MatchingAlgorithm {
     }
 }
 
+impl Default for PeerMatchingEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PeerMatchingEngine {
     /// Create a new peer matching engine
+    #[must_use]
     pub fn new() -> Self {
         Self {
             profiles: RwLock::new(HashMap::new()),
@@ -520,10 +527,7 @@ impl PeerMatchingEngine {
         // Simplified compatibility calculation for debugging
         let language_score = if user2.target_languages.contains(&request.target_language)
             || user2.native_language == request.target_language
-            || user1
-                .target_languages
-                .iter()
-                .any(|lang| user2.native_language == *lang)
+            || user1.target_languages.contains(&user2.native_language)
         {
             1.0
         } else {
@@ -535,10 +539,10 @@ impl PeerMatchingEngine {
         } else {
             user2.skill_level.to_numeric() - user1.skill_level.to_numeric()
         };
-        let skill_score = 1.0 - (skill_diff as f32 / 5.0).min(1.0);
+        let skill_score = 1.0 - (f32::from(skill_diff) / 5.0).min(1.0);
 
         // Simple average of language and skill compatibility
-        (language_score + skill_score) / 2.0
+        f32::midpoint(language_score, skill_score)
     }
 
     /// Calculate schedule overlap between two users
@@ -575,7 +579,7 @@ impl PeerMatchingEngine {
         if total_hours == 0 {
             0.0
         } else {
-            (overlap_hours as f32 * 2.0) / total_hours as f32 // Multiply by 2 since we counted both users' hours
+            (f32::from(overlap_hours) * 2.0) / f32::from(total_hours) // Multiply by 2 since we counted both users' hours
         }
     }
 

@@ -424,6 +424,11 @@ pub mod batch {
     use std::os::raw::{c_float, c_uint};
 
     /// Process multiple audio operations in a single FFI call
+    ///
+    /// # Safety
+    /// The `operations` pointer must point to an array of `operation_count` valid VoirsBatchOperation structures.
+    /// Each operation's buffer pointers must be valid and point to arrays of the specified buffer sizes.
+    /// The `config` pointer, if not null, must point to a valid VoirsPerformanceConfig structure.
     #[no_mangle]
     pub unsafe extern "C" fn voirs_batch_process_audio(
         operations: *const VoirsBatchOperation,
@@ -490,6 +495,12 @@ pub mod batch {
     }
 
     /// Batch convert multiple audio buffers between formats
+    ///
+    /// # Safety
+    /// The `input_buffers` pointer must point to an array of `buffer_count` valid read-only float pointers.
+    /// The `output_buffers` pointer must point to an array of `buffer_count` valid mutable float pointers.
+    /// The `buffer_sizes` pointer must point to an array of `buffer_count` valid size values.
+    /// Each input_buffers[i] must point to buffer_sizes[i] floats, and each output_buffers[i] must have space for buffer_sizes[i] floats.
     #[no_mangle]
     pub unsafe extern "C" fn voirs_batch_convert_format(
         input_buffers: *const *const c_float,
@@ -665,7 +676,7 @@ pub mod advanced {
         for frame in 0..frame_count {
             // Prefetch next frames
             if frame + prefetch_frames < frame_count {
-                for (_ch_idx, channel) in channels.iter().enumerate() {
+                for channel in channels.iter() {
                     unsafe {
                         prefetch_memory(
                             channel.as_ptr().add(frame + prefetch_frames) as *const u8,
@@ -845,7 +856,9 @@ pub mod lockfree {
             // Pre-allocate initial capacity
             for _ in 0..initial_capacity {
                 if let Ok(ptr) = pool.allocate_chunk() {
-                    pool.deallocate(ptr);
+                    unsafe {
+                        pool.deallocate(ptr);
+                    }
                 }
             }
 
@@ -880,14 +893,19 @@ pub mod lockfree {
         }
 
         /// Deallocate a chunk back to the pool
-        pub fn deallocate(&self, ptr: *mut u8) {
+        ///
+        /// # Safety
+        ///
+        /// The pointer must have been allocated by this pool's `allocate` method
+        /// and must not have been previously deallocated.
+        pub unsafe fn deallocate(&self, ptr: *mut u8) {
             if ptr.is_null() {
                 return;
             }
 
             unsafe {
                 // Get the node pointer (before the data)
-                let node = (ptr as *mut u8).sub(std::mem::size_of::<PoolNode>()) as *mut PoolNode;
+                let node = ptr.sub(std::mem::size_of::<PoolNode>()) as *mut PoolNode;
 
                 loop {
                     let head = self.head.load(Ordering::Acquire);
@@ -1260,8 +1278,10 @@ mod tests {
         assert_eq!(stats.chunk_size, 1024);
 
         // Test deallocation
-        pool.deallocate(ptr1);
-        pool.deallocate(ptr2);
+        unsafe {
+            pool.deallocate(ptr1);
+            pool.deallocate(ptr2);
+        }
 
         let stats_after = pool.stats();
         assert_eq!(stats_after.allocated_count, stats.allocated_count - 2);
@@ -1302,7 +1322,9 @@ mod tests {
 
                 // Deallocate all memory within the same thread
                 for ptr in ptrs {
-                    pool_clone.deallocate(ptr);
+                    unsafe {
+                        pool_clone.deallocate(ptr);
+                    }
                 }
 
                 // Return success count instead of pointers
@@ -1324,7 +1346,9 @@ mod tests {
 
         // Verify pool is functional after concurrent operations
         let ptr = pool.allocate().expect("Pool should still work");
-        pool.deallocate(ptr);
+        unsafe {
+            pool.deallocate(ptr);
+        }
     }
 
     #[test]

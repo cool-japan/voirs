@@ -34,9 +34,9 @@ impl MelUtils {
         hop_length: u32,
     ) -> Result<MelSpectrogram> {
         if flat.len() != n_mels * n_frames {
-            return Err(AcousticError::InputError(
-                "Flat vector size mismatch".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Flat vector size mismatch".to_string(),
+            });
         }
 
         let mut data = vec![vec![0.0; n_frames]; n_mels];
@@ -52,30 +52,41 @@ impl MelUtils {
 
     /// Save mel spectrogram to binary format
     pub fn save_binary<P: AsRef<Path>>(mel: &MelSpectrogram, path: P) -> Result<()> {
-        let file = File::create(path)
-            .map_err(|e| AcousticError::ModelError(format!("Failed to create file: {e}")))?;
+        let file = File::create(path).map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to create file: {e}"),
+        })?;
         let mut writer = BufWriter::new(file);
 
         // Write header
         writer
             .write_all(&(mel.n_mels as u32).to_le_bytes())
-            .map_err(|e| AcousticError::ModelError(format!("Write error: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Write error: {e}"),
+            })?;
         writer
             .write_all(&(mel.n_frames as u32).to_le_bytes())
-            .map_err(|e| AcousticError::ModelError(format!("Write error: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Write error: {e}"),
+            })?;
         writer
             .write_all(&mel.sample_rate.to_le_bytes())
-            .map_err(|e| AcousticError::ModelError(format!("Write error: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Write error: {e}"),
+            })?;
         writer
             .write_all(&mel.hop_length.to_le_bytes())
-            .map_err(|e| AcousticError::ModelError(format!("Write error: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Write error: {e}"),
+            })?;
 
         // Write data
         for channel in &mel.data {
             for &value in channel {
                 writer
                     .write_all(&value.to_le_bytes())
-                    .map_err(|e| AcousticError::ModelError(format!("Write error: {e}")))?;
+                    .map_err(|e| AcousticError::ModelError {
+                        message: format!("Write error: {e}"),
+                    })?;
             }
         }
 
@@ -86,30 +97,39 @@ impl MelUtils {
     pub fn load_binary<P: AsRef<Path>>(path: P) -> Result<MelSpectrogram> {
         use std::io::Read;
 
-        let file = File::open(path)
-            .map_err(|e| AcousticError::ModelError(format!("Failed to open file: {e}")))?;
+        let file = File::open(path).map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to open file: {e}"),
+        })?;
         let mut reader = BufReader::new(file);
 
         // Read header
         let mut buffer = [0u8; 4];
         reader
             .read_exact(&mut buffer)
-            .map_err(|e| AcousticError::ModelError(format!("Read error: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Read error: {e}"),
+            })?;
         let n_mels = u32::from_le_bytes(buffer) as usize;
 
         reader
             .read_exact(&mut buffer)
-            .map_err(|e| AcousticError::ModelError(format!("Read error: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Read error: {e}"),
+            })?;
         let n_frames = u32::from_le_bytes(buffer) as usize;
 
         reader
             .read_exact(&mut buffer)
-            .map_err(|e| AcousticError::ModelError(format!("Read error: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Read error: {e}"),
+            })?;
         let sample_rate = u32::from_le_bytes(buffer);
 
         reader
             .read_exact(&mut buffer)
-            .map_err(|e| AcousticError::ModelError(format!("Read error: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Read error: {e}"),
+            })?;
         let hop_length = u32::from_le_bytes(buffer);
 
         // Read data
@@ -118,7 +138,9 @@ impl MelUtils {
             for value in channel {
                 reader
                     .read_exact(&mut buffer)
-                    .map_err(|e| AcousticError::ModelError(format!("Read error: {e}")))?;
+                    .map_err(|e| AcousticError::ModelError {
+                        message: format!("Read error: {e}"),
+                    })?;
                 *value = f32::from_le_bytes(buffer);
             }
         }
@@ -128,31 +150,46 @@ impl MelUtils {
 
     /// Save mel spectrogram as CSV
     pub fn save_csv<P: AsRef<Path>>(mel: &MelSpectrogram, path: P) -> Result<()> {
-        let file = File::create(path)
-            .map_err(|e| AcousticError::ModelError(format!("Failed to create file: {e}")))?;
+        let file = File::create(path).map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to create file: {e}"),
+        })?;
         let mut writer = BufWriter::new(file);
 
         // Write header
-        writeln!(writer, "# n_mels: {}", mel.n_mels)
-            .map_err(|e| AcousticError::ModelError(format!("Write error: {e}")))?;
-        writeln!(writer, "# n_frames: {}", mel.n_frames)
-            .map_err(|e| AcousticError::ModelError(format!("Write error: {e}")))?;
-        writeln!(writer, "# sample_rate: {}", mel.sample_rate)
-            .map_err(|e| AcousticError::ModelError(format!("Write error: {e}")))?;
-        writeln!(writer, "# hop_length: {}", mel.hop_length)
-            .map_err(|e| AcousticError::ModelError(format!("Write error: {e}")))?;
+        writeln!(writer, "# n_mels: {}", mel.n_mels).map_err(|e| AcousticError::ModelError {
+            message: format!("Write error: {e}"),
+        })?;
+        writeln!(writer, "# n_frames: {}", mel.n_frames).map_err(|e| {
+            AcousticError::ModelError {
+                message: format!("Write error: {e}"),
+            }
+        })?;
+        writeln!(writer, "# sample_rate: {}", mel.sample_rate).map_err(|e| {
+            AcousticError::ModelError {
+                message: format!("Write error: {e}"),
+            }
+        })?;
+        writeln!(writer, "# hop_length: {}", mel.hop_length).map_err(|e| {
+            AcousticError::ModelError {
+                message: format!("Write error: {e}"),
+            }
+        })?;
 
         // Write data (each row is a mel channel, each column is a time frame)
         for channel in &mel.data {
             for (i, &value) in channel.iter().enumerate() {
                 if i > 0 {
-                    write!(writer, ",")
-                        .map_err(|e| AcousticError::ModelError(format!("Write error: {e}")))?;
+                    write!(writer, ",").map_err(|e| AcousticError::ModelError {
+                        message: format!("Write error: {e}"),
+                    })?;
                 }
-                write!(writer, "{value:.6}")
-                    .map_err(|e| AcousticError::ModelError(format!("Write error: {e}")))?;
+                write!(writer, "{value:.6}").map_err(|e| AcousticError::ModelError {
+                    message: format!("Write error: {e}"),
+                })?;
             }
-            writeln!(writer).map_err(|e| AcousticError::ModelError(format!("Write error: {e}")))?;
+            writeln!(writer).map_err(|e| AcousticError::ModelError {
+                message: format!("Write error: {e}"),
+            })?;
         }
 
         Ok(())
@@ -388,9 +425,9 @@ impl MelUtils {
         mel2: &MelSpectrogram,
     ) -> Result<SimilarityMetrics> {
         if mel1.n_mels != mel2.n_mels {
-            return Err(AcousticError::InputError(
-                "Mel spectrograms must have same number of mel channels".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Mel spectrograms must have same number of mel channels".to_string(),
+            });
         }
 
         let min_frames = mel1.n_frames.min(mel2.n_frames);

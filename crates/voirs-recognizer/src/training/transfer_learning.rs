@@ -3,7 +3,11 @@
 //! This module provides sophisticated transfer learning capabilities for adapting
 //! pre-trained models to new domains, languages, and tasks.
 
-use super::*;
+#![allow(clippy::unused_async)] // Functions are async for API consistency and future I/O operations
+
+use super::{
+    EarlyStoppingConfig, EarlyStoppingMode, LayerConfiguration, ModelArchitecture, TrainingTask,
+};
 use crate::{PerformanceRequirements, RecognitionError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -246,8 +250,15 @@ pub struct PretrainedModelRegistry {
     domain_similarity_cache: HashMap<(String, String), f32>,
 }
 
+impl Default for PretrainedModelRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PretrainedModelRegistry {
     /// new
+    #[must_use]
     pub fn new() -> Self {
         Self {
             models: HashMap::new(),
@@ -262,6 +273,7 @@ impl PretrainedModelRegistry {
     }
 
     /// Find the best pre-trained model for a given task
+    #[must_use]
     pub fn find_best_model(
         &self,
         target_domain: &str,
@@ -407,8 +419,15 @@ pub struct LayerAnalyzer {
     layer_similarity: HashMap<String, HashMap<String, f32>>,
 }
 
+impl Default for LayerAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LayerAnalyzer {
     /// new
+    #[must_use]
     pub fn new() -> Self {
         Self {
             layer_importance: HashMap::new(),
@@ -417,6 +436,7 @@ impl LayerAnalyzer {
     }
 
     /// Analyze layers and recommend transfer strategy
+    #[must_use]
     pub fn recommend_transfer_strategy(
         &self,
         source_model: &PretrainedModelInfo,
@@ -456,6 +476,7 @@ impl LayerAnalyzer {
     }
 
     /// Determine which layers to freeze for a given strategy
+    #[must_use]
     pub fn determine_freezing_schedule(
         &self,
         strategy: &TransferStrategy,
@@ -488,7 +509,7 @@ impl LayerAnalyzer {
                 // Freeze all encoder layers
                 for i in 0..*num_layers {
                     policies.push(LayerFreezingPolicy {
-                        layer_pattern: format!("encoder.layers.{}.*", i),
+                        layer_pattern: format!("encoder.layers.{i}.*"),
                         freeze_initially: true,
                         unfreeze_epoch: u32::MAX, // Never unfreeze
                         learning_rate_scale: 0.0,
@@ -568,7 +589,7 @@ impl LayerAnalyzer {
 
                 for (pattern, lr_scale) in &groups {
                     policies.push(LayerFreezingPolicy {
-                        layer_pattern: pattern.to_string(),
+                        layer_pattern: (*pattern).to_string(),
                         freeze_initially: false,
                         unfreeze_epoch: 0,
                         learning_rate_scale: *lr_scale,
@@ -661,8 +682,15 @@ pub enum InitializationStrategy {
     },
 }
 
+impl Default for FineTuningScheduler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FineTuningScheduler {
     /// new
+    #[must_use]
     pub fn new() -> Self {
         Self {
             current_epoch: 0,
@@ -747,6 +775,7 @@ impl FineTuningScheduler {
     }
 
     /// Get current state of all layers
+    #[must_use]
     pub fn get_layer_states(&self) -> &HashMap<String, LayerState> {
         &self.layer_states
     }

@@ -972,15 +972,9 @@ impl VoirsPipelineBuilder {
                 }
 
                 // Validate room size if specified
-                if let Some(room_size) = &config.room_size {
-                    // Room size validation is handled by the enum, but we can add warnings
-                    match room_size {
-                        crate::builder::features::RoomSize::Huge => {
-                            if !self.config.use_gpu {
-                                tracing::warn!("Large room acoustics without GPU acceleration may be computationally expensive");
-                            }
-                        }
-                        _ => {}
+                if let Some(crate::builder::features::RoomSize::Huge) = &config.room_size {
+                    if !self.config.use_gpu {
+                        tracing::warn!("Large room acoustics without GPU acceleration may be computationally expensive");
                     }
                 }
 
@@ -993,10 +987,8 @@ impl VoirsPipelineBuilder {
                 }
 
                 // Validate HRTF compatibility
-                if config.hrtf_enabled {
-                    if config.sample_rate < 44100 {
-                        tracing::warn!("HRTF processing works best with sample rates >= 44.1kHz");
-                    }
+                if config.hrtf_enabled && config.sample_rate < 44100 {
+                    tracing::warn!("HRTF processing works best with sample rates >= 44.1kHz");
                 }
 
                 // Validate device compatibility for spatial audio

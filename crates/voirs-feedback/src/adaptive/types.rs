@@ -304,7 +304,7 @@ pub enum ActivationFunction {
     Sigmoid,
     /// Hyperbolic tangent
     Tanh,
-    /// Leaky ReLU
+    /// Leaky `ReLU`
     LeakyReLU,
     /// Softmax (for output layer)
     Softmax,

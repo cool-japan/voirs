@@ -1,6 +1,6 @@
 //! Mobile platform adapter implementation
 //!
-//! This module provides mobile-specific implementations for VoiRS feedback system
+//! This module provides mobile-specific implementations for `VoiRS` feedback system
 //! including iOS and Android support with platform-specific optimizations.
 
 use super::{AudioDeviceInfo, NetworkType, PlatformAdapter, PlatformError, PlatformResult};
@@ -14,11 +14,13 @@ pub struct MobileAdapter {
 
 impl MobileAdapter {
     /// Create a new mobile adapter
+    #[must_use]
     pub fn new() -> Self {
         Self { initialized: false }
     }
 
     /// Get mobile platform type
+    #[must_use]
     pub fn get_mobile_platform() -> MobilePlatform {
         #[cfg(target_os = "ios")]
         return MobilePlatform::IOS;
@@ -31,6 +33,7 @@ impl MobileAdapter {
     }
 
     /// Check if device has specific hardware capabilities
+    #[must_use]
     pub fn has_hardware_capability(capability: &str) -> bool {
         match capability {
             "microphone" => true,
@@ -49,6 +52,7 @@ impl MobileAdapter {
     }
 
     /// Get device information
+    #[must_use]
     pub fn get_device_info() -> DeviceInfo {
         DeviceInfo {
             platform: Self::get_mobile_platform(),
@@ -96,18 +100,21 @@ impl MobileAdapter {
     }
 
     /// Check if app is in foreground
+    #[must_use]
     pub fn is_foreground() -> bool {
         // In real implementation, this would check app state
         true
     }
 
     /// Check if device is in low power mode
+    #[must_use]
     pub fn is_low_power_mode() -> bool {
         // In real implementation, this would check device power state
         false
     }
 
     /// Get network connectivity status
+    #[must_use]
     pub fn get_network_status() -> NetworkStatus {
         NetworkStatus {
             is_connected: true,
@@ -282,7 +289,7 @@ impl PlatformAdapter for MobileAdapter {
         #[cfg(not(any(target_os = "ios", target_os = "android")))]
         {
             // Test environment
-            println!("Mobile Notification: {} - {}", title, message);
+            println!("Mobile Notification: {title} - {message}");
         }
 
         Ok(())
@@ -509,6 +516,7 @@ pub struct MobileUtils;
 
 impl MobileUtils {
     /// Check if device supports specific audio feature
+    #[must_use]
     pub fn supports_audio_feature(feature: &str) -> bool {
         match feature {
             "low_latency" => true,
@@ -523,6 +531,7 @@ impl MobileUtils {
     }
 
     /// Get recommended audio settings for mobile
+    #[must_use]
     pub fn get_recommended_audio_settings() -> MobileAudioSettings {
         MobileAudioSettings {
             sample_rate: 44100,
@@ -538,6 +547,7 @@ impl MobileUtils {
     }
 
     /// Get optimal settings based on device capabilities
+    #[must_use]
     pub fn get_optimal_settings(device_info: &DeviceInfo) -> MobileAudioSettings {
         let mut settings = Self::get_recommended_audio_settings();
 
@@ -557,18 +567,21 @@ impl MobileUtils {
     }
 
     /// Check if device supports background audio processing
+    #[must_use]
     pub fn supports_background_audio() -> bool {
         // Background audio is supported but limited on mobile
         true
     }
 
     /// Check if device supports hardware acceleration
+    #[must_use]
     pub fn supports_hardware_acceleration() -> bool {
         // Most modern mobile devices support hardware acceleration
         true
     }
 
     /// Get battery optimization recommendations
+    #[must_use]
     pub fn get_battery_optimization_tips() -> Vec<String> {
         vec![
             "Use larger buffer sizes to reduce CPU usage".to_string(),
@@ -580,6 +593,7 @@ impl MobileUtils {
     }
 
     /// Get network optimization recommendations
+    #[must_use]
     pub fn get_network_optimization_tips() -> Vec<String> {
         vec![
             "Use compression for data transfer".to_string(),
@@ -619,6 +633,7 @@ pub struct MobileAudioSettings {
 
 impl MobileUtils {
     /// Optimize for battery life
+    #[must_use]
     pub fn optimize_for_battery() -> PerformanceProfile {
         PerformanceProfile {
             cpu_usage_limit: 0.3,
@@ -633,6 +648,7 @@ impl MobileUtils {
     }
 
     /// Optimize for performance
+    #[must_use]
     pub fn optimize_for_performance() -> PerformanceProfile {
         PerformanceProfile {
             cpu_usage_limit: 0.8,
@@ -647,6 +663,7 @@ impl MobileUtils {
     }
 
     /// Optimize for balanced usage
+    #[must_use]
     pub fn optimize_for_balanced() -> PerformanceProfile {
         PerformanceProfile {
             cpu_usage_limit: 0.5,
@@ -661,6 +678,7 @@ impl MobileUtils {
     }
 
     /// Auto-optimize based on device state
+    #[must_use]
     pub fn auto_optimize(device_info: &DeviceInfo) -> PerformanceProfile {
         if device_info.is_low_power_mode || device_info.battery_level < 0.2 {
             Self::optimize_for_battery()
@@ -1083,7 +1101,7 @@ impl NativeMobileApp {
                     );
                 }
                 Err(e) => {
-                    log::warn!("Offline sync failed: {}", e);
+                    log::warn!("Offline sync failed: {e}");
                     // Schedule retry
                     self.offline_sync.schedule_retry().await?;
                 }
@@ -1165,6 +1183,7 @@ impl NativeMobileApp {
     }
 
     /// Get current app state
+    #[must_use]
     pub fn get_app_state(&self) -> &MobileAppState {
         &self.app_state
     }
@@ -1251,7 +1270,7 @@ impl PushNotificationManager {
         let token = format!("device_token_{}", uuid::Uuid::new_v4());
         self.device_token = Some(token.clone());
 
-        log::info!("Registered for push notifications with token: {}", token);
+        log::info!("Registered for push notifications with token: {token}");
         Ok(token)
     }
 
@@ -1272,7 +1291,7 @@ impl PushNotificationManager {
 
         #[cfg(not(any(target_os = "ios", target_os = "android")))]
         {
-            log::info!("Local notification: {} - {}", title, message);
+            log::info!("Local notification: {title} - {message}");
         }
 
         Ok(())
@@ -1284,6 +1303,7 @@ impl PushNotificationManager {
     }
 
     /// Get device token
+    #[must_use]
     pub fn get_device_token(&self) -> Option<&String> {
         self.device_token.as_ref()
     }
@@ -1410,10 +1430,10 @@ impl OfflineSyncManager {
 
         while let Some(operation) = self.pending_operations.pop_front() {
             match self.execute_operation(operation).await {
-                Ok(_) => synced_count += 1,
+                Ok(()) => synced_count += 1,
                 Err(e) => {
                     failed_count += 1;
-                    log::warn!("Failed to sync operation: {}", e);
+                    log::warn!("Failed to sync operation: {e}");
                 }
             }
         }
@@ -1527,8 +1547,15 @@ pub struct MobilePerformanceOptimizer {
     settings: PerformanceSettings,
 }
 
+impl Default for MobilePerformanceOptimizer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MobilePerformanceOptimizer {
     /// Create new performance optimizer
+    #[must_use]
     pub fn new() -> Self {
         Self {
             performance_mode: PerformanceMode::Balanced,
@@ -1577,6 +1604,7 @@ impl MobilePerformanceOptimizer {
     }
 
     /// Get current performance mode
+    #[must_use]
     pub fn get_performance_mode(&self) -> &PerformanceMode {
         &self.performance_mode
     }
@@ -1626,8 +1654,15 @@ pub struct BackgroundTaskManager {
     settings: BackgroundTaskSettings,
 }
 
+impl Default for BackgroundTaskManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BackgroundTaskManager {
     /// Create new background task manager
+    #[must_use]
     pub fn new() -> Self {
         Self {
             active_tasks: std::collections::HashMap::new(),
@@ -1677,6 +1712,7 @@ impl BackgroundTaskManager {
     }
 
     /// Get number of active tasks
+    #[must_use]
     pub fn active_task_count(&self) -> usize {
         self.active_tasks.len()
     }

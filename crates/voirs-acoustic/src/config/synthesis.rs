@@ -62,9 +62,9 @@ impl SynthesisConfig {
 
         if let Some(batch_size) = self.batch_size {
             if batch_size == 0 {
-                return Err(AcousticError::ConfigError(
-                    "Batch size must be > 0".to_string(),
-                ));
+                return Err(AcousticError::ConfigError {
+                    message: "Batch size must be > 0".to_string(),
+                });
             }
         }
 
@@ -141,9 +141,9 @@ impl SpeakerConfig {
         if let Some(speaker_mix) = &self.speaker_mix {
             let total_weight: f32 = speaker_mix.values().sum();
             if (total_weight - 1.0).abs() > 1e-6 {
-                return Err(AcousticError::ConfigError(
-                    "Speaker mix weights must sum to 1.0".to_string(),
-                ));
+                return Err(AcousticError::ConfigError {
+                    message: "Speaker mix weights must sum to 1.0".to_string(),
+                });
             }
         }
 
@@ -213,9 +213,9 @@ impl EmotionConfig {
     /// Validate emotion configuration
     pub fn validate(&self) -> Result<()> {
         if self.intensity < 0.0 || self.intensity > 1.0 {
-            return Err(AcousticError::ConfigError(
-                "Emotion intensity must be between 0.0 and 1.0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Emotion intensity must be between 0.0 and 1.0".to_string(),
+            });
         }
         Ok(())
     }
@@ -390,9 +390,9 @@ impl VoiceQuality {
                     3 => "creakiness",
                     _ => "unknown_quality",
                 };
-                return Err(AcousticError::ConfigError(format!(
-                    "{name} must be between 0.0 and 1.0"
-                )));
+                return Err(AcousticError::ConfigError {
+                    message: format!("{name} must be between 0.0 and 1.0"),
+                });
             }
         }
         Ok(())
@@ -455,14 +455,14 @@ impl ProsodyConfig {
     /// Validate prosody configuration
     pub fn validate(&self) -> Result<()> {
         if self.speed <= 0.0 {
-            return Err(AcousticError::ConfigError(
-                "Speed must be > 0.0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Speed must be > 0.0".to_string(),
+            });
         }
         if self.energy <= 0.0 {
-            return Err(AcousticError::ConfigError(
-                "Energy must be > 0.0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Energy must be > 0.0".to_string(),
+            });
         }
 
         self.duration.validate()?;
@@ -516,24 +516,24 @@ impl DurationControl {
     /// Validate duration control
     pub fn validate(&self) -> Result<()> {
         if self.phoneme_duration_scale <= 0.0 {
-            return Err(AcousticError::ConfigError(
-                "Phoneme duration scale must be > 0.0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Phoneme duration scale must be > 0.0".to_string(),
+            });
         }
         if self.pause_duration_scale <= 0.0 {
-            return Err(AcousticError::ConfigError(
-                "Pause duration scale must be > 0.0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Pause duration scale must be > 0.0".to_string(),
+            });
         }
         if self.min_phoneme_duration <= 0.0 {
-            return Err(AcousticError::ConfigError(
-                "Minimum phoneme duration must be > 0.0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Minimum phoneme duration must be > 0.0".to_string(),
+            });
         }
         if self.max_phoneme_duration <= self.min_phoneme_duration {
-            return Err(AcousticError::ConfigError(
-                "Maximum phoneme duration must be > minimum".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Maximum phoneme duration must be > minimum".to_string(),
+            });
         }
         Ok(())
     }
@@ -581,25 +581,25 @@ impl PitchControl {
     pub fn validate(&self) -> Result<()> {
         if let Some(base_pitch) = self.base_pitch_hz {
             if base_pitch <= 0.0 {
-                return Err(AcousticError::ConfigError(
-                    "Base pitch must be > 0.0".to_string(),
-                ));
+                return Err(AcousticError::ConfigError {
+                    message: "Base pitch must be > 0.0".to_string(),
+                });
             }
         }
         if self.pitch_range_scale <= 0.0 {
-            return Err(AcousticError::ConfigError(
-                "Pitch range scale must be > 0.0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Pitch range scale must be > 0.0".to_string(),
+            });
         }
         if self.intonation_strength < 0.0 {
-            return Err(AcousticError::ConfigError(
-                "Intonation strength must be >= 0.0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Intonation strength must be >= 0.0".to_string(),
+            });
         }
         if self.stress_emphasis < 0.0 {
-            return Err(AcousticError::ConfigError(
-                "Stress emphasis must be >= 0.0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Stress emphasis must be >= 0.0".to_string(),
+            });
         }
         Ok(())
     }
@@ -648,24 +648,24 @@ impl RhythmControl {
     /// Validate rhythm control
     pub fn validate(&self) -> Result<()> {
         if self.rhythm_strength < 0.0 {
-            return Err(AcousticError::ConfigError(
-                "Rhythm strength must be >= 0.0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Rhythm strength must be >= 0.0".to_string(),
+            });
         }
         if self.syllable_timing_variation < 0.0 {
-            return Err(AcousticError::ConfigError(
-                "Syllable timing variation must be >= 0.0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Syllable timing variation must be >= 0.0".to_string(),
+            });
         }
         if self.word_boundary_emphasis < 0.0 {
-            return Err(AcousticError::ConfigError(
-                "Word boundary emphasis must be >= 0.0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Word boundary emphasis must be >= 0.0".to_string(),
+            });
         }
         if self.sentence_boundary_emphasis < 0.0 {
-            return Err(AcousticError::ConfigError(
-                "Sentence boundary emphasis must be >= 0.0".to_string(),
-            ));
+            return Err(AcousticError::ConfigError {
+                message: "Sentence boundary emphasis must be >= 0.0".to_string(),
+            });
         }
         Ok(())
     }
@@ -733,9 +733,9 @@ impl QualityConfig {
     pub fn validate(&self) -> Result<()> {
         if let Some(max_time) = self.max_inference_time {
             if max_time == 0 {
-                return Err(AcousticError::ConfigError(
-                    "Max inference time must be > 0".to_string(),
-                ));
+                return Err(AcousticError::ConfigError {
+                    message: "Max inference time must be > 0".to_string(),
+                });
             }
         }
         Ok(())

@@ -255,7 +255,9 @@ impl Decoder {
             },
             vb.pp("pre_conv"),
         )
-        .map_err(|e| AcousticError::ModelError(format!("Failed to create pre_conv: {e}")))?;
+        .map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to create pre_conv: {e}"),
+        })?;
 
         // Create upsampling layers
         let mut upsample_layers = Vec::new();
@@ -278,8 +280,8 @@ impl Decoder {
                 config.dropout,
                 vb.pp(format!("upsample_{i}")),
             )
-            .map_err(|e| {
-                AcousticError::ModelError(format!("Failed to create upsample layer {i}: {e}"))
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to create upsample layer {i}: {e}"),
             })?;
 
             upsample_layers.push(layer);
@@ -298,7 +300,9 @@ impl Decoder {
             },
             vb.pp("post_conv"),
         )
-        .map_err(|e| AcousticError::ModelError(format!("Failed to create post_conv: {e}")))?;
+        .map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to create post_conv: {e}"),
+        })?;
 
         Ok(Self {
             config,
@@ -320,20 +324,25 @@ impl Decoder {
         // Validate input shape
         let input_shape = z.dims();
         if input_shape.len() != 3 {
-            return Err(AcousticError::InputError(format!(
-                "Expected 3D tensor [batch, latent_dim, frames], got {input_shape:?}"
-            )));
+            return Err(AcousticError::InputError {
+                message: format!(
+                    "Expected 3D tensor [batch, latent_dim, frames], got {input_shape:?}"
+                ),
+            });
         }
 
-        let (batch_size, latent_dim, n_frames) = z.dims3().map_err(|e| {
-            AcousticError::ModelError(format!("Failed to get tensor dimensions: {e}"))
-        })?;
+        let (batch_size, latent_dim, n_frames) =
+            z.dims3().map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to get tensor dimensions: {e}"),
+            })?;
 
         if latent_dim != self.config.latent_dim {
-            return Err(AcousticError::InputError(format!(
-                "Expected {} latent dimensions, got {latent_dim}",
-                self.config.latent_dim
-            )));
+            return Err(AcousticError::InputError {
+                message: format!(
+                    "Expected {} latent dimensions, got {latent_dim}",
+                    self.config.latent_dim
+                ),
+            });
         }
 
         tracing::debug!("Decoder forward: input shape [{batch_size}, {latent_dim}, {n_frames}]");
@@ -342,14 +351,16 @@ impl Decoder {
         let mut h = self
             .pre_conv
             .forward(z)
-            .map_err(|e| AcousticError::ModelError(format!("Pre-convolution failed: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Pre-convolution failed: {e}"),
+            })?;
 
         tracing::debug!("After pre_conv: {:?}", h.dims());
 
         // Apply upsampling layers
         for (i, layer) in self.upsample_layers.iter().enumerate() {
-            h = layer.forward(&h).map_err(|e| {
-                AcousticError::ModelError(format!("Upsample layer {i} failed: {e}"))
+            h = layer.forward(&h).map_err(|e| AcousticError::ModelError {
+                message: format!("Upsample layer {i} failed: {e}"),
             })?;
 
             tracing::debug!("After upsample layer {i}: {:?}", h.dims());
@@ -359,12 +370,14 @@ impl Decoder {
         let mel = self
             .post_conv
             .forward(&h)
-            .map_err(|e| AcousticError::ModelError(format!("Post-convolution failed: {e}")))?;
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Post-convolution failed: {e}"),
+            })?;
 
         // Apply tanh activation to keep values in reasonable range for mel spectrograms
-        let mel = mel
-            .tanh()
-            .map_err(|e| AcousticError::ModelError(format!("Tanh activation failed: {e}")))?;
+        let mel = mel.tanh().map_err(|e| AcousticError::ModelError {
+            message: format!("Tanh activation failed: {e}"),
+        })?;
 
         tracing::debug!("Output mel spectrogram shape: {:?}", mel.dims());
 

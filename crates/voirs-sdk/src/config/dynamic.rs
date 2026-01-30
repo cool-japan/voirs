@@ -58,7 +58,10 @@ impl DynamicConfigManager {
 
     /// Get current configuration (read-only)
     pub fn get_config(&self) -> AppConfig {
-        self.config.read().unwrap().clone()
+        self.config
+            .read()
+            .map(|cfg| cfg.clone())
+            .unwrap_or_default()
     }
 
     /// Update configuration with validation
@@ -68,19 +71,26 @@ impl DynamicConfigManager {
 
         // Store current config for potential rollback
         let previous_config = {
-            let current = self.config.read().unwrap();
+            let current = self
+                .config
+                .read()
+                .map_err(|e| ConfigUpdateError::LockError(format!("Failed to read config: {e}")))?;
             current.clone()
         };
 
         // Apply update
         {
-            let mut config = self.config.write().unwrap();
+            let mut config = self.config.write().map_err(|e| {
+                ConfigUpdateError::LockError(format!("Failed to write config: {e}"))
+            })?;
             *config = new_config.clone();
         }
 
         // Record in history
         {
-            let mut history = self.history.write().unwrap();
+            let mut history = self.history.write().map_err(|e| {
+                ConfigUpdateError::LockError(format!("Failed to write history: {e}"))
+            })?;
             history.record_change(previous_config.clone(), new_config.clone());
         }
 
@@ -282,6 +292,10 @@ pub enum ConfigUpdateError {
     /// Configuration loading failed
     #[error("Configuration loading failed: {0}")]
     LoadError(#[from] ConfigLoadError),
+
+    /// Lock acquisition failed
+    #[error("Lock error: {0}")]
+    LockError(String),
 
     /// No configuration history available for rollback
     #[error("No configuration history available for rollback")]

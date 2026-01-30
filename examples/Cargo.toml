@@ -181,7 +181,7 @@ scirs2-core = { workspace = true }  # For random number generation (replaced ran
 thiserror = "2.0"
 num_cpus = "1.17"
 md5 = "0.8"
-regex = "1.11"
+regex = "1.12"
 crossbeam = "0.8"
 
 [features]

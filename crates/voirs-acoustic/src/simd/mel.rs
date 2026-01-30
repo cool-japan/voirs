@@ -68,20 +68,22 @@ impl SimdMelComputer {
         magnitude_spectrum: &[Vec<f32>],
     ) -> Result<Vec<Vec<f32>>> {
         if magnitude_spectrum.is_empty() {
-            return Err(AcousticError::InputError(
-                "Empty magnitude spectrum".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Empty magnitude spectrum".to_string(),
+            });
         }
 
         let n_frames = magnitude_spectrum[0].len();
         let n_freq_bins = magnitude_spectrum.len();
 
         if n_freq_bins != self.n_fft / 2 + 1 {
-            return Err(AcousticError::InputError(format!(
-                "Expected {} frequency bins, got {}",
-                self.n_fft / 2 + 1,
-                n_freq_bins
-            )));
+            return Err(AcousticError::InputError {
+                message: format!(
+                    "Expected {} frequency bins, got {}",
+                    self.n_fft / 2 + 1,
+                    n_freq_bins
+                ),
+            });
         }
 
         let mut mel_spec = vec![vec![0.0f32; n_frames]; self.n_mels];
@@ -134,9 +136,12 @@ impl SimdMelComputer {
 
     /// Compute MFCC coefficients if DCT matrix is available
     pub fn compute_mfcc(&self, mel_spectrogram: &[Vec<f32>]) -> Result<Vec<Vec<f32>>> {
-        let dct_matrix = self.dct_matrix.as_ref().ok_or_else(|| {
-            AcousticError::ConfigError("DCT matrix not initialized. Use with_mfcc()".to_string())
-        })?;
+        let dct_matrix = self
+            .dct_matrix
+            .as_ref()
+            .ok_or_else(|| AcousticError::ConfigError {
+                message: "DCT matrix not initialized. Use with_mfcc()".to_string(),
+            })?;
 
         let n_frames = mel_spectrogram[0].len();
         let n_mfcc = dct_matrix.len();
@@ -210,6 +215,7 @@ impl SimdMelComputer {
         let half_window = window_size / 2;
 
         for feature_idx in 0..n_features {
+            #[allow(clippy::needless_range_loop)]
             for frame_idx in 0..n_frames {
                 let mut numerator = 0.0f32;
                 let mut denominator = 0.0f32;

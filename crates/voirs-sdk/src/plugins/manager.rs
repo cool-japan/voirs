@@ -7,13 +7,9 @@ use crate::{
         VoirsPlugin,
     },
 };
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-    sync::{Arc, RwLock},
-    time::Instant,
-};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Instant};
 use tracing::{error, info, warn};
 
 /// Plugin manager for loading and managing plugins
@@ -141,7 +137,7 @@ impl PluginManager {
 
         // Then add to audio effects collection
         {
-            let mut effects = self.audio_effects.write().unwrap();
+            let mut effects = self.audio_effects.write();
             effects.insert(name, plugin);
         }
 
@@ -161,7 +157,7 @@ impl PluginManager {
 
         // Then add to voice effects collection
         {
-            let mut effects = self.voice_effects.write().unwrap();
+            let mut effects = self.voice_effects.write();
             effects.insert(name, plugin);
         }
 
@@ -181,7 +177,7 @@ impl PluginManager {
 
         // Then add to text processors collection
         {
-            let mut processors = self.text_processors.write().unwrap();
+            let mut processors = self.text_processors.write();
             processors.insert(name, plugin);
         }
 
@@ -216,7 +212,7 @@ impl PluginManager {
 
             // Update stats
             {
-                let mut stats = self.stats.write().unwrap();
+                let mut stats = self.stats.write();
                 stats.failed_loads += 1;
             }
 
@@ -228,13 +224,13 @@ impl PluginManager {
         // Get metadata and cache it
         let metadata = plugin.metadata();
         {
-            let mut cache = self.metadata_cache.write().unwrap();
+            let mut cache = self.metadata_cache.write();
             cache.insert(name.clone(), metadata.clone());
         }
 
         // Store plugin in main collection
         {
-            let mut plugins = self.plugins.write().unwrap();
+            let mut plugins = self.plugins.write();
             plugins.insert(name.clone(), plugin.clone());
         }
 
@@ -242,20 +238,20 @@ impl PluginManager {
 
         // Store configuration
         {
-            let mut configs = self.configs.write().unwrap();
+            let mut configs = self.configs.write();
             configs.insert(name.clone(), config);
         }
 
         // Update load order
         {
-            let mut load_order = self.load_order.write().unwrap();
+            let mut load_order = self.load_order.write();
             load_order.push(name.clone());
         }
 
         // Update statistics
         let load_time = start_time.elapsed().as_millis() as u64;
         {
-            let mut stats = self.stats.write().unwrap();
+            let mut stats = self.stats.write();
             stats.total_loaded += 1;
             stats.load_times.insert(name.clone(), load_time);
             stats.activation_counts.insert(name.clone(), 0);
@@ -271,37 +267,37 @@ impl PluginManager {
 
     /// Get a plugin by name
     pub fn get_plugin(&self, name: &str) -> Option<Arc<dyn VoirsPlugin>> {
-        let plugins = self.plugins.read().unwrap();
+        let plugins = self.plugins.read();
         plugins.get(name).cloned()
     }
 
     /// Get an audio effect plugin by name
     pub fn get_audio_effect(&self, name: &str) -> Option<Arc<dyn AudioEffect>> {
-        let effects = self.audio_effects.read().unwrap();
+        let effects = self.audio_effects.read();
         effects.get(name).cloned()
     }
 
     /// Get a voice effect plugin by name
     pub fn get_voice_effect(&self, name: &str) -> Option<Arc<dyn VoiceEffect>> {
-        let effects = self.voice_effects.read().unwrap();
+        let effects = self.voice_effects.read();
         effects.get(name).cloned()
     }
 
     /// Get a text processor plugin by name
     pub fn get_text_processor(&self, name: &str) -> Option<Arc<dyn TextProcessor>> {
-        let processors = self.text_processors.read().unwrap();
+        let processors = self.text_processors.read();
         processors.get(name).cloned()
     }
 
     /// List all registered plugins
     pub fn list_plugins(&self) -> Vec<String> {
-        let plugins = self.plugins.read().unwrap();
+        let plugins = self.plugins.read();
         plugins.keys().cloned().collect()
     }
 
     /// List plugins by type
     pub fn list_plugins_by_type(&self, plugin_type: PluginType) -> Vec<String> {
-        let metadata_cache = self.metadata_cache.read().unwrap();
+        let metadata_cache = self.metadata_cache.read();
         metadata_cache
             .iter()
             .filter(|(_, metadata)| metadata.plugin_type == plugin_type)
@@ -311,13 +307,13 @@ impl PluginManager {
 
     /// Get plugin metadata
     pub fn get_plugin_metadata(&self, name: &str) -> Option<PluginMetadata> {
-        let cache = self.metadata_cache.read().unwrap();
+        let cache = self.metadata_cache.read();
         cache.get(name).cloned()
     }
 
     /// Get plugin configuration
     pub fn get_plugin_config(&self, name: &str) -> Option<PluginConfig> {
-        let configs = self.configs.read().unwrap();
+        let configs = self.configs.read();
         configs.get(name).cloned()
     }
 
@@ -332,7 +328,7 @@ impl PluginManager {
             }
 
             // Update stored configuration
-            let mut configs = self.configs.write().unwrap();
+            let mut configs = self.configs.write();
             configs.insert(name.to_string(), config);
 
             info!("Updated configuration for plugin '{}'", name);
@@ -348,7 +344,7 @@ impl PluginManager {
     pub async fn unregister_plugin(&self, name: &str) -> Result<()> {
         // Remove from all collections
         let plugin = {
-            let mut plugins = self.plugins.write().unwrap();
+            let mut plugins = self.plugins.write();
             plugins.remove(name)
         };
 
@@ -360,39 +356,39 @@ impl PluginManager {
 
             // Remove from specialized collections
             {
-                let mut effects = self.audio_effects.write().unwrap();
+                let mut effects = self.audio_effects.write();
                 effects.remove(name);
             }
             {
-                let mut effects = self.voice_effects.write().unwrap();
+                let mut effects = self.voice_effects.write();
                 effects.remove(name);
             }
             {
-                let mut processors = self.text_processors.write().unwrap();
+                let mut processors = self.text_processors.write();
                 processors.remove(name);
             }
 
             // Remove from metadata cache
             {
-                let mut cache = self.metadata_cache.write().unwrap();
+                let mut cache = self.metadata_cache.write();
                 cache.remove(name);
             }
 
             // Remove from configurations
             {
-                let mut configs = self.configs.write().unwrap();
+                let mut configs = self.configs.write();
                 configs.remove(name);
             }
 
             // Update load order
             {
-                let mut load_order = self.load_order.write().unwrap();
+                let mut load_order = self.load_order.write();
                 load_order.retain(|n| n != name);
             }
 
             // Update statistics
             {
-                let mut stats = self.stats.write().unwrap();
+                let mut stats = self.stats.write();
                 stats.total_loaded = stats.total_loaded.saturating_sub(1);
                 stats.load_times.remove(name);
                 stats.memory_usage.remove(name);
@@ -441,13 +437,13 @@ impl PluginManager {
 
     /// Get plugin statistics
     pub fn get_stats(&self) -> PluginStats {
-        let stats = self.stats.read().unwrap();
+        let stats = self.stats.read();
         stats.clone()
     }
 
     /// Get enabled plugins in load order
     pub fn get_enabled_plugins_ordered(&self) -> Vec<String> {
-        let load_order = self.load_order.read().unwrap();
+        let load_order = self.load_order.read();
         load_order
             .iter()
             .filter(|name| self.is_plugin_enabled(name))
@@ -459,7 +455,7 @@ impl PluginManager {
     pub fn validate_dependencies(&self, name: &str) -> Result<()> {
         if let Some(metadata) = self.get_plugin_metadata(name) {
             for dep_name in &metadata.dependencies {
-                if !self.plugins.read().unwrap().contains_key(dep_name) {
+                if !self.plugins.read().contains_key(dep_name) {
                     return Err(VoirsError::plugin_error(format!(
                         "Plugin '{name}' requires dependency '{dep_name}' which is not loaded"
                     )));
@@ -476,7 +472,7 @@ impl PluginManager {
     /// Shutdown all plugins
     pub async fn shutdown_all(&self) -> Result<()> {
         let plugins: Vec<_> = {
-            let plugins = self.plugins.read().unwrap();
+            let plugins = self.plugins.read();
             plugins
                 .iter()
                 .map(|(name, plugin)| (name.clone(), plugin.clone()))

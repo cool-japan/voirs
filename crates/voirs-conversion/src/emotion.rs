@@ -45,12 +45,11 @@ impl EmotionConversionAdapter {
         emotion_config: voirs_emotion::config::EmotionConfig,
         transfer_config: EmotionTransferConfig,
     ) -> Self {
-        let adapter = Self {
+        Self {
             config: Some(emotion_config),
             current_emotion: None,
             transfer_config,
-        };
-        adapter
+        }
     }
 
     /// Set target emotion for conversion

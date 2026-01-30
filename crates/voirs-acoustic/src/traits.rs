@@ -1,7 +1,99 @@
 //! Core traits for acoustic models
 //!
 //! This module contains the fundamental traits that define the interface
-//! for acoustic models in the VoiRS system.
+//! for acoustic models in the VoiRS system. Acoustic models convert phoneme
+//! sequences into mel spectrograms, which can then be converted to audio
+//! waveforms using a vocoder.
+//!
+//! # Core Concepts
+//!
+//! - **AcousticModel**: Main trait for phoneme-to-mel conversion
+//! - **ModelLoader**: Trait for loading models from files or HuggingFace Hub
+//! - **Backend**: Trait for ML framework backends (Candle, ONNX)
+//! - **MelComputation**: Trait for mel spectrogram computation from audio
+//! - **ProsodyController**: Trait for prosody manipulation
+//!
+//! # Examples
+//!
+//! ## Basic Synthesis
+//!
+//! ```ignore
+//! use voirs_acoustic::{AcousticModel, Phoneme, SynthesisConfig};
+//!
+//! async fn synthesize_speech(model: &dyn AcousticModel) -> Result<()> {
+//!     // Create phoneme sequence
+//!     let phonemes = vec![
+//!         Phoneme::new("HH"),
+//!         Phoneme::new("AH0"),
+//!         Phoneme::new("L"),
+//!         Phoneme::new("OW1"),
+//!     ];
+//!
+//!     // Default synthesis configuration
+//!     let config = SynthesisConfig::new();
+//!
+//!     // Synthesize mel spectrogram
+//!     let mel = model.synthesize(&phonemes, Some(&config)).await?;
+//!
+//!     println!("Generated mel: {} mels × {} frames", mel.n_mels, mel.n_frames);
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## Multi-Speaker Synthesis
+//!
+//! ```ignore
+//! use voirs_acoustic::{AcousticModel, AcousticModelFeature, SynthesisConfig};
+//!
+//! async fn synthesize_with_speaker(model: &mut dyn AcousticModel) -> Result<()> {
+//!     // Check if model supports multi-speaker
+//!     if !model.supports(AcousticModelFeature::MultiSpeaker) {
+//!         return Err("Model does not support multi-speaker".into());
+//!     }
+//!
+//!     // Set speaker ID
+//!     model.set_speaker(Some(2)).await?;
+//!
+//!     // Synthesize with the selected speaker
+//!     let mel = model.synthesize(&phonemes, None).await?;
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## Batch Processing
+//!
+//! ```ignore
+//! async fn batch_synthesize(model: &dyn AcousticModel) -> Result<()> {
+//!     let sentences = vec![
+//!         vec![Phoneme::new("HH"), Phoneme::new("AY1")],
+//!         vec![Phoneme::new("B"), Phoneme::new("AY1")],
+//!     ];
+//!
+//!     let refs: Vec<&[Phoneme]> = sentences.iter().map(|s| s.as_slice()).collect();
+//!
+//!     // Batch synthesis for efficiency
+//!     let mels = model.synthesize_batch(&refs, None).await?;
+//!
+//!     println!("Generated {} mel spectrograms", mels.len());
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## Prosody Control
+//!
+//! ```ignore
+//! async fn synthesize_with_prosody(model: &dyn AcousticModel) -> Result<()> {
+//!     let config = SynthesisConfig {
+//!         speed: 1.2,        // 20% faster
+//!         pitch_shift: 2.0,  // +2 semitones
+//!         energy: 0.9,       // Slightly quieter
+//!         ..Default::default()
+//!     };
+//!
+//!     let mel = model.synthesize(&phonemes, Some(&config)).await?;
+//!     Ok(())
+//! }
+//! ```
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

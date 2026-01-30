@@ -338,9 +338,9 @@ impl EmotionVector {
     /// Interpolate with another emotion vector
     pub fn interpolate(&self, other: &EmotionVector, alpha: f32) -> Result<EmotionVector> {
         if self.dimension != other.dimension {
-            return Err(AcousticError::InputError(
-                "Emotion vectors must have same dimension".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Emotion vectors must have same dimension".to_string(),
+            });
         }
 
         let alpha = alpha.clamp(0.0, 1.0);
@@ -478,56 +478,63 @@ impl EmotionValidator {
     pub fn validate(&self, config: &EmotionConfig) -> Result<()> {
         // Validate primary emotion type
         if !self.is_emotion_supported(&config.emotion_type) {
-            return Err(AcousticError::InputError(format!(
-                "Emotion type {:?} is not supported",
-                config.emotion_type
-            )));
+            return Err(AcousticError::InputError {
+                message: format!("Emotion type {:?} is not supported", config.emotion_type),
+            });
         }
 
         // Validate intensity
         let intensity_value = config.intensity.as_f32();
         if intensity_value < self.min_intensity || intensity_value > self.max_intensity {
-            return Err(AcousticError::InputError(format!(
-                "Emotion intensity {} is out of range [{}, {}]",
-                intensity_value, self.min_intensity, self.max_intensity
-            )));
+            return Err(AcousticError::InputError {
+                message: format!(
+                    "Emotion intensity {} is out of range [{}, {}]",
+                    intensity_value, self.min_intensity, self.max_intensity
+                ),
+            });
         }
 
         // Validate secondary emotions
         if config.secondary_emotions.len() > self.max_secondary_emotions {
-            return Err(AcousticError::InputError(format!(
-                "Too many secondary emotions: {} (max: {})",
-                config.secondary_emotions.len(),
-                self.max_secondary_emotions
-            )));
+            return Err(AcousticError::InputError {
+                message: format!(
+                    "Too many secondary emotions: {} (max: {})",
+                    config.secondary_emotions.len(),
+                    self.max_secondary_emotions
+                ),
+            });
         }
 
         for (emotion, weight) in &config.secondary_emotions {
             if !self.is_emotion_supported(emotion) {
-                return Err(AcousticError::InputError(format!(
-                    "Secondary emotion type {emotion:?} is not supported"
-                )));
+                return Err(AcousticError::InputError {
+                    message: format!("Secondary emotion type {emotion:?} is not supported"),
+                });
             }
 
             if *weight < 0.0 || *weight > 1.0 {
-                return Err(AcousticError::InputError(format!(
-                    "Secondary emotion weight {weight} is out of range [0.0, 1.0]"
-                )));
+                return Err(AcousticError::InputError {
+                    message: format!(
+                        "Secondary emotion weight {weight} is out of range [0.0, 1.0]"
+                    ),
+                });
             }
         }
 
         // Validate custom parameters
         for (param_name, param_value) in &config.custom_params {
             if param_name.is_empty() {
-                return Err(AcousticError::InputError(
-                    "Custom parameter name cannot be empty".to_string(),
-                ));
+                return Err(AcousticError::InputError {
+                    message: "Custom parameter name cannot be empty".to_string(),
+                });
             }
 
             if !param_value.is_finite() {
-                return Err(AcousticError::InputError(format!(
-                    "Custom parameter '{param_name}' has invalid value: {param_value}"
-                )));
+                return Err(AcousticError::InputError {
+                    message: format!(
+                        "Custom parameter '{param_name}' has invalid value: {param_value}"
+                    ),
+                });
             }
         }
 
@@ -1023,9 +1030,9 @@ impl EmotionInterpolator {
         to: &EmotionVector,
     ) -> Result<Vec<EmotionVector>> {
         if from.dimension != to.dimension {
-            return Err(AcousticError::InputError(
-                "Emotion vectors must have the same dimension".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Emotion vectors must have the same dimension".to_string(),
+            });
         }
 
         let mut result = Vec::with_capacity(self.interpolation_steps);
@@ -1138,9 +1145,9 @@ impl EmotionTransitionManager {
     /// Get emotion at specific time
     pub fn get_emotion_at_time(&self, time: f32) -> Result<EmotionConfig> {
         if self.emotion_sequence.is_empty() {
-            return Err(AcousticError::InputError(
-                "No emotions in sequence".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "No emotions in sequence".to_string(),
+            });
         }
 
         if self.emotion_sequence.len() == 1 {
@@ -1165,7 +1172,12 @@ impl EmotionTransitionManager {
         }
 
         // Return last emotion if time is beyond sequence
-        Ok(self.emotion_sequence.last().unwrap().clone())
+        self.emotion_sequence
+            .last()
+            .cloned()
+            .ok_or_else(|| crate::AcousticError::ProcessingError {
+                message: "Emotion sequence is empty, cannot get emotion at time".to_string(),
+            })
     }
 
     /// Generate complete emotion sequence

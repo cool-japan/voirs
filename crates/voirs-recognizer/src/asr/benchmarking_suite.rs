@@ -837,7 +837,8 @@ pub struct AccuracyValidationReport {
 }
 
 impl AccuracyValidator {
-    /// Create a new accuracy validator with standard VoiRS requirements
+    /// Create a new accuracy validator with standard `VoiRS` requirements
+    #[must_use]
     pub fn new_standard() -> Self {
         let requirements = vec![
             AccuracyRequirement {
@@ -876,6 +877,7 @@ impl AccuracyValidator {
     }
 
     /// Create a custom accuracy validator
+    #[must_use]
     pub fn new_custom(requirements: Vec<AccuracyRequirement>) -> Self {
         Self { requirements }
     }
@@ -947,7 +949,9 @@ impl AccuracyValidator {
 
             let passed = wer_passed && cer_passed && phoneme_passed;
 
-            let failure_reason = if !passed {
+            let failure_reason = if passed {
+                None
+            } else {
                 let mut reasons = Vec::new();
                 if !wer_passed {
                     reasons.push(format!(
@@ -974,8 +978,6 @@ impl AccuracyValidator {
                     }
                 }
                 Some(reasons.join(", "))
-            } else {
-                None
             };
 
             Ok(AccuracyValidationResult {
@@ -1012,6 +1014,7 @@ impl AccuracyValidator {
     }
 
     /// Generate a summary report
+    #[must_use]
     pub fn generate_summary_report(&self, report: &AccuracyValidationReport) -> String {
         let mut summary = String::new();
 
@@ -1066,10 +1069,10 @@ impl AccuracyValidator {
             summary.push_str(&format!("  Samples: {}\n", result.sample_count));
 
             if let Some(failure_reason) = &result.failure_reason {
-                summary.push_str(&format!("  Failure: {}\n", failure_reason));
+                summary.push_str(&format!("  Failure: {failure_reason}\n"));
             }
 
-            summary.push_str("\n");
+            summary.push('\n');
         }
 
         summary

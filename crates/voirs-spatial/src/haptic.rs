@@ -622,14 +622,18 @@ impl HapticAudioProcessor {
     /// Add haptic device
     pub fn add_device(&mut self, device: Box<dyn HapticDevice>) -> Result<()> {
         let device_id = device.device_id();
-        let mut devices = self.devices.write().unwrap();
+        let mut devices = self.devices.write().map_err(|_| {
+            crate::Error::LegacyProcessing("Haptic devices lock poisoned".to_string())
+        })?;
         devices.insert(device_id, device);
         Ok(())
     }
 
     /// Remove haptic device
     pub fn remove_device(&mut self, device_id: &str) -> Result<()> {
-        let mut devices = self.devices.write().unwrap();
+        let mut devices = self.devices.write().map_err(|_| {
+            crate::Error::LegacyProcessing("Haptic devices lock poisoned".to_string())
+        })?;
         devices.remove(device_id);
         Ok(())
     }
@@ -684,7 +688,9 @@ impl HapticAudioProcessor {
                 intensity_scale,
             };
 
-            let mut active_patterns = self.active_patterns.write().unwrap();
+            let mut active_patterns = self.active_patterns.write().map_err(|_| {
+                crate::Error::LegacyProcessing("Active patterns lock poisoned".to_string())
+            })?;
             active_patterns.insert(pattern_id.to_string(), active_pattern);
         }
 
@@ -694,13 +700,17 @@ impl HapticAudioProcessor {
     /// Stop all haptic feedback
     pub fn stop_all(&mut self) -> Result<()> {
         // Stop all devices
-        let mut devices = self.devices.write().unwrap();
+        let mut devices = self.devices.write().map_err(|_| {
+            crate::Error::LegacyProcessing("Haptic devices lock poisoned".to_string())
+        })?;
         for device in devices.values_mut() {
             device.stop()?;
         }
 
         // Clear active patterns
-        let mut active_patterns = self.active_patterns.write().unwrap();
+        let mut active_patterns = self.active_patterns.write().map_err(|_| {
+            crate::Error::LegacyProcessing("Active patterns lock poisoned".to_string())
+        })?;
         active_patterns.clear();
 
         Ok(())
@@ -793,7 +803,9 @@ impl HapticAudioProcessor {
         scaled_pattern.spatial_position = Some(event.position);
 
         // Send to devices
-        let devices = self.devices.read().unwrap();
+        let devices = self.devices.read().map_err(|_| {
+            crate::Error::LegacyProcessing("Haptic devices lock poisoned".to_string())
+        })?;
         for device in devices.values() {
             if device.is_ready() {
                 // Create device-specific pattern based on capabilities
@@ -837,7 +849,9 @@ impl HapticAudioProcessor {
     }
 
     fn update_active_patterns(&mut self) -> Result<()> {
-        let mut active_patterns = self.active_patterns.write().unwrap();
+        let mut active_patterns = self.active_patterns.write().map_err(|_| {
+            crate::Error::LegacyProcessing("Active patterns lock poisoned".to_string())
+        })?;
         let current_time = Instant::now();
 
         // Remove completed patterns
@@ -865,11 +879,24 @@ impl HapticAudioProcessor {
     }
 
     fn update_metrics(&mut self) {
-        let active_patterns = self.active_patterns.read().unwrap();
-        let devices = self.devices.read().unwrap();
+        let active_pattern_count = match self.active_patterns.read() {
+            Ok(patterns) => patterns.len(),
+            Err(_) => {
+                tracing::warn!("Active patterns lock poisoned, using 0");
+                0
+            }
+        };
 
-        self.metrics.active_patterns = active_patterns.len();
-        self.metrics.resource_usage.active_devices = devices.len();
+        let device_count = match self.devices.read() {
+            Ok(devices) => devices.len(),
+            Err(_) => {
+                tracing::warn!("Haptic devices lock poisoned, using 0");
+                0
+            }
+        };
+
+        self.metrics.active_patterns = active_pattern_count;
+        self.metrics.resource_usage.active_devices = device_count;
         self.metrics.resource_usage.pattern_library_size = self.pattern_library.size();
 
         // Update other metrics (would be implemented with actual measurements)
@@ -1355,8 +1382,10 @@ mod tests {
     #[test]
     fn test_effect_type_serialization() {
         let effect = HapticEffectType::Vibration;
-        let serialized = serde_json::to_string(&effect).unwrap();
-        let deserialized: HapticEffectType = serde_json::from_str(&serialized).unwrap();
+        let serialized =
+            serde_json::to_string(&effect).expect("Failed to serialize effect type in test");
+        let deserialized: HapticEffectType =
+            serde_json::from_str(&serialized).expect("Failed to deserialize effect type in test");
         assert_eq!(effect, deserialized);
     }
 

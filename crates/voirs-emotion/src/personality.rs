@@ -325,7 +325,7 @@ impl PersonalityEmotionModifier {
     /// Export personality model to JSON
     pub async fn export_personality(&self) -> Result<String> {
         let personality = self.personality.read().await;
-        serde_json::to_string_pretty(&*personality).map_err(|e| Error::Serialization(e))
+        serde_json::to_string_pretty(&*personality).map_err(Error::Serialization)
     }
 
     /// Import personality model from JSON

@@ -841,11 +841,13 @@ impl EmotionalSpeechEvaluationTrait for EmotionalSpeechEvaluator {
         }
 
         // Expressiveness transfer (requires reference)
-        if config.expressiveness_transfer && reference.is_some() {
-            expressiveness_transfer = Some(
-                self.evaluate_expressiveness_transfer(audio, reference.unwrap(), config)
-                    .await?,
-            );
+        if config.expressiveness_transfer {
+            if let Some(ref_audio) = reference {
+                expressiveness_transfer = Some(
+                    self.evaluate_expressiveness_transfer(audio, ref_audio, config)
+                        .await?,
+                );
+            }
         }
 
         // Style consistency
@@ -854,11 +856,13 @@ impl EmotionalSpeechEvaluationTrait for EmotionalSpeechEvaluator {
         }
 
         // Personality preservation (requires reference)
-        if config.personality_preservation && reference.is_some() {
-            personality_preservation = Some(
-                self.evaluate_personality_preservation(audio, reference.unwrap(), config)
-                    .await?,
-            );
+        if config.personality_preservation {
+            if let Some(ref_audio) = reference {
+                personality_preservation = Some(
+                    self.evaluate_personality_preservation(audio, ref_audio, config)
+                        .await?,
+                );
+            }
         }
 
         // Cross-cultural expression

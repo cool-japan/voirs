@@ -21,6 +21,11 @@ pub struct PhonologicalRule {
 }
 
 impl PhonologicalRule {
+    /// Creates a new phonological rule without context constraints
+    ///
+    /// # Arguments
+    /// * `pattern` - The grapheme pattern to match (e.g., "ch", "tion")
+    /// * `phoneme` - The phoneme output (e.g., "tʃ", "ʃən")
     pub fn new(pattern: &str, phoneme: &str) -> Self {
         Self {
             pattern: pattern.to_string(),
@@ -31,6 +36,15 @@ impl PhonologicalRule {
         }
     }
 
+    /// Creates a context-aware phonological rule with left/right constraints
+    ///
+    /// # Arguments
+    /// * `pattern` - The grapheme pattern to match
+    /// * `phoneme` - The phoneme output
+    /// * `left` - Optional left context constraint
+    /// * `right` - Optional right context constraint
+    ///
+    /// Context-aware rules automatically get higher priority (10 vs 0).
     pub fn with_context(
         pattern: &str,
         phoneme: &str,
@@ -46,6 +60,7 @@ impl PhonologicalRule {
         }
     }
 
+    /// Sets a custom priority for this rule (higher = applied first)
     pub fn with_priority(mut self, priority: u32) -> Self {
         self.priority = priority;
         self

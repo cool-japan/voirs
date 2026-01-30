@@ -71,11 +71,12 @@ pub trait MigrationManager: Send + Sync {
         -> PersistenceResult<Vec<String>>;
 }
 
-/// Built-in migrations for VoiRS feedback system
+/// Built-in migrations for `VoiRS` feedback system
 pub struct FeedbackMigrations;
 
 impl FeedbackMigrations {
     /// Get all migrations in order
+    #[must_use]
     pub fn get_all_migrations() -> Vec<Migration> {
         vec![
             Self::create_initial_schema(),
@@ -92,7 +93,7 @@ impl FeedbackMigrations {
             version: 1,
             name: "Initial Schema".to_string(),
             description: "Create initial tables for feedback system".to_string(),
-            up_script: r#"
+            up_script: r"
                 CREATE TABLE IF NOT EXISTS sessions (
                     session_id TEXT PRIMARY KEY,
                     user_id TEXT NOT NULL,
@@ -128,9 +129,9 @@ impl FeedbackMigrations {
                 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
                 CREATE INDEX IF NOT EXISTS idx_feedback_user_id ON feedback_history(user_id);
                 CREATE INDEX IF NOT EXISTS idx_feedback_timestamp ON feedback_history(timestamp);
-            "#
+            "
             .to_string(),
-            down_script: r#"
+            down_script: r"
                 DROP INDEX IF EXISTS idx_feedback_timestamp;
                 DROP INDEX IF EXISTS idx_feedback_user_id;
                 DROP INDEX IF EXISTS idx_sessions_user_id;
@@ -138,7 +139,7 @@ impl FeedbackMigrations {
                 DROP TABLE IF EXISTS user_preferences;
                 DROP TABLE IF EXISTS user_progress;
                 DROP TABLE IF EXISTS sessions;
-            "#
+            "
             .to_string(),
             dependencies: vec![],
             checksum: "f7a8b3c9d2e1f4g5h6i7j8k9l0m1n2o3".to_string(),
@@ -152,7 +153,7 @@ impl FeedbackMigrations {
             version: 2,
             name: "Add Privacy Fields".to_string(),
             description: "Add privacy level and anonymization fields".to_string(),
-            up_script: r#"
+            up_script: r"
                 ALTER TABLE sessions ADD COLUMN privacy_level TEXT DEFAULT 'Anonymized';
                 ALTER TABLE user_progress ADD COLUMN privacy_level TEXT DEFAULT 'Anonymized';
                 ALTER TABLE user_preferences ADD COLUMN privacy_level TEXT DEFAULT 'Anonymized';
@@ -162,9 +163,9 @@ impl FeedbackMigrations {
                 ALTER TABLE user_progress ADD COLUMN is_encrypted BOOLEAN DEFAULT FALSE;
                 ALTER TABLE user_preferences ADD COLUMN is_encrypted BOOLEAN DEFAULT FALSE;
                 ALTER TABLE feedback_history ADD COLUMN is_encrypted BOOLEAN DEFAULT FALSE;
-            "#
+            "
             .to_string(),
-            down_script: r#"
+            down_script: r"
                 ALTER TABLE sessions DROP COLUMN privacy_level;
                 ALTER TABLE sessions DROP COLUMN is_encrypted;
                 ALTER TABLE user_progress DROP COLUMN privacy_level;
@@ -173,7 +174,7 @@ impl FeedbackMigrations {
                 ALTER TABLE user_preferences DROP COLUMN is_encrypted;
                 ALTER TABLE feedback_history DROP COLUMN privacy_level;
                 ALTER TABLE feedback_history DROP COLUMN is_encrypted;
-            "#
+            "
             .to_string(),
             dependencies: vec!["001_initial_schema".to_string()],
             checksum: "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6".to_string(),
@@ -187,7 +188,7 @@ impl FeedbackMigrations {
             version: 3,
             name: "Add Performance Indexes".to_string(),
             description: "Add indexes for better query performance".to_string(),
-            up_script: r#"
+            up_script: r"
                 CREATE INDEX IF NOT EXISTS idx_sessions_start_time ON sessions(start_time);
                 CREATE INDEX IF NOT EXISTS idx_sessions_last_activity ON sessions(last_activity);
                 CREATE INDEX IF NOT EXISTS idx_user_progress_updated_at ON user_progress(updated_at);
@@ -197,8 +198,8 @@ impl FeedbackMigrations {
                 -- Composite indexes for common queries
                 CREATE INDEX IF NOT EXISTS idx_sessions_user_start ON sessions(user_id, start_time);
                 CREATE INDEX IF NOT EXISTS idx_feedback_user_timestamp ON feedback_history(user_id, timestamp);
-            "#.to_string(),
-            down_script: r#"
+            ".to_string(),
+            down_script: r"
                 DROP INDEX IF EXISTS idx_feedback_user_timestamp;
                 DROP INDEX IF EXISTS idx_sessions_user_start;
                 DROP INDEX IF EXISTS idx_feedback_created_at;
@@ -206,7 +207,7 @@ impl FeedbackMigrations {
                 DROP INDEX IF EXISTS idx_user_progress_updated_at;
                 DROP INDEX IF EXISTS idx_sessions_last_activity;
                 DROP INDEX IF EXISTS idx_sessions_start_time;
-            "#.to_string(),
+            ".to_string(),
             dependencies: vec!["001_initial_schema".to_string()],
             checksum: "z9y8x7w6v5u4t3s2r1q0p9o8n7m6l5k4".to_string(),
         }
@@ -219,7 +220,7 @@ impl FeedbackMigrations {
             version: 4,
             name: "Add Encryption Support".to_string(),
             description: "Add encryption metadata and key management".to_string(),
-            up_script: r#"
+            up_script: r"
                 CREATE TABLE IF NOT EXISTS encryption_keys (
                     key_id TEXT PRIMARY KEY,
                     key_purpose TEXT NOT NULL,
@@ -236,8 +237,8 @@ impl FeedbackMigrations {
 
                 CREATE INDEX IF NOT EXISTS idx_encryption_keys_purpose ON encryption_keys(key_purpose);
                 CREATE INDEX IF NOT EXISTS idx_encryption_keys_active ON encryption_keys(is_active);
-            "#.to_string(),
-            down_script: r#"
+            ".to_string(),
+            down_script: r"
                 DROP INDEX IF EXISTS idx_encryption_keys_active;
                 DROP INDEX IF EXISTS idx_encryption_keys_purpose;
                 
@@ -247,7 +248,7 @@ impl FeedbackMigrations {
                 ALTER TABLE feedback_history DROP COLUMN encryption_key_id;
                 
                 DROP TABLE IF EXISTS encryption_keys;
-            "#.to_string(),
+            ".to_string(),
             dependencies: vec!["002_add_privacy_fields".to_string()],
             checksum: "q1w2e3r4t5y6u7i8o9p0a1s2d3f4g5h6".to_string(),
         }
@@ -386,6 +387,7 @@ pub struct MigrationStatus {
 }
 
 /// Calculate migration checksum
+#[must_use]
 pub fn calculate_checksum(migration: &Migration) -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};

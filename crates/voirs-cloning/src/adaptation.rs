@@ -505,13 +505,14 @@ impl SpeakerAdapter {
 
         // Extract basic acoustic features (placeholder)
         // In a real implementation, this would extract spectral features, MFCCs, etc.
-        let mut features = Vec::new();
 
         // Basic statistical features
-        features.push(Self::compute_mean(&audio));
-        features.push(Self::compute_std(&audio));
-        features.push(Self::compute_skewness(&audio));
-        features.push(Self::compute_kurtosis(&audio));
+        let mut features = vec![
+            Self::compute_mean(&audio),
+            Self::compute_std(&audio),
+            Self::compute_skewness(&audio),
+            Self::compute_kurtosis(&audio),
+        ];
 
         // Spectral features (simplified)
         features.extend(self.extract_spectral_features(&audio)?);
@@ -528,16 +529,11 @@ impl SpeakerAdapter {
     /// Extract spectral features from audio
     fn extract_spectral_features(&self, audio: &[f32]) -> Result<Vec<f32>> {
         // Simplified spectral features
-        let mut features = Vec::new();
-
-        // Spectral centroid
-        features.push(self.compute_spectral_centroid(audio));
-
-        // Spectral rolloff
-        features.push(self.compute_spectral_rolloff(audio));
-
-        // Zero crossing rate
-        features.push(self.compute_zero_crossing_rate(audio));
+        let features = vec![
+            self.compute_spectral_centroid(audio),  // Spectral centroid
+            self.compute_spectral_rolloff(audio),   // Spectral rolloff
+            self.compute_zero_crossing_rate(audio), // Zero crossing rate
+        ];
 
         Ok(features)
     }
@@ -606,7 +602,7 @@ impl SpeakerAdapter {
             let layer = linear(
                 current_dim,
                 hidden_dim,
-                vs.pp(&format!("hidden_{}", layers.len())),
+                vs.pp(format!("hidden_{}", layers.len())),
             )?;
             layers.push(layer);
             current_dim = hidden_dim;

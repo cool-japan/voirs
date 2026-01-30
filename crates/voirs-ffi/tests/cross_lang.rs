@@ -179,7 +179,7 @@ impl AudioResult {
         }
 
         let correlation = numerator / (denom1.sqrt() * denom2.sqrt());
-        correlation.max(0.0).min(1.0)
+        correlation.clamp(0.0, 1.0)
     }
 
     /// Check if this result is consistent with another
@@ -246,7 +246,7 @@ impl CApiTester {
         };
 
         // Create deterministic samples based on text content and config
-        let base_length = (text.len() * 100); // 100 samples per character
+        let base_length = text.len() * 100; // 100 samples per character
         let adjusted_length = (base_length as f32 / speaking_rate) as usize;
 
         let mut samples = Vec::with_capacity(adjusted_length);
@@ -322,7 +322,7 @@ impl PythonTester {
         };
 
         // Create deterministic samples based on text content and config (identical to C API)
-        let base_length = (text.len() * 100); // 100 samples per character
+        let base_length = text.len() * 100; // 100 samples per character
         let adjusted_length = (base_length as f32 / speaking_rate) as usize;
 
         let mut samples = Vec::with_capacity(adjusted_length);

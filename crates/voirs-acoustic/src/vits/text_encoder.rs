@@ -67,7 +67,7 @@ impl MultiHeadAttention {
         let d_model = config.d_model;
         let n_heads = config.n_heads;
 
-        if d_model % n_heads != 0 {
+        if !d_model.is_multiple_of(n_heads) {
             return Err(candle_core::Error::Msg(
                 "d_model must be divisible by n_heads".to_string(),
             ));
@@ -322,18 +322,27 @@ impl TextEncoder {
         // Add all the required tensors with proper initialization (embedding is [vocab_size, d_model])
         tensors.insert(
             "phoneme_embedding.embedding.weight".to_string(),
-            Tensor::randn(0f32, 1f32, (config.vocab_size, config.d_model), &device)
-                .map_err(|e| AcousticError::ModelError(e.to_string()))?,
+            Tensor::randn(0f32, 1f32, (config.vocab_size, config.d_model), &device).map_err(
+                |e| AcousticError::ModelError {
+                    message: e.to_string(),
+                },
+            )?,
         );
         tensors.insert(
             "final_norm.weight".to_string(),
-            Tensor::ones((config.d_model,), DType::F32, &device)
-                .map_err(|e| AcousticError::ModelError(e.to_string()))?,
+            Tensor::ones((config.d_model,), DType::F32, &device).map_err(|e| {
+                AcousticError::ModelError {
+                    message: e.to_string(),
+                }
+            })?,
         );
         tensors.insert(
             "final_norm.bias".to_string(),
-            Tensor::zeros((config.d_model,), DType::F32, &device)
-                .map_err(|e| AcousticError::ModelError(e.to_string()))?,
+            Tensor::zeros((config.d_model,), DType::F32, &device).map_err(|e| {
+                AcousticError::ModelError {
+                    message: e.to_string(),
+                }
+            })?,
         );
 
         // Add tensors for each transformer layer
@@ -343,115 +352,165 @@ impl TextEncoder {
             // Self-attention tensors (note: weight shape is [output_features, input_features])
             tensors.insert(
                 format!("{layer_prefix}.self_attn.q_proj.weight"),
-                Tensor::randn(0f32, 1f32, (config.d_model, config.d_model), &device)
-                    .map_err(|e| AcousticError::ModelError(e.to_string()))?,
+                Tensor::randn(0f32, 1f32, (config.d_model, config.d_model), &device).map_err(
+                    |e| AcousticError::ModelError {
+                        message: e.to_string(),
+                    },
+                )?,
             );
             tensors.insert(
                 format!("{layer_prefix}.self_attn.q_proj.bias"),
-                Tensor::zeros((config.d_model,), DType::F32, &device)
-                    .map_err(|e| AcousticError::ModelError(e.to_string()))?,
+                Tensor::zeros((config.d_model,), DType::F32, &device).map_err(|e| {
+                    AcousticError::ModelError {
+                        message: e.to_string(),
+                    }
+                })?,
             );
             tensors.insert(
                 format!("{layer_prefix}.self_attn.k_proj.weight"),
-                Tensor::randn(0f32, 1f32, (config.d_model, config.d_model), &device)
-                    .map_err(|e| AcousticError::ModelError(e.to_string()))?,
+                Tensor::randn(0f32, 1f32, (config.d_model, config.d_model), &device).map_err(
+                    |e| AcousticError::ModelError {
+                        message: e.to_string(),
+                    },
+                )?,
             );
             tensors.insert(
                 format!("{layer_prefix}.self_attn.k_proj.bias"),
-                Tensor::zeros((config.d_model,), DType::F32, &device)
-                    .map_err(|e| AcousticError::ModelError(e.to_string()))?,
+                Tensor::zeros((config.d_model,), DType::F32, &device).map_err(|e| {
+                    AcousticError::ModelError {
+                        message: e.to_string(),
+                    }
+                })?,
             );
             tensors.insert(
                 format!("{layer_prefix}.self_attn.v_proj.weight"),
-                Tensor::randn(0f32, 1f32, (config.d_model, config.d_model), &device)
-                    .map_err(|e| AcousticError::ModelError(e.to_string()))?,
+                Tensor::randn(0f32, 1f32, (config.d_model, config.d_model), &device).map_err(
+                    |e| AcousticError::ModelError {
+                        message: e.to_string(),
+                    },
+                )?,
             );
             tensors.insert(
                 format!("{layer_prefix}.self_attn.v_proj.bias"),
-                Tensor::zeros((config.d_model,), DType::F32, &device)
-                    .map_err(|e| AcousticError::ModelError(e.to_string()))?,
+                Tensor::zeros((config.d_model,), DType::F32, &device).map_err(|e| {
+                    AcousticError::ModelError {
+                        message: e.to_string(),
+                    }
+                })?,
             );
             tensors.insert(
                 format!("{layer_prefix}.self_attn.out_proj.weight"),
-                Tensor::randn(0f32, 1f32, (config.d_model, config.d_model), &device)
-                    .map_err(|e| AcousticError::ModelError(e.to_string()))?,
+                Tensor::randn(0f32, 1f32, (config.d_model, config.d_model), &device).map_err(
+                    |e| AcousticError::ModelError {
+                        message: e.to_string(),
+                    },
+                )?,
             );
             tensors.insert(
                 format!("{layer_prefix}.self_attn.out_proj.bias"),
-                Tensor::zeros((config.d_model,), DType::F32, &device)
-                    .map_err(|e| AcousticError::ModelError(e.to_string()))?,
+                Tensor::zeros((config.d_model,), DType::F32, &device).map_err(|e| {
+                    AcousticError::ModelError {
+                        message: e.to_string(),
+                    }
+                })?,
             );
 
             // Feed-forward tensors (note: weight shape is [output_features, input_features])
             tensors.insert(
                 format!("{layer_prefix}.feed_forward.linear1.weight"),
-                Tensor::randn(0f32, 1f32, (config.d_ff, config.d_model), &device)
-                    .map_err(|e| AcousticError::ModelError(e.to_string()))?,
+                Tensor::randn(0f32, 1f32, (config.d_ff, config.d_model), &device).map_err(|e| {
+                    AcousticError::ModelError {
+                        message: e.to_string(),
+                    }
+                })?,
             );
             tensors.insert(
                 format!("{layer_prefix}.feed_forward.linear1.bias"),
-                Tensor::zeros((config.d_ff,), DType::F32, &device)
-                    .map_err(|e| AcousticError::ModelError(e.to_string()))?,
+                Tensor::zeros((config.d_ff,), DType::F32, &device).map_err(|e| {
+                    AcousticError::ModelError {
+                        message: e.to_string(),
+                    }
+                })?,
             );
             tensors.insert(
                 format!("{layer_prefix}.feed_forward.linear2.weight"),
-                Tensor::randn(0f32, 1f32, (config.d_model, config.d_ff), &device)
-                    .map_err(|e| AcousticError::ModelError(e.to_string()))?,
+                Tensor::randn(0f32, 1f32, (config.d_model, config.d_ff), &device).map_err(|e| {
+                    AcousticError::ModelError {
+                        message: e.to_string(),
+                    }
+                })?,
             );
             tensors.insert(
                 format!("{layer_prefix}.feed_forward.linear2.bias"),
-                Tensor::zeros((config.d_model,), DType::F32, &device)
-                    .map_err(|e| AcousticError::ModelError(e.to_string()))?,
+                Tensor::zeros((config.d_model,), DType::F32, &device).map_err(|e| {
+                    AcousticError::ModelError {
+                        message: e.to_string(),
+                    }
+                })?,
             );
 
             // Layer norm tensors
             tensors.insert(
                 format!("{layer_prefix}.norm1.weight"),
-                Tensor::ones((config.d_model,), DType::F32, &device)
-                    .map_err(|e| AcousticError::ModelError(e.to_string()))?,
+                Tensor::ones((config.d_model,), DType::F32, &device).map_err(|e| {
+                    AcousticError::ModelError {
+                        message: e.to_string(),
+                    }
+                })?,
             );
             tensors.insert(
                 format!("{layer_prefix}.norm1.bias"),
-                Tensor::zeros((config.d_model,), DType::F32, &device)
-                    .map_err(|e| AcousticError::ModelError(e.to_string()))?,
+                Tensor::zeros((config.d_model,), DType::F32, &device).map_err(|e| {
+                    AcousticError::ModelError {
+                        message: e.to_string(),
+                    }
+                })?,
             );
             tensors.insert(
                 format!("{layer_prefix}.norm2.weight"),
-                Tensor::ones((config.d_model,), DType::F32, &device)
-                    .map_err(|e| AcousticError::ModelError(e.to_string()))?,
+                Tensor::ones((config.d_model,), DType::F32, &device).map_err(|e| {
+                    AcousticError::ModelError {
+                        message: e.to_string(),
+                    }
+                })?,
             );
             tensors.insert(
                 format!("{layer_prefix}.norm2.bias"),
-                Tensor::zeros((config.d_model,), DType::F32, &device)
-                    .map_err(|e| AcousticError::ModelError(e.to_string()))?,
+                Tensor::zeros((config.d_model,), DType::F32, &device).map_err(|e| {
+                    AcousticError::ModelError {
+                        message: e.to_string(),
+                    }
+                })?,
             );
         }
 
         let vb = VarBuilder::from_tensors(tensors, DType::F32, &device);
 
         let phoneme_embedding = PhonemeEmbedding::new(&config, vb.pp("phoneme_embedding"))
-            .map_err(|e| {
-                AcousticError::ModelError(format!("Failed to create phoneme embedding: {e}"))
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to create phoneme embedding: {e}"),
             })?;
 
         let pos_encoding = PositionalEncoding::new(config.d_model, config.max_seq_len, &device)
-            .map_err(|e| {
-                AcousticError::ModelError(format!("Failed to create positional encoding: {e}"))
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to create positional encoding: {e}"),
             })?;
 
         let mut layers = Vec::new();
         for i in 0..config.n_layers {
             let layer = TransformerEncoderLayer::new(&config, vb.pp(format!("layer_{i}")))
-                .map_err(|e| {
-                    AcousticError::ModelError(format!(
-                        "Failed to create transformer layer {i}: {e}"
-                    ))
+                .map_err(|e| AcousticError::ModelError {
+                    message: format!("Failed to create transformer layer {i}: {e}"),
                 })?;
             layers.push(layer);
         }
 
-        let final_norm = candle_nn::layer_norm(config.d_model, 1e-5, vb.pp("final_norm"))
-            .map_err(|e| AcousticError::ModelError(format!("Failed to create final norm: {e}")))?;
+        let final_norm =
+            candle_nn::layer_norm(config.d_model, 1e-5, vb.pp("final_norm")).map_err(|e| {
+                AcousticError::ModelError {
+                    message: format!("Failed to create final norm: {e}"),
+                }
+            })?;
 
         Ok(Self {
             config,
@@ -466,9 +525,9 @@ impl TextEncoder {
     /// Forward pass through the text encoder
     pub fn forward(&self, phonemes: &[Phoneme], lengths: Option<&[usize]>) -> Result<Tensor> {
         if phonemes.is_empty() {
-            return Err(AcousticError::InputError(
-                "Empty phoneme sequence".to_string(),
-            ));
+            return Err(AcousticError::InputError {
+                message: "Empty phoneme sequence".to_string(),
+            });
         }
 
         // Encode phonemes to IDs
@@ -478,26 +537,29 @@ impl TextEncoder {
         let mut x = self
             .phoneme_embedding
             .forward(&phoneme_ids, &self.device)
-            .map_err(|e| AcousticError::InferenceError(format!("Failed to embed phonemes: {e}")))?;
+            .map_err(|e| AcousticError::InferenceError {
+                message: format!("Failed to embed phonemes: {e}"),
+            })?;
 
         // Add batch dimension
-        x = x.unsqueeze(0).map_err(|e| {
-            AcousticError::InferenceError(format!("Failed to add batch dimension: {e}"))
+        x = x.unsqueeze(0).map_err(|e| AcousticError::InferenceError {
+            message: format!("Failed to add batch dimension: {e}"),
         })?;
 
         // Add positional encoding
-        x = self.pos_encoding.forward(&x).map_err(|e| {
-            AcousticError::InferenceError(format!("Failed to add positional encoding: {e}"))
-        })?;
+        x = self
+            .pos_encoding
+            .forward(&x)
+            .map_err(|e| AcousticError::InferenceError {
+                message: format!("Failed to add positional encoding: {e}"),
+            })?;
 
         // Create attention mask if lengths are provided
         let mask = if let Some(lengths) = lengths {
             Some(
                 self.create_attention_mask(lengths, phonemes.len())
-                    .map_err(|e| {
-                        AcousticError::InferenceError(format!(
-                            "Failed to create attention mask: {e}"
-                        ))
+                    .map_err(|e| AcousticError::InferenceError {
+                        message: format!("Failed to create attention mask: {e}"),
                     })?,
             )
         } else {
@@ -506,15 +568,20 @@ impl TextEncoder {
 
         // Pass through transformer layers
         for (i, layer) in self.layers.iter().enumerate() {
-            x = layer.forward(&x, mask.as_ref()).map_err(|e| {
-                AcousticError::InferenceError(format!("Failed in transformer layer {i}: {e}"))
-            })?;
+            x = layer
+                .forward(&x, mask.as_ref())
+                .map_err(|e| AcousticError::InferenceError {
+                    message: format!("Failed in transformer layer {i}: {e}"),
+                })?;
         }
 
         // Final layer normalization
-        x = self.final_norm.forward(&x).map_err(|e| {
-            AcousticError::InferenceError(format!("Failed in final normalization: {e}"))
-        })?;
+        x = self
+            .final_norm
+            .forward(&x)
+            .map_err(|e| AcousticError::InferenceError {
+                message: format!("Failed in final normalization: {e}"),
+            })?;
 
         Ok(x)
     }
@@ -681,7 +748,10 @@ mod tests {
         let result = encoder.forward(&[], None);
 
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), AcousticError::InputError(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            AcousticError::InputError { message: _ }
+        ));
     }
 
     #[test]

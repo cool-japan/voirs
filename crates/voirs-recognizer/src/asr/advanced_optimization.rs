@@ -147,6 +147,7 @@ pub struct DistillationStats {
 
 impl KnowledgeDistillationOptimizer {
     /// Create new knowledge distillation optimizer
+    #[must_use]
     pub fn new(config: AdvancedOptimizationConfig, device: Device) -> Self {
         Self {
             teacher_layers: HashMap::new(),
@@ -321,6 +322,7 @@ impl KnowledgeDistillationOptimizer {
     }
 
     /// Get distillation statistics
+    #[must_use]
     pub fn get_stats(&self) -> &DistillationStats {
         &self.distillation_stats
     }
@@ -364,6 +366,7 @@ pub struct PruningStepResult {
 
 impl ProgressivePruningOptimizer {
     /// Create new progressive pruning optimizer
+    #[must_use]
     pub fn new(config: AdvancedOptimizationConfig, device: Device) -> Self {
         let pruning_schedule = Self::create_pruning_schedule(&config);
 
@@ -580,11 +583,13 @@ impl ProgressivePruningOptimizer {
     }
 
     /// Get pruning history
+    #[must_use]
     pub fn get_pruning_history(&self) -> &[PruningStepResult] {
         &self.pruning_history
     }
 
     /// Get current pruning progress
+    #[must_use]
     pub fn get_progress(&self) -> (usize, usize) {
         (self.current_step, self.pruning_schedule.len())
     }
@@ -638,6 +643,7 @@ pub struct PrecisionSearchResult {
 
 impl MixedPrecisionOptimizer {
     /// Create new mixed-precision optimizer
+    #[must_use]
     pub fn new(config: AdvancedOptimizationConfig, device: Device) -> Self {
         Self {
             config,
@@ -663,7 +669,7 @@ impl MixedPrecisionOptimizer {
 
         let precisions_to_test = vec![DType::F32, DType::F16, DType::U8];
 
-        for (layer_name, _weights) in model_layers {
+        for layer_name in model_layers.keys() {
             let mut best_precision = DType::F32;
             let mut best_score = f32::NEG_INFINITY;
 
@@ -810,11 +816,13 @@ impl MixedPrecisionOptimizer {
     }
 
     /// Get layer precision assignments
+    #[must_use]
     pub fn get_layer_precisions(&self) -> &HashMap<String, DType> {
         &self.layer_precisions
     }
 
     /// Get search results
+    #[must_use]
     pub fn get_search_results(&self) -> &[PrecisionSearchResult] {
         &self.search_results
     }

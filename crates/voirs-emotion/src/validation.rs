@@ -413,7 +413,7 @@ impl PerceptualValidationStudy {
                 .as_secs()
         });
 
-        serde_json::to_string_pretty(&export_data).map_err(|e| Error::Serialization(e))
+        serde_json::to_string_pretty(&export_data).map_err(Error::Serialization)
     }
 
     /// Check if study meets minimum requirements

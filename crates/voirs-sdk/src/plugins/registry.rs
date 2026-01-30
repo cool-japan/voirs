@@ -1179,12 +1179,12 @@ impl WasmPluginWrapper {
     }
 
     fn create_store(&self) -> Store<()> {
-        Store::new(&*self.engine, ())
+        Store::new(&self.engine, ())
     }
 
     fn call_wasm_function(&self, function_name: &str) -> Result<i32> {
         let mut store = self.create_store();
-        let instance = Instance::new(&mut store, &*self.module, &[]).map_err(|e| {
+        let instance = Instance::new(&mut store, &self.module, &[]).map_err(|e| {
             VoirsError::plugin_error(format!("Failed to instantiate WASM module: {}", e))
         })?;
 

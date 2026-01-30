@@ -267,7 +267,7 @@ impl CorrelationAnalyzer {
         let mut discordant = 0;
         let mut ties_x = 0;
         let mut ties_y = 0;
-        let mut ties_xy = 0;
+        let mut _ties_xy = 0;
 
         // Count concordant and discordant pairs
         for i in 0..n {
@@ -281,7 +281,7 @@ impl CorrelationAnalyzer {
                 let dy = y[i] - y[j];
 
                 if dx == 0.0 && dy == 0.0 {
-                    ties_xy += 1;
+                    _ties_xy += 1;
                 } else if dx == 0.0 {
                     ties_x += 1;
                 } else if dy == 0.0 {
