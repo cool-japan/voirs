@@ -99,7 +99,7 @@ mod encryption_impl {
 
         /// Encrypt and serialize data
         pub fn encrypt_serialize<T: Serialize>(&self, data: &T) -> Result<EncryptedData> {
-            let serialized = bincode::serde::encode_to_vec(data, bincode::config::standard())
+            let serialized = oxicode::serde::encode_to_vec(data, oxicode::config::standard())
                 .map_err(|e| VoirsError::cache_error(format!("Serialization failed: {e}")))?;
             self.encrypt(&serialized)
         }
@@ -110,7 +110,7 @@ mod encryption_impl {
             encrypted_data: &EncryptedData,
         ) -> Result<T> {
             let decrypted = self.decrypt(encrypted_data)?;
-            bincode::serde::decode_from_slice(&decrypted, bincode::config::standard())
+            oxicode::serde::decode_from_slice(&decrypted, oxicode::config::standard())
                 .map(|(v, _)| v)
                 .map_err(|e| VoirsError::cache_error(format!("Deserialization failed: {e}")))
         }

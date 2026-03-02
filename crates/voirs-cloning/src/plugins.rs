@@ -533,8 +533,10 @@ impl PluginManager {
 
         if let Some(mut plugin) = plugins.remove(plugin_id) {
             // Shutdown plugin safely
-            if let Err(e) = Arc::get_mut(&mut plugin).unwrap().shutdown().await {
-                warn!("Error shutting down plugin {}: {}", plugin_id, e);
+            if let Some(plugin_ref) = Arc::get_mut(&mut plugin) {
+                if let Err(e) = plugin_ref.shutdown().await {
+                    warn!("Error shutting down plugin {}: {}", plugin_id, e);
+                }
             }
         }
 

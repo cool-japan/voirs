@@ -136,8 +136,8 @@ impl PerformanceStatistics {
         let mut latencies: Vec<f32> = metrics.iter().map(|m| m.latency_ms).collect();
 
         // Sort for percentile calculation
-        rtfs.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        rtfs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        latencies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         // Calculate statistics
         let mean_rtf = rtfs.iter().sum::<f32>() / count as f32;

@@ -16,7 +16,7 @@ import numpy as np
 
 # Import the VoiRS Python module (when available)
 try:
-    import voirs_ffi as voirs
+    import voirs
     VOIRS_AVAILABLE = True
 except ImportError:
     VOIRS_AVAILABLE = False

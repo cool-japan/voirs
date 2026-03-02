@@ -122,8 +122,12 @@ impl FusionEngine {
         // Select best candidate (in production: use language model)
         let (final_text, _) = text_candidates
             .into_iter()
-            .max_by(|(_, conf1), (_, conf2)| conf1.partial_cmp(conf2).unwrap())
-            .unwrap();
+            .max_by(|(_, conf1), (_, conf2)| {
+                conf1
+                    .partial_cmp(conf2)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .expect("text_candidates should not be empty");
 
         let normalized_confidence = if total_weight > 0.0 {
             total_confidence / total_weight
@@ -442,7 +446,7 @@ mod tests {
         assert!((sum - 1.0).abs() < 1e-5);
 
         // Check all values are between 0 and 1
-        assert!(normalized.iter().all(|&w| w >= 0.0 && w <= 1.0));
+        assert!(normalized.iter().all(|&w| (0.0..=1.0).contains(&w)));
     }
 
     #[test]

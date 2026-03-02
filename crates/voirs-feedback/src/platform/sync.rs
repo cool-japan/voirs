@@ -411,11 +411,17 @@ impl ConflictResolver {
         match self.resolution_strategy {
             ConflictResolutionStrategy::LastWriteWins => {
                 // Use the change with the latest timestamp
-                Ok(changes.into_iter().max_by_key(|c| c.timestamp).unwrap())
+                Ok(changes
+                    .into_iter()
+                    .max_by_key(|c| c.timestamp)
+                    .expect("value should be present"))
             }
             ConflictResolutionStrategy::FirstWriteWins => {
                 // Use the change with the earliest timestamp
-                Ok(changes.into_iter().min_by_key(|c| c.timestamp).unwrap())
+                Ok(changes
+                    .into_iter()
+                    .min_by_key(|c| c.timestamp)
+                    .expect("value should be present"))
             }
             ConflictResolutionStrategy::Merge => {
                 // Merge changes (simplified implementation)

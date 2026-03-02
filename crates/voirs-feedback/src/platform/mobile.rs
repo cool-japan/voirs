@@ -1358,8 +1358,12 @@ impl Default for NotificationSettings {
             exercise_reminders: true,
             progress_updates: true,
             system_messages: true,
-            quiet_hours_start: Some(chrono::NaiveTime::from_hms_opt(22, 0, 0).unwrap()),
-            quiet_hours_end: Some(chrono::NaiveTime::from_hms_opt(8, 0, 0).unwrap()),
+            quiet_hours_start: Some(
+                chrono::NaiveTime::from_hms_opt(22, 0, 0).expect("value should be present"),
+            ),
+            quiet_hours_end: Some(
+                chrono::NaiveTime::from_hms_opt(8, 0, 0).expect("value should be present"),
+            ),
         }
     }
 }
@@ -1443,7 +1447,7 @@ impl OfflineSyncManager {
         Ok(SyncResult {
             items_synced: synced_count,
             items_failed: failed_count,
-            sync_timestamp: self.last_sync.unwrap(),
+            sync_timestamp: self.last_sync.expect("value should be present"),
         })
     }
 

@@ -431,7 +431,7 @@ See the [`examples/`](../../examples/) directory for comprehensive usage example
 
 ## 📝 License
 
-Licensed under either of Apache License 2.0 or MIT License at your option.
+Licensed under the Apache License, Version 2.0.
 
 ---
 

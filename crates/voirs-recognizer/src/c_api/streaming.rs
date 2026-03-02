@@ -1,4 +1,6 @@
 //! Streaming recognition functions for the C API.
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+#![allow(clippy::arc_with_non_send_sync)]
 
 use super::core::VoirsRecognizerInternal;
 use super::memory::c_string_to_string;
@@ -172,7 +174,9 @@ pub extern "C" fn voirs_stream_audio(
 
         // Buffer the audio data
         {
-            let mut context = streaming_context.lock().unwrap();
+            let mut context = streaming_context
+                .lock()
+                .expect("lock should not be poisoned");
             if !context.is_active {
                 return VoirsError::StreamingNotStarted;
             }
@@ -182,13 +186,17 @@ pub extern "C" fn voirs_stream_audio(
 
         // Process audio chunks when buffer is large enough
         let chunk_size = {
-            let context = streaming_context.lock().unwrap();
+            let context = streaming_context
+                .lock()
+                .expect("lock should not be poisoned");
             (context.config.chunk_duration * internal.config.sample_rate as f32 * 2.0) as usize
             // 2 bytes per sample for 16-bit
         };
 
         let callback_data = {
-            let mut context = streaming_context.lock().unwrap();
+            let mut context = streaming_context
+                .lock()
+                .expect("lock should not be poisoned");
             if context.audio_buffer.len() >= chunk_size {
                 // Extract chunk for processing
                 let chunk: Vec<u8> = context.audio_buffer.drain(..chunk_size).collect();
@@ -238,7 +246,7 @@ pub extern "C" fn voirs_stream_audio(
 
                 let c_result = VoirsRecognitionResult {
                     text: internal.memory_manager.store_string(
-                        &result
+                        result
                             .transcription
                             .as_ref()
                             .map(|t| &t.text)
@@ -280,7 +288,9 @@ pub extern "C" fn voirs_stream_audio(
 
                 // Update latency measurements
                 {
-                    let mut context = streaming_context.lock().unwrap();
+                    let mut context = streaming_context
+                        .lock()
+                        .expect("lock should not be poisoned");
                     context.latency_measurements.push_back(processing_time);
                     if context.latency_measurements.len() > 100 {
                         context.latency_measurements.pop_front();
@@ -339,11 +349,7 @@ pub extern "C" fn voirs_is_streaming_active(recognizer: *mut VoirsRecognizer) ->
         false
     });
 
-    if let Ok(is_active) = catch_result {
-        is_active
-    } else {
-        false
-    }
+    catch_result.unwrap_or_default()
 }
 
 /// Get streaming buffer information
@@ -473,7 +479,7 @@ pub extern "C" fn voirs_flush_streaming_buffer(recognizer: *mut VoirsRecognizer)
 
         // Process any remaining audio in the buffer
         if let Some(context_arc) = &internal.streaming_context {
-            let mut context = context_arc.lock().unwrap();
+            let mut context = context_arc.lock().expect("lock should not be poisoned");
             if !context.is_active {
                 return VoirsError::StreamingNotStarted;
             }
@@ -520,7 +526,7 @@ pub extern "C" fn voirs_flush_streaming_buffer(recognizer: *mut VoirsRecognizer)
 
                     let c_result = VoirsRecognitionResult {
                         text: internal.memory_manager.store_string(
-                            &result
+                            result
                                 .transcription
                                 .as_ref()
                                 .map(|t| &t.text)

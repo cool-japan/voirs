@@ -36,7 +36,7 @@ impl PerformanceMonitor {
             return;
         }
 
-        let mut metrics = self.metrics.lock().unwrap();
+        let mut metrics = self.metrics.lock().expect("lock should not be poisoned");
         let metric = metrics
             .entry(name.to_string())
             .or_insert_with(|| PerformanceMetric {
@@ -59,17 +59,29 @@ impl PerformanceMonitor {
 
     /// Get performance metrics
     pub fn get_metrics(&self) -> Vec<PerformanceMetric> {
-        self.metrics.lock().unwrap().values().cloned().collect()
+        self.metrics
+            .lock()
+            .expect("lock should not be poisoned")
+            .values()
+            .cloned()
+            .collect()
     }
 
     /// Clear all metrics
     pub fn clear_metrics(&self) {
-        self.metrics.lock().unwrap().clear();
+        self.metrics
+            .lock()
+            .expect("lock should not be poisoned")
+            .clear();
     }
 
     /// Get metric by name
     pub fn get_metric(&self, name: &str) -> Option<PerformanceMetric> {
-        self.metrics.lock().unwrap().get(name).cloned()
+        self.metrics
+            .lock()
+            .expect("lock should not be poisoned")
+            .get(name)
+            .cloned()
     }
 }
 

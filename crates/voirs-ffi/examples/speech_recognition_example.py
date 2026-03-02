@@ -9,7 +9,7 @@ This example demonstrates how to use VoiRS for speech recognition tasks includin
 - Phoneme recognition and forced alignment
 
 Requirements:
-- voirs_ffi Python package with recognition support
+- voirs Python package with recognition support
 - numpy (optional, for advanced audio processing)
 - An audio file for testing (or use the generated example)
 """
@@ -20,21 +20,21 @@ import numpy as np
 from pathlib import Path
 
 try:
-    import voirs_ffi
+    import voirs
 except ImportError:
-    print("Error: voirs_ffi package not found. Please install the VoiRS Python bindings.")
+    print("Error: voirs package not found. Please install the VoiRS Python bindings.")
     sys.exit(1)
 
 def check_features():
     """Check which features are available in the VoiRS installation."""
     print("=== VoiRS Feature Check ===")
-    print(f"Version: {voirs_ffi.__version__}")
-    print(f"NumPy support: {voirs_ffi.HAS_NUMPY}")
-    print(f"GPU support: {voirs_ffi.HAS_GPU}")
+    print(f"Version: {voirs.__version__}")
+    print(f"NumPy support: {voirs.HAS_NUMPY}")
+    print(f"GPU support: {voirs.HAS_GPU}")
     
-    if hasattr(voirs_ffi, 'HAS_RECOGNITION'):
-        print(f"Recognition support: {voirs_ffi.HAS_RECOGNITION}")
-        if not voirs_ffi.HAS_RECOGNITION:
+    if hasattr(voirs, 'HAS_RECOGNITION'):
+        print(f"Recognition support: {voirs.HAS_RECOGNITION}")
+        if not voirs.HAS_RECOGNITION:
             print("Warning: Recognition features not available. Compile with 'recognition' feature.")
             return False
     else:
@@ -60,9 +60,9 @@ def create_test_audio():
     noise = 0.05 * np.random.randn(len(audio_data)).astype(np.float32)
     audio_data += noise
     
-    if voirs_ffi.HAS_NUMPY:
+    if voirs.HAS_NUMPY:
         # Use NumPy integration if available
-        audio_buffer = voirs_ffi.PyAudioBuffer.from_numpy(
+        audio_buffer = voirs.PyAudioBuffer.from_numpy(
             None,  # Python context (will be filled by PyO3)
             audio_data,
             sample_rate,
@@ -70,7 +70,7 @@ def create_test_audio():
         )
     else:
         # Fallback: create from samples list
-        audio_buffer = voirs_ffi.PyAudioBuffer()
+        audio_buffer = voirs.PyAudioBuffer()
         # Note: This would need to be implemented in the actual bindings
         
     print(f"Created test audio: {duration}s, {sample_rate}Hz, {len(audio_data)} samples")
@@ -82,7 +82,7 @@ def demonstrate_audio_analysis():
     
     try:
         # Create audio analyzer
-        analyzer = voirs_ffi.PyAudioAnalyzer()
+        analyzer = voirs.PyAudioAnalyzer()
         print("Audio analyzer created successfully")
         
         # Create test audio
@@ -116,7 +116,7 @@ def demonstrate_speech_recognition():
         # Create Whisper ASR model
         print("Loading Whisper model (this may take a moment)...")
         start_time = time.time()
-        asr_model = voirs_ffi.PyASRModel.whisper("tiny")  # Use tiny model for speed
+        asr_model = voirs.PyASRModel.whisper("tiny")  # Use tiny model for speed
         load_time = time.time() - start_time
         print(f"Model loaded in {load_time:.2f}s")
         
@@ -167,7 +167,7 @@ def demonstrate_file_recognition(audio_file_path):
         # Recognize directly from file
         print("Recognizing audio file...")
         start_time = time.time()
-        result = voirs_ffi.PyASRModel.recognize_file(audio_file_path, "base")
+        result = voirs.PyASRModel.recognize_file(audio_file_path, "base")
         recognition_time = time.time() - start_time
         
         print(f"Recognition completed in {recognition_time:.3f}s")
@@ -178,7 +178,7 @@ def demonstrate_file_recognition(audio_file_path):
         
         # Also analyze the audio file
         print("\nAnalyzing audio file...")
-        analysis = voirs_ffi.PyAudioAnalyzer.analyze_file(audio_file_path)
+        analysis = voirs.PyAudioAnalyzer.analyze_file(audio_file_path)
         print(f"Analysis: {analysis}")
         
     except Exception as e:
@@ -192,7 +192,7 @@ def demonstrate_phoneme_recognition():
     
     try:
         # Create phoneme recognizer for English
-        phoneme_recognizer = voirs_ffi.PyPhonemeRecognizer("en")
+        phoneme_recognizer = voirs.PyPhonemeRecognizer("en")
         print("Phoneme recognizer created for English")
         
         # Create test audio
@@ -233,7 +233,7 @@ def demonstrate_performance_monitoring():
         audio_samples = [create_test_audio() for _ in range(3)]
         
         # Load ASR model
-        asr_model = voirs_ffi.PyASRModel.whisper("tiny")
+        asr_model = voirs.PyASRModel.whisper("tiny")
         
         # Batch recognition with timing
         print("Performing batch recognition...")

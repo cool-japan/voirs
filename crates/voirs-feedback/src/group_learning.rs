@@ -816,7 +816,7 @@ impl GroupLearningOrchestrator {
         // Create session participants from group participants
         let mut session_participants = HashMap::new();
         let groups = self.groups.read().await;
-        let group = groups.get(group_id).unwrap();
+        let group = groups.get(group_id).expect("value should be present");
 
         for (user_id, participant) in &group.participants {
             if matches!(
@@ -1545,7 +1545,8 @@ impl CollaborativeChallengeCoordinator {
     ) -> String {
         let challenge_id = Uuid::new_v4().to_string();
         let start_time = Utc::now();
-        let end_time = start_time + chrono::Duration::from_std(duration).unwrap();
+        let end_time =
+            start_time + chrono::Duration::from_std(duration).expect("value should be present");
 
         let challenge = CollaborativeChallenge {
             challenge_id: challenge_id.clone(),

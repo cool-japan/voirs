@@ -68,7 +68,7 @@ pub fn smooth_f0_contour_simd(contour: &mut [f32], alpha: f32) {
     }
 
     // Copy back to original slice
-    contour.copy_from_slice(arr.as_slice().unwrap());
+    contour.copy_from_slice(arr.as_slice().expect("array should be contiguous"));
 }
 
 /// SIMD-optimized linear interpolation of F0 values
@@ -174,7 +174,7 @@ pub fn shift_pitch_simd(contour: &mut [f32], semitones: f32) {
     arr.mapv_inplace(|x| if x > 0.0 { x * factor } else { x });
 
     // Copy back to original slice
-    contour.copy_from_slice(arr.as_slice().unwrap());
+    contour.copy_from_slice(arr.as_slice().expect("array should be contiguous"));
 }
 
 /// SIMD-optimized energy envelope smoothing
@@ -219,7 +219,7 @@ pub fn smooth_energy_envelope_simd(energy: &mut [f32], window_size: usize) {
         smoothed[i] = sum / count;
     }
 
-    energy.copy_from_slice(smoothed.as_slice().unwrap());
+    energy.copy_from_slice(smoothed.as_slice().expect("array should be contiguous"));
 }
 
 /// SIMD-optimized duration scaling with linear interpolation

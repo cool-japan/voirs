@@ -345,7 +345,7 @@ pub fn exponential_moving_average(values: &[f32], alpha: f32) -> Vec<f32> {
     ema.push(values[0]);
 
     for &value in &values[1..] {
-        let prev_ema = *ema.last().unwrap();
+        let prev_ema = *ema.last().expect("collection should not be empty");
         ema.push(alpha * value + (1.0 - alpha) * prev_ema);
     }
 

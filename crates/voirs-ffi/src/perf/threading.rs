@@ -466,7 +466,7 @@ mod tests {
 
         // Wait for all threads to complete
         for handle in handles {
-            handle.join().unwrap();
+            handle.join().expect("thread should not panic");
         }
 
         assert_eq!(counter.get(), 4000);

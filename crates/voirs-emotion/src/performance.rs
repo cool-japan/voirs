@@ -19,8 +19,8 @@
 //! use voirs_emotion::performance::*;
 //!
 //! // Run comprehensive performance validation
-//! let validator = PerformanceValidator::new().unwrap();
-//! let results = validator.validate_all_targets().await.unwrap();
+//! let validator = PerformanceValidator::new().expect("operation should succeed");
+//! let results = validator.validate_all_targets().await.expect("operation should succeed");
 //!
 //! if results.all_passed() {
 //!     println!("All performance targets met!");

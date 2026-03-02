@@ -312,7 +312,7 @@ impl OptimizationPipeline {
         let optimal_temperature = stats
             .temperature_sensitivity
             .iter()
-            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map_or(4.0, |&(temp, _)| temp);
 
         // Measure final accuracy

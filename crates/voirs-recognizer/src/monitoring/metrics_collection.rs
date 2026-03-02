@@ -161,26 +161,35 @@ impl InMemoryMetricsCollector {
     pub fn register_metric(&self, metadata: MetricMetadata) {
         self.metadata
             .write()
-            .unwrap()
+            .expect("lock should not be poisoned")
             .insert(metadata.name.clone(), metadata);
     }
 
     /// Get metric metadata
     #[must_use]
     pub fn get_metadata(&self, name: &str) -> Option<MetricMetadata> {
-        self.metadata.read().unwrap().get(name).cloned()
+        self.metadata
+            .read()
+            .expect("lock should not be poisoned")
+            .get(name)
+            .cloned()
     }
 
     /// Get all metric names
     #[must_use]
     pub fn get_metric_names(&self) -> Vec<String> {
-        self.metrics.read().unwrap().keys().cloned().collect()
+        self.metrics
+            .read()
+            .expect("lock should not be poisoned")
+            .keys()
+            .cloned()
+            .collect()
     }
 }
 
 impl MetricsCollector for InMemoryMetricsCollector {
     fn increment_counter(&self, name: &str, value: u64, labels: HashMap<String, String>) {
-        let mut metrics = self.metrics.write().unwrap();
+        let mut metrics = self.metrics.write().expect("lock should not be poisoned");
         let data_points = metrics.entry(name.to_string()).or_default();
 
         // Find existing counter with same labels or create new one
@@ -203,7 +212,7 @@ impl MetricsCollector for InMemoryMetricsCollector {
     }
 
     fn set_gauge(&self, name: &str, value: f64, labels: HashMap<String, String>) {
-        let mut metrics = self.metrics.write().unwrap();
+        let mut metrics = self.metrics.write().expect("lock should not be poisoned");
         let data_points = metrics.entry(name.to_string()).or_default();
 
         data_points.push(DataPoint {
@@ -214,7 +223,7 @@ impl MetricsCollector for InMemoryMetricsCollector {
     }
 
     fn observe_histogram(&self, name: &str, value: f64, labels: HashMap<String, String>) {
-        let mut metrics = self.metrics.write().unwrap();
+        let mut metrics = self.metrics.write().expect("lock should not be poisoned");
         let data_points = metrics.entry(name.to_string()).or_default();
 
         // Find existing histogram with same labels or create new one
@@ -236,7 +245,9 @@ impl MetricsCollector for InMemoryMetricsCollector {
                                 *count += 1;
                             } else {
                                 hist.buckets.push((bucket_bound, 1));
-                                hist.buckets.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+                                hist.buckets.sort_by(|a, b| {
+                                    a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal)
+                                });
                             }
                         }
                     }
@@ -268,7 +279,7 @@ impl MetricsCollector for InMemoryMetricsCollector {
     }
 
     fn observe_summary(&self, name: &str, value: f64, labels: HashMap<String, String>) {
-        let mut metrics = self.metrics.write().unwrap();
+        let mut metrics = self.metrics.write().expect("lock should not be poisoned");
         let data_points = metrics.entry(name.to_string()).or_default();
 
         // For simplicity, we'll store individual observations and calculate quantiles on read
@@ -293,7 +304,7 @@ impl MetricsCollector for InMemoryMetricsCollector {
 
         if recent_values.len() >= 10 {
             let mut sorted_values = recent_values.clone();
-            sorted_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            sorted_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
             let mut quantiles = Vec::new();
             for &quantile in &self.summary_quantiles {
@@ -317,11 +328,17 @@ impl MetricsCollector for InMemoryMetricsCollector {
     }
 
     fn get_metrics(&self) -> HashMap<String, Vec<DataPoint>> {
-        self.metrics.read().unwrap().clone()
+        self.metrics
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     fn reset(&self) {
-        self.metrics.write().unwrap().clear();
+        self.metrics
+            .write()
+            .expect("lock should not be poisoned")
+            .clear();
     }
 }
 
@@ -426,7 +443,7 @@ impl PerformanceMetrics {
         processing_duration: Duration,
         audio_duration: Duration,
     ) {
-        let mut counters = self.counters.lock().unwrap();
+        let mut counters = self.counters.lock().expect("lock should not be poisoned");
 
         counters.total_requests += 1;
         let processing_seconds = processing_duration.as_secs_f64();
@@ -480,7 +497,7 @@ impl PerformanceMetrics {
     /// Get current performance statistics
     #[must_use]
     pub fn get_statistics(&self) -> PerformanceStatistics {
-        let counters = self.counters.lock().unwrap();
+        let counters = self.counters.lock().expect("lock should not be poisoned");
 
         let success_rate = if counters.total_requests > 0 {
             counters.successful_recognitions as f64 / counters.total_requests as f64
@@ -772,19 +789,28 @@ impl AlertManager {
 
     /// Add alert rule
     pub fn add_rule(&self, rule: AlertRule) {
-        self.rules.write().unwrap().push(rule);
+        self.rules
+            .write()
+            .expect("lock should not be poisoned")
+            .push(rule);
     }
 
     /// Add alert handler
     pub fn add_handler(&self, handler: Box<dyn AlertHandler>) {
-        self.handlers.write().unwrap().push(handler);
+        self.handlers
+            .write()
+            .expect("lock should not be poisoned")
+            .push(handler);
     }
 
     /// Evaluate alerts against current metrics
     pub fn evaluate_alerts(&self, metrics: &HashMap<String, Vec<DataPoint>>) {
-        let rules = self.rules.read().unwrap();
-        let mut active_alerts = self.active_alerts.write().unwrap();
-        let handlers = self.handlers.read().unwrap();
+        let rules = self.rules.read().expect("lock should not be poisoned");
+        let mut active_alerts = self
+            .active_alerts
+            .write()
+            .expect("lock should not be poisoned");
+        let handlers = self.handlers.read().expect("lock should not be poisoned");
 
         for rule in rules.iter() {
             if let Some(data_points) = metrics.get(&rule.metric_name) {
@@ -884,7 +910,7 @@ impl AlertManager {
     pub fn get_active_alerts(&self) -> Vec<ActiveAlert> {
         self.active_alerts
             .read()
-            .unwrap()
+            .expect("lock should not be poisoned")
             .values()
             .cloned()
             .collect()
@@ -892,7 +918,10 @@ impl AlertManager {
 
     /// Clear all alerts
     pub fn clear_alerts(&self) {
-        self.active_alerts.write().unwrap().clear();
+        self.active_alerts
+            .write()
+            .expect("lock should not be poisoned")
+            .clear();
     }
 }
 
@@ -979,7 +1008,10 @@ impl TimeSeriesAnalyzer {
 
     /// Add data point
     pub fn add_point(&self, metric_name: String, point: TimeSeriesPoint) {
-        let mut store = self.data_store.write().unwrap();
+        let mut store = self
+            .data_store
+            .write()
+            .expect("lock should not be poisoned");
         let series = store.entry(metric_name).or_default();
 
         series.push_back(point);
@@ -993,7 +1025,7 @@ impl TimeSeriesAnalyzer {
     /// Analyze trends for a metric
     #[must_use]
     pub fn analyze_trends(&self, metric_name: &str) -> Option<TrendAnalysis> {
-        let store = self.data_store.read().unwrap();
+        let store = self.data_store.read().expect("lock should not be poisoned");
         let series = store.get(metric_name)?;
 
         if series.len() < 10 {
@@ -1003,7 +1035,12 @@ impl TimeSeriesAnalyzer {
         let values: Vec<f64> = series.iter().map(|p| p.value).collect();
         let timestamps: Vec<u64> = series
             .iter()
-            .map(|p| p.timestamp.duration_since(UNIX_EPOCH).unwrap().as_secs())
+            .map(|p| {
+                p.timestamp
+                    .duration_since(UNIX_EPOCH)
+                    .expect("SystemTime should be after UNIX_EPOCH")
+                    .as_secs()
+            })
             .collect();
 
         // Calculate linear trend
@@ -1160,13 +1197,18 @@ impl TimeSeriesAnalyzer {
     /// Get all metric names being tracked
     #[must_use]
     pub fn get_tracked_metrics(&self) -> Vec<String> {
-        self.data_store.read().unwrap().keys().cloned().collect()
+        self.data_store
+            .read()
+            .expect("lock should not be poisoned")
+            .keys()
+            .cloned()
+            .collect()
     }
 
     /// Get recent data points for a metric
     #[must_use]
     pub fn get_recent_data(&self, metric_name: &str, limit: usize) -> Vec<TimeSeriesPoint> {
-        let store = self.data_store.read().unwrap();
+        let store = self.data_store.read().expect("lock should not be poisoned");
         if let Some(series) = store.get(metric_name) {
             series.iter().rev().take(limit).cloned().collect()
         } else {

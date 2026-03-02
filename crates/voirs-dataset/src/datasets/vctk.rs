@@ -125,7 +125,7 @@ impl VctkSample {
             let audio = load_audio(&self.audio_path)?;
             self.cached_audio = Some(audio);
         }
-        Ok(self.cached_audio.as_ref().unwrap())
+        Ok(self.cached_audio.as_ref().expect("just set to Some above"))
     }
 
     /// Get audio data (load if not cached)

@@ -370,7 +370,7 @@ impl ReferenceVoiceDatabase {
         }
 
         // Sort by similarity (descending)
-        similarities.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+        similarities.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
         // Take top matches
         Ok(similarities

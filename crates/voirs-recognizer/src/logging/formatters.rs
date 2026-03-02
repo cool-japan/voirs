@@ -87,7 +87,7 @@ impl LogFormatter for PlainFormatter {
             entry.level.as_str(),
             self.color_reset()
         )
-        .unwrap();
+        .expect("write to String is infallible");
 
         // Timestamp
         write!(
@@ -95,38 +95,38 @@ impl LogFormatter for PlainFormatter {
             " {}",
             entry.timestamp.format("%Y-%m-%d %H:%M:%S%.3f")
         )
-        .unwrap();
+        .expect("write to String is infallible");
 
         // Thread ID
         if let Some(ref thread_id) = entry.thread_id {
-            write!(output, " [{thread_id}]").unwrap();
+            write!(output, " [{thread_id}]").expect("write to String is infallible");
         }
 
         // Source
         if let Some(ref source) = entry.source {
-            write!(output, " [{source}]").unwrap();
+            write!(output, " [{source}]").expect("write to String is infallible");
         }
 
         // Message
-        write!(output, " {}", entry.message).unwrap();
+        write!(output, " {}", entry.message).expect("write to String is infallible");
 
         // Context
         if !entry.context.is_empty() {
-            write!(output, " {{").unwrap();
+            write!(output, " {{").expect("write to String is infallible");
             let mut first = true;
             for (k, v) in &entry.context {
                 if !first {
-                    write!(output, ", ").unwrap();
+                    write!(output, ", ").expect("write to String is infallible");
                 }
-                write!(output, "{k}={v}").unwrap();
+                write!(output, "{k}={v}").expect("write to String is infallible");
                 first = false;
             }
-            write!(output, "}}").unwrap();
+            write!(output, "}}").expect("write to String is infallible");
         }
 
         // Performance metrics
         if let Some(ref metrics) = entry.metrics {
-            write!(output, " [{}ms]", metrics.duration_ms).unwrap();
+            write!(output, " [{}ms]", metrics.duration_ms).expect("write to String is infallible");
         }
 
         output
@@ -199,24 +199,28 @@ impl LogFormatter for LogfmtFormatter {
             Self::escape_value(&entry.timestamp.to_rfc3339()),
             Self::escape_value(&entry.message)
         )
-        .unwrap();
+        .expect("write to String is infallible");
 
         // Optional fields
         if let Some(ref module) = entry.module {
-            write!(output, " module={}", Self::escape_value(module)).unwrap();
+            write!(output, " module={}", Self::escape_value(module))
+                .expect("write to String is infallible");
         }
 
         if let Some(ref source) = entry.source {
-            write!(output, " source={}", Self::escape_value(source)).unwrap();
+            write!(output, " source={}", Self::escape_value(source))
+                .expect("write to String is infallible");
         }
 
         if let Some(ref thread_id) = entry.thread_id {
-            write!(output, " thread={}", Self::escape_value(thread_id)).unwrap();
+            write!(output, " thread={}", Self::escape_value(thread_id))
+                .expect("write to String is infallible");
         }
 
         // Context fields
         for (k, v) in &entry.context {
-            write!(output, " {}={}", k, Self::escape_value(v)).unwrap();
+            write!(output, " {}={}", k, Self::escape_value(v))
+                .expect("write to String is infallible");
         }
 
         // Performance metrics
@@ -227,7 +231,7 @@ impl LogFormatter for LogfmtFormatter {
                 Self::escape_value(&metrics.operation),
                 metrics.duration_ms
             )
-            .unwrap();
+            .expect("write to String is infallible");
         }
 
         output

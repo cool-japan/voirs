@@ -80,7 +80,7 @@ impl OfflineManager {
             id: uuid::Uuid::new_v4().to_string(),
             operation_type: OperationType::ProcessFeedback,
             session_id: session.session_id.to_string(),
-            data: serde_json::to_value(&feedback).unwrap(),
+            data: serde_json::to_value(&feedback).expect("serialization should succeed"),
             timestamp: chrono::Utc::now(),
             retry_count: 0,
         };
@@ -137,7 +137,7 @@ impl OfflineManager {
             id: uuid::Uuid::new_v4().to_string(),
             operation_type: OperationType::SaveProgress,
             session_id: progress.user_id.clone(),
-            data: serde_json::to_value(progress).unwrap(),
+            data: serde_json::to_value(progress).expect("serialization should succeed"),
             timestamp: chrono::Utc::now(),
             retry_count: 0,
         };

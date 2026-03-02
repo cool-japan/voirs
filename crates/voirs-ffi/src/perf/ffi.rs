@@ -740,7 +740,7 @@ pub mod advanced_optimization {
         #[inline(always)]
         pub fn should_inline(&self, function_id: u64) -> bool {
             let hot_funcs = self.hot_functions.read();
-            hot_funcs.get(&function_id).map_or(false, |&count| count >= self.inline_threshold)
+            hot_funcs.get(&function_id).is_some_and(|&count| count >= self.inline_threshold)
         }
         
         /// Optimize function call with branch prediction hints

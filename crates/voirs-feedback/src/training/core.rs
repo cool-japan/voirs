@@ -85,7 +85,10 @@ impl InteractiveTrainer {
     ) -> Result<Vec<TrainingExercise>, FeedbackError> {
         // Extract exercises from library before async operations
         let exercises = {
-            let library = self.exercise_library.read().unwrap();
+            let library = self
+                .exercise_library
+                .read()
+                .expect("lock should not be poisoned");
             library.exercises.clone()
         };
 
@@ -420,8 +423,11 @@ impl InteractiveTrainer {
 
     /// Get training statistics
     pub fn get_statistics(&self) -> Result<TrainingSystemStats, FeedbackError> {
-        let metrics = self.metrics.read().unwrap();
-        let exercise_library = self.exercise_library.read().unwrap();
+        let metrics = self.metrics.read().expect("lock should not be poisoned");
+        let exercise_library = self
+            .exercise_library
+            .read()
+            .expect("lock should not be poisoned");
 
         let success_rate = if metrics.total_attempts > 0 {
             metrics.successful_attempts as f32 / metrics.total_attempts as f32

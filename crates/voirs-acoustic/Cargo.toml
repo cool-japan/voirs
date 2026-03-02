@@ -11,6 +11,7 @@ keywords = ["voirs", "acoustic", "tts", "mel-spectrogram", "vits"]
 categories = ["multimedia::audio", "science", "algorithms"]
 rust-version.workspace = true
 description = "Acoustic model inference for VoiRS speech synthesis (VITS/FastSpeech2)"
+readme = "README.md"
 
 [lib]
 name = "voirs_acoustic"
@@ -38,7 +39,7 @@ numrs2.workspace = true
 # Serialization
 serde.workspace = true
 serde_json.workspace = true
-bincode.workspace = true
+oxicode.workspace = true
 toml.workspace = true
 
 # Time handling
@@ -114,7 +115,7 @@ name = "simd_operations_benchmarks"
 harness = false
 
 [[example]]
-name = "advanced_features_demo"
+name = "acoustic_advanced_features_demo"
 required-features = ["candle"]
 
 [[example]]

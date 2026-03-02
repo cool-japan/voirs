@@ -119,13 +119,19 @@ impl ZeroShotConverter {
 
     /// Add reference voice to database
     pub fn add_reference_voice(&mut self, reference_voice: ReferenceVoice) -> Result<()> {
-        let mut db = self.reference_database.write().unwrap();
+        let mut db = self
+            .reference_database
+            .write()
+            .expect("lock should not be poisoned");
         db.add_voice(reference_voice)
     }
 
     /// Remove reference voice from database
     pub fn remove_reference_voice(&mut self, speaker_id: &str) -> Result<()> {
-        let mut db = self.reference_database.write().unwrap();
+        let mut db = self
+            .reference_database
+            .write()
+            .expect("lock should not be poisoned");
         db.remove_voice(speaker_id)
     }
 
@@ -164,7 +170,10 @@ impl ZeroShotConverter {
     }
 
     fn check_cache(&self, cache_key: &str) -> Result<Option<CachedConversion>> {
-        let cache = self.conversion_cache.read().unwrap();
+        let cache = self
+            .conversion_cache
+            .read()
+            .expect("lock should not be poisoned");
         Ok(cache.get(cache_key).cloned())
     }
 
@@ -175,7 +184,10 @@ impl ZeroShotConverter {
         quality_score: f32,
         processing_time: Duration,
     ) -> Result<()> {
-        let mut cache = self.conversion_cache.write().unwrap();
+        let mut cache = self
+            .conversion_cache
+            .write()
+            .expect("lock should not be poisoned");
         cache.insert(
             cache_key,
             CachedConversion {
@@ -193,7 +205,10 @@ impl ZeroShotConverter {
         &self,
         target_characteristics: &VoiceCharacteristics,
     ) -> Result<Vec<ReferenceVoice>> {
-        let db = self.reference_database.read().unwrap();
+        let db = self
+            .reference_database
+            .read()
+            .expect("lock should not be poisoned");
         db.find_similar_voices(target_characteristics, self.config.max_references)
     }
 
@@ -843,7 +858,7 @@ impl ZeroShotConverter {
         }
 
         // Sort by frequency and take up to 8 peaks
-        peaks.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        peaks.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         peaks.truncate(8);
 
         // Pad if needed

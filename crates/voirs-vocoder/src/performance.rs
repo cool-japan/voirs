@@ -268,7 +268,7 @@ impl PerformanceMonitor {
 
         // Add to history
         {
-            let mut history = self.history.lock().unwrap();
+            let mut history = self.history.lock().expect("lock should not be poisoned");
             history.push_back(metrics.clone());
             if history.len() > self.max_history_size {
                 history.pop_front();
@@ -302,14 +302,14 @@ impl PerformanceMonitor {
 
     /// Get recent performance history
     pub fn get_history(&self, max_samples: Option<usize>) -> Vec<PerformanceMetrics> {
-        let history = self.history.lock().unwrap();
+        let history = self.history.lock().expect("lock should not be poisoned");
         let samples = max_samples.unwrap_or(history.len());
         history.iter().rev().take(samples).cloned().collect()
     }
 
     /// Get current average performance
     pub fn get_average_performance(&self, duration: Duration) -> Option<PerformanceMetrics> {
-        let history = self.history.lock().unwrap();
+        let history = self.history.lock().expect("lock should not be poisoned");
         let cutoff_time = Instant::now() - duration;
 
         let recent_metrics: Vec<_> = history
@@ -541,7 +541,7 @@ impl PerformanceMonitor {
             buffer_underrun_count: self.buffer_underrun_count,
             cache_hit_rate,
             history_size: {
-                let history = self.history.lock().unwrap();
+                let history = self.history.lock().expect("lock should not be poisoned");
                 history.len()
             },
         }

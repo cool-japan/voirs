@@ -791,7 +791,7 @@ mod tests {
         let mut vocoder = SpatialVocoder::new(config).unwrap();
 
         // Create sample mel spectrogram
-        let mel = Array2::ones((80, 100));
+        let mel = Array2::ones((80, 10));
         let position = SpatialPosition::default();
 
         let result = vocoder.process_mel_spectrogram_spatial(&mel, &position);

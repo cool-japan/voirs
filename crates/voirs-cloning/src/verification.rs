@@ -783,7 +783,7 @@ impl SpeakerVerifier {
 
         // Estimate noise floor (bottom 10% of energies)
         let mut sorted_energies = energies.clone();
-        sorted_energies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted_energies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let noise_samples = sorted_energies.len() / 10;
         let noise_energy =
             sorted_energies[..noise_samples].iter().sum::<f32>() / noise_samples as f32;

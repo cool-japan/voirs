@@ -29,18 +29,18 @@
 //! # use voirs_conversion::audio_libraries_update::*;
 //! # tokio_test::block_on(async {
 //! // Create audio libraries updater
-//! let mut updater = AudioLibrariesUpdater::new().await.unwrap();
+//! let mut updater = AudioLibrariesUpdater::new().await.expect("operation should succeed");
 //!
 //! // Analyze current library versions
-//! let analysis = updater.analyze_current_versions().await.unwrap();
+//! let analysis = updater.analyze_current_versions().await.expect("operation should succeed");
 //! println!("Libraries needing updates: {}", analysis.outdated_libraries.len());
 //!
 //! // Run compatibility tests
-//! let compatibility = updater.test_compatibility().await.unwrap();
+//! let compatibility = updater.test_compatibility().await.expect("operation should succeed");
 //!
 //! // Update libraries with compatibility assurance
 //! if compatibility.all_compatible {
-//!     updater.apply_updates().await.unwrap();
+//!     updater.apply_updates().await.expect("operation should succeed");
 //! }
 //! # });
 //! ```

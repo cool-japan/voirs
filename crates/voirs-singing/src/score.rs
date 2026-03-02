@@ -399,7 +399,11 @@ impl MusicalScore {
         self.dynamics
             .iter()
             .filter(|d| d.position <= time)
-            .max_by(|a, b| a.position.partial_cmp(&b.position).unwrap())
+            .max_by(|a, b| {
+                a.position
+                    .partial_cmp(&b.position)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .map(|d| d.dynamics)
             .unwrap_or(Dynamics::MezzoForte)
     }
@@ -497,7 +501,11 @@ impl MusicalScore {
 
         // Check for overlapping notes (if monophonic)
         let mut sorted_notes = self.notes.clone();
-        sorted_notes.sort_by(|a, b| a.start_time.partial_cmp(&b.start_time).unwrap());
+        sorted_notes.sort_by(|a, b| {
+            a.start_time
+                .partial_cmp(&b.start_time)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         for i in 0..sorted_notes.len() - 1 {
             let current_end = sorted_notes[i].start_time + sorted_notes[i].duration;

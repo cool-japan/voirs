@@ -807,7 +807,7 @@ impl AdaptiveAcousticEnvironment {
         use std::time::{SystemTime, UNIX_EPOCH};
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("SystemTime should be after UNIX_EPOCH")
             .as_secs_f64()
     }
 
@@ -942,7 +942,7 @@ impl AdaptiveAcousticEnvironment {
                 use std::time::SystemTime;
                 let now = SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
+                    .expect("SystemTime should be after UNIX_EPOCH")
                     .as_secs()
                     % 86400; // Seconds since midnight
                 now as f32 / 86400.0 // Normalized to 0.0-1.0

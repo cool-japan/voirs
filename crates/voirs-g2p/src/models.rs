@@ -374,7 +374,7 @@ impl G2pModel {
 
         // bincode 2: use serde integration module
         let (model, _len): (G2pModel, usize) =
-            bincode::serde::decode_from_slice(&file_content, bincode::config::standard())
+            oxicode::serde::decode_from_slice(&file_content, oxicode::config::standard())
                 .map_err(|e| G2pError::ModelError(format!("Failed to deserialize model: {e}")))?;
 
         Ok(model)
@@ -384,7 +384,7 @@ impl G2pModel {
     pub fn save_to_file<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
         self.model_path = Some(path.as_ref().to_path_buf());
 
-        let serialized = bincode::serde::encode_to_vec(self, bincode::config::standard())
+        let serialized = oxicode::serde::encode_to_vec(self, oxicode::config::standard())
             .map_err(|e| G2pError::ModelError(format!("Failed to serialize model: {e}")))?;
 
         std::fs::write(path.as_ref(), serialized)
@@ -498,11 +498,11 @@ mod bincode_migration_tests {
         model.parameters.vocabulary.insert("hello".into(), 42);
 
         let bytes =
-            bincode::serde::encode_to_vec(&model, bincode::config::standard()).expect("encode");
+            oxicode::serde::encode_to_vec(&model, oxicode::config::standard()).expect("encode");
         assert!(!bytes.is_empty());
 
         let (decoded, _len): (G2pModel, usize) =
-            bincode::serde::decode_from_slice(&bytes, bincode::config::standard()).expect("decode");
+            oxicode::serde::decode_from_slice(&bytes, oxicode::config::standard()).expect("decode");
         assert_eq!(decoded.parameters.weights.len(), 3);
         assert_eq!(decoded.parameters.vocabulary.get("hello"), Some(&42));
     }
@@ -550,11 +550,11 @@ mod bincode_migration_tests {
         let mut model = G2pModel::new(config);
         model.parameters.weights = vec![7, 8];
 
-        let bytes = bincode::serde::encode_to_vec(&model, bincode::config::standard()).unwrap();
+        let bytes = oxicode::serde::encode_to_vec(&model, oxicode::config::standard()).unwrap();
         let truncated = &bytes[0..bytes.len() / 3];
-        let result = bincode::serde::decode_from_slice::<G2pModel, _>(
+        let result = oxicode::serde::decode_from_slice::<G2pModel, _>(
             truncated,
-            bincode::config::standard(),
+            oxicode::config::standard(),
         );
         assert!(result.is_err(), "Expected error on truncated input");
     }

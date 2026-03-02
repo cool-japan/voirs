@@ -345,7 +345,10 @@ impl BenchmarkRunner {
 
             // Calculate trend
             let first_value = measurements[0].value;
-            let last_value = measurements.last().unwrap().value;
+            let last_value = measurements
+                .last()
+                .expect("collection should not be empty")
+                .value;
             let trend_change = (last_value - first_value) / first_value * 100.0;
 
             analysis.push_str(&format!("📊 {}\n", measurement_name));

@@ -1,0 +1,60 @@
+[package]
+name = "voirs-integration-tests"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Integration tests for VoiRS speech synthesis framework"
+publish = false
+
+keywords = ["voirs", "tts", "testing", "integration"]
+categories = ["multimedia::audio"]
+
+[lib]
+name = "voirs_integration_tests"
+path = "src/lib.rs"
+
+[dependencies]
+voirs-g2p.workspace = true
+voirs-acoustic.workspace = true
+voirs-vocoder.workspace = true
+voirs-sdk.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+futures.workspace = true
+
+[dev-dependencies]
+voirs-g2p.workspace = true
+voirs-acoustic.workspace = true
+voirs-vocoder.workspace = true
+voirs-dataset.workspace = true
+voirs-sdk.workspace = true
+voirs-recognizer.workspace = true
+voirs-evaluation.workspace = true
+voirs-feedback.workspace = true
+voirs-emotion.workspace = true
+voirs-cloning.workspace = true
+voirs-conversion.workspace = true
+voirs-singing.workspace = true
+voirs-spatial.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+futures.workspace = true
+uuid.workspace = true
+serde.workspace = true
+chrono.workspace = true
+fastrand.workspace = true
+anyhow.workspace = true
+candle-core.workspace = true
+candle-nn.workspace = true
+proptest.workspace = true
+
+[features]
+default = []
+onnx = ["voirs-sdk/onnx"]
+gpu = ["voirs-sdk/gpu"]

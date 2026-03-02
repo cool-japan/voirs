@@ -508,7 +508,10 @@ impl LibriTtsDataset {
 
     /// Get or create speaker info for a speaker ID
     fn get_speaker_info(&self, speaker_id: &str) -> SpeakerInfo {
-        let mut cache = self.speaker_cache.lock().unwrap();
+        let mut cache = self
+            .speaker_cache
+            .lock()
+            .expect("lock should not be poisoned");
 
         if let Some(info) = cache.get(speaker_id) {
             return info.clone();

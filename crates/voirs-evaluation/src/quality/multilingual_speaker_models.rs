@@ -1188,7 +1188,7 @@ impl MultilingualSpeakerModelEvaluator {
         }
 
         // Sort formants and take first 3-4
-        formants.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        formants.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         formants.truncate(4);
 
         // Ensure we have at least 3 formants with reasonable defaults
@@ -1343,7 +1343,9 @@ impl MultilingualSpeakerModelEvaluator {
 
         self.speaker_models
             .insert(speaker_id.to_string(), speaker_model);
-        self.speaker_models.get(speaker_id).unwrap()
+        self.speaker_models
+            .get(speaker_id)
+            .expect("value should be present")
     }
 
     /// Evaluate voice transfer quality

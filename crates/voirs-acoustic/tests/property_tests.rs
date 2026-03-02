@@ -258,7 +258,7 @@ fn test_mel_spectrogram_frame_properties() {
         // Property: Number of mel spectrogram frames should be deterministic
         // based on audio length and hop length
 
-        let expected_frames = (audio_samples + hop_length - 1) / hop_length;
+        let expected_frames = audio_samples.div_ceil(hop_length);
 
         // Property: Should always have at least one frame
         assert!(expected_frames > 0);
@@ -940,7 +940,7 @@ fn test_streaming_chunk_alignment() {
         total_frames in 1000usize..100000usize,
     )| {
         // Property: Total frames should be processable in chunks
-        let num_chunks = (total_frames + chunk_frames - 1) / chunk_frames;
+        let num_chunks = total_frames.div_ceil(chunk_frames);
 
         // Property: Number of chunks should be reasonable
         assert!(num_chunks > 0);

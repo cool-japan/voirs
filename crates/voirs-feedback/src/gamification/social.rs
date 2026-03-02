@@ -183,7 +183,7 @@ impl SocialSystem {
         matches.sort_by(|a, b| {
             b.compatibility_score
                 .partial_cmp(&a.compatibility_score)
-                .unwrap()
+                .expect("value should be present")
         });
         matches
     }
@@ -274,7 +274,7 @@ impl SocialSystem {
         recommendations.suggested_peer_groups.sort_by(|a, b| {
             b.compatibility_score
                 .partial_cmp(&a.compatibility_score)
-                .unwrap()
+                .expect("value should be present")
         });
 
         recommendations

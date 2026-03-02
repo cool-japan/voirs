@@ -67,11 +67,11 @@ class CBindingTester:
         if not self.lib_path:
             # Try to find the library
             possible_paths = [
-                "target/debug/libvoirs_ffi.so",
-                "target/debug/libvoirs_ffi.dylib",
-                "target/debug/voirs_ffi.dll",
-                "../target/debug/libvoirs_ffi.so",
-                "../target/debug/libvoirs_ffi.dylib",
+                "target/debug/libvoirs.so",
+                "target/debug/libvoirs.dylib",
+                "target/debug/voirs.dll",
+                "../target/debug/libvoirs.so",
+                "../target/debug/libvoirs.dylib",
             ]
             
             for path in possible_paths:
@@ -248,7 +248,7 @@ class PythonBindingTester:
     def _setup_bindings(self):
         """Setup Python bindings."""
         try:
-            import voirs_ffi as voirs
+            import voirs
             self.voirs = voirs
             self.available = True
         except ImportError:

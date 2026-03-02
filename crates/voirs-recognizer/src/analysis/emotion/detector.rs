@@ -65,7 +65,7 @@ impl EmotionDetectorImpl {
             return current_emotion.clone();
         }
 
-        let history = self.emotion_history.lock().unwrap();
+        let history = self.emotion_history.lock().expect("lock should not be poisoned");
         
         // Get recent emotions for the same type
         let recent_emotions: Vec<_> = history.iter()
@@ -99,7 +99,7 @@ impl EmotionDetectorImpl {
             return current_sentiment.clone();
         }
 
-        let history = self.sentiment_history.lock().unwrap();
+        let history = self.sentiment_history.lock().expect("lock should not be poisoned");
         
         let recent_sentiments: Vec<_> = history.iter()
             .filter(|s| current_sentiment.timestamp.duration_since(s.timestamp) < Duration::from_secs(10))
@@ -139,7 +139,7 @@ impl EmotionDetectorImpl {
 
     /// Update emotion statistics
     fn update_stats(&self, emotion: &EmotionDetection, sentiment: Option<&SentimentAnalysis>) {
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
         
         stats.total_analyses += 1;
         stats.last_analysis = Some(emotion.timestamp);
@@ -164,7 +164,7 @@ impl EmotionDetectorImpl {
         let cutoff = Instant::now() - Duration::from_secs(300); // Keep 5 minutes
         
         {
-            let mut emotion_history = self.emotion_history.lock().unwrap();
+            let mut emotion_history = self.emotion_history.lock().expect("lock should not be poisoned");
             emotion_history.retain(|e| e.timestamp > cutoff);
             if emotion_history.len() > 100 {
                 emotion_history.drain(0..emotion_history.len() - 100);
@@ -172,7 +172,7 @@ impl EmotionDetectorImpl {
         }
         
         {
-            let mut sentiment_history = self.sentiment_history.lock().unwrap();
+            let mut sentiment_history = self.sentiment_history.lock().expect("lock should not be poisoned");
             sentiment_history.retain(|s| s.timestamp > cutoff);
             if sentiment_history.len() > 100 {
                 sentiment_history.drain(0..sentiment_history.len() - 100);
@@ -218,7 +218,7 @@ impl EmotionRecognizer for EmotionDetectorImpl {
             
             // Add to history
             {
-                let mut history = self.emotion_history.lock().unwrap();
+                let mut history = self.emotion_history.lock().expect("lock should not be poisoned");
                 history.push(smoothed_detection);
             }
         }
@@ -230,7 +230,7 @@ impl EmotionRecognizer for EmotionDetectorImpl {
         
         // Update tracker
         if self.config.enable_tracking && !detections.is_empty() {
-            let mut tracker = self.tracker.lock().unwrap();
+            let mut tracker = self.tracker.lock().expect("lock should not be poisoned");
             tracker.update(&detections[0]).await;
         }
         
@@ -281,7 +281,7 @@ impl EmotionRecognizer for EmotionDetectorImpl {
         
         // Add to history
         {
-            let mut history = self.sentiment_history.lock().unwrap();
+            let mut history = self.sentiment_history.lock().expect("lock should not be poisoned");
             history.push(smoothed_sentiment.clone());
         }
         
@@ -416,7 +416,7 @@ impl EmotionRecognizer for EmotionDetectorImpl {
 impl EmotionDetectorImpl {
     /// Get emotion statistics
     pub fn get_stats(&self) -> EmotionStats {
-        let stats = self.stats.lock().unwrap();
+        let stats = self.stats.lock().expect("lock should not be poisoned");
         stats.clone()
     }
     

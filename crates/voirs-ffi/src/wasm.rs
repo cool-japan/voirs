@@ -484,7 +484,7 @@ pub mod wasm_bindings {
                 &JsValue::from_str("rms"),
                 &JsValue::from_f64(rms as f64),
             )
-            .unwrap();
+            .expect("Reflect::set should succeed on new object");
 
             // Calculate peak
             let peak = self.samples.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
@@ -493,7 +493,7 @@ pub mod wasm_bindings {
                 &JsValue::from_str("peak"),
                 &JsValue::from_f64(peak as f64),
             )
-            .unwrap();
+            .expect("Reflect::set should succeed on new object");
 
             // Calculate zero crossing rate
             let mut crossings = 0;
@@ -508,7 +508,7 @@ pub mod wasm_bindings {
                 &JsValue::from_str("zeroCrossingRate"),
                 &JsValue::from_f64(zcr),
             )
-            .unwrap();
+            .expect("Reflect::set should succeed on new object");
 
             // Calculate dynamic range
             let min_val = self.samples.iter().fold(f32::INFINITY, |a, &b| a.min(b));
@@ -522,7 +522,7 @@ pub mod wasm_bindings {
                 &JsValue::from_str("dynamicRange"),
                 &JsValue::from_f64(dynamic_range as f64),
             )
-            .unwrap();
+            .expect("Reflect::set should succeed on new object");
 
             stats
         }
@@ -773,8 +773,9 @@ pub mod wasm_bindings {
         pub fn get_info(&self) -> js_sys::Object {
             let info = js_sys::Object::new();
             js_sys::Reflect::set(&info, &"version".into(), &env!("CARGO_PKG_VERSION").into())
-                .unwrap();
-            js_sys::Reflect::set(&info, &"platform".into(), &"wasm".into()).unwrap();
+                .expect("Reflect::set should succeed on new object");
+            js_sys::Reflect::set(&info, &"platform".into(), &"wasm".into())
+                .expect("Reflect::set should succeed on new object");
             js_sys::Reflect::set(&info, &"features".into(), &{
                 let features = js_sys::Object::new();
                 js_sys::Reflect::set(
@@ -782,23 +783,24 @@ pub mod wasm_bindings {
                     &"gpu_support".into(),
                     &cfg!(feature = "gpu").into(),
                 )
-                .unwrap();
+                .expect("Reflect::set should succeed on new object");
                 js_sys::Reflect::set(
                     &features,
                     &"python_bindings".into(),
                     &cfg!(feature = "python").into(),
                 )
-                .unwrap();
+                .expect("Reflect::set should succeed on new object");
                 js_sys::Reflect::set(
                     &features,
                     &"nodejs_bindings".into(),
                     &cfg!(feature = "nodejs").into(),
                 )
-                .unwrap();
-                js_sys::Reflect::set(&features, &"wasm_bindings".into(), &true.into()).unwrap();
+                .expect("Reflect::set should succeed on new object");
+                js_sys::Reflect::set(&features, &"wasm_bindings".into(), &true.into())
+                    .expect("Reflect::set should succeed on new object");
                 features.into()
             })
-            .unwrap();
+            .expect("Reflect::set should succeed on new object");
             info
         }
     }

@@ -24,14 +24,15 @@ impl GpuEmotionProcessor {
         #[cfg(feature = "gpu")]
         {
             // Try to initialize CUDA device first, fallback to CPU
-            let device = if Device::cuda_if_available(0).is_ok() {
-                debug!("GPU acceleration enabled with CUDA device");
-                Device::cuda_if_available(0).map_err(|e| {
-                    Error::Processing(format!("Failed to initialize CUDA device: {}", e))
-                })?
-            } else {
-                debug!("CUDA not available, GPU acceleration disabled");
-                Device::Cpu
+            let device = match std::panic::catch_unwind(|| Device::cuda_if_available(0)) {
+                Ok(Ok(dev)) => {
+                    debug!("GPU acceleration enabled with CUDA device");
+                    dev
+                }
+                _ => {
+                    debug!("CUDA not available, GPU acceleration disabled");
+                    Device::Cpu
+                }
             };
 
             let enabled = !matches!(device, Device::Cpu);
@@ -537,7 +538,10 @@ impl GpuCapabilities {
     pub fn detect() -> Self {
         #[cfg(feature = "gpu")]
         {
-            let cuda_available = Device::cuda_if_available(0).is_ok();
+            let cuda_available = std::panic::catch_unwind(|| Device::cuda_if_available(0))
+                .ok()
+                .and_then(|r| r.ok())
+                .is_some();
 
             Self {
                 cuda_available,

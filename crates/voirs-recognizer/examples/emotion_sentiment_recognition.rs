@@ -58,7 +58,7 @@ impl EmotionType {
         }
     }
 
-    fn to_string(&self) -> &'static str {
+    fn as_str(self) -> &'static str {
         match self {
             EmotionType::Joy => "Joy",
             EmotionType::Sadness => "Sadness",
@@ -142,7 +142,7 @@ impl SentimentType {
         }
     }
 
-    fn to_string(&self) -> &'static str {
+    fn as_str(self) -> &'static str {
         match self {
             SentimentType::Positive => "Positive",
             SentimentType::Negative => "Negative",
@@ -375,8 +375,8 @@ async fn main() -> Result<(), RecognitionError> {
         println!(
             "│ {:15} │ {:9} │ {:7} │ {:8.2} │ {:5.0}Hz │ {:5.3} │ {:6.1}/s │",
             expected_emotion,
-            result.emotion.to_string(),
-            result.sentiment.to_string(),
+            result.emotion.as_str(),
+            result.sentiment.as_str(),
             result.confidence,
             pitch_mean,
             energy,
@@ -404,8 +404,8 @@ async fn main() -> Result<(), RecognitionError> {
         // Build confusion matrix
         let key = format!(
             "{} -> {}",
-            expected_emotion.to_string(),
-            detected_emotion.to_string()
+            expected_emotion.as_str(),
+            detected_emotion.as_str()
         );
         *emotion_confusion_matrix.entry(key).or_insert(0) += 1;
     }
@@ -551,11 +551,9 @@ async fn main() -> Result<(), RecognitionError> {
     let mut sentiment_counts = HashMap::new();
 
     for (_, result, _) in &analysis_results {
-        *emotion_counts
-            .entry(result.emotion.to_string())
-            .or_insert(0) += 1;
+        *emotion_counts.entry(result.emotion.as_str()).or_insert(0) += 1;
         *sentiment_counts
-            .entry(result.sentiment.to_string())
+            .entry(result.sentiment.as_str())
             .or_insert(0) += 1;
     }
 

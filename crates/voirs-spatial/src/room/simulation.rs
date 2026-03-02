@@ -655,7 +655,7 @@ impl AdvancedRoomSimulator {
     // Private implementation methods
 
     fn initialize_rays(&self, source: &Position3D) -> Result<Vec<AcousticRay>> {
-        let ray_tracer = self.ray_tracer.read().unwrap();
+        let ray_tracer = self.ray_tracer.read().expect("lock should not be poisoned");
         let ray_count = self.config.max_rays;
         let mut rays = Vec::with_capacity(ray_count as usize);
 
@@ -749,7 +749,11 @@ impl AdvancedRoomSimulator {
     ) -> Result<Vec<ImpulseResponseSample>> {
         let mut combined = specular.to_vec();
         combined.extend_from_slice(diffracted);
-        combined.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
+        combined.sort_by(|a, b| {
+            a.time
+                .partial_cmp(&b.time)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         Ok(combined)
     }
 

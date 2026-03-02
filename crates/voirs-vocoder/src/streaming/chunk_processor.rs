@@ -302,7 +302,10 @@ impl MemoryPool {
 
     /// Get current memory usage
     fn get_memory_usage_mb(&self) -> f32 {
-        *self.current_usage_mb.read().unwrap()
+        *self
+            .current_usage_mb
+            .read()
+            .expect("lock should not be poisoned")
     }
 }
 
@@ -457,7 +460,10 @@ impl AdvancedChunkProcessor {
         }
 
         if buffers.len() == 1 {
-            return Ok(buffers.into_iter().next().unwrap());
+            return Ok(buffers
+                .into_iter()
+                .next()
+                .expect("buffers has exactly one element"));
         }
 
         let first_buffer = &buffers[0];
@@ -526,7 +532,10 @@ impl AdvancedChunkProcessor {
 
     /// Get advanced processing statistics
     pub fn get_stats(&self) -> AdvancedChunkStats {
-        self.stats.read().unwrap().clone()
+        self.stats
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Reset statistics

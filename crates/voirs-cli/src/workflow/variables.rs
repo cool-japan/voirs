@@ -63,28 +63,41 @@ impl VariableResolver {
 
     /// Resolve a string with variable substitution
     pub fn resolve_string(&self, input: &str, current_step: Option<&str>) -> String {
-        let mut result = input.to_string();
+        let mut result = String::new();
+        let mut remaining = input;
 
         // Find all ${var} patterns
-        while let Some(start) = result.find("${") {
-            if let Some(end) = result[start..].find('}') {
-                let var_name = &result[start + 2..start + end];
-                let replacement = self
-                    .get(var_name, current_step)
-                    .and_then(|v| match v {
-                        serde_json::Value::String(s) => Some(s),
-                        serde_json::Value::Number(n) => Some(n.to_string()),
-                        serde_json::Value::Bool(b) => Some(b.to_string()),
-                        _ => None,
-                    })
-                    .unwrap_or_else(|| format!("${{{}}}", var_name));
+        while let Some(start) = remaining.find("${") {
+            // Append everything before the pattern
+            result.push_str(&remaining[..start]);
+            remaining = &remaining[start..];
 
-                result.replace_range(start..start + end + 1, &replacement);
+            if let Some(end) = remaining.find('}') {
+                let var_name = &remaining[2..end];
+                match self.get(var_name, current_step).and_then(|v| match v {
+                    serde_json::Value::String(s) => Some(s),
+                    serde_json::Value::Number(n) => Some(n.to_string()),
+                    serde_json::Value::Bool(b) => Some(b.to_string()),
+                    _ => None,
+                }) {
+                    Some(replacement) => {
+                        result.push_str(&replacement);
+                    }
+                    None => {
+                        // Variable not found: preserve the original pattern literally
+                        result.push_str(&remaining[..end + 1]);
+                    }
+                }
+                remaining = &remaining[end + 1..];
             } else {
-                break;
+                // No closing brace found: append the rest as-is
+                result.push_str(remaining);
+                return result;
             }
         }
 
+        // Append any remaining text
+        result.push_str(remaining);
         result
     }
 
@@ -198,7 +211,7 @@ mod tests {
 
         let value = resolver.get("key1", None);
         assert!(value.is_some());
-        assert_eq!(value.unwrap().as_str().unwrap(), "value1");
+        assert_eq!(value.unwrap().as_str().unwrap_or_default(), "value1");
     }
 
     #[test]
@@ -212,7 +225,7 @@ mod tests {
 
         let value = resolver.get("key1", Some("step1"));
         assert!(value.is_some());
-        assert_eq!(value.unwrap().as_str().unwrap(), "value1");
+        assert_eq!(value.unwrap().as_str().unwrap_or_default(), "value1");
 
         let value2 = resolver.get("key1", Some("step2"));
         assert!(value2.is_none());
@@ -232,11 +245,11 @@ mod tests {
 
         // Step scope should override global
         let value = resolver.get("key1", Some("step1"));
-        assert_eq!(value.unwrap().as_str().unwrap(), "step_value");
+        assert_eq!(value.unwrap().as_str().unwrap_or_default(), "step_value");
 
         // Without step context, should get global
         let value2 = resolver.get("key1", None);
-        assert_eq!(value2.unwrap().as_str().unwrap(), "global_value");
+        assert_eq!(value2.unwrap().as_str().unwrap_or_default(), "global_value");
     }
 
     #[test]
@@ -277,10 +290,13 @@ mod tests {
         let resolved = resolver.resolve_parameters(&params, None);
 
         assert_eq!(
-            resolved.get("voice").unwrap().as_str().unwrap(),
+            resolved.get("voice").unwrap().as_str().unwrap_or_default(),
             "en-US-neural"
         );
-        assert_eq!(resolved.get("text").unwrap().as_str().unwrap(), "Hello");
+        assert_eq!(
+            resolved.get("text").unwrap().as_str().unwrap_or_default(),
+            "Hello"
+        );
     }
 
     #[test]

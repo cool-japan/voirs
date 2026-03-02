@@ -302,7 +302,7 @@ impl StandardsValidator {
 
 impl Default for StandardsValidator {
     fn default() -> Self {
-        Self::new().unwrap()
+        Self::new().expect("value should be present")
     }
 }
 

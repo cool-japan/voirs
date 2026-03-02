@@ -127,7 +127,7 @@ impl DynamicConfigManager {
     /// Rollback to previous configuration
     pub async fn rollback(&self) -> Result<(), ConfigUpdateError> {
         let previous_config = {
-            let history = self.history.read().unwrap();
+            let history = self.history.read().expect("lock should not be poisoned");
             history
                 .get_previous()
                 .ok_or(ConfigUpdateError::NoHistory)?
@@ -161,13 +161,13 @@ impl DynamicConfigManager {
 
     /// Get configuration history
     pub fn get_history(&self) -> Vec<ConfigHistoryEntry> {
-        let history = self.history.read().unwrap();
+        let history = self.history.read().expect("lock should not be poisoned");
         history.entries.clone()
     }
 
     /// Clear configuration history
     pub fn clear_history(&self) {
-        let mut history = self.history.write().unwrap();
+        let mut history = self.history.write().expect("lock should not be poisoned");
         history.clear();
     }
 

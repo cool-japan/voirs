@@ -277,8 +277,12 @@ impl MetricsCollector {
 
         // Record throughput history (every minute)
         if self.throughput_history.is_empty()
-            || now.duration_since(self.throughput_history.last().unwrap().0)
-                > Duration::from_secs(60)
+            || now.duration_since(
+                self.throughput_history
+                    .last()
+                    .expect("checked non-empty in condition above")
+                    .0,
+            ) > Duration::from_secs(60)
         {
             self.throughput_history.push((now, throughput));
 

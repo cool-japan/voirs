@@ -657,18 +657,28 @@ impl MemoryEfficientLayer {
     /// Allocate memory through pool
     #[must_use]
     pub fn allocate_memory(&self, size: usize) -> Option<Vec<f32>> {
-        self.memory_pool.lock().unwrap().allocate(size)
+        self.memory_pool
+            .lock()
+            .expect("lock should not be poisoned")
+            .allocate(size)
     }
 
     /// Deallocate memory through pool
     pub fn deallocate_memory(&self, block: Vec<f32>) {
-        self.memory_pool.lock().unwrap().deallocate(block);
+        self.memory_pool
+            .lock()
+            .expect("lock should not be poisoned")
+            .deallocate(block);
     }
 
     /// Get memory statistics
     #[must_use]
     pub fn memory_stats(&self) -> MemoryStats {
-        self.memory_pool.lock().unwrap().stats().clone()
+        self.memory_pool
+            .lock()
+            .expect("lock should not be poisoned")
+            .stats()
+            .clone()
     }
 
     /// Check if memory usage is within threshold
@@ -800,8 +810,8 @@ mod tests {
         let tensor = layer.apply_mixed_precision(data);
 
         match tensor {
-            MixedPrecisionTensor::FP16(_) => assert!(true),
-            _ => assert!(false, "Expected FP16 tensor"),
+            MixedPrecisionTensor::FP16(_) => {}
+            _ => panic!("Expected FP16 tensor"),
         }
     }
 }

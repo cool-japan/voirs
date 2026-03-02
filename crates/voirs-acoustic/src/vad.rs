@@ -380,7 +380,10 @@ impl VoiceActivityDetector {
                 segment.end_time = time;
             } else {
                 // End current segment and start new one
-                let completed = self.current_segment.take().unwrap();
+                let completed = self
+                    .current_segment
+                    .take()
+                    .expect("checked Some in if-let above");
 
                 if Self::is_valid_segment(&completed, &self.config) {
                     segments.push(completed);

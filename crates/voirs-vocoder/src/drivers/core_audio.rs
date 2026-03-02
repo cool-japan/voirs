@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{BuildStreamError, Device, Host, SampleFormat, SampleRate, StreamConfig};
+use cpal::{BuildStreamError, Device, Host, SampleFormat, StreamConfig};
 use parking_lot::Mutex;
 use std::sync::Arc;
 
@@ -55,7 +55,7 @@ impl CoreAudioDriver {
 
         // Try to get default output config
         if let Ok(default_config) = device.default_output_config() {
-            supported_sample_rates.push(default_config.sample_rate().0);
+            supported_sample_rates.push(default_config.sample_rate());
             max_channels = default_config.channels() as u32;
 
             // Get buffer size range if available
@@ -80,15 +80,14 @@ impl CoreAudioDriver {
                 // Test if this sample rate is supported
                 let _config = StreamConfig {
                     channels: 1,
-                    sample_rate: SampleRate(rate),
+                    sample_rate: rate,
                     buffer_size: cpal::BufferSize::Default,
                 };
 
                 // Safely check if this rate is supported, catching any panics
                 let is_supported = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     device.supported_output_configs().is_ok_and(|mut configs| {
-                        configs
-                            .any(|c| c.min_sample_rate().0 <= rate && rate <= c.max_sample_rate().0)
+                        configs.any(|c| c.min_sample_rate() <= rate && rate <= c.max_sample_rate())
                     })
                 }))
                 .unwrap_or(false);
@@ -117,7 +116,7 @@ impl CoreAudioDriver {
     fn to_cpal_config(config: &AudioStreamConfig) -> StreamConfig {
         StreamConfig {
             channels: config.channels as u16,
-            sample_rate: SampleRate(config.sample_rate),
+            sample_rate: config.sample_rate,
             buffer_size: if config.buffer_size > 0 {
                 cpal::BufferSize::Fixed(config.buffer_size)
             } else {
@@ -202,8 +201,8 @@ impl AudioDriver for CoreAudioDriver {
             .collect();
 
         let is_supported = supported_configs.iter().any(|c| {
-            c.min_sample_rate().0 <= config.sample_rate
-                && config.sample_rate <= c.max_sample_rate().0
+            c.min_sample_rate() <= config.sample_rate
+                && config.sample_rate <= c.max_sample_rate()
                 && c.channels() >= config.channels as u16
         });
 

@@ -247,19 +247,19 @@ mod tests {
     #[test]
     fn test_telemetry_level_from_str() {
         assert_eq!(
-            "minimal".parse::<TelemetryLevel>().unwrap(),
+            "minimal".parse::<TelemetryLevel>().expect("valid format"),
             TelemetryLevel::Minimal
         );
         assert_eq!(
-            "standard".parse::<TelemetryLevel>().unwrap(),
+            "standard".parse::<TelemetryLevel>().expect("valid format"),
             TelemetryLevel::Standard
         );
         assert_eq!(
-            "detailed".parse::<TelemetryLevel>().unwrap(),
+            "detailed".parse::<TelemetryLevel>().expect("valid format"),
             TelemetryLevel::Detailed
         );
         assert_eq!(
-            "debug".parse::<TelemetryLevel>().unwrap(),
+            "debug".parse::<TelemetryLevel>().expect("valid format"),
             TelemetryLevel::Debug
         );
         assert!("invalid".parse::<TelemetryLevel>().is_err());

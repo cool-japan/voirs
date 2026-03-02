@@ -496,9 +496,18 @@ impl AuditTrail {
     }
 
     fn write_event(&self, event_json: &str) -> Result<(), EvaluationError> {
-        let mut file_guard = self.current_file.lock().unwrap();
-        let mut path_guard = self.current_file_path.lock().unwrap();
-        let mut size_guard = self.current_file_size.lock().unwrap();
+        let mut file_guard = self
+            .current_file
+            .lock()
+            .expect("lock should not be poisoned");
+        let mut path_guard = self
+            .current_file_path
+            .lock()
+            .expect("lock should not be poisoned");
+        let mut size_guard = self
+            .current_file_size
+            .lock()
+            .expect("lock should not be poisoned");
 
         // Check if we need to rotate the log file
         let needs_rotation = match self.config.rotation_policy {
@@ -591,7 +600,10 @@ impl AuditTrail {
 
     /// Get audit statistics
     pub fn get_statistics(&self) -> AuditStatistics {
-        self.stats.lock().unwrap().clone()
+        self.stats
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Query audit events

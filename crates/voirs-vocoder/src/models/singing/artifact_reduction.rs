@@ -299,7 +299,10 @@ impl ArtifactReductionProcessor {
         }
 
         // Get current and previous frames
-        let current_frame = self.spectral_history.back().unwrap();
+        let current_frame = self
+            .spectral_history
+            .back()
+            .expect("spectral_history should not be empty");
         let prev_frame = &self.spectral_history[self.spectral_history.len() - 2];
 
         // Detect discontinuities

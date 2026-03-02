@@ -780,11 +780,17 @@ impl UsageTracker {
             metadata: HashMap::new(),
         };
         {
-            let mut store = self.usage_store.write().unwrap();
+            let mut store = self
+                .usage_store
+                .write()
+                .expect("lock should not be poisoned");
             store.insert(usage_id, usage_record.clone());
         }
         if let Some(ref session_id) = usage_record.user_context.session_id {
-            let mut sessions = self.active_sessions.write().unwrap();
+            let mut sessions = self
+                .active_sessions
+                .write()
+                .expect("lock should not be poisoned");
             let session = sessions
                 .entry(session_id.clone())
                 .or_insert_with(|| ActiveSession {
@@ -811,9 +817,12 @@ impl UsageTracker {
     ) -> Result<ConsentUsageResult> {
         if let Some(ref consent_manager) = self.consent_manager {
             if let Some(consent_id) = consent_id {
-                let manager = consent_manager.lock().unwrap();
+                let manager = consent_manager.lock().expect("lock should not be poisoned");
                 let context = {
-                    let store = self.usage_store.read().unwrap();
+                    let store = self
+                        .usage_store
+                        .read()
+                        .expect("lock should not be poisoned");
                     let usage = store
                         .get(&usage_id)
                         .ok_or_else(|| Error::Validation("Usage record not found".to_string()))?;
@@ -834,7 +843,10 @@ impl UsageTracker {
                 };
                 let result = manager.check_consent_for_use(consent_id, use_case, &context)?;
                 {
-                    let mut store = self.usage_store.write().unwrap();
+                    let mut store = self
+                        .usage_store
+                        .write()
+                        .expect("lock should not be poisoned");
                     if let Some(usage) = store.get_mut(&usage_id) {
                         usage.consent_id = Some(consent_id);
                         usage.outcome.consent_result = Some(ConsentCheckResult {
@@ -868,7 +880,10 @@ impl UsageTracker {
     ) -> Result<()> {
         let now = SystemTime::now();
         {
-            let mut store = self.usage_store.write().unwrap();
+            let mut store = self
+                .usage_store
+                .write()
+                .expect("lock should not be poisoned");
             if let Some(usage) = store.get_mut(&usage_id) {
                 usage.outcome = outcome.clone();
                 usage.resources = resources.clone();
@@ -882,7 +897,10 @@ impl UsageTracker {
             }
         }
         {
-            let mut stats = self.statistics.write().unwrap();
+            let mut stats = self
+                .statistics
+                .write()
+                .expect("lock should not be poisoned");
             stats.total_operations += 1;
             match outcome.status {
                 UsageStatus::Success | UsageStatus::PartialSuccess => {
@@ -897,7 +915,10 @@ impl UsageTracker {
                 resources.cost_estimate.map(|c| c.total_cost).unwrap_or(0.0);
         }
         let usage_record = {
-            let store = self.usage_store.read().unwrap();
+            let store = self
+                .usage_store
+                .read()
+                .expect("lock should not be poisoned");
             store.get(&usage_id).cloned()
         };
         if let Some(usage) = usage_record {
@@ -912,12 +933,15 @@ impl UsageTracker {
     }
     /// Get usage statistics
     pub fn get_statistics(&self) -> UsageStatistics {
-        let stats = self.statistics.read().unwrap();
+        let stats = self.statistics.read().expect("lock should not be poisoned");
         stats.clone()
     }
     /// Query usage records
     pub fn query_usage_records(&self, filters: &UsageQueryFilters) -> Result<Vec<UsageRecord>> {
-        let store = self.usage_store.read().unwrap();
+        let store = self
+            .usage_store
+            .read()
+            .expect("lock should not be poisoned");
         let mut results: Vec<UsageRecord> = store
             .values()
             .filter(|usage| self.matches_filters(usage, filters))

@@ -435,7 +435,7 @@ impl PerformanceMonitor {
         }
 
         let mut values: Vec<f64> = points.iter().map(|p| p.value).collect();
-        values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let count = values.len();
         let min = values[0];

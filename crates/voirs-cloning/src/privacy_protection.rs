@@ -571,7 +571,7 @@ impl DifferentialPrivacyEngine {
 
         let sensitivity = 1.0; // Assume L1 sensitivity of 1
         let scale = sensitivity / self.epsilon;
-        let mut rng = self.rng.lock().unwrap();
+        let mut rng = self.rng.lock().expect("lock should not be poisoned");
 
         for feature in features.iter_mut() {
             // Generate Laplace noise using uniform random variables

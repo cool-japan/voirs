@@ -667,7 +667,7 @@ impl TimingController {
     pub fn add_tempo_variation(&mut self, time: f32, tempo: f32) {
         self.tempo_variations.push((time, tempo));
         self.tempo_variations
-            .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     }
 
     /// Add a timing adjustment at a specific time
@@ -679,7 +679,7 @@ impl TimingController {
     pub fn add_timing_adjustment(&mut self, time: f32, adjustment: f32) {
         self.timing_adjustments.push((time, adjustment));
         self.timing_adjustments
-            .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     }
 
     /// Add tempo curve
@@ -689,8 +689,11 @@ impl TimingController {
     /// * `curve` - Tempo curve defining a smooth tempo change over a time range
     pub fn add_tempo_curve(&mut self, curve: TempoCurve) {
         self.tempo_curves.push(curve);
-        self.tempo_curves
-            .sort_by(|a, b| a.start_time.partial_cmp(&b.start_time).unwrap());
+        self.tempo_curves.sort_by(|a, b| {
+            a.start_time
+                .partial_cmp(&b.start_time)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
     }
 
     /// Get the tempo at a specific time

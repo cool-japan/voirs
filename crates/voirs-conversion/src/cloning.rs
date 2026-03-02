@@ -95,7 +95,7 @@ pub struct CloningIntegration {
 pub struct SimpleSpeakerProfile {
     /// Speaker ID
     pub id: String,
-    /// Speaker embedding (simplified as Vec<f32>)
+    /// Speaker embedding (simplified as `Vec<f32>`)
     pub embedding: Vec<f32>,
     /// Voice characteristics
     pub characteristics: VoiceCharacteristics,

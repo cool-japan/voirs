@@ -326,7 +326,7 @@ impl P56LoudnessMeter {
             if is_active && segment_start.is_none() {
                 segment_start = Some(i);
             } else if !is_active && segment_start.is_some() {
-                let start = segment_start.unwrap();
+                let start = segment_start.expect("value should be present");
                 let segment_length = i - start;
 
                 if segment_length >= min_frames {

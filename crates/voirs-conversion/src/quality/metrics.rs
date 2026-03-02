@@ -663,7 +663,7 @@ impl QualityMetricsSystem {
         // Estimate noise power from quiet segments (simplified)
         let sorted_samples: Vec<f32> = {
             let mut samples = audio.iter().map(|&x| x.abs()).collect::<Vec<f32>>();
-            samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             samples
         };
 

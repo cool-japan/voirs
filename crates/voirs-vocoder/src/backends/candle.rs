@@ -146,22 +146,24 @@ impl CandleBackend {
         let device = match device_type {
             DeviceType::Cpu => Device::Cpu,
             DeviceType::Cuda => {
-                if candle_core::utils::cuda_is_available() {
-                    let device = Device::new_cuda(0)
-                        .map_err(|e| VocoderError::ModelError(format!("CUDA device error: {e}")))?;
-
-                    // Initialize GPU memory pool for better performance
-                    if matches!(
-                        self.optimization_level,
-                        OptimizationLevel::Aggressive | OptimizationLevel::MaxPerformance
-                    ) {
-                        self.gpu_memory_pool = Some(GpuMemoryPool::new(device.clone(), 1024));
+                // Use catch_unwind because cudarc panics when the CUDA shared library
+                // is not installed (e.g. on macOS without CUDA).
+                let cuda_result = std::panic::catch_unwind(|| Device::cuda_if_available(0));
+                match cuda_result {
+                    Ok(Ok(device)) if !matches!(device, Device::Cpu) => {
+                        // Initialize GPU memory pool for better performance
+                        if matches!(
+                            self.optimization_level,
+                            OptimizationLevel::Aggressive | OptimizationLevel::MaxPerformance
+                        ) {
+                            self.gpu_memory_pool = Some(GpuMemoryPool::new(device.clone(), 1024));
+                        }
+                        device
                     }
-
-                    device
-                } else {
-                    tracing::warn!("CUDA requested but not available, falling back to CPU");
-                    Device::Cpu
+                    _ => {
+                        tracing::warn!("CUDA requested but not available, falling back to CPU");
+                        Device::Cpu
+                    }
                 }
             }
             DeviceType::Metal => {
@@ -185,14 +187,21 @@ impl CandleBackend {
                 }
             }
             DeviceType::Auto => {
-                let device = if candle_core::utils::cuda_is_available() {
-                    Device::new_cuda(0)
-                        .map_err(|e| VocoderError::ModelError(format!("CUDA device error: {e}")))?
-                } else if candle_core::utils::metal_is_available() {
-                    Device::new_metal(0)
-                        .map_err(|e| VocoderError::ModelError(format!("Metal device error: {e}")))?
-                } else {
-                    Device::Cpu
+                // Try CUDA first via catch_unwind because cudarc panics when the CUDA
+                // shared library is not installed (e.g. on macOS without CUDA).
+                let cuda_result = std::panic::catch_unwind(|| Device::cuda_if_available(0));
+                let device = match cuda_result {
+                    Ok(Ok(device)) if !matches!(device, Device::Cpu) => device,
+                    _ => {
+                        // Fall through to Metal or CPU
+                        if candle_core::utils::metal_is_available() {
+                            Device::new_metal(0).map_err(|e| {
+                                VocoderError::ModelError(format!("Metal device error: {e}"))
+                            })?
+                        } else {
+                            Device::Cpu
+                        }
+                    }
                 };
 
                 // Initialize GPU memory pool for auto-selected GPU devices
@@ -413,7 +422,7 @@ impl CandleBackend {
         let normalized = if self
             .model
             .as_ref()
-            .unwrap()
+            .expect("model should be loaded before preprocessing")
             .preprocessing
             .enable_normalization
         {
@@ -777,7 +786,14 @@ impl Backend for CandleBackend {
         match device {
             DeviceType::Cpu => true,
             #[cfg(feature = "candle")]
-            DeviceType::Cuda => candle_core::utils::cuda_is_available(),
+            DeviceType::Cuda => {
+                // Use catch_unwind because cudarc panics when the CUDA shared library
+                // is not installed (e.g. on macOS without CUDA).
+                matches!(
+                    std::panic::catch_unwind(|| candle_core::Device::cuda_if_available(0)),
+                    Ok(Ok(d)) if !matches!(d, candle_core::Device::Cpu)
+                )
+            }
             #[cfg(feature = "candle")]
             DeviceType::Metal => candle_core::utils::metal_is_available(),
             #[cfg(not(feature = "candle"))]

@@ -398,7 +398,7 @@ impl StatisticalAnalyzer {
     /// Compute median
     fn compute_median(&self, samples: &Array1<f32>) -> f32 {
         let mut sorted = samples.to_vec();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         
         let n = sorted.len();
         if n % 2 == 0 {
@@ -426,7 +426,7 @@ impl StatisticalAnalyzer {
     /// Compute interquartile range
     fn compute_iqr(&self, samples: &Array1<f32>) -> f32 {
         let mut sorted = samples.to_vec();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         
         let n = sorted.len();
         let q1_idx = n / 4;
@@ -495,7 +495,7 @@ impl StatisticalAnalyzer {
     /// Compute percentiles
     fn compute_percentiles(&self, samples: &Array1<f32>, percentiles: &[f32]) -> Vec<f32> {
         let mut sorted = samples.to_vec();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         
         percentiles.iter()
             .map(|&p| {
@@ -823,7 +823,7 @@ impl StatisticalAnalyzer {
     /// Get ordinal pattern for permutation entropy
     fn get_ordinal_pattern(&self, window: &[f32]) -> Vec<usize> {
         let mut indices: Vec<usize> = (0..window.len()).collect();
-        indices.sort_by(|&a, &b| window[a].partial_cmp(&window[b]).unwrap());
+        indices.sort_by(|&a, &b| window[a].partial_cmp(&window[b]).unwrap_or(std::cmp::Ordering::Equal));
         indices
     }
     

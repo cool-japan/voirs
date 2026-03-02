@@ -221,13 +221,13 @@ impl DefaultRealTimeProcessor {
 #[async_trait]
 impl RealTimeProcessor for DefaultRealTimeProcessor {
     async fn start(&mut self) -> Result<()> {
-        let mut is_running = self.is_running.lock().unwrap();
+        let mut is_running = self.is_running.lock().expect("lock should not be poisoned");
         *is_running = true;
         Ok(())
     }
 
     async fn stop(&mut self) -> Result<()> {
-        let mut is_running = self.is_running.lock().unwrap();
+        let mut is_running = self.is_running.lock().expect("lock should not be poisoned");
         *is_running = false;
         Ok(())
     }

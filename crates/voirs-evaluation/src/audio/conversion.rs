@@ -151,7 +151,7 @@ pub fn convert_channels(audio: AudioBuffer, target_channels: u32) -> AudioIoResu
                         right += sample;
                     }
                 }
-                let left_count = (n + 1) / 2;
+                let left_count = n.div_ceil(2);
                 let right_count = n / 2;
                 output_samples.push(left / left_count as f32);
                 output_samples.push(if right_count > 0 {

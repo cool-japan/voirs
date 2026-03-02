@@ -2,7 +2,7 @@
 
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
-    ChannelCount, Device, Host, SampleRate, Stream,
+    ChannelCount, Device, Host, Stream,
 };
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -197,7 +197,7 @@ impl RealTimeAudioStream {
 
         let stream_config = cpal::StreamConfig {
             channels: self.config.channels as ChannelCount,
-            sample_rate: SampleRate(self.config.sample_rate),
+            sample_rate: self.config.sample_rate,
             buffer_size: cpal::BufferSize::Fixed(self.config.buffer_size),
         };
 

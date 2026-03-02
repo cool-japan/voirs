@@ -166,7 +166,7 @@ impl StatisticalAnalyzer {
             .chain(group2.iter().map(|&x| (x, 1)))
             .collect();
 
-        combined.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        combined.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
         // Calculate ranks (simplified - doesn't handle ties properly)
         let mut ranks = vec![0.0; combined.len()];
@@ -511,7 +511,7 @@ impl StatisticalAnalyzer {
             bootstrap_stats.push(statistic(&sample));
         }
 
-        bootstrap_stats.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        bootstrap_stats.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let lower_idx = (0.025 * self.config.bootstrap_samples as f32) as usize;
         let upper_idx = (0.975 * self.config.bootstrap_samples as f32) as usize;
 
@@ -544,7 +544,8 @@ impl StatisticalAnalyzer {
             MultipleComparisonCorrection::BenjaminiHochberg => {
                 let mut indexed_p: Vec<(usize, f32)> =
                     p_values.iter().enumerate().map(|(i, &p)| (i, p)).collect();
-                indexed_p.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                indexed_p
+                    .sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
                 let n = p_values.len() as f32;
                 let mut corrected = vec![0.0; p_values.len()];

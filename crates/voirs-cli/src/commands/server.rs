@@ -430,7 +430,7 @@ async fn validate_and_rate_limit(
     client_ip: &str,
     api_key: Option<&str>,
 ) -> std::result::Result<Option<ApiKeyConfig>, ApiError> {
-    let mut auth_state = state.auth.lock().unwrap();
+    let mut auth_state = state.auth.lock().expect("lock should not be poisoned");
 
     // Check if API key is provided and valid
     let api_key_config = if let Some(key) = api_key {
@@ -548,7 +548,7 @@ async fn update_usage_stats_with_audio(
     audio_duration: Option<f64>,
 ) {
     if let Some(config) = api_key_config {
-        let mut auth_state = state.auth.lock().unwrap();
+        let mut auth_state = state.auth.lock().expect("lock should not be poisoned");
         let stats = auth_state
             .usage_stats
             .entry(config.key.clone())
@@ -574,7 +574,7 @@ async fn update_usage_stats_with_audio(
 
 /// Log request
 async fn log_request(state: &AppState, params: LogRequestParams<'_>) {
-    let mut auth_state = state.auth.lock().unwrap();
+    let mut auth_state = state.auth.lock().expect("lock should not be poisoned");
 
     let log_entry = AccessLogEntry {
         timestamp: SystemTime::now(),
@@ -1059,7 +1059,7 @@ async fn detailed_health_handler(State(state): State<AppState>) -> Json<Detailed
     let uptime_seconds = state.start_time.elapsed().as_secs();
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .expect("SystemTime should be after UNIX_EPOCH")
         .as_secs();
 
     let mut checks = Vec::new();
@@ -1147,7 +1147,7 @@ async fn readiness_handler(State(state): State<AppState>) -> impl IntoResponse {
     let pipeline_ready = (state.pipeline.list_voices().await).is_ok();
 
     let auth_ready = {
-        let auth_state = state.auth.lock().unwrap();
+        let auth_state = state.auth.lock().expect("lock should not be poisoned");
         true // Allow unauthenticated access for development
     };
 
@@ -1252,7 +1252,7 @@ fn check_memory_health() -> (String, String) {
 
 /// Check authentication system health
 fn check_auth_health(state: &AppState) -> (String, String) {
-    let auth_state = state.auth.lock().unwrap();
+    let auth_state = state.auth.lock().expect("lock should not be poisoned");
 
     let api_key_count = auth_state.api_keys.len();
     let active_buckets = auth_state.rate_limits.len();
@@ -1387,7 +1387,7 @@ fn get_disk_usage() -> f32 {
         use std::ffi::CString;
         use std::mem::MaybeUninit;
 
-        let path = CString::new("/").unwrap();
+        let path = CString::new("/").expect("no null bytes in literal");
         unsafe {
             let mut stat: libc::statvfs = MaybeUninit::zeroed().assume_init();
             if libc::statvfs(path.as_ptr(), &mut stat) == 0 {
@@ -1408,7 +1408,7 @@ fn get_disk_usage() -> f32 {
         use std::ffi::CString;
         use std::mem::MaybeUninit;
 
-        let path = CString::new("/").unwrap();
+        let path = CString::new("/").expect("no null bytes in literal");
         unsafe {
             let mut stat: libc::statfs = MaybeUninit::zeroed().assume_init();
             if libc::statfs(path.as_ptr(), &mut stat) == 0 {
@@ -1454,7 +1454,7 @@ fn get_file_descriptor_count() -> u64 {
 
 /// Server statistics endpoint
 async fn stats_handler(State(state): State<AppState>) -> Json<ServerStats> {
-    let auth_state = state.auth.lock().unwrap();
+    let auth_state = state.auth.lock().expect("lock should not be poisoned");
     let uptime = state.start_time.elapsed().as_secs();
 
     // Calculate aggregate statistics
@@ -1516,7 +1516,7 @@ async fn auth_info_handler(
         message: "API key required".to_string(),
     })?;
 
-    let auth_state = state.auth.lock().unwrap();
+    let auth_state = state.auth.lock().expect("lock should not be poisoned");
 
     let api_key_config = auth_state.api_keys.get(&api_key).ok_or_else(|| ApiError {
         status: StatusCode::UNAUTHORIZED,
@@ -1559,7 +1559,7 @@ async fn usage_stats_handler(
         message: "API key required".to_string(),
     })?;
 
-    let auth_state = state.auth.lock().unwrap();
+    let auth_state = state.auth.lock().expect("lock should not be poisoned");
 
     let api_key_config = auth_state.api_keys.get(&api_key).ok_or_else(|| ApiError {
         status: StatusCode::UNAUTHORIZED,

@@ -103,7 +103,7 @@ impl WarmingSchedule {
     /// Get top priority items
     pub fn get_top_items(&self) -> Vec<String> {
         let mut items: Vec<_> = self.items.iter().collect();
-        items.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
+        items.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
         items
             .into_iter()
             .take(self.max_items)

@@ -71,7 +71,7 @@ impl RequestMetrics {
         };
 
         let mut sorted_durations = durations.clone();
-        sorted_durations.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted_durations.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let p95_duration = if sorted_durations.is_empty() {
             0.0
@@ -114,15 +114,17 @@ pub async fn metrics_middleware(
 pub async fn request_id_middleware(mut request: Request, next: Next) -> Response {
     let request_id = Uuid::new_v4().to_string();
 
-    request
-        .headers_mut()
-        .insert("x-request-id", HeaderValue::from_str(&request_id).unwrap());
+    request.headers_mut().insert(
+        "x-request-id",
+        HeaderValue::from_str(&request_id).expect("value should be present"),
+    );
 
     let mut response = next.run(request).await;
 
-    response
-        .headers_mut()
-        .insert("x-request-id", HeaderValue::from_str(&request_id).unwrap());
+    response.headers_mut().insert(
+        "x-request-id",
+        HeaderValue::from_str(&request_id).expect("value should be present"),
+    );
 
     response
 }

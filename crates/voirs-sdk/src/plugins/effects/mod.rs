@@ -34,7 +34,10 @@ mod tests {
         reverb
             .set_parameter("mix", ParameterValue::Float(0.5))
             .unwrap();
-        assert_eq!(*reverb.mix.read().unwrap(), 0.5);
+        assert_eq!(
+            *reverb.mix.read().expect("lock should not be poisoned"),
+            0.5
+        );
 
         // Test audio processing
         let audio = crate::AudioBuffer::sine_wave(440.0, 1.0, 44100, 0.5);
@@ -56,9 +59,18 @@ mod tests {
         eq.set_parameter("high_gain", ParameterValue::Float(1.0))
             .unwrap();
 
-        assert_eq!(*eq.low_gain.read().unwrap(), 3.0);
-        assert_eq!(*eq.mid_gain.read().unwrap(), -2.0);
-        assert_eq!(*eq.high_gain.read().unwrap(), 1.0);
+        assert_eq!(
+            *eq.low_gain.read().expect("lock should not be poisoned"),
+            3.0
+        );
+        assert_eq!(
+            *eq.mid_gain.read().expect("lock should not be poisoned"),
+            -2.0
+        );
+        assert_eq!(
+            *eq.high_gain.read().expect("lock should not be poisoned"),
+            1.0
+        );
 
         // Test audio processing
         let audio = crate::AudioBuffer::sine_wave(1000.0, 0.5, 44100, 0.3);
@@ -77,8 +89,14 @@ mod tests {
         comp.set_parameter("ratio", ParameterValue::Float(6.0))
             .unwrap();
 
-        assert_eq!(*comp.threshold.read().unwrap(), -18.0);
-        assert_eq!(*comp.ratio.read().unwrap(), 6.0);
+        assert_eq!(
+            *comp.threshold.read().expect("lock should not be poisoned"),
+            -18.0
+        );
+        assert_eq!(
+            *comp.ratio.read().expect("lock should not be poisoned"),
+            6.0
+        );
 
         // Test audio processing with loud signal
         let audio = crate::AudioBuffer::sine_wave(440.0, 0.5, 44100, 0.9); // Loud signal
@@ -120,8 +138,14 @@ mod tests {
             .set_parameter("feedback", ParameterValue::Float(0.6))
             .unwrap();
 
-        assert_eq!(*delay.delay_ms.read().unwrap(), 500.0);
-        assert_eq!(*delay.feedback.read().unwrap(), 0.6);
+        assert_eq!(
+            *delay.delay_ms.read().expect("lock should not be poisoned"),
+            500.0
+        );
+        assert_eq!(
+            *delay.feedback.read().expect("lock should not be poisoned"),
+            0.6
+        );
 
         // Test audio processing
         let audio = crate::AudioBuffer::sine_wave(440.0, 0.5, 44100, 0.5);
@@ -143,8 +167,17 @@ mod tests {
             .set_parameter("distance", ParameterValue::Float(2.0))
             .unwrap();
 
-        assert_eq!(*spatial.azimuth.read().unwrap(), 45.0);
-        assert_eq!(*spatial.distance.read().unwrap(), 2.0);
+        assert_eq!(
+            *spatial.azimuth.read().expect("lock should not be poisoned"),
+            45.0
+        );
+        assert_eq!(
+            *spatial
+                .distance
+                .read()
+                .expect("lock should not be poisoned"),
+            2.0
+        );
 
         // Test audio processing
         let mono_audio = crate::AudioBuffer::sine_wave(440.0, 0.5, 44100, 0.5);

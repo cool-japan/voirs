@@ -594,7 +594,7 @@ mod tests {
     impl AudioEffect for TestAudioEffect {
         async fn process_audio(&self, audio: &AudioBuffer) -> Result<AudioBuffer> {
             let mut processed = audio.clone();
-            let gain = *self.gain.read().unwrap();
+            let gain = *self.gain.read().expect("lock should not be poisoned");
             for sample in processed.samples_mut() {
                 *sample *= gain;
             }
@@ -605,7 +605,7 @@ mod tests {
             let mut params = HashMap::new();
             params.insert(
                 "gain".to_string(),
-                ParameterValue::Float(*self.gain.read().unwrap()),
+                ParameterValue::Float(*self.gain.read().expect("lock should not be poisoned")),
             );
             params
         }
@@ -614,7 +614,7 @@ mod tests {
             match name {
                 "gain" => {
                     if let Some(gain) = value.as_f32() {
-                        *self.gain.write().unwrap() = gain;
+                        *self.gain.write().expect("lock should not be poisoned") = gain;
                         Ok(())
                     } else {
                         Err(VoirsError::internal(

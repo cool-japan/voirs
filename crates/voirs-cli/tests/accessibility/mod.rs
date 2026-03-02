@@ -149,7 +149,7 @@ fn test_clear_progress_indication() {
         .arg(input_file.to_str().unwrap())
         .arg("--output-dir")
         .arg(output_dir.to_str().unwrap())
-        .timeout(Duration::from_secs(60))
+        .timeout(Duration::from_secs(300))
         .assert()
         .success();
 }

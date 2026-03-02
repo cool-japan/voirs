@@ -23,11 +23,15 @@ fn mel_data_strategy() -> impl Strategy<Value = Vec<Vec<f32>>> {
 }
 
 /// Strategy for generating positive-valued mel data (for certain normalizations)
+///
+/// Uses integer mapping to avoid proptest float sampler edge cases with small float ranges.
 fn positive_mel_data_strategy() -> impl Strategy<Value = Vec<Vec<f32>>> {
     mel_dimensions().prop_flat_map(|(n_mels, n_frames)| {
+        // Use integer range (1..100) and scale to (0.01..1.0) to avoid proptest
+        // float sampler assertion failures with adjacent float ranges like 0.1..10.0
+        let positive_float = (1u32..=1000u32).prop_map(|i| i as f32 * 0.01);
         prop::collection::vec(
-            // Use a more conservative range to avoid proptest float sampler edge cases
-            prop::collection::vec(0.1f32..10.0f32, n_frames..=n_frames),
+            prop::collection::vec(positive_float, n_frames..=n_frames),
             n_mels..=n_mels,
         )
     })

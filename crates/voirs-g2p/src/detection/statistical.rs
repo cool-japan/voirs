@@ -335,7 +335,7 @@ impl StatisticalDetector {
         // Find best match
         let best_match = scores
             .iter()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(lang, score)| (*lang, *score));
 
         if let Some((language, confidence)) = best_match {
@@ -346,7 +346,8 @@ impl StatisticalDetector {
                     .into_iter()
                     .filter(|(lang, _)| *lang != language)
                     .collect();
-                alternatives.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+                alternatives
+                    .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                 alternatives.truncate(3);
 
                 return Ok(Some(DetectionResult {

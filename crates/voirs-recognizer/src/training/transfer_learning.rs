@@ -545,7 +545,9 @@ impl LayerAnalyzer {
                     policies.push(LayerFreezingPolicy {
                         layer_pattern: format!("encoder.layers.{}.*", num_layers - 1 - i),
                         freeze_initially: true,
-                        unfreeze_epoch: unfreeze_epoch.try_into().unwrap(),
+                        unfreeze_epoch: unfreeze_epoch
+                            .try_into()
+                            .expect("epoch value fits in target type"),
                         learning_rate_scale: 0.1 * (i + 1) as f32 / *num_layers as f32,
                     });
                 }

@@ -604,7 +604,8 @@ pub unsafe extern "C" fn cpp_comparative_evaluator_compare(
 #[no_mangle]
 pub unsafe extern "C" fn cpp_evaluation_version() -> *const c_char {
     static VERSION_CSTRING: once_cell::sync::Lazy<CString> = once_cell::sync::Lazy::new(|| {
-        CString::new(crate::VERSION).unwrap_or_else(|_| CString::new("unknown").unwrap())
+        CString::new(crate::VERSION)
+            .unwrap_or_else(|_| CString::new("unknown").expect("value should be present"))
     });
     VERSION_CSTRING.as_ptr()
 }

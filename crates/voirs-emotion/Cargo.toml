@@ -11,6 +11,7 @@ keywords = ["voirs", "emotion", "prosody", "expression", "voice"]
 categories = ["science", "multimedia::audio", "algorithms"]
 rust-version = { workspace = true }
 description = "Emotion expression control system for VoiRS voice synthesis"
+readme = "README.md"
 
 [dependencies]
 # SciRS2 - Scientific computing abstractions
@@ -19,6 +20,7 @@ scirs2-fft = { workspace = true }
 
 # Async and concurrency
 tokio = { workspace = true }
+async-trait = { workspace = true }
 
 # Serialization
 serde = { workspace = true }

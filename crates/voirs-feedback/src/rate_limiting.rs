@@ -344,7 +344,10 @@ impl RateLimiter {
     fn check_fixed_window(&self, state: &mut FixedWindowState, now: DateTime<Utc>) -> bool {
         // Check if we need to reset the window
         let elapsed = now - state.window_start;
-        if elapsed > chrono::Duration::from_std(self.config.window_duration).unwrap() {
+        if elapsed
+            > chrono::Duration::from_std(self.config.window_duration)
+                .expect("value should be present")
+        {
             state.count = 0;
             state.window_start = now;
         }
@@ -360,7 +363,9 @@ impl RateLimiter {
 
     fn check_sliding_window(&self, state: &mut SlidingWindowState, now: DateTime<Utc>) -> bool {
         // Remove old requests outside the window
-        let window_start = now - chrono::Duration::from_std(self.config.window_duration).unwrap();
+        let window_start = now
+            - chrono::Duration::from_std(self.config.window_duration)
+                .expect("value should be present");
         state.request_timestamps.retain(|&ts| ts > window_start);
 
         // Check if we're within limits
@@ -399,11 +404,14 @@ impl RateLimiter {
             }
             RateLimitState::FixedWindow(state) => {
                 state.window_start
-                    + chrono::Duration::from_std(self.config.window_duration).unwrap()
+                    + chrono::Duration::from_std(self.config.window_duration)
+                        .expect("value should be present")
             }
             RateLimitState::SlidingWindow(state) => {
                 if let Some(oldest) = state.request_timestamps.first() {
-                    *oldest + chrono::Duration::from_std(self.config.window_duration).unwrap()
+                    *oldest
+                        + chrono::Duration::from_std(self.config.window_duration)
+                            .expect("value should be present")
                 } else {
                     now
                 }
@@ -429,8 +437,9 @@ impl RateLimiter {
 
                 let mut entries_write = entries.write().await;
                 let now = Utc::now();
-                let retention_threshold =
-                    now - chrono::Duration::from_std(window_duration * 2).unwrap();
+                let retention_threshold = now
+                    - chrono::Duration::from_std(window_duration * 2)
+                        .expect("value should be present");
 
                 entries_write.retain(|_, entry| entry.last_access > retention_threshold);
             }

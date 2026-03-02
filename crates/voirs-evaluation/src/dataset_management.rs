@@ -403,7 +403,10 @@ impl DatasetManager {
             score -= 0.1;
         }
 
-        let validation_duration = start_time.elapsed().unwrap().as_millis() as u64;
+        let validation_duration = start_time
+            .elapsed()
+            .expect("elapsed time should succeed")
+            .as_millis() as u64;
         let is_valid = issues
             .iter()
             .all(|issue| issue.severity != IssueSeverity::Critical);
@@ -414,7 +417,7 @@ impl DatasetManager {
             issues,
             validated_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .expect("value should be present")
                 .as_secs(),
             validation_duration_ms: validation_duration,
         })

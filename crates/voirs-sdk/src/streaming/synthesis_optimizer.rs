@@ -639,7 +639,7 @@ impl StreamingSynthesisOptimizer {
         vocoder_time: Duration,
         text_length: usize,
     ) {
-        let mut metrics = self.metrics.write().unwrap();
+        let mut metrics = self.metrics.write().expect("lock should not be poisoned");
 
         // Update latency statistics
         let total_ms = total_time.as_millis() as f32;
@@ -664,7 +664,7 @@ impl StreamingSynthesisOptimizer {
         }
 
         // Update optimization statistics
-        let mut stats = self.stats.write().unwrap();
+        let mut stats = self.stats.write().expect("lock should not be poisoned");
         stats.optimized_latency_ms = total_ms;
 
         // Track sub-latency achievement rates
@@ -689,12 +689,18 @@ impl StreamingSynthesisOptimizer {
 
     /// Get current optimization statistics
     pub fn get_optimization_stats(&self) -> OptimizationStats {
-        self.stats.read().unwrap().clone()
+        self.stats
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Get comprehensive synthesis metrics
     pub fn get_synthesis_metrics(&self) -> SynthesisMetrics {
-        self.metrics.read().unwrap().clone()
+        self.metrics
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Enable advanced optimizations
@@ -1002,7 +1008,7 @@ impl LatencyBenchmarkReport {
         let target_50ms_count = results.iter().filter(|r| r.meets_50ms_target).count();
 
         let mut latencies: Vec<f32> = results.iter().map(|r| r.latency_ms).collect();
-        latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        latencies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let avg_latency_ms = latencies.iter().sum::<f32>() / latencies.len() as f32;
         let p95_index = (latencies.len() as f32 * 0.95) as usize;

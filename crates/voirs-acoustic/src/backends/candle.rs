@@ -70,11 +70,16 @@ impl CandleBackend {
 
         #[cfg(feature = "candle")]
         {
-            // Check for CUDA devices
-            if candle_core::Device::cuda_if_available(0).is_ok() {
+            // Check for CUDA devices (use catch_unwind because cudarc panics
+            // when the CUDA shared library is not installed, e.g. on macOS)
+            if let Ok(Ok(_)) =
+                std::panic::catch_unwind(|| candle_core::Device::cuda_if_available(0))
+            {
                 // Try to detect multiple CUDA devices
                 for i in 0..8 {
-                    if candle_core::Device::cuda_if_available(i).is_ok() {
+                    if let Ok(Ok(_)) =
+                        std::panic::catch_unwind(|| candle_core::Device::cuda_if_available(i))
+                    {
                         devices.push(format!("cuda:{i}"));
                     } else {
                         break;
@@ -208,8 +213,9 @@ impl CandleDevice {
     pub fn auto_detect() -> Result<Self> {
         #[cfg(feature = "candle")]
         {
-            // Try CUDA first
-            if let Ok(device) = Device::cuda_if_available(0) {
+            // Try CUDA first (use catch_unwind because cudarc panics
+            // when the CUDA shared library is not installed, e.g. on macOS)
+            if let Ok(Ok(device)) = std::panic::catch_unwind(|| Device::cuda_if_available(0)) {
                 return Ok(Self {
                     device_type: DeviceType::Cuda,
                     device_index: Some(0),
@@ -252,11 +258,20 @@ impl CandleDevice {
                 DeviceType::Cpu => Device::Cpu,
                 DeviceType::Cuda => {
                     let index = config.device_index.unwrap_or(0);
-                    Device::cuda_if_available(index as usize).map_err(|e| {
-                        AcousticError::ConfigError {
-                            message: format!("CUDA device {index} not available: {e}"),
+                    // Use catch_unwind because cudarc panics when CUDA is not installed
+                    match std::panic::catch_unwind(|| Device::cuda_if_available(index as usize)) {
+                        Ok(Ok(device)) => device,
+                        Ok(Err(e)) => {
+                            return Err(AcousticError::ConfigError {
+                                message: format!("CUDA device {index} not available: {e}"),
+                            });
                         }
-                    })?
+                        Err(_) => {
+                            return Err(AcousticError::ConfigError {
+                                message: format!("CUDA device {index} not available: CUDA runtime library not found"),
+                            });
+                        }
+                    }
                 }
                 DeviceType::Metal => {
                     let index = config.device_index.unwrap_or(0);
@@ -1199,20 +1214,31 @@ impl CandleTensorOps {
 mod tests {
     use super::*;
 
+    /// Check whether CUDA is available on this machine by probing for the nvcc compiler.
+    /// Returns `false` on macOS/platforms without an NVIDIA GPU.
+    #[allow(dead_code)]
+    fn is_cuda_available() -> bool {
+        std::process::Command::new("nvcc")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
     #[test]
     fn test_candle_device_auto_detect() {
-        let result = CandleDevice::auto_detect();
-        // Should always succeed, at least with CPU
-        assert!(result.is_ok());
-
-        let device = result.unwrap();
+        // auto_detect uses catch_unwind for CUDA, so it always succeeds
+        // by falling back to Metal (macOS) or CPU.
+        let device = CandleDevice::auto_detect()
+            .expect("auto_detect should always succeed with at least CPU");
         assert!(!device.name().is_empty());
     }
 
     #[test]
     fn test_candle_device_from_config() {
         let config = DeviceConfig::cpu();
-        let device = CandleDevice::from_config(&config).unwrap();
+        let device =
+            CandleDevice::from_config(&config).expect("CPU device config should always succeed");
 
         assert_eq!(device.device_type, DeviceType::Cpu);
         assert_eq!(device.name(), "cpu");
@@ -1221,10 +1247,10 @@ mod tests {
 
     #[test]
     fn test_candle_backend_creation() {
-        let result = CandleBackend::new();
-        assert!(result.is_ok());
-
-        let backend = result.unwrap();
+        // CandleBackend::new() gracefully handles missing CUDA via catch_unwind
+        // and falls back to Metal (macOS) or CPU. Should work on all platforms.
+        let backend =
+            CandleBackend::new().expect("CandleBackend::new should succeed on any platform");
         assert_eq!(backend.name(), "Candle");
         assert!(!backend.available_devices().is_empty());
         assert!(backend.available_devices().contains(&"cpu".to_string()));
@@ -1232,7 +1258,8 @@ mod tests {
 
     #[test]
     fn test_candle_backend_capabilities() {
-        let backend = CandleBackend::new().unwrap();
+        let backend =
+            CandleBackend::new().expect("CandleBackend::new should succeed on any platform");
         let caps = backend.capabilities();
 
         assert_eq!(caps.name, "Candle");
@@ -1244,27 +1271,35 @@ mod tests {
 
     #[test]
     fn test_candle_backend_model_validation() {
-        let backend = CandleBackend::new().unwrap();
+        let backend =
+            CandleBackend::new().expect("CandleBackend::new should succeed on any platform");
 
         // Test with SafeTensors file
-        let info = backend.validate_model("model.safetensors").unwrap();
+        let info = backend
+            .validate_model("model.safetensors")
+            .expect("validate_model should succeed for safetensors");
         assert_eq!(info.format, ModelFormat::SafeTensors);
         assert!(info.compatible);
 
         // Test with PyTorch file
-        let info = backend.validate_model("model.pth").unwrap();
+        let info = backend
+            .validate_model("model.pth")
+            .expect("validate_model should succeed for pth");
         assert_eq!(info.format, ModelFormat::PyTorch);
         assert!(info.compatible);
 
         // Test with unsupported format
-        let info = backend.validate_model("model.onnx").unwrap();
+        let info = backend
+            .validate_model("model.onnx")
+            .expect("validate_model should succeed for onnx");
         assert_eq!(info.format, ModelFormat::Onnx);
         assert!(!info.compatible);
     }
 
     #[test]
     fn test_candle_backend_optimization_options() {
-        let backend = CandleBackend::new().unwrap();
+        let backend =
+            CandleBackend::new().expect("CandleBackend::new should succeed on any platform");
         let options = backend.optimization_options();
 
         assert!(!options.is_empty());
@@ -1278,7 +1313,7 @@ mod tests {
     async fn test_candle_acoustic_model_creation() {
         use std::path::Path;
 
-        let device = CandleDevice::auto_detect().unwrap();
+        let device = CandleDevice::auto_detect().expect("auto_detect should always succeed");
         let options = CandleOptions::new();
 
         // Skip test if dummy model file doesn't exist (common in CI/test environments)
@@ -1287,10 +1322,9 @@ mod tests {
             return;
         }
 
-        let result = CandleAcousticModel::load("dummy_model.safetensors", &device, &options).await;
-        assert!(result.is_ok());
-
-        let model = result.unwrap();
+        let model = CandleAcousticModel::load("dummy_model.safetensors", &device, &options)
+            .await
+            .expect("model loading should succeed");
         let metadata = model.metadata();
         assert_eq!(metadata.name, "Candle VITS Model");
         assert_eq!(metadata.sample_rate, 22050);
@@ -1301,7 +1335,7 @@ mod tests {
     async fn test_candle_acoustic_model_synthesis() {
         use std::path::Path;
 
-        let device = CandleDevice::auto_detect().unwrap();
+        let device = CandleDevice::auto_detect().expect("auto_detect should always succeed");
         let options = CandleOptions::new();
 
         // Skip test if dummy model file doesn't exist (common in CI/test environments)
@@ -1312,19 +1346,19 @@ mod tests {
 
         let model = CandleAcousticModel::load("dummy_model.safetensors", &device, &options)
             .await
-            .unwrap();
+            .expect("model loading should succeed");
 
         let phonemes = vec![
             Phoneme::new("h"),
-            Phoneme::new("ɛ"),
+            Phoneme::new("\u{025B}"),
             Phoneme::new("l"),
-            Phoneme::new("oʊ"),
+            Phoneme::new("o\u{028A}"),
         ];
 
-        let result = model.synthesize(&phonemes, None).await;
-        assert!(result.is_ok());
-
-        let mel = result.unwrap();
+        let mel = model
+            .synthesize(&phonemes, None)
+            .await
+            .expect("synthesis should succeed");
         assert_eq!(mel.n_frames, 40); // 4 phonemes * 10 frames each
         assert_eq!(mel.n_mels, 80);
         assert_eq!(mel.sample_rate, 22050);
@@ -1334,7 +1368,7 @@ mod tests {
     async fn test_candle_acoustic_model_batch_synthesis() {
         use std::path::Path;
 
-        let device = CandleDevice::auto_detect().unwrap();
+        let device = CandleDevice::auto_detect().expect("auto_detect should always succeed");
         let options = CandleOptions::new();
 
         // Skip test if dummy model file doesn't exist (common in CI/test environments)
@@ -1347,16 +1381,16 @@ mod tests {
 
         let model = CandleAcousticModel::load("dummy_model.safetensors", &device, &options)
             .await
-            .unwrap();
+            .expect("model loading should succeed");
 
         let phonemes1 = vec![Phoneme::new("h"), Phoneme::new("i")];
-        let phonemes2 = vec![Phoneme::new("b"), Phoneme::new("aɪ")];
+        let phonemes2 = vec![Phoneme::new("b"), Phoneme::new("a\u{026A}")];
         let inputs = vec![phonemes1.as_slice(), phonemes2.as_slice()];
 
-        let result = model.synthesize_batch(&inputs, None).await;
-        assert!(result.is_ok());
-
-        let mels = result.unwrap();
+        let mels = model
+            .synthesize_batch(&inputs, None)
+            .await
+            .expect("batch synthesis should succeed");
         assert_eq!(mels.len(), 2);
         assert_eq!(mels[0].n_frames, 20); // 2 phonemes * 10 frames each
         assert_eq!(mels[1].n_frames, 20);
@@ -1366,7 +1400,7 @@ mod tests {
     fn test_candle_acoustic_model_features() {
         use std::path::Path;
 
-        let device = CandleDevice::auto_detect().unwrap();
+        let device = CandleDevice::auto_detect().expect("auto_detect should always succeed");
         let options = CandleOptions::new();
 
         // Skip test if dummy model file doesn't exist (common in CI/test environments)
@@ -1375,10 +1409,11 @@ mod tests {
             return;
         }
 
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime creation should succeed");
+        rt.block_on(async {
             let model = CandleAcousticModel::load("dummy_model.safetensors", &device, &options)
                 .await
-                .unwrap();
+                .expect("model loading should succeed");
 
             assert!(model.supports(AcousticModelFeature::BatchProcessing));
             assert!(model.supports(AcousticModelFeature::StreamingInference));
@@ -1402,17 +1437,20 @@ mod tests {
         let mel = MelSpectrogram::new(data, 22050, 256);
 
         // Convert to tensor
-        let tensor = CandleTensorOps::mel_to_tensor(&mel, &device).unwrap();
+        let tensor =
+            CandleTensorOps::mel_to_tensor(&mel, &device).expect("mel_to_tensor should succeed");
         assert_eq!(tensor.shape().dims(), &[2, 3]);
 
         // Convert back to mel
-        let reconstructed = CandleTensorOps::tensor_to_mel(&tensor, 22050, 256).unwrap();
+        let reconstructed = CandleTensorOps::tensor_to_mel(&tensor, 22050, 256)
+            .expect("tensor_to_mel should succeed");
         assert_eq!(reconstructed.n_mels, mel.n_mels);
         assert_eq!(reconstructed.n_frames, mel.n_frames);
         assert_eq!(reconstructed.data, mel.data);
 
         // Test normalization
-        let normalized = CandleTensorOps::normalize_tensor(&tensor).unwrap();
+        let normalized =
+            CandleTensorOps::normalize_tensor(&tensor).expect("normalize_tensor should succeed");
         assert_eq!(normalized.shape().dims(), tensor.shape().dims());
     }
 }

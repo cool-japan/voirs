@@ -477,7 +477,10 @@ impl BatchOptimizer {
         if !current_batch.is_empty() {
             if current_batch.len() < min_size && !batches.is_empty() {
                 // Merge small trailing batch with previous
-                batches.last_mut().unwrap().extend(current_batch);
+                batches
+                    .last_mut()
+                    .expect("value should be present")
+                    .extend(current_batch);
             } else {
                 batches.push(current_batch);
             }
@@ -651,7 +654,10 @@ fn should_split_batch(batch: &[OptimizedRequest]) -> bool {
     }
 
     // Split if there's a significant priority difference
-    let last_priority = batch.last().unwrap().priority;
+    let last_priority = batch
+        .last()
+        .expect("collection should not be empty")
+        .priority;
     let has_priority_change = batch.iter().any(|r| (r.priority - last_priority).abs() > 5);
 
     has_priority_change

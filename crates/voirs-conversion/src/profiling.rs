@@ -257,7 +257,7 @@ impl ConversionProfiler {
             "session_{}",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .expect("operation should succeed")
                 .as_nanos()
         );
 
@@ -283,7 +283,7 @@ impl ConversionProfiler {
                 .keys()
                 .min_by_key(|&k| sessions[k].start_time)
                 .cloned()
-                .unwrap();
+                .expect("operation should succeed");
             sessions.remove(&oldest_session);
         }
 
@@ -1058,8 +1058,16 @@ impl ProfilingReport {
             return 0.0;
         }
 
-        let first = memory_data.memory_samples.front().unwrap().memory_usage as f64;
-        let last = memory_data.memory_samples.back().unwrap().memory_usage as f64;
+        let first = memory_data
+            .memory_samples
+            .front()
+            .expect("operation should succeed")
+            .memory_usage as f64;
+        let last = memory_data
+            .memory_samples
+            .back()
+            .expect("operation should succeed")
+            .memory_usage as f64;
         let growth = (last - first) / first;
         growth.clamp(-1.0, 10.0) // Clamp between -100% and 1000%
     }

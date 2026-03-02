@@ -405,7 +405,7 @@ pub mod memory {
                     self.capacity * std::mem::size_of::<f32>(),
                     self.alignment,
                 )
-                .unwrap();
+                .expect("layout alignment must be power of two and size must be valid");
                 unsafe {
                     dealloc(self.ptr as *mut u8, layout);
                 }
@@ -500,7 +500,7 @@ pub mod batch {
     /// The `input_buffers` pointer must point to an array of `buffer_count` valid read-only float pointers.
     /// The `output_buffers` pointer must point to an array of `buffer_count` valid mutable float pointers.
     /// The `buffer_sizes` pointer must point to an array of `buffer_count` valid size values.
-    /// Each input_buffers[i] must point to buffer_sizes[i] floats, and each output_buffers[i] must have space for buffer_sizes[i] floats.
+    /// Each input_buffers\[i\] must point to buffer_sizes\[i\] floats, and each output_buffers\[i\] must have space for buffer_sizes\[i\] floats.
     #[no_mangle]
     pub unsafe extern "C" fn voirs_batch_convert_format(
         input_buffers: *const *const c_float,
@@ -958,7 +958,8 @@ pub mod lockfree {
                 unsafe {
                     let next = (*current).next;
                     let total_size = std::mem::size_of::<PoolNode>() + self.chunk_size;
-                    let layout = Layout::from_size_align(total_size, self.alignment).unwrap();
+                    let layout = Layout::from_size_align(total_size, self.alignment)
+                        .expect("layout alignment must be power of two and size must be valid");
                     dealloc(current as *mut u8, layout);
                     current = next;
                 }

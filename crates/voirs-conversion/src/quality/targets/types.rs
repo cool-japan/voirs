@@ -469,7 +469,7 @@ impl QualityTargetsSystem {
         if energy_values.is_empty() {
             return Ok(0.001);
         }
-        energy_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        energy_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let noise_index = (energy_values.len() as f32 * 0.1) as usize;
         Ok(energy_values.get(noise_index).copied().unwrap_or(0.001))
     }

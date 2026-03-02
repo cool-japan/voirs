@@ -4,7 +4,7 @@
 //! technique for speech processing that applies time and frequency masking to spectrograms.
 //!
 //! Reference: "SpecAugment: A Simple Data Augmentation Method for Automatic Speech Recognition"
-//! https://arxiv.org/abs/1904.08779
+//! <https://arxiv.org/abs/1904.08779>
 
 use crate::{AudioData, Result};
 use scirs2_core::ndarray::{Array2, Axis};

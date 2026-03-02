@@ -1176,7 +1176,11 @@ impl AICoachingSystem {
         // Recommend focus area (lowest performing area)
         let recommended_focus = skill_breakdown
             .iter()
-            .min_by(|a, b| a.1.accuracy.partial_cmp(&b.1.accuracy).unwrap())
+            .min_by(|a, b| {
+                a.1.accuracy
+                    .partial_cmp(&b.1.accuracy)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .map_or(FocusArea::Pronunciation, |(area, _)| area.clone());
 
         let assessment = SkillAssessment {

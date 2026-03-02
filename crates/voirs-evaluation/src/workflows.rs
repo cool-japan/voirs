@@ -710,7 +710,7 @@ impl Workflow {
                         };
 
                         let meets_min = value >= *min_value;
-                        let meets_max = max_value.map_or(true, |max| value <= max);
+                        let meets_max = max_value.is_none_or(|max| value <= max);
                         return Ok(meets_min && meets_max);
                     }
                 }

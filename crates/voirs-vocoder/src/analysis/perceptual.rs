@@ -288,7 +288,7 @@ impl PerceptualAnalyzer {
             return 0.0;
         }
         
-        valid_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        valid_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         
         // Calculate 10th and 95th percentiles
         let p10_idx = (valid_values.len() as f32 * 0.10) as usize;
@@ -500,7 +500,7 @@ impl PerceptualAnalyzer {
         let mut envelope = Vec::new();
         
         for i in 0..samples.len().saturating_sub(window_size) {
-            let chunk = &samples.as_slice().unwrap()[i..i + window_size];
+            let chunk = &samples.as_slice().expect("samples should be contiguous")[i..i + window_size];
             let rms = (chunk.iter().map(|&x| x * x).sum::<f32>() / chunk.len() as f32).sqrt();
             envelope.push(rms);
         }

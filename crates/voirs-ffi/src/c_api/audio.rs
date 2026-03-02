@@ -158,7 +158,7 @@ pub unsafe extern "C" fn voirs_audio_duplicate(
         return VoirsErrorCode::InternalError;
     }
 
-    let new_samples = std::alloc::alloc(layout.unwrap()) as *mut c_float;
+    let new_samples = std::alloc::alloc(layout.expect("checked is_err above")) as *mut c_float;
     if new_samples.is_null() {
         return VoirsErrorCode::OutOfMemory;
     }

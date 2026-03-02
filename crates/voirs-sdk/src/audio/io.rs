@@ -217,10 +217,10 @@ impl AudioBuffer {
         let stream_config: StreamConfig = config.into();
 
         // Convert our samples to the device's sample rate if needed
-        let samples = if self.sample_rate == stream_config.sample_rate.0 {
+        let samples = if self.sample_rate == stream_config.sample_rate {
             self.samples.clone()
         } else {
-            self.resample(stream_config.sample_rate.0)?.samples
+            self.resample(stream_config.sample_rate)?.samples
         };
 
         let samples = Arc::new(Mutex::new(samples.into_iter()));
@@ -232,7 +232,7 @@ impl AudioBuffer {
                 SampleFormat::F32 => device.build_output_stream(
                     config,
                     move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                        let mut samples_lock = samples.lock().unwrap();
+                        let mut samples_lock = samples.lock().expect("lock should not be poisoned");
                         for frame in data.chunks_mut(channels as usize) {
                             let sample = samples_lock.next().unwrap_or(0.0);
                             for channel_sample in frame.iter_mut() {
@@ -246,7 +246,7 @@ impl AudioBuffer {
                 SampleFormat::I16 => device.build_output_stream(
                     config,
                     move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
-                        let mut samples_lock = samples.lock().unwrap();
+                        let mut samples_lock = samples.lock().expect("lock should not be poisoned");
                         for frame in data.chunks_mut(channels as usize) {
                             let sample = samples_lock.next().unwrap_or(0.0);
                             let sample_i16 = (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
@@ -261,7 +261,7 @@ impl AudioBuffer {
                 SampleFormat::U16 => device.build_output_stream(
                     config,
                     move |data: &mut [u16], _: &cpal::OutputCallbackInfo| {
-                        let mut samples_lock = samples.lock().unwrap();
+                        let mut samples_lock = samples.lock().expect("lock should not be poisoned");
                         for frame in data.chunks_mut(channels as usize) {
                             let sample = samples_lock.next().unwrap_or(0.0);
                             let sample_u16 =
@@ -322,10 +322,10 @@ impl AudioBuffer {
         let stream_config: StreamConfig = config.into();
 
         // Convert our samples to the device's sample rate if needed
-        let samples = if self.sample_rate == stream_config.sample_rate.0 {
+        let samples = if self.sample_rate == stream_config.sample_rate {
             self.samples.clone()
         } else {
-            self.resample(stream_config.sample_rate.0)?.samples
+            self.resample(stream_config.sample_rate)?.samples
         };
 
         let total_samples = samples.len();
@@ -344,7 +344,7 @@ impl AudioBuffer {
                 SampleFormat::F32 => device.build_output_stream(
                     config,
                     move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                        let mut samples_lock = samples.lock().unwrap();
+                        let mut samples_lock = samples.lock().expect("lock should not be poisoned");
                         for frame in data.chunks_mut(channels as usize) {
                             if let Some((index, sample)) = samples_lock.next() {
                                 for channel_sample in frame.iter_mut() {
@@ -352,7 +352,9 @@ impl AudioBuffer {
                                 }
 
                                 // Update progress every 100ms
-                                let mut last_update = last_progress_update.lock().unwrap();
+                                let mut last_update = last_progress_update
+                                    .lock()
+                                    .expect("lock should not be poisoned");
                                 let now = Instant::now();
                                 if now.duration_since(*last_update) >= Duration::from_millis(100) {
                                     let progress = (index as f32) / (total_samples as f32);
@@ -375,7 +377,7 @@ impl AudioBuffer {
                 SampleFormat::I16 => device.build_output_stream(
                     config,
                     move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
-                        let mut samples_lock = samples.lock().unwrap();
+                        let mut samples_lock = samples.lock().expect("lock should not be poisoned");
                         for frame in data.chunks_mut(channels as usize) {
                             if let Some((index, sample)) = samples_lock.next() {
                                 let sample_i16 = (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
@@ -384,7 +386,9 @@ impl AudioBuffer {
                                 }
 
                                 // Update progress every 100ms
-                                let mut last_update = last_progress_update.lock().unwrap();
+                                let mut last_update = last_progress_update
+                                    .lock()
+                                    .expect("lock should not be poisoned");
                                 let now = Instant::now();
                                 if now.duration_since(*last_update) >= Duration::from_millis(100) {
                                     let progress = (index as f32) / (total_samples as f32);
@@ -407,7 +411,7 @@ impl AudioBuffer {
                 SampleFormat::U16 => device.build_output_stream(
                     config,
                     move |data: &mut [u16], _: &cpal::OutputCallbackInfo| {
-                        let mut samples_lock = samples.lock().unwrap();
+                        let mut samples_lock = samples.lock().expect("lock should not be poisoned");
                         for frame in data.chunks_mut(channels as usize) {
                             if let Some((index, sample)) = samples_lock.next() {
                                 let sample_u16 = ((sample.clamp(-1.0, 1.0) + 1.0) * u16::MAX as f32
@@ -417,7 +421,9 @@ impl AudioBuffer {
                                 }
 
                                 // Update progress every 100ms
-                                let mut last_update = last_progress_update.lock().unwrap();
+                                let mut last_update = last_progress_update
+                                    .lock()
+                                    .expect("lock should not be poisoned");
                                 let now = Instant::now();
                                 if now.duration_since(*last_update) >= Duration::from_millis(100) {
                                     let progress = (index as f32) / (total_samples as f32);
@@ -1240,13 +1246,17 @@ mod tests {
 
         buffer
             .play_with_callback(move |progress| {
-                let mut count = progress_updates_clone.lock().unwrap();
+                let mut count = progress_updates_clone
+                    .lock()
+                    .expect("lock should not be poisoned");
                 *count += 1;
                 assert!((0.0..=1.0).contains(&progress));
             })
             .unwrap();
 
-        let final_count = *progress_updates.lock().unwrap();
+        let final_count = *progress_updates
+            .lock()
+            .expect("lock should not be poisoned");
         assert!(final_count > 0); // Should have at least some progress updates
     }
 }

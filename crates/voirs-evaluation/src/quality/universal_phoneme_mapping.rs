@@ -1112,7 +1112,9 @@ impl UniversalPhonemeMapper {
 
                     // Sort candidates by similarity score
                     candidates.sort_by(|a, b| {
-                        b.similarity_score.partial_cmp(&a.similarity_score).unwrap()
+                        b.similarity_score
+                            .partial_cmp(&a.similarity_score)
+                            .unwrap_or(std::cmp::Ordering::Equal)
                     });
 
                     let best_mapping = candidates.first().cloned();

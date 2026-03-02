@@ -1075,7 +1075,7 @@ fn calculate_duration_stats(values: &[f32]) -> DurationStatistics {
     }
 
     let mut sorted = values.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     let min = sorted[0];
     let max = sorted[sorted.len() - 1];

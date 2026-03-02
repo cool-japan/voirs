@@ -255,7 +255,10 @@ impl InterruptController {
 
     /// Start the interrupt controller with specified number of worker threads
     pub async fn start(&self, num_workers: usize) -> Result<()> {
-        let mut workers = self.worker_threads.write().unwrap();
+        let mut workers = self
+            .worker_threads
+            .write()
+            .expect("lock should not be poisoned");
 
         for worker_id in 0..num_workers {
             let controller = self.clone_for_worker();
@@ -278,7 +281,7 @@ impl InterruptController {
 
     /// Register an interrupt handler for a specific priority level
     pub fn register_handler(&self, priority: InterruptPriority, handler: InterruptHandler) {
-        let mut handlers = self.handlers.write().unwrap();
+        let mut handlers = self.handlers.write().expect("lock should not be poisoned");
         handlers.entry(priority).or_default().push(handler);
     }
 
@@ -309,7 +312,10 @@ impl InterruptController {
 
         // Add to priority queue
         {
-            let mut queue = self.interrupt_queue.write().unwrap();
+            let mut queue = self
+                .interrupt_queue
+                .write()
+                .expect("lock should not be poisoned");
 
             // Insert in priority order (higher priority first)
             let insert_pos = queue
@@ -325,7 +331,7 @@ impl InterruptController {
 
         // Update statistics
         {
-            let mut stats = self.stats.write().unwrap();
+            let mut stats = self.stats.write().expect("lock should not be poisoned");
             stats.total_interrupts += 1;
             *stats.interrupts_by_priority.entry(priority).or_insert(0) += 1;
         }
@@ -365,7 +371,10 @@ impl InterruptController {
 
         // Add to priority queue
         {
-            let mut queue = self.interrupt_queue.write().unwrap();
+            let mut queue = self
+                .interrupt_queue
+                .write()
+                .expect("lock should not be poisoned");
 
             // Insert in priority order
             let insert_pos = queue
@@ -381,7 +390,7 @@ impl InterruptController {
 
         // Update statistics
         {
-            let mut stats = self.stats.write().unwrap();
+            let mut stats = self.stats.write().expect("lock should not be poisoned");
             stats.total_interrupts += 1;
             *stats.interrupts_by_priority.entry(priority).or_insert(0) += 1;
         }
@@ -398,7 +407,10 @@ impl InterruptController {
 
     /// Mask/unmask specific interrupt priority level
     pub fn set_interrupt_mask(&self, priority: InterruptPriority, masked: bool) {
-        let mut mask = self.interrupt_mask.write().unwrap();
+        let mut mask = self
+            .interrupt_mask
+            .write()
+            .expect("lock should not be poisoned");
         mask.insert(priority, masked);
     }
 
@@ -413,13 +425,19 @@ impl InterruptController {
             return true;
         }
 
-        let mask = self.interrupt_mask.read().unwrap();
+        let mask = self
+            .interrupt_mask
+            .read()
+            .expect("lock should not be poisoned");
         !mask.get(&priority).copied().unwrap_or(false)
     }
 
     /// Get current interrupt statistics
     pub fn get_stats(&self) -> InterruptStats {
-        self.stats.read().unwrap().clone()
+        self.stats
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Shutdown the interrupt controller
@@ -428,7 +446,10 @@ impl InterruptController {
         self.notify.notify_waiters();
 
         // Wait for worker threads to finish
-        let mut workers = self.worker_threads.write().unwrap();
+        let mut workers = self
+            .worker_threads
+            .write()
+            .expect("lock should not be poisoned");
         while let Some(handle) = workers.pop() {
             if let Err(e) = handle.join() {
                 tracing::warn!("Worker thread panicked: {:?}", e);
@@ -483,7 +504,10 @@ impl InterruptControllerWorker {
 
                 // Set current interrupt context
                 {
-                    let mut current = self.current_interrupt.write().unwrap();
+                    let mut current = self
+                        .current_interrupt
+                        .write()
+                        .expect("lock should not be poisoned");
                     *current = Some(pending.context.clone());
                 }
 
@@ -501,7 +525,10 @@ impl InterruptControllerWorker {
 
                 // Clear current interrupt
                 {
-                    let mut current = self.current_interrupt.write().unwrap();
+                    let mut current = self
+                        .current_interrupt
+                        .write()
+                        .expect("lock should not be poisoned");
                     *current = None;
                 }
             }
@@ -524,13 +551,19 @@ impl InterruptControllerWorker {
 
     /// Get next interrupt from queue
     fn get_next_interrupt(&self) -> Option<PendingInterrupt> {
-        let mut queue = self.interrupt_queue.write().unwrap();
+        let mut queue = self
+            .interrupt_queue
+            .write()
+            .expect("lock should not be poisoned");
         queue.pop_front()
     }
 
     /// Check if interrupt should preempt current one
     fn should_preempt(&self, new_context: &InterruptContext) -> bool {
-        let current = self.current_interrupt.read().unwrap();
+        let current = self
+            .current_interrupt
+            .read()
+            .expect("lock should not be poisoned");
 
         if let Some(current_context) = current.as_ref() {
             // Higher priority interrupts can preempt lower priority ones
@@ -542,11 +575,16 @@ impl InterruptControllerWorker {
 
     /// Preempt current interrupt
     fn preempt_current_interrupt(&self) {
-        let mut stats = self.stats.write().unwrap();
+        let mut stats = self.stats.write().expect("lock should not be poisoned");
         stats.preempted_interrupts += 1;
 
         // Save current interrupt state for later resumption
-        if let Some(mut current) = self.current_interrupt.write().unwrap().take() {
+        if let Some(mut current) = self
+            .current_interrupt
+            .write()
+            .expect("lock should not be poisoned")
+            .take()
+        {
             // Mark context as preempted
             current.preempted = true;
 
@@ -566,7 +604,10 @@ impl InterruptControllerWorker {
             };
 
             // Add to preempted queue (ordered by original priority)
-            let mut preempted_queue = self.preempted_interrupts.write().unwrap();
+            let mut preempted_queue = self
+                .preempted_interrupts
+                .write()
+                .expect("lock should not be poisoned");
             preempted_queue.push_back(preempted);
 
             tracing::info!("Interrupt preempted and saved for later resumption");
@@ -577,7 +618,10 @@ impl InterruptControllerWorker {
     #[allow(dead_code)]
     pub async fn resume_preempted_interrupt(&self) -> Option<InterruptResponse> {
         let preempted = {
-            let mut preempted_queue = self.preempted_interrupts.write().unwrap();
+            let mut preempted_queue = self
+                .preempted_interrupts
+                .write()
+                .expect("lock should not be poisoned");
             preempted_queue.pop_front()
         }; // Lock is released here
 
@@ -593,16 +637,22 @@ impl InterruptControllerWorker {
             preempted.context.preempted = false;
 
             // Set as current interrupt
-            *self.current_interrupt.write().unwrap() = Some(preempted.context.clone());
+            *self
+                .current_interrupt
+                .write()
+                .expect("lock should not be poisoned") = Some(preempted.context.clone());
 
             // Execute the handler with restored state
             let response = self.execute_handler(&preempted.context).await;
 
             // Clear current interrupt when done
-            *self.current_interrupt.write().unwrap() = None;
+            *self
+                .current_interrupt
+                .write()
+                .expect("lock should not be poisoned") = None;
 
             // Update statistics
-            let mut stats = self.stats.write().unwrap();
+            let mut stats = self.stats.write().expect("lock should not be poisoned");
             stats.resumed_interrupts += 1;
 
             Some(response)
@@ -614,12 +664,15 @@ impl InterruptControllerWorker {
     /// Get count of preempted interrupts waiting for resumption
     #[allow(dead_code)]
     pub fn preempted_count(&self) -> usize {
-        self.preempted_interrupts.read().unwrap().len()
+        self.preempted_interrupts
+            .read()
+            .expect("lock should not be poisoned")
+            .len()
     }
 
     /// Execute interrupt handler for given context
     async fn execute_handler(&self, context: &InterruptContext) -> InterruptResponse {
-        let handlers = self.handlers.read().unwrap();
+        let handlers = self.handlers.read().expect("lock should not be poisoned");
 
         if let Some(handler_list) = handlers.get(&context.priority) {
             for handler in handler_list {
@@ -627,7 +680,7 @@ impl InterruptControllerWorker {
                     Ok(response) => return response,
                     Err(e) => {
                         tracing::warn!("Interrupt handler failed: {}", e);
-                        let mut stats = self.stats.write().unwrap();
+                        let mut stats = self.stats.write().expect("lock should not be poisoned");
                         stats.failed_interrupts += 1;
                     }
                 }
@@ -639,7 +692,7 @@ impl InterruptControllerWorker {
 
     /// Update latency statistics
     fn update_latency_stats(&self, latency: Duration) {
-        let mut stats = self.stats.write().unwrap();
+        let mut stats = self.stats.write().expect("lock should not be poisoned");
         let latency_us = latency.as_micros() as u64;
 
         if latency_us > stats.peak_interrupt_latency_us {
@@ -726,7 +779,10 @@ mod tests {
             controller.register_handler(
                 priority,
                 Box::new(move |ctx| {
-                    order_clone.write().unwrap().push(ctx.priority);
+                    order_clone
+                        .write()
+                        .expect("lock should not be poisoned")
+                        .push(ctx.priority);
                     Ok(InterruptResponse::Handled)
                 }),
             );
@@ -763,7 +819,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         {
-            let order = execution_order.read().unwrap();
+            let order = execution_order.read().expect("lock should not be poisoned");
             // Critical should execute before Background due to priority
             if order.len() >= 2 {
                 assert!(order[0] >= InterruptPriority::Critical);

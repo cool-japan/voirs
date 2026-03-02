@@ -343,9 +343,15 @@ fn list_voices_impl() -> Result<VoirsVoiceListDetailed, VoirsErrorCode> {
 
     for (id, name, lang, gender, quality) in voices {
         let voice_info = VoirsVoiceInfoDetailed {
-            id: CString::new(id).unwrap().into_raw(),
-            name: CString::new(name).unwrap().into_raw(),
-            language: CString::new(lang).unwrap().into_raw(),
+            id: CString::new(id)
+                .expect("id should not contain null bytes")
+                .into_raw(),
+            name: CString::new(name)
+                .expect("name should not contain null bytes")
+                .into_raw(),
+            language: CString::new(lang)
+                .expect("lang should not contain null bytes")
+                .into_raw(),
             gender,
             quality,
         };
@@ -388,9 +394,15 @@ fn get_voice_info_impl(voice_id: *const c_char) -> Result<VoirsVoiceInfoDetailed
     };
 
     Ok(VoirsVoiceInfoDetailed {
-        id: CString::new(voice_str).unwrap().into_raw(),
-        name: CString::new(name).unwrap().into_raw(),
-        language: CString::new(lang).unwrap().into_raw(),
+        id: CString::new(voice_str)
+            .expect("voice_str should not contain null bytes")
+            .into_raw(),
+        name: CString::new(name)
+            .expect("name should not contain null bytes")
+            .into_raw(),
+        language: CString::new(lang)
+            .expect("lang should not contain null bytes")
+            .into_raw(),
         gender,
         quality,
     })

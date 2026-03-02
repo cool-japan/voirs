@@ -769,7 +769,11 @@ impl DistributedEvaluator {
                 // Select worker with lowest current load
                 available_workers
                     .iter()
-                    .min_by(|a, b| a.current_load.partial_cmp(&b.current_load).unwrap())
+                    .min_by(|a, b| {
+                        a.current_load
+                            .partial_cmp(&b.current_load)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
                     .map(|w| w.id)
             }
             LoadBalancingStrategy::Random => {
@@ -797,7 +801,7 @@ impl DistributedEvaluator {
                         a.network_metrics
                             .latency_ms
                             .partial_cmp(&b.network_metrics.latency_ms)
-                            .unwrap()
+                            .expect("value should be present")
                     })
                     .map(|w| w.id)
             }
@@ -809,7 +813,7 @@ impl DistributedEvaluator {
                         a.network_metrics
                             .bandwidth_mbps
                             .partial_cmp(&b.network_metrics.bandwidth_mbps)
-                            .unwrap()
+                            .expect("value should be present")
                     })
                     .map(|w| w.id)
             }
@@ -820,7 +824,9 @@ impl DistributedEvaluator {
                     .min_by(|a, b| {
                         let score_a = Self::calculate_worker_score(a);
                         let score_b = Self::calculate_worker_score(b);
-                        score_a.partial_cmp(&score_b).unwrap()
+                        score_a
+                            .partial_cmp(&score_b)
+                            .unwrap_or(std::cmp::Ordering::Equal)
                     })
                     .map(|w| w.id)
             }
@@ -1152,12 +1158,12 @@ pub fn create_evaluation_task(
 /// Serialize audio buffer for transmission
 fn serialize_audio_buffer(audio: &AudioBuffer) -> Vec<u8> {
     // bincode 2 serde integration
-    bincode::serde::encode_to_vec(audio, bincode::config::standard()).unwrap_or_default()
+    oxicode::serde::encode_to_vec(audio, oxicode::config::standard()).unwrap_or_default()
 }
 
 /// Deserialize audio buffer from transmission
 pub fn deserialize_audio_buffer(data: &[u8]) -> Option<AudioBuffer> {
-    bincode::serde::decode_from_slice(data, bincode::config::standard())
+    oxicode::serde::decode_from_slice(data, oxicode::config::standard())
         .ok()
         .map(|(v, _)| v)
 }

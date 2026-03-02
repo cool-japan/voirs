@@ -585,7 +585,11 @@ impl PitchGenerator {
         notes
             .iter()
             .filter(|note| note.start_time < current_start)
-            .max_by(|a, b| a.start_time.partial_cmp(&b.start_time).unwrap())
+            .max_by(|a, b| {
+                a.start_time
+                    .partial_cmp(&b.start_time)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
     }
 
     /// Apply bend curve

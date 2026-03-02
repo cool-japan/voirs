@@ -603,7 +603,7 @@ fn generate_discontinuous_audio(sample_rate: u32, duration: f32) -> Vec<f32> {
     (0..samples_count)
         .map(|i| {
             let segment = i / segment_length as usize;
-            if segment % 2 == 0 {
+            if segment.is_multiple_of(2) {
                 // On segments: normal sine wave
                 (i as f32 * 440.0 * 2.0 * std::f32::consts::PI / sample_rate as f32).sin() * 0.5
             } else {

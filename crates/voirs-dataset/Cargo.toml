@@ -11,6 +11,7 @@ keywords = ["voirs", "dataset", "ljspeech", "jvs", "audio-data"]
 categories = ["science", "data-structures", "multimedia::audio"]
 rust-version.workspace = true
 description = "Dataset utilities for VoiRS (LJSpeech, JVS, etc.)"
+readme = "README.md"
 
 [lib]
 name = "voirs_dataset"
@@ -22,7 +23,7 @@ scirs2-core.workspace = true
 scirs2-fft.workspace = true
 
 # FFT (for mel spectrogram computation)
-rustfft.workspace = true
+oxifft.workspace = true
 
 # HTTP and file handling
 reqwest.workspace = true
@@ -41,7 +42,7 @@ mp3lame-encoder.workspace = true
 # Compression and archives
 flate2.workspace = true
 tar.workspace = true
-zip.workspace = true
+oxiarc-archive.workspace = true
 bzip2.workspace = true
 
 # Serialization and data formats
@@ -49,7 +50,7 @@ serde.workspace = true
 serde_json.workspace = true
 csv.workspace = true
 toml.workspace = true
-bincode.workspace = true
+oxicode.workspace = true
 ordered-float.workspace = true
 parquet.workspace = true
 arrow.workspace = true

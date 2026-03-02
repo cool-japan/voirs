@@ -3,11 +3,11 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "voirs-ffi"
-version = "0.1.0"
+name = "voirs"
+version = "0.1.0b1"
 description = "Python bindings for VoiRS speech synthesis library"
 authors = [
-    {name = "VoiRS Team", email = "team@voirs.dev"}
+    {name = "COOLJAPAN OU (Team Kitasan)", email = "contact@cooljapan.tech"}
 ]
 license = {text = "MIT"}
 readme = "README.md"
@@ -55,13 +55,18 @@ examples = [
 [project.urls]
 Homepage = "https://github.com/cool-japan/voirs"
 Repository = "https://github.com/cool-japan/voirs"
-Documentation = "https://docs.voirs.dev"
+Documentation = "https://docs.rs/voirs-ffi"
 "Bug Tracker" = "https://github.com/cool-japan/voirs/issues"
 
 [tool.maturin]
-features = ["python"]
+features = ["python", "pyo3/extension-module"]
 python-source = "python"
-module-name = "voirs_ffi"
+binding = "pyo3"
+include = ["LICENSE*", "README.md", "voirs.pyi"]
+abi3 = true
+abi3-py38 = true
+manifest-path = "Cargo.toml"
+module-name = "voirs"
 strip = true
 
 [tool.black]

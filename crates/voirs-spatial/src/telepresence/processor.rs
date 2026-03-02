@@ -307,7 +307,7 @@ fn generate_session_id() -> String {
         "session_{}",
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("SystemTime should be after UNIX_EPOCH")
             .as_millis()
     )
 }

@@ -598,7 +598,7 @@ impl ItuTComplianceValidator {
         let max_error = test_results
             .iter()
             .map(|t| t.error)
-            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap_or(0.0);
 
         let compliant = pass_rate >= 0.8; // At least 80% of tests must pass

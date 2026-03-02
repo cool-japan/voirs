@@ -565,7 +565,7 @@ impl RuleBasedDetector {
         // Find the language with highest score
         let best_match = scores
             .iter()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(lang, score)| (*lang, *score));
 
         if let Some((language, confidence)) = best_match {
@@ -576,7 +576,8 @@ impl RuleBasedDetector {
                     .into_iter()
                     .filter(|(lang, _)| *lang != language)
                     .collect();
-                alternatives.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+                alternatives
+                    .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                 alternatives.truncate(3); // Keep top 3 alternatives
 
                 return Ok(Some(DetectionResult {

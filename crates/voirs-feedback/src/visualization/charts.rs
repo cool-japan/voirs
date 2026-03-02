@@ -83,8 +83,18 @@ impl ProgressChart {
                 .map(|p| p.value)
                 .fold(f32::NEG_INFINITY, f32::max);
 
-            let min_time = self.data.iter().map(|p| p.timestamp).min().unwrap();
-            let max_time = self.data.iter().map(|p| p.timestamp).max().unwrap();
+            let min_time = self
+                .data
+                .iter()
+                .map(|p| p.timestamp)
+                .min()
+                .expect("value should be present");
+            let max_time = self
+                .data
+                .iter()
+                .map(|p| p.timestamp)
+                .max()
+                .expect("value should be present");
 
             let mut chart = ChartBuilder::on(&root)
                 .caption(&self.config.title, ("sans-serif", 30))
@@ -1032,8 +1042,18 @@ impl InteractiveTimeline {
             return;
         }
 
-        let min_time = self.events.iter().map(|e| e.timestamp).min().unwrap();
-        let max_time = self.events.iter().map(|e| e.timestamp).max().unwrap();
+        let min_time = self
+            .events
+            .iter()
+            .map(|e| e.timestamp)
+            .min()
+            .expect("value should be present");
+        let max_time = self
+            .events
+            .iter()
+            .map(|e| e.timestamp)
+            .max()
+            .expect("value should be present");
 
         self.time_range = Some(TimelineRange {
             start: min_time,

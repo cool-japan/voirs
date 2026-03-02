@@ -5,7 +5,6 @@
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use uuid;
 use voirs_feedback::integration::PerformanceMetrics;
 use voirs_feedback::realtime::types::RealtimeConfig;
 use voirs_feedback::traits::{

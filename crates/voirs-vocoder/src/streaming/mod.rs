@@ -228,7 +228,7 @@ impl BufferPool {
 
     /// Get a buffer of the specified size
     pub fn get_buffer(&self, size: usize) -> Vec<f32> {
-        let mut pools = self.pools.lock().unwrap();
+        let mut pools = self.pools.lock().expect("lock should not be poisoned");
 
         if let Some(pool) = pools.get_mut(&size) {
             if let Some(buffer) = pool.pop() {
@@ -246,7 +246,7 @@ impl BufferPool {
         buffer.clear();
         buffer.resize(size, 0.0);
 
-        let mut pools = self.pools.lock().unwrap();
+        let mut pools = self.pools.lock().expect("lock should not be poisoned");
         let pool = pools.entry(size).or_default();
 
         if pool.len() < self.max_buffers_per_size {

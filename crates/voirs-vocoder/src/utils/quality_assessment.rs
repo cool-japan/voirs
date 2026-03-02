@@ -256,7 +256,7 @@ fn estimate_snr(samples: &[f32]) -> f32 {
         return 0.0;
     }
 
-    window_energies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    window_energies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     // Take bottom 10% as noise estimate
     let noise_idx = (window_energies.len() as f32 * 0.1) as usize;

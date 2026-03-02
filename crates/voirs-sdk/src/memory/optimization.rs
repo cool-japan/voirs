@@ -103,7 +103,9 @@ impl MemoryLayout {
     pub fn calculate_optimal_alignment(&self, size: usize) -> usize {
         // Find the largest power of 2 that divides size and is <= cache_line_size
         let mut alignment = 1;
-        while alignment <= self.config.cache_line_size && alignment <= size && size.is_multiple_of(alignment)
+        while alignment <= self.config.cache_line_size
+            && alignment <= size
+            && size.is_multiple_of(alignment)
         {
             alignment *= 2;
         }
@@ -192,8 +194,7 @@ impl MemoryLayout {
         }
 
         let total_bytes = accesses.iter().map(|a| a.size).sum::<usize>();
-        let cache_lines_needed =
-            total_bytes.div_ceil(self.config.cache_line_size);
+        let cache_lines_needed = total_bytes.div_ceil(self.config.cache_line_size);
 
         if cache_lines_needed > 0 {
             cache_lines_accessed.len() as f64 / cache_lines_needed as f64

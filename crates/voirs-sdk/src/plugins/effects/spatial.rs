@@ -35,8 +35,8 @@ impl SpatialAudioEffect {
     }
 
     fn calculate_stereo_pan(&self) -> (f32, f32) {
-        let azimuth = *self.azimuth.read().unwrap();
-        let distance = *self.distance.read().unwrap();
+        let azimuth = *self.azimuth.read().expect("lock should not be poisoned");
+        let distance = *self.distance.read().expect("lock should not be poisoned");
 
         // Simple stereo panning based on azimuth
         let angle_rad = azimuth.to_radians();
@@ -102,19 +102,19 @@ impl AudioEffect for SpatialAudioEffect {
         let mut params = HashMap::new();
         params.insert(
             "azimuth".to_string(),
-            ParameterValue::Float(*self.azimuth.read().unwrap()),
+            ParameterValue::Float(*self.azimuth.read().expect("lock should not be poisoned")),
         );
         params.insert(
             "elevation".to_string(),
-            ParameterValue::Float(*self.elevation.read().unwrap()),
+            ParameterValue::Float(*self.elevation.read().expect("lock should not be poisoned")),
         );
         params.insert(
             "distance".to_string(),
-            ParameterValue::Float(*self.distance.read().unwrap()),
+            ParameterValue::Float(*self.distance.read().expect("lock should not be poisoned")),
         );
         params.insert(
             "room_size".to_string(),
-            ParameterValue::Float(*self.room_size.read().unwrap()),
+            ParameterValue::Float(*self.room_size.read().expect("lock should not be poisoned")),
         );
         params
     }
@@ -123,7 +123,8 @@ impl AudioEffect for SpatialAudioEffect {
         match name {
             "azimuth" => {
                 if let Some(v) = value.as_f32() {
-                    *self.azimuth.write().unwrap() = v.clamp(-180.0, 180.0);
+                    *self.azimuth.write().expect("lock should not be poisoned") =
+                        v.clamp(-180.0, 180.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -134,7 +135,8 @@ impl AudioEffect for SpatialAudioEffect {
             }
             "elevation" => {
                 if let Some(v) = value.as_f32() {
-                    *self.elevation.write().unwrap() = v.clamp(-90.0, 90.0);
+                    *self.elevation.write().expect("lock should not be poisoned") =
+                        v.clamp(-90.0, 90.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -145,7 +147,8 @@ impl AudioEffect for SpatialAudioEffect {
             }
             "distance" => {
                 if let Some(v) = value.as_f32() {
-                    *self.distance.write().unwrap() = v.clamp(0.1, 100.0);
+                    *self.distance.write().expect("lock should not be poisoned") =
+                        v.clamp(0.1, 100.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -156,7 +159,8 @@ impl AudioEffect for SpatialAudioEffect {
             }
             "room_size" => {
                 if let Some(v) = value.as_f32() {
-                    *self.room_size.write().unwrap() = v.clamp(0.0, 1.0);
+                    *self.room_size.write().expect("lock should not be poisoned") =
+                        v.clamp(0.0, 1.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(

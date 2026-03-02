@@ -66,7 +66,7 @@ impl MemoryMonitor {
 
                 // Record memory sample
                 {
-                    let mut samples_guard = samples.lock().unwrap();
+                    let mut samples_guard = samples.lock().expect("lock should not be poisoned");
                     samples_guard.push(MemorySample {
                         timestamp,
                         memory_usage,
@@ -101,7 +101,10 @@ impl MemoryMonitor {
 
     /// Register a new session for memory tracking
     pub fn register_session(&self, session_id: &str) {
-        let mut session_memory = self.session_memory.lock().unwrap();
+        let mut session_memory = self
+            .session_memory
+            .lock()
+            .expect("lock should not be poisoned");
         session_memory.insert(
             session_id.to_string(),
             SessionMemoryInfo {
@@ -118,7 +121,10 @@ impl MemoryMonitor {
 
     /// Update session activity
     pub fn update_session_activity(&self, session_id: &str) {
-        let mut session_memory = self.session_memory.lock().unwrap();
+        let mut session_memory = self
+            .session_memory
+            .lock()
+            .expect("lock should not be poisoned");
         if let Some(info) = session_memory.get_mut(session_id) {
             info.last_activity = Instant::now();
             let current_memory = Self::get_memory_usage();
@@ -128,15 +134,24 @@ impl MemoryMonitor {
 
     /// Unregister a session
     pub fn unregister_session(&self, session_id: &str) {
-        let mut session_memory = self.session_memory.lock().unwrap();
+        let mut session_memory = self
+            .session_memory
+            .lock()
+            .expect("lock should not be poisoned");
         session_memory.remove(session_id);
     }
 
     /// Get memory statistics
     #[must_use]
     pub fn get_memory_statistics(&self) -> MemoryStatistics {
-        let samples = self.memory_samples.lock().unwrap();
-        let session_memory = self.session_memory.lock().unwrap();
+        let samples = self
+            .memory_samples
+            .lock()
+            .expect("lock should not be poisoned");
+        let session_memory = self
+            .session_memory
+            .lock()
+            .expect("lock should not be poisoned");
 
         let current_memory = Self::get_memory_usage();
 
@@ -213,7 +228,7 @@ impl MemoryMonitor {
         samples: &Arc<Mutex<Vec<MemorySample>>>,
         config: &MemoryMonitorConfig,
     ) -> Option<MemoryLeakInfo> {
-        let samples_guard = samples.lock().unwrap();
+        let samples_guard = samples.lock().expect("lock should not be poisoned");
 
         if samples_guard.len() < config.min_samples_for_leak_detection {
             return None;
@@ -222,8 +237,14 @@ impl MemoryMonitor {
         // Check for sustained memory growth
         let recent_samples =
             &samples_guard[samples_guard.len() - config.min_samples_for_leak_detection..];
-        let oldest_memory = recent_samples.first().unwrap().memory_usage;
-        let newest_memory = recent_samples.last().unwrap().memory_usage;
+        let oldest_memory = recent_samples
+            .first()
+            .expect("recent_samples should not be empty")
+            .memory_usage;
+        let newest_memory = recent_samples
+            .last()
+            .expect("recent_samples should not be empty")
+            .memory_usage;
 
         let growth_rate = (newest_memory as f64 - oldest_memory as f64) / oldest_memory as f64;
 
@@ -252,7 +273,7 @@ impl MemoryMonitor {
 
     /// Trigger garbage collection
     fn trigger_garbage_collection(last_gc_time: &Arc<Mutex<Instant>>) {
-        let mut last_gc = last_gc_time.lock().unwrap();
+        let mut last_gc = last_gc_time.lock().expect("lock should not be poisoned");
         let now = Instant::now();
 
         // Only trigger GC if enough time has passed
@@ -274,7 +295,7 @@ impl MemoryMonitor {
         session_memory: &Arc<Mutex<HashMap<String, SessionMemoryInfo>>>,
         config: &MemoryMonitorConfig,
     ) {
-        let mut session_memory_guard = session_memory.lock().unwrap();
+        let mut session_memory_guard = session_memory.lock().expect("lock should not be poisoned");
         let now = Instant::now();
 
         session_memory_guard.retain(|_, info| {
@@ -287,7 +308,10 @@ impl MemoryMonitor {
     pub fn force_cleanup(&self) {
         // Clean up old samples
         {
-            let mut samples = self.memory_samples.lock().unwrap();
+            let mut samples = self
+                .memory_samples
+                .lock()
+                .expect("lock should not be poisoned");
             if samples.len() > self.config.max_samples / 2 {
                 samples.drain(0..self.config.max_samples / 4);
             }
@@ -303,14 +327,20 @@ impl MemoryMonitor {
     /// Get session memory information
     #[must_use]
     pub fn get_session_memory_info(&self, session_id: &str) -> Option<SessionMemoryInfo> {
-        let session_memory = self.session_memory.lock().unwrap();
+        let session_memory = self
+            .session_memory
+            .lock()
+            .expect("lock should not be poisoned");
         session_memory.get(session_id).cloned()
     }
 
     /// Get all session memory information
     #[must_use]
     pub fn get_all_session_memory_info(&self) -> HashMap<String, SessionMemoryInfo> {
-        let session_memory = self.session_memory.lock().unwrap();
+        let session_memory = self
+            .session_memory
+            .lock()
+            .expect("lock should not be poisoned");
         session_memory.clone()
     }
 }
@@ -607,7 +637,10 @@ mod tests {
 
         // Add some samples manually to simulate memory growth
         {
-            let mut samples = monitor.memory_samples.lock().unwrap();
+            let mut samples = monitor
+                .memory_samples
+                .lock()
+                .expect("lock should not be poisoned");
             samples.push(MemorySample {
                 timestamp: Instant::now(),
                 memory_usage: 1000,

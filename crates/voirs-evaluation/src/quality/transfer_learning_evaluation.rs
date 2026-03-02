@@ -1513,7 +1513,7 @@ impl TransferLearningEvaluator {
                 let best = performances
                     .iter()
                     .fold(f32::NEG_INFINITY, |a, &b| a.max(b));
-                let final_perf = *performances.last().unwrap();
+                let final_perf = *performances.last().expect("collection should not be empty");
 
                 // Find convergence epoch (simplified)
                 let convergence_epoch = if performances.len() > 10 {
@@ -1895,8 +1895,14 @@ impl TransferLearningEvaluator {
             return 0.5;
         }
 
-        let smallest_size = *performance_by_sample_size.keys().min().unwrap();
-        let largest_size = *performance_by_sample_size.keys().max().unwrap();
+        let smallest_size = *performance_by_sample_size
+            .keys()
+            .min()
+            .expect("value should be present");
+        let largest_size = *performance_by_sample_size
+            .keys()
+            .max()
+            .expect("value should be present");
 
         let initial_perf = performance_by_sample_size[&smallest_size];
         let final_perf = performance_by_sample_size[&largest_size];

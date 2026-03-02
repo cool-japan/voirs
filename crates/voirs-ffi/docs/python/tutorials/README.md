@@ -69,7 +69,7 @@ Integrate VoiRS with ML workflows:
 
 ```bash
 # Install VoiRS Python bindings
-pip install voirs-ffi
+pip install voirs
 
 # Install notebook dependencies
 pip install jupyter numpy matplotlib pandas
@@ -93,7 +93,7 @@ You can also run these tutorials in Google Colab:
 2. Open with Google Colab
 3. Install VoiRS in the first cell:
    ```python
-   !pip install voirs-ffi
+   !pip install voirs
    ```
 
 ## Tutorial Structure
@@ -129,7 +129,7 @@ If GPU acceleration isn't working:
 
 ```python
 # Check CUDA availability
-from voirs_ffi import check_compatibility
+from voirs import check_compatibility
 info = check_compatibility()
 print(f"GPU available: {info['gpu']}")
 
@@ -185,4 +185,4 @@ If you encounter issues with the tutorials:
 
 ## License
 
-These tutorials are provided under the MIT License, same as the VoiRS project.
+These tutorials are provided under the Apache-2.0 License, same as the VoiRS project.

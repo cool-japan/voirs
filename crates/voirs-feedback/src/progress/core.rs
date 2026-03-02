@@ -422,7 +422,10 @@ impl ProgressAnalyzer {
         user_id: &str,
     ) -> Result<UserProgress, FeedbackError> {
         {
-            let progress_map = self.user_progress.read().unwrap();
+            let progress_map = self
+                .user_progress
+                .read()
+                .expect("lock should not be poisoned");
             if let Some(progress) = progress_map.get(user_id) {
                 return Ok(progress.clone());
             }
@@ -459,12 +462,15 @@ impl ProgressAnalyzer {
         };
 
         {
-            let mut progress_map = self.user_progress.write().unwrap();
+            let mut progress_map = self
+                .user_progress
+                .write()
+                .expect("lock should not be poisoned");
             progress_map.insert(user_id.to_string(), progress.clone());
         }
 
         {
-            let mut metrics = self.metrics.write().unwrap();
+            let mut metrics = self.metrics.write().expect("lock should not be poisoned");
             metrics.total_users += 1;
         }
 
@@ -525,7 +531,10 @@ impl ProgressAnalyzer {
 
         // Create a clone of the user's progress to check achievements
         let progress_for_achievements = {
-            let mut progress_map = self.user_progress.write().unwrap();
+            let mut progress_map = self
+                .user_progress
+                .write()
+                .expect("lock should not be poisoned");
             let progress = progress_map.get_mut(user_id).ok_or_else(|| {
                 FeedbackError::ProgressTrackingError {
                     message: format!("User progress not found: {user_id}"),
@@ -595,7 +604,10 @@ impl ProgressAnalyzer {
 
         // Add achievements to the user's progress
         {
-            let mut progress_map = self.user_progress.write().unwrap();
+            let mut progress_map = self
+                .user_progress
+                .write()
+                .expect("lock should not be poisoned");
             if let Some(progress) = progress_map.get_mut(user_id) {
                 progress.achievements.extend(new_achievements);
                 progress.last_updated = Utc::now();
@@ -604,7 +616,7 @@ impl ProgressAnalyzer {
 
         // Update system metrics
         {
-            let mut metrics = self.metrics.write().unwrap();
+            let mut metrics = self.metrics.write().expect("lock should not be poisoned");
             metrics.total_sessions += 1;
             metrics.total_snapshots += 1;
         }
@@ -729,7 +741,10 @@ impl ProgressAnalyzer {
         // Ensure user exists - create if not
         let _ = self.get_user_progress_impl(user_id).await?;
 
-        let mut progress_map = self.user_progress.write().unwrap();
+        let mut progress_map = self
+            .user_progress
+            .write()
+            .expect("lock should not be poisoned");
         let progress =
             progress_map
                 .get_mut(user_id)
@@ -764,8 +779,11 @@ impl ProgressAnalyzer {
 
     /// Get system statistics
     pub async fn get_statistics(&self) -> Result<ProgressSystemStats, FeedbackError> {
-        let progress_map = self.user_progress.read().unwrap();
-        let metrics = self.metrics.read().unwrap();
+        let progress_map = self
+            .user_progress
+            .read()
+            .expect("lock should not be poisoned");
+        let metrics = self.metrics.read().expect("lock should not be poisoned");
 
         let active_users = progress_map.len();
         let total_achievements = progress_map.values().map(|p| p.achievements.len()).sum();
@@ -920,7 +938,10 @@ impl ProgressAnalyzer {
         &self,
         progress: &UserProgress,
     ) -> Result<Vec<Achievement>, FeedbackError> {
-        let achievements = self.achievements.read().unwrap();
+        let achievements = self
+            .achievements
+            .read()
+            .expect("lock should not be poisoned");
         let mut new_achievements = Vec::new();
 
         for achievement_def in achievements.iter() {
@@ -985,7 +1006,10 @@ impl ProgressAnalyzer {
 
     /// Analyze achievement progress
     fn analyze_achievement_progress(&self, progress: &UserProgress) -> Vec<AchievementAnalysis> {
-        let achievements = self.achievements.read().unwrap();
+        let achievements = self
+            .achievements
+            .read()
+            .expect("lock should not be poisoned");
         let mut analyses = Vec::new();
 
         for achievement_def in achievements.iter() {
@@ -1250,7 +1274,10 @@ impl ProgressTracker for ProgressAnalyzer {
     }
 
     async fn set_goals(&mut self, user_id: &str, goals: Vec<Goal>) -> FeedbackResult<()> {
-        let mut progress_map = self.user_progress.write().unwrap();
+        let mut progress_map = self
+            .user_progress
+            .write()
+            .expect("lock should not be poisoned");
         let progress = progress_map.get_mut(user_id).ok_or_else(|| {
             VoirsError::from(FeedbackError::ProgressTrackingError {
                 message: format!("User progress not found: {user_id}"),

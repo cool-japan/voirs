@@ -21,7 +21,7 @@ from typing import List, Optional
 
 # Import the actual VoiRS FFI Python bindings
 try:
-    import voirs_ffi
+    import voirs
     VOIRS_AVAILABLE = True
     print("VoiRS FFI Enhanced Callback System Example (Using Real API)")
     print("========================================================")
@@ -105,7 +105,7 @@ def demonstrate_progress_callbacks():
     if VOIRS_AVAILABLE:
         try:
             # Use real VoiRS API with callback support
-            pipeline = voirs_ffi.VoirsPipeline()
+            pipeline = voirs.VoirsPipeline()
             
             # Track synthesis manually for demonstration
             results = []
@@ -154,7 +154,7 @@ def demonstrate_streaming_callbacks():
     if VOIRS_AVAILABLE:
         try:
             # Use real VoiRS API for synthesis
-            pipeline = voirs_ffi.VoirsPipeline()
+            pipeline = voirs.VoirsPipeline()
             audio = pipeline.synthesize(text)
             
             # Simulate chunked processing of real audio
@@ -248,7 +248,7 @@ def demonstrate_comprehensive_callbacks():
     if VOIRS_AVAILABLE:
         try:
             # Use real VoiRS API for comprehensive demonstration
-            pipeline = voirs_ffi.VoirsPipeline()
+            pipeline = voirs.VoirsPipeline()
             
             print("Starting comprehensive synthesis with real API...")
             
@@ -397,7 +397,7 @@ def main():
         if VOIRS_AVAILABLE:
             print("""
 # Real VoiRS API usage:
-import voirs_ffi
+import voirs
 
 def my_progress_callback(current, total, progress, message):
     print(f"Progress: {progress:.1%} - {message}")
@@ -409,18 +409,18 @@ def my_chunk_callback(chunk_idx, total_chunks, audio_chunk):
     # You could: save, analyze, stream, apply effects, etc.
 
 # Basic synthesis
-pipeline = voirs_ffi.VoirsPipeline()
+pipeline = voirs.VoirsPipeline()
 audio = pipeline.synthesize("Hello, world!")
 print(f"Generated {len(audio.samples_as_list())} samples at {audio.sample_rate}Hz")
 
 # With custom configuration
-config = voirs_ffi.SynthesisConfig()
-pipeline_config = voirs_ffi.VoirsPipeline.with_config(config)
+config = voirs.SynthesisConfig()
+pipeline_config = voirs.VoirsPipeline.with_config(config)
 """)
         else:
             print("""
 # When VoiRS FFI becomes available:
-import voirs_ffi
+import voirs
 
 def my_progress_callback(current, total, progress, message):
     print(f"Progress: {progress:.1%} - {message}")
@@ -431,7 +431,7 @@ def my_chunk_callback(chunk_idx, total_chunks, audio_chunk):
     # You could: save, analyze, stream, apply effects, etc.
 
 # Basic synthesis
-pipeline = voirs_ffi.VoirsPipeline()
+pipeline = voirs.VoirsPipeline()
 audio = pipeline.synthesize("Hello, world!")
 """)
         

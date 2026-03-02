@@ -108,7 +108,10 @@ impl TrackedSystemAllocator {
         }
 
         if self.enable_backtrace {
-            let mut allocations = self.allocations.lock().unwrap();
+            let mut allocations = self
+                .allocations
+                .lock()
+                .expect("lock should not be poisoned");
             allocations.insert(
                 ptr as usize,
                 AllocationInfo {
@@ -137,7 +140,10 @@ impl TrackedSystemAllocator {
         stats.current_bytes_allocated = stats.current_bytes_allocated.saturating_sub(layout.size());
 
         if self.enable_backtrace {
-            let mut allocations = self.allocations.lock().unwrap();
+            let mut allocations = self
+                .allocations
+                .lock()
+                .expect("lock should not be poisoned");
             allocations.remove(&(ptr as usize));
         }
     }
@@ -163,7 +169,10 @@ impl VoirsAllocator for TrackedSystemAllocator {
         let mut stats = self.stats.write();
         *stats = AllocatorStats::default();
 
-        let mut allocations = self.allocations.lock().unwrap();
+        let mut allocations = self
+            .allocations
+            .lock()
+            .expect("lock should not be poisoned");
         allocations.clear();
     }
 
@@ -210,13 +219,16 @@ impl PoolAllocator {
             }
 
             // Initialize free block list
-            let mut free_blocks = self.free_blocks.lock().unwrap();
+            let mut free_blocks = self
+                .free_blocks
+                .lock()
+                .expect("lock should not be poisoned");
             for i in 0..self.blocks_per_chunk {
                 let block_ptr = memory.add(i * self.block_size);
                 free_blocks.push(block_ptr as usize);
             }
 
-            let mut chunks = self.chunks.lock().unwrap();
+            let mut chunks = self.chunks.lock().expect("lock should not be poisoned");
             chunks.push(Chunk {
                 memory: memory as usize,
                 layout,
@@ -234,7 +246,10 @@ impl VoirsAllocator for PoolAllocator {
             return std::alloc::System.alloc(layout);
         }
 
-        let mut free_blocks = self.free_blocks.lock().unwrap();
+        let mut free_blocks = self
+            .free_blocks
+            .lock()
+            .expect("lock should not be poisoned");
 
         if let Some(ptr_addr) = free_blocks.pop() {
             let ptr = ptr_addr as *mut u8;
@@ -259,7 +274,10 @@ impl VoirsAllocator for PoolAllocator {
             drop(free_blocks);
 
             if self.allocate_chunk().is_ok() {
-                let mut free_blocks = self.free_blocks.lock().unwrap();
+                let mut free_blocks = self
+                    .free_blocks
+                    .lock()
+                    .expect("lock should not be poisoned");
                 if let Some(ptr_addr) = free_blocks.pop() {
                     let ptr = ptr_addr as *mut u8;
 
@@ -300,7 +318,10 @@ impl VoirsAllocator for PoolAllocator {
         }
 
         // Return block to free list
-        let mut free_blocks = self.free_blocks.lock().unwrap();
+        let mut free_blocks = self
+            .free_blocks
+            .lock()
+            .expect("lock should not be poisoned");
         free_blocks.push(ptr as usize);
 
         // Update statistics
@@ -330,7 +351,7 @@ impl VoirsAllocator for PoolAllocator {
 impl Drop for PoolAllocator {
     fn drop(&mut self) {
         unsafe {
-            let chunks = self.chunks.lock().unwrap();
+            let chunks = self.chunks.lock().expect("lock should not be poisoned");
             for chunk in chunks.iter() {
                 std::alloc::System.dealloc(chunk.memory as *mut u8, chunk.layout);
             }

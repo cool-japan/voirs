@@ -163,4 +163,4 @@ When contributing to manual pages:
 
 ## License
 
-Manual pages are part of the VoiRS CLI project and are licensed under the MIT License.
+Manual pages are part of the VoiRS CLI project and are licensed under the Apache-2.0 License.

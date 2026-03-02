@@ -192,7 +192,7 @@ Tests pass when:
 
 #### Binding Not Available
 ```
-WARN: Python: Not available - voirs_ffi module not found
+WARN: Python: Not available - voirs module not found
 ```
 **Solution**: Build the Python bindings with `maturin develop --features python`
 
@@ -216,13 +216,13 @@ ERROR: Consistency test failed - audio similarity: 87%
 cargo test c_api
 
 # Test Python bindings
-python3 -c "import voirs_ffi; print('OK')"
+python3 -c "import voirs; print('OK')"
 
 # Test Node.js bindings
 node -e "require('./index.js')"
 
 # Check WASM bindings
-ls pkg/voirs_ffi.js
+ls pkg/voirs.js
 ```
 
 #### Memory Issues
@@ -230,7 +230,7 @@ ls pkg/voirs_ffi.js
 # Run with memory monitoring
 python3 -c "
 import psutil
-import voirs_ffi
+import voirs
 print(f'Memory: {psutil.Process().memory_info().rss/1024/1024:.1f} MB')
 "
 ```

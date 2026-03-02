@@ -607,7 +607,7 @@ Provides text-to-speech synthesis for Asterisk PBX using VoiRS FFI
 
 import sys
 import os
-import voirs_ffi
+import voirs
 import tempfile
 import re
 from asterisk.agi import AGI
@@ -622,13 +622,13 @@ class VoiRSAsteriskAGI:
     def initialize_voirs(self):
         """Initialize VoiRS engine with telephony-optimized settings"""
         try:
-            self.engine = voirs_ffi.Engine()
+            self.engine = voirs.Engine()
             
             # Telephony optimization: 8kHz, μ-law compatible quality
-            config = voirs_ffi.SynthesisConfig(
-                quality=voirs_ffi.Quality.MEDIUM,  # Good quality for phone
+            config = voirs.SynthesisConfig(
+                quality=voirs.Quality.MEDIUM,  # Good quality for phone
                 sample_rate=8000,  # Telephony standard
-                output_format=voirs_ffi.Format.WAV,
+                output_format=voirs.Format.WAV,
                 thread_count=1,  # Conservative for telephony server
                 use_simd=True
             )
@@ -654,9 +654,9 @@ class VoiRSAsteriskAGI:
                 return None
             
             # Synthesize with telephony settings
-            config = voirs_ffi.SynthesisConfig(
+            config = voirs.SynthesisConfig(
                 voice_id=voice_id,
-                quality=voirs_ffi.Quality.MEDIUM,
+                quality=voirs.Quality.MEDIUM,
                 speed=0.9,  # Slightly slower for phone clarity
                 volume=1.0
             )
@@ -969,7 +969,7 @@ import config
 import wx
 import gui
 import addonHandler
-import voirs_ffi
+import voirs
 import threading
 import queue
 import tempfile
@@ -1000,14 +1000,14 @@ class VoiRSSpeechDriver:
     def initialize(self):
         """Initialize VoiRS engine"""
         try:
-            self.engine = voirs_ffi.Engine()
+            self.engine = voirs.Engine()
             
             # Configure for screen reader use
-            config = voirs_ffi.SynthesisConfig(
-                quality=voirs_ffi.Quality.HIGH,
+            config = voirs.SynthesisConfig(
+                quality=voirs.Quality.HIGH,
                 thread_count=1,  # Single thread for responsiveness
                 cache_size=512 * 1024,  # 512KB cache
-                output_format=voirs_ffi.Format.WAV
+                output_format=voirs.Format.WAV
             )
             
             if self.engine.initialize(config):
@@ -1043,11 +1043,11 @@ class VoiRSSpeechDriver:
                     continue
                 
                 # Synthesize text
-                config = voirs_ffi.SynthesisConfig(
+                config = voirs.SynthesisConfig(
                     voice_id=self.voice_id,
                     speed=self.rate_to_speed(self.rate),
                     volume=self.volume / 100.0,
-                    quality=voirs_ffi.Quality.MEDIUM  # Balance quality/speed
+                    quality=voirs.Quality.MEDIUM  # Balance quality/speed
                 )
                 
                 result = self.engine.synthesize(text, config)
@@ -1121,7 +1121,7 @@ class VoiRSSpeechDriver:
     def availableVoices(self):
         """Get available voices"""
         try:
-            voices = voirs_ffi.get_available_voices()
+            voices = voirs.get_available_voices()
             return [VoiceInfo(voice, voice) for voice in voices]
         except:
             return [VoiceInfo("default", "Default Voice")]
@@ -1184,7 +1184,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                     
                     self.voice_choice = wx.Choice(self)
                     try:
-                        voices = voirs_ffi.get_available_voices()
+                        voices = voirs.get_available_voices()
                         for voice in voices:
                             self.voice_choice.Append(voice)
                     except:
@@ -1305,7 +1305,7 @@ lastTestedNVDAVersion = 2023.1
         f.write(manifest)
     
     # Copy VoiRS library (you'll need to provide the actual library path)
-    # shutil.copy("path/to/voirs_ffi.dll", os.path.join(addon_dir, "lib"))
+    # shutil.copy("path/to/voirs.dll", os.path.join(addon_dir, "lib"))
     
     # Create .nvda-addon file
     addon_file = "voirs.nvda-addon"
@@ -1348,7 +1348,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Callable, Any
 from enum import Enum
 
-import voirs_ffi
+import voirs
 from telephony_interface import TelephonyInterface  # Hypothetical telephony library
 
 class IVRState(Enum):
@@ -1437,15 +1437,15 @@ class VoiRSIVREngine:
     def initialize_voirs(self):
         """Initialize VoiRS engine for IVR use"""
         try:
-            self.voirs_engine = voirs_ffi.Engine()
+            self.voirs_engine = voirs.Engine()
             
             # IVR-optimized configuration
-            config = voirs_ffi.SynthesisConfig(
-                quality=voirs_ffi.Quality.HIGH,
+            config = voirs.SynthesisConfig(
+                quality=voirs.Quality.HIGH,
                 sample_rate=8000,  # Telephony standard
                 thread_count=4,    # Handle multiple calls
                 cache_size=2 * 1024 * 1024,  # 2MB cache for frequently used prompts
-                output_format=voirs_ffi.Format.WAV
+                output_format=voirs.Format.WAV
             )
             
             if self.voirs_engine.initialize(config):
@@ -1479,9 +1479,9 @@ class VoiRSIVREngine:
         # Check cache first (implement caching as needed)
         
         try:
-            config = voirs_ffi.SynthesisConfig(
+            config = voirs.SynthesisConfig(
                 voice_id=voice_id,
-                quality=voirs_ffi.Quality.HIGH,
+                quality=voirs.Quality.HIGH,
                 speed=0.9,  # Slightly slower for phone clarity
                 volume=1.0
             )

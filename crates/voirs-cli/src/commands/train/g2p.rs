@@ -89,7 +89,10 @@ async fn train_g2p_model(
     }
 
     // Determine device (CPU or GPU)
-    let device = Device::cuda_if_available(0).unwrap_or(Device::Cpu);
+    let device = std::panic::catch_unwind(|| Device::cuda_if_available(0))
+        .ok()
+        .and_then(|r| r.ok())
+        .unwrap_or(Device::Cpu);
     if !global.quiet {
         println!("   Using device: {:?}", device);
         println!();
@@ -150,7 +153,7 @@ async fn train_g2p_model(
 
     // Create progress tracker
     let batch_size = 64;
-    let batches_per_epoch = (train_dataset.examples.len() + batch_size - 1) / batch_size;
+    let batches_per_epoch = train_dataset.examples.len().div_ceil(batch_size);
     let mut progress = TrainingProgress::new(epochs, batches_per_epoch, !global.quiet);
 
     // Training statistics

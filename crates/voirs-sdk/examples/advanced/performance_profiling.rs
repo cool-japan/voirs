@@ -20,8 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use voirs_sdk::prelude::*;
 use voirs_sdk::profiling::{
-    PerformanceComparator, PipelineStage, Profiler, ProfilerConfig, ReportFormat, ReportGenerator,
-    RegressionDetector,
+    PerformanceComparator, Profiler, ProfilerConfig, RegressionDetector, ReportGenerator,
 };
 
 #[tokio::main]
@@ -46,49 +45,49 @@ async fn main() -> Result<()> {
 
     // Example 1: Basic profiling session
     println!("Example 1: Basic Profiling Session");
-    println!("-".repeat(60));
+    println!("{}", "-".repeat(60));
     basic_profiling_session(&pipeline).await?;
     println!();
 
     // Example 2: Stage-by-stage analysis
     println!("Example 2: Stage-by-Stage Performance Analysis");
-    println!("-".repeat(60));
+    println!("{}", "-".repeat(60));
     stage_by_stage_analysis(&pipeline).await?;
     println!();
 
     // Example 3: Memory profiling
     println!("Example 3: Memory Profiling and Leak Detection");
-    println!("-".repeat(60));
+    println!("{}", "-".repeat(60));
     memory_profiling(&pipeline).await?;
     println!();
 
     // Example 4: Bottleneck detection
     println!("Example 4: Automatic Bottleneck Detection");
-    println!("-".repeat(60));
+    println!("{}", "-".repeat(60));
     bottleneck_detection(&pipeline).await?;
     println!();
 
     // Example 5: Performance comparison
     println!("Example 5: Performance Comparison Between Sessions");
-    println!("-".repeat(60));
+    println!("{}", "-".repeat(60));
     performance_comparison(&pipeline).await?;
     println!();
 
     // Example 6: Regression detection
     println!("Example 6: Regression Detection");
-    println!("-".repeat(60));
+    println!("{}", "-".repeat(60));
     regression_detection(&pipeline).await?;
     println!();
 
     // Example 7: Report generation
     println!("Example 7: Multi-Format Report Generation");
-    println!("-".repeat(60));
+    println!("{}", "-".repeat(60));
     report_generation(&pipeline).await?;
     println!();
 
     // Example 8: Real-time monitoring
     println!("Example 8: Real-Time Performance Monitoring");
-    println!("-".repeat(60));
+    println!("{}", "-".repeat(60));
     realtime_monitoring(&pipeline).await?;
     println!();
 
@@ -116,21 +115,27 @@ async fn basic_profiling_session(pipeline: &Arc<VoirsPipeline>) -> Result<()> {
     }
 
     // End session and get report
-    let session = profiler.end_session(session).await?;
+    let report = profiler.end_session(session).await?;
 
     println!("\nSession Summary:");
-    println!("  Duration: {:.2}ms", session.duration.unwrap().as_millis());
-    println!("  Stages profiled: {}", session.stage_metrics.len());
-    println!("  Memory snapshots: {}", session.memory_snapshots.len());
-    println!("  Bottlenecks detected: {}", session.bottlenecks.len());
+    println!(
+        "  Duration: {:.2}ms",
+        report.session.duration_seconds * 1000.0
+    );
+    println!("  Stages profiled: {}", report.stage_breakdown.len());
+    println!(
+        "  Memory snapshots: {}",
+        report.memory_analysis.is_some() as usize
+    );
+    println!("  Bottlenecks detected: {}", report.bottlenecks.len());
 
     // Display stage metrics
     println!("\nStage Performance:");
-    for (stage_name, metrics) in &session.stage_metrics {
-        println!("  {}: {:.2}ms avg ({} executions)",
-                 stage_name,
-                 metrics.average_duration.as_millis(),
-                 metrics.execution_count);
+    for stage in &report.stage_breakdown {
+        println!(
+            "  {}: {:.2}ms avg ({} executions)",
+            stage.stage_name, stage.avg_duration_ms, stage.execution_count
+        );
     }
 
     Ok(())
@@ -153,27 +158,26 @@ async fn stage_by_stage_analysis(pipeline: &Arc<VoirsPipeline>) -> Result<()> {
     let text = "This is a detailed performance analysis of the synthesis pipeline stages.";
     let _audio = pipeline.synthesize(text).await?;
 
-    let session = profiler.end_session(session).await?;
+    let report = profiler.end_session(session).await?;
 
     println!("Detailed Stage Analysis:\n");
 
     // Sort stages by average duration
-    let mut stages: Vec<_> = session.stage_metrics.iter().collect();
-    stages.sort_by(|a, b| b.1.average_duration.cmp(&a.1.average_duration));
+    let mut stages: Vec<_> = report.stage_breakdown.iter().collect();
+    stages.sort_by(|a, b| {
+        b.avg_duration_ms
+            .partial_cmp(&a.avg_duration_ms)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
-    for (stage_name, metrics) in stages {
-        println!("Stage: {}", stage_name);
-        println!("  Executions: {}", metrics.execution_count);
-        println!("  Average duration: {:.2}ms", metrics.average_duration.as_millis());
-        println!("  Min duration: {:.2}ms", metrics.min_duration.as_millis());
-        println!("  Max duration: {:.2}ms", metrics.max_duration.as_millis());
-        println!("  Total duration: {:.2}ms", metrics.total_duration.as_millis());
-        if let Some(pct) = metrics.percentage_of_total {
-            println!("  Percentage of total: {:.1}%", pct);
-        }
-        if let Some(std_dev) = metrics.std_deviation {
-            println!("  Std deviation: {:.2}ms", std_dev.as_millis());
-        }
+    for stage in stages {
+        println!("Stage: {}", stage.stage_name);
+        println!("  Executions: {}", stage.execution_count);
+        println!("  Average duration: {:.2}ms", stage.avg_duration_ms);
+        println!("  Min duration: {:.2}ms", stage.min_duration_ms);
+        println!("  Max duration: {:.2}ms", stage.max_duration_ms);
+        println!("  Total duration: {:.2}ms", stage.total_duration_ms);
+        println!("  Percentage of total: {:.1}%", stage.percentage_of_total);
         println!();
     }
 
@@ -199,34 +203,25 @@ async fn memory_profiling(pipeline: &Arc<VoirsPipeline>) -> Result<()> {
         let _audio = pipeline.synthesize(&text).await?;
     }
 
-    let session = profiler.end_session(session).await?;
+    let report = profiler.end_session(session).await?;
 
     println!("Memory Profiling Results:\n");
-    println!("Total snapshots: {}", session.memory_snapshots.len());
 
-    if let Some(first) = session.memory_snapshots.first() {
-        if let Some(last) = session.memory_snapshots.last() {
-            let growth = last.total_allocated as i64 - first.total_allocated as i64;
-            let growth_pct = (growth as f64 / first.total_allocated.max(1) as f64) * 100.0;
+    if let Some(memory) = &report.memory_analysis {
+        println!("Peak memory: {:.2} MB", memory.peak_mb);
+        println!("Average memory: {:.2} MB", memory.average_mb);
+        println!("Memory growth: {:+.1}%", memory.growth_percent);
+        println!();
 
-            println!("Initial allocation: {} bytes", first.total_allocated);
-            println!("Final allocation: {} bytes", last.total_allocated);
-            println!("Memory growth: {} bytes ({:+.1}%)", growth, growth_pct);
-            println!();
-
-            if let Some(peak) = session.memory_snapshots.iter()
-                .max_by_key(|s| s.total_allocated) {
-                println!("Peak memory usage: {} bytes", peak.total_allocated);
-            }
-
-            // Check for potential memory leaks
-            if growth_pct > 50.0 {
-                println!("\n⚠️  WARNING: Significant memory growth detected!");
-                println!("   This may indicate a memory leak.");
-            } else {
-                println!("\n✓ Memory usage appears stable.");
-            }
+        // Check for potential memory leaks
+        if memory.growth_percent > 50.0 {
+            println!("WARNING: Significant memory growth detected!");
+            println!("   This may indicate a memory leak.");
+        } else {
+            println!("Memory usage appears stable.");
         }
+    } else {
+        println!("No memory analysis data available.");
     }
 
     Ok(())
@@ -250,21 +245,23 @@ async fn bottleneck_detection(pipeline: &Arc<VoirsPipeline>) -> Result<()> {
     let text = "Testing bottleneck detection in the synthesis pipeline.";
     let _audio = pipeline.synthesize(text).await?;
 
-    let session = profiler.end_session(session).await?;
+    let report = profiler.end_session(session).await?;
 
     println!("Bottleneck Detection Results:\n");
 
-    if session.bottlenecks.is_empty() {
-        println!("✓ No significant bottlenecks detected!");
+    if report.bottlenecks.is_empty() {
+        println!("No significant bottlenecks detected!");
     } else {
-        println!("Found {} potential bottleneck(s):\n", session.bottlenecks.len());
+        println!(
+            "Found {} potential bottleneck(s):\n",
+            report.bottlenecks.len()
+        );
 
-        for (idx, bottleneck) in session.bottlenecks.iter().enumerate() {
+        for (idx, bottleneck) in report.bottlenecks.iter().enumerate() {
             println!("Bottleneck #{}", idx + 1);
             println!("  Component: {}", bottleneck.component);
             println!("  Severity: {:?}", bottleneck.severity);
-            println!("  Description: {}", bottleneck.description);
-            println!("  Impact: {}", bottleneck.impact);
+            println!("  Impact: {}", bottleneck.impact_description);
             if !bottleneck.recommendation.is_empty() {
                 println!("  Recommendation: {}", bottleneck.recommendation);
             }
@@ -285,42 +282,60 @@ async fn performance_comparison(pipeline: &Arc<VoirsPipeline>) -> Result<()> {
     println!("Running baseline session...");
     let session1 = profiler.start_session("baseline").await;
     let _audio1 = pipeline.synthesize("Baseline performance test.").await?;
-    let session1 = profiler.end_session(session1).await?;
-    println!("Baseline duration: {:.2}ms\n",
-             session1.duration.unwrap().as_millis());
+    let report1 = profiler.end_session(session1).await?;
+    println!(
+        "Baseline duration: {:.2}ms\n",
+        report1.session.duration_seconds * 1000.0
+    );
 
     // Session 2: Comparison
     println!("Running comparison session...");
     let session2 = profiler.start_session("comparison").await;
     let _audio2 = pipeline.synthesize("Comparison performance test.").await?;
-    let session2 = profiler.end_session(session2).await?;
-    println!("Comparison duration: {:.2}ms\n",
-             session2.duration.unwrap().as_millis());
+    let report2 = profiler.end_session(session2).await?;
+    println!(
+        "Comparison duration: {:.2}ms\n",
+        report2.session.duration_seconds * 1000.0
+    );
 
-    // Compare sessions
-    let comparator = PerformanceComparator::new();
-    let comparison = comparator.compare(&session1, &session2);
+    // Compare sessions (need ProfileSession, not PerformanceReport)
+    let all_sessions = profiler.get_sessions().await;
+    if all_sessions.len() >= 2 {
+        let comparator = PerformanceComparator::new();
+        let comparison = comparator.compare(&all_sessions[0], &all_sessions[1]).await;
 
-    println!("Performance Comparison:\n");
-    println!("Overall change: {:.1}%", comparison.overall_change_percent);
+        println!("Performance Comparison:\n");
+        println!("Overall change: {:.1}%", comparison.overall_change_percent);
 
-    println!("\nStage-by-Stage Comparison:");
-    for (stage, change) in &comparison.stage_changes {
-        let symbol = if *change > 0.0 { "↑" } else if *change < 0.0 { "↓" } else { "=" };
-        println!("  {}: {}{:.1}%", stage, symbol, change.abs());
-    }
+        println!("\nStage-by-Stage Comparison:");
+        for (stage, stage_cmp) in &comparison.stage_comparisons {
+            let symbol = if stage_cmp.change_percent > 0.0 {
+                "up"
+            } else if stage_cmp.change_percent < 0.0 {
+                "down"
+            } else {
+                "equal"
+            };
+            println!(
+                "  {}: {} {:.1}%",
+                stage,
+                symbol,
+                stage_cmp.change_percent.abs()
+            );
+        }
 
-    if let Some(memory_change) = comparison.memory_change_percent {
-        println!("\nMemory change: {:.1}%", memory_change);
-    }
+        if let Some(memory_cmp) = &comparison.memory_comparison {
+            println!("\nMemory change: {:.1}%", memory_cmp.change_percent);
+        }
 
-    // Check for regressions
-    if comparison.overall_change_percent > 10.0 {
-        println!("\n⚠️  Performance regression detected!");
-    } else if comparison.overall_change_percent < -10.0 {
-        println!("\n✓ Performance improvement detected!");
-    } else {
-        println!("\n✓ Performance is stable.");
+        // Check for regressions
+        if comparison.overall_change_percent > 10.0 {
+            println!("\nPerformance regression detected!");
+        } else if comparison.overall_change_percent < -10.0 {
+            println!("\nPerformance improvement detected!");
+        } else {
+            println!("\nPerformance is stable.");
+        }
     }
 
     Ok(())
@@ -343,14 +358,18 @@ async fn regression_detection(pipeline: &Arc<VoirsPipeline>) -> Result<()> {
         let session = profiler.start_session(&format!("session_{}", i)).await;
         let text = format!("Regression test iteration {}", i);
         let _audio = pipeline.synthesize(&text).await?;
-        let session = profiler.end_session(session).await?;
-        println!("  Session {}: {:.2}ms", i, session.duration.unwrap().as_millis());
+        let report = profiler.end_session(session).await?;
+        println!(
+            "  Session {}: {:.2}ms",
+            i,
+            report.session.duration_seconds * 1000.0
+        );
     }
     println!();
 
     // Detect regressions
-    let detector = RegressionDetector::new(15.0); // 15% threshold
-    let history = profiler.session_history().await;
+    let detector = RegressionDetector::new(15.0, 5); // 15% threshold, 5 history
+    let history = profiler.get_sessions().await;
 
     println!("Regression Detection Results:\n");
 
@@ -360,18 +379,14 @@ async fn regression_detection(pipeline: &Arc<VoirsPipeline>) -> Result<()> {
         let regressions = detector.detect_regressions(&history);
 
         if regressions.is_empty() {
-            println!("✓ No regressions detected!");
+            println!("No regressions detected!");
         } else {
             println!("Found {} regression(s):\n", regressions.len());
 
             for (idx, regression) in regressions.iter().enumerate() {
                 println!("Regression #{}", idx + 1);
                 println!("  Description: {}", regression.description);
-                println!("  Severity: {:?}", regression.severity);
-                println!("  Change: {:.1}%", regression.change_percent);
-                if !regression.affected_components.is_empty() {
-                    println!("  Affected: {:?}", regression.affected_components);
-                }
+                println!("  Severity: {}", regression.severity);
                 println!();
             }
         }
@@ -391,27 +406,28 @@ async fn report_generation(pipeline: &Arc<VoirsPipeline>) -> Result<()> {
     let text = "Generating comprehensive performance reports.";
     let _audio = pipeline.synthesize(text).await?;
 
-    let session = profiler.end_session(session).await?;
+    let prof_session = session.clone();
+    let report = profiler.end_session(session).await?;
 
-    // Create report generator
-    let generator = ReportGenerator::new();
+    // Display the report summary
+    println!("=== Performance Report ===");
+    println!("{}", report.summary());
+    println!();
 
-    // Generate text report
-    println!("=== Text Format Report ===");
-    let text_report = generator.generate(&session, ReportFormat::Text)?;
-    println!("{}\n", text_report);
+    // Use report generator for detailed output
+    let generator = ReportGenerator::new(ProfilerConfig::default());
+    let detailed_report = generator.generate(&prof_session, None).await?;
 
-    // Generate markdown report (first 500 chars)
-    println!("=== Markdown Format Report (preview) ===");
-    let markdown_report = generator.generate(&session, ReportFormat::Markdown)?;
-    println!("{}...\n", &markdown_report[..markdown_report.len().min(500)]);
+    println!(
+        "=== Detailed Report (JSON preview) ===\n{}\n",
+        serde_json::to_string_pretty(&detailed_report)
+            .unwrap_or_default()
+            .chars()
+            .take(300)
+            .collect::<String>()
+    );
 
-    // Generate JSON report (first 300 chars)
-    println!("=== JSON Format Report (preview) ===");
-    let json_report = generator.generate(&session, ReportFormat::Json)?;
-    println!("{}...\n", &json_report[..json_report.len().min(300)]);
-
-    println!("✓ Reports generated successfully in all formats!");
+    println!("Reports generated successfully!");
 
     Ok(())
 }
@@ -443,22 +459,28 @@ async fn realtime_monitoring(pipeline: &Arc<VoirsPipeline>) -> Result<()> {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
-    let session = profiler.end_session(session).await?;
+    let report = profiler.end_session(session).await?;
 
     println!("\nReal-Time Monitoring Summary:");
-    println!("  Total duration: {:.2}ms", session.duration.unwrap().as_millis());
-    println!("  Memory snapshots: {}", session.memory_snapshots.len());
-    println!("  Stages tracked: {}", session.stage_metrics.len());
+    println!(
+        "  Total duration: {:.2}ms",
+        report.session.duration_seconds * 1000.0
+    );
+    println!(
+        "  Memory analysis: {}",
+        if report.memory_analysis.is_some() {
+            "available"
+        } else {
+            "not available"
+        }
+    );
+    println!("  Stages tracked: {}", report.stage_breakdown.len());
 
-    // Display memory timeline
-    if !session.memory_snapshots.is_empty() {
-        println!("\nMemory Usage Timeline:");
-        for (idx, snapshot) in session.memory_snapshots.iter().enumerate().take(10) {
-            println!("  Snapshot {}: {} bytes", idx + 1, snapshot.total_allocated);
-        }
-        if session.memory_snapshots.len() > 10 {
-            println!("  ... ({} more snapshots)", session.memory_snapshots.len() - 10);
-        }
+    // Display memory analysis if available
+    if let Some(memory) = &report.memory_analysis {
+        println!("\nMemory Usage Summary:");
+        println!("  Peak: {:.2} MB", memory.peak_mb);
+        println!("  Average: {:.2} MB", memory.average_mb);
     }
 
     Ok(())

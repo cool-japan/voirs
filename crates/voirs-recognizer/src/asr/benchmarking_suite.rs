@@ -1221,7 +1221,14 @@ mod tests {
 
         validator.add_requirement(new_requirement);
         assert_eq!(validator.requirements.len(), initial_count + 1);
-        assert_eq!(validator.requirements.last().unwrap().id, "additional_test");
+        assert_eq!(
+            validator
+                .requirements
+                .last()
+                .expect("collection should not be empty")
+                .id,
+            "additional_test"
+        );
     }
 
     #[tokio::test]

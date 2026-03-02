@@ -78,7 +78,7 @@ impl MfccFeatureComputer for crate::analysis::features::FeatureExtractor {
         // Apply mel filterbank to each frame
         for frame_idx in 0..n_frames {
             let frame = power_spectrogram.row(frame_idx);
-            let mel_frame = self.mel_filterbank.apply(frame.as_slice().unwrap());
+            let mel_frame = self.mel_filterbank.apply(frame.as_slice().expect("row should be contiguous"));
             
             // Raise to power
             for (mel_idx, &mel_value) in mel_frame.iter().enumerate() {

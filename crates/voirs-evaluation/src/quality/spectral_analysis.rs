@@ -864,7 +864,10 @@ impl SpectralAnalyzer {
         }
 
         // Get or create FFT for this size
-        let mut planner = self.fft_planner.lock().unwrap();
+        let mut planner = self
+            .fft_planner
+            .lock()
+            .expect("lock should not be poisoned");
         let fft = planner.plan_fft_forward(n);
 
         // Prepare input buffer

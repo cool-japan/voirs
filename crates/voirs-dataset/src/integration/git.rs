@@ -509,7 +509,7 @@ impl GitRepositoryImpl {
                     chrono::DateTime::parse_from_rfc2822(date_line.trim_start_matches("Date: "))
                         .unwrap_or_else(|_| {
                             chrono::DateTime::parse_from_rfc2822("Mon, 1 Jan 2000 00:00:00 +0000")
-                                .unwrap()
+                                .expect("hardcoded date literal is valid RFC2822")
                         })
                         .with_timezone(&chrono::Utc)
                 } else {

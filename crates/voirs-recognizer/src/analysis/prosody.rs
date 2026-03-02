@@ -216,7 +216,7 @@ impl ProsodyAnalyzer {
             let mut window: Vec<f32> = contour[start..end].to_vec();
             window.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-            let median = if window.len() % 2 == 0 {
+            let median = if window.len().is_multiple_of(2) {
                 (window[window.len() / 2 - 1] + window[window.len() / 2]) / 2.0
             } else {
                 window[window.len() / 2]

@@ -17,9 +17,9 @@ impl SynthesisProgress {
             ProgressStyle::with_template(
                 "{spinner:.green} [{elapsed_precise}] [{bar:.cyan/blue}] {pos}/{len} {msg}",
             )
-            .unwrap()
+            .expect("progress template is valid")
             .with_key("eta", |state: &ProgressState, w: &mut dyn Write| {
-                write!(w, "{:.1}s", state.eta().as_secs_f64()).unwrap()
+                let _ = write!(w, "{:.1}s", state.eta().as_secs_f64());
             })
             .progress_chars("#>-"),
         );
@@ -59,7 +59,7 @@ impl DownloadProgress {
             ProgressStyle::with_template(
                 "{spinner:.green} [{elapsed_precise}] [{bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta}) {msg}"
             )
-            .unwrap()
+            .expect("progress template is valid")
             .progress_chars("#>-")
         );
         bar.set_message(format!("Downloading {}", filename));
@@ -92,7 +92,7 @@ impl BatchProgress {
             ProgressStyle::with_template(
                 "{spinner:.green} [{elapsed_precise}] [{bar:.cyan/blue}] {pos}/{len} ({per_sec}) {msg}"
             )
-            .unwrap()
+            .expect("progress template is valid")
             .progress_chars("#>-")
         );
         bar.set_message(format!("Processing {} items...", operation));
@@ -145,7 +145,7 @@ impl Spinner {
         bar.enable_steady_tick(Duration::from_millis(120));
         bar.set_style(
             ProgressStyle::with_template("{spinner:.blue} {msg}")
-                .unwrap()
+                .expect("progress template is valid")
                 .tick_strings(&[
                     "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█", "▇", "▆", "▅", "▄", "▃", "▂", "▁",
                 ]),
@@ -174,7 +174,7 @@ pub fn create_file_progress(total_files: usize, operation: &str) -> ProgressBar 
             "{{spinner:.green}} {} [{{bar:.cyan/blue}}] {{pos}}/{{len}} {{msg}}",
             operation
         ))
-        .unwrap()
+        .expect("progress template is valid")
         .progress_chars("#>-"),
     );
     bar

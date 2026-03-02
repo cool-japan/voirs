@@ -138,7 +138,10 @@ impl ReferenceTracker {
                     self.dfs_cycles(dep, visited, rec_stack, path, cycles);
                 } else if rec_stack.contains(&dep) {
                     // Found a cycle
-                    let cycle_start = path.iter().position(|&x| x == dep).unwrap();
+                    let cycle_start = path
+                        .iter()
+                        .position(|&x| x == dep)
+                        .expect("dep was found in rec_stack so it must be in path");
                     cycles.push(path[cycle_start..].to_vec());
                 }
             }
@@ -553,7 +556,7 @@ mod tests {
             .collect();
 
         for handle in handles {
-            handle.join().unwrap();
+            handle.join().expect("thread should not panic");
         }
 
         assert_eq!(rc.strong_count(), 1);

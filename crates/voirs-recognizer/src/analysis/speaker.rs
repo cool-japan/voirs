@@ -768,7 +768,7 @@ impl SpeakerAnalyzer {
             let amplitude = frame
                 .iter()
                 .map(|x| x.abs())
-                .max_by(|a, b| a.partial_cmp(b).unwrap())
+                .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                 .unwrap_or(0.0);
             amplitudes.push(amplitude);
             pos += self.hop_size;

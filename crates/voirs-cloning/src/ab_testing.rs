@@ -358,7 +358,7 @@ impl ABTestingFramework {
 
         // Create ranking based on scores
         let mut ranked_conditions: Vec<_> = comparison_results.condition_scores.iter().collect();
-        ranked_conditions.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
+        ranked_conditions.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
         comparison_results.ranking = ranked_conditions
             .into_iter()
             .map(|(id, _)| id.clone())

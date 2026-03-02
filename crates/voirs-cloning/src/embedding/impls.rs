@@ -440,7 +440,11 @@ impl SpeakerEmbeddingExtractor {
 
         // Sort samples by quality feedback (highest first)
         let mut sorted_samples: Vec<_> = refinement_samples.iter().enumerate().collect();
-        sorted_samples.sort_by(|a, b| b.1 .1.partial_cmp(&a.1 .1).unwrap());
+        sorted_samples.sort_by(|a, b| {
+            b.1 .1
+                .partial_cmp(&a.1 .1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         for (iteration, (idx, (sample, quality_feedback))) in sorted_samples.iter().enumerate() {
             let iteration_start = std::time::Instant::now();
@@ -569,7 +573,7 @@ impl SpeakerEmbeddingExtractor {
             return 0.0;
         }
 
-        energies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        energies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let percentile_50 = energies[energies.len() / 2];
         percentile_50 * 2.0 // Simple threshold
     }
@@ -678,8 +682,12 @@ impl SpeakerEmbeddingExtractor {
         for i in 0..feature_dim {
             let column = features.column(i);
             if let (Some(&min_val), Some(&max_val)) = (
-                column.iter().min_by(|a, b| a.partial_cmp(b).unwrap()),
-                column.iter().max_by(|a, b| a.partial_cmp(b).unwrap()),
+                column
+                    .iter()
+                    .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)),
+                column
+                    .iter()
+                    .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)),
             ) {
                 let min_idx = feature_dim * 2 + i;
                 let max_idx = feature_dim * 3 + i;
@@ -1210,7 +1218,11 @@ impl SpeakerEmbeddingExtractor {
         }
 
         // Sort by similarity (highest first)
-        matches.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap());
+        matches.sort_by(|a, b| {
+            b.similarity
+                .partial_cmp(&a.similarity)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         Ok(matches)
     }

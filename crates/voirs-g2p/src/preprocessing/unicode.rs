@@ -42,7 +42,7 @@ fn clean_text(text: &str) -> Result<String> {
 /// Check if a grapheme is valid for text processing
 fn is_valid_text_char(grapheme: &str) -> bool {
     if grapheme.len() == 1 {
-        let ch = grapheme.chars().next().unwrap();
+        let ch = grapheme.chars().next().expect("grapheme has len == 1");
         ch.is_alphabetic()
             || ch.is_numeric()
             || ch.is_whitespace()

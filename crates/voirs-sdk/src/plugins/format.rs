@@ -368,7 +368,9 @@ impl FormatPlugin for CodecIntegration {
 
     fn validate_data(&self, data: &[u8]) -> bool {
         data.len() >= 4
-            && (data.len().is_multiple_of(4) || data.starts_with(b"MP3_SIM") || data.starts_with(b"OGG_SIM"))
+            && (data.len().is_multiple_of(4)
+                || data.starts_with(b"MP3_SIM")
+                || data.starts_with(b"OGG_SIM"))
     }
 }
 

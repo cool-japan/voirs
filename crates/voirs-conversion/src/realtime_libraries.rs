@@ -536,7 +536,9 @@ impl RealtimeLibraryManager {
             match capabilities {
                 caps if std::ptr::eq(
                     caps,
-                    self.backend_capabilities.get(&AudioBackend::JACK).unwrap(),
+                    self.backend_capabilities
+                        .get(&AudioBackend::JACK)
+                        .expect("operation should succeed"),
                 ) =>
                 {
                     score += 10.0
@@ -553,7 +555,7 @@ impl RealtimeLibraryManager {
                     caps,
                     self.backend_capabilities
                         .get(&AudioBackend::CoreAudio)
-                        .unwrap(),
+                        .expect("operation should succeed"),
                 ) =>
                 {
                     score += 10.0
@@ -567,7 +569,10 @@ impl RealtimeLibraryManager {
             // Prefer ASIO on Windows
             match capabilities {
                 caps if caps as *const _
-                    == self.backend_capabilities.get(&AudioBackend::ASIO).unwrap() as *const _ =>
+                    == self
+                        .backend_capabilities
+                        .get(&AudioBackend::ASIO)
+                        .expect("operation should succeed") as *const _ =>
                 {
                     score += 10.0
                 }

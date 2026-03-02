@@ -318,7 +318,10 @@ mod tests {
 
         let fixes = get_quick_fixes(error, range);
         assert!(!fixes.is_empty());
-        assert_eq!(fixes[0]["title"].as_str().unwrap(), "Close <speak> tag");
+        assert_eq!(
+            fixes[0]["title"].as_str().unwrap_or_default(),
+            "Close <speak> tag"
+        );
     }
 
     #[test]
@@ -339,7 +342,7 @@ mod tests {
     fn test_create_insert_action() {
         let action = create_insert_action("Test insert", Position::new(5, 10), "test text");
 
-        assert_eq!(action["title"].as_str().unwrap(), "Test insert");
+        assert_eq!(action["title"].as_str().unwrap_or_default(), "Test insert");
         assert_eq!(
             action["edit"]["changes"]["document"][0]["newText"]
                 .as_str()

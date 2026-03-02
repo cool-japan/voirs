@@ -480,7 +480,7 @@ impl ErrorRecoveryManager {
             a.priority.cmp(&b.priority).then_with(|| {
                 b.success_probability
                     .partial_cmp(&a.success_probability)
-                    .unwrap()
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
         });
 

@@ -452,11 +452,15 @@ impl DashboardConfig {
                     );
                     config.insert(
                         "warning_threshold".to_string(),
-                        serde_json::Value::Number(serde_json::Number::from_f64(0.7).unwrap()),
+                        serde_json::Value::Number(
+                            serde_json::Number::from_f64(0.7).expect("0.7 is a valid f64"),
+                        ),
                     );
                     config.insert(
                         "critical_threshold".to_string(),
-                        serde_json::Value::Number(serde_json::Number::from_f64(0.5).unwrap()),
+                        serde_json::Value::Number(
+                            serde_json::Number::from_f64(0.5).expect("0.5 is a valid f64"),
+                        ),
                     );
                     config
                 },
@@ -563,7 +567,7 @@ impl QualityVisualization {
 
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("SystemTime should be after UNIX_EPOCH")
             .as_secs();
 
         // Assess quality metrics
@@ -649,7 +653,7 @@ impl QualityVisualization {
         timestamp: u64,
         label: Option<String>,
     ) {
-        let mut metrics = self.metrics.write().unwrap();
+        let mut metrics = self.metrics.write().expect("lock should not be poisoned");
 
         let data_point = DataPoint {
             timestamp,
@@ -775,8 +779,8 @@ impl QualityVisualization {
 
     /// Check quality thresholds and generate alerts
     async fn check_thresholds(&self) -> Result<()> {
-        let metrics = self.metrics.read().unwrap();
-        let mut alerts = self.alerts.write().unwrap();
+        let metrics = self.metrics.read().expect("lock should not be poisoned");
+        let mut alerts = self.alerts.write().expect("lock should not be poisoned");
 
         for threshold in &self.config.quality_thresholds {
             if !threshold.enabled {
@@ -817,7 +821,7 @@ impl QualityVisualization {
                             threshold.id,
                             SystemTime::now()
                                 .duration_since(UNIX_EPOCH)
-                                .unwrap()
+                                .expect("SystemTime should be after UNIX_EPOCH")
                                 .as_secs()
                         ),
                         level: AlertLevel::Critical,
@@ -878,7 +882,7 @@ impl QualityVisualization {
         metric_id: &str,
         time_window: &TimeWindow,
     ) -> Result<Vec<DataPoint>> {
-        let metrics = self.metrics.read().unwrap();
+        let metrics = self.metrics.read().expect("lock should not be poisoned");
 
         if let Some(metric) = metrics.get(metric_id) {
             let (start_time, end_time) = self.get_time_range(time_window);
@@ -923,13 +927,13 @@ impl QualityVisualization {
 
     /// Get all active alerts
     pub async fn get_alerts(&self) -> Vec<QualityAlert> {
-        let alerts = self.alerts.read().unwrap();
+        let alerts = self.alerts.read().expect("lock should not be poisoned");
         alerts.clone()
     }
 
     /// Acknowledge alert
     pub async fn acknowledge_alert(&self, alert_id: &str) -> Result<()> {
-        let mut alerts = self.alerts.write().unwrap();
+        let mut alerts = self.alerts.write().expect("lock should not be poisoned");
 
         if let Some(alert) = alerts.iter_mut().find(|a| a.id == alert_id) {
             alert.acknowledged = true;
@@ -995,8 +999,8 @@ impl QualityVisualization {
 
     /// Export dashboard data to JSON
     pub async fn export_data(&self, time_window: &TimeWindow) -> Result<serde_json::Value> {
-        let metrics = self.metrics.read().unwrap();
-        let alerts = self.alerts.read().unwrap();
+        let metrics = self.metrics.read().expect("lock should not be poisoned");
+        let alerts = self.alerts.read().expect("lock should not be poisoned");
 
         let mut export_data = HashMap::new();
 

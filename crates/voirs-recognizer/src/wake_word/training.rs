@@ -344,7 +344,7 @@ impl WakeWordTrainerImpl {
 
         let start_time = Instant::now();
         {
-            let mut stats = self.stats.lock().unwrap();
+            let mut stats = self.stats.lock().expect("lock should not be poisoned");
             stats.start_time = Some(start_time);
         }
 
@@ -360,7 +360,7 @@ impl WakeWordTrainerImpl {
 
             // Update statistics
             {
-                let mut stats = self.stats.lock().unwrap();
+                let mut stats = self.stats.lock().expect("lock should not be poisoned");
                 stats.loss_history.push(loss);
                 stats.accuracy_history.push(accuracy);
 
@@ -391,7 +391,7 @@ impl WakeWordTrainerImpl {
 
             // Check for early stopping
             if epoch > self.config.early_stopping_patience {
-                let stats = self.stats.lock().unwrap();
+                let stats = self.stats.lock().expect("lock should not be poisoned");
                 let recent_losses = &stats.loss_history[stats
                     .loss_history
                     .len()
@@ -413,7 +413,7 @@ impl WakeWordTrainerImpl {
 
         // Complete training
         {
-            let mut stats = self.stats.lock().unwrap();
+            let mut stats = self.stats.lock().expect("lock should not be poisoned");
             stats.end_time = Some(Instant::now());
         }
 

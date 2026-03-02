@@ -219,7 +219,7 @@ impl LoudnessProcessor {
             return 0.0;
         }
 
-        chunk_loudnesses.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        chunk_loudnesses.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let len = chunk_loudnesses.len();
         let p95 = chunk_loudnesses[(len as f32 * 0.95) as usize];
         let p10 = chunk_loudnesses[(len as f32 * 0.10) as usize];
@@ -360,7 +360,7 @@ impl DynamicsProcessor {
             return 0.0;
         }
 
-        rms_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        rms_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let len = rms_values.len();
         let p95 = rms_values[(len as f32 * 0.95) as usize];
         let p5 = rms_values[(len as f32 * 0.05) as usize];
@@ -569,7 +569,7 @@ impl NoiseGate {
             return -60.0;
         }
 
-        rms_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        rms_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         rms_values[(rms_values.len() as f32 * 0.1) as usize]
     }
 

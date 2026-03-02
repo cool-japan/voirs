@@ -539,6 +539,6 @@ mod tests {
         let config = UnifiedVoirsConfig::default();
         assert_eq!(config.global.default_language, LanguageCode::EnUs);
         assert_eq!(config.performance.max_memory_mb, 2048.0);
-        assert_eq!(config.integration.coordination.enabled, true);
+        assert!(config.integration.coordination.enabled);
     }
 }

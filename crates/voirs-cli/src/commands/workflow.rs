@@ -142,7 +142,7 @@ pub async fn run_workflow_execute(
     // Determine state directory
     let state_dir = state_dir.unwrap_or_else(|| {
         std::env::current_dir()
-            .unwrap()
+            .expect("current dir should be accessible")
             .join(".voirs")
             .join("workflow_state")
     });
@@ -285,7 +285,7 @@ pub async fn run_workflow_list(registry_dir: Option<PathBuf>, detailed: bool) ->
     // Determine registry directory
     let registry_dir = registry_dir.unwrap_or_else(|| {
         std::env::current_dir()
-            .unwrap()
+            .expect("current dir should be accessible")
             .join(".voirs")
             .join("workflows")
     });
@@ -334,7 +334,7 @@ pub async fn run_workflow_status(
     // Determine state directory
     let state_dir = state_dir.unwrap_or_else(|| {
         std::env::current_dir()
-            .unwrap()
+            .expect("current dir should be accessible")
             .join(".voirs")
             .join("workflow_state")
     });
@@ -417,7 +417,7 @@ pub async fn run_workflow_resume(
     // Determine state directory
     let state_dir = state_dir.unwrap_or_else(|| {
         std::env::current_dir()
-            .unwrap()
+            .expect("current dir should be accessible")
             .join(".voirs")
             .join("workflow_state")
     });
@@ -465,7 +465,7 @@ pub async fn run_workflow_stop(
     // Determine state directory
     let state_dir = state_dir.unwrap_or_else(|| {
         std::env::current_dir()
-            .unwrap()
+            .expect("current dir should be accessible")
             .join(".voirs")
             .join("workflow_state")
     });

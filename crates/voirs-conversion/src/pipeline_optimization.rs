@@ -751,13 +751,19 @@ impl OptimizedPipeline {
 
         // Get current system resources
         let system_resources = {
-            let resource_manager = self.resource_manager.read().unwrap();
+            let resource_manager = self
+                .resource_manager
+                .read()
+                .expect("lock should not be poisoned");
             resource_manager.system_resources.clone()
         };
 
         // Select optimal algorithm
         let selected_algorithm = if self.config.enable_adaptive_algorithms {
-            let selector = self.algorithm_selector.read().unwrap();
+            let selector = self
+                .algorithm_selector
+                .read()
+                .expect("lock should not be poisoned");
             selector.select_optimal_algorithm(
                 &request.conversion_type,
                 &system_resources,
@@ -769,7 +775,10 @@ impl OptimizedPipeline {
 
         // Generate optimized processing plan
         let processing_plan = {
-            let engine = self.optimization_engine.read().unwrap();
+            let engine = self
+                .optimization_engine
+                .read()
+                .expect("lock should not be poisoned");
             engine.generate_processing_plan(
                 request,
                 &selected_algorithm,
@@ -818,7 +827,10 @@ impl OptimizedPipeline {
 
     /// Get optimization statistics
     pub fn get_optimization_statistics(&self) -> OptimizationStatistics {
-        let engine = self.optimization_engine.read().unwrap();
+        let engine = self
+            .optimization_engine
+            .read()
+            .expect("lock should not be poisoned");
         engine.optimization_stats.clone()
     }
 
@@ -880,7 +892,7 @@ impl OptimizedPipeline {
 
             // Record performance if profiling enabled
             if let Some(ref profiler) = profiler {
-                let mut prof = profiler.lock().unwrap();
+                let mut prof = profiler.lock().expect("lock should not be poisoned");
                 prof.record_stage_performance(&stage.name, stage_time);
             }
         }

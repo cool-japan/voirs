@@ -920,7 +920,7 @@ impl Plugin for UtilityExtensionPlugin {
                     PluginError::ExecutionFailed("Missing 'key' argument".to_string())
                 })?;
 
-                let cache = self.cache.lock().unwrap();
+                let cache = self.cache.lock().expect("lock should not be poisoned");
                 Ok(serde_json::json!({
                     "value": cache.get(key).cloned(),
                     "exists": cache.contains_key(key)
@@ -934,7 +934,7 @@ impl Plugin for UtilityExtensionPlugin {
                     PluginError::ExecutionFailed("Missing 'value' argument".to_string())
                 })?;
 
-                let mut cache = self.cache.lock().unwrap();
+                let mut cache = self.cache.lock().expect("lock should not be poisoned");
                 cache.insert(key.to_string(), value.clone());
                 Ok(serde_json::json!({
                     "success": true,
@@ -942,7 +942,7 @@ impl Plugin for UtilityExtensionPlugin {
                 }))
             }
             "cache_clear" => {
-                let mut cache = self.cache.lock().unwrap();
+                let mut cache = self.cache.lock().expect("lock should not be poisoned");
                 let count = cache.len();
                 cache.clear();
                 Ok(serde_json::json!({

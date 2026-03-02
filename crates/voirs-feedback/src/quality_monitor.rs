@@ -560,8 +560,8 @@ impl QualityMonitor {
             std::env::var("ALERT_EMAIL").unwrap_or_else(|_| "admin@voirs.ai".to_string());
 
         let email_result = Message::builder()
-            .from(smtp_username.parse().unwrap_or_else(|_| "noreply@voirs.ai".parse().unwrap()))
-            .to(recipient.parse().unwrap_or_else(|_| "admin@voirs.ai".parse().unwrap()))
+            .from(smtp_username.parse().unwrap_or_else(|_| "noreply@voirs.ai".parse().expect("parse should succeed")))
+            .to(recipient.parse().unwrap_or_else(|_| "admin@voirs.ai".parse().expect("parse should succeed")))
             .subject(format!("VoiRS Quality Alert: {}", alert.title))
             .body(format!(
                 "Quality Alert Details:\n\nTitle: {}\nMessage: {}\nSeverity: {:?}\nTimestamp: {}\nMetric: {}\nCurrent Value: {}\nThreshold: {}",

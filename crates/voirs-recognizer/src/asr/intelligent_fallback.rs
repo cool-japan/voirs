@@ -549,7 +549,7 @@ impl IntelligentASRFallback {
         // Select highest scoring model
         let best_model = model_scores
             .iter()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map_or_else(
                 || self.backend_to_key(&self.config.primary_backend),
                 |(k, _)| k.clone(),
@@ -575,7 +575,9 @@ impl IntelligentASRFallback {
                 let a_time = a.1.average_processing_time * a_warmup_factor;
                 let b_time = b.1.average_processing_time * b_warmup_factor;
 
-                a_time.partial_cmp(&b_time).unwrap()
+                a_time
+                    .partial_cmp(&b_time)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
             .map_or_else(
                 || self.backend_to_key(&self.config.primary_backend),
@@ -621,7 +623,7 @@ impl IntelligentASRFallback {
         }
 
         let mut abs_samples: Vec<f32> = samples.iter().map(|&x| x.abs()).collect();
-        abs_samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        abs_samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         // Use 10th percentile as noise floor estimate
         let percentile_index = (abs_samples.len() as f32 * 0.1) as usize;
@@ -921,7 +923,9 @@ impl IntelligentASRFallback {
                     tracing::debug!(
                         "Model error from {}: {}, trying fallback",
                         model_key,
-                        last_error.as_ref().unwrap()
+                        last_error
+                            .as_ref()
+                            .expect("last_error was just set to Some")
                     );
                 }
                 Err(_timeout) => {

@@ -432,7 +432,7 @@ impl EvaluationApiService {
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("value should be present")
             .as_secs();
         format!("req_{}_{}", timestamp, counter)
     }
@@ -454,7 +454,7 @@ impl EvaluationApiService {
         // Validate timestamp (should be within 5 minutes)
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("value should be present")
             .as_secs();
 
         let time_diff = current_time.saturating_sub(auth.timestamp);
@@ -563,7 +563,10 @@ impl EvaluationApiService {
 
     /// Check rate limiting for user
     pub fn check_rate_limit(&self, user_id: &str) -> Result<(), ApiError> {
-        let mut rate_limiter = self.rate_limiter.lock().unwrap();
+        let mut rate_limiter = self
+            .rate_limiter
+            .lock()
+            .expect("lock should not be poisoned");
         let now = std::time::Instant::now();
 
         let state = rate_limiter
@@ -945,7 +948,7 @@ impl EvaluationApiService {
                 "status": "healthy",
                 "timestamp": std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
+                    .expect("value should be present")
                     .as_secs()
             }))
         });

@@ -75,7 +75,10 @@ impl LatencyOptimizer {
 
     /// Record processing time for a chunk
     pub fn record_processing_time(&self, processing_time_ms: f32) {
-        let mut times = self.processing_times.write().unwrap();
+        let mut times = self
+            .processing_times
+            .write()
+            .expect("lock should not be poisoned");
         times.push_back(processing_time_ms);
 
         // Keep only recent measurements
@@ -89,7 +92,10 @@ impl LatencyOptimizer {
 
     /// Record latency measurement
     pub fn record_latency(&self, latency_ms: f32) {
-        let mut latencies = self.latency_history.write().unwrap();
+        let mut latencies = self
+            .latency_history
+            .write()
+            .expect("lock should not be poisoned");
         latencies.push_back(latency_ms);
 
         // Keep only recent measurements
@@ -101,7 +107,7 @@ impl LatencyOptimizer {
         self.update_latency_stats();
 
         // Check for deadline miss
-        let config = self.config.read().unwrap();
+        let config = self.config.read().expect("lock should not be poisoned");
         if latency_ms > config.max_latency_ms {
             if let Ok(mut stats) = self.stats.write() {
                 stats.deadline_misses += 1;
@@ -111,30 +117,42 @@ impl LatencyOptimizer {
 
     /// Get optimal chunk size for current conditions
     pub fn get_optimal_chunk_size(&self) -> usize {
-        let config = self.config.read().unwrap();
+        let config = self.config.read().expect("lock should not be poisoned");
 
         if !config.enable_adaptive_chunking {
             return config.chunk_size;
         }
 
         // Check if enough data for optimization
-        let processing_times = self.processing_times.read().unwrap();
+        let processing_times = self
+            .processing_times
+            .read()
+            .expect("lock should not be poisoned");
         if processing_times.len() < 10 {
             return config.chunk_size;
         }
 
         // Check optimization interval
         let now = Instant::now();
-        let last_opt = *self.last_optimization.read().unwrap();
+        let last_opt = *self
+            .last_optimization
+            .read()
+            .expect("lock should not be poisoned");
         if now.duration_since(last_opt) < Duration::from_millis(500) {
-            return *self.current_chunk_size.read().unwrap();
+            return *self
+                .current_chunk_size
+                .read()
+                .expect("lock should not be poisoned");
         }
 
         // Calculate optimal chunk size
         let optimal_size = self.calculate_optimal_chunk_size();
 
         // Update if changed
-        let mut current_size = self.current_chunk_size.write().unwrap();
+        let mut current_size = self
+            .current_chunk_size
+            .write()
+            .expect("lock should not be poisoned");
         if optimal_size != *current_size {
             *current_size = optimal_size;
             if let Ok(mut stats) = self.stats.write() {
@@ -144,18 +162,27 @@ impl LatencyOptimizer {
             tracing::debug!("Adapted chunk size to {}", optimal_size);
         }
 
-        *self.last_optimization.write().unwrap() = now;
+        *self
+            .last_optimization
+            .write()
+            .expect("lock should not be poisoned") = now;
         optimal_size
     }
 
     /// Calculate optimal chunk size based on performance data
     fn calculate_optimal_chunk_size(&self) -> usize {
-        let config = self.config.read().unwrap();
-        let processing_times = self.processing_times.read().unwrap();
+        let config = self.config.read().expect("lock should not be poisoned");
+        let processing_times = self
+            .processing_times
+            .read()
+            .expect("lock should not be poisoned");
 
         // Calculate average processing time per sample
         let avg_time: f32 = processing_times.iter().sum::<f32>() / processing_times.len() as f32;
-        let current_chunk_size = *self.current_chunk_size.read().unwrap();
+        let current_chunk_size = *self
+            .current_chunk_size
+            .read()
+            .expect("lock should not be poisoned");
         let time_per_sample = avg_time / current_chunk_size as f32;
 
         // Target processing time based on latency mode
@@ -177,7 +204,10 @@ impl LatencyOptimizer {
 
     /// Update processing time statistics
     fn update_processing_stats(&self) {
-        let times = self.processing_times.read().unwrap();
+        let times = self
+            .processing_times
+            .read()
+            .expect("lock should not be poisoned");
         if times.is_empty() {
             return;
         }
@@ -197,7 +227,10 @@ impl LatencyOptimizer {
 
     /// Update latency statistics
     fn update_latency_stats(&self) {
-        let latencies = self.latency_history.read().unwrap();
+        let latencies = self
+            .latency_history
+            .read()
+            .expect("lock should not be poisoned");
         if latencies.is_empty() {
             return;
         }
@@ -224,13 +257,16 @@ impl LatencyOptimizer {
 
     /// Get current latency statistics
     pub fn get_stats(&self) -> LatencyStats {
-        self.stats.read().unwrap().clone()
+        self.stats
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Check if latency constraints are being met
     pub fn is_meeting_constraints(&self) -> bool {
         let stats = self.get_stats();
-        let config = self.config.read().unwrap();
+        let config = self.config.read().expect("lock should not be poisoned");
 
         stats.avg_latency <= config.target_latency_ms
             && stats.peak_latency <= config.max_latency_ms
@@ -240,7 +276,7 @@ impl LatencyOptimizer {
     /// Get performance health score (0.0-1.0)
     pub fn get_health_score(&self) -> f32 {
         let stats = self.get_stats();
-        let config = self.config.read().unwrap();
+        let config = self.config.read().expect("lock should not be poisoned");
 
         // Latency score
         let latency_score = if stats.avg_latency <= config.target_latency_ms {
@@ -321,7 +357,10 @@ impl PredictiveProcessor {
             return;
         }
 
-        let mut buffer = self.lookahead_buffer.write().unwrap();
+        let mut buffer = self
+            .lookahead_buffer
+            .write()
+            .expect("lock should not be poisoned");
         buffer.push_back(mel);
 
         // Keep buffer size manageable
@@ -337,7 +376,10 @@ impl PredictiveProcessor {
             return None;
         }
 
-        let buffer = self.lookahead_buffer.read().unwrap();
+        let buffer = self
+            .lookahead_buffer
+            .read()
+            .expect("lock should not be poisoned");
         if buffer.len() < 2 {
             return None;
         }
@@ -399,7 +441,10 @@ impl PredictiveProcessor {
 
     /// Get prediction statistics
     pub fn get_stats(&self) -> PredictionStats {
-        self.stats.read().unwrap().clone()
+        self.stats
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Check if prediction is beneficial

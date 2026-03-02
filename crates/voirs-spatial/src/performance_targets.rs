@@ -325,7 +325,10 @@ impl PerformanceTargetValidator {
         &mut self,
         processor: &mut SpatialProcessor,
     ) -> Result<PerformanceValidationResult> {
-        let config = self.test_configs.get(&TargetCategory::Latency).unwrap();
+        let config = self
+            .test_configs
+            .get(&TargetCategory::Latency)
+            .expect("Latency test config must be present");
         let mut latency_samples = Vec::new();
 
         // Warm up
@@ -348,7 +351,7 @@ impl PerformanceTargetValidator {
         }
 
         // Calculate statistics
-        latency_samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        latency_samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let count = latency_samples.len();
         let average = latency_samples.iter().sum::<f64>() / count as f64;
         let min = latency_samples[0];
@@ -488,7 +491,10 @@ impl PerformanceTargetValidator {
         &mut self,
         processor: &mut SpatialProcessor,
     ) -> Result<PerformanceValidationResult> {
-        let config = self.test_configs.get(&TargetCategory::Quality).unwrap();
+        let config = self
+            .test_configs
+            .get(&TargetCategory::Quality)
+            .expect("Quality test config must be present");
 
         // Simulate quality measurements
         // In a real implementation, this would involve human perception tests
@@ -600,7 +606,10 @@ impl PerformanceTargetValidator {
         &mut self,
         processor: &mut SpatialProcessor,
     ) -> Result<PerformanceValidationResult> {
-        let config = self.test_configs.get(&TargetCategory::Scalability).unwrap();
+        let config = self
+            .test_configs
+            .get(&TargetCategory::Scalability)
+            .expect("Scalability test config must be present");
         let mut max_sources_handled = 0;
         let mut achieved_update_rate = 0.0;
 
@@ -735,7 +744,10 @@ impl PerformanceTargetValidator {
         &mut self,
         processor: &mut SpatialProcessor,
     ) -> Result<PerformanceValidationResult> {
-        let config = self.test_configs.get(&TargetCategory::Resources).unwrap();
+        let config = self
+            .test_configs
+            .get(&TargetCategory::Resources)
+            .expect("Resources test config must be present");
 
         // Start resource monitoring (simulated)
 

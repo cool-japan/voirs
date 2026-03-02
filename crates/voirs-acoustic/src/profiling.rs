@@ -380,8 +380,8 @@ impl PerformanceProfilerInner {
         sorted.sort();
 
         let count = sorted.len();
-        let min_duration = *sorted.first().unwrap();
-        let max_duration = *sorted.last().unwrap();
+        let min_duration = *sorted.first().expect("durations slice is non-empty");
+        let max_duration = *sorted.last().expect("durations slice is non-empty");
         let total_duration: Duration = sorted.iter().sum();
         let avg_duration = total_duration / count as u32;
 
@@ -413,7 +413,7 @@ impl PerformanceProfilerInner {
         }
 
         let total_allocations: u64 = allocations.iter().sum();
-        let peak_memory_bytes = *allocations.iter().max().unwrap();
+        let peak_memory_bytes = *allocations.iter().max().expect("checked non-empty above");
         let avg_memory_bytes = total_allocations / allocations.len() as u64;
 
         MemoryStatistics {

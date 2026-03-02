@@ -472,7 +472,7 @@ impl AdvancedAudioAnalyzer {
     fn find_peak_frequency(&self, magnitude_spectrum: &[f32]) -> f32 {
         let peak_bin = magnitude_spectrum.iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i)
             .unwrap_or(0);
         

@@ -291,7 +291,7 @@ impl StreamingPipeline {
     async fn maintenance_task(&self) {
         let mut cleanup_interval = tokio::time::interval(Duration::from_secs(60));
 
-        while *self.is_running.read().unwrap() {
+        while *self.is_running.read().expect("lock should not be poisoned") {
             cleanup_interval.tick().await;
 
             // Cleanup inactive streams
@@ -313,11 +313,14 @@ impl StreamingPipeline {
 
     /// Start the pipeline
     pub async fn start(&self) -> Result<()> {
-        if *self.is_running.read().unwrap() {
+        if *self.is_running.read().expect("lock should not be poisoned") {
             return Ok(());
         }
 
-        *self.is_running.write().unwrap() = true;
+        *self
+            .is_running
+            .write()
+            .expect("lock should not be poisoned") = true;
 
         // Start maintenance task
         let pipeline = self.clone();
@@ -331,7 +334,10 @@ impl StreamingPipeline {
 
     /// Stop the pipeline
     pub async fn stop(&self) -> Result<()> {
-        *self.is_running.write().unwrap() = false;
+        *self
+            .is_running
+            .write()
+            .expect("lock should not be poisoned") = false;
 
         // Stop all active streams
         let mut streams = self.active_streams.lock().await;
@@ -462,7 +468,10 @@ impl StreamingVocoder for StreamingPipeline {
     }
 
     fn get_stats(&self) -> StreamingStats {
-        self.stats.read().unwrap().clone()
+        self.stats
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 }
 
@@ -529,7 +538,10 @@ impl ChunkProcessor {
 
     /// Get processing statistics
     pub fn get_stats(&self) -> ChunkStats {
-        self.stats.read().unwrap().clone()
+        self.stats
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Reset statistics

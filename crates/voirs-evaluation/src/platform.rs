@@ -639,7 +639,7 @@ impl PlatformCompatibility {
 
         let result = unsafe {
             libc::sysctlbyname(
-                b"hw.memsize\0".as_ptr() as *const i8,
+                c"hw.memsize".as_ptr(),
                 &mut total_memory as *mut _ as *mut libc::c_void,
                 &mut size,
                 std::ptr::null_mut(),
@@ -775,7 +775,7 @@ impl PlatformCompatibility {
         // First get the size needed
         let result = unsafe {
             libc::sysctlbyname(
-                b"machdep.cpu.brand_string\0".as_ptr() as *const i8,
+                c"machdep.cpu.brand_string".as_ptr(),
                 std::ptr::null_mut(),
                 &mut size,
                 std::ptr::null_mut(),
@@ -791,7 +791,7 @@ impl PlatformCompatibility {
         let mut buffer = vec![0u8; size];
         let result = unsafe {
             libc::sysctlbyname(
-                b"machdep.cpu.brand_string\0".as_ptr() as *const i8,
+                c"machdep.cpu.brand_string".as_ptr(),
                 buffer.as_mut_ptr() as *mut libc::c_void,
                 &mut size,
                 std::ptr::null_mut(),

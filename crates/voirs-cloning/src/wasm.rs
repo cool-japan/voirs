@@ -196,6 +196,12 @@ pub struct WasmVoiceCloner {
     current_speaker_profile: Option<SpeakerProfile>,
 }
 
+impl Default for WasmVoiceCloner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[wasm_bindgen]
 impl WasmVoiceCloner {
     /// Create new WebAssembly voice cloner
@@ -226,28 +232,19 @@ impl WasmVoiceCloner {
         // Build cloning configuration
         let mut cloning_config = CloningConfig::default();
 
+        // Map WASM config fields to available CloningConfig fields
         if let Some(quality) = wasm_config.target_quality {
-            cloning_config.target_quality = quality;
+            cloning_config.quality_level = quality.clamp(0.0, 1.0);
         }
 
-        if let Some(speed) = wasm_config.adaptation_speed {
-            cloning_config.adaptation_speed = speed;
-        }
+        // adaptation_speed, enable_few_shot, min_reference_samples, enable_realtime
+        // are not direct fields on CloningConfig; they are represented through
+        // performance and quality_assessment sub-configs or via FewShotConfig.
+        // Ignored for now - callers should use the native CloningConfig builder for
+        // fine-grained control.
 
-        if let Some(few_shot) = wasm_config.enable_few_shot {
-            cloning_config.enable_few_shot = few_shot;
-        }
-
-        if let Some(min_samples) = wasm_config.min_reference_samples {
-            cloning_config.min_reference_samples = min_samples;
-        }
-
-        if let Some(realtime) = wasm_config.enable_realtime {
-            cloning_config.enable_realtime = realtime;
-        }
-
-        // Initialize voice cloner
-        match VoiceCloner::new(cloning_config.clone()).await {
+        // Initialize voice cloner (sync constructor)
+        match VoiceCloner::with_config(cloning_config.clone()) {
             Ok(cloner) => {
                 console_log!("Voice cloner initialized successfully");
                 self.cloner = Some(cloner);
@@ -260,9 +257,9 @@ impl WasmVoiceCloner {
             }
         }
 
-        // Initialize quality assessor if enabled
+        // Initialize quality assessor if enabled (sync constructor)
         if wasm_config.enable_quality_assessment.unwrap_or(true) {
-            match CloningQualityAssessor::new().await {
+            match CloningQualityAssessor::new() {
                 Ok(assessor) => {
                     console_log!("Quality assessor initialized");
                     self.quality_assessor = Some(assessor);
@@ -274,8 +271,8 @@ impl WasmVoiceCloner {
             }
         }
 
-        // Initialize speaker verifier
-        match SpeakerVerifier::new().await {
+        // Initialize speaker verifier (sync constructor via with_default_config)
+        match SpeakerVerifier::with_default_config() {
             Ok(verifier) => {
                 console_log!("Speaker verifier initialized");
                 self.verifier = Some(verifier);
@@ -368,29 +365,28 @@ impl WasmVoiceCloner {
             use crate::types::{AgeGroup, Gender, SpeakerCharacteristics};
 
             // Parse gender from string
-            let gender =
-                wasm_profile
-                    .gender
-                    .as_ref()
-                    .and_then(|g| match g.to_lowercase().as_str() {
-                        "male" => Some(Gender::Male),
-                        "female" => Some(Gender::Female),
-                        "other" => Some(Gender::Other),
-                        _ => Some(Gender::Unknown),
-                    });
+            let gender = wasm_profile
+                .gender
+                .as_ref()
+                .map(|g| match g.to_lowercase().as_str() {
+                    "male" => Gender::Male,
+                    "female" => Gender::Female,
+                    "other" => Gender::Other,
+                    _ => Gender::Unknown,
+                });
 
             // Parse age range from string
             let age_group =
                 wasm_profile
                     .age_range
                     .as_ref()
-                    .and_then(|a| match a.to_lowercase().as_str() {
-                        "child" => Some(AgeGroup::Child),
-                        "teen" | "teenager" => Some(AgeGroup::Teen),
-                        "young_adult" | "youngadult" => Some(AgeGroup::YoungAdult),
-                        "middle_aged" | "middleaged" => Some(AgeGroup::MiddleAged),
-                        "senior" => Some(AgeGroup::Senior),
-                        _ => Some(AgeGroup::Unknown),
+                    .map(|a| match a.to_lowercase().as_str() {
+                        "child" => AgeGroup::Child,
+                        "teen" | "teenager" => AgeGroup::Teen,
+                        "young_adult" | "youngadult" => AgeGroup::YoungAdult,
+                        "middle_aged" | "middleaged" => AgeGroup::MiddleAged,
+                        "senior" => AgeGroup::Senior,
+                        _ => AgeGroup::Unknown,
                     });
 
             let mut characteristics = SpeakerCharacteristics::default();
@@ -429,8 +425,8 @@ impl WasmVoiceCloner {
             return Err(JsValue::from_str("No voice samples provided"));
         }
 
-        // Create or use speaker profile
-        let profile = speaker_profile.unwrap_or_else(|| {
+        // Create or use speaker profile (clone before consuming so we can store it later)
+        let profile = speaker_profile.clone().unwrap_or_else(|| {
             use crate::types::SpeakerCharacteristics;
             let now = std::time::SystemTime::now();
             SpeakerProfile {
@@ -483,14 +479,31 @@ impl WasmVoiceCloner {
                 let duration = clone_result.audio.len() as f64 / clone_result.sample_rate as f64;
 
                 // Note: Quality assessment in WASM requires original and cloned samples for comparison
-                // For now, we use the quality metrics from the cloning result
+                // For now, we use the quality metrics from the cloning result.
+                // quality_metrics is a HashMap<String, f32> – extract named entries.
+                let overall_score = clone_result
+                    .quality_metrics
+                    .get("overall_quality")
+                    .or_else(|| clone_result.quality_metrics.get("overall_score"))
+                    .copied()
+                    .unwrap_or(clone_result.similarity_score);
+                let audio_quality = clone_result
+                    .quality_metrics
+                    .get("audio_quality")
+                    .copied()
+                    .unwrap_or(0.8);
+                let naturalness = clone_result
+                    .quality_metrics
+                    .get("naturalness")
+                    .copied()
+                    .unwrap_or(0.8);
                 let quality_metrics = WasmQualityMetrics {
-                    overall_score: clone_result.quality_metrics.overall_score,
+                    overall_score,
                     similarity_score: clone_result.similarity_score,
-                    audio_quality: clone_result.quality_metrics.audio_quality,
-                    naturalness: clone_result.quality_metrics.naturalness,
+                    audio_quality,
+                    naturalness,
                     intelligibility: 0.8, // Default
-                    detailed_metrics: std::collections::HashMap::new(),
+                    detailed_metrics: clone_result.quality_metrics.clone(),
                 };
 
                 // Perform speaker verification if verifier is available
@@ -585,12 +598,12 @@ impl WasmVoiceCloner {
 
                 let wasm_result = serde_json::json!({
                     "success": true,
-                    "adaptation_quality": result.adaptation_quality,
-                    "samples_used": result.samples_processed,
-                    "convergence_achieved": result.convergence_achieved,
-                    "adaptation_time_ms": result.processing_time.as_millis(),
-                    "quality_improvement": result.quality_improvement,
-                    "metadata": result.metadata
+                    "confidence": result.confidence,
+                    "quality_score": result.quality_score,
+                    "samples_used": result.samples_used,
+                    "adaptation_time_ms": result.adaptation_time.as_millis(),
+                    "algorithm": format!("{:?}", result.algorithm),
+                    "cross_lingual": result.cross_lingual_info.is_some()
                 });
 
                 JsValue::from_serde(&wasm_result)
@@ -737,7 +750,7 @@ pub fn init_wasm_logger() {
 pub fn get_wasm_memory_usage() -> JsValue {
     let memory = wasm_bindgen::memory()
         .dyn_into::<js_sys::WebAssembly::Memory>()
-        .unwrap();
+        .expect("wasm_bindgen::memory() should return WebAssembly.Memory");
 
     let buffer = memory.buffer();
     let usage = serde_json::json!({

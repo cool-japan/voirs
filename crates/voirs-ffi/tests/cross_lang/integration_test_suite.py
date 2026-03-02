@@ -76,7 +76,7 @@ class IntegrationTestRunner:
         
         # Check Python bindings
         try:
-            import voirs_ffi as voirs
+            import voirs
             self.available_bindings['python'] = {
                 'module': voirs,
                 'available': True,
@@ -86,7 +86,7 @@ class IntegrationTestRunner:
             self.available_bindings['python'] = {
                 'module': None,
                 'available': False,
-                'error': 'voirs_ffi module not found'
+                'error': 'voirs module not found'
             }
     
     def run_all_tests(self) -> Dict[str, Any]:

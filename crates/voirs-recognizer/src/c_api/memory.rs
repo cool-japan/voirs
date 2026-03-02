@@ -98,7 +98,9 @@ impl VoirsMemoryManager {
     ) -> *const super::types::VoirsRecognitionResult {
         self.result_allocations.push(result);
         // Get pointer to the last element
-        self.result_allocations.last().unwrap() as *const super::types::VoirsRecognitionResult
+        self.result_allocations
+            .last()
+            .expect("just pushed an element") as *const super::types::VoirsRecognitionResult
     }
 
     /// Mark a pointer for cleanup (for reference counting)
@@ -144,6 +146,7 @@ impl Default for VoirsMemoryManager {
 // Utility functions for C string conversion
 
 /// Convert a C string to a Rust String
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn c_string_to_string(c_str: *const c_char) -> Result<String, std::str::Utf8Error> {
     if c_str.is_null() {
         return Ok(String::new());
@@ -166,6 +169,7 @@ pub fn string_to_c_string(s: &str) -> *const c_char {
 }
 
 /// Copy a C string (returns newly allocated string that must be freed)
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn copy_c_string(c_str: *const c_char) -> *mut c_char {
     if c_str.is_null() {
         return ptr::null_mut();
@@ -185,6 +189,11 @@ pub fn copy_c_string(c_str: *const c_char) -> *mut c_char {
 }
 
 /// Free a C string that was allocated by copy_c_string
+///
+/// # Safety
+///
+/// The caller must ensure that `c_str` was allocated by `copy_c_string` and
+/// is not used after this call.
 pub unsafe fn free_c_string(c_str: *mut c_char) {
     if !c_str.is_null() {
         let _ = CString::from_raw(c_str);
@@ -193,7 +202,7 @@ pub unsafe fn free_c_string(c_str: *mut c_char) {
 
 /// Validate that a pointer is not null and properly aligned
 pub fn validate_pointer<T>(ptr: *const T) -> bool {
-    !ptr.is_null() && (ptr as usize) % std::mem::align_of::<T>() == 0
+    !ptr.is_null() && (ptr as usize).is_multiple_of(std::mem::align_of::<T>())
 }
 
 /// Calculate the size needed for a null-terminated array of pointers

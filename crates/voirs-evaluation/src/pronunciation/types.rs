@@ -732,7 +732,10 @@ impl PronunciationEvaluatorImpl {
                         format!(
                             "Substituted '{}' with '{}' at position {}",
                             phoneme_score.expected_phoneme,
-                            phoneme_score.actual_phoneme.as_ref().unwrap(),
+                            phoneme_score
+                                .actual_phoneme
+                                .as_ref()
+                                .expect("value should be present"),
                             phoneme_score.position
                         )
                     }
@@ -1555,7 +1558,9 @@ impl PronunciationEvaluatorImpl {
                 boundaries.push(i);
             }
         }
-        if boundaries.is_empty() || *boundaries.last().unwrap() != chars.len() - 1 {
+        if boundaries.is_empty()
+            || *boundaries.last().expect("collection should not be empty") != chars.len() - 1
+        {
             boundaries.push(chars.len() - 1);
         }
         boundaries

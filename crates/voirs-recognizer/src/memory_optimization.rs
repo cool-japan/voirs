@@ -286,7 +286,10 @@ impl MemoryPressureMonitor {
         let usage = self.get_system_memory_usage();
         let pressure_level = self.calculate_pressure_level(&usage);
         {
-            let mut current = self.current_usage.lock().unwrap();
+            let mut current = self
+                .current_usage
+                .lock()
+                .expect("lock should not be poisoned");
             *current = usage;
         }
 
@@ -303,7 +306,10 @@ impl MemoryPressureMonitor {
     /// Get current pressure level without updating
     #[must_use]
     pub fn get_current_pressure_level(&self) -> MemoryPressureLevel {
-        let usage = self.current_usage.lock().unwrap();
+        let usage = self
+            .current_usage
+            .lock()
+            .expect("lock should not be poisoned");
         self.calculate_pressure_level(&usage)
     }
 
@@ -741,7 +747,11 @@ impl MemoryOptimizer {
         };
 
         let current_usage = if let Ok(monitor) = self.pressure_monitor.lock() {
-            monitor.current_usage.lock().unwrap().clone()
+            monitor
+                .current_usage
+                .lock()
+                .expect("lock should not be poisoned")
+                .clone()
         } else {
             MemoryUsage::default()
         };

@@ -389,7 +389,7 @@ impl MLEmotionRecognizer {
             .map(|(emotion, &score)| (emotion.clone(), score))
             .collect();
 
-        sorted_emotions.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        sorted_emotions.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         sorted_emotions.into_iter().skip(1).take(3).collect()
     }
 

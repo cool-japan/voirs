@@ -309,7 +309,7 @@ impl LlmMusicalUnderstanding {
             .collect();
 
         // Sort by similarity (descending)
-        similarities.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        similarities.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         similarities
     }

@@ -494,7 +494,7 @@ impl IntelligentModelManager {
         // Select highest scoring model
         let best_model = model_scores
             .iter()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(k, _)| k.clone())
             .ok_or_else(|| RecognitionError::ModelError {
                 message: "No suitable model found".to_string(),
@@ -1005,6 +1005,6 @@ mod tests {
 
         let score =
             manager.calculate_resource_efficiency_score("whisper_base", &requirements, &status);
-        assert!(score >= 0.0 && score <= 1.0);
+        assert!((0.0..=1.0).contains(&score));
     }
 }

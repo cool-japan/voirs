@@ -9,7 +9,6 @@
 //! ```
 
 use std::path::Path;
-use tokio;
 use voirs_recognizer::audio_formats::ResamplingQuality;
 use voirs_recognizer::prelude::*;
 use voirs_recognizer::{AudioPreprocessingConfig, AudioPreprocessor, RecognitionError};

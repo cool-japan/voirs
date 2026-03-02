@@ -376,7 +376,7 @@ impl VoirsPipeline {
         texts: Vec<String>,
         progress_callback: Option<PyObject>,
     ) -> PyResult<Vec<SynthesisResult>> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let mut results = Vec::new();
             let total_count = texts.len();
 
@@ -415,7 +415,7 @@ impl VoirsPipeline {
         chunk_callback: PyObject,
         chunk_size: Option<usize>,
     ) -> PyResult<PyAudioBuffer> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             // Use actual streaming synthesis from SDK
             let pipeline = Arc::new(self.inner.clone());
             let mut stream = self
@@ -494,7 +494,7 @@ impl VoirsPipeline {
         text: &str,
         error_callback: Option<PyObject>,
     ) -> PyResult<PyAudioBuffer> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             match self.rt.block_on(self.inner.synthesize(text)) {
                 Ok(audio) => Ok(PyAudioBuffer::new(audio)),
                 Err(e) => {
@@ -521,7 +521,7 @@ impl VoirsPipeline {
     fn set_progress_callback(&self, callback: Option<PyObject>) -> PyResult<()> {
         // Validate callback is callable if provided
         if let Some(ref cb) = callback {
-            Python::with_gil(|py| {
+            Python::attach(|py| {
                 if !cb.bind(py).is_callable() {
                     return Err(PyValueError::new_err("Progress callback must be callable"));
                 }
@@ -539,7 +539,7 @@ impl VoirsPipeline {
     fn set_error_callback(&self, callback: Option<PyObject>) -> PyResult<()> {
         // Validate callback is callable if provided
         if let Some(ref cb) = callback {
-            Python::with_gil(|py| {
+            Python::attach(|py| {
                 if !cb.bind(py).is_callable() {
                     return Err(PyValueError::new_err("Error callback must be callable"));
                 }
@@ -562,7 +562,7 @@ impl VoirsPipeline {
         error_callback: Option<PyObject>,
         chunk_size: Option<usize>,
     ) -> PyResult<PyAudioBuffer> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             // Validate callbacks
             for (name, callback) in [
                 ("progress", &progress_callback),
@@ -651,14 +651,14 @@ impl VoirsPipeline {
     }
 
     /// Get system performance information
-    fn get_performance_info(&self) -> PyResult<pyo3::PyObject> {
-        Python::with_gil(|py| {
-            let info = pyo3::types::PyDict::new(py);
+    fn get_performance_info(&self) -> PyResult<Py<PyDict>> {
+        Python::attach(|py| {
+            let info = PyDict::new(py);
             info.set_item("cpu_cores", num_cpus::get())?;
             info.set_item("memory_usage_mb", self.get_memory_usage_mb())?;
             info.set_item("gpu_available", self.is_gpu_available())?;
 
-            Ok(info.unbind().into())
+            Ok(info.unbind())
         })
     }
 
@@ -674,15 +674,15 @@ impl VoirsPipeline {
     }
 
     /// Get performance statistics
-    fn get_performance_stats(&self) -> PyResult<pyo3::PyObject> {
-        Python::with_gil(|py| {
+    fn get_performance_stats(&self) -> PyResult<Py<PyDict>> {
+        Python::attach(|py| {
             let tracker = self.performance_tracker.lock();
-            let stats = pyo3::types::PyDict::new(py);
+            let stats = PyDict::new(py);
             stats.set_item("total_syntheses", tracker.total_syntheses)?;
             stats.set_item("cache_hits", tracker.cache_hits)?;
             stats.set_item("cache_misses", tracker.cache_misses)?;
             stats.set_item("cache_hit_rate", tracker.get_cache_hit_rate())?;
-            Ok(stats.unbind().into())
+            Ok(stats.unbind())
         })
     }
 

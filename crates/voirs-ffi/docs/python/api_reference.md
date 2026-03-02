@@ -2,7 +2,7 @@
 
 Complete reference for all VoiRS Python binding functions, classes, and constants.
 
-## Module: voirs_ffi
+## Module: voirs
 
 ### Main Classes
 
@@ -490,7 +490,7 @@ ErrorCallback = Callable[[Exception], None]
 ### Basic Synthesis
 
 ```python
-import voirs_ffi as vf
+import voirs as vf
 
 # Simple synthesis
 audio = vf.synthesize_text("Hello, world!")
@@ -508,7 +508,7 @@ audio = vf.synthesize_text(
 ### Pipeline Management
 
 ```python
-import voirs_ffi as vf
+import voirs as vf
 
 # Create and configure pipeline
 pipeline = vf.VoirsPipeline.with_config(
@@ -534,7 +534,7 @@ for text in texts:
 ### Error Handling
 
 ```python
-import voirs_ffi as vf
+import voirs as vf
 
 try:
     pipeline = vf.VoirsPipeline()
@@ -551,7 +551,7 @@ except vf.VoirsError as e:
 ### Audio Processing
 
 ```python
-import voirs_ffi as vf
+import voirs as vf
 
 # Load existing audio
 audio = vf.load_audio("input.wav")

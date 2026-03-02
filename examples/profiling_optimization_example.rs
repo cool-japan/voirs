@@ -658,7 +658,7 @@ impl VoirsProfiler {
                 code_example: Some(
                     r#"
 // Example: Parallel batch processing
-use rayon::prelude::*;
+use scirs2_core::parallel_ops::*;
 
 let results: Vec<_> = texts
     .par_iter()

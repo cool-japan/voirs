@@ -118,7 +118,12 @@ impl SingingVocoder {
 
             for i in 0..num_rows {
                 let mut row = Vec::with_capacity(num_cols);
-                row.extend_from_slice(mel_spectrogram.row(i).as_slice().unwrap());
+                row.extend_from_slice(
+                    mel_spectrogram
+                        .row(i)
+                        .as_slice()
+                        .expect("row should be contiguous"),
+                );
                 mel_data.push(row);
             }
             let mel = MelSpectrogram::new(

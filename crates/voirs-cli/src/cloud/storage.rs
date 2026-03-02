@@ -616,7 +616,9 @@ impl CloudStorageManager {
 
         // Ensure key is exactly 32 bytes for AES-256
         let key_bytes: [u8; 32] = if key.len() >= 32 {
-            key[..32].try_into().unwrap()
+            key[..32]
+                .try_into()
+                .expect("slice of 32 bytes fits into [u8; 32]")
         } else {
             // Derive 32-byte key using SHA-256
             let mut hasher = Sha256::new();
@@ -666,7 +668,9 @@ impl CloudStorageManager {
 
         // Ensure key is exactly 32 bytes for AES-256
         let key_bytes: [u8; 32] = if key.len() >= 32 {
-            key[..32].try_into().unwrap()
+            key[..32]
+                .try_into()
+                .expect("slice of 32 bytes fits into [u8; 32]")
         } else {
             // Derive 32-byte key using SHA-256
             let mut hasher = Sha256::new();

@@ -463,7 +463,7 @@ impl WhisperMemoryManager {
         let mut pools = self.tensor_pools.write().await;
         let threshold = Instant::now()
             .checked_sub(Duration::from_secs(600))
-            .unwrap(); // 10 minutes
+            .expect("10 minutes should not exceed Instant range");
 
         let initial_count = pools.len();
         pools.retain(|_, pool| pool.last_accessed > threshold);
@@ -578,7 +578,9 @@ impl TensorPool {
     }
 
     fn cleanup_expired(&mut self, max_age: Duration) -> u32 {
-        let threshold = Instant::now().checked_sub(max_age).unwrap();
+        let threshold = Instant::now()
+            .checked_sub(max_age)
+            .expect("max_age should not exceed Instant range");
         let initial_len = self.tensors.len();
 
         self.tensors.retain(|tensor| tensor.last_used > threshold);
@@ -624,7 +626,10 @@ impl LRUTensorCache {
 
             // Move to back of access order
             if let Some(pos) = self.access_order.iter().position(|k| k == key) {
-                let key = self.access_order.remove(pos).unwrap();
+                let key = self
+                    .access_order
+                    .remove(pos)
+                    .expect("pos is valid index from position()");
                 self.access_order.push_back(key);
             }
 

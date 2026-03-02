@@ -805,9 +805,7 @@ impl SemanticSimilarityEvaluator {
         // Extract likely content words (longer words, capitalized, etc.)
         self.tokenize(text)
             .into_iter()
-            .filter(|word| {
-                word.len() > 3 || word.chars().next().map_or(false, |c| c.is_uppercase())
-            })
+            .filter(|word| word.len() > 3 || word.chars().next().is_some_and(|c| c.is_uppercase()))
             .collect()
     }
 

@@ -108,12 +108,16 @@ pub extern "C" fn voirs_is_pipeline_valid(pipeline_id: c_uint) -> c_int {
             return 0;
         }
 
-        let created = CREATED_PIPELINES.lock().unwrap();
+        let created = CREATED_PIPELINES
+            .lock()
+            .expect("lock should not be poisoned");
         if !created.contains(&pipeline_id) {
             return 0;
         }
 
-        let destroyed = DESTROYED_PIPELINES.lock().unwrap();
+        let destroyed = DESTROYED_PIPELINES
+            .lock()
+            .expect("lock should not be poisoned");
         if destroyed.contains(&pipeline_id) {
             0
         } else {
@@ -147,7 +151,9 @@ fn create_pipeline_impl() -> Result<c_uint, VoirsErrorCode> {
         };
 
         // Track created pipeline IDs for test validation
-        let mut created = CREATED_PIPELINES.lock().unwrap();
+        let mut created = CREATED_PIPELINES
+            .lock()
+            .expect("lock should not be poisoned");
         created.insert(id);
 
         Ok(id)
@@ -224,7 +230,9 @@ fn create_pipeline_with_config_impl(config_json: *const c_char) -> Result<c_uint
         };
 
         // Track created pipeline IDs for test validation
-        let mut created = CREATED_PIPELINES.lock().unwrap();
+        let mut created = CREATED_PIPELINES
+            .lock()
+            .expect("lock should not be poisoned");
         created.insert(id);
 
         Ok(id)
@@ -273,13 +281,17 @@ fn destroy_pipeline_impl(pipeline_id: c_uint) -> Result<(), VoirsErrorCode> {
     #[cfg(test)]
     {
         // In test mode, validate pipeline lifecycle for testing purposes
-        let created = CREATED_PIPELINES.lock().unwrap();
+        let created = CREATED_PIPELINES
+            .lock()
+            .expect("lock should not be poisoned");
         if !created.contains(&pipeline_id) {
             return Err(VoirsErrorCode::InvalidParameter);
         }
 
         // Check if already destroyed
-        let mut destroyed = DESTROYED_PIPELINES.lock().unwrap();
+        let mut destroyed = DESTROYED_PIPELINES
+            .lock()
+            .expect("lock should not be poisoned");
         if destroyed.contains(&pipeline_id) {
             return Err(VoirsErrorCode::InvalidParameter);
         }

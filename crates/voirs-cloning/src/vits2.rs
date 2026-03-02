@@ -1005,8 +1005,12 @@ impl Vits2Cloner {
     pub fn new(config: Vits2Config) -> Result<Self> {
         config.validate()?;
 
-        let device = if candle_core::utils::cuda_is_available() {
-            Device::new_cuda(0).unwrap_or(Device::Cpu)
+        let cuda_available =
+            std::panic::catch_unwind(candle_core::utils::cuda_is_available).unwrap_or(false);
+        let device = if cuda_available {
+            std::panic::catch_unwind(|| Device::new_cuda(0))
+                .unwrap_or(Ok(Device::Cpu))
+                .unwrap_or(Device::Cpu)
         } else {
             Device::Cpu
         };
@@ -1080,7 +1084,11 @@ impl Vits2Cloner {
 
             // Limit cache size
             if cache.len() > 1000 {
-                let oldest_key = cache.keys().next().unwrap().clone();
+                let oldest_key = cache
+                    .keys()
+                    .next()
+                    .expect("cache is non-empty (len > 1000)")
+                    .clone();
                 cache.remove(&oldest_key);
             }
         }
@@ -1216,7 +1224,7 @@ impl Vits2Cloner {
                 extraction_time: Some(
                     std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
+                        .expect("SystemTime should be after UNIX_EPOCH")
                         .as_secs_f64(),
                 ),
             },

@@ -57,7 +57,10 @@ impl AdaptiveFeedbackEngine {
     /// Get or create user model
     pub async fn get_user_model(&self, user_id: &str) -> Result<UserModel, FeedbackError> {
         {
-            let models = self.user_models.read().unwrap();
+            let models = self
+                .user_models
+                .read()
+                .expect("lock should not be poisoned");
             if let Some(model) = models.get(user_id) {
                 return Ok(model.clone());
             }
@@ -70,12 +73,15 @@ impl AdaptiveFeedbackEngine {
         let model = UserModel::new(user_id.to_string());
 
         {
-            let mut models = self.user_models.write().unwrap();
+            let mut models = self
+                .user_models
+                .write()
+                .expect("lock should not be poisoned");
             models.insert(user_id.to_string(), model.clone());
         }
 
         {
-            let mut metrics = self.metrics.write().unwrap();
+            let mut metrics = self.metrics.write().expect("lock should not be poisoned");
             metrics.total_users += 1;
         }
 
@@ -120,7 +126,10 @@ impl AdaptiveFeedbackEngine {
         interaction: &UserInteraction,
         performance: &PerformanceData,
     ) -> Result<(), FeedbackError> {
-        let mut models = self.user_models.write().unwrap();
+        let mut models = self
+            .user_models
+            .write()
+            .expect("lock should not be poisoned");
 
         if let Some(model) = models.get_mut(user_id) {
             // Update interaction history
@@ -155,7 +164,7 @@ impl AdaptiveFeedbackEngine {
 
         // Update system metrics
         {
-            let mut metrics = self.metrics.write().unwrap();
+            let mut metrics = self.metrics.write().expect("lock should not be poisoned");
             metrics.total_adaptations += 1;
         }
 
@@ -192,15 +201,22 @@ impl AdaptiveFeedbackEngine {
         }
 
         // Sort by priority
-        recommendations.sort_by(|a, b| b.priority.partial_cmp(&a.priority).unwrap());
+        recommendations.sort_by(|a, b| {
+            b.priority
+                .partial_cmp(&a.priority)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         Ok(recommendations)
     }
 
     /// Get system statistics
     pub async fn get_statistics(&self) -> Result<AdaptiveSystemStats, FeedbackError> {
-        let models = self.user_models.read().unwrap();
-        let metrics = self.metrics.read().unwrap();
+        let models = self
+            .user_models
+            .read()
+            .expect("lock should not be poisoned");
+        let metrics = self.metrics.read().expect("lock should not be poisoned");
 
         let active_users = models
             .values()
@@ -411,7 +427,10 @@ impl FeedbackProvider for AdaptiveFeedbackEngine {
         let audio_quality = self.analyze_audio_quality(audio);
 
         // Generate feedback based on user model and context
-        let user_models = self.user_models.read().unwrap();
+        let user_models = self
+            .user_models
+            .read()
+            .expect("lock should not be poisoned");
         let user_model = user_models
             .get(&context.session.user_id)
             .cloned()
@@ -530,7 +549,10 @@ impl FeedbackProvider for AdaptiveFeedbackEngine {
 
         // Get user model for adaptive feedback
         let user_model = {
-            let models = self.user_models.read().unwrap();
+            let models = self
+                .user_models
+                .read()
+                .expect("lock should not be poisoned");
             models
                 .get(&context.session.user_id)
                 .cloned()
@@ -749,7 +771,10 @@ impl AdaptiveLearner for AdaptiveFeedbackEngine {
         };
 
         // Direct update to user model
-        let mut models = self.user_models.write().unwrap();
+        let mut models = self
+            .user_models
+            .write()
+            .expect("lock should not be poisoned");
         if let Some(model) = models.get_mut(user_id) {
             // Update skill level based on recent performance
             if let Some(latest_quality) = performance_data.quality_scores.last() {
@@ -785,7 +810,10 @@ impl AdaptiveLearner for AdaptiveFeedbackEngine {
     ) -> crate::FeedbackResult<Vec<LearningRecommendation>> {
         // Get user model to understand current state
         let user_model = {
-            let models = self.user_models.read().unwrap();
+            let models = self
+                .user_models
+                .read()
+                .expect("lock should not be poisoned");
             models.get(user_id).cloned().unwrap_or_default()
         };
 
@@ -815,7 +843,7 @@ impl AdaptiveLearner for AdaptiveFeedbackEngine {
 
         // Sort by lowest scores to prioritize improvement areas
         let mut sorted_areas = skill_areas.to_vec();
-        sorted_areas.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        sorted_areas.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
         // Generate recommendations for the 3 lowest scoring areas
         for (focus_area, score) in sorted_areas.iter().take(3) {
@@ -981,7 +1009,11 @@ impl AdaptiveLearner for AdaptiveFeedbackEngine {
         }
 
         // Sort recommendations by priority (highest first)
-        recommendations.sort_by(|a, b| b.priority.partial_cmp(&a.priority).unwrap());
+        recommendations.sort_by(|a, b| {
+            b.priority
+                .partial_cmp(&a.priority)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         Ok(recommendations)
     }

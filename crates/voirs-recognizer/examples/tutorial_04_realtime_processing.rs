@@ -187,7 +187,7 @@ async fn demonstrate_streaming_configs(
         println!("   • Chunk size: {}ms", config.chunk_size as f32 / 16.0);
         println!("   • Overlap: {}ms", config.overlap as f32 / 16.0);
         println!("   • Buffer duration: {:.1}s", config.buffer_duration);
-        println!("   • Expected latency: ~{}ms", estimate_latency(&config));
+        println!("   • Expected latency: ~{}ms", estimate_latency(config));
     }
 
     Ok(configs)

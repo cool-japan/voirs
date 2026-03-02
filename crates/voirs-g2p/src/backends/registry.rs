@@ -352,13 +352,13 @@ impl RegistryG2p {
     where
         F: Fn() -> Result<Box<dyn G2p>> + Send + Sync + 'static,
     {
-        let mut registry = self.registry.write().unwrap();
+        let mut registry = self.registry.write().expect("lock should not be poisoned");
         registry.register_backend(info, factory)
     }
 
     /// Set default backends
     pub fn set_default_backends(&self, backend_ids: Vec<String>) -> Result<()> {
-        let mut registry = self.registry.write().unwrap();
+        let mut registry = self.registry.write().expect("lock should not be poisoned");
         registry.set_default_backends(backend_ids)
     }
 }
@@ -379,7 +379,7 @@ impl G2p for RegistryG2p {
         let language = lang.unwrap_or(LanguageCode::EnUs);
 
         let backend = {
-            let registry = self.registry.read().unwrap();
+            let registry = self.registry.read().expect("lock should not be poisoned");
             if self.use_load_balancing {
                 registry.get_backend_with_load_balancing(language)?
             } else {
@@ -391,7 +391,7 @@ impl G2p for RegistryG2p {
     }
 
     fn supported_languages(&self) -> Vec<LanguageCode> {
-        let registry = self.registry.read().unwrap();
+        let registry = self.registry.read().expect("lock should not be poisoned");
         let mut languages: Vec<LanguageCode> = registry.language_backends.keys().copied().collect();
         languages.sort();
         languages.dedup();
@@ -399,7 +399,7 @@ impl G2p for RegistryG2p {
     }
 
     fn metadata(&self) -> crate::G2pMetadata {
-        let _registry = self.registry.read().unwrap();
+        let _registry = self.registry.read().expect("lock should not be poisoned");
         crate::G2pMetadata {
             name: "Registry G2P".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),

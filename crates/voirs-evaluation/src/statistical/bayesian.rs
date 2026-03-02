@@ -150,12 +150,14 @@ impl BayesianAnalyzer {
         let mut samples_b = Vec::with_capacity(self.n_samples);
 
         for _ in 0..self.n_samples {
-            let sample_a = self
-                .rng
-                .sample(Normal::new(posterior_mean_a, posterior_var_a.sqrt()).unwrap());
-            let sample_b = self
-                .rng
-                .sample(Normal::new(posterior_mean_b, posterior_var_b.sqrt()).unwrap());
+            let sample_a = self.rng.sample(
+                Normal::new(posterior_mean_a, posterior_var_a.sqrt())
+                    .expect("value should be present"),
+            );
+            let sample_b = self.rng.sample(
+                Normal::new(posterior_mean_b, posterior_var_b.sqrt())
+                    .expect("value should be present"),
+            );
             samples_a.push(sample_a);
             samples_b.push(sample_b);
         }
@@ -179,7 +181,7 @@ impl BayesianAnalyzer {
         let expected_difference = differences.iter().sum::<f64>() / differences.len() as f64;
 
         let mut sorted_diffs = differences.clone();
-        sorted_diffs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted_diffs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let ci_95_lower = sorted_diffs[(self.n_samples as f64 * 0.025) as usize];
         let ci_95_upper = sorted_diffs[(self.n_samples as f64 * 0.975) as usize];
@@ -254,14 +256,14 @@ impl BayesianAnalyzer {
         let mut samples = Vec::with_capacity(self.n_samples);
 
         for _ in 0..self.n_samples {
-            let sample = self
-                .rng
-                .sample(Normal::new(posterior_mean, posterior_var.sqrt()).unwrap());
+            let sample = self.rng.sample(
+                Normal::new(posterior_mean, posterior_var.sqrt()).expect("value should be present"),
+            );
             samples.push(sample);
         }
 
         // Calculate credible intervals
-        samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let ci_95_lower = samples[(self.n_samples as f64 * 0.025) as usize];
         let ci_95_upper = samples[(self.n_samples as f64 * 0.975) as usize];
@@ -316,9 +318,9 @@ impl BayesianAnalyzer {
         let best_model_index = model_probabilities
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(idx, _)| idx)
-            .unwrap();
+            .expect("value should be present");
 
         Ok(BayesianModelComparison {
             model_names,

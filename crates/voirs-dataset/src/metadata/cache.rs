@@ -4,7 +4,7 @@
 //! and memory usage optimization.
 
 use crate::{DatasetError, Result};
-use bincode;
+use oxicode;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
@@ -450,7 +450,7 @@ impl MetadataCache {
                 };
 
                 let (cached_data, _): (CachedData, usize) =
-                    bincode::serde::decode_from_slice(&data, bincode::config::standard()).map_err(
+                    oxicode::serde::decode_from_slice(&data, oxicode::config::standard()).map_err(
                         |e| DatasetError::FormatError(format!("Cache deserialization failed: {e}")),
                     )?;
 
@@ -472,7 +472,7 @@ impl MetadataCache {
                     .map_err(DatasetError::IoError)?;
             }
 
-            let serialized = bincode::serde::encode_to_vec(&data, bincode::config::standard())
+            let serialized = oxicode::serde::encode_to_vec(&data, oxicode::config::standard())
                 .map_err(|e| {
                     DatasetError::FormatError(format!("Cache serialization failed: {e}"))
                 })?;

@@ -158,12 +158,18 @@ impl MemoryLogger {
 
     /// Get all logged events
     pub fn events(&self) -> Vec<EvaluationEvent> {
-        self.events.lock().unwrap().clone()
+        self.events
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Clear all logged events
     pub fn clear(&self) {
-        self.events.lock().unwrap().clear();
+        self.events
+            .lock()
+            .expect("lock should not be poisoned")
+            .clear();
     }
 
     /// Get events by component
@@ -186,7 +192,10 @@ impl MemoryLogger {
 impl LogBackend for MemoryLogger {
     fn log(&self, event: &EvaluationEvent) {
         if event.level >= self.min_level {
-            self.events.lock().unwrap().push(event.clone());
+            self.events
+                .lock()
+                .expect("lock should not be poisoned")
+                .push(event.clone());
         }
     }
 

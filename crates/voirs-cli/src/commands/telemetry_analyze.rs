@@ -423,7 +423,11 @@ fn find_insights(events: &[TelemetryEvent], min_confidence: f32) -> Vec<Insight>
     insights.retain(|i| i.confidence >= min_confidence);
 
     // Sort by confidence
-    insights.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
+    insights.sort_by(|a, b| {
+        b.confidence
+            .partial_cmp(&a.confidence)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     insights
 }

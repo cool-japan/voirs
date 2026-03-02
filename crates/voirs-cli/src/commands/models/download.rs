@@ -217,7 +217,7 @@ async fn download_model_files(
                 .template(
                     "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}",
                 )
-                .unwrap()
+                .expect("progress template is valid")
                 .progress_chars("#>-"),
         );
         pb.set_message("Downloading files");
@@ -435,7 +435,7 @@ async fn verify_model_installation(
         )
     })?;
 
-    let format = model_format.unwrap();
+    let format = model_format.expect("model_format should be set when model file is found");
 
     if !global.quiet {
         println!("Found model format: {}", format);

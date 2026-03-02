@@ -467,7 +467,7 @@ impl ConfigManager {
     /// Get default configuration path
     fn default_config_path() -> PathBuf {
         Self::config_dir()
-            .unwrap_or_else(|| env::current_dir().unwrap())
+            .unwrap_or_else(|| env::current_dir().expect("current dir should be accessible"))
             .join("voirs.toml")
     }
 

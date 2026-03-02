@@ -1101,7 +1101,7 @@ impl AccuracyBenchmarkRunner {
         }
 
         let mut sorted_times = processing_times.to_vec();
-        sorted_times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted_times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let avg_processing_time_ms = sorted_times.iter().sum::<f64>() / sorted_times.len() as f64;
         let median_processing_time_ms = sorted_times[sorted_times.len() / 2];
@@ -1429,7 +1429,7 @@ fn calculate_processing_time_stats(times: &[f64]) -> ProcessingTimeStats {
     }
 
     let mut sorted_times = times.to_vec();
-    sorted_times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    sorted_times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     let min_ms = sorted_times[0];
     let max_ms = sorted_times[sorted_times.len() - 1];

@@ -566,7 +566,7 @@ impl MetadataWriter {
 
             offset += 8 + chunk_size;
             // Align to even byte boundary
-            if chunk_size % 2 != 0 {
+            if !chunk_size.is_multiple_of(2) {
                 offset += 1;
             }
         }
@@ -592,7 +592,7 @@ impl MetadataWriter {
             {
                 // Skip existing INFO chunk
                 scan_offset += 8 + chunk_size;
-                if chunk_size % 2 != 0 {
+                if !chunk_size.is_multiple_of(2) {
                     scan_offset += 1;
                 }
                 continue;
@@ -600,7 +600,7 @@ impl MetadataWriter {
 
             // Copy non-INFO chunks
             let chunk_end = scan_offset + 8 + chunk_size;
-            if chunk_size % 2 != 0 && chunk_end < file_content.len() {
+            if !chunk_size.is_multiple_of(2) && chunk_end < file_content.len() {
                 cleaned_content.extend_from_slice(&file_content[scan_offset..chunk_end + 1]);
                 scan_offset = chunk_end + 1;
             } else {
@@ -705,7 +705,7 @@ impl MetadataWriter {
         field.extend_from_slice(value_bytes); // Field data
 
         // Pad to even byte boundary
-        if value_bytes.len() % 2 != 0 {
+        if !value_bytes.len().is_multiple_of(2) {
             field.push(0);
         }
 

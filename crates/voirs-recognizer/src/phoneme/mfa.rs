@@ -251,7 +251,10 @@ impl MFAModel {
             state.loaded = true;
             state.load_time = Some(start_time.elapsed());
 
-            tracing::info!("MFA model loaded in {:?}", state.load_time.unwrap());
+            tracing::info!(
+                "MFA model loaded in {:?}",
+                state.load_time.expect("load_time was just set to Some")
+            );
         }
 
         Ok(())

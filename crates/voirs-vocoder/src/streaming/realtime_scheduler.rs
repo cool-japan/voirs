@@ -257,7 +257,7 @@ impl EnhancedRtScheduler {
 
         // Update statistics
         {
-            let mut stats = self.stats.write().unwrap();
+            let mut stats = self.stats.write().expect("lock should not be poisoned");
             stats.total_scheduled += 1;
         }
 
@@ -282,8 +282,16 @@ impl EnhancedRtScheduler {
             }
 
             // Check if we have capacity for this task
-            let running_count = self.running_tasks.read().unwrap().len();
-            let max_concurrent = self.config.read().unwrap().max_concurrent_tasks;
+            let running_count = self
+                .running_tasks
+                .read()
+                .expect("lock should not be poisoned")
+                .len();
+            let max_concurrent = self
+                .config
+                .read()
+                .expect("lock should not be poisoned")
+                .max_concurrent_tasks;
 
             if running_count < max_concurrent {
                 return queue.pop().map(|pt| pt.task);
@@ -307,14 +315,18 @@ impl EnhancedRtScheduler {
 
         self.running_tasks
             .write()
-            .unwrap()
+            .expect("lock should not be poisoned")
             .insert(task.id, execution);
         Ok(())
     }
 
     /// Mark task as completed
     pub async fn complete_task(&self, task_id: u64, _success: bool) -> Result<()> {
-        let execution = self.running_tasks.write().unwrap().remove(&task_id);
+        let execution = self
+            .running_tasks
+            .write()
+            .expect("lock should not be poisoned")
+            .remove(&task_id);
 
         if let Some(exec) = execution {
             let completion_time = Instant::now();
@@ -323,7 +335,7 @@ impl EnhancedRtScheduler {
 
             // Update statistics
             {
-                let mut stats = self.stats.write().unwrap();
+                let mut stats = self.stats.write().expect("lock should not be poisoned");
                 stats.total_completed += 1;
 
                 if !deadline_met {
@@ -372,13 +384,13 @@ impl EnhancedRtScheduler {
 
     /// Select optimal CPU core for task assignment
     async fn select_optimal_core(&self, priority: RtPriority, _chunk_size: usize) -> Option<usize> {
-        let config = self.config.read().unwrap();
+        let config = self.config.read().expect("lock should not be poisoned");
 
         if !config.enable_cpu_affinity {
             return None;
         }
 
-        let stats = self.stats.read().unwrap();
+        let stats = self.stats.read().expect("lock should not be poisoned");
         let strategy = config.load_balancing;
 
         match strategy {
@@ -389,7 +401,7 @@ impl EnhancedRtScheduler {
                 .core_loads
                 .iter()
                 .enumerate()
-                .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                 .map(|(idx, _)| idx),
             LoadBalancingStrategy::PriorityBased => {
                 // High priority tasks get dedicated cores (if available)
@@ -401,7 +413,9 @@ impl EnhancedRtScheduler {
                             .iter()
                             .enumerate()
                             .filter(|(_, load)| **load < 0.5)
-                            .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                            .min_by(|(_, a), (_, b)| {
+                                a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+                            })
                             .map(|(idx, _)| idx)
                     }
                     _ => {
@@ -410,7 +424,9 @@ impl EnhancedRtScheduler {
                             .core_loads
                             .iter()
                             .enumerate()
-                            .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                            .min_by(|(_, a), (_, b)| {
+                                a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+                            })
                             .map(|(idx, _)| idx)
                     }
                 }
@@ -422,7 +438,12 @@ impl EnhancedRtScheduler {
                 // Find optimal NUMA node
                 if let Some(best_numa_node) = self.find_optimal_numa_node() {
                     // Get cores for the best NUMA node
-                    if let Some(numa_topology) = self.numa_topology.read().unwrap().as_ref() {
+                    if let Some(numa_topology) = self
+                        .numa_topology
+                        .read()
+                        .expect("lock should not be poisoned")
+                        .as_ref()
+                    {
                         if let Some(node) = numa_topology
                             .nodes
                             .iter()
@@ -449,7 +470,7 @@ impl EnhancedRtScheduler {
                     .core_loads
                     .iter()
                     .enumerate()
-                    .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                    .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                     .map(|(idx, _)| idx)
             }
         }
@@ -496,8 +517,13 @@ impl EnhancedRtScheduler {
 
     /// Update NUMA node loads based on current core loads
     fn update_numa_loads(&self) {
-        if let Some(ref mut numa_topology) = self.numa_topology.write().unwrap().as_mut() {
-            let stats = self.stats.read().unwrap();
+        if let Some(ref mut numa_topology) = self
+            .numa_topology
+            .write()
+            .expect("lock should not be poisoned")
+            .as_mut()
+        {
+            let stats = self.stats.read().expect("lock should not be poisoned");
 
             // Update load for each NUMA node
             for node in &mut numa_topology.nodes {
@@ -514,7 +540,10 @@ impl EnhancedRtScheduler {
 
     /// Find best NUMA node for task placement
     fn find_optimal_numa_node(&self) -> Option<u32> {
-        let numa_topology_guard = self.numa_topology.read().unwrap();
+        let numa_topology_guard = self
+            .numa_topology
+            .read()
+            .expect("lock should not be poisoned");
         let numa_topology = numa_topology_guard.as_ref()?;
 
         // Find the NUMA node with the lowest load
@@ -531,21 +560,30 @@ impl EnhancedRtScheduler {
 
     /// Enable or disable NUMA awareness at runtime
     pub fn set_numa_awareness(&self, enable: bool) {
-        let mut config = self.config.write().unwrap();
+        let mut config = self.config.write().expect("lock should not be poisoned");
         config.enable_numa_awareness = enable;
 
         if enable {
             let num_cores = num_cpus::get();
             let topology = Self::detect_numa_topology(num_cores);
-            *self.numa_topology.write().unwrap() = Some(topology);
+            *self
+                .numa_topology
+                .write()
+                .expect("lock should not be poisoned") = Some(topology);
         } else {
-            *self.numa_topology.write().unwrap() = None;
+            *self
+                .numa_topology
+                .write()
+                .expect("lock should not be poisoned") = None;
         }
     }
 
     /// Get current scheduler statistics
     pub fn get_stats(&self) -> SchedulerStats {
-        self.stats.read().unwrap().clone()
+        self.stats
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Check for deadline violations and missed tasks
@@ -553,7 +591,12 @@ impl EnhancedRtScheduler {
         let mut violations = Vec::new();
         let now = Instant::now();
 
-        for (task_id, execution) in self.running_tasks.read().unwrap().iter() {
+        for (task_id, execution) in self
+            .running_tasks
+            .read()
+            .expect("lock should not be poisoned")
+            .iter()
+        {
             if now > execution.task.deadline {
                 violations.push(*task_id);
             }

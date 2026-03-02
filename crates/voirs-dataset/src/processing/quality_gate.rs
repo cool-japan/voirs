@@ -29,7 +29,7 @@
 //! ));
 //!
 //! let samples: Vec<DatasetSample> = vec![/* ... */];
-//! let report = gate.validate(&samples).unwrap();
+//! let report = gate.validate(&samples)?;
 //!
 //! if report.passed() {
 //!     println!("All quality checks passed!");

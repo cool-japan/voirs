@@ -1558,7 +1558,11 @@ impl SystemProfiler {
             };
         }
 
-        let current_usage = self.samples.last().unwrap().memory_usage;
+        let current_usage = self
+            .samples
+            .last()
+            .expect("collection should not be empty")
+            .memory_usage;
         let peak_usage = self
             .samples
             .iter()

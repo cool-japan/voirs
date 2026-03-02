@@ -11,7 +11,7 @@ import os
 def test_basic_import():
     """Test that the basic VoiRS FFI module can be imported"""
     try:
-        # This would normally be: import voirs_ffi
+        # This would normally be: import voirs
         # For now, we'll simulate the test
         print("✓ Basic import test would pass with proper build")
         return True

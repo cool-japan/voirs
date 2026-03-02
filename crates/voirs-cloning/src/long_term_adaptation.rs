@@ -378,7 +378,10 @@ impl LongTermAdaptationEngine {
     pub fn submit_feedback(&self, feedback: UserFeedback) -> Result<()> {
         // Add feedback to store within its own scope to release lock before triggering adaptation
         {
-            let mut store = self.feedback_store.write().unwrap();
+            let mut store = self
+                .feedback_store
+                .write()
+                .expect("lock should not be poisoned");
 
             // Maintain size limit
             if store.len() >= self.config.max_feedback_history {
@@ -389,7 +392,10 @@ impl LongTermAdaptationEngine {
 
             // Update statistics
             {
-                let mut stats = self.statistics.write().unwrap();
+                let mut stats = self
+                    .statistics
+                    .write()
+                    .expect("lock should not be poisoned");
                 stats.total_feedback += 1;
             }
         } // Write lock on feedback_store is dropped here
@@ -405,8 +411,14 @@ impl LongTermAdaptationEngine {
 
     /// Check if adaptation should be triggered
     fn should_trigger_adaptation(&self) -> bool {
-        let store = self.feedback_store.read().unwrap();
-        let last_adaptation = *self.last_adaptation.read().unwrap();
+        let store = self
+            .feedback_store
+            .read()
+            .expect("lock should not be poisoned");
+        let last_adaptation = *self
+            .last_adaptation
+            .read()
+            .expect("lock should not be poisoned");
 
         // Check minimum feedback count
         if store.len() < self.config.min_feedback_for_adaptation {
@@ -485,7 +497,10 @@ impl LongTermAdaptationEngine {
 
         // Store result
         {
-            let mut history = self.adaptation_history.write().unwrap();
+            let mut history = self
+                .adaptation_history
+                .write()
+                .expect("lock should not be poisoned");
             history.push_back(result.clone());
 
             // Maintain history size
@@ -496,13 +511,19 @@ impl LongTermAdaptationEngine {
 
         // Update last adaptation time
         {
-            let mut last_adaptation = self.last_adaptation.write().unwrap();
+            let mut last_adaptation = self
+                .last_adaptation
+                .write()
+                .expect("lock should not be poisoned");
             *last_adaptation = SystemTime::now();
         }
 
         // Update statistics
         {
-            let mut stats = self.statistics.write().unwrap();
+            let mut stats = self
+                .statistics
+                .write()
+                .expect("lock should not be poisoned");
             stats.total_adaptations += 1;
             stats.avg_quality_improvement = (stats.avg_quality_improvement
                 * (stats.total_adaptations - 1) as f32
@@ -520,7 +541,10 @@ impl LongTermAdaptationEngine {
 
     /// Collect feedback samples for adaptation
     fn collect_feedback_for_adaptation(&self) -> Result<Vec<UserFeedback>> {
-        let store = self.feedback_store.read().unwrap();
+        let store = self
+            .feedback_store
+            .read()
+            .expect("lock should not be poisoned");
         let cutoff_time =
             SystemTime::now() - Duration::from_secs(self.config.feedback_window_hours * 3600);
 
@@ -559,7 +583,10 @@ impl LongTermAdaptationEngine {
 
     /// Adapt speaker based on feedback
     fn adapt_speaker(&self, speaker_id: &str, feedback_list: &[UserFeedback]) -> Result<f32> {
-        let mut speaker_store = self.speaker_store.write().unwrap();
+        let mut speaker_store = self
+            .speaker_store
+            .write()
+            .expect("lock should not be poisoned");
 
         // Get or create speaker data
         let speaker_data = speaker_store.entry(speaker_id.to_string()).or_default();
@@ -754,14 +781,17 @@ impl LongTermAdaptationEngine {
 
     /// Get processing statistics
     pub fn get_statistics(&self) -> ProcessingStatistics {
-        self.statistics.read().unwrap().clone()
+        self.statistics
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Get adaptation history
     pub fn get_adaptation_history(&self) -> Vec<AdaptationResult> {
         self.adaptation_history
             .read()
-            .unwrap()
+            .expect("lock should not be poisoned")
             .iter()
             .cloned()
             .collect()
@@ -769,7 +799,10 @@ impl LongTermAdaptationEngine {
 
     /// Get recent feedback
     pub fn get_recent_feedback(&self, limit: usize) -> Vec<UserFeedback> {
-        let store = self.feedback_store.read().unwrap();
+        let store = self
+            .feedback_store
+            .read()
+            .expect("lock should not be poisoned");
         store.iter().rev().take(limit).cloned().collect()
     }
 

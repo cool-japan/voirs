@@ -61,7 +61,7 @@ where
 
     /// Insert value with compression
     pub fn insert(&self, key: K, value: V) -> Result<()> {
-        let serialized = bincode::serde::encode_to_vec(&value, bincode::config::standard())
+        let serialized = oxicode::serde::encode_to_vec(&value, oxicode::config::standard())
             .map_err(|e| crate::G2pError::InvalidInput(format!("Serialization failed: {e}")))?;
         let original_size = serialized.len();
 
@@ -74,8 +74,8 @@ where
             crate::G2pError::InvalidInput(format!("Compression finish failed: {e}"))
         })?;
 
-        let mut cache = self.cache.lock().unwrap();
-        let mut stats = self.stats.lock().unwrap();
+        let mut cache = self.cache.lock().expect("lock should not be poisoned");
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
 
         // Update statistics
         stats.total_original_size += original_size;
@@ -111,8 +111,8 @@ where
 
     /// Get value with decompression
     pub fn get(&self, key: &K) -> Result<Option<V>> {
-        let mut cache = self.cache.lock().unwrap();
-        let mut stats = self.stats.lock().unwrap();
+        let mut cache = self.cache.lock().expect("lock should not be poisoned");
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
 
         if let Some(entry) = cache.get_mut(key) {
             entry.access_count += 1;
@@ -127,7 +127,7 @@ where
                 .map_err(|e| crate::G2pError::InvalidInput(format!("Decompression failed: {e}")))?;
 
             let (value, _): (V, usize) =
-                bincode::serde::decode_from_slice(&decompressed, bincode::config::standard())
+                oxicode::serde::decode_from_slice(&decompressed, oxicode::config::standard())
                     .map_err(|e| {
                         crate::G2pError::InvalidInput(format!("Deserialization failed: {e}"))
                     })?;
@@ -148,18 +148,27 @@ where
 
     /// Get cache statistics
     pub fn stats(&self) -> CompressedCacheStats {
-        self.stats.lock().unwrap().clone()
+        self.stats
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Get cache size
     pub fn size(&self) -> usize {
-        self.cache.lock().unwrap().len()
+        self.cache
+            .lock()
+            .expect("lock should not be poisoned")
+            .len()
     }
 
     /// Clear cache
     pub fn clear(&self) {
-        self.cache.lock().unwrap().clear();
-        let mut stats = self.stats.lock().unwrap();
+        self.cache
+            .lock()
+            .expect("lock should not be poisoned")
+            .clear();
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
         stats.total_original_size = 0;
         stats.total_compressed_size = 0;
         stats.compression_ratio = 1.0;
@@ -193,7 +202,7 @@ impl AdaptiveCompressionManager {
 
     /// Decide whether to compress based on size and type
     pub fn should_compress<T: Serialize>(&self, data: &T) -> bool {
-        if let Ok(serialized) = bincode::serde::encode_to_vec(data, bincode::config::standard()) {
+        if let Ok(serialized) = oxicode::serde::encode_to_vec(data, oxicode::config::standard()) {
             serialized.len() > self.compression_threshold
         } else {
             false
@@ -202,9 +211,9 @@ impl AdaptiveCompressionManager {
 
     /// Compress data adaptively
     pub fn compress_adaptive<T: Serialize>(&self, data: &T) -> Result<Vec<u8>> {
-        let serialized = bincode::serde::encode_to_vec(data, bincode::config::standard())
+        let serialized = oxicode::serde::encode_to_vec(data, oxicode::config::standard())
             .map_err(|e| crate::G2pError::InvalidInput(format!("Serialization failed: {e}")))?;
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
 
         if serialized.len() > self.compression_threshold {
             // Compress large data
@@ -257,7 +266,7 @@ impl AdaptiveCompressionManager {
         };
 
         let (value, _): (T, usize) =
-            bincode::serde::decode_from_slice(&decompressed, bincode::config::standard()).map_err(
+            oxicode::serde::decode_from_slice(&decompressed, oxicode::config::standard()).map_err(
                 |e| crate::G2pError::InvalidInput(format!("Deserialization failed: {e}")),
             )?;
         Ok(value)
@@ -265,7 +274,10 @@ impl AdaptiveCompressionManager {
 
     /// Get compression statistics
     pub fn stats(&self) -> CompressionStats {
-        self.stats.lock().unwrap().clone()
+        self.stats
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 }
 

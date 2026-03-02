@@ -445,7 +445,7 @@ tracing = "0.1"
 
 ## 📝 License
 
-All examples are licensed under either of Apache License 2.0 or MIT License at your option, consistent with the main VoiRS project.
+All examples are licensed under the Apache License, Version 2.0, consistent with the main VoiRS project.
 
 ---
 

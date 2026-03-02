@@ -449,10 +449,12 @@ impl RetentionManager {
 
     /// Generate retention report
     pub async fn generate_report(&self, period_days: i64) -> Result<RetentionReport> {
-        let statistics = match self.stats_history.read().await.last() {
-            Some(stats) => stats.clone(),
+        // Read the last statistics from history, dropping the lock before potentially calling run_cleanup
+        let last_stats = self.stats_history.read().await.last().cloned();
+        let statistics = match last_stats {
+            Some(stats) => stats,
             None => {
-                // Run cleanup if no history
+                // Run cleanup if no history (lock is already dropped above)
                 self.run_cleanup().await?
             }
         };

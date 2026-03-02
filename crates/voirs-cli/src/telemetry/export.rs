@@ -291,17 +291,26 @@ mod tests {
 
     #[test]
     fn test_export_format_from_str() {
-        assert_eq!("json".parse::<ExportFormat>().unwrap(), ExportFormat::Json);
         assert_eq!(
-            "jsonl".parse::<ExportFormat>().unwrap(),
+            "json".parse::<ExportFormat>().expect("valid format"),
+            ExportFormat::Json
+        );
+        assert_eq!(
+            "jsonl".parse::<ExportFormat>().expect("valid format"),
             ExportFormat::JsonLines
         );
-        assert_eq!("csv".parse::<ExportFormat>().unwrap(), ExportFormat::Csv);
         assert_eq!(
-            "markdown".parse::<ExportFormat>().unwrap(),
+            "csv".parse::<ExportFormat>().expect("valid format"),
+            ExportFormat::Csv
+        );
+        assert_eq!(
+            "markdown".parse::<ExportFormat>().expect("valid format"),
             ExportFormat::Markdown
         );
-        assert_eq!("html".parse::<ExportFormat>().unwrap(), ExportFormat::Html);
+        assert_eq!(
+            "html".parse::<ExportFormat>().expect("valid format"),
+            ExportFormat::Html
+        );
         assert!("invalid".parse::<ExportFormat>().is_err());
     }
 

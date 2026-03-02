@@ -161,7 +161,7 @@ impl EnhancedStatisticalAnalyzer {
             p_values.iter().enumerate().map(|(i, &p)| (i, p)).collect();
 
         // Sort by p-value
-        indexed_p.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        indexed_p.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
         let mut adjusted_p = vec![0.0; p_values.len()];
 
@@ -309,7 +309,7 @@ impl EnhancedStatisticalAnalyzer {
             combined.push((x, 1));
         }
 
-        combined.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        combined.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
         // Calculate ranks
         let mut ranks = vec![0.0; combined.len()];
@@ -410,7 +410,7 @@ impl EnhancedStatisticalAnalyzer {
             differences.push(mean1 - mean2);
         }
 
-        differences.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        differences.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let alpha_2 = self.alpha / 2.0;
         let lower_idx = (alpha_2 * self.bootstrap_samples as f64) as usize;
@@ -482,7 +482,7 @@ impl EnhancedStatisticalAnalyzer {
     fn assign_ranks(&self, data: &[f64]) -> Vec<f64> {
         let mut indexed: Vec<(usize, f64)> =
             data.iter().enumerate().map(|(i, &x)| (i, x)).collect();
-        indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
         let mut ranks = vec![0.0; data.len()];
         let mut i = 0;
@@ -548,7 +548,7 @@ impl EnhancedStatisticalAnalyzer {
             correlations.push(r);
         }
 
-        correlations.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        correlations.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let alpha_2 = self.alpha / 2.0;
         let lower_idx = (alpha_2 * self.bootstrap_samples as f64) as usize;
@@ -560,7 +560,7 @@ impl EnhancedStatisticalAnalyzer {
     fn count_outliers(&self, x: &[f64], y: &[f64]) -> Result<usize, EvaluationError> {
         // Simple outlier detection using IQR method
         let mut combined: Vec<f64> = x.iter().chain(y.iter()).cloned().collect();
-        combined.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        combined.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let n = combined.len();
         let q1 = combined[n / 4];

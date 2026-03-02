@@ -394,9 +394,7 @@ impl BenchmarkRunner {
             let content = std::fs::read_to_string(path).map_err(DatasetError::IoError)?;
 
             let baselines: HashMap<String, BenchmarkResult> = serde_json::from_str(&content)
-                .map_err(|e| {
-                    DatasetError::IoError(std::io::Error::other(e))
-                })?;
+                .map_err(|e| DatasetError::IoError(std::io::Error::other(e)))?;
 
             self.baselines = baselines;
         }
@@ -405,9 +403,8 @@ impl BenchmarkRunner {
 
     /// Save baselines to file
     pub fn save_baselines(&self, path: &Path) -> DatasetResult<()> {
-        let json = serde_json::to_string_pretty(&self.baselines).map_err(|e| {
-            DatasetError::IoError(std::io::Error::other(e))
-        })?;
+        let json = serde_json::to_string_pretty(&self.baselines)
+            .map_err(|e| DatasetError::IoError(std::io::Error::other(e)))?;
 
         std::fs::write(path, json).map_err(DatasetError::IoError)?;
 
@@ -626,9 +623,8 @@ impl BenchmarkRunner {
 
     /// Save suite to file
     pub fn save_suite(&self, suite: &BenchmarkSuite, path: &Path) -> DatasetResult<()> {
-        let json = serde_json::to_string_pretty(suite).map_err(|e| {
-            DatasetError::IoError(std::io::Error::other(e))
-        })?;
+        let json = serde_json::to_string_pretty(suite)
+            .map_err(|e| DatasetError::IoError(std::io::Error::other(e)))?;
 
         std::fs::write(path, json).map_err(DatasetError::IoError)?;
 

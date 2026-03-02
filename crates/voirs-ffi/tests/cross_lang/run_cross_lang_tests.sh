@@ -60,9 +60,9 @@ check_binding_availability() {
     log "Checking binding availability..."
     
     # Check C API (always available if FFI is built)
-    if [ -f "$FFI_DIR/target/debug/libvoirs_ffi.so" ] || \
-       [ -f "$FFI_DIR/target/debug/libvoirs_ffi.dylib" ] || \
-       [ -f "$FFI_DIR/target/debug/voirs_ffi.dll" ]; then
+    if [ -f "$FFI_DIR/target/debug/libvoirs.so" ] || \
+       [ -f "$FFI_DIR/target/debug/libvoirs.dylib" ] || \
+       [ -f "$FFI_DIR/target/debug/voirs.dll" ]; then
         RUST_AVAILABLE="true"
         success "C API: Available"
     else
@@ -73,12 +73,12 @@ check_binding_availability() {
     
     # Check Python bindings
     if command_exists python3; then
-        if python3 -c "import voirs_ffi" 2>/dev/null; then
+        if python3 -c "import voirs" 2>/dev/null; then
             PYTHON_AVAILABLE="true"
             success "Python: Available"
         else
             PYTHON_AVAILABLE="false"
-            PYTHON_ERROR="voirs_ffi module not found. Build Python bindings first."
+            PYTHON_ERROR="voirs module not found. Build Python bindings first."
             warn "Python: Not available - ${PYTHON_ERROR}"
         fi
     else
@@ -111,7 +111,7 @@ check_binding_availability() {
     fi
     
     # Check WebAssembly bindings
-    if [ -f "$FFI_DIR/pkg/voirs_ffi.js" ]; then
+    if [ -f "$FFI_DIR/pkg/voirs.js" ]; then
         WASM_AVAILABLE="true"
         success "WebAssembly: Available"
     else
@@ -249,7 +249,7 @@ import time
 import sys
 
 try:
-    import voirs_ffi as voirs
+    import voirs
     
     def test_python_performance():
         start_time = time.time()
@@ -345,7 +345,7 @@ def monitor_memory(label):
     return process.memory_info().rss / 1024 / 1024  # MB
 
 try:
-    import voirs_ffi as voirs
+    import voirs
     
     def test_memory_usage():
         initial_memory = monitor_memory("initial")
@@ -397,7 +397,7 @@ try:
         sys.exit(1)
         
 except ImportError:
-    print("Memory test skipped - voirs_ffi not available")
+    print("Memory test skipped - voirs not available")
     sys.exit(0)
 except Exception as e:
     print(f"Memory test error: {e}")

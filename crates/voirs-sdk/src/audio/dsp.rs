@@ -384,7 +384,7 @@ pub fn spectral_statistics(buffer: &AudioBuffer, fft_size: usize) -> Result<Spec
     // Spectral crest factor
     let peak = magnitude
         .iter()
-        .max_by(|a, b| a.partial_cmp(b).unwrap())
+        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
         .unwrap_or(&0.0);
     let rms = (magnitude.iter().map(|m| m * m).sum::<f64>() / magnitude.len() as f64).sqrt();
     let crest_factor = if rms > 1e-10 {

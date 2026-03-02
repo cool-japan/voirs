@@ -15,7 +15,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 try:
-    import voirs_ffi as voirs
+    import voirs
     VOIRS_AVAILABLE = True
 except ImportError:
     VOIRS_AVAILABLE = False

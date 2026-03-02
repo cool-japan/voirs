@@ -797,7 +797,7 @@ impl JitterBuffer {
 
     fn get_frame(&mut self) -> Result<Vec<f32>> {
         if !self.buffer.is_empty() {
-            Ok(self.buffer.pop_front().unwrap())
+            Ok(self.buffer.pop_front().expect("operation should succeed"))
         } else {
             // Generate silence if no frames available
             Ok(vec![0.0; self.frame_size])

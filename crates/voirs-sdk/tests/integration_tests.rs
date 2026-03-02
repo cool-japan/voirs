@@ -122,10 +122,7 @@ fn test_error_system() {
     let error = VoirsError::config_error("Test configuration error");
     assert!(matches!(error, VoirsError::ConfigError { .. }));
 
-    let synthesis_error = VoirsError::synthesis_failed(
-        "test text",
-        std::io::Error::new(std::io::ErrorKind::Other, "test"),
-    );
+    let synthesis_error = VoirsError::synthesis_failed("test text", std::io::Error::other("test"));
     assert!(matches!(
         synthesis_error,
         VoirsError::SynthesisFailed { .. }

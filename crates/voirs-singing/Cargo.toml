@@ -5,11 +5,13 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Singing voice synthesis for VoiRS"
+readme = "README.md"
 homepage.workspace = true
 documentation = "https://docs.rs/voirs-singing"
 repository.workspace = true
 categories = ["multimedia::audio", "multimedia", "science"]
 keywords = ["voice", "singing", "synthesis", "music", "audio"]
+rust-version.workspace = true
 
 [dependencies]
 # SciRS2 - Scientific computing abstractions

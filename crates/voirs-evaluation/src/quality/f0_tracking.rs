@@ -568,7 +568,7 @@ impl F0Contour {
 
     /// Smooth F0 contour using median filtering
     pub fn smooth(&mut self, window_size: usize) {
-        if window_size < 3 || window_size % 2 == 0 {
+        if window_size < 3 || window_size.is_multiple_of(2) {
             return; // Invalid window size
         }
 
@@ -587,7 +587,7 @@ impl F0Contour {
             if window_f0s.is_empty() {
                 smoothed_f0s.push(None);
             } else {
-                window_f0s.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                window_f0s.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                 let median = window_f0s[window_f0s.len() / 2];
                 smoothed_f0s.push(Some(median));
             }

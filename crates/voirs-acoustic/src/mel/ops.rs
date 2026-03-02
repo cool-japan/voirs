@@ -150,7 +150,7 @@ impl MelOps {
         for channel in &mut mel.data {
             let mut chan_arr = arr1(channel);
             chan_arr.mapv_inplace(|x| x * inv_norm);
-            channel.copy_from_slice(chan_arr.as_slice().unwrap());
+            channel.copy_from_slice(chan_arr.as_slice().expect("array should be contiguous"));
         }
 
         Ok(())
@@ -368,7 +368,8 @@ impl MelOps {
                 PaddingMode::Constant(value) => {
                     padded_data[mel_idx][..pad_left].fill(value);
                 }
-                PaddingMode::Reflect => {
+                PaddingMode::Reflect =>
+                {
                     #[allow(clippy::needless_range_loop)]
                     for i in 0..pad_left {
                         let source_idx = (pad_left - 1 - i).min(channel.len() - 1);
@@ -482,7 +483,7 @@ impl MelOps {
                 smoothed[i] = sum / count;
             }
 
-            channel.copy_from_slice(smoothed.as_slice().unwrap());
+            channel.copy_from_slice(smoothed.as_slice().expect("array should be contiguous"));
         }
 
         Ok(())

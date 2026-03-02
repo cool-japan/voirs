@@ -605,8 +605,16 @@ impl DataCollector {
             })
             .sum::<f32>();
 
-        let time_span = sorted.last().unwrap().timestamp.timestamp()
-            - sorted.first().unwrap().timestamp.timestamp();
+        let time_span = sorted
+            .last()
+            .expect("collection should not be empty")
+            .timestamp
+            .timestamp()
+            - sorted
+                .first()
+                .expect("collection should not be empty")
+                .timestamp
+                .timestamp();
 
         if time_span > 0 {
             total_improvement / (time_span as f32 / 3600.0) // improvement per hour
@@ -695,8 +703,16 @@ impl DataCollector {
                     })
                     .collect(),
                 total_duration: if interactions.len() > 1 {
-                    interactions.last().unwrap().timestamp.timestamp()
-                        - interactions.first().unwrap().timestamp.timestamp()
+                    interactions
+                        .last()
+                        .expect("collection should not be empty")
+                        .timestamp
+                        .timestamp()
+                        - interactions
+                            .first()
+                            .expect("collection should not be empty")
+                            .timestamp
+                            .timestamp()
                 } else {
                     0
                 },

@@ -526,7 +526,11 @@ pub mod utils {
         for word in &mut alignment.word_alignments {
             if !word.phonemes.is_empty() {
                 word.start_time = word.phonemes[0].start_time;
-                word.end_time = word.phonemes.last().unwrap().end_time;
+                word.end_time = word
+                    .phonemes
+                    .last()
+                    .expect("phonemes is non-empty (checked above)")
+                    .end_time;
             }
         }
     }
@@ -783,7 +787,12 @@ pub mod utils {
             let _word_start_phoneme = phoneme_pos;
 
             // Skip whitespace
-            while text_pos < text.len() && text.chars().nth(text_pos).unwrap().is_whitespace() {
+            while text_pos < text.len()
+                && text
+                    .chars()
+                    .nth(text_pos)
+                    .is_some_and(|c| c.is_whitespace())
+            {
                 text_pos += 1;
             }
 

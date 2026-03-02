@@ -412,7 +412,9 @@ impl MultiRegionConfig {
                         .min_by(|a, b| {
                             let latency_a = client_reg.estimated_latency_to(&a.region);
                             let latency_b = client_reg.estimated_latency_to(&b.region);
-                            latency_a.partial_cmp(&latency_b).unwrap()
+                            latency_a
+                                .partial_cmp(&latency_b)
+                                .unwrap_or(std::cmp::Ordering::Equal)
                         })
                         .map(|r| r.region)
                 } else {
@@ -427,7 +429,7 @@ impl MultiRegionConfig {
                     .min_by(|a, b| {
                         a.current_utilization
                             .partial_cmp(&b.current_utilization)
-                            .unwrap()
+                            .expect("value should be present")
                     })
                     .map(|r| r.region)
             }
@@ -438,7 +440,9 @@ impl MultiRegionConfig {
                     .max_by(|a, b| {
                         let score_a = a.max_capacity as f64 / (a.current_utilization + 1.0);
                         let score_b = b.max_capacity as f64 / (b.current_utilization + 1.0);
-                        score_a.partial_cmp(&score_b).unwrap()
+                        score_a
+                            .partial_cmp(&score_b)
+                            .unwrap_or(std::cmp::Ordering::Equal)
                     })
                     .map(|r| r.region)
             }

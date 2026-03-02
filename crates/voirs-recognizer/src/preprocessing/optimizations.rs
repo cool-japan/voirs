@@ -372,7 +372,7 @@ impl CacheOptimizedRingBuffer {
     #[must_use]
     pub fn new(capacity: usize) -> Self {
         // Align capacity to cache line size (64 bytes = 16 f32 values)
-        let aligned_capacity = ((capacity + 15) / 16) * 16;
+        let aligned_capacity = capacity.div_ceil(16) * 16;
 
         Self {
             buffer: vec![0.0; aligned_capacity],

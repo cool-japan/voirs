@@ -1,14 +1,14 @@
 # VoiRS — Pure-Rust Neural Speech Synthesis
 
 [![Rust](https://img.shields.io/badge/rust-1.70+-blue.svg)](https://www.rust-lang.org)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](https://github.com/cool-japan/voirs)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/cool-japan/voirs)
 [![CI](https://github.com/cool-japan/voirs/workflows/CI/badge.svg)](https://github.com/cool-japan/voirs/actions)
 
 > **Democratize state-of-the-art speech synthesis with a fully open, memory-safe, and hardware-portable stack built 100% in Rust.**
 
 VoiRS is a cutting-edge Text-to-Speech (TTS) framework that unifies high-performance crates from the cool-japan ecosystem (SciRS2, NumRS2, PandRS, TrustformeRS) into a cohesive neural speech synthesis solution.
 
-> **🚀 Alpha Release (0.1.0-alpha.3 — 2026-01-29)**: Core TTS functionality is working and production-ready. **NEW**: Enhanced CUDA GPU acceleration, SciRS2-Core 0.1.3 integration with improved SIMD optimizations, and comprehensive code quality improvements following strict no-unwrap policy!
+> **🚀 Beta Release (0.1.0-beta.1 — 2026-02-26)**: Core TTS functionality is working and production-ready. Enhanced CUDA GPU acceleration, SciRS2-Core integration with improved SIMD optimizations, comprehensive code quality improvements, and API stabilization for the beta milestone!
 
 ## 🎯 Key Features
 
@@ -22,7 +22,7 @@ VoiRS is a cutting-edge Text-to-Speech (TTS) framework that unifies high-perform
 - **Multilingual** — 20+ languages with pluggable G2P backends
 - **SafeTensors Checkpoints** — Production-ready model persistence (370 parameters, 1.5M trainable values)
 
-## 🔥 Alpha Release Status
+## 🔥 Beta Release Status
 
 ### ✅ What's Ready Now
 - **Core TTS Pipeline**: Complete text-to-speech synthesis with VITS + HiFi-GAN
@@ -36,17 +36,15 @@ VoiRS is a cutting-edge Text-to-Speech (TTS) framework that unifies high-perform
 - **50+ Examples**: Comprehensive code examples and tutorials
 - **SafeTensors Checkpoints**: Production-ready model persistence (370 parameters, 30MB per checkpoint)
 
-### 🚧 What's Coming Soon (Beta)
-- **GPU Acceleration**: CUDA and Metal backends for faster synthesis
-- **Voice Cloning**: Few-shot speaker adaptation
+### 🚧 What's Coming Next (Towards Stable)
 - **Production Models**: High-quality pre-trained voices
 - **Enhanced SSML**: Advanced prosody and emotion control
-- **WebAssembly**: Browser-native speech synthesis
-- **FFI Bindings**: C/Python/Node.js integration
-- **Advanced Evaluation**: Comprehensive quality metrics
+- **WebAssembly**: Browser-native speech synthesis optimization
+- **FFI Bindings**: C/Python/Node.js integration improvements
+- **Advanced Evaluation**: Comprehensive quality metrics expansion
 
-### ⚠️ Alpha Limitations
-- APIs may change between alpha versions
+### ⚠️ Beta Limitations
+- APIs are stabilizing but may still change before 1.0
 - Limited pre-trained model selection
 - Documentation still being expanded
 - Some advanced features are experimental
@@ -336,6 +334,13 @@ cargo run --example kokoro_espeak_auto_demo --features onnx --release
 
 ## 🗺️ Roadmap
 
+### Q1 2026 — Beta 0.1.0-beta.1 ✅
+- [x] API stabilization and beta milestone preparation
+- [x] SciRS2-Core 0.2.0 integration with improved SIMD and parallel operations
+- [x] Workspace metadata consistency and crates.io publishing readiness
+- [x] Dependency modernization (reqwest 0.13, bytes security fix)
+- [x] Comprehensive build and metadata validation
+
 ### Q1 2026 — Alpha 0.1.0-alpha.3 ✅
 - [x] Enhanced CUDA GPU acceleration across pipeline
 - [x] SciRS2-Core 0.1.3 integration with improved SIMD
@@ -387,12 +392,9 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 ## 📄 License
 
-Licensed under either of:
+Licensed under the Apache License 2.0:
 
-- **Apache License 2.0** ([LICENSE-APACHE](LICENSE-APACHE))
-- **MIT License** ([LICENSE-MIT](LICENSE-MIT))
-
-at your option.
+- **Apache License 2.0** ([LICENSE](LICENSE))
 
 ## 🙏 Acknowledgments
 

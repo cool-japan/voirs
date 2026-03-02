@@ -398,7 +398,7 @@ impl MultiHeadAttention {
 
         // Tile size for memory efficiency
         let tile_size = 512;
-        let num_tiles = (seq_len + tile_size - 1) / tile_size;
+        let num_tiles = seq_len.div_ceil(tile_size);
 
         // Reshape for multi-head attention
         let q = q
@@ -511,7 +511,10 @@ impl MultiHeadAttention {
 
         // Concatenate tiles
         let output = if output_tiles.len() == 1 {
-            output_tiles.into_iter().next().unwrap()
+            output_tiles
+                .into_iter()
+                .next()
+                .expect("output_tiles has exactly one element")
         } else {
             let tile_refs: Vec<&Tensor> = output_tiles.iter().collect();
             Tensor::cat(&tile_refs, 2).map_err(|e| RecognitionError::ModelError {

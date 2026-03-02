@@ -1,4 +1,4 @@
-# voirs-ffi
+# voirs
 
 [![Crates.io](https://img.shields.io/crates/v/voirs-ffi.svg)](https://crates.io/crates/voirs-ffi)
 [![Documentation](https://docs.rs/voirs-ffi/badge.svg)](https://docs.rs/voirs-ffi)
@@ -494,10 +494,10 @@ target_compile_options(my_app PRIVATE ${VOIRS_CFLAGS_OTHER})
 
 ```bash
 # Linux/macOS
-gcc -o my_app main.c -lvoirs_ffi -lpthread -ldl -lm
+gcc -o my_app main.c -lvoirs -lpthread -ldl -lm
 
 # Windows (MSVC)
-cl main.c voirs_ffi.lib
+cl main.c voirs.lib
 ```
 
 ### Python Development
@@ -797,9 +797,4 @@ cargo test
 
 ## License
 
-Licensed under either of:
-
-- Apache License, Version 2.0 ([LICENSE-APACHE](../../LICENSE-APACHE))
-- MIT license ([LICENSE-MIT](../../LICENSE-MIT))
-
-at your option.
+Licensed under the Apache License, Version 2.0 ([LICENSE](../../LICENSE)).

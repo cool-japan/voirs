@@ -586,12 +586,12 @@ impl AgeGenderAdapter {
         let f0_std = variance.sqrt();
         let f0_range = f0_values
             .iter()
-            .max_by(|a, b| a.partial_cmp(b).unwrap())
-            .unwrap()
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .expect("f0_values is non-empty")
             - f0_values
                 .iter()
-                .min_by(|a, b| a.partial_cmp(b).unwrap())
-                .unwrap();
+                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .expect("f0_values is non-empty");
 
         // Calculate jitter
         let mut jitter_sum = 0.0;
@@ -697,7 +697,7 @@ impl AgeGenderAdapter {
             }
         }
 
-        peaks.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        peaks.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         peaks
     }
 

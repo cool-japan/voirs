@@ -262,11 +262,11 @@ pub enum AttributeValue {
     Bool(bool),
     /// String array( vec< string>)
     StringArray(Vec<String>),
-    /// Int array( vec<i64>)
+    /// Int array( `Vec<i64>`)
     IntArray(Vec<i64>),
-    /// Float array( vec<f64>)
+    /// Float array( `Vec<f64>`)
     FloatArray(Vec<f64>),
-    /// Bool array( vec<bool>)
+    /// Bool array( `Vec<bool>`)
     BoolArray(Vec<bool>),
 }
 
@@ -472,7 +472,7 @@ impl Tracer {
         if sampling_result.decision != SamplingDecision::Drop {
             self.active_spans
                 .lock()
-                .unwrap()
+                .expect("lock should not be poisoned")
                 .insert(span.context.span_id.clone(), span.clone());
         }
 
@@ -486,7 +486,7 @@ impl Tracer {
         // Remove from active spans
         self.active_spans
             .lock()
-            .unwrap()
+            .expect("lock should not be poisoned")
             .remove(&span.context.span_id);
 
         // Notify processor
@@ -496,7 +496,11 @@ impl Tracer {
     /// Get active span by ID
     #[must_use]
     pub fn get_active_span(&self, span_id: &SpanId) -> Option<Span> {
-        self.active_spans.lock().unwrap().get(span_id).cloned()
+        self.active_spans
+            .lock()
+            .expect("lock should not be poisoned")
+            .get(span_id)
+            .cloned()
     }
 
     /// Get all active spans
@@ -504,7 +508,7 @@ impl Tracer {
     pub fn get_active_spans(&self) -> Vec<Span> {
         self.active_spans
             .lock()
-            .unwrap()
+            .expect("lock should not be poisoned")
             .values()
             .cloned()
             .collect()
@@ -577,7 +581,7 @@ impl BatchSpanProcessor {
 
     /// Force export current batch
     pub fn force_export(&self) {
-        let mut batch = self.batch.lock().unwrap();
+        let mut batch = self.batch.lock().expect("lock should not be poisoned");
         if !batch.is_empty() {
             let spans = batch.drain(..).collect();
             drop(batch);
@@ -592,7 +596,7 @@ impl SpanProcessor for BatchSpanProcessor {
     }
 
     fn on_end(&self, span: &Span) {
-        let mut batch = self.batch.lock().unwrap();
+        let mut batch = self.batch.lock().expect("lock should not be poisoned");
         batch.push(span.clone());
 
         // Export if batch is full
@@ -619,7 +623,8 @@ impl SpanExporter for ConsoleSpanExporter {
         for span in spans {
             println!(
                 "Exported span: {}",
-                serde_json::to_string_pretty(&SpanJson::from(span)).unwrap()
+                serde_json::to_string_pretty(&SpanJson::from(span))
+                    .expect("SpanJson is serializable")
             );
         }
         Ok(())
@@ -658,11 +663,13 @@ impl From<Span> for SpanJson {
         let start_timestamp = span
             .start_time
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("SystemTime should be after UNIX_EPOCH")
             .as_millis() as u64;
-        let end_timestamp = span
-            .end_time
-            .map(|end| end.duration_since(UNIX_EPOCH).unwrap().as_millis() as u64);
+        let end_timestamp = span.end_time.map(|end| {
+            end.duration_since(UNIX_EPOCH)
+                .expect("SystemTime should be after UNIX_EPOCH")
+                .as_millis() as u64
+        });
         let duration_ms = span.duration().map(|d| d.as_millis() as u64);
 
         Self {
@@ -685,7 +692,11 @@ impl From<Span> for SpanJson {
                 .into_iter()
                 .map(|e| SpanEventJson {
                     name: e.name,
-                    timestamp: e.timestamp.duration_since(UNIX_EPOCH).unwrap().as_millis() as u64,
+                    timestamp: e
+                        .timestamp
+                        .duration_since(UNIX_EPOCH)
+                        .expect("SystemTime should be after UNIX_EPOCH")
+                        .as_millis() as u64,
                     attributes: e
                         .attributes
                         .into_iter()
@@ -844,8 +855,14 @@ impl Sampler for RateLimitingSampler {
         _kind: SpanKind,
     ) -> SamplingResult {
         let now = Instant::now();
-        let mut last_time = self.last_sample_time.lock().unwrap();
-        let mut count = self.current_count.lock().unwrap();
+        let mut last_time = self
+            .last_sample_time
+            .lock()
+            .expect("lock should not be poisoned");
+        let mut count = self
+            .current_count
+            .lock()
+            .expect("lock should not be poisoned");
 
         // Reset count if a second has passed
         if now.duration_since(*last_time) >= Duration::from_secs(1) {

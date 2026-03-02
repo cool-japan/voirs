@@ -29,7 +29,7 @@ impl BatchProcessor {
             let semaphore = semaphore.clone();
 
             let handle = task::spawn(async move {
-                let _permit = semaphore.acquire().await.unwrap();
+                let _permit = semaphore.acquire().await.expect("semaphore should be open");
                 backend.to_phonemes(&text, language).await
             });
 
@@ -38,7 +38,7 @@ impl BatchProcessor {
 
         let mut results = Vec::new();
         for handle in handles {
-            let result = handle.await.unwrap();
+            let result = handle.await.expect("spawned task should not panic");
             results.push(result);
         }
 
@@ -61,7 +61,7 @@ impl BatchProcessor {
             let semaphore = semaphore.clone();
 
             let handle = task::spawn(async move {
-                let _permit = semaphore.acquire().await.unwrap();
+                let _permit = semaphore.acquire().await.expect("semaphore should be open");
                 backend.to_phonemes(&text, lang).await
             });
 
@@ -70,7 +70,7 @@ impl BatchProcessor {
 
         let mut results = Vec::new();
         for handle in handles {
-            let result = handle.await.unwrap();
+            let result = handle.await.expect("spawned task should not panic");
             results.push(result);
         }
 
@@ -149,7 +149,10 @@ impl BatchPhonemeProcessor {
 
     /// Get a reusable vector from the memory pool
     fn get_reusable_vector(&self) -> Vec<Vec<Phoneme>> {
-        let mut pool = self.memory_pool.lock().unwrap();
+        let mut pool = self
+            .memory_pool
+            .lock()
+            .expect("lock should not be poisoned");
         pool.pop()
             .unwrap_or_else(|| Vec::<Vec<Phoneme>>::with_capacity(self.max_batch_size))
     }
@@ -158,7 +161,10 @@ impl BatchPhonemeProcessor {
     fn return_reusable_vector(&self, mut vec: Vec<Vec<Phoneme>>) {
         vec.clear();
         if vec.capacity() > 0 {
-            let mut pool = self.memory_pool.lock().unwrap();
+            let mut pool = self
+                .memory_pool
+                .lock()
+                .expect("lock should not be poisoned");
             if pool.len() < 10 {
                 // Limit pool size to prevent unbounded growth
                 pool.push(vec);
@@ -168,7 +174,7 @@ impl BatchPhonemeProcessor {
 
     /// Update processing statistics
     fn update_stats(&self, batches: u64, phonemes: usize, duration: Duration) {
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
         stats.batches_processed += batches;
         stats.phonemes_processed += phonemes as u64;
 
@@ -190,18 +196,24 @@ impl BatchPhonemeProcessor {
 
     /// Get current processing statistics
     pub fn get_stats(&self) -> BatchProcessingStats {
-        self.stats.lock().unwrap().clone()
+        self.stats
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Reset processing statistics
     pub fn reset_stats(&self) {
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
         *stats = BatchProcessingStats::default();
     }
 
     /// Clear memory pool to free unused memory
     pub fn clear_memory_pool(&self) {
-        let mut pool = self.memory_pool.lock().unwrap();
+        let mut pool = self
+            .memory_pool
+            .lock()
+            .expect("lock should not be poisoned");
         pool.clear();
     }
 }
@@ -500,7 +512,7 @@ impl DynamicBatchProcessor {
         total_efficiency: f32,
         processing_time: Duration,
     ) {
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
 
         stats.adaptive_batches_processed += batches_count as u64;
 
@@ -542,12 +554,15 @@ impl DynamicBatchProcessor {
 
     /// Get current dynamic processing statistics
     pub fn get_dynamic_stats(&self) -> DynamicBatchStats {
-        self.stats.lock().unwrap().clone()
+        self.stats
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Reset dynamic processing statistics
     pub fn reset_dynamic_stats(&self) {
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
         *stats = DynamicBatchStats::default();
     }
 

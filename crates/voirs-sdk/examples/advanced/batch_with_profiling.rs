@@ -22,7 +22,7 @@ use std::time::Instant;
 use voirs_sdk::batch::{BatchConfig, BatchProcessor, BatchRequest, SchedulingStrategy};
 use voirs_sdk::prelude::*;
 use voirs_sdk::profiling::{
-    PerformanceComparator, Profiler, ProfilerConfig, ReportFormat, ReportGenerator,
+    PerformanceComparator, PerformanceReport, Profiler, ProfilerConfig, ReportGenerator,
 };
 
 #[tokio::main]
@@ -47,31 +47,31 @@ async fn main() -> Result<()> {
 
     // Example 1: Basic batch profiling
     println!("Example 1: Basic Batch Processing with Profiling");
-    println!("-".repeat(70));
+    println!("{}", "-".repeat(70));
     basic_batch_profiling(&pipeline).await?;
     println!();
 
     // Example 2: Comparing batch configurations
     println!("Example 2: Comparing Batch Configurations");
-    println!("-".repeat(70));
+    println!("{}", "-".repeat(70));
     compare_batch_configurations(&pipeline).await?;
     println!();
 
     // Example 3: Memory analysis during batch processing
     println!("Example 3: Memory Usage Analysis");
-    println!("-".repeat(70));
+    println!("{}", "-".repeat(70));
     batch_memory_analysis(&pipeline).await?;
     println!();
 
     // Example 4: Bottleneck identification
     println!("Example 4: Batch Bottleneck Identification");
-    println!("-".repeat(70));
+    println!("{}", "-".repeat(70));
     identify_batch_bottlenecks(&pipeline).await?;
     println!();
 
     // Example 5: Production optimization
     println!("Example 5: Production Optimization Analysis");
-    println!("-".repeat(70));
+    println!("{}", "-".repeat(70));
     production_optimization(&pipeline).await?;
     println!();
 
@@ -105,33 +105,52 @@ async fn basic_batch_profiling(pipeline: &Arc<VoirsPipeline>) -> Result<()> {
     let batch_duration = start.elapsed();
 
     // End profiling session
-    let session = profiler.end_session(session).await?;
+    let report = profiler.end_session(session).await?;
 
     // Analyze results
     println!("Batch Processing Results:");
     println!("  Total requests: {}", results.len());
-    println!("  Successful: {}", results.iter().filter(|r| r.is_success()).count());
+    println!(
+        "  Successful: {}",
+        results.iter().filter(|r| r.is_success()).count()
+    );
     println!("  Total time: {:.2}s", batch_duration.as_secs_f64());
     println!();
 
     println!("Profiling Results:");
-    println!("  Session duration: {:.2}ms", session.duration.unwrap().as_millis());
-    println!("  Stages profiled: {}", session.stage_metrics.len());
-    println!("  Memory snapshots: {}", session.memory_snapshots.len());
-    println!("  Bottlenecks detected: {}", session.bottlenecks.len());
+    println!(
+        "  Session duration: {:.2}ms",
+        report.session.duration_seconds * 1000.0
+    );
+    println!("  Stages profiled: {}", report.stage_breakdown.len());
+    println!(
+        "  Memory analysis: {}",
+        if report.memory_analysis.is_some() {
+            "available"
+        } else {
+            "not available"
+        }
+    );
+    println!("  Bottlenecks detected: {}", report.bottlenecks.len());
     println!();
 
     // Show top time-consuming stages
-    let mut stages: Vec<_> = session.stage_metrics.iter().collect();
-    stages.sort_by(|a, b| b.1.total_duration.cmp(&a.1.total_duration));
+    let mut stages: Vec<_> = report.stage_breakdown.iter().collect();
+    stages.sort_by(|a, b| {
+        b.total_duration_ms
+            .partial_cmp(&a.total_duration_ms)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     println!("Top 5 Time-Consuming Stages:");
-    for (idx, (name, metrics)) in stages.iter().take(5).enumerate() {
-        println!("  {}. {}: {:.2}ms total ({:.1}% of total)",
-                 idx + 1,
-                 name,
-                 metrics.total_duration.as_millis(),
-                 metrics.percentage_of_total.unwrap_or(0.0));
+    for (idx, stage) in stages.iter().take(5).enumerate() {
+        println!(
+            "  {}. {}: {:.2}ms total ({:.1}% of total)",
+            idx + 1,
+            stage.stage_name,
+            stage.total_duration_ms,
+            stage.percentage_of_total
+        );
     }
 
     Ok(())
@@ -150,69 +169,90 @@ async fn compare_batch_configurations(pipeline: &Arc<VoirsPipeline>) -> Result<(
 
     // Configuration 1: Default
     println!("Testing default configuration...");
-    let config1 = BatchConfig::default();
-    let session1 = profile_batch_config(
+    let report1 = profile_batch_config(
         &profiler,
-        &pipeline,
-        config1,
+        pipeline,
+        BatchConfig::default(),
         test_requests.clone(),
         "default_config",
-    ).await?;
+    )
+    .await?;
 
     // Configuration 2: High concurrency
     println!("Testing high concurrency configuration...");
-    let config2 = BatchConfig {
-        max_concurrency: num_cpus::get() * 2,
-        scheduling_strategy: SchedulingStrategy::LoadBalanced,
-        ..Default::default()
-    };
-    let session2 = profile_batch_config(
+    let report2 = profile_batch_config(
         &profiler,
-        &pipeline,
-        config2,
+        pipeline,
+        BatchConfig {
+            max_concurrency: num_cpus::get() * 2,
+            scheduling_strategy: SchedulingStrategy::LoadBalanced,
+            ..Default::default()
+        },
         test_requests.clone(),
         "high_concurrency",
-    ).await?;
+    )
+    .await?;
 
     // Configuration 3: Priority scheduling
     println!("Testing priority scheduling configuration...");
-    let config3 = BatchConfig {
-        scheduling_strategy: SchedulingStrategy::Priority,
-        ..Default::default()
-    };
-    let session3 = profile_batch_config(
+    let report3 = profile_batch_config(
         &profiler,
-        &pipeline,
-        config3,
+        pipeline,
+        BatchConfig {
+            scheduling_strategy: SchedulingStrategy::PriorityBased,
+            ..Default::default()
+        },
         test_requests.clone(),
         "priority_scheduling",
-    ).await?;
+    )
+    .await?;
 
-    println!("\n" + &"=".repeat(70));
+    println!();
+    println!("{}", "=".repeat(70));
     println!("Configuration Comparison:\n");
 
-    // Compare configurations
-    let comparator = PerformanceComparator::new();
+    // Compare configurations using ProfileSession history
+    let sessions = profiler.get_sessions().await;
+    if sessions.len() >= 2 {
+        let comparator = PerformanceComparator::new();
 
-    println!("Default vs High Concurrency:");
-    let comparison1 = comparator.compare(&session1, &session2);
-    println!("  Performance change: {:.1}%", comparison1.overall_change_percent);
-    println!();
+        println!("Default vs High Concurrency:");
+        let comparison1 = comparator.compare(&sessions[0], &sessions[1]).await;
+        println!(
+            "  Performance change: {:.1}%",
+            comparison1.overall_change_percent
+        );
+        println!();
 
-    println!("Default vs Priority Scheduling:");
-    let comparison2 = comparator.compare(&session1, &session3);
-    println!("  Performance change: {:.1}%", comparison2.overall_change_percent);
-    println!();
+        if sessions.len() >= 3 {
+            println!("Default vs Priority Scheduling:");
+            let comparison2 = comparator.compare(&sessions[0], &sessions[2]).await;
+            println!(
+                "  Performance change: {:.1}%",
+                comparison2.overall_change_percent
+            );
+            println!();
+        }
+    }
 
     // Determine best configuration
     let durations = vec![
-        ("Default", session1.duration.unwrap().as_millis()),
-        ("High Concurrency", session2.duration.unwrap().as_millis()),
-        ("Priority Scheduling", session3.duration.unwrap().as_millis()),
+        (
+            "Default",
+            (report1.session.duration_seconds * 1000.0) as u64,
+        ),
+        (
+            "High Concurrency",
+            (report2.session.duration_seconds * 1000.0) as u64,
+        ),
+        (
+            "Priority Scheduling",
+            (report3.session.duration_seconds * 1000.0) as u64,
+        ),
     ];
 
     let best = durations.iter().min_by_key(|x| x.1).unwrap();
-    println!("✓ Best configuration: {} ({} ms)", best.0, best.1);
+    println!("Best configuration: {} ({} ms)", best.0, best.1);
 
     Ok(())
 }
@@ -236,7 +276,10 @@ async fn batch_memory_analysis(pipeline: &Arc<VoirsPipeline>) -> Result<()> {
             let text = match i % 3 {
                 0 => format!("Short {}", i),
                 1 => format!("Medium length text for request {}", i),
-                _ => format!("This is a much longer text for request {} with more content to process", i),
+                _ => format!(
+                    "This is a much longer text for request {} with more content to process",
+                    i
+                ),
             };
             BatchRequest::new(text, None)
         })
@@ -256,49 +299,34 @@ async fn batch_memory_analysis(pipeline: &Arc<VoirsPipeline>) -> Result<()> {
     let results = processor.process(requests).await?;
 
     // End profiling
-    let session = profiler.end_session(session).await?;
+    let report = profiler.end_session(session).await?;
 
     println!("Batch Results:");
     println!("  Total requests: {}", results.len());
-    println!("  Successful: {}", results.iter().filter(|r| r.is_success()).count());
+    println!(
+        "  Successful: {}",
+        results.iter().filter(|r| r.is_success()).count()
+    );
     println!();
 
     println!("Memory Analysis:");
-    if !session.memory_snapshots.is_empty() {
-        let first = session.memory_snapshots.first().unwrap();
-        let last = session.memory_snapshots.last().unwrap();
-        let peak = session.memory_snapshots.iter()
-            .max_by_key(|s| s.total_allocated)
-            .unwrap();
+    if let Some(memory) = &report.memory_analysis {
+        println!("  Peak memory: {:.2} MB", memory.peak_mb);
+        println!("  Average memory: {:.2} MB", memory.average_mb);
+        println!("  Memory growth: {:+.1}%", memory.growth_percent);
 
-        println!("  Initial memory: {} bytes", first.total_allocated);
-        println!("  Final memory: {} bytes", last.total_allocated);
-        println!("  Peak memory: {} bytes", peak.total_allocated);
-
-        let growth = last.total_allocated as i64 - first.total_allocated as i64;
-        let growth_pct = (growth as f64 / first.total_allocated.max(1) as f64) * 100.0;
-        println!("  Memory growth: {} bytes ({:+.1}%)", growth, growth_pct);
-        println!("  Total snapshots: {}", session.memory_snapshots.len());
-        println!();
-
-        // Memory efficiency analysis
-        let total_audio_samples: usize = results.iter()
-            .filter_map(|r| r.audio())
-            .map(|a| a.len())
-            .sum();
-
-        let bytes_per_sample = peak.total_allocated as f64 / total_audio_samples.max(1) as f64;
-        println!("Memory Efficiency:");
-        println!("  Total audio samples: {}", total_audio_samples);
-        println!("  Peak bytes per sample: {:.2}", bytes_per_sample);
-
-        if growth_pct < 10.0 {
-            println!("\n✓ Memory usage is well-controlled (growth < 10%)");
-        } else if growth_pct < 50.0 {
-            println!("\n⚠️  Moderate memory growth ({:.1}%)", growth_pct);
+        if memory.growth_percent < 10.0 {
+            println!("\n  Memory usage is well-controlled (growth < 10%)");
+        } else if memory.growth_percent < 50.0 {
+            println!("\n  Moderate memory growth ({:.1}%)", memory.growth_percent);
         } else {
-            println!("\n⚠️  Significant memory growth ({:.1}%) - investigate potential leaks", growth_pct);
+            println!(
+                "\n  Significant memory growth ({:.1}%) - investigate potential leaks",
+                memory.growth_percent
+            );
         }
+    } else {
+        println!("  No memory analysis data available.");
     }
 
     Ok(())
@@ -334,25 +362,27 @@ async fn identify_batch_bottlenecks(pipeline: &Arc<VoirsPipeline>) -> Result<()>
     // Profile batch processing
     let session = profiler.start_session("bottleneck_analysis").await;
     let results = processor.process(requests).await?;
-    let session = profiler.end_session(session).await?;
+    let report = profiler.end_session(session).await?;
 
     println!("Batch Results:");
     println!("  Total requests: {}", results.len());
-    println!("  Success rate: {:.1}%",
-             (results.iter().filter(|r| r.is_success()).count() as f64 / results.len() as f64) * 100.0);
+    println!(
+        "  Success rate: {:.1}%",
+        (results.iter().filter(|r| r.is_success()).count() as f64 / results.len() as f64) * 100.0
+    );
     println!();
 
     println!("Bottleneck Analysis:");
-    if session.bottlenecks.is_empty() {
-        println!("  ✓ No significant bottlenecks detected");
+    if report.bottlenecks.is_empty() {
+        println!("  No significant bottlenecks detected");
     } else {
-        println!("  Found {} bottleneck(s):\n", session.bottlenecks.len());
+        println!("  Found {} bottleneck(s):\n", report.bottlenecks.len());
 
-        for (idx, bottleneck) in session.bottlenecks.iter().enumerate() {
+        for (idx, bottleneck) in report.bottlenecks.iter().enumerate() {
             println!("  Bottleneck #{}:", idx + 1);
             println!("    Component: {}", bottleneck.component);
             println!("    Severity: {:?}", bottleneck.severity);
-            println!("    Description: {}", bottleneck.description);
+            println!("    Impact: {}", bottleneck.impact_description);
             if !bottleneck.recommendation.is_empty() {
                 println!("    Recommendation: {}", bottleneck.recommendation);
             }
@@ -363,13 +393,18 @@ async fn identify_batch_bottlenecks(pipeline: &Arc<VoirsPipeline>) -> Result<()>
     // Provide optimization recommendations
     println!("Optimization Recommendations:");
 
-    let mut stages: Vec<_> = session.stage_metrics.iter().collect();
-    stages.sort_by(|a, b| b.1.total_duration.cmp(&a.1.total_duration));
+    let mut stages: Vec<_> = report.stage_breakdown.iter().collect();
+    stages.sort_by(|a, b| {
+        b.total_duration_ms
+            .partial_cmp(&a.total_duration_ms)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
-    if let Some((slowest_stage, metrics)) = stages.first() {
-        println!("  1. Focus on optimizing {} (takes {:.1}% of total time)",
-                 slowest_stage,
-                 metrics.percentage_of_total.unwrap_or(0.0));
+    if let Some(slowest_stage) = stages.first() {
+        println!(
+            "  1. Focus on optimizing {} (takes {:.1}% of total time)",
+            slowest_stage.stage_name, slowest_stage.percentage_of_total
+        );
     }
 
     println!("  2. Consider increasing concurrency for I/O-bound operations");
@@ -387,11 +422,14 @@ async fn production_optimization(pipeline: &Arc<VoirsPipeline>) -> Result<()> {
     // Simulate production workload
     let requests: Vec<_> = (0..100)
         .map(|i| {
-            let priority = if i < 10 { 100 } else if i < 30 { 50 } else { 10 };
-            BatchRequest::new(
-                format!("Production request {}", i),
-                None,
-            ).with_priority(priority)
+            let priority = if i < 10 {
+                100
+            } else if i < 30 {
+                50
+            } else {
+                10
+            };
+            BatchRequest::new(format!("Production request {}", i), None).with_priority(priority)
         })
         .collect();
 
@@ -410,41 +448,54 @@ async fn production_optimization(pipeline: &Arc<VoirsPipeline>) -> Result<()> {
     let start = Instant::now();
     let results = processor.process(requests).await?;
     let total_time = start.elapsed();
-    let session = profiler.end_session(session).await?;
+    let report = profiler.end_session(session).await?;
 
     // Generate comprehensive report
-    let generator = ReportGenerator::new();
-    let report = generator.generate(&session, ReportFormat::Text)?;
-
-    println!("Production Workload Analysis:\n");
-    println!("{}", report);
+    let generator = ReportGenerator::new(ProfilerConfig::default());
+    let sessions = profiler.get_sessions().await;
+    if let Some(last_session) = sessions.last() {
+        let detailed_report = generator.generate(last_session, None).await?;
+        println!("Production Workload Analysis:\n");
+        println!("{}", detailed_report.summary());
+    }
 
     // Calculate production metrics
     let stats = processor.statistics().await;
 
     println!("\nProduction Metrics:");
     println!("  Total requests: {}", results.len());
-    println!("  Success rate: {:.2}%", stats.success_rate * 100.0);
-    println!("  Throughput: {:.2} requests/second", stats.throughput);
-    println!("  Average latency: {:.2}ms", stats.average_processing_time.as_millis());
+    println!("  Success rate: {:.2}%", stats.success_rate() * 100.0);
+    println!("  Throughput: {:.2} requests/second", stats.throughput());
+    println!(
+        "  Average latency: {:.2}ms",
+        stats.avg_time_per_request.as_secs_f64() * 1000.0
+    );
     println!("  Total processing time: {:.2}s", total_time.as_secs_f64());
+
+    let _ = report; // report used for session data
 
     // Provide production recommendations
     println!("\nProduction Deployment Recommendations:");
 
     let throughput = results.len() as f64 / total_time.as_secs_f64();
 
-    println!("  • Expected throughput: {:.0} requests/second", throughput);
-    println!("  • Recommended max concurrency: {}", num_cpus::get() * 2);
-    println!("  • Recommended batch size: 50-100 requests");
-    println!("  • Enable result caching for repeated content");
-    println!("  • Use priority scheduling for time-sensitive requests");
-    println!("  • Monitor memory usage for large batches");
+    println!("  - Expected throughput: {:.0} requests/second", throughput);
+    println!("  - Recommended max concurrency: {}", num_cpus::get() * 2);
+    println!("  - Recommended batch size: 50-100 requests");
+    println!("  - Enable result caching for repeated content");
+    println!("  - Use priority scheduling for time-sensitive requests");
+    println!("  - Monitor memory usage for large batches");
 
-    if stats.success_rate > 0.99 {
-        println!("\n✓ System shows excellent reliability ({:.2}% success rate)", stats.success_rate * 100.0);
+    if stats.success_rate() > 0.99 {
+        println!(
+            "\nSystem shows excellent reliability ({:.2}% success rate)",
+            stats.success_rate() * 100.0
+        );
     } else {
-        println!("\n⚠️  Success rate is {:.2}% - investigate errors", stats.success_rate * 100.0);
+        println!(
+            "\nSuccess rate is {:.2}% - investigate errors",
+            stats.success_rate() * 100.0
+        );
     }
 
     Ok(())
@@ -457,14 +508,17 @@ async fn profile_batch_config(
     config: BatchConfig,
     requests: Vec<BatchRequest>,
     session_name: &str,
-) -> Result<voirs_sdk::profiling::ProfileSession> {
+) -> Result<PerformanceReport> {
     let processor = BatchProcessor::new(Arc::clone(pipeline), config);
 
     let session = profiler.start_session(session_name).await;
     let _ = processor.process(requests).await?;
-    let session = profiler.end_session(session).await?;
+    let report = profiler.end_session(session).await?;
 
-    println!("  Duration: {:.2}ms", session.duration.unwrap().as_millis());
+    println!(
+        "  Duration: {:.2}ms",
+        report.session.duration_seconds * 1000.0
+    );
 
-    Ok(session)
+    Ok(report)
 }

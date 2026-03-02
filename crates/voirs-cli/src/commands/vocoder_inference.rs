@@ -114,8 +114,8 @@ pub async fn run_vocoder_inference(
         }
         return run_batch_inference(
             config.checkpoint,
-            config.batch_input.unwrap(),
-            config.batch_output.unwrap(),
+            config.batch_input.expect("checked is_none above"),
+            config.batch_output.expect("checked is_none above"),
             config.steps,
             config.quality,
             config.show_metrics,
@@ -554,7 +554,7 @@ fn save_audio_tensor(tensor: &Tensor, output: &Path, sample_rate: u32) -> Result
         WavWriter::create(output, spec).map_err(|e| voirs_sdk::VoirsError::IoError {
             path: output.to_path_buf(),
             operation: voirs_sdk::error::IoOperation::Write,
-            source: std::io::Error::new(std::io::ErrorKind::Other, e),
+            source: std::io::Error::other(e),
         })?;
 
     // Write samples (convert f32 to i16)
@@ -565,7 +565,7 @@ fn save_audio_tensor(tensor: &Tensor, output: &Path, sample_rate: u32) -> Result
             .map_err(|e| voirs_sdk::VoirsError::IoError {
                 path: output.to_path_buf(),
                 operation: voirs_sdk::error::IoOperation::Write,
-                source: std::io::Error::new(std::io::ErrorKind::Other, e),
+                source: std::io::Error::other(e),
             })?;
     }
 
@@ -574,7 +574,7 @@ fn save_audio_tensor(tensor: &Tensor, output: &Path, sample_rate: u32) -> Result
         .map_err(|e| voirs_sdk::VoirsError::IoError {
             path: output.to_path_buf(),
             operation: voirs_sdk::error::IoOperation::Write,
-            source: std::io::Error::new(std::io::ErrorKind::Other, e),
+            source: std::io::Error::other(e),
         })?;
 
     Ok(())

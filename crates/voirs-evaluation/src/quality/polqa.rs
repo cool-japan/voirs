@@ -398,7 +398,8 @@ impl PolqaEvaluator {
         // Perform FFT
         let fft_size = signal.len().next_power_of_two();
         let mut padded_signal = vec![0.0f32; fft_size];
-        padded_signal[..signal.len()].copy_from_slice(signal.as_slice().unwrap());
+        padded_signal[..signal.len()]
+            .copy_from_slice(signal.as_slice().expect("value should be present"));
 
         let mut planner =
             self.fft_planner

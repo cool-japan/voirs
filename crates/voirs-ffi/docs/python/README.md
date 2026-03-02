@@ -23,7 +23,7 @@ This directory contains comprehensive documentation for the VoiRS Python binding
 
 ```python
 # Quick example
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 # Create pipeline
 pipeline = VoirsPipeline()
@@ -38,7 +38,7 @@ audio.save("output.wav")
 ## Installation
 
 ```bash
-pip install voirs-ffi
+pip install voirs
 ```
 
 ## Requirements

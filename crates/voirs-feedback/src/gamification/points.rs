@@ -546,13 +546,13 @@ impl PointSystem {
             .iter()
             .map(|t| t.timestamp)
             .min()
-            .unwrap();
+            .expect("value should be present");
 
         let latest = currency_transactions
             .iter()
             .map(|t| t.timestamp)
             .max()
-            .unwrap();
+            .expect("value should be present");
 
         // Calculate the span of days
         let duration = latest.signed_duration_since(earliest);

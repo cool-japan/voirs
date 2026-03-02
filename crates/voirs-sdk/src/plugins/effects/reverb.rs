@@ -48,8 +48,14 @@ impl ReverbEffect {
     }
 
     fn initialize_filters(&self, sample_rate: u32) {
-        let mut comb_filters = self.comb_filters.write().unwrap();
-        let mut allpass_filters = self.allpass_filters.write().unwrap();
+        let mut comb_filters = self
+            .comb_filters
+            .write()
+            .expect("lock should not be poisoned");
+        let mut allpass_filters = self
+            .allpass_filters
+            .write()
+            .expect("lock should not be poisoned");
 
         // Freeverb comb filter delay lengths (in samples at 44.1kHz)
         let comb_tunings = [1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617];
@@ -74,18 +80,24 @@ impl ReverbEffect {
             }
         }
 
-        *self.sample_rate.write().unwrap() = Some(sample_rate);
+        *self
+            .sample_rate
+            .write()
+            .expect("lock should not be poisoned") = Some(sample_rate);
     }
 
     fn update_parameters(&self) {
-        let room_size = *self.room_size.read().unwrap();
-        let damping = *self.damping.read().unwrap();
-        let decay = *self.decay_time.read().unwrap();
+        let room_size = *self.room_size.read().expect("lock should not be poisoned");
+        let damping = *self.damping.read().expect("lock should not be poisoned");
+        let decay = *self.decay_time.read().expect("lock should not be poisoned");
 
         // Calculate feedback based on room size and decay time
         let feedback = 0.28 + (room_size * 0.7) * (decay / 10.0).min(1.0);
 
-        let mut comb_filters = self.comb_filters.write().unwrap();
+        let mut comb_filters = self
+            .comb_filters
+            .write()
+            .expect("lock should not be poisoned");
         for filter in comb_filters.iter_mut() {
             filter.set_feedback(feedback);
             filter.set_damp(damping);
@@ -125,8 +137,13 @@ impl VoirsPlugin for ReverbEffect {
 impl AudioEffect for ReverbEffect {
     async fn process_audio(&self, audio: &AudioBuffer) -> Result<AudioBuffer> {
         // Initialize filters if needed
-        let current_sample_rate = *self.sample_rate.read().unwrap();
-        if current_sample_rate.is_none() || current_sample_rate.unwrap() != audio.sample_rate() {
+        let current_sample_rate = *self
+            .sample_rate
+            .read()
+            .expect("lock should not be poisoned");
+        if current_sample_rate.is_none()
+            || current_sample_rate.expect("value should be present") != audio.sample_rate()
+        {
             self.initialize_filters(audio.sample_rate());
         }
 
@@ -135,10 +152,16 @@ impl AudioEffect for ReverbEffect {
 
         let mut processed = audio.clone();
         let samples = processed.samples_mut();
-        let mix = *self.mix.read().unwrap();
+        let mix = *self.mix.read().expect("lock should not be poisoned");
 
-        let mut comb_filters = self.comb_filters.write().unwrap();
-        let mut allpass_filters = self.allpass_filters.write().unwrap();
+        let mut comb_filters = self
+            .comb_filters
+            .write()
+            .expect("lock should not be poisoned");
+        let mut allpass_filters = self
+            .allpass_filters
+            .write()
+            .expect("lock should not be poisoned");
 
         for sample in samples.iter_mut() {
             let input = *sample;
@@ -169,19 +192,19 @@ impl AudioEffect for ReverbEffect {
         let mut params = HashMap::new();
         params.insert(
             "mix".to_string(),
-            ParameterValue::Float(*self.mix.read().unwrap()),
+            ParameterValue::Float(*self.mix.read().expect("lock should not be poisoned")),
         );
         params.insert(
             "room_size".to_string(),
-            ParameterValue::Float(*self.room_size.read().unwrap()),
+            ParameterValue::Float(*self.room_size.read().expect("lock should not be poisoned")),
         );
         params.insert(
             "damping".to_string(),
-            ParameterValue::Float(*self.damping.read().unwrap()),
+            ParameterValue::Float(*self.damping.read().expect("lock should not be poisoned")),
         );
         params.insert(
             "decay_time".to_string(),
-            ParameterValue::Float(*self.decay_time.read().unwrap()),
+            ParameterValue::Float(*self.decay_time.read().expect("lock should not be poisoned")),
         );
         params
     }
@@ -190,7 +213,7 @@ impl AudioEffect for ReverbEffect {
         match name {
             "mix" => {
                 if let Some(v) = value.as_f32() {
-                    *self.mix.write().unwrap() = v.clamp(0.0, 1.0);
+                    *self.mix.write().expect("lock should not be poisoned") = v.clamp(0.0, 1.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -201,7 +224,8 @@ impl AudioEffect for ReverbEffect {
             }
             "room_size" => {
                 if let Some(v) = value.as_f32() {
-                    *self.room_size.write().unwrap() = v.clamp(0.0, 1.0);
+                    *self.room_size.write().expect("lock should not be poisoned") =
+                        v.clamp(0.0, 1.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -212,7 +236,7 @@ impl AudioEffect for ReverbEffect {
             }
             "damping" => {
                 if let Some(v) = value.as_f32() {
-                    *self.damping.write().unwrap() = v.clamp(0.0, 1.0);
+                    *self.damping.write().expect("lock should not be poisoned") = v.clamp(0.0, 1.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -223,7 +247,10 @@ impl AudioEffect for ReverbEffect {
             }
             "decay_time" => {
                 if let Some(v) = value.as_f32() {
-                    *self.decay_time.write().unwrap() = v.clamp(0.1, 10.0);
+                    *self
+                        .decay_time
+                        .write()
+                        .expect("lock should not be poisoned") = v.clamp(0.1, 10.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(

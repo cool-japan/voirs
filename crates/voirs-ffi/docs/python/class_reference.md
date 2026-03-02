@@ -21,7 +21,7 @@ Creates a new synthesis pipeline with optional configuration.
 
 **Example:**
 ```python
-from voirs_ffi import VoirsPipeline, SynthesisConfig
+from voirs import VoirsPipeline, SynthesisConfig
 
 # Default configuration
 pipeline = VoirsPipeline()

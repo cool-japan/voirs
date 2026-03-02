@@ -9,7 +9,6 @@
 //! ```
 
 use std::time::{Duration, Instant};
-use tokio;
 use voirs_recognizer::asr::{ASRBackend, FallbackConfig, WhisperModelSize};
 use voirs_recognizer::prelude::*;
 use voirs_recognizer::{PerformanceValidator, RecognitionError};

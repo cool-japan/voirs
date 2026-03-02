@@ -37,7 +37,7 @@ System Memory (Audio/Models)
 VoiRS uses automatic reference counting for most objects:
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 # Pipeline created with ref count = 1
 pipeline = VoirsPipeline()
@@ -59,7 +59,7 @@ del pipeline2
 
 ```python
 import gc
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 def create_pipelines():
     """Function that creates temporary pipelines."""
@@ -84,7 +84,7 @@ gc.collect()  # Ensures cleanup of any cycles
 ```python
 import psutil
 import os
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 def get_memory_usage():
     """Get current memory usage in MB."""
@@ -118,7 +118,7 @@ print(f"After cleanup: {final:.1f} MB")
 
 ```python
 import tracemalloc
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 def profile_memory_usage():
     """Profile memory usage with detailed tracing."""
@@ -183,7 +183,7 @@ def memory_monitor(operation_name="Operation"):
         print(f"  Net change: {end_memory - start_memory:.1f} MB")
 
 # Usage
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 with memory_monitor("TTS Synthesis") as get_current_usage:
     pipeline = VoirsPipeline()
@@ -201,7 +201,7 @@ with memory_monitor("TTS Synthesis") as get_current_usage:
 ### Pipeline Reuse
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 class OptimizedTTS:
     """Memory-optimized TTS class with pipeline reuse."""
@@ -247,7 +247,7 @@ for text in texts:
 
 ```python
 from typing import List
-from voirs_ffi import VoirsPipeline, PyAudioBuffer
+from voirs import VoirsPipeline, PyAudioBuffer
 
 def batch_synthesize(texts: List[str], batch_size: int = 10) -> List[PyAudioBuffer]:
     """Memory-efficient batch synthesis."""
@@ -285,7 +285,7 @@ audio_results = batch_synthesize(large_text_list, batch_size=20)
 
 ```python
 from typing import Iterator
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 def streaming_synthesize(texts: Iterator[str]) -> Iterator[PyAudioBuffer]:
     """Memory-efficient streaming synthesis."""
@@ -323,7 +323,7 @@ for audio in streaming_synthesize(text_generator()):
 ### Efficient Audio Handling
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 import numpy as np
 
 class MemoryEfficientAudio:
@@ -374,7 +374,7 @@ efficient_audio.save("output.wav")
 ### Audio Format Optimization
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 def optimize_audio_format(audio: PyAudioBuffer, target_size_mb: float = 1.0) -> PyAudioBuffer:
     """Optimize audio format for target memory size."""
@@ -420,7 +420,7 @@ optimized_audio.save("optimized_output.wav")
 ### Memory-Constrained Configuration
 
 ```python
-from voirs_ffi import SynthesisConfig, VoirsPipeline
+from voirs import SynthesisConfig, VoirsPipeline
 import psutil
 
 def create_memory_efficient_config() -> SynthesisConfig:
@@ -476,7 +476,7 @@ pipeline = VoirsPipeline(config)
 ```python
 import psutil
 import time
-from voirs_ffi import VoirsPipeline, SynthesisConfig
+from voirs import VoirsPipeline, SynthesisConfig
 
 class AdaptiveMemoryTTS:
     """TTS that adapts to memory pressure."""
@@ -573,7 +573,7 @@ for i in range(100):
 ### Common Leak Patterns
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 import weakref
 
 # BAD: Creating pipelines in loops without cleanup
@@ -628,7 +628,7 @@ def best_pattern():
 ```python
 import weakref
 import gc
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 class LeakDetector:
     """Detect memory leaks in VoiRS objects."""
@@ -684,7 +684,7 @@ detector.check_leaks()  # Should show proper cleanup
 from typing import List, Optional
 from queue import Queue
 import threading
-from voirs_ffi import VoirsPipeline, PyAudioBuffer
+from voirs import VoirsPipeline, PyAudioBuffer
 
 class PipelinePool:
     """Pool of reusable pipelines to prevent repeated allocation."""
@@ -783,7 +783,7 @@ pipeline_pool.cleanup()
 ### Performance vs Memory Trade-offs
 
 ```python
-from voirs_ffi import SynthesisConfig
+from voirs import SynthesisConfig
 
 # Memory-optimized (slower)
 memory_config = SynthesisConfig(
@@ -816,7 +816,7 @@ balanced_config = SynthesisConfig(
 ```python
 import os
 import psutil
-from voirs_ffi import SynthesisConfig, VoirsPipeline
+from voirs import SynthesisConfig, VoirsPipeline
 
 class ProductionTTS:
     """Production-ready TTS with memory management."""

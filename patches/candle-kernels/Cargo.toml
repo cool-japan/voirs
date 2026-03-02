@@ -1,0 +1,14 @@
+[package]
+name = "candle-kernels"
+version = "0.9.2"
+edition = "2021"
+build = "build.rs"
+description = "CUDA kernels for Candle (macOS/no-CUDA stub)"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "candle_kernels"
+path = "src/lib.rs"
+
+[build-dependencies]
+# No bindgen_cuda — CUDA detection and PTX generation are handled without it

@@ -370,7 +370,7 @@ pub unsafe extern "C" fn voirs_synthesize_async(
                         let msg =
                             std::ffi::CString::new("Operation cancelled").unwrap_or_else(|_| {
                                 std::ffi::CString::new("Operation cancelled (encoding error)")
-                                    .unwrap()
+                                    .expect("CString::new failed for static string")
                             });
                         error_cb(
                             pipeline_id,
@@ -474,7 +474,8 @@ pub unsafe extern "C" fn voirs_synthesize_async(
                                 std::ffi::CString::new(format!("{e}")).unwrap_or_else(|_| {
                                     std::ffi::CString::new("Unknown error").unwrap_or_else(|_| {
                                         // This should never fail, but just in case
-                                        std::ffi::CString::new("Error").unwrap()
+                                        std::ffi::CString::new("Error")
+                                            .expect("CString::new failed for static string")
                                     })
                                 });
                             error_cb(

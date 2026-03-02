@@ -424,7 +424,10 @@ impl PESQEvaluator {
         let num_bark_bands = self.bark_mapping.len();
 
         let mut bark_spectrum = Array2::zeros((num_frames, num_bark_bands));
-        let mut fft_planner = self.fft_planner.lock().unwrap();
+        let mut fft_planner = self
+            .fft_planner
+            .lock()
+            .expect("lock should not be poisoned");
         let fft = fft_planner.plan_fft_forward(frame_size);
         let mut spectrum = vec![scirs2_core::Complex::new(0.0, 0.0); fft.output_len()];
 

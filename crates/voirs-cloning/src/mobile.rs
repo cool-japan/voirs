@@ -403,7 +403,10 @@ impl MobileVoiceCloner {
     ) -> Result<()> {
         // Update device info
         {
-            let mut device_info = self.device_info.write().unwrap();
+            let mut device_info = self
+                .device_info
+                .write()
+                .expect("lock should not be poisoned");
             device_info.battery_level = battery_level.clamp(0.0, 1.0);
         }
 
@@ -415,7 +418,10 @@ impl MobileVoiceCloner {
             _ => ThermalState::Critical,
         };
 
-        *self.thermal_state.write().unwrap() = thermal_state;
+        *self
+            .thermal_state
+            .write()
+            .expect("lock should not be poisoned") = thermal_state;
 
         // Determine power mode
         let power_mode = self.determine_optimal_power_mode(
@@ -425,11 +431,17 @@ impl MobileVoiceCloner {
             memory_usage_mb,
         );
 
-        *self.power_mode.write().unwrap() = power_mode;
+        *self
+            .power_mode
+            .write()
+            .expect("lock should not be poisoned") = power_mode;
 
         // Update performance monitor
         {
-            let mut monitor = self.performance_monitor.write().unwrap();
+            let mut monitor = self
+                .performance_monitor
+                .write()
+                .expect("lock should not be poisoned");
             monitor.memory_samples.push(memory_usage_mb);
             monitor.cpu_samples.push(cpu_usage_percent);
             monitor.battery_samples.push(battery_level);
@@ -444,7 +456,7 @@ impl MobileVoiceCloner {
 
         // Update statistics
         {
-            let mut stats = self.stats.write().unwrap();
+            let mut stats = self.stats.write().expect("lock should not be poisoned");
             stats.current_memory_usage_mb = memory_usage_mb;
             stats.avg_cpu_usage = cpu_usage_percent;
 
@@ -517,8 +529,11 @@ impl MobileVoiceCloner {
             })?;
 
         // Check if we should proceed based on current state
-        let power_mode = *self.power_mode.read().unwrap();
-        let thermal_state = *self.thermal_state.read().unwrap();
+        let power_mode = *self.power_mode.read().expect("lock should not be poisoned");
+        let thermal_state = *self
+            .thermal_state
+            .read()
+            .expect("lock should not be poisoned");
 
         if matches!(power_mode, PowerMode::UltraLowPower) {
             return Err(Error::Processing(
@@ -681,7 +696,7 @@ impl MobileVoiceCloner {
 
     /// Update cache statistics
     async fn update_cache_stats(&self, hit: bool) {
-        let mut stats = self.stats.write().unwrap();
+        let mut stats = self.stats.write().expect("lock should not be poisoned");
         if hit {
             stats.cache_hit_rate = (stats.cache_hit_rate * 0.9) + (1.0 * 0.1);
         } else {
@@ -691,7 +706,7 @@ impl MobileVoiceCloner {
 
     /// Update performance statistics
     async fn update_performance_stats(&self, operation_time: Duration, result: &VoiceCloneResult) {
-        let mut stats = self.stats.write().unwrap();
+        let mut stats = self.stats.write().expect("lock should not be poisoned");
 
         if result.success {
             stats.operations_completed += 1;
@@ -704,7 +719,10 @@ impl MobileVoiceCloner {
         stats.avg_cloning_time_ms = (stats.avg_cloning_time_ms * 0.9) + (time_ms * 0.1);
 
         // Update performance monitor
-        let mut monitor = self.performance_monitor.write().unwrap();
+        let mut monitor = self
+            .performance_monitor
+            .write()
+            .expect("lock should not be poisoned");
         monitor.operation_times.push(operation_time);
         let quality_score = result.quality_metrics.get("mcd").copied().unwrap_or(0.0);
         monitor.quality_scores.push(quality_score);
@@ -723,45 +741,69 @@ impl MobileVoiceCloner {
 
     /// Get current mobile cloning statistics
     pub fn get_statistics(&self) -> MobileCloningStats {
-        self.stats.read().unwrap().clone()
+        self.stats
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Get current power mode
     pub fn get_power_mode(&self) -> PowerMode {
-        *self.power_mode.read().unwrap()
+        *self.power_mode.read().expect("lock should not be poisoned")
     }
 
     /// Get current thermal state
     pub fn get_thermal_state(&self) -> ThermalState {
-        *self.thermal_state.read().unwrap()
+        *self
+            .thermal_state
+            .read()
+            .expect("lock should not be poisoned")
     }
 
     /// Get device information
     pub fn get_device_info(&self) -> MobileDeviceInfo {
-        self.device_info.read().unwrap().clone()
+        self.device_info
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Force specific power mode (for testing or manual control)
     pub fn set_power_mode(&self, power_mode: PowerMode) {
-        *self.power_mode.write().unwrap() = power_mode;
+        *self
+            .power_mode
+            .write()
+            .expect("lock should not be poisoned") = power_mode;
     }
 
     /// Clear model cache
     pub async fn clear_model_cache(&self) -> Result<()> {
-        let mut cache = self.model_cache.write().unwrap();
+        let mut cache = self
+            .model_cache
+            .write()
+            .expect("lock should not be poisoned");
         cache.clear();
         Ok(())
     }
 
     /// Get cache statistics
     pub fn get_cache_statistics(&self) -> (usize, usize) {
-        let cache = self.model_cache.read().unwrap();
+        let cache = self
+            .model_cache
+            .read()
+            .expect("lock should not be poisoned");
         (cache.len(), self.config.max_cached_models)
     }
 
     /// Enable or disable NEON optimizations
     pub fn set_neon_optimization(&mut self, enabled: bool) {
-        if enabled && self.device_info.read().unwrap().has_neon {
+        if enabled
+            && self
+                .device_info
+                .read()
+                .expect("lock should not be poisoned")
+                .has_neon
+        {
             self.neon_optimizer = Some(Arc::new(NeonCloningOptimizer::new(true)));
         } else {
             self.neon_optimizer = None;

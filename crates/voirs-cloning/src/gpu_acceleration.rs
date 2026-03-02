@@ -730,9 +730,25 @@ impl GpuAccelerator {
             GpuDeviceType::Cuda => {
                 #[cfg(feature = "gpu")]
                 {
-                    Device::new_cuda(config.device_id).map_err(|e| {
-                        Error::Processing(format!("Failed to create CUDA device: {e}"))
-                    })
+                    let result = std::panic::catch_unwind(|| Device::new_cuda(config.device_id))
+                        .unwrap_or_else(|_| {
+                            Err(candle_core::Error::Msg(
+                                "CUDA unavailable (panic caught)".to_string(),
+                            ))
+                        });
+                    match result {
+                        Ok(device) => Ok(device),
+                        Err(e) => {
+                            if config.auto_fallback {
+                                tracing::warn!("CUDA unavailable, falling back to CPU: {}", e);
+                                Ok(Device::Cpu)
+                            } else {
+                                Err(Error::Processing(format!(
+                                    "Failed to create CUDA device: {e}"
+                                )))
+                            }
+                        }
+                    }
                 }
                 #[cfg(not(feature = "gpu"))]
                 {
@@ -763,7 +779,10 @@ impl GpuAccelerator {
         execution_time: Duration,
         operation: &TensorOperation,
     ) {
-        let mut metrics = self.performance_metrics.write().unwrap();
+        let mut metrics = self
+            .performance_metrics
+            .write()
+            .expect("lock should not be poisoned");
 
         metrics.operations_count += 1;
 
@@ -796,27 +815,43 @@ impl GpuAccelerator {
 
     /// Get current memory statistics
     pub fn get_memory_stats(&self) -> GpuMemoryStats {
-        self.memory_pool.lock().unwrap().get_stats()
+        self.memory_pool
+            .lock()
+            .expect("lock should not be poisoned")
+            .get_stats()
     }
 
     /// Get current performance metrics
     pub fn get_performance_metrics(&self) -> GpuPerformanceMetrics {
-        self.performance_metrics.read().unwrap().clone()
+        self.performance_metrics
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Get cached tensor if available
     pub fn get_cached_tensor(&self, key: &str) -> Option<Tensor> {
-        self.tensor_cache.read().unwrap().get(key).cloned()
+        self.tensor_cache
+            .read()
+            .expect("lock should not be poisoned")
+            .get(key)
+            .cloned()
     }
 
     /// Cache tensor for reuse
     pub fn cache_tensor(&self, key: String, tensor: Tensor) {
-        self.tensor_cache.write().unwrap().insert(key, tensor);
+        self.tensor_cache
+            .write()
+            .expect("lock should not be poisoned")
+            .insert(key, tensor);
     }
 
     /// Clear tensor cache
     pub fn clear_cache(&self) {
-        self.tensor_cache.write().unwrap().clear();
+        self.tensor_cache
+            .write()
+            .expect("lock should not be poisoned")
+            .clear();
     }
 
     /// Synchronize GPU operations
@@ -898,7 +933,7 @@ impl GpuUtils {
     pub fn is_cuda_available() -> bool {
         #[cfg(feature = "gpu")]
         {
-            Device::new_cuda(0).is_ok()
+            std::panic::catch_unwind(|| Device::new_cuda(0)).is_ok_and(|r| r.is_ok())
         }
         #[cfg(not(feature = "gpu"))]
         {
@@ -919,7 +954,8 @@ impl GpuUtils {
         #[cfg(feature = "gpu")]
         {
             for i in 0..8 {
-                if let Ok(device) = Device::new_cuda(i) {
+                let result = std::panic::catch_unwind(|| Device::new_cuda(i));
+                if result.is_ok_and(|r| r.is_ok()) {
                     let mut info = HashMap::new();
                     info.insert("type".to_string(), "CUDA".to_string());
                     info.insert("id".to_string(), i.to_string());

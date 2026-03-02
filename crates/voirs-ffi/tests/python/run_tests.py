@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-# Add the parent directory to the path so we can import voirs_ffi
+# Add the parent directory to the path so we can import voirs
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 try:
@@ -29,7 +29,7 @@ except ImportError:
     PYTEST_AVAILABLE = False
 
 try:
-    import voirs_ffi as voirs
+    import voirs
     VOIRS_AVAILABLE = True
 except ImportError:
     VOIRS_AVAILABLE = False
@@ -247,7 +247,7 @@ class TestRunner:
         cmd = [
             sys.executable, "-m", "pytest",
             str(self.test_dir),
-            "--cov=voirs_ffi",
+            "--cov=voirs",
             "--cov-report=term-missing",
             "--cov-report=html",
             "-v" if verbose else "-q",
@@ -271,7 +271,7 @@ class TestRunner:
         """Check if all prerequisites are available."""
         return {
             "pytest": PYTEST_AVAILABLE,
-            "voirs_ffi": VOIRS_AVAILABLE,
+            "voirs": VOIRS_AVAILABLE,
             "test_dir": self.test_dir.exists(),
             "python_version": sys.version_info >= (3, 7)
         }

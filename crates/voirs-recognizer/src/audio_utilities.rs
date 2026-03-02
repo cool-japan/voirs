@@ -50,7 +50,7 @@ impl<'a> Iterator for AudioChunkIterator<'a> {
         }
 
         let remaining_samples = self.audio_data.len() - self.current_start;
-        let max_chunks = (remaining_samples + self.step_size - 1) / self.step_size;
+        let max_chunks = remaining_samples.div_ceil(self.step_size);
         (0, Some(max_chunks))
     }
 }
@@ -151,7 +151,7 @@ impl AudioUtilities {
         let num_chunks = if audio_data.len() <= chunk_samples {
             1
         } else {
-            ((audio_data.len() - chunk_samples) + step_size - 1) / step_size + 1
+            (audio_data.len() - chunk_samples).div_ceil(step_size) + 1
         };
         let mut chunks = Vec::with_capacity(num_chunks);
 
@@ -647,11 +647,11 @@ mod tests {
 
     #[test]
     fn test_audio_utilities_creation() {
-        let utils = AudioUtilities::new();
-        assert!(true); // Just test that it can be created
+        let _utils = AudioUtilities::new();
+        // Just test that it can be created
 
-        let utils2 = AudioUtilities::default();
-        assert!(true); // Test default implementation
+        let _utils2 = AudioUtilities;
+        // Test default (unit struct)
     }
 
     #[test]
@@ -829,7 +829,7 @@ mod tests {
         assert!(iter_result.is_ok());
         let mut iter = iter_result.unwrap();
         let mut chunk_count = 0;
-        while let Some(chunk) = iter.next() {
+        for chunk in iter.by_ref() {
             assert!(!chunk.is_empty());
             chunk_count += 1;
             if chunk_count > 10 {

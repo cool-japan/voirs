@@ -20,7 +20,7 @@
 //!     .build();
 //!
 //! // Load configuration from files and environment
-//! let config = ConfigLoader::new().load().unwrap();
+//! let config = ConfigLoader::new().load().expect("value should be present");
 //!
 //! // Use preset configurations
 //! let dev_config = presets::development();

@@ -1077,7 +1077,7 @@ impl RPackageBuilder {
     fn validate_package_name(&self) -> bool {
         let name = &self.spec.package_name;
         // Basic validation: starts with letter, contains only letters/numbers/dots
-        name.chars().next().map_or(false, |c| c.is_alphabetic())
+        name.chars().next().is_some_and(|c| c.is_alphabetic())
             && name.chars().all(|c| c.is_alphanumeric() || c == '.')
             && name.len() >= 2
             && name.len() <= 100

@@ -278,7 +278,7 @@ python -m pytest tests/
 
 ## License
 
-This project is licensed under MIT OR Apache-2.0.
+This project is licensed under Apache-2.0.
 
 ## Support
 

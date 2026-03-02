@@ -190,7 +190,12 @@ impl WhisperBatchProcessor {
         let mut futures = FuturesUnordered::new();
 
         for input in inputs {
-            let permit = self.semaphore.clone().acquire_owned().await.unwrap();
+            let permit = self
+                .semaphore
+                .clone()
+                .acquire_owned()
+                .await
+                .expect("semaphore should not be closed");
             let processor = self.clone();
 
             futures.push(tokio::spawn(async move {

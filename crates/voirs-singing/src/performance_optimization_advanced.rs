@@ -197,11 +197,19 @@ impl NeuralArchitectureSearcher {
                 );
 
                 if self.best_architectures.len() < 10
-                    || best.fitness > self.best_architectures.last().unwrap().fitness
+                    || best.fitness
+                        > self
+                            .best_architectures
+                            .last()
+                            .expect("collection should not be empty")
+                            .fitness
                 {
                     self.best_architectures.push(best.clone());
-                    self.best_architectures
-                        .sort_by(|a, b| b.fitness.partial_cmp(&a.fitness).unwrap());
+                    self.best_architectures.sort_by(|a, b| {
+                        b.fitness
+                            .partial_cmp(&a.fitness)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
                     self.best_architectures.truncate(10);
                 }
             }
@@ -231,8 +239,11 @@ impl NeuralArchitectureSearcher {
 
     /// Selection (tournament selection)
     fn selection(&mut self) {
-        self.population
-            .sort_by(|a, b| b.fitness.partial_cmp(&a.fitness).unwrap());
+        self.population.sort_by(|a, b| {
+            b.fitness
+                .partial_cmp(&a.fitness)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         self.population.truncate(self.config.population_size / 2);
     }
 
@@ -353,7 +364,11 @@ impl NeuralArchitectureSearcher {
     fn get_best_candidate(&self) -> Option<ArchitectureCandidate> {
         self.population
             .iter()
-            .max_by(|a, b| a.fitness.partial_cmp(&b.fitness).unwrap())
+            .max_by(|a, b| {
+                a.fitness
+                    .partial_cmp(&b.fitness)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .cloned()
     }
 
@@ -550,7 +565,9 @@ impl QuantizationAwareTrainer {
         }
 
         Ok(QatTrainingResult {
-            final_accuracy: *accuracy_history.last().unwrap(),
+            final_accuracy: *accuracy_history
+                .last()
+                .expect("collection should not be empty"),
             accuracy_history,
             quantized_accuracy: 0.88,
             compression_ratio: match self.config.bits {

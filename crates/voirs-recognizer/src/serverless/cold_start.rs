@@ -138,7 +138,7 @@ impl ColdStartOptimizer {
 
         // In real implementation, would use ML model to predict which models are needed
         // For now, load a subset based on heuristics
-        let predicted_models = model_paths.iter().take((model_paths.len() + 1) / 2);
+        let predicted_models = model_paths.iter().take(model_paths.len().div_ceil(2));
 
         for path in predicted_models {
             debug!("Loading predicted model: {}", path);

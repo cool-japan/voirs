@@ -286,7 +286,7 @@ impl VoiceCache {
     }
     /// Get a voice from cache
     pub fn get_voice(&self, voice_id: &str) -> Option<CachedVoice> {
-        let mut stats = self.stats.write().unwrap();
+        let mut stats = self.stats.write().expect("lock should not be poisoned");
         stats.requests += 1;
         if let Ok(mut cache) = self.cache.write() {
             if let Some(cached_voice) = cache.get(&voice_id.to_string()) {
@@ -317,7 +317,7 @@ impl VoiceCache {
     }
     /// Check if memory limits allow caching this voice
     fn check_memory_limits(&self, voice: &CachedVoice) -> bool {
-        let stats = self.stats.read().unwrap();
+        let stats = self.stats.read().expect("lock should not be poisoned");
         stats.memory_usage + voice.memory_footprint <= self.config.max_memory
     }
     /// Evict voices to make space
@@ -342,7 +342,10 @@ impl VoiceCache {
     }
     /// Get cache statistics
     pub fn get_stats(&self) -> CacheStats {
-        self.stats.read().unwrap().clone()
+        self.stats
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
     /// Clear the cache
     pub fn clear(&self) {
@@ -698,7 +701,10 @@ impl StreamingEngine {
     }
     /// Get streaming statistics
     pub fn get_stats(&self) -> StreamingStats {
-        self.stats.read().unwrap().clone()
+        self.stats
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 }
 /// Precomputation system for expensive calculations
@@ -831,7 +837,11 @@ impl PrecomputationEngine {
     }
     /// Get precomputed data
     pub fn get_precomputed(&self, key: &str) -> Option<PrecomputedData> {
-        self.cache.read().unwrap().get(key).cloned()
+        self.cache
+            .read()
+            .expect("lock should not be poisoned")
+            .get(key)
+            .cloned()
     }
     /// Clear precomputed cache to prevent memory leaks
     pub fn clear_cache(&self) {
@@ -1070,7 +1080,10 @@ impl CompressionEngine {
     }
     /// Get compression statistics
     pub fn get_stats(&self) -> CompressionStats {
-        self.stats.read().unwrap().clone()
+        self.stats
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 }
 /// Preload statistics

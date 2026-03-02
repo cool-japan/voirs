@@ -6,7 +6,6 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
-use uuid;
 use voirs_feedback::memory_monitor::{MemoryManager, MemoryMonitor, MemoryMonitorConfig};
 use voirs_feedback::{AudioBuffer, FeedbackError, FeedbackSystem, FeedbackSystemConfig};
 

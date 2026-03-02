@@ -11,6 +11,7 @@ keywords = ["voirs", "g2p", "phoneme", "text-processing", "tts"]
 categories = ["text-processing", "algorithms", "science"]
 rust-version.workspace = true
 description = "Grapheme-to-Phoneme conversion for VoiRS speech synthesis"
+readme = "README.md"
 
 [lib]
 name = "voirs_g2p"
@@ -64,7 +65,7 @@ candle-nn.workspace = true
 candle-transformers.workspace = true
 
 # Model serialization
-bincode.workspace = true
+oxicode.workspace = true
 safetensors.workspace = true
 md5.workspace = true
 

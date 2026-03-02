@@ -12,7 +12,7 @@ from pathlib import Path
 import time
 
 try:
-    import voirs_ffi as voirs
+    import voirs
     VOIRS_AVAILABLE = True
 except ImportError:
     VOIRS_AVAILABLE = False

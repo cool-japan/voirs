@@ -114,20 +114,32 @@ impl PerformanceProfiler {
             tags,
         };
 
-        *self.session.write().unwrap() = Some(session);
+        *self.session.write().expect("lock should not be poisoned") = Some(session);
 
         // Start individual profilers
         if self.config.cpu_profiling {
-            self.cpu_profiler.lock().unwrap().start();
+            self.cpu_profiler
+                .lock()
+                .expect("lock should not be poisoned")
+                .start();
         }
         if self.config.memory_profiling {
-            self.memory_profiler.lock().unwrap().start();
+            self.memory_profiler
+                .lock()
+                .expect("lock should not be poisoned")
+                .start();
         }
         if self.config.gpu_profiling {
-            self.gpu_profiler.lock().unwrap().start();
+            self.gpu_profiler
+                .lock()
+                .expect("lock should not be poisoned")
+                .start();
         }
         if self.config.network_profiling {
-            self.network_profiler.lock().unwrap().start();
+            self.network_profiler
+                .lock()
+                .expect("lock should not be poisoned")
+                .start();
         }
 
         session_id
@@ -136,36 +148,52 @@ impl PerformanceProfiler {
     /// Stop profiling session
     #[must_use]
     pub fn stop_session(&self) -> Option<ProfilingReport> {
-        let mut session_guard = self.session.write().unwrap();
+        let mut session_guard = self.session.write().expect("lock should not be poisoned");
         if let Some(ref mut session) = *session_guard {
             session.end_time = Some(SystemTime::now());
 
             // Stop individual profilers and collect data
             let cpu_report = if self.config.cpu_profiling {
-                self.cpu_profiler.lock().unwrap().stop()
+                self.cpu_profiler
+                    .lock()
+                    .expect("lock should not be poisoned")
+                    .stop()
             } else {
                 CpuProfilingReport::default()
             };
 
             let memory_report = if self.config.memory_profiling {
-                self.memory_profiler.lock().unwrap().stop()
+                self.memory_profiler
+                    .lock()
+                    .expect("lock should not be poisoned")
+                    .stop()
             } else {
                 MemoryProfilingReport::default()
             };
 
             let gpu_report = if self.config.gpu_profiling {
-                self.gpu_profiler.lock().unwrap().stop()
+                self.gpu_profiler
+                    .lock()
+                    .expect("lock should not be poisoned")
+                    .stop()
             } else {
                 GpuProfilingReport::default()
             };
 
             let network_report = if self.config.network_profiling {
-                self.network_profiler.lock().unwrap().stop()
+                self.network_profiler
+                    .lock()
+                    .expect("lock should not be poisoned")
+                    .stop()
             } else {
                 NetworkProfilingReport::default()
             };
 
-            let custom_report = self.custom_profiler.lock().unwrap().get_report();
+            let custom_report = self
+                .custom_profiler
+                .lock()
+                .expect("lock should not be poisoned")
+                .get_report();
 
             let report = ProfilingReport {
                 session: session.clone(),
@@ -194,7 +222,7 @@ impl PerformanceProfiler {
         // Mark function entry
         self.custom_profiler
             .lock()
-            .unwrap()
+            .expect("lock should not be poisoned")
             .mark_function_entry(name);
 
         // Execute function
@@ -203,7 +231,7 @@ impl PerformanceProfiler {
         // Mark function exit
         self.custom_profiler
             .lock()
-            .unwrap()
+            .expect("lock should not be poisoned")
             .mark_function_exit(name);
 
         let end_time = Instant::now();
@@ -235,13 +263,19 @@ impl PerformanceProfiler {
 
     /// Add custom profiling event
     pub fn add_custom_event(&self, name: String, data: CustomEventData) {
-        self.custom_profiler.lock().unwrap().add_event(name, data);
+        self.custom_profiler
+            .lock()
+            .expect("lock should not be poisoned")
+            .add_event(name, data);
     }
 
     /// Get current session info
     #[must_use]
     pub fn get_current_session(&self) -> Option<ProfilingSession> {
-        self.session.read().unwrap().clone()
+        self.session
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 }
 

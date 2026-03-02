@@ -518,7 +518,10 @@ impl CommonVoiceDataset {
 
     /// Get or create speaker info for a client ID
     fn get_speaker_info(&self, entry: &CommonVoiceEntry) -> SpeakerInfo {
-        let mut cache = self.speaker_cache.lock().unwrap();
+        let mut cache = self
+            .speaker_cache
+            .lock()
+            .expect("lock should not be poisoned");
 
         if let Some(info) = cache.get(&entry.client_id) {
             return info.clone();

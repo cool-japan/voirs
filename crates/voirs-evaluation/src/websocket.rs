@@ -408,7 +408,7 @@ impl WebSocketSessionManager {
         user_id: String,
         config: SessionConfig,
     ) -> Result<(), WebSocketError> {
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().expect("lock should not be poisoned");
 
         if sessions.len() >= self.config.max_sessions {
             return Err(WebSocketError::ConnectionError(
@@ -462,7 +462,7 @@ impl WebSocketSessionManager {
 
         // Extract session config before the async operations
         let session_config = {
-            let mut sessions = self.sessions.write().unwrap();
+            let mut sessions = self.sessions.write().expect("lock should not be poisoned");
             let session = sessions
                 .get_mut(session_id)
                 .ok_or_else(|| WebSocketError::InvalidMessage("Session not found".to_string()))?;
@@ -498,7 +498,7 @@ impl WebSocketSessionManager {
 
         // Update session statistics (acquire lock again)
         let (confidence, processing_time, analysis_result) = {
-            let mut sessions = self.sessions.write().unwrap();
+            let mut sessions = self.sessions.write().expect("lock should not be poisoned");
             let session = sessions
                 .get_mut(session_id)
                 .ok_or_else(|| WebSocketError::InvalidMessage("Session not found".to_string()))?;
@@ -555,7 +555,7 @@ impl WebSocketSessionManager {
 
     /// Get session status
     pub fn get_session_status(&self, session_id: &str) -> Result<WebSocketMessage, WebSocketError> {
-        let sessions = self.sessions.read().unwrap();
+        let sessions = self.sessions.read().expect("lock should not be poisoned");
         let session = sessions
             .get(session_id)
             .ok_or_else(|| WebSocketError::InvalidMessage("Session not found".to_string()))?;
@@ -570,7 +570,7 @@ impl WebSocketSessionManager {
 
     /// End evaluation session
     pub fn end_session(&self, session_id: &str) -> Result<SessionStatistics, WebSocketError> {
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().expect("lock should not be poisoned");
         let session = sessions
             .remove(session_id)
             .ok_or_else(|| WebSocketError::InvalidMessage("Session not found".to_string()))?;
@@ -607,7 +607,7 @@ impl WebSocketSessionManager {
                     "service": "websocket",
                     "timestamp": std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
+                        .expect("value should be present")
                         .as_secs()
                 }))
             });
@@ -619,13 +619,16 @@ impl WebSocketSessionManager {
             .map({
                 let manager = manager.clone();
                 move || {
-                    let sessions = manager.sessions.read().unwrap();
+                    let sessions = manager
+                        .sessions
+                        .read()
+                        .expect("lock should not be poisoned");
                     let status = serde_json::json!({
                         "active_sessions": sessions.len(),
                         "max_sessions": manager.config.max_sessions,
                         "uptime_seconds": std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
+                            .expect("value should be present")
                             .as_secs()
                     });
                     warp::reply::json(&status)
@@ -655,7 +658,7 @@ impl WebSocketSessionManager {
 
     /// Cleanup expired sessions
     pub fn cleanup_expired_sessions(&self) {
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().expect("lock should not be poisoned");
         let now = std::time::Instant::now();
         let timeout_duration = std::time::Duration::from_secs(self.config.session_timeout);
 
@@ -664,7 +667,7 @@ impl WebSocketSessionManager {
 
     /// Get active session count
     pub fn get_active_session_count(&self) -> usize {
-        let sessions = self.sessions.read().unwrap();
+        let sessions = self.sessions.read().expect("lock should not be poisoned");
         sessions.len()
     }
 
@@ -754,7 +757,7 @@ impl WebSocketSessionManager {
                 description: "Audio level is very low".to_string(),
                 timestamp: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
+                    .expect("value should be present")
                     .as_secs_f64(),
                 suggested_action: "Increase input gain".to_string(),
             });
@@ -767,7 +770,7 @@ impl WebSocketSessionManager {
                 description: "Audio signal is clipping".to_string(),
                 timestamp: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
+                    .expect("value should be present")
                     .as_secs_f64(),
                 suggested_action: "Reduce input gain to prevent distortion".to_string(),
             });

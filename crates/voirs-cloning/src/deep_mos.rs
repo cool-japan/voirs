@@ -194,8 +194,10 @@ impl DeepMosPredictor {
     /// Create new MOS predictor with custom configuration
     pub fn with_config(config: DeepMosConfig) -> Result<Self> {
         let device = if config.use_gpu {
-            Device::cuda_if_available(0)
-                .map_err(|e| Error::Processing(format!("Failed to initialize GPU device: {}", e)))?
+            std::panic::catch_unwind(|| Device::cuda_if_available(0))
+                .ok()
+                .and_then(|r| r.ok())
+                .unwrap_or(Device::Cpu)
         } else {
             Device::Cpu
         };

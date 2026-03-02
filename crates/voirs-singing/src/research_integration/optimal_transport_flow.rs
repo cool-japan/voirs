@@ -367,8 +367,8 @@ impl OptimalTransportFlow {
         // Sort both distributions
         let mut sorted_source: Vec<_> = source.iter().take(n).copied().collect();
         let mut sorted_target: Vec<_> = target.iter().take(n).copied().collect();
-        sorted_source.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        sorted_target.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted_source.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        sorted_target.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         // Create coupling based on sorted order
         let mut coupling = Array2::zeros((n, n));
@@ -481,7 +481,7 @@ impl OptimalTransportFlow {
 /// Coupling matrix from optimal transport plan
 #[derive(Debug, Clone)]
 pub struct CouplingMatrix {
-    /// Coupling matrix π(i, j) representing transport from source[i] to target[j]
+    /// Coupling matrix π(i, j) representing transport from source\[i\] to target\[j\]
     pub matrix: Array2<f32>,
     /// Source distribution size
     pub source_size: usize,

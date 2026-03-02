@@ -6,7 +6,7 @@ fn test_concatenate() {
     let buf2 = AudioBuffer::mono(vec![3.0, 4.0], 22050);
     let buf3 = AudioBuffer::mono(vec![5.0, 6.0], 22050);
 
-    let result = AudioBuffer::concatenate(&[buf1, buf2, buf3]).unwrap();
+    let result = AudioBuffer::concatenate(&[buf1, buf2, buf3]).expect("value should be present");
     assert_eq!(result.samples(), &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
 }
 
@@ -251,9 +251,9 @@ fn test_get_magnitude_spectrum() {
     let peak_bin = spectrum
         .iter()
         .enumerate()
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
         .map(|(idx, _)| idx)
-        .unwrap();
+        .expect("value should be present");
 
     // Peak should be within a few bins of expected
     assert!((peak_bin as i32 - expected_bin as i32).abs() < 5);
@@ -552,9 +552,9 @@ fn test_chroma_features_musical_note() {
     let max_idx = chroma
         .iter()
         .enumerate()
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
         .map(|(idx, _)| idx)
-        .unwrap();
+        .expect("value should be present");
 
     // A4 at 440 Hz with ref_freq=440 should map to pitch class 0 (the reference)
     // Actually, 440/440 = 1, log2(1) = 0, so it should be pitch class 0

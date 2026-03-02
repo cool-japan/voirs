@@ -17,9 +17,9 @@ mod python_tests {
     #[test]
     fn test_python_module_creation() {
         // Test that Python module can be created
-        pyo3::prepare_freethreaded_python();
+        Python::initialize();
 
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             // Test module creation
             let module = PyModule::new(py, "voirs_test").unwrap();
             assert!(!module.is_none());
@@ -36,9 +36,9 @@ mod python_tests {
 
     #[test]
     fn test_python_error_handling() {
-        pyo3::prepare_freethreaded_python();
+        Python::initialize();
 
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             // Test error creation and handling
             let error = PyErr::new::<pyo3::exceptions::PyValueError, _>("Test error");
             assert!(error.is_instance_of::<pyo3::exceptions::PyValueError>(py));
@@ -51,9 +51,9 @@ mod python_tests {
 
     #[test]
     fn test_python_type_conversions() {
-        pyo3::prepare_freethreaded_python();
+        Python::initialize();
 
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             // Test basic type conversions
             let int_val = 42i32;
             let py_int = int_val.into_pyobject(py).unwrap().into_any().unbind();
@@ -74,9 +74,9 @@ mod python_tests {
 
     #[test]
     fn test_python_list_operations() {
-        pyo3::prepare_freethreaded_python();
+        Python::initialize();
 
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             // Test list creation and manipulation
             let list = PyList::new(py, [1, 2, 3, 4, 5]).unwrap();
             assert_eq!(list.len(), 5);
@@ -96,9 +96,9 @@ mod python_tests {
 
     #[test]
     fn test_python_dict_operations() {
-        pyo3::prepare_freethreaded_python();
+        Python::initialize();
 
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             // Test dictionary creation and manipulation
             let dict = PyDict::new(py);
             dict.set_item("name", "VoiRS").unwrap();
@@ -129,9 +129,9 @@ mod python_tests {
 
     #[test]
     fn test_python_function_calls() {
-        pyo3::prepare_freethreaded_python();
+        Python::initialize();
 
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             // Test function definition and calling
             let module = PyModule::from_code(
                 py,
@@ -162,9 +162,9 @@ def multiply_numbers(a, b):
 
     #[test]
     fn test_python_class_creation() {
-        pyo3::prepare_freethreaded_python();
+        Python::initialize();
 
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             // Test class creation
             let module = PyModule::from_code(
                 py,
@@ -205,9 +205,9 @@ class TestClass:
 
     #[test]
     fn test_python_async_support() {
-        pyo3::prepare_freethreaded_python();
+        Python::initialize();
 
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             // Test async function support
             let module = PyModule::from_code(
                 py,
@@ -241,9 +241,9 @@ def run_async_add(a, b):
 
     #[test]
     fn test_python_exception_handling() {
-        pyo3::prepare_freethreaded_python();
+        Python::initialize();
 
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             // Test exception handling
             let module = PyModule::from_code(
                 py,
@@ -276,9 +276,9 @@ def divide_numbers(a, b):
 
     #[test]
     fn test_python_memory_management() {
-        pyo3::prepare_freethreaded_python();
+        Python::initialize();
 
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             // Test memory management with large objects
             let large_list = PyList::new(py, (0..10000).collect::<Vec<i32>>()).unwrap();
             assert_eq!(large_list.len(), 10000);
@@ -294,9 +294,9 @@ def divide_numbers(a, b):
 
     #[test]
     fn test_python_numpy_compatibility() {
-        pyo3::prepare_freethreaded_python();
+        Python::initialize();
 
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             // Only run if NumPy is available
             let numpy_available = py.import("numpy").is_ok();
             if numpy_available {
@@ -342,9 +342,9 @@ def array_info(arr):
 
     #[test]
     fn test_python_callback_functions() {
-        pyo3::prepare_freethreaded_python();
+        Python::initialize();
 
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             // Test callback function support
             let module = PyModule::from_code(
                 py,
@@ -390,9 +390,9 @@ def double(x):
 
     #[test]
     fn test_python_threading_support() {
-        pyo3::prepare_freethreaded_python();
+        Python::initialize();
 
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             // Test threading support
             let module = PyModule::from_code(
                 py,
@@ -447,9 +447,9 @@ def run_threads():
 
     #[test]
     fn test_python_gc_interaction() {
-        pyo3::prepare_freethreaded_python();
+        Python::initialize();
 
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             // Test garbage collection interaction
             let module = PyModule::from_code(
                 py,

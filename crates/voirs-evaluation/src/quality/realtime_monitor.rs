@@ -242,7 +242,7 @@ impl RealTimeQualityMonitor {
     {
         self.alert_callbacks
             .lock()
-            .unwrap()
+            .expect("value should be present")
             .push(Box::new(callback));
     }
 
@@ -682,7 +682,10 @@ impl RealTimeQualityMonitor {
 
     /// Calculate quality trend based on recent history
     async fn calculate_quality_trend(&self, current_quality: f32) -> QualityTrend {
-        let history = self.quality_history.lock().unwrap();
+        let history = self
+            .quality_history
+            .lock()
+            .expect("lock should not be poisoned");
 
         if history.len() < 3 {
             return QualityTrend::Unknown;
@@ -724,7 +727,10 @@ impl RealTimeQualityMonitor {
 
     /// Store quality metrics in history buffer
     async fn store_quality_metrics(&self, metrics: RealTimeQualityMetrics) {
-        let mut history = self.quality_history.lock().unwrap();
+        let mut history = self
+            .quality_history
+            .lock()
+            .expect("lock should not be poisoned");
 
         // Add new metrics
         history.push_back(metrics);
@@ -774,7 +780,10 @@ impl RealTimeQualityMonitor {
 
         // Trigger alert callbacks
         if !alerts.is_empty() {
-            let callbacks = self.alert_callbacks.lock().unwrap();
+            let callbacks = self
+                .alert_callbacks
+                .lock()
+                .expect("lock should not be poisoned");
             for alert in alerts {
                 for callback in callbacks.iter() {
                     callback(alert.clone());
@@ -791,7 +800,10 @@ impl RealTimeQualityMonitor {
             return;
         }
 
-        let history = self.quality_history.lock().unwrap();
+        let history = self
+            .quality_history
+            .lock()
+            .expect("lock should not be poisoned");
         if history.len() < 10 {
             return; // Need more data
         }
@@ -824,7 +836,10 @@ impl RealTimeQualityMonitor {
 
     /// Update processing statistics
     async fn update_processing_stats(&self, samples_processed: usize, processing_time: Duration) {
-        let mut stats = self.processing_stats.lock().unwrap();
+        let mut stats = self
+            .processing_stats
+            .lock()
+            .expect("lock should not be poisoned");
 
         stats.total_samples_processed += samples_processed as u64;
         stats.total_processing_time += processing_time;
@@ -840,7 +855,10 @@ impl RealTimeQualityMonitor {
 
     /// Get current processing statistics
     pub async fn get_processing_stats(&self) -> ProcessingStats {
-        let stats = self.processing_stats.lock().unwrap();
+        let stats = self
+            .processing_stats
+            .lock()
+            .expect("lock should not be poisoned");
         ProcessingStats {
             total_samples_processed: stats.total_samples_processed,
             total_processing_time: stats.total_processing_time,
@@ -852,7 +870,10 @@ impl RealTimeQualityMonitor {
 
     /// Get quality history
     pub async fn get_quality_history(&self) -> Vec<RealTimeQualityMetrics> {
-        let history = self.quality_history.lock().unwrap();
+        let history = self
+            .quality_history
+            .lock()
+            .expect("lock should not be poisoned");
         history.iter().cloned().collect()
     }
 
@@ -864,8 +885,14 @@ impl RealTimeQualityMonitor {
 
     /// Reset monitoring state
     pub async fn reset(&self) {
-        self.quality_history.lock().unwrap().clear();
-        *self.processing_stats.lock().unwrap() = ProcessingStats::default();
+        self.quality_history
+            .lock()
+            .expect("lock should not be poisoned")
+            .clear();
+        *self
+            .processing_stats
+            .lock()
+            .expect("lock should not be poisoned") = ProcessingStats::default();
 
         let mut thresholds = self.adaptive_thresholds.write().await;
         thresholds.quality_threshold = self.config.quality_threshold;

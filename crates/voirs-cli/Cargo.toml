@@ -11,6 +11,7 @@ keywords = ["voirs", "cli", "tts", "command-line", "speech"]
 categories = ["command-line-utilities", "multimedia::audio"]
 rust-version.workspace = true
 description = "Command-line interface for VoiRS speech synthesis"
+readme = "README.md"
 
 [[bin]]
 name = "voirs"
@@ -116,9 +117,9 @@ libloading.workspace = true
 wasmtime.workspace = true
 
 [dev-dependencies]
-assert_cmd = "2.0"
+assert_cmd = "2.1"
 predicates = "3.1"
-tempfile = "3.24"
+tempfile = "3.26"
 
 [features]
 default = ["emotion", "cloning", "conversion", "singing", "spatial", "cloud"]

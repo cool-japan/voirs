@@ -459,7 +459,7 @@ impl VisualVoiceEditor {
             "session_{}",
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
+                .expect("SystemTime should be after UNIX_EPOCH")
                 .as_secs()
         );
 
@@ -499,7 +499,7 @@ impl VisualVoiceEditor {
             has_unsaved_changes: false,
         };
 
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().expect("lock should not be poisoned");
         sessions.insert(session_id.clone(), session);
 
         Ok(session_id)
@@ -514,7 +514,7 @@ impl VisualVoiceEditor {
     ) -> Result<()> {
         // Determine if preview should be generated
         let should_generate_preview = {
-            let mut sessions = self.sessions.write().unwrap();
+            let mut sessions = self.sessions.write().expect("lock should not be poisoned");
             let session = sessions
                 .get_mut(session_id)
                 .ok_or_else(|| Error::Validation(format!("Session not found: {session_id}")))?;
@@ -623,7 +623,7 @@ impl VisualVoiceEditor {
 
         // Clone necessary data before async operations
         let (speaker_profile, current_parameters) = {
-            let sessions = self.sessions.read().unwrap();
+            let sessions = self.sessions.read().expect("lock should not be poisoned");
             let session = sessions
                 .get(session_id)
                 .ok_or_else(|| Error::Validation(format!("Session not found: {session_id}")))?;
@@ -717,12 +717,19 @@ impl VisualVoiceEditor {
         };
 
         // Cache preview result
-        let mut cache = self.preview_cache.write().unwrap();
+        let mut cache = self
+            .preview_cache
+            .write()
+            .expect("lock should not be poisoned");
         cache.insert(session_id.to_string(), preview_result);
 
         // Limit cache size
         if cache.len() > 10 {
-            let oldest_key = cache.keys().next().unwrap().clone();
+            let oldest_key = cache
+                .keys()
+                .next()
+                .expect("cache is non-empty (len > 10)")
+                .clone();
             cache.remove(&oldest_key);
         }
 
@@ -731,7 +738,10 @@ impl VisualVoiceEditor {
 
     /// Get current preview result for session
     pub async fn get_preview(&self, session_id: &str) -> Result<Option<PreviewResult>> {
-        let cache = self.preview_cache.read().unwrap();
+        let cache = self
+            .preview_cache
+            .read()
+            .expect("lock should not be poisoned");
         Ok(cache.get(session_id).cloned())
     }
 
@@ -741,7 +751,7 @@ impl VisualVoiceEditor {
             return Err(Error::Config("Undo/redo not enabled".to_string()));
         }
 
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().expect("lock should not be poisoned");
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| Error::Validation(format!("Session not found: {session_id}")))?;
@@ -769,7 +779,7 @@ impl VisualVoiceEditor {
             return Err(Error::Config("Undo/redo not enabled".to_string()));
         }
 
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().expect("lock should not be poisoned");
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| Error::Validation(format!("Session not found: {session_id}")))?;
@@ -807,7 +817,11 @@ impl VisualVoiceEditor {
 
         // Sort parameters by importance within each category
         for parameters in categorized.values_mut() {
-            parameters.sort_by(|a, b| b.importance.partial_cmp(&a.importance).unwrap());
+            parameters.sort_by(|a, b| {
+                b.importance
+                    .partial_cmp(&a.importance)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
         }
 
         categorized
@@ -817,7 +831,7 @@ impl VisualVoiceEditor {
     pub async fn save_session(&self, session_id: &str, file_path: &str) -> Result<()> {
         // Clone session data before async operation
         let session = {
-            let sessions = self.sessions.read().unwrap();
+            let sessions = self.sessions.read().expect("lock should not be poisoned");
             sessions
                 .get(session_id)
                 .ok_or_else(|| Error::Validation(format!("Session not found: {session_id}")))?
@@ -841,7 +855,7 @@ impl VisualVoiceEditor {
 
         let session_id = session.session_id.clone();
 
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().expect("lock should not be poisoned");
         sessions.insert(session_id.clone(), session);
 
         Ok(session_id)
@@ -849,7 +863,7 @@ impl VisualVoiceEditor {
 
     /// Get session information
     pub async fn get_session_info(&self, session_id: &str) -> Result<EditorSession> {
-        let sessions = self.sessions.read().unwrap();
+        let sessions = self.sessions.read().expect("lock should not be poisoned");
         let session = sessions
             .get(session_id)
             .ok_or_else(|| Error::Validation(format!("Session not found: {session_id}")))?;
@@ -859,16 +873,19 @@ impl VisualVoiceEditor {
 
     /// List all active sessions
     pub async fn list_sessions(&self) -> Vec<String> {
-        let sessions = self.sessions.read().unwrap();
+        let sessions = self.sessions.read().expect("lock should not be poisoned");
         sessions.keys().cloned().collect()
     }
 
     /// Close and cleanup session
     pub async fn close_session(&self, session_id: &str) -> Result<()> {
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().expect("lock should not be poisoned");
         sessions.remove(session_id);
 
-        let mut cache = self.preview_cache.write().unwrap();
+        let mut cache = self
+            .preview_cache
+            .write()
+            .expect("lock should not be poisoned");
         cache.remove(session_id);
 
         Ok(())

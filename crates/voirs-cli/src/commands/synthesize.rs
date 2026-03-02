@@ -437,10 +437,7 @@ async fn try_synthesize(
             .map_err(|e| VoirsError::IoError {
                 path: output_path.clone(),
                 operation: IoOperation::Write,
-                source: std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Failed to save audio: {}", e),
-                ),
+                source: std::io::Error::other(format!("Failed to save audio: {}", e)),
             })?;
 
         if !global.quiet {
@@ -554,10 +551,7 @@ async fn run_enhanced_streaming_synthesis(
         .map_err(|e| VoirsError::IoError {
             path: output_path.clone(),
             operation: IoOperation::Write,
-            source: std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to save combined audio: {}", e),
-            ),
+            source: std::io::Error::other(format!("Failed to save combined audio: {}", e)),
         })?;
 
     if !global.quiet {
@@ -675,8 +669,8 @@ pub async fn run_synthesize(
 
         // Show extracted parameters if any
         if !global.quiet {
-            if parsed.parameters.voice.is_some() {
-                println!("   Voice: {}", parsed.parameters.voice.as_ref().unwrap());
+            if let Some(voice) = parsed.parameters.voice.as_ref() {
+                println!("   Voice: {}", voice);
             }
             if parsed.parameters.rate.is_some() {
                 println!("   Rate: {}", rate);
@@ -684,11 +678,8 @@ pub async fn run_synthesize(
             if parsed.parameters.pitch.is_some() {
                 println!("   Pitch: {}", pitch);
             }
-            if parsed.parameters.emotion.is_some() {
-                println!(
-                    "   Emotion: {}",
-                    parsed.parameters.emotion.as_ref().unwrap()
-                );
+            if let Some(emotion) = parsed.parameters.emotion.as_ref() {
+                println!("   Emotion: {}", emotion);
             }
         }
 
@@ -940,7 +931,7 @@ fn split_text_into_chunks(text: &str, config: &StreamingConfig) -> Result<Vec<St
     let mut chunks = Vec::new();
 
     // Use sentence boundaries for cleaner splitting
-    let sentence_regex = Regex::new(r"[.!?]\s+").unwrap();
+    let sentence_regex = Regex::new(r"[.!?]\s+").expect("regex pattern is valid");
     let sentences: Vec<&str> = sentence_regex.split(text).collect();
 
     let mut current_chunk = String::new();
@@ -1002,7 +993,7 @@ async fn process_chunks_with_progress(
                 .template(
                     "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})",
                 )
-                .unwrap()
+                .expect("progress template is valid")
                 .progress_chars("#>-"),
         );
         pb.set_message("Processing chunks");
@@ -1022,7 +1013,10 @@ async fn process_chunks_with_progress(
         let pb_clone = progress_bar.clone();
 
         let task = tokio::spawn(async move {
-            let _permit = semaphore_clone.acquire().await.unwrap();
+            let _permit = semaphore_clone
+                .acquire()
+                .await
+                .expect("semaphore should not be closed");
 
             let start_time = Instant::now();
             let result = pipeline_clone
@@ -1092,7 +1086,7 @@ async fn process_chunks_with_enhanced_progress(
         pb.set_style(
             ProgressStyle::default_bar()
                 .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta}) {msg}")
-                .unwrap()
+                .expect("progress template is valid")
                 .progress_chars("#>-")
         );
 
@@ -1120,7 +1114,10 @@ async fn process_chunks_with_enhanced_progress(
         let total_chunks_clone = total_chunks;
 
         let task = tokio::spawn(async move {
-            let _permit = semaphore_clone.acquire().await.unwrap();
+            let _permit = semaphore_clone
+                .acquire()
+                .await
+                .expect("semaphore should not be closed");
 
             let start_time = Instant::now();
             let mut last_error = None;
@@ -1249,7 +1246,10 @@ fn combine_audio_segments(segments: Vec<voirs_sdk::AudioBuffer>) -> Result<voirs
     }
 
     if segments.len() == 1 {
-        return Ok(segments.into_iter().next().unwrap());
+        return Ok(segments
+            .into_iter()
+            .next()
+            .expect("checked len() == 1 above"));
     }
 
     // For now, use the first segment's sample rate and channels

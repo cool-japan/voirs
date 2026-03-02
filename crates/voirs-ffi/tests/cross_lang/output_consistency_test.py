@@ -15,11 +15,11 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 import unittest
 
-# Add the parent directory to sys.path to import voirs_ffi
+# Add the parent directory to sys.path to import voirs
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'python'))
 
 try:
-    import voirs_ffi
+    import voirs
     PYTHON_BINDINGS_AVAILABLE = True
 except ImportError:
     PYTHON_BINDINGS_AVAILABLE = False
@@ -127,10 +127,10 @@ class CrossLanguageConsistencyTest(unittest.TestCase):
         """Synthesize speech using Python bindings"""
         try:
             # Create pipeline
-            pipeline = voirs_ffi.VoirsPipeline()
+            pipeline = voirs.VoirsPipeline()
             
             # Configure synthesis
-            config = voirs_ffi.SynthesisConfig(
+            config = voirs.SynthesisConfig(
                 voice_id=voice_id,
                 sample_rate=sample_rate,
                 quality=self.test_quality
@@ -224,8 +224,8 @@ class CrossLanguageConsistencyTest(unittest.TestCase):
         results = []
         for case in error_cases:
             try:
-                pipeline = voirs_ffi.VoirsPipeline()
-                config = voirs_ffi.SynthesisConfig(
+                pipeline = voirs.VoirsPipeline()
+                config = voirs.SynthesisConfig(
                     voice_id=case["voice_id"],
                     sample_rate=case.get("sample_rate", 22050),
                     quality="medium"
@@ -311,8 +311,8 @@ class CrossLanguageConsistencyTest(unittest.TestCase):
         baseline_memory = process.memory_info().rss
         
         # Memory during synthesis
-        pipeline = voirs_ffi.VoirsPipeline()
-        config = voirs_ffi.SynthesisConfig(
+        pipeline = voirs.VoirsPipeline()
+        config = voirs.SynthesisConfig(
             voice_id=self.test_voice_id,
             sample_rate=self.test_sample_rate,
             quality=self.test_quality
@@ -371,8 +371,8 @@ class CrossLanguageConsistencyTest(unittest.TestCase):
         """Measure performance for Python bindings"""
         import time
         
-        pipeline = voirs_ffi.VoirsPipeline()
-        config = voirs_ffi.SynthesisConfig(
+        pipeline = voirs.VoirsPipeline()
+        config = voirs.SynthesisConfig(
             voice_id=self.test_voice_id,
             sample_rate=self.test_sample_rate,
             quality=self.test_quality
@@ -426,8 +426,8 @@ class CrossLanguageConsistencyTest(unittest.TestCase):
     def _test_config_python(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Test configuration using Python bindings"""
         try:
-            pipeline = voirs_ffi.VoirsPipeline()
-            synthesis_config = voirs_ffi.SynthesisConfig(
+            pipeline = voirs.VoirsPipeline()
+            synthesis_config = voirs.SynthesisConfig(
                 voice_id=config["voice_id"],
                 sample_rate=config["sample_rate"],
                 quality=config["quality"]
@@ -508,7 +508,7 @@ class CrossLanguageConsistencyTest(unittest.TestCase):
             str(c_source),
             "-I", str(Path(__file__).parent.parent.parent / "src"),
             "-L", str(Path(__file__).parent.parent.parent / "target" / "debug"),
-            "-lvoirs_ffi",
+            "-lvoirs",
             "-lm"
         ]
         

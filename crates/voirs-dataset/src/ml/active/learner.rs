@@ -614,7 +614,8 @@ impl ActiveLearner for ActiveLearnerImpl {
                 .map(|(i, &score)| (i, score))
                 .collect();
 
-            scored_indices.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            scored_indices
+                .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
             let selected_data: Vec<(usize, f32)> =
                 scored_indices.into_iter().take(batch_size).collect();

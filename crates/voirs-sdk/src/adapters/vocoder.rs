@@ -172,7 +172,10 @@ impl SdkVocoder for VocoderAdapter {
 
         let vocoder_configs: Option<Vec<_>> = configs.map(|cfgs| {
             cfgs.iter()
-                .map(|cfg| Self::convert_synthesis_config_to_vocoder(&Some(cfg)).unwrap())
+                .map(|cfg| {
+                    Self::convert_synthesis_config_to_vocoder(&Some(cfg))
+                        .expect("value should be present")
+                })
                 .collect()
         });
 

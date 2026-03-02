@@ -121,7 +121,7 @@ impl AesStandards {
         let peak_level = samples
             .iter()
             .map(|&s| s.abs())
-            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap_or(0.0);
         let peak_level_dbfs = 20.0 * peak_level.max(1e-10).log10();
 
@@ -230,12 +230,12 @@ impl AesStandards {
         let peak = samples
             .iter()
             .map(|&s| s.abs())
-            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap_or(0.0);
 
         // Estimate noise floor (using quiet passages)
         let mut sorted_samples: Vec<f32> = samples.iter().map(|&s| s.abs()).collect();
-        sorted_samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted_samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         // Noise floor is approximately the 10th percentile
         let noise_floor_idx = (sorted_samples.len() as f32 * 0.1) as usize;
@@ -386,7 +386,7 @@ impl AesStandards {
             return Ok(0.0);
         }
 
-        block_loudnesses.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        block_loudnesses.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         // Loudness range is difference between 95th and 10th percentiles
         let p10_idx = (block_loudnesses.len() as f32 * 0.1) as usize;
@@ -404,7 +404,7 @@ impl AesStandards {
         let peak = samples
             .iter()
             .map(|&s| s.abs())
-            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap_or(0.0);
 
         // Add 0.3 dB margin for inter-sample peaks

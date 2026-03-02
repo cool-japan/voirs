@@ -23,7 +23,7 @@
 //! ];
 //!
 //! // Apply phonological processes (e.g., /n/ -> /m/ before /p/)
-//! let output = processor.apply_all_processes(&input).unwrap();
+//! let output = processor.apply_all_processes(&input)?;
 //! ```
 
 pub mod processes;
@@ -69,7 +69,7 @@ pub enum ProcessType {
     Fortition,
     /// R-dropping in non-rhotic dialects (British RP, New England, etc.)
     RDropping,
-    /// T-flapping in American English (/t/ → [ɾ])
+    /// T-flapping in American English (/t/ → \[ɾ\])
     TFlapping,
     /// Final devoicing in German (Auslautverhärtung)
     FinalDevoicing,

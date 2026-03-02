@@ -451,7 +451,7 @@ impl QueryOptimizer {
         if let Some(cached) = cache.get(key) {
             if !cached.is_expired() {
                 if let Ok((data, _)) =
-                    bincode::serde::decode_from_slice(&cached.data, bincode::config::standard())
+                    oxicode::serde::decode_from_slice(&cached.data, oxicode::config::standard())
                 {
                     return Some(data);
                 }
@@ -465,7 +465,7 @@ impl QueryOptimizer {
     where
         T: Serialize,
     {
-        if let Ok(serialized) = bincode::serde::encode_to_vec(data, bincode::config::standard()) {
+        if let Ok(serialized) = oxicode::serde::encode_to_vec(data, oxicode::config::standard()) {
             let cached = CachedResult::new(
                 serialized,
                 Duration::from_secs(self.config.cache_ttl_seconds),

@@ -9,7 +9,6 @@
 //! ```
 
 use std::time::{Duration, Instant};
-use tokio;
 use voirs_recognizer::asr::{
     ASRBackend, BenchmarkingConfig, FallbackConfig, FallbackResult, WhisperModelSize,
 };
@@ -378,14 +377,17 @@ fn calculate_wer(hypothesis: &str, reference: &str) -> f32 {
     let mut dp = vec![vec![0; hyp_words.len() + 1]; ref_words.len() + 1];
 
     // Initialize first row and column
+    // needless_range_loop: 2D DP table requires index-based access
+    #[allow(clippy::needless_range_loop)]
     for i in 0..=ref_words.len() {
         dp[i][0] = i;
     }
-    for j in 0..=hyp_words.len() {
-        dp[0][j] = j;
+    for (j, row) in dp[0].iter_mut().enumerate() {
+        *row = j;
     }
 
     // Fill the DP table
+    #[allow(clippy::needless_range_loop)]
     for i in 1..=ref_words.len() {
         for j in 1..=hyp_words.len() {
             if ref_words[i - 1] == hyp_words[j - 1] {
@@ -413,13 +415,13 @@ fn generate_accuracy_report(
         chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
     ));
     report.push_str(&format!("Test Cases: {}\n", results.len()));
-    report.push_str("\n");
+    report.push('\n');
 
     report.push_str("=== Summary Metrics ===\n");
     report.push_str(&format!("Average WER: {:.2}%\n", avg_wer * 100.0));
     report.push_str(&format!("Average Confidence: {:.2}\n", avg_confidence));
     report.push_str(&format!("Overall RTF: {:.3}\n", overall_rtf));
-    report.push_str("\n");
+    report.push('\n');
 
     report.push_str("=== Detailed Results ===\n");
     for (name, result, expected, processing_time) in results {
@@ -436,7 +438,7 @@ fn generate_accuracy_report(
             result.transcript.confidence
         ));
         report.push_str(&format!("  Processing: {:?}\n", processing_time));
-        report.push_str("\n");
+        report.push('\n');
     }
 
     report

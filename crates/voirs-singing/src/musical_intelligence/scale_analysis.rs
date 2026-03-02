@@ -115,7 +115,11 @@ impl ScaleAnalyzer {
         }
 
         // Sort by confidence
-        scale_results.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
+        scale_results.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         Ok(scale_results)
     }

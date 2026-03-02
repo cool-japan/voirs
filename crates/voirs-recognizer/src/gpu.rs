@@ -277,8 +277,8 @@ impl GpuAccelerator {
             }
             Err(_) => {
                 // Fall back to candle device detection
-                match candle_core::Device::cuda_if_available(0) {
-                    Ok(_) => {
+                match std::panic::catch_unwind(|| candle_core::Device::cuda_if_available(0)) {
+                    Ok(Ok(_)) => {
                         Ok(vec![DeviceInfo {
                             device_type: DeviceType::Cuda,
                             name: "CUDA Device".to_string(),
@@ -287,7 +287,7 @@ impl GpuAccelerator {
                             available: true,
                         }])
                     }
-                    Err(_) => Ok(vec![])
+                    _ => Ok(vec![])
                 }
             }
         }

@@ -11,6 +11,7 @@ keywords = ["voirs", "sdk", "tts", "speech-synthesis", "api"]
 categories = ["api-bindings", "multimedia::audio", "science"]
 rust-version.workspace = true
 description = "Unified SDK and public API for VoiRS speech synthesis"
+readme = "README.md"
 
 [lib]
 name = "voirs_sdk"
@@ -90,7 +91,7 @@ flate2 = { workspace = true, optional = true }
 zstd = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 aes-gcm = { workspace = true, optional = true }
-bincode = { workspace = true, optional = true }
+oxicode = { workspace = true, optional = true }
 
 # Plugin loading dependencies
 libloading = { workspace = true, optional = true }
@@ -108,7 +109,7 @@ gpu = ["voirs-acoustic/gpu", "voirs-vocoder/gpu", "voirs-cloning/gpu", "voirs-co
 onnx = ["voirs-acoustic/onnx", "voirs-vocoder/onnx", "voirs-cloning/onnx"]
 wasm = ["wasm-bindgen", "wasm-bindgen-futures", "web-sys", "js-sys", "console_error_panic_hook", "wasm-logger"]
 http = ["axum", "tower", "tower-http"]
-cloud = ["flate2", "zstd", "sha2", "aes-gcm", "bincode"]
+cloud = ["flate2", "zstd", "sha2", "aes-gcm", "oxicode"]
 plugins = ["libloading", "wasmtime"]
 
 # Advanced voice features
@@ -196,6 +197,30 @@ path = "examples/advanced/quality_monitoring_demo.rs"
 [[example]]
 name = "regression_detection_demo"
 path = "examples/advanced/regression_detection_demo.rs"
+
+[[example]]
+name = "sdk_batch_processing"
+path = "examples/advanced/batch_processing.rs"
+required-features = ["emotion", "cloning", "conversion"]
+
+[[example]]
+name = "sdk_performance_profiling"
+path = "examples/advanced/performance_profiling.rs"
+required-features = ["emotion", "cloning", "conversion"]
+
+[[example]]
+name = "sdk_streaming_synthesis"
+path = "examples/advanced/streaming_synthesis.rs"
+required-features = ["emotion", "cloning", "conversion"]
+
+[[example]]
+name = "sdk_batch_with_profiling"
+path = "examples/advanced/batch_with_profiling.rs"
+required-features = ["emotion", "cloning", "conversion"]
+
+[[example]]
+name = "sdk_performance_monitoring"
+path = "examples/advanced/performance_monitoring.rs"
 
 [[bench]]
 name = "synthesis_benchmarks"

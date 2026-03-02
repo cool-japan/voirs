@@ -491,7 +491,7 @@ async fn execute_calibrate_command(
         args.headphone_model,
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("SystemTime should be after UNIX_EPOCH")
             .as_secs()
     );
     std::fs::write(&args.output_profile, profile_data)

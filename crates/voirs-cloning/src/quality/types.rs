@@ -589,7 +589,7 @@ impl CloningQualityAssessor {
             .chunks(256)
             .map(|chunk| chunk.iter().map(|x| x * x).sum::<f32>() / chunk.len() as f32)
             .collect();
-        energies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        energies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let noise_samples = energies.len() / 10;
         let noise_power = if noise_samples > 0 {
             energies[..noise_samples].iter().sum::<f32>() / noise_samples as f32
@@ -945,7 +945,7 @@ impl CloningQualityAssessor {
             .chunks(256)
             .map(|chunk| chunk.iter().map(|x| x * x).sum::<f32>() / chunk.len() as f32)
             .collect();
-        energies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        energies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let noise_samples = (energies.len() / 20).max(1);
         energies[..noise_samples].iter().sum::<f32>() / noise_samples as f32
     }

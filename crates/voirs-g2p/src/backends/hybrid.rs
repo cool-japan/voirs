@@ -221,7 +221,11 @@ impl HybridG2p {
                                 ));
                                 debug!(
                                     "Neural-based backend: {} phonemes, confidence: {:.2}",
-                                    backend_results.last().unwrap().1.len(),
+                                    backend_results
+                                        .last()
+                                        .expect("just pushed an element")
+                                        .1
+                                        .len(),
                                     confidence
                                 );
                             }
@@ -364,14 +368,14 @@ impl HybridG2p {
 
             SelectionStrategy::HighestConfidence => {
                 // Return result with highest confidence
-                results.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
+                results.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
                 Ok(results[0].1.clone())
             }
 
             SelectionStrategy::MajorityVoting => {
                 // Implement majority voting (simplified version)
                 // For now, just return the result from the backend with highest weight
-                results.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap());
+                results.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap_or(std::cmp::Ordering::Equal));
                 Ok(results[0].1.clone())
             }
 
@@ -380,7 +384,9 @@ impl HybridG2p {
                 results.sort_by(|a, b| {
                     let score_a = a.2 * a.3; // confidence * weight
                     let score_b = b.2 * b.3;
-                    score_b.partial_cmp(&score_a).unwrap()
+                    score_b
+                        .partial_cmp(&score_a)
+                        .unwrap_or(std::cmp::Ordering::Equal)
                 });
                 Ok(results[0].1.clone())
             }

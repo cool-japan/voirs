@@ -1,4 +1,5 @@
 //! Recognition functions for the C API.
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 use super::core::VoirsRecognizerInternal;
 use super::memory::c_string_to_string;
@@ -114,7 +115,7 @@ pub extern "C" fn voirs_recognize(
                 // Create result structure
                 let c_result = VoirsRecognitionResult {
                     text: internal.memory_manager.store_string(
-                        &rec_result
+                        rec_result
                             .transcription
                             .as_ref()
                             .map(|t| &t.text)

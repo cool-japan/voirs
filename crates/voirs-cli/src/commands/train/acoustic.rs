@@ -171,7 +171,10 @@ async fn train_vits(args: AcousticTrainingArgs, global: &GlobalOptions) -> Resul
 
     // Determine device
     let device = if use_gpu {
-        Device::cuda_if_available(0).unwrap_or(Device::Cpu)
+        std::panic::catch_unwind(|| Device::cuda_if_available(0))
+            .ok()
+            .and_then(|r| r.ok())
+            .unwrap_or(Device::Cpu)
     } else {
         Device::Cpu
     };
@@ -346,7 +349,11 @@ async fn train_vits(args: AcousticTrainingArgs, global: &GlobalOptions) -> Resul
                 // Save best checkpoint
                 let best_path = output.parent().unwrap_or(output.as_path()).join(format!(
                     "{}_best.safetensors",
-                    output.file_stem().unwrap().to_str().unwrap()
+                    output
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_str()
+                        .unwrap_or_default()
                 ));
                 if let Err(e) = trainer.save_checkpoint(&best_path, epoch) {
                     if !global.quiet {
@@ -457,7 +464,10 @@ async fn train_fastspeech2(args: AcousticTrainingArgs, global: &GlobalOptions) -
 
     // Determine device
     let device = if use_gpu {
-        Device::cuda_if_available(0).unwrap_or(Device::Cpu)
+        std::panic::catch_unwind(|| Device::cuda_if_available(0))
+            .ok()
+            .and_then(|r| r.ok())
+            .unwrap_or(Device::Cpu)
     } else {
         Device::Cpu
     };
@@ -627,7 +637,11 @@ async fn train_fastspeech2(args: AcousticTrainingArgs, global: &GlobalOptions) -
                 // Save best checkpoint
                 let best_path = output.parent().unwrap_or(output.as_path()).join(format!(
                     "{}_best.safetensors",
-                    output.file_stem().unwrap().to_str().unwrap()
+                    output
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_str()
+                        .unwrap_or_default()
                 ));
                 if let Err(e) = trainer.save_checkpoint(&best_path, epoch) {
                     if !global.quiet {
@@ -705,7 +719,11 @@ async fn train_fastspeech2(args: AcousticTrainingArgs, global: &GlobalOptions) -
         println!("   - Final model: {}", output.display());
         println!(
             "   - Best model:  {}_best.safetensors",
-            output.file_stem().unwrap().to_str().unwrap()
+            output
+                .file_stem()
+                .unwrap_or_default()
+                .to_str()
+                .unwrap_or_default()
         );
 
         println!("\n✅ Real FastSpeech2 training completed!");

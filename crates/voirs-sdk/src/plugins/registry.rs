@@ -397,7 +397,7 @@ impl PluginRegistry {
 
         // Update the main plugins collection
         {
-            let mut plugins = self.plugins.write().unwrap();
+            let mut plugins = self.plugins.write().expect("lock should not be poisoned");
             *plugins = discovered_plugins;
         }
 
@@ -407,7 +407,7 @@ impl PluginRegistry {
         stats.discovery_duration_ms = start_time.elapsed().unwrap_or_default().as_millis() as u64;
 
         {
-            let mut registry_stats = self.stats.write().unwrap();
+            let mut registry_stats = self.stats.write().expect("lock should not be poisoned");
             *registry_stats = stats.clone();
         }
 
@@ -531,7 +531,10 @@ impl PluginRegistry {
 
         // Cache the manifest
         {
-            let mut cache = self.manifest_cache.write().unwrap();
+            let mut cache = self
+                .manifest_cache
+                .write()
+                .expect("lock should not be poisoned");
             cache.insert(manifest_path.to_path_buf(), manifest.clone());
         }
 
@@ -612,7 +615,7 @@ impl PluginRegistry {
 
     /// Check if plugin is in blacklist
     fn is_blacklisted(&self, plugin_name: &str) -> bool {
-        let blacklist = self.blacklist.read().unwrap();
+        let blacklist = self.blacklist.read().expect("lock should not be poisoned");
         blacklist.contains(plugin_name)
     }
 
@@ -628,14 +631,14 @@ impl PluginRegistry {
 
     /// Add plugin to blacklist
     pub fn blacklist_plugin(&self, plugin_name: &str) {
-        let mut blacklist = self.blacklist.write().unwrap();
+        let mut blacklist = self.blacklist.write().expect("lock should not be poisoned");
         blacklist.insert(plugin_name.to_string());
         warn!("Added plugin '{}' to blacklist", plugin_name);
     }
 
     /// Remove plugin from blacklist
     pub fn unblacklist_plugin(&self, plugin_name: &str) {
-        let mut blacklist = self.blacklist.write().unwrap();
+        let mut blacklist = self.blacklist.write().expect("lock should not be poisoned");
         blacklist.remove(plugin_name);
         info!("Removed plugin '{}' from blacklist", plugin_name);
     }
@@ -643,7 +646,7 @@ impl PluginRegistry {
     /// Load a plugin by name
     pub async fn load_plugin(&self, name: &str) -> Result<Arc<dyn VoirsPlugin>> {
         let plugin_info = {
-            let plugins = self.plugins.read().unwrap();
+            let plugins = self.plugins.read().expect("lock should not be poisoned");
             plugins.get(name).cloned()
         };
 
@@ -672,19 +675,19 @@ impl PluginRegistry {
 
     /// List discovered plugins
     pub fn list_plugins(&self) -> Vec<PluginInfo> {
-        let plugins = self.plugins.read().unwrap();
+        let plugins = self.plugins.read().expect("lock should not be poisoned");
         plugins.values().cloned().collect()
     }
 
     /// Get plugin info by name
     pub fn get_plugin_info(&self, name: &str) -> Option<PluginInfo> {
-        let plugins = self.plugins.read().unwrap();
+        let plugins = self.plugins.read().expect("lock should not be poisoned");
         plugins.get(name).cloned()
     }
 
     /// List plugins by type
     pub fn list_plugins_by_type(&self, plugin_type: PluginType) -> Vec<PluginInfo> {
-        let plugins = self.plugins.read().unwrap();
+        let plugins = self.plugins.read().expect("lock should not be poisoned");
         plugins
             .values()
             .filter(|plugin| plugin.plugin_type == plugin_type)
@@ -694,13 +697,16 @@ impl PluginRegistry {
 
     /// Get plugin manifest
     pub fn get_plugin_manifest(&self, manifest_path: &Path) -> Option<PluginManifest> {
-        let cache = self.manifest_cache.read().unwrap();
+        let cache = self
+            .manifest_cache
+            .read()
+            .expect("lock should not be poisoned");
         cache.get(manifest_path).cloned()
     }
 
     /// Get discovery statistics
     pub fn get_discovery_stats(&self) -> DiscoveryStats {
-        let stats = self.stats.read().unwrap();
+        let stats = self.stats.read().expect("lock should not be poisoned");
         stats.clone()
     }
 
@@ -718,11 +724,14 @@ impl PluginRegistry {
     /// Clear discovery cache
     pub fn clear_cache(&self) {
         {
-            let mut plugins = self.plugins.write().unwrap();
+            let mut plugins = self.plugins.write().expect("lock should not be poisoned");
             plugins.clear();
         }
         {
-            let mut cache = self.manifest_cache.write().unwrap();
+            let mut cache = self
+                .manifest_cache
+                .write()
+                .expect("lock should not be poisoned");
             cache.clear();
         }
         info!("Cleared plugin discovery cache");

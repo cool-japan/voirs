@@ -157,7 +157,7 @@ impl LoadPredictor {
     fn update(&mut self, load: f32) {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("SystemTime should be after UNIX_EPOCH")
             .as_secs();
 
         self.load_history.push_back((now, load));
@@ -187,7 +187,7 @@ impl LoadPredictor {
         // Get current time
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("SystemTime should be after UNIX_EPOCH")
             .as_secs();
 
         let future_time = now + seconds_ahead as u64;
@@ -347,7 +347,10 @@ impl DynamicBufferManager {
 
     /// Get optimal buffer size for a stream
     fn get_optimal_buffer_size(&self, stream_id: u64, predicted_load: f32) -> usize {
-        let configs = self.buffer_configs.read().unwrap();
+        let configs = self
+            .buffer_configs
+            .read()
+            .expect("lock should not be poisoned");
 
         if let Some(config) = configs.get(&stream_id) {
             // Adjust based on predicted load
@@ -362,7 +365,10 @@ impl DynamicBufferManager {
     /// Update buffer configuration based on performance
     #[allow(dead_code)]
     fn update_buffer_config(&self, stream_id: u64, event: BufferEvent) {
-        let mut configs = self.buffer_configs.write().unwrap();
+        let mut configs = self
+            .buffer_configs
+            .write()
+            .expect("lock should not be poisoned");
 
         let config = configs.entry(stream_id).or_insert_with(|| BufferConfig {
             stream_id,
@@ -453,7 +459,10 @@ impl SystemResourceMonitor {
     #[allow(dead_code)]
     fn update(&self) {
         let load = self.get_system_load();
-        let mut history = self.usage_history.write().unwrap();
+        let mut history = self
+            .usage_history
+            .write()
+            .expect("lock should not be poisoned");
 
         history.push_back(load);
 
@@ -461,7 +470,10 @@ impl SystemResourceMonitor {
             history.pop_front();
         }
 
-        *self.last_update.write().unwrap() = Instant::now();
+        *self
+            .last_update
+            .write()
+            .expect("lock should not be poisoned") = Instant::now();
     }
 
     /// Get optimal CPU affinity for current load
@@ -545,7 +557,7 @@ impl RealtimeScheduler {
         let priority = self
             .priority_levels
             .read()
-            .unwrap()
+            .expect("lock should not be poisoned")
             .get(&stream_id)
             .copied()
             .unwrap_or(Priority::Normal);
@@ -668,7 +680,7 @@ impl EnhancedLatencyOptimizer {
             .get_optimal_buffer_size(stream_id, predicted_load);
 
         // Calculate chunk size based on buffer and load
-        let config = self.config.read().unwrap();
+        let config = self.config.read().expect("lock should not be poisoned");
         let base_size = config.chunk_size;
 
         // Adjust based on predicted conditions
@@ -715,14 +727,14 @@ impl EnhancedLatencyOptimizer {
         self.metrics
             .latency_history
             .write()
-            .unwrap()
+            .expect("lock should not be poisoned")
             .push_back(latency_measurement);
 
         // Record processing time
         self.metrics
             .processing_history
             .write()
-            .unwrap()
+            .expect("lock should not be poisoned")
             .push_back((now, processing_time_ms));
 
         // Check for quality degradation
@@ -738,7 +750,7 @@ impl EnhancedLatencyOptimizer {
             self.metrics
                 .quality_events
                 .write()
-                .unwrap()
+                .expect("lock should not be poisoned")
                 .push_back(quality_event);
         }
 
@@ -754,12 +766,19 @@ impl EnhancedLatencyOptimizer {
     /// Get comprehensive optimization statistics
     pub fn get_stats(&self) -> EnhancedLatencyStats {
         self.calculate_comprehensive_stats();
-        self.stats.read().unwrap().clone()
+        self.stats
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Calculate comprehensive statistics
     fn calculate_comprehensive_stats(&self) {
-        let latency_history = self.metrics.latency_history.read().unwrap();
+        let latency_history = self
+            .metrics
+            .latency_history
+            .read()
+            .expect("lock should not be poisoned");
 
         if latency_history.is_empty() {
             return;
@@ -767,7 +786,7 @@ impl EnhancedLatencyOptimizer {
 
         // Calculate latency percentiles
         let mut latencies: Vec<f32> = latency_history.iter().map(|m| m.latency_ms).collect();
-        latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        latencies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let len = latencies.len();
         let p50 = latencies[len / 2];
@@ -788,7 +807,11 @@ impl EnhancedLatencyOptimizer {
             }
 
             // Calculate quality metrics
-            let quality_events = self.metrics.quality_events.read().unwrap();
+            let quality_events = self
+                .metrics
+                .quality_events
+                .read()
+                .expect("lock should not be poisoned");
             stats.quality_degradation_events = quality_events.len() as u64;
 
             // Calculate deadline miss rate
@@ -808,7 +831,11 @@ impl EnhancedLatencyOptimizer {
 
         // Clean processing history
         {
-            let mut history = self.metrics.processing_history.write().unwrap();
+            let mut history = self
+                .metrics
+                .processing_history
+                .write()
+                .expect("lock should not be poisoned");
             while let Some((timestamp, _)) = history.front() {
                 if *timestamp < cutoff {
                     history.pop_front();
@@ -820,7 +847,11 @@ impl EnhancedLatencyOptimizer {
 
         // Clean latency history
         {
-            let mut history = self.metrics.latency_history.write().unwrap();
+            let mut history = self
+                .metrics
+                .latency_history
+                .write()
+                .expect("lock should not be poisoned");
             while let Some(measurement) = history.front() {
                 if measurement.timestamp < cutoff {
                     history.pop_front();
@@ -832,7 +863,11 @@ impl EnhancedLatencyOptimizer {
 
         // Clean system load history
         {
-            let mut history = self.metrics.system_load.write().unwrap();
+            let mut history = self
+                .metrics
+                .system_load
+                .write()
+                .expect("lock should not be poisoned");
             while let Some(load) = history.front() {
                 if load.timestamp < cutoff {
                     history.pop_front();

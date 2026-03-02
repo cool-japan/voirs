@@ -206,7 +206,7 @@ impl VoiceConverter {
 
         // Check session limits
         {
-            let sessions = self.sessions.read().unwrap();
+            let sessions = self.sessions.read().expect("lock should not be poisoned");
             if sessions.len() >= self.config.max_concurrent_sessions as usize {
                 return Err(Error::Processing(
                     "Maximum concurrent sessions reached".to_string(),
@@ -221,7 +221,10 @@ impl VoiceConverter {
 
         // Cache the model
         {
-            let mut cache = self.model_cache.write().unwrap();
+            let mut cache = self
+                .model_cache
+                .write()
+                .expect("lock should not be poisoned");
             let cache_key = format!(
                 "{:?}_{:?}",
                 source_speaker.vector.iter().sum::<f32>(),
@@ -247,15 +250,19 @@ impl VoiceConverter {
 
         // Store session
         {
-            let mut sessions = self.sessions.write().unwrap();
+            let mut sessions = self.sessions.write().expect("lock should not be poisoned");
             sessions.insert(session_id.clone(), session);
         }
 
         // Update statistics
         {
-            let mut stats = self.stats.write().unwrap();
+            let mut stats = self.stats.write().expect("lock should not be poisoned");
             stats.total_sessions += 1;
-            stats.active_sessions = self.sessions.read().unwrap().len() as u32;
+            stats.active_sessions = self
+                .sessions
+                .read()
+                .expect("lock should not be poisoned")
+                .len() as u32;
         }
 
         Ok(session_id)
@@ -283,7 +290,7 @@ impl VoiceConverter {
 
         // Update session
         {
-            let mut sessions = self.sessions.write().unwrap();
+            let mut sessions = self.sessions.write().expect("lock should not be poisoned");
             if let Some(session) = sessions.get_mut(session_id) {
                 session.last_activity = Instant::now();
                 session.samples_processed += audio_chunk.len() as u64;
@@ -344,10 +351,10 @@ impl VoiceConverter {
 
     /// Close conversion session
     pub fn close_session(&self, session_id: &str) -> Result<()> {
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().expect("lock should not be poisoned");
         if sessions.remove(session_id).is_some() {
             // Update statistics
-            let mut stats = self.stats.write().unwrap();
+            let mut stats = self.stats.write().expect("lock should not be poisoned");
             stats.active_sessions = sessions.len() as u32;
             Ok(())
         } else {
@@ -360,7 +367,7 @@ impl VoiceConverter {
 
     /// Get session information
     pub fn get_session_info(&self, session_id: &str) -> Result<SessionInfo> {
-        let sessions = self.sessions.read().unwrap();
+        let sessions = self.sessions.read().expect("lock should not be poisoned");
         if let Some(session) = sessions.get(session_id) {
             Ok(SessionInfo {
                 id: session.id.clone(),
@@ -701,7 +708,7 @@ impl VoiceConverter {
 
     /// Get conversion model for session
     fn get_conversion_model_for_session(&self, session_id: &str) -> Result<ConversionModel> {
-        let sessions = self.sessions.read().unwrap();
+        let sessions = self.sessions.read().expect("lock should not be poisoned");
         if let Some(session) = sessions.get(session_id) {
             let cache_key = format!(
                 "{:?}_{:?}",
@@ -709,7 +716,10 @@ impl VoiceConverter {
                 session.target_speaker.vector.iter().sum::<f32>()
             );
 
-            let cache = self.model_cache.read().unwrap();
+            let cache = self
+                .model_cache
+                .read()
+                .expect("lock should not be poisoned");
             if let Some(model) = cache.get(&cache_key) {
                 let mut model = model.clone();
                 model.last_used = Instant::now();
@@ -792,7 +802,7 @@ impl VoiceConverter {
 
     /// Update conversion statistics
     fn update_statistics(&self, latency_ms: f32, quality_score: f32) -> Result<()> {
-        let mut stats = self.stats.write().unwrap();
+        let mut stats = self.stats.write().expect("lock should not be poisoned");
 
         // Update latency
         let total_samples = stats.total_sessions;
@@ -813,12 +823,15 @@ impl VoiceConverter {
 
     /// Get current statistics
     pub fn get_statistics(&self) -> ConversionStatistics {
-        self.stats.read().unwrap().clone()
+        self.stats
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Clean up inactive sessions
     pub fn cleanup_inactive_sessions(&self, timeout_duration: Duration) {
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().expect("lock should not be poisoned");
         let now = Instant::now();
 
         sessions.retain(|_, session| now.duration_since(session.last_activity) < timeout_duration);

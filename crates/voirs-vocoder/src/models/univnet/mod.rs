@@ -47,7 +47,7 @@
 //!
 //! - Paper: "UnivNet: A Neural Vocoder with Multi-Resolution Spectrogram Discriminators
 //!   for High-Fidelity Waveform Generation" (Jang et al., 2021)
-//! - GitHub: https://github.com/mindslab-ai/univnet
+//! - GitHub: <https://github.com/mindslab-ai/univnet>
 //!
 //! # Performance Benchmarks
 //!

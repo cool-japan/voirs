@@ -381,7 +381,7 @@ impl CloudStorage for CloudStorageImpl {
             ));
 
             upload_tasks.push(async move {
-                let _permit = sem.acquire().await.unwrap();
+                let _permit = sem.acquire().await.expect("semaphore should be open");
                 // Upload audio file implementation would go here
                 Ok::<_, DatasetError>(())
             });

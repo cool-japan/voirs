@@ -534,7 +534,7 @@ impl HorizontalScalingManager {
                 let best_instance = healthy_instances
                     .iter()
                     .min_by_key(|i| lb_state.connection_counts.get(&i.instance_id).unwrap_or(&0))
-                    .unwrap();
+                    .expect("value should be present");
                 Ok(Some(best_instance.instance_id.clone()))
             }
             LoadBalancingStrategy::LeastResponseTime => {
@@ -546,7 +546,7 @@ impl HorizontalScalingManager {
                             .partial_cmp(&b.metrics.avg_response_time_ms)
                             .unwrap_or(std::cmp::Ordering::Equal)
                     })
-                    .unwrap();
+                    .expect("value should be present");
                 Ok(Some(best_instance.instance_id.clone()))
             }
             LoadBalancingStrategy::ResourceBased => {
@@ -559,7 +559,7 @@ impl HorizontalScalingManager {
                             .partial_cmp(&score_b)
                             .unwrap_or(std::cmp::Ordering::Equal)
                     })
-                    .unwrap();
+                    .expect("value should be present");
                 Ok(Some(best_instance.instance_id.clone()))
             }
             LoadBalancingStrategy::WeightedRoundRobin => {
@@ -571,7 +571,7 @@ impl HorizontalScalingManager {
                             .partial_cmp(&b.weight)
                             .unwrap_or(std::cmp::Ordering::Equal)
                     })
-                    .unwrap();
+                    .expect("value should be present");
                 Ok(Some(best_instance.instance_id.clone()))
             }
         }

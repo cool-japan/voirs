@@ -217,13 +217,16 @@ impl WakeWordDetector {
 
         let mut dp = vec![vec![0; len2 + 1]; len1 + 1];
 
+        // 2D DP table: index-based access requires range loops
+        #[allow(clippy::needless_range_loop)]
         for i in 0..=len1 {
             dp[i][0] = i;
         }
-        for j in 0..=len2 {
-            dp[0][j] = j;
+        for (j, cell) in dp[0].iter_mut().enumerate() {
+            *cell = j;
         }
 
+        #[allow(clippy::needless_range_loop)]
         for i in 1..=len1 {
             for j in 1..=len2 {
                 let cost = if word1.chars().nth(i - 1) == word2.chars().nth(j - 1) {
@@ -376,7 +379,7 @@ async fn main() -> Result<(), RecognitionError> {
     for (scenario_name, audio, expected_detections) in &test_scenarios {
         for (detector_idx, detector) in detectors.iter_mut().enumerate() {
             let detection_start = Instant::now();
-            let detection = detector.detect_wake_word(&audio).await?;
+            let detection = detector.detect_wake_word(audio).await?;
             let detection_time = detection_start.elapsed();
 
             // Validate detection latency

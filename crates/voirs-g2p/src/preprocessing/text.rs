@@ -111,7 +111,7 @@ fn expand_currency_pattern(text: &str, pattern: &str, replacement: &str) -> Resu
             // Collect digits and decimal point
             while let Some(&next_ch) = chars.peek() {
                 if next_ch.is_ascii_digit() || next_ch == '.' || next_ch == ',' {
-                    amount.push(chars.next().unwrap());
+                    amount.push(chars.next().expect("peek returned Some"));
                 } else {
                     break;
                 }

@@ -1436,12 +1436,16 @@ impl ArtifactDetector {
                     peak_indices.push(j);
                 }
             }
-            peak_indices.sort_by(|&a, &b| spectrum[b].partial_cmp(&spectrum[a]).unwrap());
+            peak_indices.sort_by(|&a, &b| {
+                spectrum[b]
+                    .partial_cmp(&spectrum[a])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             for &idx in peak_indices.iter().take(3) {
                 let freq = (idx as f32 * sample_rate as f32) / (2.0 * spectrum.len() as f32);
                 formants.push(freq);
             }
-            formants.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            formants.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             if !prev_formants.is_empty() && formants.len() >= 2 && prev_formants.len() >= 2 {
                 let f1_change: f32 = (formants[0] - prev_formants[0]).abs() / prev_formants[0];
                 let f2_change = if formants.len() > 1 && prev_formants.len() > 1 {

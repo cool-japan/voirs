@@ -344,7 +344,7 @@ impl ClassroomClient {
             if let Some(expires_in) = token_response["expires_in"].as_u64() {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
+                    .expect("value should be present")
                     .as_secs();
                 self.config.token_expiry = Some(now + expires_in);
             }
@@ -371,7 +371,12 @@ impl ClassroomClient {
             let response = self
                 .http_client
                 .get(&url)
-                .bearer_auth(self.config.access_token.as_ref().unwrap())
+                .bearer_auth(
+                    self.config
+                        .access_token
+                        .as_ref()
+                        .expect("value should be present"),
+                )
                 .send()
                 .await
                 .map_err(|e| ClassroomError::ApiError {
@@ -413,7 +418,12 @@ impl ClassroomClient {
             let _response = self
                 .http_client
                 .get(&url)
-                .bearer_auth(self.config.access_token.as_ref().unwrap())
+                .bearer_auth(
+                    self.config
+                        .access_token
+                        .as_ref()
+                        .expect("value should be present"),
+                )
                 .send()
                 .await
                 .map_err(|e| ClassroomError::ApiError {
@@ -454,7 +464,12 @@ impl ClassroomClient {
             let _response = self
                 .http_client
                 .get(&url)
-                .bearer_auth(self.config.access_token.as_ref().unwrap())
+                .bearer_auth(
+                    self.config
+                        .access_token
+                        .as_ref()
+                        .expect("value should be present"),
+                )
                 .send()
                 .await
                 .map_err(|e| ClassroomError::ApiError {
@@ -485,7 +500,12 @@ impl ClassroomClient {
             let _response = self
                 .http_client
                 .post(&url)
-                .bearer_auth(self.config.access_token.as_ref().unwrap())
+                .bearer_auth(
+                    self.config
+                        .access_token
+                        .as_ref()
+                        .expect("value should be present"),
+                )
                 .json(&course_work)
                 .send()
                 .await
@@ -517,7 +537,12 @@ impl ClassroomClient {
             let _response = self
                 .http_client
                 .post(&url)
-                .bearer_auth(self.config.access_token.as_ref().unwrap())
+                .bearer_auth(
+                    self.config
+                        .access_token
+                        .as_ref()
+                        .expect("value should be present"),
+                )
                 .json(&serde_json::json!({
                     "assignedGrade": grade.grade,
                 }))
@@ -552,7 +577,12 @@ impl ClassroomClient {
             let _response = self
                 .http_client
                 .get(&url)
-                .bearer_auth(self.config.access_token.as_ref().unwrap())
+                .bearer_auth(
+                    self.config
+                        .access_token
+                        .as_ref()
+                        .expect("value should be present"),
+                )
                 .send()
                 .await
                 .map_err(|e| ClassroomError::ApiError {

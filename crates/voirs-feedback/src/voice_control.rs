@@ -224,22 +224,83 @@ impl VoiceControlManager {
     /// Create new voice control manager
     #[must_use]
     pub fn new(config: VoiceControlConfig) -> Self {
-        let mut manager = Self {
+        // Build default commands synchronously during construction
+        let mut default_command_map = HashMap::new();
+        for command in Self::build_default_commands() {
+            default_command_map.insert(command.command_id.clone(), command);
+        }
+
+        Self {
             config: Arc::new(RwLock::new(config)),
-            commands: Arc::new(RwLock::new(HashMap::new())),
+            commands: Arc::new(RwLock::new(default_command_map)),
             history: Arc::new(RwLock::new(Vec::new())),
             executions: Arc::new(RwLock::new(Vec::new())),
             stats: Arc::new(RwLock::new(VoiceControlStats::default())),
-        };
+        }
+    }
 
-        // Register default commands
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                manager.register_default_commands().await;
-            });
-        });
-
-        manager
+    /// Build the set of default voice commands
+    fn build_default_commands() -> Vec<VoiceCommand> {
+        vec![
+            VoiceCommand {
+                command_id: "play".to_string(),
+                name: "Play".to_string(),
+                trigger_phrases: vec!["play".to_string(), "start playback".to_string()],
+                category: CommandCategory::Playback,
+                parameters: vec![],
+                description: "Start playback".to_string(),
+                enabled: true,
+                requires_confirmation: false,
+            },
+            VoiceCommand {
+                command_id: "pause".to_string(),
+                name: "Pause".to_string(),
+                trigger_phrases: vec!["pause".to_string(), "stop playback".to_string()],
+                category: CommandCategory::Playback,
+                parameters: vec![],
+                description: "Pause playback".to_string(),
+                enabled: true,
+                requires_confirmation: false,
+            },
+            VoiceCommand {
+                command_id: "next".to_string(),
+                name: "Next".to_string(),
+                trigger_phrases: vec![
+                    "next".to_string(),
+                    "skip".to_string(),
+                    "next item".to_string(),
+                ],
+                category: CommandCategory::Navigation,
+                parameters: vec![],
+                description: "Go to next item".to_string(),
+                enabled: true,
+                requires_confirmation: false,
+            },
+            VoiceCommand {
+                command_id: "previous".to_string(),
+                name: "Previous".to_string(),
+                trigger_phrases: vec!["previous".to_string(), "go back".to_string()],
+                category: CommandCategory::Navigation,
+                parameters: vec![],
+                description: "Go to previous item".to_string(),
+                enabled: true,
+                requires_confirmation: false,
+            },
+            VoiceCommand {
+                command_id: "help".to_string(),
+                name: "Help".to_string(),
+                trigger_phrases: vec![
+                    "help".to_string(),
+                    "show help".to_string(),
+                    "what can I say".to_string(),
+                ],
+                category: CommandCategory::System,
+                parameters: vec![],
+                description: "Show help information".to_string(),
+                enabled: true,
+                requires_confirmation: false,
+            },
+        ]
     }
 
     /// Register a voice command
@@ -293,7 +354,7 @@ impl VoiceControlManager {
         }
 
         // Sort by confidence
-        matches.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        matches.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         let (best_command_id, confidence) = matches[0].clone();
 
@@ -307,7 +368,9 @@ impl VoiceControlManager {
         drop(config);
 
         // Extract parameters
-        let command = commands.get(&best_command_id).unwrap();
+        let command = commands
+            .get(&best_command_id)
+            .expect("value should be present");
         let parameters = self.extract_parameters(input, command);
 
         let intent = VoiceIntent {
@@ -434,75 +497,16 @@ impl VoiceControlManager {
 
     // Private helper methods
 
-    async fn register_default_commands(&mut self) {
-        let default_commands = vec![
-            VoiceCommand {
-                command_id: "play".to_string(),
-                name: "Play".to_string(),
-                trigger_phrases: vec!["play".to_string(), "start playback".to_string()],
-                category: CommandCategory::Playback,
-                parameters: vec![],
-                description: "Start playback".to_string(),
-                enabled: true,
-                requires_confirmation: false,
-            },
-            VoiceCommand {
-                command_id: "pause".to_string(),
-                name: "Pause".to_string(),
-                trigger_phrases: vec!["pause".to_string(), "stop playback".to_string()],
-                category: CommandCategory::Playback,
-                parameters: vec![],
-                description: "Pause playback".to_string(),
-                enabled: true,
-                requires_confirmation: false,
-            },
-            VoiceCommand {
-                command_id: "next".to_string(),
-                name: "Next".to_string(),
-                trigger_phrases: vec![
-                    "next".to_string(),
-                    "skip".to_string(),
-                    "next item".to_string(),
-                ],
-                category: CommandCategory::Navigation,
-                parameters: vec![],
-                description: "Go to next item".to_string(),
-                enabled: true,
-                requires_confirmation: false,
-            },
-            VoiceCommand {
-                command_id: "previous".to_string(),
-                name: "Previous".to_string(),
-                trigger_phrases: vec!["previous".to_string(), "go back".to_string()],
-                category: CommandCategory::Navigation,
-                parameters: vec![],
-                description: "Go to previous item".to_string(),
-                enabled: true,
-                requires_confirmation: false,
-            },
-            VoiceCommand {
-                command_id: "help".to_string(),
-                name: "Help".to_string(),
-                trigger_phrases: vec![
-                    "help".to_string(),
-                    "show help".to_string(),
-                    "what can I say".to_string(),
-                ],
-                category: CommandCategory::System,
-                parameters: vec![],
-                description: "Show help information".to_string(),
-                enabled: true,
-                requires_confirmation: false,
-            },
-        ];
-
-        for command in default_commands {
+    async fn register_default_commands(&self) {
+        for command in Self::build_default_commands() {
             let _ = self.register_command(command).await;
         }
     }
 
     fn calculate_similarity(&self, input: &str, trigger: &str) -> f32 {
-        // Simple word-based similarity (could be enhanced with better NLP)
+        // Intent-focused similarity that checks what fraction of trigger keywords
+        // appear in the user's input. This allows natural phrasing like
+        // "please play the audio" to match the "play" trigger with high confidence.
         let input_words: Vec<&str> = input.split_whitespace().collect();
         let trigger_words: Vec<&str> = trigger.split_whitespace().collect();
 
@@ -510,17 +514,41 @@ impl VoiceControlManager {
             return 0.0;
         }
 
-        let mut matches = 0;
-        for input_word in &input_words {
-            if trigger_words
-                .iter()
-                .any(|&tw| tw.contains(input_word) || input_word.contains(tw))
-            {
-                matches += 1;
-            }
-        }
+        // Recall metric: fraction of trigger words that appear in the input.
+        // A trigger like "play" appearing anywhere in the input means the user
+        // likely intends that command, regardless of other words present.
+        let trigger_matches = trigger_words
+            .iter()
+            .filter(|&&tw| {
+                input_words
+                    .iter()
+                    .any(|&iw| iw == tw || iw.contains(tw) || tw.contains(iw))
+            })
+            .count();
 
-        matches as f32 / trigger_words.len().max(input_words.len()) as f32
+        let trigger_recall = trigger_matches as f32 / trigger_words.len() as f32;
+
+        // Precision metric: fraction of input words that match trigger words.
+        // Used to reduce false positives for very short trigger phrases.
+        let input_matches = input_words
+            .iter()
+            .filter(|&&iw| {
+                trigger_words
+                    .iter()
+                    .any(|&tw| iw == tw || iw.contains(tw) || tw.contains(iw))
+            })
+            .count();
+        let input_precision = input_matches as f32 / input_words.len() as f32;
+
+        // Combine recall and precision using a weighted geometric mean.
+        // Recall is weighted higher (3:1) because we prioritize detecting intent
+        // over exact phrase matching.
+        let recall_weight = 3.0_f32;
+        let precision_weight = 1.0_f32;
+        let total_weight = recall_weight + precision_weight;
+
+        (trigger_recall.powf(recall_weight / total_weight))
+            * (input_precision.powf(precision_weight / total_weight))
     }
 
     fn extract_parameters(&self, input: &str, _command: &VoiceCommand) -> HashMap<String, String> {

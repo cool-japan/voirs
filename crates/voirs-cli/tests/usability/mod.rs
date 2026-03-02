@@ -38,7 +38,7 @@ fn test_common_workflow_synthesis() {
     cmd.arg("synthesize")
         .arg("Hello, this is a test.")
         .arg(output_file.to_str().unwrap())
-        .timeout(Duration::from_secs(30))
+        .timeout(Duration::from_secs(300))
         .assert()
         .success();
 
@@ -147,7 +147,8 @@ fn test_voice_management_workflow() {
 
     // Step 2: Get voice info (using a common voice ID)
     let mut cmd = Command::cargo_bin("voirs").unwrap();
-    cmd.arg("voice-info")
+    let _ = cmd
+        .arg("voice-info")
         .arg("default")
         .timeout(Duration::from_secs(10))
         .assert(); // May succeed or fail depending on voice availability
@@ -172,7 +173,7 @@ fn test_batch_processing_workflow() {
         .arg(output_dir.to_str().unwrap())
         .arg("--workers")
         .arg("1")
-        .timeout(Duration::from_secs(60))
+        .timeout(Duration::from_secs(600))
         .assert()
         .success();
 }

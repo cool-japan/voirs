@@ -112,7 +112,7 @@ impl MemoryPool {
         } else {
             // Pool is full, actually free the memory
             unsafe {
-                let layout = Layout::from_size_align(self.chunk_size, 64).unwrap();
+                let layout = Layout::from_size_align(self.chunk_size, 64).expect("chunk_size with alignment 64 is valid");
                 dealloc(ptr.as_ptr(), layout);
             }
             self.stats.record_deallocation(self.chunk_size);
@@ -129,7 +129,7 @@ impl Drop for MemoryPool {
         let chunks = self.chunks.lock();
         for chunk in chunks.iter() {
             unsafe {
-                let layout = Layout::from_size_align(self.chunk_size, 64).unwrap();
+                let layout = Layout::from_size_align(self.chunk_size, 64).expect("chunk_size with alignment 64 is valid");
                 dealloc(chunk.as_ptr(), layout);
             }
         }

@@ -59,7 +59,7 @@ pub fn init_wasm_logger() {
 pub fn get_wasm_memory_usage() -> JsValue {
     let memory = wasm_bindgen::memory()
         .dyn_into::<js_sys::WebAssembly::Memory>()
-        .unwrap();
+        .expect("wasm_bindgen::memory() should return WebAssembly.Memory");
 
     let buffer = memory.buffer();
     let usage = serde_json::json!({

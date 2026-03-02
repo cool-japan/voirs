@@ -292,9 +292,11 @@ impl AdaptiveQualityController {
             .max_by(|a, b| {
                 let score_a = a.effectiveness * a.success_rate;
                 let score_b = b.effectiveness * b.success_rate;
-                score_a.partial_cmp(&score_b).unwrap()
+                score_a
+                    .partial_cmp(&score_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
-            .unwrap()
+            .expect("operation should succeed")
     }
 
     /// Calculate parameter adjustments based on strategy and quality gap

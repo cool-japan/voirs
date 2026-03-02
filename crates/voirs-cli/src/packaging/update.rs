@@ -424,7 +424,7 @@ impl UpdateManager {
     fn parse_hex_signature(&self, signature: &str) -> Result<Vec<u8>> {
         let signature_clean = signature.trim().replace(" ", "").replace("\n", "");
 
-        if signature_clean.len() % 2 != 0 {
+        if !signature_clean.len().is_multiple_of(2) {
             return Err(anyhow::anyhow!("Invalid hex signature length"));
         }
 

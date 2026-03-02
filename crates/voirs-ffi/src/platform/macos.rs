@@ -80,7 +80,7 @@ impl MacOSCoreAudio {
                             if let Ok(device_name) = device.name() {
                                 let sample_rate = device
                                     .default_output_config()
-                                    .map(|config| config.sample_rate().0 as f64)
+                                    .map(|config| config.sample_rate() as f64)
                                     .unwrap_or(44100.0);
 
                                 let channels = device
@@ -106,7 +106,7 @@ impl MacOSCoreAudio {
                             if let Ok(device_name) = device.name() {
                                 let sample_rate = device
                                     .default_input_config()
-                                    .map(|config| config.sample_rate().0 as f64)
+                                    .map(|config| config.sample_rate() as f64)
                                     .unwrap_or(44100.0);
 
                                 let channels = device

@@ -318,7 +318,7 @@ impl LoadBalancer {
             .min_by(|a, b| {
                 a.avg_response_time_ms
                     .partial_cmp(&b.avg_response_time_ms)
-                    .unwrap()
+                    .expect("value should be present")
             })
             .ok_or("No workers available")?;
 
@@ -335,7 +335,9 @@ impl LoadBalancer {
             .min_by(|a, b| {
                 let a_score = a.active_requests as f64 / a.weight;
                 let b_score = b.active_requests as f64 / b.weight;
-                a_score.partial_cmp(&b_score).unwrap()
+                a_score
+                    .partial_cmp(&b_score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
             .ok_or("No workers available")?;
 
@@ -349,7 +351,9 @@ impl LoadBalancer {
             .min_by(|a, b| {
                 let a_score = a.current_load;
                 let b_score = b.current_load;
-                a_score.partial_cmp(&b_score).unwrap()
+                a_score
+                    .partial_cmp(&b_score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
             .ok_or("No workers available")?;
 

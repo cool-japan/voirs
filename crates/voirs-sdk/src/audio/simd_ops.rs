@@ -88,7 +88,7 @@ impl SimdAudioProcessor {
         let result = f32::simd_add(&samples_array, &scaled_other.view());
 
         // Copy result back
-        samples[..len].copy_from_slice(result.as_slice().unwrap());
+        samples[..len].copy_from_slice(result.as_slice().expect("value should be present"));
     }
 
     /// Scale audio samples with SIMD acceleration.
@@ -112,7 +112,7 @@ impl SimdAudioProcessor {
     pub fn scale_simd(samples: &mut [f32], scale_factor: f32) {
         let samples_array = ArrayView1::from(&samples[..]);
         let result = f32::simd_scalar_mul(&samples_array, scale_factor);
-        samples.copy_from_slice(result.as_slice().unwrap());
+        samples.copy_from_slice(result.as_slice().expect("value should be present"));
     }
 
     /// Compute RMS with SIMD acceleration.
@@ -310,7 +310,7 @@ impl SimdAudioProcessor {
         let other_array = ArrayView1::from(&other[..len]);
 
         let result = f32::simd_mul(&samples_array, &other_array);
-        samples[..len].copy_from_slice(result.as_slice().unwrap());
+        samples[..len].copy_from_slice(result.as_slice().expect("value should be present"));
     }
 
     /// Fused multiply-add with SIMD acceleration.
@@ -345,7 +345,7 @@ impl SimdAudioProcessor {
         let c_array = ArrayView1::from(&c[..len]);
 
         let result = f32::simd_fma(&a_array, &b_array, &c_array);
-        samples[..len].copy_from_slice(result.as_slice().unwrap());
+        samples[..len].copy_from_slice(result.as_slice().expect("value should be present"));
     }
 }
 

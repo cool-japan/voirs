@@ -165,7 +165,11 @@ impl RealtimeProcessor {
         chunk_id: usize,
         text: String,
     ) -> Result<AudioChunk> {
-        let _permit = self.semaphore.acquire().await.unwrap();
+        let _permit = self
+            .semaphore
+            .acquire()
+            .await
+            .expect("value should be present");
 
         let start_time = Instant::now();
         let result = StreamingPipeline::process_text_chunk(

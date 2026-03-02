@@ -371,7 +371,7 @@ impl SingingQualityMetrics {
         // Find signal peaks (above certain threshold) and noise floor
         let sorted_spectrum: Vec<f32> = spectrum.iter().map(|x| x.abs()).collect::<Vec<_>>();
         let mut sorted = sorted_spectrum.clone();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         // Use bottom 10% as noise floor estimate
         let noise_samples = (spectrum.len() as f32 * 0.1).max(1.0) as usize;

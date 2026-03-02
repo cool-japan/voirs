@@ -41,17 +41,15 @@ impl<T> VoirsRwLock<T> {
 
     /// Try to acquire a read lock without blocking
     pub fn try_read(&self) -> Option<parking_lot::RwLockReadGuard<'_, T>> {
-        self.inner.try_read().map(|guard| {
+        self.inner.try_read().inspect(|_guard| {
             self.read_count.fetch_add(1, Ordering::Relaxed);
-            guard
         })
     }
 
     /// Try to acquire a write lock without blocking
     pub fn try_write(&self) -> Option<parking_lot::RwLockWriteGuard<'_, T>> {
-        self.inner.try_write().map(|guard| {
+        self.inner.try_write().inspect(|_guard| {
             self.write_count.fetch_add(1, Ordering::Relaxed);
-            guard
         })
     }
 
@@ -481,7 +479,7 @@ mod tests {
         condvar.wait();
         let elapsed = start.elapsed();
 
-        handle.join().unwrap();
+        handle.join().expect("thread should not panic");
         assert!(elapsed >= Duration::from_millis(40));
     }
 
@@ -498,7 +496,10 @@ mod tests {
             }));
         }
 
-        let results: Vec<bool> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        let results: Vec<bool> = handles
+            .into_iter()
+            .map(|h| h.join().expect("thread should not panic"))
+            .collect();
 
         // Exactly one thread should be the leader
         assert_eq!(results.iter().filter(|&&x| x).count(), 1);

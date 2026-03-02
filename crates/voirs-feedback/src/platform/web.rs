@@ -26,7 +26,7 @@ impl WebAdapter {
         #[cfg(target_arch = "wasm32")]
         {
             // This would be implemented using web_sys
-            // web_sys::window().unwrap().is_secure_context()
+            // web_sys::window().expect("value should be present").is_secure_context()
             true
         }
 
@@ -131,7 +131,7 @@ impl WebAdapter {
             // In WASM environment, this would use navigator.mediaDevices.getUserMedia()
             // with proper constraints and error handling
             // let media_devices = web_sys::window()
-            //     .unwrap()
+            //     .expect("value should be present")
             //     .navigator()
             //     .media_devices()
             //     .map_err(|_| PlatformError::FeatureNotAvailable {

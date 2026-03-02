@@ -176,7 +176,7 @@ impl KernelGenerator {
             Device::Cuda(_) => CodegenTarget::Cuda,
             #[cfg(feature = "metal")]
             Device::Metal(_) => CodegenTarget::Metal,
-#[allow(unreachable_patterns)]
+            #[allow(unreachable_patterns)]
             _ => CodegenTarget::Cpu,
         };
 

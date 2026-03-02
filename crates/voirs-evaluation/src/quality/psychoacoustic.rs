@@ -296,7 +296,7 @@ impl PsychoacousticEvaluator {
 
         // Loudness range (LRA)
         let mut sorted_loudness = block_loudness.clone();
-        sorted_loudness.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted_loudness.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let percentile_10 = sorted_loudness[(sorted_loudness.len() as f32 * 0.1) as usize];
         let percentile_95 = sorted_loudness[(sorted_loudness.len() as f32 * 0.95) as usize];
         let loudness_range = percentile_95 - percentile_10;
@@ -386,7 +386,10 @@ impl PsychoacousticEvaluator {
         }
 
         // Get or create FFT for this size
-        let mut planner = self.fft_planner.lock().unwrap();
+        let mut planner = self
+            .fft_planner
+            .lock()
+            .expect("lock should not be poisoned");
         let fft = planner.plan_fft_forward(n);
 
         // Prepare input buffer

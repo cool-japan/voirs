@@ -120,7 +120,7 @@ fn synthesize_with_strategy(
         OptimizationStrategy::Streaming => {
             // Streaming synthesis - process in chunks
             let chunk_size = 50; // phonemes per chunk
-            let chunks = (phonemes.len() + chunk_size - 1) / chunk_size;
+            let chunks = phonemes.len().div_ceil(chunk_size);
             allocations = chunks * 2; // Buffer + result per chunk
 
             let chunk_buffer_mb = (chunk_size * 256 * 4) as f64 / 1024.0 / 1024.0;
@@ -137,7 +137,7 @@ fn synthesize_with_strategy(
             let max_batch_size = ((available_memory_mb * 0.8) / 4.0) as usize; // 80% utilization
             let batch_size = max_batch_size.min(phonemes.len());
 
-            let batches = (phonemes.len() + batch_size - 1) / batch_size;
+            let batches = phonemes.len().div_ceil(batch_size);
             allocations = batches;
 
             let batch_buffer_mb = (batch_size * 256 * 4) as f64 / 1024.0 / 1024.0;

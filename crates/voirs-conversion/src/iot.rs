@@ -35,10 +35,10 @@
 //! # use voirs_conversion::types::*;
 //! # tokio_test::block_on(async {
 //! // Create IoT-optimized converter
-//! let mut iot_converter = IoTVoiceConverter::new(IoTPlatform::RaspberryPi).await.unwrap();
+//! let mut iot_converter = IoTVoiceConverter::new(IoTPlatform::RaspberryPi).await.expect("operation should succeed");
 //!
 //! // Configure for battery optimization
-//! iot_converter.set_power_mode(IoTPowerMode::BatteryOptimized).await.unwrap();
+//! iot_converter.set_power_mode(IoTPowerMode::BatteryOptimized).await.expect("operation should succeed");
 //!
 //! // Process audio with edge computing
 //! let request = ConversionRequest::new(
@@ -49,7 +49,7 @@
 //!     ConversionTarget::new(VoiceCharacteristics::default()),
 //! );
 //!
-//! let result = iot_converter.convert_with_fallback(&request).await.unwrap();
+//! let result = iot_converter.convert_with_fallback(&request).await.expect("operation should succeed");
 //! # });
 //! ```
 
@@ -603,7 +603,7 @@ impl IoTVoiceConverter {
                     status.resource_usage.memory_mb < (self.constraints.max_memory_mb as f64 * 0.8);
                 let cpu_available =
                     status.resource_usage.cpu_percent < (self.constraints.max_cpu_percent * 0.8);
-                let battery_ok = status.battery_level.map_or(true, |level| level > 20.0);
+                let battery_ok = status.battery_level.is_none_or(|level| level > 20.0);
                 let network_ok = status.network_connected;
 
                 // Check request complexity

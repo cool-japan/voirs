@@ -30,7 +30,7 @@ impl PyAudioAnalyzer {
         audio: PyReadonlyArray1<f32>,
         threshold: f32,
         min_duration: usize,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Bound<'py, PyAny>> {
         let samples = audio.as_array();
         let mut silence_regions = Vec::new();
         let mut in_silence = false;
@@ -66,7 +66,7 @@ impl PyAudioAnalyzer {
             .collect();
         let array = PyArray2::from_vec2(py, &silence_vecs)
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to create array: {}", e)))?;
-        Ok(array.unbind().into())
+        Ok(array.into_any())
     }
 
     /// Compute zero crossing rate

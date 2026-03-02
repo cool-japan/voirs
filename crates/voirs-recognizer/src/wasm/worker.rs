@@ -82,7 +82,10 @@ impl WasmRecognizerWorker {
             "initialize" => {
                 match self
                     .recognizer
-                    .initialize(JsValue::from_serde(&worker_msg.data).unwrap())
+                    .initialize(
+                        JsValue::from_serde(&worker_msg.data)
+                            .expect("worker_msg.data is serializable"),
+                    )
                     .await
                 {
                     Ok(()) => WorkerResponse {
@@ -133,7 +136,10 @@ impl WasmRecognizerWorker {
             "stream_start" => {
                 match self
                     .recognizer
-                    .start_streaming(JsValue::from_serde(&worker_msg.data).unwrap())
+                    .start_streaming(
+                        JsValue::from_serde(&worker_msg.data)
+                            .expect("worker_msg.data is serializable"),
+                    )
                     .await
                 {
                     Ok(()) => WorkerResponse {

@@ -11,10 +11,11 @@ keywords = ["voirs", "asr", "whisper", "recognition", "speech"]
 categories = ["multimedia::audio", "science", "algorithms"]
 rust-version.workspace = true
 description = "Voice recognition and analysis capabilities for VoiRS"
+readme = "README.md"
 
 [lib]
 name = "voirs_recognizer"
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [dependencies]
 # SciRS2 - Scientific computing abstractions
@@ -41,7 +42,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 hex = "0.4"
-bincode.workspace = true
+oxicode.workspace = true
 
 # Error handling
 anyhow.workspace = true
@@ -85,10 +86,10 @@ half.workspace = true  # For F16 support
 flate2.workspace = true
 
 # Configuration
-toml = "0.8"
+toml = "1.0"
 
 # Python bindings (optional)
-pyo3 = { workspace = true, features = ["extension-module", "abi3-py38"], optional = true }
+pyo3 = { workspace = true, features = ["auto-initialize"], optional = true }
 numpy = { workspace = true, optional = true }
 pyo3-async-runtimes = { workspace = true, optional = true }  # Using maintained fork for pyo3 0.25 compatibility
 

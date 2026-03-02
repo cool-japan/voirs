@@ -234,7 +234,7 @@ impl QualityPredictor {
 
         // Estimate noise floor using the lowest 10% of power values
         let mut sorted_powers: Vec<f32> = audio_data.iter().map(|&x| x * x).collect();
-        sorted_powers.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted_powers.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let noise_samples = sorted_powers.len() / 10;
         let noise_power = if noise_samples > 0 {
             sorted_powers[..noise_samples].iter().sum::<f32>() / noise_samples as f32

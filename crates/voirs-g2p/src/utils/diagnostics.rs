@@ -234,7 +234,7 @@ pub fn create_diagnostic_context(
         context: std::collections::HashMap::new(),
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("SystemTime should be after UNIX_EPOCH")
             .as_secs(),
     }
 }
@@ -254,7 +254,7 @@ pub fn create_diagnostic_context_with_details(
         context: details,
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("SystemTime should be after UNIX_EPOCH")
             .as_secs(),
     }
 }

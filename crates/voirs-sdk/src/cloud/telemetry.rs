@@ -802,7 +802,9 @@ impl VoirsTelemetryProvider {
                 ),
                 (
                     "value".to_string(),
-                    serde_json::Value::Number(serde_json::Number::from_f64(value).unwrap()),
+                    serde_json::Value::Number(
+                        serde_json::Number::from_f64(value).expect("value should be present"),
+                    ),
                 ),
             ]
             .iter()
@@ -958,7 +960,8 @@ impl MetricAggregator {
                     .fold(f64::NEG_INFINITY, f64::max),
                 AggregationType::Percentile(p) => {
                     let mut sorted_values: Vec<f64> = self.values.iter().map(|v| v.value).collect();
-                    sorted_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    sorted_values
+                        .sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                     let index = ((p / 100.0) * (sorted_values.len() - 1) as f32) as usize;
                     sorted_values.get(index).copied().unwrap_or(0.0)
                 }

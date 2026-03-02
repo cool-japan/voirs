@@ -1260,13 +1260,16 @@ impl VoiceCloner {
     fn detect_best_device() -> candle_core::Device {
         #[cfg(feature = "cuda")]
         {
-            match candle_core::Device::new_cuda(0) {
-                Ok(device) => {
+            match std::panic::catch_unwind(|| candle_core::Device::new_cuda(0)) {
+                Ok(Ok(device)) => {
                     info!("Using CUDA device for GPU acceleration");
                     return device;
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     trace!("CUDA not available: {}", e);
+                }
+                Err(_) => {
+                    trace!("CUDA initialization panicked (cudarc unavailable on this platform)");
                 }
             }
         }

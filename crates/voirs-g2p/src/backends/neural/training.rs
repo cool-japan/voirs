@@ -728,7 +728,11 @@ impl LstmTrainer {
         // Calculate training progress statistics
         if !self.training_state.loss_history.is_empty() {
             let initial_loss = self.training_state.loss_history[0];
-            let current_loss = *self.training_state.loss_history.last().unwrap();
+            let current_loss = *self
+                .training_state
+                .loss_history
+                .last()
+                .expect("checked non-empty above");
             let improvement = ((initial_loss - current_loss) / initial_loss * 100.0).max(0.0);
             stats.insert("training_improvement_percent".to_string(), improvement);
 

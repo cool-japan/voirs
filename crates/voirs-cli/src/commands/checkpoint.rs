@@ -367,7 +367,11 @@ async fn list_checkpoints(
                     if SafeTensors::deserialize(&data).is_ok() {
                         checkpoints.push(CheckpointInfo {
                             path: path.clone(),
-                            name: path.file_name().unwrap().to_string_lossy().to_string(),
+                            name: path
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_string(),
                             epoch,
                             train_loss,
                             val_loss,
@@ -389,7 +393,11 @@ async fn list_checkpoints(
     match sort_by {
         "name" => checkpoints.sort_by(|a, b| a.name.cmp(&b.name)),
         "epoch" => checkpoints.sort_by(|a, b| b.epoch.cmp(&a.epoch)),
-        "loss" => checkpoints.sort_by(|a, b| a.val_loss.partial_cmp(&b.val_loss).unwrap()),
+        "loss" => checkpoints.sort_by(|a, b| {
+            a.val_loss
+                .partial_cmp(&b.val_loss)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        }),
         "size" => checkpoints.sort_by(|a, b| b.size.cmp(&a.size)),
         "date" => checkpoints.sort_by(|a, b| b.modified.cmp(&a.modified)),
         _ => {}
@@ -757,7 +765,11 @@ async fn prune_checkpoints(
                     if SafeTensors::deserialize(&data).is_ok() {
                         checkpoints.push(CheckpointInfo {
                             path: path.clone(),
-                            name: path.file_name().unwrap().to_string_lossy().to_string(),
+                            name: path
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_string(),
                             epoch,
                             train_loss,
                             val_loss,

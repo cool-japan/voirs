@@ -660,7 +660,7 @@ pub fn calculate_audio_quality_metrics(audio: &AudioBuffer) -> AudioQualityMetri
         .map(|&x| x.abs())
         .filter(|&x| x < peak * 0.1)
         .collect();
-    noise_samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    noise_samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let noise_floor = if !noise_samples.is_empty() {
         noise_samples[noise_samples.len() / 10]
     } else {
@@ -682,7 +682,7 @@ pub fn calculate_audio_quality_metrics(audio: &AudioBuffer) -> AudioQualityMetri
         .map(|&x| x.abs())
         .filter(|&x| x > 1e-10)
         .collect();
-    amplitude_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    amplitude_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let dynamic_range_db = if amplitude_sorted.len() > 20 {
         let p10 = amplitude_sorted[amplitude_sorted.len() / 10];
         let p90 = amplitude_sorted[amplitude_sorted.len() * 9 / 10];

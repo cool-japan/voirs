@@ -592,7 +592,9 @@ impl UsageAnalytics {
         }
 
         let overall_conversion = if total_users_at_start > 0 && !stages.is_empty() {
-            (stages.last().unwrap().users as f64 / total_users_at_start as f64) * 100.0
+            (stages.last().expect("collection should not be empty").users as f64
+                / total_users_at_start as f64)
+                * 100.0
         } else {
             0.0
         };

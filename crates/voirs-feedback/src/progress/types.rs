@@ -725,7 +725,7 @@ impl MemoryBoundedMetrics {
         // Remove old entries from front
         while let Some((key, metric)) = self.storage.front() {
             if metric.timestamp < cutoff_time {
-                let (removed_key, _) = self.storage.pop_front().unwrap();
+                let (removed_key, _) = self.storage.pop_front().expect("value should be present");
                 self.index.remove(&removed_key);
                 removed_count += 1;
             } else {

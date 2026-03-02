@@ -846,7 +846,10 @@ impl PolynomialMotionModel {
         }
 
         // Simplified polynomial prediction (would be more sophisticated in practice)
-        let last_pos = history.last().unwrap().position;
+        let last_pos = history
+            .last()
+            .ok_or_else(|| Error::processing("history is empty"))?
+            .position;
         let dt = lookahead.as_secs_f32();
 
         // For now, just add some curvature to linear prediction

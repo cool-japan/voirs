@@ -787,7 +787,7 @@ impl VoiceLibraryManager {
             "collection_{}",
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
+                .expect("SystemTime should be after UNIX_EPOCH")
                 .as_nanos()
         );
 

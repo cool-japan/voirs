@@ -173,7 +173,10 @@ impl WorkflowEngine {
                 let save_state = workflow.config.save_state;
 
                 let task = tokio::spawn(async move {
-                    let _permit = semaphore.acquire().await.unwrap();
+                    let _permit = semaphore
+                        .acquire()
+                        .await
+                        .expect("semaphore should not be closed");
 
                     let mut ctx = context_clone.write().await;
 

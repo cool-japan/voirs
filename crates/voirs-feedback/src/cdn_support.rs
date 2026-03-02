@@ -388,7 +388,11 @@ impl CdnManager {
         locations
             .iter()
             .filter(|loc| loc.active && loc.region == region)
-            .min_by(|a, b| a.latency_ms.partial_cmp(&b.latency_ms).unwrap())
+            .min_by(|a, b| {
+                a.latency_ms
+                    .partial_cmp(&b.latency_ms)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .cloned()
     }
 

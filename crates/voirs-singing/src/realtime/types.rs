@@ -559,7 +559,7 @@ impl RealtimeEngine {
                     if note.scheduled_time
                         <= now + Duration::from_millis(config.target_latency as u64)
                     {
-                        Some(queue_guard.pop_front().unwrap())
+                        Some(queue_guard.pop_front().expect("operation should succeed"))
                     } else {
                         None
                     }
@@ -1010,7 +1010,7 @@ impl ExpressionMapping {
                 if scaled_value <= points[0].0 {
                     points[0].1
                 } else {
-                    points.last().unwrap().1
+                    points.last().expect("collection should not be empty").1
                 }
             }
         }
@@ -1414,7 +1414,9 @@ impl MidiControlMapping {
                 if normalized <= points[0].0 {
                     self.min_value + (self.max_value - self.min_value) * points[0].1
                 } else {
-                    self.min_value + (self.max_value - self.min_value) * points.last().unwrap().1
+                    self.min_value
+                        + (self.max_value - self.min_value)
+                            * points.last().expect("collection should not be empty").1
                 }
             }
         }

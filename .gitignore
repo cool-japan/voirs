@@ -44,6 +44,7 @@ models/**/*.bin
 **/*.log
 **/*.bak
 **/*.backup
+rustc-ice-*.txt
 
 # Documentation build artifacts
 docs/guide/book/

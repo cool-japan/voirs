@@ -387,7 +387,7 @@ mod tests {
     async fn test_get_config_path() {
         let path = get_config_path();
         assert!(path.is_ok());
-        assert!(path.unwrap().to_str().unwrap().contains("voirs"));
+        assert!(path.unwrap().to_str().unwrap_or_default().contains("voirs"));
     }
 
     #[tokio::test]

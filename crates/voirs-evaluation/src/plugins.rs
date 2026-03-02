@@ -398,7 +398,10 @@ impl PluginManager {
                 name: plugin_name.to_string(),
             })?;
 
-        let config = self.configs.get(plugin_name).unwrap();
+        let config = self
+            .configs
+            .get(plugin_name)
+            .expect("value should be present");
 
         // Check if plugin is enabled
         if !config.enabled {
@@ -435,12 +438,28 @@ impl PluginManager {
         // Update statistics
         match &result {
             Ok(metric_result) => {
-                *self.stats.evaluation_counts.get_mut(plugin_name).unwrap() += 1;
-                *self.stats.processing_times.get_mut(plugin_name).unwrap() += processing_time;
+                *self
+                    .stats
+                    .evaluation_counts
+                    .get_mut(plugin_name)
+                    .expect("value should be present") += 1;
+                *self
+                    .stats
+                    .processing_times
+                    .get_mut(plugin_name)
+                    .expect("value should be present") += processing_time;
 
                 // Update success rate
-                let total_evaluations = *self.stats.evaluation_counts.get(plugin_name).unwrap();
-                let error_count = *self.stats.error_counts.get(plugin_name).unwrap();
+                let total_evaluations = *self
+                    .stats
+                    .evaluation_counts
+                    .get(plugin_name)
+                    .expect("value should be present");
+                let error_count = *self
+                    .stats
+                    .error_counts
+                    .get(plugin_name)
+                    .expect("value should be present");
                 let success_rate =
                     (total_evaluations - error_count) as f64 / total_evaluations as f64;
                 self.stats
@@ -458,7 +477,11 @@ impl PluginManager {
                 }
             }
             Err(_) => {
-                *self.stats.error_counts.get_mut(plugin_name).unwrap() += 1;
+                *self
+                    .stats
+                    .error_counts
+                    .get_mut(plugin_name)
+                    .expect("value should be present") += 1;
             }
         }
 

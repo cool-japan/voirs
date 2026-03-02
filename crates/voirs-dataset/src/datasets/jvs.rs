@@ -751,7 +751,7 @@ impl Dataset for JvsDataset {
             }
         } else {
             let mut sorted_durations = durations.clone();
-            sorted_durations.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            sorted_durations.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
             let min = sorted_durations[0];
             let max = sorted_durations[sorted_durations.len() - 1];

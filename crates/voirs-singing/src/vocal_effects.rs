@@ -541,9 +541,9 @@ impl AutoTuneEffect {
                 (note_in_octave - **a)
                     .abs()
                     .partial_cmp(&(note_in_octave - **b).abs())
-                    .unwrap()
+                    .expect("operation should succeed")
             })
-            .unwrap();
+            .expect("operation should succeed");
 
         octave + closest_note
     }
@@ -560,9 +560,9 @@ impl AutoTuneEffect {
                 (note_in_octave - **a)
                     .abs()
                     .partial_cmp(&(note_in_octave - **b).abs())
-                    .unwrap()
+                    .expect("operation should succeed")
             })
-            .unwrap();
+            .expect("operation should succeed");
 
         octave + closest_note
     }
@@ -579,9 +579,9 @@ impl AutoTuneEffect {
                 (note_in_octave - **a)
                     .abs()
                     .partial_cmp(&(note_in_octave - **b).abs())
-                    .unwrap()
+                    .expect("operation should succeed")
             })
-            .unwrap();
+            .expect("operation should succeed");
 
         octave + closest_note
     }
@@ -598,9 +598,9 @@ impl AutoTuneEffect {
                 (note_in_octave - **a)
                     .abs()
                     .partial_cmp(&(note_in_octave - **b).abs())
-                    .unwrap()
+                    .expect("operation should succeed")
             })
-            .unwrap();
+            .expect("operation should succeed");
 
         octave + closest_note
     }

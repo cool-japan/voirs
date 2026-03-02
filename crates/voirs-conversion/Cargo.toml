@@ -11,6 +11,7 @@ keywords = ["voirs", "conversion", "voice-conversion", "real-time", "audio"]
 categories = ["multimedia::audio", "science", "asynchronous"]
 rust-version = { workspace = true }
 description = "Real-time voice conversion system for VoiRS"
+readme = "README.md"
 
 [dependencies]
 # SciRS2 - Scientific computing abstractions
@@ -54,7 +55,7 @@ chrono = { workspace = true }
 flate2 = { workspace = true }
 
 # HTTP client for IoT cloud connectivity
-reqwest = { version = "0.12.28", default-features = false, features = ["json", "rustls-tls"], optional = true }
+reqwest = { workspace = true, features = ["json", "rustls"], optional = true }
 
 # VoiRS dependencies
 voirs-acoustic = { workspace = true, optional = true }
@@ -63,11 +64,11 @@ voirs-emotion = { workspace = true, optional = true }
 voirs-spatial = { workspace = true, optional = true }
 
 # WebAssembly dependencies
-wasm-bindgen = { version = "0.2.105", optional = true }
-wasm-bindgen-futures = { version = "0.4.55", optional = true }
+wasm-bindgen = { version = "0.2.113", optional = true }
+wasm-bindgen-futures = { version = "0.4.63", optional = true }
 serde-wasm-bindgen = { version = "0.6", optional = true }
-js-sys = { version = "0.3.82", optional = true }
-web-sys = { version = "0.3.82", optional = true, features = [
+js-sys = { version = "0.3.90", optional = true }
+web-sys = { version = "0.3.90", optional = true, features = [
     "console",
     "AudioContext",
     "AudioContextState",
@@ -87,7 +88,7 @@ web-sys = { version = "0.3.82", optional = true, features = [
 # If targeting wasm32-unknown-unknown, remember to also set:
 #   RUSTFLAGS='--cfg getrandom_backend="wasm_js"'
 # (The feature alone only makes the backend available.)
-getrandom = { version = "0.3", features = ["wasm_js"], optional = true }
+getrandom = { version = "0.4", features = ["wasm_js"], optional = true }
 # Also add getrandom 0.2 with js feature for transitive dependencies from scirs2-core
 getrandom_v2 = { package = "getrandom", version = "0.2", features = ["js"], optional = true }
 
@@ -95,7 +96,7 @@ getrandom_v2 = { package = "getrandom", version = "0.2", features = ["js"], opti
 tokio-test = { workspace = true }
 criterion = { workspace = true }
 proptest = { workspace = true }
-tempfile = "3.24"
+tempfile = "3.26"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [features]

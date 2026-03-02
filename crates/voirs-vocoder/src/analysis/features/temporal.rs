@@ -335,7 +335,7 @@ impl TemporalFeatureComputer for crate::analysis::features::FeatureExtractor {
         // Find attack peak
         let peak_idx = envelope.iter()
             .enumerate()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i)
             .unwrap_or(0);
         
@@ -392,7 +392,7 @@ impl crate::analysis::features::FeatureExtractor {
         for start in (0..samples.len()).step_by(hop_size) {
             let end = (start + window_size).min(samples.len());
             if start < end {
-                let window = &samples.as_slice().unwrap()[start..end];
+                let window = &samples.as_slice().expect("samples should be contiguous")[start..end];
                 let rms = (window.iter().map(|&x| x * x).sum::<f32>() / window.len() as f32).sqrt();
                 envelope.push(rms);
             }

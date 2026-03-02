@@ -245,23 +245,26 @@ impl AudioResultCache {
 
     /// Get cached audio result
     pub fn get(&self, key: &AudioCacheKey) -> Option<AudioBuffer> {
-        let mut cache = self.cache.write().unwrap();
+        let mut cache = self.cache.write().expect("lock should not be poisoned");
 
         if let Some(entry) = cache.get_mut(key) {
             // Check if entry is still valid
             if entry.metadata.created_at.elapsed() <= self.config.entry_ttl {
-                *self.hits.write().unwrap() += 1;
+                *self.hits.write().expect("lock should not be poisoned") += 1;
                 Some(entry.access().clone())
             } else {
                 // Entry expired, remove it
                 let size = entry.metadata.size_bytes;
                 cache.remove(key);
-                *self.current_size.write().unwrap() -= size;
-                *self.misses.write().unwrap() += 1;
+                *self
+                    .current_size
+                    .write()
+                    .expect("lock should not be poisoned") -= size;
+                *self.misses.write().expect("lock should not be poisoned") += 1;
                 None
             }
         } else {
-            *self.misses.write().unwrap() += 1;
+            *self.misses.write().expect("lock should not be poisoned") += 1;
             None
         }
     }
@@ -281,8 +284,11 @@ impl AudioResultCache {
         let audio_size = std::mem::size_of_val(audio.samples());
         let entry = CacheEntry::new(audio, quality_score, audio_size, processing_time_ms);
 
-        let mut cache = self.cache.write().unwrap();
-        let mut current_size = self.current_size.write().unwrap();
+        let mut cache = self.cache.write().expect("lock should not be poisoned");
+        let mut current_size = self
+            .current_size
+            .write()
+            .expect("lock should not be poisoned");
 
         // Evict entries if necessary
         while (*current_size + audio_size > self.config.max_size_bytes
@@ -327,8 +333,8 @@ impl AudioResultCache {
 
     /// Get cache statistics
     pub fn get_stats(&self) -> CacheStats {
-        let hits = *self.hits.read().unwrap();
-        let misses = *self.misses.read().unwrap();
+        let hits = *self.hits.read().expect("lock should not be poisoned");
+        let misses = *self.misses.read().expect("lock should not be poisoned");
         let hit_rate = if hits + misses > 0 {
             hits as f32 / (hits + misses) as f32
         } else {
@@ -339,16 +345,29 @@ impl AudioResultCache {
             hits,
             misses,
             hit_rate,
-            entries: self.cache.read().unwrap().len(),
-            size_bytes: *self.current_size.read().unwrap(),
+            entries: self
+                .cache
+                .read()
+                .expect("lock should not be poisoned")
+                .len(),
+            size_bytes: *self
+                .current_size
+                .read()
+                .expect("lock should not be poisoned"),
             max_size_bytes: self.config.max_size_bytes,
         }
     }
 
     /// Clear cache
     pub fn clear(&self) {
-        self.cache.write().unwrap().clear();
-        *self.current_size.write().unwrap() = 0;
+        self.cache
+            .write()
+            .expect("lock should not be poisoned")
+            .clear();
+        *self
+            .current_size
+            .write()
+            .expect("lock should not be poisoned") = 0;
     }
 }
 
@@ -379,21 +398,24 @@ impl MelCache {
 
     /// Get cached mel spectrogram
     pub fn get(&self, key: &MelCacheKey) -> Option<MelSpectrogram> {
-        let mut cache = self.cache.write().unwrap();
+        let mut cache = self.cache.write().expect("lock should not be poisoned");
 
         if let Some(entry) = cache.get_mut(key) {
             if entry.metadata.created_at.elapsed() <= self.config.entry_ttl {
-                *self.hits.write().unwrap() += 1;
+                *self.hits.write().expect("lock should not be poisoned") += 1;
                 Some(entry.access().clone())
             } else {
                 let size = entry.metadata.size_bytes;
                 cache.remove(key);
-                *self.current_size.write().unwrap() -= size;
-                *self.misses.write().unwrap() += 1;
+                *self
+                    .current_size
+                    .write()
+                    .expect("lock should not be poisoned") -= size;
+                *self.misses.write().expect("lock should not be poisoned") += 1;
                 None
             }
         } else {
-            *self.misses.write().unwrap() += 1;
+            *self.misses.write().expect("lock should not be poisoned") += 1;
             None
         }
     }
@@ -408,8 +430,11 @@ impl MelCache {
         let mel_size = mel.n_mels * mel.n_frames * std::mem::size_of::<f32>();
         let entry = CacheEntry::new(mel, 1.0, mel_size, processing_time_ms); // Assume mel quality is always good
 
-        let mut cache = self.cache.write().unwrap();
-        let mut current_size = self.current_size.write().unwrap();
+        let mut cache = self.cache.write().expect("lock should not be poisoned");
+        let mut current_size = self
+            .current_size
+            .write()
+            .expect("lock should not be poisoned");
 
         // Evict if necessary
         while (*current_size + mel_size > self.config.max_size_bytes
@@ -454,8 +479,8 @@ impl MelCache {
 
     /// Get cache statistics
     pub fn get_stats(&self) -> CacheStats {
-        let hits = *self.hits.read().unwrap();
-        let misses = *self.misses.read().unwrap();
+        let hits = *self.hits.read().expect("lock should not be poisoned");
+        let misses = *self.misses.read().expect("lock should not be poisoned");
         let hit_rate = if hits + misses > 0 {
             hits as f32 / (hits + misses) as f32
         } else {
@@ -466,18 +491,31 @@ impl MelCache {
             hits,
             misses,
             hit_rate,
-            entries: self.cache.read().unwrap().len(),
-            size_bytes: *self.current_size.read().unwrap(),
+            entries: self
+                .cache
+                .read()
+                .expect("lock should not be poisoned")
+                .len(),
+            size_bytes: *self
+                .current_size
+                .read()
+                .expect("lock should not be poisoned"),
             max_size_bytes: self.config.max_size_bytes,
         }
     }
 
     /// Clear cache
     pub fn clear(&self) {
-        self.cache.write().unwrap().clear();
-        *self.current_size.write().unwrap() = 0;
-        *self.hits.write().unwrap() = 0;
-        *self.misses.write().unwrap() = 0;
+        self.cache
+            .write()
+            .expect("lock should not be poisoned")
+            .clear();
+        *self
+            .current_size
+            .write()
+            .expect("lock should not be poisoned") = 0;
+        *self.hits.write().expect("lock should not be poisoned") = 0;
+        *self.misses.write().expect("lock should not be poisoned") = 0;
     }
 }
 

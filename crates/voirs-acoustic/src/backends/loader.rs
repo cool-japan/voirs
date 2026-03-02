@@ -135,7 +135,7 @@ impl AcousticModelLoader {
         // Cache the model (using pre-loaded cache for backward compatibility)
         if self.cache_config.enabled {
             let cache_key = format!("{source}:{backend_type:?}");
-            let cached_model = CachedModel::new(model_arc.clone(), self.cache_config.ttl_seconds);
+            let cached_model = CachedModel::new(model_arc.clone(), self.cache_config.ttl_seconds)?;
             self.model_cache.insert(cache_key, cached_model);
 
             // Clean up cache if needed
@@ -643,22 +643,34 @@ impl CachedModel {
     }
 
     /// Create cached model with pre-loaded model (for backward compatibility)
-    fn new(model: Arc<dyn AcousticModel>, ttl_seconds: u32) -> Self {
+    ///
+    /// The `backend_ref` in `load_params` is only used for lazy loading.
+    /// Since the model is already set in the `OnceCell`, the `backend_ref` will
+    /// never be called for actual loading, but the struct still requires one.
+    /// We use a CPU-only CandleBackend as a safe placeholder.
+    fn new(model: Arc<dyn AcousticModel>, ttl_seconds: u32) -> Result<Self> {
         let cell = Arc::new(OnceCell::new());
         let _ = cell.set(model);
 
-        Self {
+        // Use CPU-only device to avoid any CUDA/Metal initialization issues.
+        // This backend_ref is a placeholder since the model is already pre-loaded.
+        let backend_ref: Arc<dyn Backend> = Arc::new(
+            crate::backends::candle::CandleBackend::with_device(crate::config::DeviceConfig::cpu())
+                .or_else(|_| crate::backends::candle::CandleBackend::new())?,
+        );
+
+        Ok(Self {
             model: cell,
             load_params: ModelLoadParams {
                 source: "preloaded".to_string(),
                 backend: BackendType::Candle,
                 load_config: ModelLoadConfig::new(),
-                backend_ref: Arc::new(crate::backends::candle::CandleBackend::new().unwrap()),
+                backend_ref,
             },
             cached_at: std::time::Instant::now(),
             ttl_seconds,
             memory_mapped: false,
-        }
+        })
     }
 
     /// Get the model, loading it lazily if needed
@@ -962,13 +974,19 @@ mod tests {
     #[test]
     fn test_cached_model() {
         let model = Arc::new(DummyAcousticModel::new()) as Arc<dyn AcousticModel>;
-        let cached = CachedModel::new(model, 3600);
+        let cached = CachedModel::new(model, 3600)
+            .expect("CachedModel::new should succeed with CPU backend");
 
         assert!(!cached.is_expired());
 
         // Test with very short TTL
-        let model_arc = cached.model.get().unwrap().clone();
-        let short_cached = CachedModel::new(model_arc, 0);
+        let model_arc = cached
+            .model
+            .get()
+            .expect("model should be set in OnceCell")
+            .clone();
+        let short_cached = CachedModel::new(model_arc, 0)
+            .expect("CachedModel::new should succeed with CPU backend");
         std::thread::sleep(std::time::Duration::from_millis(100));
         assert!(short_cached.is_expired());
     }

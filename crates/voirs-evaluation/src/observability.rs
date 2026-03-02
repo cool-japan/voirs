@@ -621,7 +621,7 @@ impl ObservabilityManager {
         let samples = self.latency_samples.read().await;
         let (p50, p95, p99) = if !samples.is_empty() {
             let mut sorted = samples.clone();
-            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
             let p50_idx = (sorted.len() as f64 * 0.50) as usize;
             let p95_idx = (sorted.len() as f64 * 0.95) as usize;

@@ -11,6 +11,7 @@ keywords = ["voirs", "evaluation", "quality", "metrics", "mos"]
 categories = ["science", "multimedia::audio", "mathematics"]
 rust-version.workspace = true
 description = "Quality evaluation and assessment framework for VoiRS"
+readme = "README.md"
 
 [dependencies]
 # SciRS2 - Scientific computing abstractions
@@ -45,7 +46,7 @@ statrs = "0.18"
 # Serialization
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-bincode.workspace = true
+oxicode.workspace = true
 
 # Error handling
 anyhow.workspace = true
@@ -59,9 +60,9 @@ once_cell.workspace = true
 parking_lot.workspace = true
 chrono.workspace = true
 flate2.workspace = true
-uuid = { version = "1.20", features = ["v4", "serde"] }
+uuid = { version = "1.21", features = ["v4", "serde"] }
 base64 = "0.22"
-md5 = "0.7"
+md5 = "0.8"
 
 # Machine learning
 candle-core.workspace = true
@@ -116,6 +117,10 @@ required-features = ["perceptual"]
 [[example]]
 name = "r_statistical_analysis"
 required-features = ["r-integration"]
+
+[[example]]
+name = "evaluation_batch_processing"
+path = "examples/evaluation_batch_processing.rs"
 
 [[bench]]
 name = "evaluation_metrics"

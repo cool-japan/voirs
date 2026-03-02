@@ -69,7 +69,7 @@ pub async fn process_inputs_parallel(
         pb.set_style(
             ProgressStyle::default_bar()
                 .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%) {msg}")
-                .unwrap()
+                .expect("progress template is valid")
                 .progress_chars("#>-")
         );
         Some(pb)
@@ -100,7 +100,10 @@ pub async fn process_inputs_parallel(
         let (quality, use_gpu) = pipeline_config;
 
         let handle = tokio::spawn(async move {
-            let _permit = semaphore.acquire().await.unwrap();
+            let _permit = semaphore
+                .acquire()
+                .await
+                .expect("semaphore should not be closed");
             let result = process_single_input_with_own_pipeline(
                 input,
                 index,

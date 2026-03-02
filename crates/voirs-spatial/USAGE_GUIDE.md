@@ -688,4 +688,4 @@ println!("{}", report);
 
 **Version:** 0.1.0-alpha.2
 **Last Updated:** 2025-12-09
-**License:** MIT OR Apache-2.0
+**License:** Apache-2.0

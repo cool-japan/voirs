@@ -215,16 +215,20 @@ impl LoadBalancer {
     }
 
     fn least_connections_selection(&self) -> Option<&WorkerInfo> {
-        self.workers
-            .values()
-            .min_by(|a, b| a.current_load.partial_cmp(&b.current_load).unwrap())
+        self.workers.values().min_by(|a, b| {
+            a.current_load
+                .partial_cmp(&b.current_load)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
     }
 
     fn weighted_round_robin_selection(&self) -> Option<&WorkerInfo> {
         self.workers.values().min_by(|a, b| {
             let a_weight = a.current_load / a.capacity as f64;
             let b_weight = b.current_load / b.capacity as f64;
-            a_weight.partial_cmp(&b_weight).unwrap()
+            a_weight
+                .partial_cmp(&b_weight)
+                .unwrap_or(std::cmp::Ordering::Equal)
         })
     }
 
@@ -238,7 +242,9 @@ impl LoadBalancer {
         self.workers.values().min_by(|a, b| {
             let a_score = a.current_load * (1.0 + a.error_rate) * a.response_time.as_secs_f64();
             let b_score = b.current_load * (1.0 + b.error_rate) * b.response_time.as_secs_f64();
-            a_score.partial_cmp(&b_score).unwrap()
+            a_score
+                .partial_cmp(&b_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
         })
     }
 

@@ -236,7 +236,10 @@ impl DashboardApp {
         &mut self,
         terminal: &mut Terminal<B>,
         update_interval_ms: u64,
-    ) -> Result<()> {
+    ) -> Result<()>
+    where
+        B::Error: Send + Sync + 'static,
+    {
         let update_interval = Duration::from_millis(update_interval_ms);
         let mut last_update = Instant::now();
 
@@ -274,7 +277,7 @@ impl DashboardApp {
 
             // Update metrics periodically
             if last_update.elapsed() >= update_interval {
-                let mut state = self.state.lock().unwrap();
+                let mut state = self.state.lock().expect("lock should not be poisoned");
                 state.update_metrics();
                 last_update = Instant::now();
             }
@@ -287,7 +290,7 @@ impl DashboardApp {
 
     /// Render the UI
     fn ui(&self, f: &mut Frame) {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().expect("lock should not be poisoned");
 
         // Create main layout
         let chunks = Layout::default()
@@ -690,7 +693,7 @@ pub async fn run_dashboard(update_interval_ms: u64) -> Result<()> {
             time::sleep(Duration::from_secs(3)).await;
             counter += 1;
 
-            let mut state = state.lock().unwrap();
+            let mut state = state.lock().expect("lock should not be poisoned");
             let success = fastrand::f32() > 0.1; // 90% success rate
             state.add_synthesis_result(
                 format!("Synthesis operation #{}", counter),

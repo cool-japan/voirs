@@ -781,8 +781,8 @@ df = table.to_pandas()
 ```rust
 // Using Arrow in Rust
 use parquet::arrow::arrow_reader::ParquetFileArrowReader;
-let file = std::fs::File::open("{base_name}.parquet").unwrap();
-let reader = ParquetFileArrowReader::try_new(file).unwrap();
+let file = std::fs::File::open("{base_name}.parquet").expect("file should exist");
+let reader = ParquetFileArrowReader::try_new(file).expect("valid parquet file");
 ```
 
 ## Compression

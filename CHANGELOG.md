@@ -5,6 +5,31 @@ All notable changes to VoiRS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0-beta.1] - 2026-02-26
+
+### Added
+- Production-quality pre-trained model support infrastructure
+- Comprehensive workspace metadata for crates.io publishing readiness
+- `readme` field added to all subcrate Cargo.toml files
+
+### Changed
+- API stabilization for beta milestone
+- Updated SciRS2-Core integration to version 0.2.0 with improved SIMD and parallel operations
+- Updated workspace dependencies to latest versions (reqwest 0.13, bytes security fix)
+- Fixed invalid crates.io category in voirs-feedback (`accessibility` -> `development-tools`)
+- Added missing `rust-version` workspace inheritance to voirs-feedback and voirs-singing
+- Updated examples dependency versions to match workspace version
+- Enhanced GPU acceleration support
+- WebAssembly optimization improvements
+- Performance improvements across the pipeline
+
+### Fixed
+- Resolved workspace metadata inconsistencies for crates.io compatibility
+- Fixed stale version references in examples/Cargo.toml
+- Improved documentation version references
+
+---
+
 ## [0.1.0-alpha.3] - 2026-01-29
 
 ### Added
@@ -136,7 +161,7 @@ N/A - Initial release
 #### 🛡️ Security
 
 - All crates use workspace version management
-- Dual-licensed under MIT/Apache-2.0
+- Licensed under Apache-2.0
 - No embedded secrets or sensitive data
 - Secure by default configuration
 
@@ -144,10 +169,10 @@ N/A - Initial release
 
 ## [Unreleased]
 
-### Planned for Beta (0.1.0-beta.1)
-- Production-quality pre-trained models
-- Enhanced GPU acceleration
-- WebAssembly optimization
-- Performance improvements
-- API stabilization
-- Comprehensive documentation
+### Planned for 0.1.0-beta.2
+- Expanded production-quality pre-trained model zoo
+- Further GPU acceleration improvements
+- WebAssembly optimization enhancements
+- Continued performance improvements
+- Comprehensive documentation expansion
+- Additional language support

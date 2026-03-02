@@ -312,7 +312,10 @@ impl GpuLoadBalancer {
             let gpu_config = GpuAccelerationConfig {
                 enabled: true,
                 device_id,
-                auto_fallback: false,
+                // Use auto_fallback so that when CUDA/Metal is unavailable on the
+                // current platform (e.g. macOS without CUDA), we gracefully fall
+                // back to CPU rather than returning an error.
+                auto_fallback: true,
                 ..Default::default()
             };
 
@@ -325,11 +328,14 @@ impl GpuLoadBalancer {
                     )
                     .await;
 
-                    let is_healthy = warmup_result.is_ok() && warmup_result.unwrap().is_ok();
+                    let is_healthy = warmup_result.as_ref().is_ok_and(|r| r.is_ok());
 
                     // Add to devices
                     {
-                        let mut devices = self.gpu_devices.write().unwrap();
+                        let mut devices = self
+                            .gpu_devices
+                            .write()
+                            .expect("lock should not be poisoned");
                         devices.insert(device_id, accelerator);
                     }
 
@@ -366,19 +372,28 @@ impl GpuLoadBalancer {
                     };
 
                     {
-                        let mut info_map = self.device_info.write().unwrap();
+                        let mut info_map = self
+                            .device_info
+                            .write()
+                            .expect("lock should not be poisoned");
                         info_map.insert(device_id, device_info);
                     }
 
                     // Initialize operation queue
                     {
-                        let mut queues = self.operation_queues.write().unwrap();
+                        let mut queues = self
+                            .operation_queues
+                            .write()
+                            .expect("lock should not be poisoned");
                         queues.insert(device_id, VecDeque::new());
                     }
 
                     // Initialize semaphore
                     {
-                        let mut semaphores = self.gpu_semaphores.write().unwrap();
+                        let mut semaphores = self
+                            .gpu_semaphores
+                            .write()
+                            .expect("lock should not be poisoned");
                         semaphores.insert(
                             device_id,
                             Arc::new(Semaphore::new(self.config.max_concurrent_ops_per_gpu)),
@@ -397,7 +412,11 @@ impl GpuLoadBalancer {
             }
         }
 
-        let device_count = self.gpu_devices.read().unwrap().len();
+        let device_count = self
+            .gpu_devices
+            .read()
+            .expect("lock should not be poisoned")
+            .len();
         if device_count == 0 {
             return Err(Error::Config(
                 "No GPU devices available for load balancing".to_string(),
@@ -419,7 +438,8 @@ impl GpuLoadBalancer {
         #[cfg(feature = "gpu")]
         {
             for device_id in 0..8 {
-                if Device::new_cuda(device_id).is_ok() {
+                let result = std::panic::catch_unwind(|| Device::new_cuda(device_id));
+                if result.is_ok_and(|r| r.is_ok()) {
                     available_devices.push(device_id);
                 } else {
                     break;
@@ -559,7 +579,10 @@ impl GpuLoadBalancer {
 
     /// Round-robin GPU selection
     fn select_round_robin(&self, available_gpus: &[usize]) -> usize {
-        let mut counter = self.round_robin_counter.lock().unwrap();
+        let mut counter = self
+            .round_robin_counter
+            .lock()
+            .expect("lock should not be poisoned");
         let selected = available_gpus[*counter % available_gpus.len()];
         *counter += 1;
         selected
@@ -567,14 +590,24 @@ impl GpuLoadBalancer {
 
     /// Select GPU with lowest utilization
     async fn select_lowest_utilization(&self, available_gpus: &[usize]) -> usize {
-        let device_info = self.device_info.read().unwrap();
+        let device_info = self
+            .device_info
+            .read()
+            .expect("lock should not be poisoned");
 
         available_gpus
             .iter()
             .min_by(|&&a, &&b| {
-                let info_a = device_info.get(&a).unwrap();
-                let info_b = device_info.get(&b).unwrap();
-                info_a.utilization.partial_cmp(&info_b.utilization).unwrap()
+                let info_a = device_info
+                    .get(&a)
+                    .expect("GPU ID should exist in device_info");
+                let info_b = device_info
+                    .get(&b)
+                    .expect("GPU ID should exist in device_info");
+                info_a
+                    .utilization
+                    .partial_cmp(&info_b.utilization)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
             .copied()
             .unwrap_or(available_gpus[0])
@@ -586,19 +619,28 @@ impl GpuLoadBalancer {
         available_gpus: &[usize],
         operation: &TensorOperation,
     ) -> usize {
-        let device_info = self.device_info.read().unwrap();
+        let device_info = self
+            .device_info
+            .read()
+            .expect("lock should not be poisoned");
 
         available_gpus
             .iter()
             .max_by(|&&a, &&b| {
-                let info_a = device_info.get(&a).unwrap();
-                let info_b = device_info.get(&b).unwrap();
+                let info_a = device_info
+                    .get(&a)
+                    .expect("GPU ID should exist in device_info");
+                let info_b = device_info
+                    .get(&b)
+                    .expect("GPU ID should exist in device_info");
 
                 // Calculate performance score (higher is better)
                 let score_a = self.calculate_performance_score(info_a, operation);
                 let score_b = self.calculate_performance_score(info_b, operation);
 
-                score_a.partial_cmp(&score_b).unwrap()
+                score_a
+                    .partial_cmp(&score_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
             .copied()
             .unwrap_or(available_gpus[0])
@@ -610,18 +652,27 @@ impl GpuLoadBalancer {
         available_gpus: &[usize],
         operation: &TensorOperation,
     ) -> usize {
-        let device_info = self.device_info.read().unwrap();
+        let device_info = self
+            .device_info
+            .read()
+            .expect("lock should not be poisoned");
         let estimated_memory = self.estimate_operation_memory(operation);
 
         available_gpus
             .iter()
             .filter(|&&gpu_id| {
-                let info = device_info.get(&gpu_id).unwrap();
+                let info = device_info
+                    .get(&gpu_id)
+                    .expect("GPU ID should exist in device_info");
                 info.memory_stats.free_memory >= estimated_memory
             })
             .max_by(|&&a, &&b| {
-                let info_a = device_info.get(&a).unwrap();
-                let info_b = device_info.get(&b).unwrap();
+                let info_a = device_info
+                    .get(&a)
+                    .expect("GPU ID should exist in device_info");
+                let info_b = device_info
+                    .get(&b)
+                    .expect("GPU ID should exist in device_info");
                 info_a
                     .memory_stats
                     .free_memory
@@ -633,17 +684,24 @@ impl GpuLoadBalancer {
 
     /// Select GPU based on reliability (success rate)
     async fn select_reliability_based(&self, available_gpus: &[usize]) -> usize {
-        let device_info = self.device_info.read().unwrap();
+        let device_info = self
+            .device_info
+            .read()
+            .expect("lock should not be poisoned");
 
         available_gpus
             .iter()
             .max_by(|&&a, &&b| {
-                let info_a = device_info.get(&a).unwrap();
-                let info_b = device_info.get(&b).unwrap();
+                let info_a = device_info
+                    .get(&a)
+                    .expect("GPU ID should exist in device_info");
+                let info_b = device_info
+                    .get(&b)
+                    .expect("GPU ID should exist in device_info");
                 info_a
                     .success_rate
                     .partial_cmp(&info_b.success_rate)
-                    .unwrap()
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
             .copied()
             .unwrap_or(available_gpus[0])
@@ -665,14 +723,21 @@ impl GpuLoadBalancer {
             memory_weight,
             reliability_weight,
         });
-        let device_info = self.device_info.read().unwrap();
+        let device_info = self
+            .device_info
+            .read()
+            .expect("lock should not be poisoned");
         let estimated_memory = self.estimate_operation_memory(operation);
 
         available_gpus
             .iter()
             .max_by(|&&a, &&b| {
-                let info_a = device_info.get(&a).unwrap();
-                let info_b = device_info.get(&b).unwrap();
+                let info_a = device_info
+                    .get(&a)
+                    .expect("GPU ID should exist in device_info");
+                let info_b = device_info
+                    .get(&b)
+                    .expect("GPU ID should exist in device_info");
 
                 let score_a =
                     self.calculate_weighted_score(info_a, operation, estimated_memory, &weights);
@@ -680,7 +745,9 @@ impl GpuLoadBalancer {
                 let score_b =
                     self.calculate_weighted_score(info_b, operation, estimated_memory, &weights);
 
-                score_a.partial_cmp(&score_b).unwrap()
+                score_a
+                    .partial_cmp(&score_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
             .copied()
             .unwrap_or(available_gpus[0])
@@ -727,7 +794,10 @@ impl GpuLoadBalancer {
 
     /// Get list of available and healthy GPUs
     async fn get_available_gpus(&self) -> Vec<usize> {
-        let device_info = self.device_info.read().unwrap();
+        let device_info = self
+            .device_info
+            .read()
+            .expect("lock should not be poisoned");
 
         device_info
             .iter()
@@ -745,7 +815,10 @@ impl GpuLoadBalancer {
     ) -> Result<TensorOperationResult> {
         // Get semaphore permit to limit concurrent operations
         let semaphore = {
-            let semaphores = self.gpu_semaphores.read().unwrap();
+            let semaphores = self
+                .gpu_semaphores
+                .read()
+                .expect("lock should not be poisoned");
             semaphores
                 .get(&gpu_id)
                 .cloned()
@@ -759,7 +832,10 @@ impl GpuLoadBalancer {
 
         // Update active operations count
         {
-            let mut device_info = self.device_info.write().unwrap();
+            let mut device_info = self
+                .device_info
+                .write()
+                .expect("lock should not be poisoned");
             if let Some(info) = device_info.get_mut(&gpu_id) {
                 info.active_operations += 1;
             }
@@ -767,7 +843,10 @@ impl GpuLoadBalancer {
 
         // Get GPU accelerator
         let accelerator = {
-            let devices = self.gpu_devices.read().unwrap();
+            let devices = self
+                .gpu_devices
+                .read()
+                .expect("lock should not be poisoned");
             devices
                 .get(&gpu_id)
                 .cloned()
@@ -781,7 +860,10 @@ impl GpuLoadBalancer {
 
         // Update device info
         {
-            let mut device_info = self.device_info.write().unwrap();
+            let mut device_info = self
+                .device_info
+                .write()
+                .expect("lock should not be poisoned");
             if let Some(info) = device_info.get_mut(&gpu_id) {
                 info.active_operations = info.active_operations.saturating_sub(1);
 
@@ -855,7 +937,10 @@ impl GpuLoadBalancer {
         gpu_id: usize,
     ) -> PerformancePrediction {
         let operation_key = format!("{:?}_{}", operation.operation_type, gpu_id);
-        let history = self.performance_history.read().unwrap();
+        let history = self
+            .performance_history
+            .read()
+            .expect("lock should not be poisoned");
 
         if let Some(history_data) = history.get(&operation_key) {
             if !history_data.is_empty() {
@@ -903,7 +988,10 @@ impl GpuLoadBalancer {
         _prediction: Option<PerformancePrediction>,
     ) {
         let operation_key = metadata.operation_type.clone();
-        let mut history = self.performance_history.write().unwrap();
+        let mut history = self
+            .performance_history
+            .write()
+            .expect("lock should not be poisoned");
 
         let history_data = history.entry(operation_key).or_default();
 
@@ -923,7 +1011,7 @@ impl GpuLoadBalancer {
         result: &Result<TensorOperationResult>,
         start_time: SystemTime,
     ) {
-        let mut stats = self.stats.write().unwrap();
+        let mut stats = self.stats.write().expect("lock should not be poisoned");
 
         stats.total_operations += 1;
         *stats.operations_per_gpu.entry(gpu_id).or_insert(0) += 1;
@@ -953,7 +1041,10 @@ impl GpuLoadBalancer {
 
         // Update device success rate
         {
-            let mut device_info = self.device_info.write().unwrap();
+            let mut device_info = self
+                .device_info
+                .write()
+                .expect("lock should not be poisoned");
             if let Some(info) = device_info.get_mut(&gpu_id) {
                 info.success_rate = new_success_rate;
             }
@@ -968,34 +1059,50 @@ impl GpuLoadBalancer {
         let check_interval = Duration::from_secs(self.config.health_check_interval_secs);
 
         {
-            let mut active = health_monitoring_active.write().unwrap();
+            let mut active = health_monitoring_active
+                .write()
+                .expect("lock should not be poisoned");
             *active = true;
         }
 
         tokio::spawn(async move {
-            while *health_monitoring_active.read().unwrap() {
+            while *health_monitoring_active
+                .read()
+                .expect("lock should not be poisoned")
+            {
                 tokio::time::sleep(check_interval).await;
 
-                let device_ids: Vec<usize> =
-                    { device_info.read().unwrap().keys().copied().collect() };
+                let device_ids: Vec<usize> = {
+                    device_info
+                        .read()
+                        .expect("lock should not be poisoned")
+                        .keys()
+                        .copied()
+                        .collect()
+                };
 
                 for device_id in device_ids {
                     // Check GPU health
-                    let accelerator = gpu_devices.read().unwrap().get(&device_id).cloned();
+                    let accelerator = gpu_devices
+                        .read()
+                        .expect("lock should not be poisoned")
+                        .get(&device_id)
+                        .cloned();
                     let is_healthy = if let Some(accelerator) = accelerator {
                         // Try a simple operation to test GPU health
                         let test_result =
                             tokio::time::timeout(Duration::from_secs(5), accelerator.synchronize())
                                 .await;
 
-                        test_result.is_ok() && test_result.unwrap().is_ok()
+                        test_result.as_ref().is_ok_and(|r| r.is_ok())
                     } else {
                         false
                     };
 
                     // Update device health
                     {
-                        let mut info_map = device_info.write().unwrap();
+                        let mut info_map =
+                            device_info.write().expect("lock should not be poisoned");
                         if let Some(info) = info_map.get_mut(&device_id) {
                             info.is_healthy = is_healthy;
                             info.last_health_check = SystemTime::now();
@@ -1024,12 +1131,18 @@ impl GpuLoadBalancer {
                 tokio::time::sleep(rebalancing_interval).await;
 
                 // Check if rebalancing is needed
-                let total_ops = stats.read().unwrap().total_operations;
+                let total_ops = stats
+                    .read()
+                    .expect("lock should not be poisoned")
+                    .total_operations;
                 if total_ops < min_ops as u64 {
                     continue;
                 }
 
-                let device_info_snapshot = device_info.read().unwrap().clone();
+                let device_info_snapshot = device_info
+                    .read()
+                    .expect("lock should not be poisoned")
+                    .clone();
                 let mut needs_rebalancing = false;
 
                 for info in device_info_snapshot.values() {
@@ -1048,7 +1161,7 @@ impl GpuLoadBalancer {
                     // In a full implementation, this would redistribute queued operations
                     // For now, we just log the event
 
-                    let mut stats_lock = stats.write().unwrap();
+                    let mut stats_lock = stats.write().expect("lock should not be poisoned");
                     stats_lock.rebalancing_count += 1;
                 }
             }
@@ -1057,8 +1170,11 @@ impl GpuLoadBalancer {
 
     /// Get current load balancing statistics
     pub fn get_statistics(&self) -> LoadBalancingStats {
-        let stats = self.stats.read().unwrap();
-        let device_info = self.device_info.read().unwrap();
+        let stats = self.stats.read().expect("lock should not be poisoned");
+        let device_info = self
+            .device_info
+            .read()
+            .expect("lock should not be poisoned");
 
         // Calculate derived metrics
         let total_gpus = device_info.len();
@@ -1109,7 +1225,10 @@ impl GpuLoadBalancer {
 
     /// Get information about all GPU devices
     pub fn get_device_info(&self) -> HashMap<usize, GpuDeviceInfo> {
-        self.device_info.read().unwrap().clone()
+        self.device_info
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Get current configuration
@@ -1126,15 +1245,31 @@ impl GpuLoadBalancer {
     pub async fn shutdown(&self) {
         // Stop health monitoring
         {
-            let mut active = self.health_monitoring_active.write().unwrap();
+            let mut active = self
+                .health_monitoring_active
+                .write()
+                .expect("lock should not be poisoned");
             *active = false;
         }
 
         // Clear all caches and shutdown GPUs
-        let device_ids: Vec<usize> = { self.gpu_devices.read().unwrap().keys().copied().collect() };
+        let device_ids: Vec<usize> = {
+            self.gpu_devices
+                .read()
+                .expect("lock should not be poisoned")
+                .keys()
+                .copied()
+                .collect()
+        };
 
         for device_id in device_ids {
-            let accelerator_opt = { self.gpu_devices.read().unwrap().get(&device_id).cloned() };
+            let accelerator_opt = {
+                self.gpu_devices
+                    .read()
+                    .expect("lock should not be poisoned")
+                    .get(&device_id)
+                    .cloned()
+            };
             if let Some(accelerator) = accelerator_opt {
                 accelerator.clear_cache();
                 let _ = accelerator.synchronize().await;

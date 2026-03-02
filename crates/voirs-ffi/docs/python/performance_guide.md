@@ -16,7 +16,7 @@ VoiRS is designed for high-performance speech synthesis with several optimizatio
 ### Enabling GPU Support
 
 ```python
-from voirs_ffi import VoirsPipeline, check_compatibility
+from voirs import VoirsPipeline, check_compatibility
 
 # Check GPU availability
 info = check_compatibility()
@@ -39,7 +39,7 @@ else:
 ### GPU Memory Management
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 # Configure GPU memory usage
 pipeline = VoirsPipeline.with_config(
@@ -55,7 +55,7 @@ pipeline = VoirsPipeline.with_config(
 
 ```python
 import multiprocessing
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 # Auto-detect optimal thread count
 num_cores = multiprocessing.cpu_count()
@@ -68,7 +68,7 @@ pipeline = VoirsPipeline.with_config(num_threads=optimal_threads)
 
 ```python
 from concurrent.futures import ThreadPoolExecutor
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 # Create multiple pipelines for concurrent processing
 def create_pipeline():
@@ -93,7 +93,7 @@ with ThreadPoolExecutor(max_workers=4) as executor:
 ### Quality Levels
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 # Fast synthesis (lower quality)
 fast_pipeline = VoirsPipeline.with_config(
@@ -132,7 +132,7 @@ quality_pipeline = VoirsPipeline.with_config(
 ### Memory-Efficient Processing
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 # Configure memory-efficient settings
 pipeline = VoirsPipeline.with_config(
@@ -148,7 +148,7 @@ pipeline = VoirsPipeline.with_config(
 ```python
 import psutil
 import time
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 def monitor_memory(func):
     process = psutil.Process()
@@ -179,7 +179,7 @@ audio = monitor_memory(lambda: pipeline.synthesize("Hello, world!"))
 ### Efficient Batch Synthesis
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 pipeline = VoirsPipeline.with_config(
     use_gpu=True,
@@ -206,7 +206,7 @@ for i, audio in enumerate(audios):
 ### Streaming Processing
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 pipeline = VoirsPipeline.with_config(
     use_gpu=True,
@@ -231,7 +231,7 @@ for chunk in audio_stream:
 ### Model Caching
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 # Enable model caching
 pipeline = VoirsPipeline.with_config(
@@ -251,7 +251,7 @@ audio2 = pipeline.synthesize("Second text")  # Faster (cached models)
 ### Result Caching
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 import hashlib
 
 class CachedPipeline:
@@ -287,7 +287,7 @@ audio = cached_pipeline.synthesize("Hello, world!")  # Second time: cached
 ```python
 import cProfile
 import pstats
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 def profile_synthesis():
     pipeline = VoirsPipeline.with_config(use_gpu=True)
@@ -313,7 +313,7 @@ profile_synthesis()
 
 ```python
 import time
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 def benchmark_config(config_name, **config):
     pipeline = VoirsPipeline.with_config(**config)
@@ -344,7 +344,7 @@ benchmark_config("Fast Mode", use_gpu=True, quality="low")
 
 ```python
 import os
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 # Set environment variables for optimal performance
 os.environ['OMP_NUM_THREADS'] = '8'
@@ -363,7 +363,7 @@ pipeline = VoirsPipeline.with_config(
 
 ```python
 import os
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 # Windows-specific optimizations
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Reduce TensorFlow logging
@@ -380,7 +380,7 @@ pipeline = VoirsPipeline.with_config(
 
 ```python
 import os
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 # macOS-specific settings
 os.environ['VECLIB_MAXIMUM_THREADS'] = '8'
@@ -398,7 +398,7 @@ pipeline = VoirsPipeline.with_config(
 ### Proper Resource Cleanup
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 def synthesize_with_cleanup(text):
     pipeline = VoirsPipeline()
@@ -432,7 +432,7 @@ with PipelineContext(use_gpu=True) as pipeline:
 ### Memory Pool Management
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 # Configure memory pools
 pipeline = VoirsPipeline.with_config(
@@ -457,7 +457,7 @@ check_memory_usage()
 ### Real-time Performance Metrics
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 import time
 
 class PerformanceMonitor:
@@ -509,7 +509,7 @@ print(f"Min/Max time: {stats['min_time']:.3f}s / {stats['max_time']:.3f}s")
 **Solution**: Use warmup synthesis or enable model pre-loading.
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 pipeline = VoirsPipeline.with_config(
     use_gpu=True,
@@ -530,7 +530,7 @@ audio = pipeline.synthesize("Hello, world!")
 **Solution**: Implement proper cleanup and use context managers.
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 # Bad: Memory leak potential
 pipeline = VoirsPipeline()
@@ -556,7 +556,7 @@ finally:
 **Solution**: Configure GPU memory limits and enable memory growth.
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 pipeline = VoirsPipeline.with_config(
     use_gpu=True,

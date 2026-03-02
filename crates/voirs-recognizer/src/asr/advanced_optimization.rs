@@ -538,7 +538,7 @@ impl ProgressivePruningOptimizer {
         let flat = magnitudes.flatten_all()?;
         let values: Vec<f32> = flat.to_vec1()?;
         let mut sorted_values = values;
-        sorted_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let threshold_index = (sorted_values.len() as f32 * ratio) as usize;
         let threshold = sorted_values.get(threshold_index).copied().unwrap_or(0.0);

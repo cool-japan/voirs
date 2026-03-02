@@ -418,7 +418,7 @@ mod tests {
             assert_eq!(result, VoirsErrorCode::Success);
 
             let info_str = std::ffi::CStr::from_ptr(buffer.as_ptr() as *const c_char);
-            let info = info_str.to_str().unwrap();
+            let info = info_str.to_str().unwrap_or_default();
             assert!(info.contains("Speed: 1.00"));
             assert!(info.contains("SR: 22050Hz"));
         }

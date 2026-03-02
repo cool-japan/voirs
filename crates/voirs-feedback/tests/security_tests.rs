@@ -400,10 +400,10 @@ mod privacy_tests {
                 assert!(message.contains("not allowed"));
             }
             Err(other_error) => {
-                assert!(false, "Expected ConfigError but got: {:?}", other_error);
+                panic!("Expected ConfigError but got: {:?}", other_error);
             }
             Ok(_) => {
-                assert!(false, "Expected ConfigError but operation succeeded");
+                panic!("Expected ConfigError but operation succeeded");
             }
         }
     }

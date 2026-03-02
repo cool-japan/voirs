@@ -789,7 +789,7 @@ impl GenderTransform {
 /// Multi-channel audio data structure with per-channel samples
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MultiChannelAudio {
-    /// Audio samples organized as [channel][sample]
+    /// Audio samples organized as \[channel\]\[sample\]
     pub channels: Vec<Vec<f32>>,
     /// Sample rate
     pub sample_rate: u32,

@@ -380,7 +380,10 @@ impl CloudScalingManager {
 
         // Update request statistics
         {
-            let mut stats = self.performance_stats.write().unwrap();
+            let mut stats = self
+                .performance_stats
+                .write()
+                .expect("lock should not be poisoned");
             stats.total_requests += 1;
         }
 
@@ -394,7 +397,10 @@ impl CloudScalingManager {
 
         // Update performance statistics
         {
-            let mut stats = self.performance_stats.write().unwrap();
+            let mut stats = self
+                .performance_stats
+                .write()
+                .expect("lock should not be poisoned");
             match &result {
                 Ok(_) => {
                     stats.successful_requests += 1;
@@ -421,7 +427,10 @@ impl CloudScalingManager {
 
         // Update scaling statistics
         {
-            let mut stats = self.performance_stats.write().unwrap();
+            let mut stats = self
+                .performance_stats
+                .write()
+                .expect("lock should not be poisoned");
             stats.scaling_events += 1;
             stats.instances_launched += target_instances as u64;
         }
@@ -441,7 +450,10 @@ impl CloudScalingManager {
 
         // Update scaling statistics
         {
-            let mut stats = self.performance_stats.write().unwrap();
+            let mut stats = self
+                .performance_stats
+                .write()
+                .expect("lock should not be poisoned");
             stats.scaling_events += 1;
             stats.instances_terminated += 1;
         }
@@ -468,7 +480,10 @@ impl CloudScalingManager {
 
         // Update disaster recovery statistics
         {
-            let mut stats = self.performance_stats.write().unwrap();
+            let mut stats = self
+                .performance_stats
+                .write()
+                .expect("lock should not be poisoned");
             stats.disaster_recovery_events += 1;
         }
 
@@ -477,12 +492,18 @@ impl CloudScalingManager {
 
     /// Get current cloud scaling statistics
     pub fn get_statistics(&self) -> CloudScalingStats {
-        self.performance_stats.read().unwrap().clone()
+        self.performance_stats
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Get region status information
     pub fn get_region_status(&self) -> HashMap<String, RegionStatus> {
-        self.region_status.read().unwrap().clone()
+        self.region_status
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Update scaling configuration
@@ -506,7 +527,10 @@ impl CloudScalingManager {
         }
 
         // Initialize region status
-        let mut region_status = self.region_status.write().unwrap();
+        let mut region_status = self
+            .region_status
+            .write()
+            .expect("lock should not be poisoned");
         region_status.insert(
             region.region_id.clone(),
             RegionStatus {
@@ -533,7 +557,7 @@ impl CloudScalingManager {
             region_id,
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
+                .expect("SystemTime should be after UNIX_EPOCH")
                 .as_secs()
         );
 

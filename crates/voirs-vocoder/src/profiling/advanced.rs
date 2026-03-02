@@ -342,10 +342,10 @@ impl ProfilingSession {
         metrics.total_time += total_latency;
 
         // Update latency statistics
-        if metrics.min_latency.is_none() || total_latency < metrics.min_latency.unwrap() {
+        if metrics.min_latency.is_none_or(|min| total_latency < min) {
             metrics.min_latency = Some(total_latency);
         }
-        if metrics.max_latency.is_none() || total_latency > metrics.max_latency.unwrap() {
+        if metrics.max_latency.is_none_or(|max| total_latency > max) {
             metrics.max_latency = Some(total_latency);
         }
 

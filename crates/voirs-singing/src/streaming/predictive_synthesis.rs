@@ -270,7 +270,10 @@ impl PredictiveSynthesisEngine {
 
     /// Get prediction statistics
     pub fn get_stats(&self) -> PredictionStats {
-        self.stats.lock().unwrap().clone()
+        self.stats
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Clear all cached notes

@@ -214,7 +214,7 @@ impl ForcedAlignModel {
 
             tracing::info!(
                 "Forced alignment model loaded in {:?}",
-                state.load_time.unwrap()
+                state.load_time.expect("load_time was just set to Some")
             );
         }
 
@@ -634,8 +634,12 @@ impl ForcedAlignModel {
                 continue; // Skip phonemes with no aligned frames
             }
 
-            let start_frame = *phoneme_frames[i].first().unwrap();
-            let end_frame = *phoneme_frames[i].last().unwrap();
+            let start_frame = *phoneme_frames[i]
+                .first()
+                .expect("phoneme_frames[i] is non-empty (checked above)");
+            let end_frame = *phoneme_frames[i]
+                .last()
+                .expect("phoneme_frames[i] is non-empty (checked above)");
 
             let start_time = start_frame as f32 * frame_duration;
             let end_time = (end_frame + 1) as f32 * frame_duration;
@@ -664,7 +668,10 @@ impl ForcedAlignModel {
             let word_alignment = WordAlignment {
                 word: "aligned_sequence".to_string(),
                 start_time: aligned_phonemes[0].start_time,
-                end_time: aligned_phonemes.last().unwrap().end_time,
+                end_time: aligned_phonemes
+                    .last()
+                    .expect("aligned_phonemes is non-empty (checked above)")
+                    .end_time,
                 phonemes: aligned_phonemes.clone(),
                 confidence: aligned_phonemes.iter().map(|p| p.confidence).sum::<f32>()
                     / aligned_phonemes.len() as f32,

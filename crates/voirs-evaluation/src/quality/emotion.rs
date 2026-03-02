@@ -709,7 +709,7 @@ impl EmotionalSpeechEvaluator {
         // Find best match
         let (predicted_emotion, confidence) = emotion_scores
             .iter()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(&emotion, &score)| (emotion, score))
             .unwrap_or((EmotionType::Neutral, 0.5));
 

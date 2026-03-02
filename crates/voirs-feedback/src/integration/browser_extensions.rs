@@ -627,7 +627,7 @@ impl BrowserExtensionManager {
             tab_id,
             SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .expect("value should be present")
                 .as_secs()
         );
 

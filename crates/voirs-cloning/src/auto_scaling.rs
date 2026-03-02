@@ -414,7 +414,10 @@ impl AutoScaler {
         }
 
         {
-            let mut active = self.monitoring_active.write().unwrap();
+            let mut active = self
+                .monitoring_active
+                .write()
+                .expect("lock should not be poisoned");
             *active = true;
         }
 
@@ -431,7 +434,10 @@ impl AutoScaler {
     /// Stop auto-scaling monitoring
     pub async fn stop_monitoring(&self) -> Result<()> {
         {
-            let mut active = self.monitoring_active.write().unwrap();
+            let mut active = self
+                .monitoring_active
+                .write()
+                .expect("lock should not be poisoned");
             *active = false;
         }
 
@@ -454,7 +460,10 @@ impl AutoScaler {
         tokio::spawn(async move {
             let monitoring_interval = Duration::from_secs(config.monitoring_interval_secs);
 
-            while *monitoring_active.read().unwrap() {
+            while *monitoring_active
+                .read()
+                .expect("lock should not be poisoned")
+            {
                 tokio::time::sleep(monitoring_interval).await;
 
                 // Collect current metrics
@@ -466,7 +475,9 @@ impl AutoScaler {
 
                     // Store metrics history
                     {
-                        let mut history = metrics_history.write().unwrap();
+                        let mut history = metrics_history
+                            .write()
+                            .expect("lock should not be poisoned");
                         history.push_back(snapshot.clone());
 
                         // Keep only recent history
@@ -499,7 +510,9 @@ impl AutoScaler {
                             {
                                 // Record scaling decision
                                 {
-                                    let mut history = scaling_history.write().unwrap();
+                                    let mut history = scaling_history
+                                        .write()
+                                        .expect("lock should not be poisoned");
                                     history.push_back(decision.clone());
 
                                     // Keep only recent history
@@ -513,7 +526,9 @@ impl AutoScaler {
 
                                 // Update last scaling time
                                 {
-                                    let mut last_time = last_scaling_time.write().unwrap();
+                                    let mut last_time = last_scaling_time
+                                        .write()
+                                        .expect("lock should not be poisoned");
                                     *last_time = SystemTime::now();
                                 }
 
@@ -528,7 +543,11 @@ impl AutoScaler {
 
     /// Ensure minimum number of instances are running
     async fn ensure_minimum_instances(&self) -> Result<()> {
-        let current_count = self.instances.read().unwrap().len();
+        let current_count = self
+            .instances
+            .read()
+            .expect("lock should not be poisoned")
+            .len();
 
         if current_count < self.config.min_instances {
             let instances_needed = self.config.min_instances - current_count;
@@ -574,7 +593,7 @@ impl AutoScaler {
         };
 
         {
-            let mut instances = self.instances.write().unwrap();
+            let mut instances = self.instances.write().expect("lock should not be poisoned");
             instances.insert(instance_id.clone(), instance);
         }
 
@@ -583,7 +602,7 @@ impl AutoScaler {
 
         // Update instance state to running
         {
-            let mut instances = self.instances.write().unwrap();
+            let mut instances = self.instances.write().expect("lock should not be poisoned");
             if let Some(instance) = instances.get_mut(&instance_id) {
                 instance.state = InstanceState::Running;
             }
@@ -596,7 +615,7 @@ impl AutoScaler {
     /// Terminate GPU instance
     async fn terminate_instance(&self, instance_id: &str) -> Result<()> {
         {
-            let mut instances = self.instances.write().unwrap();
+            let mut instances = self.instances.write().expect("lock should not be poisoned");
             if let Some(instance) = instances.get_mut(instance_id) {
                 instance.state = InstanceState::Terminating;
             }
@@ -606,7 +625,7 @@ impl AutoScaler {
         tokio::time::sleep(Duration::from_secs(2)).await;
 
         {
-            let mut instances = self.instances.write().unwrap();
+            let mut instances = self.instances.write().expect("lock should not be poisoned");
             instances.remove(instance_id);
         }
 
@@ -616,7 +635,7 @@ impl AutoScaler {
 
     /// Get next available device ID
     fn get_next_available_device_id(&self) -> usize {
-        let instances = self.instances.read().unwrap();
+        let instances = self.instances.read().expect("lock should not be poisoned");
         let used_devices: std::collections::HashSet<usize> = instances
             .values()
             .map(|instance| instance.device_id)
@@ -694,7 +713,9 @@ impl AutoScaler {
         scaling_events_count: &Arc<RwLock<VecDeque<SystemTime>>>,
     ) -> Result<ScalingDecision> {
         // Check cooldown period
-        let last_scaling = *last_scaling_time.read().unwrap();
+        let last_scaling = *last_scaling_time
+            .read()
+            .expect("lock should not be poisoned");
         let cooldown_duration = Duration::from_secs(config.cooldown_period_secs);
 
         if SystemTime::now()
@@ -716,7 +737,9 @@ impl AutoScaler {
 
         // Check rate limiting
         {
-            let mut events = scaling_events_count.write().unwrap();
+            let mut events = scaling_events_count
+                .write()
+                .expect("lock should not be poisoned");
             let one_hour_ago = SystemTime::now() - Duration::from_secs(3600);
 
             // Remove old events
@@ -802,7 +825,7 @@ impl AutoScaler {
                 threshold,
                 duration_secs,
             } => {
-                let history = metrics_history.read().unwrap();
+                let history = metrics_history.read().expect("lock should not be poisoned");
                 let cutoff_time = SystemTime::now() - Duration::from_secs(*duration_secs);
 
                 let sustained = history
@@ -823,7 +846,7 @@ impl AutoScaler {
                 threshold,
                 duration_secs,
             } => {
-                let history = metrics_history.read().unwrap();
+                let history = metrics_history.read().expect("lock should not be poisoned");
                 let cutoff_time = SystemTime::now() - Duration::from_secs(*duration_secs);
 
                 let sustained = history
@@ -837,7 +860,7 @@ impl AutoScaler {
                 threshold,
                 duration_secs,
             } => {
-                let history = metrics_history.read().unwrap();
+                let history = metrics_history.read().expect("lock should not be poisoned");
                 let cutoff_time = SystemTime::now() - Duration::from_secs(*duration_secs);
 
                 let sustained = history
@@ -851,7 +874,7 @@ impl AutoScaler {
                 threshold,
                 duration_secs,
             } => {
-                let history = metrics_history.read().unwrap();
+                let history = metrics_history.read().expect("lock should not be poisoned");
                 let cutoff_time = SystemTime::now() - Duration::from_secs(*duration_secs);
 
                 let sustained = history
@@ -946,7 +969,7 @@ impl AutoScaler {
                 for _ in 0..decision.instance_delta {
                     // In a real implementation, this would launch actual GPU instances
                     let instance_id = uuid::Uuid::new_v4().to_string();
-                    let device_id = instances.read().unwrap().len();
+                    let device_id = instances.read().expect("lock should not be poisoned").len();
 
                     let instance = ScalableGpuInstance {
                         instance_id: instance_id.clone(),
@@ -960,13 +983,16 @@ impl AutoScaler {
                         health_status: InstanceHealth::Healthy,
                     };
 
-                    instances.write().unwrap().insert(instance_id, instance);
+                    instances
+                        .write()
+                        .expect("lock should not be poisoned")
+                        .insert(instance_id, instance);
                 }
             }
             ScalingAction::ScaleDown | ScalingAction::PreemptiveScaleDown => {
                 // Terminate instances
                 let instances_to_terminate: Vec<String> = {
-                    let instances_lock = instances.read().unwrap();
+                    let instances_lock = instances.read().expect("lock should not be poisoned");
                     instances_lock
                         .values()
                         .filter(|instance| instance.state == InstanceState::Running)
@@ -976,7 +1002,10 @@ impl AutoScaler {
                 };
 
                 for instance_id in instances_to_terminate {
-                    instances.write().unwrap().remove(&instance_id);
+                    instances
+                        .write()
+                        .expect("lock should not be poisoned")
+                        .remove(&instance_id);
                 }
             }
             ScalingAction::NoAction => {
@@ -992,7 +1021,7 @@ impl AutoScaler {
         stats: &Arc<RwLock<AutoScalingStats>>,
         decision: &ScalingDecision,
     ) {
-        let mut stats_lock = stats.write().unwrap();
+        let mut stats_lock = stats.write().expect("lock should not be poisoned");
 
         stats_lock.total_scaling_events += 1;
 
@@ -1016,19 +1045,25 @@ impl AutoScaler {
 
     /// Get current auto-scaling statistics
     pub fn get_statistics(&self) -> AutoScalingStats {
-        self.stats.read().unwrap().clone()
+        self.stats
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Get current instances
     pub fn get_instances(&self) -> HashMap<String, ScalableGpuInstance> {
-        self.instances.read().unwrap().clone()
+        self.instances
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Get scaling history
     pub fn get_scaling_history(&self) -> Vec<ScalingDecision> {
         self.scaling_history
             .read()
-            .unwrap()
+            .expect("lock should not be poisoned")
             .iter()
             .cloned()
             .collect()
@@ -1036,7 +1071,10 @@ impl AutoScaler {
 
     /// Generate workload prediction
     pub fn predict_workload(&self, prediction_window: Duration) -> WorkloadPrediction {
-        let history = self.metrics_history.read().unwrap();
+        let history = self
+            .metrics_history
+            .read()
+            .expect("lock should not be poisoned");
 
         if history.is_empty() {
             return WorkloadPrediction {
@@ -1164,7 +1202,11 @@ mod tests {
     fn test_auto_scaler_creation() {
         let auto_scaler = AutoScaler::new_default();
         assert_eq!(auto_scaler.config.strategy, AutoScalingStrategy::Balanced);
-        assert!(auto_scaler.instances.read().unwrap().is_empty());
+        assert!(auto_scaler
+            .instances
+            .read()
+            .expect("lock should not be poisoned")
+            .is_empty());
     }
 
     #[test]

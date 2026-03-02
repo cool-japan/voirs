@@ -782,7 +782,7 @@ impl EnterpriseSecurityManager {
         let keys = self.encryption_keys.read().await;
         let expired_keys = keys
             .values()
-            .filter(|k| k.expires_at.map_or(false, |exp| exp < Utc::now()))
+            .filter(|k| k.expires_at.is_some_and(|exp| exp < Utc::now()))
             .count();
 
         if expired_keys > 0 {

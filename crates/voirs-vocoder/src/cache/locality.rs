@@ -261,7 +261,7 @@ pub struct LocalityAnalysis {
     /// Total number of memory accesses analyzed
     pub total_accesses: usize,
 
-    /// Number of sequential accesses (addr[i+1] = addr[i] + 1)
+    /// Number of sequential accesses (addr\[i+1\] = addr\[i\] + 1)
     pub sequential_accesses: usize,
 
     /// Number of accesses within the same cache line

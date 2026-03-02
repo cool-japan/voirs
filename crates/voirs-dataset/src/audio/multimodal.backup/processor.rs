@@ -1074,9 +1074,9 @@ impl MultiModalProcessor for DefaultMultiModalProcessor {
             cross_correlation
                 .iter()
                 .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                 .map(|(i, &v)| (i, v))
-                .unwrap()
+                .expect("checked non-empty above")
         };
 
         // Convert index to time offset (assuming 100ms resolution)

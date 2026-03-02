@@ -138,7 +138,7 @@ pub fn simd_normalize_inplace(vec: &mut [f32]) {
         let normalized = f32::simd_scalar_mul(&arr.view(), inv_norm);
 
         // Copy results back to original vec
-        vec.copy_from_slice(normalized.as_slice().unwrap());
+        vec.copy_from_slice(normalized.as_slice().expect("Array1 should be contiguous"));
     }
 }
 

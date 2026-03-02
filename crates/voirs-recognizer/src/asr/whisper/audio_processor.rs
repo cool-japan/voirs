@@ -166,7 +166,7 @@ impl WhisperAudioProcessor {
     /// # Errors
     ///
     /// Returns `RecognitionError` if audio processing fails.
-    /// See [`process_audio`] for detailed error conditions.
+    /// See `process_audio` for detailed error conditions.
     pub async fn extract_mel_features(
         &self,
         audio: &AudioBuffer,

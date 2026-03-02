@@ -42,9 +42,9 @@ class ConsistencyTestFramework:
         try:
             # Import VoiRS Python bindings
             sys.path.insert(0, str(self.test_dir.parent.parent))
-            import voirs_ffi
+            import voirs
             
-            pipeline = voirs_ffi.VoirsPipeline()
+            pipeline = voirs.VoirsPipeline()
             
             # Basic synthesis test
             if test_name == "basic_synthesis":
@@ -320,7 +320,7 @@ console.log(JSON.stringify({{
                 'gcc', '-o', str(executable), str(test_program),
                 '-I', str(self.test_dir.parent.parent / 'src'),
                 '-L', str(self.test_dir.parent.parent / 'target/release'),
-                '-lvoirs_ffi'
+                '-lvoirs'
             ], capture_output=True, text=True)
             
             if compile_result.returncode != 0:
@@ -358,7 +358,7 @@ console.log(JSON.stringify({{
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "voirs_ffi.h"
+#include "voirs.h"
 
 int main() {{
     VoirsPipeline* pipeline = voirs_pipeline_new(NULL);
@@ -390,7 +390,7 @@ int main() {{
             return f"""
 #include <stdio.h>
 #include <stdlib.h>
-#include "voirs_ffi.h"
+#include "voirs.h"
 
 int main() {{
     VoirsPipeline* pipeline = voirs_pipeline_new(NULL);

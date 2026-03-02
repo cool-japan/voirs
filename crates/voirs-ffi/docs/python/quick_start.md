@@ -7,20 +7,20 @@ Get up and running with VoiRS Python bindings in just a few minutes.
 ### Basic Installation
 
 ```bash
-pip install voirs-ffi
+pip install voirs
 ```
 
 ### With Optional Dependencies
 
 ```bash
 # For NumPy support (recommended)
-pip install voirs-ffi[numpy]
+pip install voirs[numpy]
 
 # For GPU acceleration (requires CUDA)
-pip install voirs-ffi[gpu]
+pip install voirs[gpu]
 
 # Full installation
-pip install voirs-ffi[all]
+pip install voirs[all]
 ```
 
 ## Basic Usage
@@ -28,7 +28,7 @@ pip install voirs-ffi[all]
 ### 1. Simple Text-to-Speech
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 # Create a pipeline
 pipeline = VoirsPipeline()
@@ -43,7 +43,7 @@ audio.save("hello.wav")
 ### 2. Using Convenience Functions
 
 ```python
-from voirs_ffi import synthesize_text
+from voirs import synthesize_text
 
 # Quick synthesis
 audio = synthesize_text("Hello, world!")
@@ -53,7 +53,7 @@ audio.save("hello.wav")
 ### 3. Play Audio Directly
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 pipeline = VoirsPipeline()
 audio = pipeline.synthesize("Hello, world!")
@@ -67,7 +67,7 @@ audio.play()
 ### Basic Configuration
 
 ```python
-from voirs_ffi import VoirsPipeline, SynthesisConfig
+from voirs import VoirsPipeline, SynthesisConfig
 
 # Create custom configuration
 config = SynthesisConfig(
@@ -85,7 +85,7 @@ pipeline = VoirsPipeline(config)
 ### Using Keyword Arguments
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 # More convenient configuration
 pipeline = VoirsPipeline.with_config(
@@ -102,7 +102,7 @@ pipeline = VoirsPipeline.with_config(
 ### List Available Voices
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 pipeline = VoirsPipeline()
 
@@ -122,7 +122,7 @@ for voice in voices:
 ### Set Default Voice
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 pipeline = VoirsPipeline()
 
@@ -136,7 +136,7 @@ audio = pipeline.synthesize("Hello, world!")
 ### Use Voice for Single Synthesis
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 pipeline = VoirsPipeline()
 
@@ -149,7 +149,7 @@ audio = pipeline.synthesize("Hello, world!", voice="female-1")
 ### Basic Audio Operations
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 pipeline = VoirsPipeline()
 audio = pipeline.synthesize("Hello, world!")
@@ -170,7 +170,7 @@ audio.normalize()
 
 ```python
 import numpy as np
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 pipeline = VoirsPipeline()
 audio = pipeline.synthesize("Hello, world!")
@@ -190,7 +190,7 @@ processed = np.fft.fft(audio_array)
 ### Basic SSML
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 pipeline = VoirsPipeline()
 
@@ -209,7 +209,7 @@ audio.save("ssml_output.wav")
 ### Advanced SSML
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 pipeline = VoirsPipeline()
 
@@ -235,7 +235,7 @@ audio.save("advanced_ssml.wav")
 ### Basic Error Handling
 
 ```python
-from voirs_ffi import VoirsPipeline, VoirsError
+from voirs import VoirsPipeline, VoirsError
 
 try:
     pipeline = VoirsPipeline()
@@ -250,7 +250,7 @@ except Exception as e:
 ### Specific Error Types
 
 ```python
-from voirs_ffi import (
+from voirs import (
     VoirsPipeline, 
     VoirsError, 
     SynthesisError,
@@ -274,7 +274,7 @@ except VoirsError as e:
 ### GPU Acceleration
 
 ```python
-from voirs_ffi import VoirsPipeline, check_compatibility
+from voirs import VoirsPipeline, check_compatibility
 
 # Check if GPU is available
 info = check_compatibility()
@@ -289,7 +289,7 @@ else:
 ### Threading Configuration
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 import multiprocessing
 
 # Use all available CPU cores
@@ -300,7 +300,7 @@ pipeline = VoirsPipeline.with_config(num_threads=num_cores)
 ### Quality vs Speed
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 # Fast synthesis (lower quality)
 fast_pipeline = VoirsPipeline.with_config(quality="low")
@@ -314,7 +314,7 @@ quality_pipeline = VoirsPipeline.with_config(quality="high")
 ### Supported Output Formats
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 pipeline = VoirsPipeline()
 audio = pipeline.synthesize("Hello, world!")
@@ -329,7 +329,7 @@ audio.save("output.ogg", format="ogg")
 ### Format-Specific Options
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 pipeline = VoirsPipeline()
 audio = pipeline.synthesize("Hello, world!")
@@ -359,7 +359,7 @@ audio.save("output.mp3", format="mp3", bitrate=320)
 ### Check System Compatibility
 
 ```python
-from voirs_ffi import check_compatibility
+from voirs import check_compatibility
 import json
 
 info = check_compatibility()
@@ -380,7 +380,7 @@ print(json.dumps(info, indent=2))
 If you get import errors, ensure the package is installed correctly:
 
 ```bash
-pip install --upgrade voirs-ffi
+pip install --upgrade voirs
 ```
 
 ### Audio Playback Issues

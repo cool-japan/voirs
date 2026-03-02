@@ -504,18 +504,26 @@ fn generate_comparison_report(results: &[BenchmarkResult], global: &GlobalOption
     println!("==================");
 
     // Find best performers
-    let fastest = results
-        .iter()
-        .min_by(|a, b| a.real_time_factor.partial_cmp(&b.real_time_factor).unwrap());
-    let most_reliable = results
-        .iter()
-        .max_by(|a, b| a.success_rate.partial_cmp(&b.success_rate).unwrap());
-    let highest_quality = results
-        .iter()
-        .max_by(|a, b| a.quality_score.partial_cmp(&b.quality_score).unwrap());
-    let most_efficient = results
-        .iter()
-        .min_by(|a, b| a.memory_usage_mb.partial_cmp(&b.memory_usage_mb).unwrap());
+    let fastest = results.iter().min_by(|a, b| {
+        a.real_time_factor
+            .partial_cmp(&b.real_time_factor)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let most_reliable = results.iter().max_by(|a, b| {
+        a.success_rate
+            .partial_cmp(&b.success_rate)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let highest_quality = results.iter().max_by(|a, b| {
+        a.quality_score
+            .partial_cmp(&b.quality_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let most_efficient = results.iter().min_by(|a, b| {
+        a.memory_usage_mb
+            .partial_cmp(&b.memory_usage_mb)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     if let Some(model) = fastest {
         println!(

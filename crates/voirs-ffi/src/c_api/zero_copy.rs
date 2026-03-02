@@ -475,7 +475,7 @@ pub unsafe extern "C" fn voirs_memory_map_advise_random(
 /// The `sources` pointer must point to an array of `count` valid read-only float pointers.
 /// The `destinations` pointer must point to an array of `count` valid mutable float pointers.
 /// The `sizes` pointer must point to an array of `count` valid size values.
-/// Each source[i] must point to at least sizes[i] floats, and each destination[i] must have space for sizes[i] floats.
+/// Each source\[i\] must point to at least sizes\[i\] floats, and each destination\[i\] must have space for sizes\[i\] floats.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_zero_copy_batch_copy(
     sources: *const *const c_float,

@@ -280,7 +280,8 @@ impl ConversionModel {
     /// Create model with custom configuration
     pub fn with_config(model_type: ModelType, config: ModelConfig) -> Self {
         let device = Device::Cpu; // Default to CPU, can be changed later
-        let network = Self::create_network(model_type, &config, &device).unwrap();
+        let network =
+            Self::create_network(model_type, &config, &device).expect("operation should succeed");
 
         Self {
             model_type,

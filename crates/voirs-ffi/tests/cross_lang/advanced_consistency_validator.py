@@ -243,7 +243,7 @@ class AdvancedConsistencyValidator:
         """Setup available bindings for testing."""
         # Python bindings
         try:
-            import voirs_ffi as voirs
+            import voirs
             self.bindings['python'] = {
                 'module': voirs,
                 'available': True,

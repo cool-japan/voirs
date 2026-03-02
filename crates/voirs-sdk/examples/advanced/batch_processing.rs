@@ -45,43 +45,43 @@ async fn main() -> Result<()> {
 
     // Example 1: Basic batch processing
     println!("Example 1: Basic Batch Processing");
-    println!("-".repeat(60));
+    println!("{}", "-".repeat(60));
     basic_batch_processing(&pipeline).await?;
     println!();
 
     // Example 2: Priority-based processing
     println!("Example 2: Priority-Based Processing");
-    println!("-".repeat(60));
+    println!("{}", "-".repeat(60));
     priority_batch_processing(&pipeline).await?;
     println!();
 
     // Example 3: Custom speed and pitch parameters
     println!("Example 3: Custom Speed and Pitch Parameters");
-    println!("-".repeat(60));
+    println!("{}", "-".repeat(60));
     custom_parameters_batch(&pipeline).await?;
     println!();
 
     // Example 4: Voice switching in batch mode
     println!("Example 4: Voice Switching in Batch Mode");
-    println!("-".repeat(60));
+    println!("{}", "-".repeat(60));
     voice_switching_batch(&pipeline).await?;
     println!();
 
     // Example 5: Different scheduling strategies
     println!("Example 5: Scheduling Strategy Comparison");
-    println!("-".repeat(60));
+    println!("{}", "-".repeat(60));
     scheduling_strategies_comparison(&pipeline).await?;
     println!();
 
     // Example 6: Progress tracking
     println!("Example 6: Real-Time Progress Tracking");
-    println!("-".repeat(60));
+    println!("{}", "-".repeat(60));
     progress_tracking_batch(&pipeline).await?;
     println!();
 
     // Example 7: Large-scale batch processing
     println!("Example 7: Large-Scale Batch Processing");
-    println!("-".repeat(60));
+    println!("{}", "-".repeat(60));
     large_scale_batch(&pipeline).await?;
     println!();
 
@@ -119,20 +119,30 @@ async fn basic_batch_processing(pipeline: &Arc<VoirsPipeline>) -> Result<()> {
     // Display results
     println!("\nResults:");
     println!("  Total requests: {}", results.len());
-    println!("  Successful: {}", results.iter().filter(|r| r.is_success()).count());
-    println!("  Failed: {}", results.iter().filter(|r| !r.is_success()).count());
+    println!(
+        "  Successful: {}",
+        results.iter().filter(|r| r.is_success()).count()
+    );
+    println!(
+        "  Failed: {}",
+        results.iter().filter(|r| !r.is_success()).count()
+    );
     println!("  Total time: {:.2}s", duration.as_secs_f64());
-    println!("  Average time per request: {:.2}ms",
-             duration.as_millis() as f64 / results.len() as f64);
+    println!(
+        "  Average time per request: {:.2}ms",
+        duration.as_millis() as f64 / results.len() as f64
+    );
 
     // Display individual results
     for (idx, result) in results.iter().enumerate() {
         if let Some(audio) = result.audio() {
-            println!("  Request {}: {} samples, {:.2}s audio, processed in {:.2}ms",
-                     idx + 1,
-                     audio.len(),
-                     audio.duration(),
-                     result.processing_time.as_millis());
+            println!(
+                "  Request {}: {} samples, {:.2}s audio, processed in {:.2}ms",
+                idx + 1,
+                audio.len(),
+                audio.duration(),
+                result.processing_time.as_millis()
+            );
         } else if let Some(error) = result.error() {
             println!("  Request {}: Failed - {}", idx + 1, error);
         }
@@ -151,7 +161,7 @@ async fn priority_batch_processing(pipeline: &Arc<VoirsPipeline>) -> Result<()> 
     println!("Processing batch with different priorities...");
 
     let config = BatchConfig {
-        scheduling_strategy: SchedulingStrategy::Priority,
+        scheduling_strategy: SchedulingStrategy::PriorityBased,
         ..Default::default()
     };
 
@@ -168,16 +178,23 @@ async fn priority_batch_processing(pipeline: &Arc<VoirsPipeline>) -> Result<()> 
 
     println!("Request priorities:");
     for (idx, req) in requests.iter().enumerate() {
-        println!("  Request {}: priority {} - \"{}\"",
-                 idx + 1, req.priority, &req.text[..req.text.len().min(30)]);
+        println!(
+            "  Request {}: priority {} - \"{}\"",
+            idx + 1,
+            req.priority,
+            &req.text[..req.text.len().min(30)]
+        );
     }
 
     let results = processor.process(requests).await?;
 
     println!("\nProcessing order (by worker assignment):");
     for (idx, result) in results.iter().enumerate() {
-        println!("  Processed request {}: {:.2}ms",
-                 idx + 1, result.processing_time.as_millis());
+        println!(
+            "  Processed request {}: {:.2}ms",
+            idx + 1,
+            result.processing_time.as_millis()
+        );
     }
 
     Ok(())
@@ -225,10 +242,12 @@ async fn custom_parameters_batch(pipeline: &Arc<VoirsPipeline>) -> Result<()> {
     println!("\nResults:");
     for (idx, result) in results.iter().enumerate() {
         if let Some(audio) = result.audio() {
-            println!("  Request {}: {:.2}s audio, {:.2}ms processing",
-                     idx + 1,
-                     audio.duration(),
-                     result.processing_time.as_millis());
+            println!(
+                "  Request {}: {:.2}s audio, {:.2}ms processing",
+                idx + 1,
+                audio.duration(),
+                result.processing_time.as_millis()
+            );
         }
     }
 
@@ -253,20 +272,31 @@ async fn voice_switching_batch(pipeline: &Arc<VoirsPipeline>) -> Result<()> {
 
     println!("Voice assignments:");
     for (idx, req) in requests.iter().enumerate() {
-        println!("  Request {}: {} - \"{}\"",
-                 idx + 1,
-                 req.voice.as_deref().unwrap_or("default"),
-                 &req.text[..req.text.len().min(30)]);
+        println!(
+            "  Request {}: {} - \"{}\"",
+            idx + 1,
+            req.voice.as_deref().unwrap_or("default"),
+            &req.text[..req.text.len().min(30)]
+        );
     }
 
     let results = processor.process(requests).await?;
 
     println!("\nResults:");
     for (idx, result) in results.iter().enumerate() {
-        println!("  Request {}: {} (worker: {})",
-                 idx + 1,
-                 if result.is_success() { "Success" } else { "Failed" },
-                 result.worker_id.map(|id| id.to_string()).unwrap_or_else(|| "N/A".to_string()));
+        println!(
+            "  Request {}: {} (worker: {})",
+            idx + 1,
+            if result.is_success() {
+                "Success"
+            } else {
+                "Failed"
+            },
+            result
+                .worker_id
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "N/A".to_string())
+        );
     }
 
     Ok(())
@@ -293,8 +323,8 @@ async fn scheduling_strategies_comparison(pipeline: &Arc<VoirsPipeline>) -> Resu
     .collect();
 
     let strategies = vec![
-        ("FIFO (First In, First Out)", SchedulingStrategy::Fifo),
-        ("Priority-Based", SchedulingStrategy::Priority),
+        ("FIFO (First In, First Out)", SchedulingStrategy::FIFO),
+        ("Priority-Based", SchedulingStrategy::PriorityBased),
         ("Load Balanced", SchedulingStrategy::LoadBalanced),
         ("Shortest Job First", SchedulingStrategy::ShortestFirst),
         ("Adaptive", SchedulingStrategy::Adaptive),
@@ -316,8 +346,8 @@ async fn scheduling_strategies_comparison(pipeline: &Arc<VoirsPipeline>) -> Resu
         let stats = processor.statistics().await;
 
         println!("  Total time: {:.2}ms", duration.as_millis());
-        println!("  Throughput: {:.2} req/s", stats.throughput);
-        println!("  Success rate: {:.1}%", stats.success_rate * 100.0);
+        println!("  Throughput: {:.2} req/s", stats.throughput());
+        println!("  Success rate: {:.1}%", stats.success_rate() * 100.0);
         println!();
     }
 
@@ -333,8 +363,6 @@ async fn progress_tracking_batch(pipeline: &Arc<VoirsPipeline>) -> Result<()> {
         ..Default::default()
     };
 
-    let processor = BatchProcessor::new(Arc::clone(pipeline), config);
-
     // Create a larger batch for visible progress
     let requests: Vec<_> = (0..20)
         .map(|i| BatchRequest::new(format!("Request number {}", i + 1), None))
@@ -342,23 +370,30 @@ async fn progress_tracking_batch(pipeline: &Arc<VoirsPipeline>) -> Result<()> {
 
     println!("Starting batch of {} requests...", requests.len());
 
-    // Set up progress callback
-    let progress_callback = Arc::new(|completed: usize, total: usize| {
-        let percent = (completed as f64 / total as f64) * 100.0;
-        println!("  Progress: {}/{} ({:.1}%)", completed, total, percent);
-    });
-
-    // Process with progress tracking
-    let processor_with_progress = processor.with_progress_callback(progress_callback);
+    // Process with progress callback
+    let processor_with_progress = BatchProcessor::with_progress(
+        Arc::clone(pipeline),
+        config,
+        |completed: usize, total: usize| {
+            let percent = (completed as f64 / total as f64) * 100.0;
+            println!("  Progress: {}/{} ({:.1}%)", completed, total, percent);
+        },
+    );
     let results = processor_with_progress.process(requests).await?;
 
     println!("\nBatch completed!");
-    println!("  Successful: {}", results.iter().filter(|r| r.is_success()).count());
-    println!("  Total audio duration: {:.2}s",
-             results.iter()
-                 .filter_map(|r| r.audio())
-                 .map(|a| a.duration())
-                 .sum::<f64>());
+    println!(
+        "  Successful: {}",
+        results.iter().filter(|r| r.is_success()).count()
+    );
+    println!(
+        "  Total audio duration: {:.2}s",
+        results
+            .iter()
+            .filter_map(|r| r.audio())
+            .map(|a| a.duration() as f64)
+            .sum::<f64>()
+    );
 
     Ok(())
 }
@@ -397,28 +432,43 @@ async fn large_scale_batch(pipeline: &Arc<VoirsPipeline>) -> Result<()> {
 
     println!("\nLarge-Scale Batch Results:");
     println!("  Total requests: {}", results.len());
-    println!("  Successful: {}", results.iter().filter(|r| r.is_success()).count());
-    println!("  Failed: {}", results.iter().filter(|r| !r.is_success()).count());
+    println!(
+        "  Successful: {}",
+        results.iter().filter(|r| r.is_success()).count()
+    );
+    println!(
+        "  Failed: {}",
+        results.iter().filter(|r| !r.is_success()).count()
+    );
     println!("  Total time: {:.2}s", duration.as_secs_f64());
-    println!("  Throughput: {:.2} requests/second", stats.throughput);
-    println!("  Average processing time: {:.2}ms", stats.average_processing_time.as_millis());
-    println!("  Success rate: {:.1}%", stats.success_rate * 100.0);
+    println!("  Throughput: {:.2} requests/second", stats.throughput());
+    println!(
+        "  Average processing time: {:.2}ms",
+        stats.avg_time_per_request.as_secs_f64() * 1000.0
+    );
+    println!("  Success rate: {:.1}%", stats.success_rate() * 100.0);
 
     // Worker metrics
     println!("\nWorker Performance:");
     for (worker_id, metrics) in &stats.worker_metrics {
-        println!("  Worker {}: {} requests, {:.2}ms avg time",
-                 worker_id,
-                 metrics.requests_processed,
-                 metrics.total_time.as_millis() as f64 / metrics.requests_processed.max(1) as f64);
+        println!(
+            "  Worker {}: {} requests, {:.2}ms avg time",
+            worker_id,
+            metrics.requests_processed,
+            metrics.total_time.as_secs_f64() * 1000.0 / metrics.requests_processed.max(1) as f64
+        );
     }
 
     // Total audio produced
-    let total_audio_duration: f64 = results.iter()
+    let total_audio_duration: f64 = results
+        .iter()
         .filter_map(|r| r.audio())
-        .map(|a| a.duration())
+        .map(|a| a.duration() as f64)
         .sum();
-    println!("\n  Total audio produced: {:.2} seconds", total_audio_duration);
+    println!(
+        "\n  Total audio produced: {:.2} seconds",
+        total_audio_duration
+    );
 
     Ok(())
 }

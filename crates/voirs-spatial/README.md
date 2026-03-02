@@ -76,5 +76,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## 📄 License
 
-Licensed under MIT or Apache-2.0 at your option.
+Licensed under the Apache License, Version 2.0.
 

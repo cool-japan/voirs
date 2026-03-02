@@ -689,7 +689,7 @@ redis==5.0.1
 celery==5.3.4
 pydantic==2.5.0
 aiofiles==23.2.1
-voirs-ffi==0.1.0
+voirs==0.1.0
 ```
 
 #### FastAPI Server (main.py)
@@ -707,7 +707,7 @@ import time
 import json
 import base64
 from contextlib import asynccontextmanager
-import voirs_ffi
+import voirs
 
 # Pydantic models
 class SynthesisRequest(BaseModel):
@@ -747,10 +747,10 @@ app_state = AppState()
 async def lifespan(app: FastAPI):
     # Startup
     print("Initializing VoiRS engine...")
-    app_state.voirs_engine = voirs_ffi.Engine()
+    app_state.voirs_engine = voirs.Engine()
     
-    config = voirs_ffi.SynthesisConfig(
-        quality=voirs_ffi.Quality.HIGH,
+    config = voirs.SynthesisConfig(
+        quality=voirs.Quality.HIGH,
         thread_count=4
     )
     
@@ -797,7 +797,7 @@ async def health_check():
 async def get_voices():
     """Get list of available voices"""
     try:
-        voices = voirs_ffi.get_available_voices()
+        voices = voirs.get_available_voices()
         return {"voices": voices}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -810,12 +810,12 @@ async def synthesize_text(request: SynthesisRequest):
     
     try:
         # Convert request to VoiRS config
-        config = voirs_ffi.SynthesisConfig(
-            quality=getattr(voirs_ffi.Quality, request.quality.upper()),
+        config = voirs.SynthesisConfig(
+            quality=getattr(voirs.Quality, request.quality.upper()),
             speed=request.speed,
             volume=request.volume,
             voice_id=request.voice_id,
-            output_format=getattr(voirs_ffi.Format, request.format.upper())
+            output_format=getattr(voirs.Format, request.format.upper())
         )
         
         # Perform synthesis
@@ -955,12 +955,12 @@ async def handle_websocket_synthesis(websocket: WebSocket, message: dict):
         }))
         
         # Create synthesis config
-        voirs_config = voirs_ffi.SynthesisConfig(
-            quality=getattr(voirs_ffi.Quality, config.get("quality", "HIGH")),
+        voirs_config = voirs.SynthesisConfig(
+            quality=getattr(voirs.Quality, config.get("quality", "HIGH")),
             speed=config.get("speed", 1.0),
             volume=config.get("volume", 1.0),
             voice_id=config.get("voice_id", "default"),
-            output_format=getattr(voirs_ffi.Format, config.get("format", "MP3"))
+            output_format=getattr(voirs.Format, config.get("format", "MP3"))
         )
         
         # Perform synthesis
@@ -1000,15 +1000,15 @@ async def process_batch(batch_id: str, texts: List[str], config: Optional[Synthe
     try:
         # Create synthesis config
         if config:
-            voirs_config = voirs_ffi.SynthesisConfig(
-                quality=getattr(voirs_ffi.Quality, config.quality.upper()),
+            voirs_config = voirs.SynthesisConfig(
+                quality=getattr(voirs.Quality, config.quality.upper()),
                 speed=config.speed,
                 volume=config.volume,
                 voice_id=config.voice_id,
-                output_format=getattr(voirs_ffi.Format, config.format.upper())
+                output_format=getattr(voirs.Format, config.format.upper())
             )
         else:
-            voirs_config = voirs_ffi.SynthesisConfig()
+            voirs_config = voirs.SynthesisConfig()
         
         # Process each text
         for i, text in enumerate(texts):
@@ -1083,7 +1083,7 @@ if __name__ == "__main__":
 from flask import Flask, request, jsonify, send_file, stream_template
 from flask_cors import CORS
 from werkzeug.exceptions import BadRequest, InternalServerError
-import voirs_ffi
+import voirs
 import io
 import base64
 import uuid
@@ -1116,7 +1116,7 @@ class VoiRSFlaskApp:
         @self.app.route('/api/voices', methods=['GET'])
         def get_voices():
             try:
-                voices = voirs_ffi.get_available_voices()
+                voices = voirs.get_available_voices()
                 return jsonify({'voices': voices})
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
@@ -1135,12 +1135,12 @@ class VoiRSFlaskApp:
                 return jsonify({'error': 'Text too long (max 10,000 characters)'}), 400
             
             try:
-                config = voirs_ffi.SynthesisConfig(
-                    quality=getattr(voirs_ffi.Quality, data.get('quality', 'HIGH')),
+                config = voirs.SynthesisConfig(
+                    quality=getattr(voirs.Quality, data.get('quality', 'HIGH')),
                     speed=data.get('speed', 1.0),
                     volume=data.get('volume', 1.0),
                     voice_id=data.get('voice_id', 'default'),
-                    output_format=getattr(voirs_ffi.Format, data.get('format', 'MP3'))
+                    output_format=getattr(voirs.Format, data.get('format', 'MP3'))
                 )
                 
                 result = self.voirs_engine.synthesize(text, config)
@@ -1172,12 +1172,12 @@ class VoiRSFlaskApp:
                 return jsonify({'error': 'Text is required'}), 400
             
             try:
-                config = voirs_ffi.SynthesisConfig(
-                    quality=getattr(voirs_ffi.Quality, data.get('quality', 'HIGH')),
+                config = voirs.SynthesisConfig(
+                    quality=getattr(voirs.Quality, data.get('quality', 'HIGH')),
                     speed=data.get('speed', 1.0),
                     volume=data.get('volume', 1.0),
                     voice_id=data.get('voice_id', 'default'),
-                    output_format=getattr(voirs_ffi.Format, data.get('format', 'MP3'))
+                    output_format=getattr(voirs.Format, data.get('format', 'MP3'))
                 )
                 
                 result = self.voirs_engine.synthesize(data['text'], config)
@@ -1269,8 +1269,8 @@ class VoiRSFlaskApp:
                 try:
                     yield f"data: {json.dumps({'type': 'start', 'message': 'Starting synthesis'})}\n\n"
                     
-                    config = voirs_ffi.SynthesisConfig(
-                        quality=getattr(voirs_ffi.Quality, request.args.get('quality', 'HIGH')),
+                    config = voirs.SynthesisConfig(
+                        quality=getattr(voirs.Quality, request.args.get('quality', 'HIGH')),
                         voice_id=request.args.get('voice_id', 'default')
                     )
                     
@@ -1314,12 +1314,12 @@ class VoiRSFlaskApp:
     def process_batch(self, batch_id, texts, config):
         """Process batch synthesis in background thread"""
         try:
-            voirs_config = voirs_ffi.SynthesisConfig(
-                quality=getattr(voirs_ffi.Quality, config.get('quality', 'HIGH')),
+            voirs_config = voirs.SynthesisConfig(
+                quality=getattr(voirs.Quality, config.get('quality', 'HIGH')),
                 speed=config.get('speed', 1.0),
                 volume=config.get('volume', 1.0),
                 voice_id=config.get('voice_id', 'default'),
-                output_format=getattr(voirs_ffi.Format, config.get('format', 'MP3'))
+                output_format=getattr(voirs.Format, config.get('format', 'MP3'))
             )
             
             for i, text in enumerate(texts):
@@ -1393,9 +1393,9 @@ class VoiRSFlaskApp:
     def initialize_voirs(self):
         """Initialize VoiRS engine"""
         try:
-            self.voirs_engine = voirs_ffi.Engine()
-            config = voirs_ffi.SynthesisConfig(
-                quality=voirs_ffi.Quality.HIGH,
+            self.voirs_engine = voirs.Engine()
+            config = voirs.SynthesisConfig(
+                quality=voirs.Quality.HIGH,
                 thread_count=4
             )
             
@@ -1617,7 +1617,7 @@ from django.http import HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.conf import settings
 from django.utils import timezone
-import voirs_ffi
+import voirs
 import json
 import base64
 import threading
@@ -1657,12 +1657,12 @@ class SynthesisJobViewSet(viewsets.ModelViewSet):
             start_time = time.time()
             
             # Create VoiRS config
-            config = voirs_ffi.SynthesisConfig(
-                quality=getattr(voirs_ffi.Quality, job.quality),
+            config = voirs.SynthesisConfig(
+                quality=getattr(voirs.Quality, job.quality),
                 speed=job.speed,
                 volume=job.volume,
                 voice_id=job.voice_id,
-                output_format=getattr(voirs_ffi.Format, job.output_format)
+                output_format=getattr(voirs.Format, job.output_format)
             )
             
             # Perform synthesis
@@ -1717,13 +1717,13 @@ class SynthesisJobViewSet(viewsets.ModelViewSet):
                           status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            config = voirs_ffi.SynthesisConfig(
-                quality=getattr(voirs_ffi.Quality, 
+            config = voirs.SynthesisConfig(
+                quality=getattr(voirs.Quality, 
                               request.data.get('quality', 'HIGH')),
                 speed=request.data.get('speed', 1.0),
                 volume=request.data.get('volume', 1.0),
                 voice_id=request.data.get('voice_id', 'default'),
-                output_format=getattr(voirs_ffi.Format, 
+                output_format=getattr(voirs.Format, 
                                     request.data.get('format', 'MP3'))
             )
             
@@ -1814,12 +1814,12 @@ class BatchSynthesisJobViewSet(viewsets.ModelViewSet):
             batch_job.save()
             
             config_data = batch_job.config_json
-            config = voirs_ffi.SynthesisConfig(
-                quality=getattr(voirs_ffi.Quality, config_data.get('quality', 'HIGH')),
+            config = voirs.SynthesisConfig(
+                quality=getattr(voirs.Quality, config_data.get('quality', 'HIGH')),
                 speed=config_data.get('speed', 1.0),
                 volume=config_data.get('volume', 1.0),
                 voice_id=config_data.get('voice_id', 'default'),
-                output_format=getattr(voirs_ffi.Format, config_data.get('format', 'MP3'))
+                output_format=getattr(voirs.Format, config_data.get('format', 'MP3'))
             )
             
             # Process each item

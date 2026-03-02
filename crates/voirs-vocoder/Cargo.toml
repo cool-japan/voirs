@@ -11,6 +11,7 @@ keywords = ["voirs", "vocoder", "hifi-gan", "neural-audio", "waveform"]
 categories = ["multimedia::audio", "science", "algorithms"]
 rust-version.workspace = true
 description = "Neural vocoder inference for VoiRS (HiFi-GAN/DiffWave)"
+readme = "README.md"
 
 [lib]
 name = "voirs_vocoder"
@@ -42,7 +43,7 @@ mp4.workspace = true
 # Serialization
 serde.workspace = true
 serde_json.workspace = true
-bincode.workspace = true
+oxicode.workspace = true
 toml.workspace = true
 
 # Error handling
@@ -94,6 +95,14 @@ coreml = ["ort?/coreml"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 metal-rs = { version = "0.27", optional = true, package = "metal" }
+
+[[example]]
+name = "vocoder_performance_profiling"
+path = "examples/vocoder_performance_profiling.rs"
+
+[[example]]
+name = "vocoder_streaming_synthesis"
+path = "examples/vocoder_streaming_synthesis.rs"
 
 [[bench]]
 name = "rtf_benchmark"

@@ -310,7 +310,10 @@ impl SdkAcousticModel for AcousticAdapter {
 
         let acoustic_configs: Option<Vec<_>> = configs.map(|cfgs| {
             cfgs.iter()
-                .map(|cfg| Self::convert_synthesis_config_to_acoustic(&Some(cfg)).unwrap())
+                .map(|cfg| {
+                    Self::convert_synthesis_config_to_acoustic(&Some(cfg))
+                        .expect("value should be present")
+                })
                 .collect()
         });
 

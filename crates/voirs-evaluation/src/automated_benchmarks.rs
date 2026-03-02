@@ -260,7 +260,7 @@ impl AutomatedBenchmarkManager {
     ) {
         let cutoff_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("value should be present")
             .as_secs()
             - (max_measurement_age_days * 24 * 60 * 60);
 
@@ -328,12 +328,12 @@ impl AutomatedBenchmarkManager {
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("value should be present")
             .as_secs();
 
         report.push_str(&format!(
             "Generated: {}\n\n",
-            chrono::DateTime::from_timestamp(now as i64, 0).unwrap()
+            chrono::DateTime::from_timestamp(now as i64, 0).expect("value should be present")
         ));
 
         for (name, history) in &self.histories {
@@ -436,7 +436,7 @@ impl AutomatedBenchmarkManager {
 pub fn current_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .expect("value should be present")
         .as_secs()
 }
 

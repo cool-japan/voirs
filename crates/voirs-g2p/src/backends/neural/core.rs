@@ -179,10 +179,12 @@ impl LayerNorm {
     /// * `vb` - Variable builder for parameter initialization
     pub fn new(normalized_shape: usize, eps: f32, vb: VarBuilder) -> CandleResult<Self> {
         let gamma = vb.get((normalized_shape,), "gamma").unwrap_or_else(|_| {
-            Tensor::ones(&[normalized_shape], candle_core::DType::F32, vb.device()).unwrap()
+            Tensor::ones(&[normalized_shape], candle_core::DType::F32, vb.device())
+                .expect("creating ones tensor should succeed")
         });
         let beta = vb.get((normalized_shape,), "beta").unwrap_or_else(|_| {
-            Tensor::zeros(&[normalized_shape], candle_core::DType::F32, vb.device()).unwrap()
+            Tensor::zeros(&[normalized_shape], candle_core::DType::F32, vb.device())
+                .expect("creating zeros tensor should succeed")
         });
 
         Ok(Self {
@@ -648,7 +650,7 @@ impl BeamCandidate {
                 candle_core::DType::F32,
                 &candle_core::Device::Cpu,
             )
-            .unwrap(),
+            .expect("creating zeros tensor should succeed"),
             coverage: Vec::new(),
             normalized_score: score,
         }
@@ -786,7 +788,8 @@ impl BeamSearchDecoder {
                     .map(|(idx, &prob)| (idx, f32::ln(prob.max(1e-10))))
                     .collect();
 
-                token_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+                token_scores
+                    .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
                 // Create new candidates
                 for (token_idx, log_prob) in token_scores.iter().take(self.beam_size) {
@@ -816,7 +819,11 @@ impl BeamSearchDecoder {
             }
 
             // Select top beams
-            all_candidates.sort_by(|a, b| b.final_score().partial_cmp(&a.final_score()).unwrap());
+            all_candidates.sort_by(|a, b| {
+                b.final_score()
+                    .partial_cmp(&a.final_score())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             beams = all_candidates.into_iter().take(self.beam_size).collect();
 
             // Early stopping if all beams are completed
@@ -829,7 +836,11 @@ impl BeamSearchDecoder {
         completed_beams.extend(beams);
 
         // Sort by final score and return top-n
-        completed_beams.sort_by(|a, b| b.final_score().partial_cmp(&a.final_score()).unwrap());
+        completed_beams.sort_by(|a, b| {
+            b.final_score()
+                .partial_cmp(&a.final_score())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         Ok(completed_beams.into_iter().take(self.n_best).collect())
     }
@@ -932,15 +943,15 @@ impl SimpleDecoder {
 ///     max_seq_len,
 ///     dropout,
 ///     vb,
-/// ).unwrap();
+/// )?;
 ///
 /// // Encode graphemes
-/// let grapheme_ids = Tensor::zeros(&[1, 10, grapheme_vocab_size], candle_core::DType::F32, &device).unwrap();
-/// let encoder_output = model.encode(&grapheme_ids, None).unwrap();
+/// let grapheme_ids = Tensor::zeros(&[1, 10, grapheme_vocab_size], candle_core::DType::F32, &device)?;
+/// let encoder_output = model.encode(&grapheme_ids, None)?;
 ///
 /// // Decode to phonemes
-/// let phoneme_ids = Tensor::zeros(&[1, 10, phoneme_vocab_size], candle_core::DType::F32, &device).unwrap();
-/// let logits = model.decode(&phoneme_ids, &encoder_output, None, None).unwrap();
+/// let phoneme_ids = Tensor::zeros(&[1, 10, phoneme_vocab_size], candle_core::DType::F32, &device)?;
+/// let logits = model.decode(&phoneme_ids, &encoder_output, None, None)?;
 /// ```
 ///
 /// # Performance
@@ -1161,23 +1172,23 @@ impl TransformerG2P {
 /// use voirs_g2p::backends::neural::core::SamplingStrategy;
 ///
 /// let device = Device::Cpu;
-/// let logits = Tensor::randn(0.0f32, 1.0, 100, &device).unwrap();  // Vocab size of 100
+/// let logits = Tensor::randn(0.0f32, 1.0, 100, &device)?;  // Vocab size of 100
 ///
 /// // Greedy decoding (deterministic)
 /// let greedy = SamplingStrategy::greedy();
-/// let token = greedy.sample(&logits, &[]).unwrap();
+/// let token = greedy.sample(&logits, &[])?;
 ///
 /// // Temperature sampling (higher = more random, lower = more deterministic)
 /// let temp = SamplingStrategy::new(0.8);
-/// let token = temp.sample(&logits, &[]).unwrap();
+/// let token = temp.sample(&logits, &[])?;
 ///
 /// // Top-K sampling (sample from top 50 most likely tokens)
 /// let top_k = SamplingStrategy::new(1.0).with_top_k(50);
-/// let token = top_k.sample(&logits, &[]).unwrap();
+/// let token = top_k.sample(&logits, &[])?;
 ///
-/// // Top-P (nucleus) sampling (sample from tokens with cumulative prob ≥ 0.9)
+/// // Top-P (nucleus) sampling (sample from tokens with cumulative prob >= 0.9)
 /// let top_p = SamplingStrategy::new(1.0).with_top_p(0.9);
-/// let token = top_p.sample(&logits, &[]).unwrap();
+/// let token = top_p.sample(&logits, &[])?;
 ///
 /// // Combined: temperature + top-k + top-p + repetition penalty
 /// let combined = SamplingStrategy::new(0.9)
@@ -1185,7 +1196,7 @@ impl TransformerG2P {
 ///     .with_top_p(0.95)
 ///     .with_repetition_penalty(1.2);
 /// let previous_tokens = vec![5, 10, 15];  // Previously generated tokens
-/// let token = combined.sample(&logits, &previous_tokens).unwrap();
+/// let token = combined.sample(&logits, &previous_tokens)?;
 /// ```
 ///
 /// # Parameters
@@ -1280,7 +1291,7 @@ impl SamplingStrategy {
             let max_idx = logits_vec
                 .iter()
                 .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                 .map(|(idx, _)| idx)
                 .unwrap_or(0);
             return Ok(max_idx);
@@ -1302,7 +1313,8 @@ impl SamplingStrategy {
         if let Some(k) = self.top_k {
             let mut indexed_probs: Vec<(usize, f32)> =
                 probs.iter().enumerate().map(|(i, &p)| (i, p)).collect();
-            indexed_probs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            indexed_probs
+                .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
             // Zero out probabilities outside top-k
             for (idx, _) in indexed_probs.iter().skip(k) {
@@ -1320,7 +1332,8 @@ impl SamplingStrategy {
         if let Some(p_threshold) = self.top_p {
             let mut indexed_probs: Vec<(usize, f32)> =
                 probs.iter().enumerate().map(|(i, &p)| (i, p)).collect();
-            indexed_probs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            indexed_probs
+                .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
             let mut cumsum = 0.0;
             let mut cutoff_idx = indexed_probs.len();
@@ -1349,7 +1362,7 @@ impl SamplingStrategy {
         let sampled_idx = probs
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(idx, _)| idx)
             .unwrap_or(0);
 
@@ -1416,7 +1429,7 @@ impl LabelSmoothing {
 /// # Reference
 ///
 /// "RoFormer: Enhanced Transformer with Rotary Position Embedding"
-/// Su et al., 2021 (https://arxiv.org/abs/2104.09864)
+/// Su et al., 2021 (<https://arxiv.org/abs/2104.09864>)
 pub struct RotaryPositionEmbedding {
     dim: usize,
     max_seq_len: usize,
@@ -1525,7 +1538,7 @@ impl RotaryPositionEmbedding {
 /// # Reference
 ///
 /// "GLU Variants Improve Transformer" (Shazeer, 2020)
-/// https://arxiv.org/abs/2002.05202
+/// <https://arxiv.org/abs/2002.05202>
 pub struct SwiGLUFeedForward {
     gate_proj: Linear,
     up_proj: Linear,
@@ -1619,7 +1632,7 @@ impl SwiGLUFeedForward {
 /// # Reference
 ///
 /// "Train Short, Test Long: Attention with Linear Biases Enables Input Length Extrapolation"
-/// Press et al., 2022 (https://arxiv.org/abs/2108.12409)
+/// Press et al., 2022 (<https://arxiv.org/abs/2108.12409>)
 pub struct ALiBiPositionBias {
     num_heads: usize,
     max_seq_len: usize,

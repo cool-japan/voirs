@@ -10,7 +10,7 @@ import asyncio
 from pathlib import Path
 
 try:
-    import voirs_ffi as voirs
+    import voirs
     VOIRS_AVAILABLE = True
 except ImportError:
     VOIRS_AVAILABLE = False

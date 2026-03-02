@@ -402,7 +402,7 @@ impl SpectrogramAnalyzer {
         
         // Find median interval
         let mut sorted_intervals = intervals.clone();
-        sorted_intervals.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted_intervals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let median_interval = sorted_intervals[sorted_intervals.len() / 2];
         
         // Convert to BPM
@@ -595,7 +595,7 @@ impl SpectrogramAnalyzer {
                 }
             }
             
-            formant_freqs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            formant_freqs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             
             formant1.push(formant_freqs.get(0).copied().unwrap_or(0.0));
             formant2.push(formant_freqs.get(1).copied().unwrap_or(0.0));

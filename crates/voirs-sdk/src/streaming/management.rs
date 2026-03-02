@@ -934,7 +934,10 @@ impl StreamCombiner {
             .map(|chunks| {
                 if chunks.len() == 1 {
                     // Single chunk, no mixing needed
-                    Ok(chunks.into_iter().next().unwrap())
+                    Ok(chunks
+                        .into_iter()
+                        .next()
+                        .expect("iterator should have next element"))
                 } else {
                     // Mix multiple chunks
                     Self::mix_audio_chunks_static(chunks)
@@ -952,7 +955,10 @@ impl StreamCombiner {
         }
 
         if chunks.len() == 1 {
-            return Ok(chunks.into_iter().next().unwrap());
+            return Ok(chunks
+                .into_iter()
+                .next()
+                .expect("iterator should have next element"));
         }
 
         // Use the first chunk as a template

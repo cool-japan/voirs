@@ -298,7 +298,10 @@ impl EdgeDeploymentOptimizer {
 
         // Update performance statistics
         {
-            let mut stats = self.performance_stats.write().unwrap();
+            let mut stats = self
+                .performance_stats
+                .write()
+                .expect("lock should not be poisoned");
             stats.model_load_time = optimization_time.as_secs_f32() * 1000.0;
             stats.compression_ratio =
                 self.calculate_compression_ratio(&optimized_model, speaker_profile);
@@ -316,13 +319,19 @@ impl EdgeDeploymentOptimizer {
 
         // Update request statistics
         {
-            let mut stats = self.performance_stats.write().unwrap();
+            let mut stats = self
+                .performance_stats
+                .write()
+                .expect("lock should not be poisoned");
             stats.total_requests += 1;
         }
 
         // Check cache first
         if let Some(cached_result) = self.check_cache(request).await? {
-            let mut stats = self.performance_stats.write().unwrap();
+            let mut stats = self
+                .performance_stats
+                .write()
+                .expect("lock should not be poisoned");
             stats.successful_requests += 1;
             stats.cache_hit_rate = stats.successful_requests as f32 / stats.total_requests as f32;
             return Ok(cached_result);
@@ -344,7 +353,10 @@ impl EdgeDeploymentOptimizer {
 
         // Update performance statistics
         {
-            let mut stats = self.performance_stats.write().unwrap();
+            let mut stats = self
+                .performance_stats
+                .write()
+                .expect("lock should not be poisoned");
             stats.avg_processing_time = (stats.avg_processing_time
                 * stats.successful_requests as f32
                 + processing_time.as_secs_f32() * 1000.0)
@@ -395,19 +407,28 @@ impl EdgeDeploymentOptimizer {
 
     /// Get edge deployment statistics
     pub fn get_performance_stats(&self) -> EdgePerformanceStats {
-        self.performance_stats.read().unwrap().clone()
+        self.performance_stats
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Add distributed processing node
     pub async fn add_distributed_node(&self, node: EdgeNode) -> Result<()> {
-        let mut nodes = self.distributed_nodes.write().unwrap();
+        let mut nodes = self
+            .distributed_nodes
+            .write()
+            .expect("lock should not be poisoned");
         nodes.push(node);
         Ok(())
     }
 
     /// Remove distributed processing node
     pub async fn remove_distributed_node(&self, node_id: &str) -> Result<()> {
-        let mut nodes = self.distributed_nodes.write().unwrap();
+        let mut nodes = self
+            .distributed_nodes
+            .write()
+            .expect("lock should not be poisoned");
         nodes.retain(|node| node.node_id != node_id);
         Ok(())
     }
@@ -465,7 +486,7 @@ impl EdgeDeploymentOptimizer {
     }
 
     async fn check_cache(&self, request: &VoiceCloneRequest) -> Result<Option<VoiceCloneResult>> {
-        let cache = self.cache.read().unwrap();
+        let cache = self.cache.read().expect("lock should not be poisoned");
         let cache_key = self.generate_cache_key(request);
 
         if let Some(cached_model) = cache.get(&cache_key) {
@@ -497,7 +518,10 @@ impl EdgeDeploymentOptimizer {
     async fn process_distributed(&self, request: &VoiceCloneRequest) -> Result<VoiceCloneResult> {
         // Distribute processing across available edge nodes
         let has_available_nodes = {
-            let nodes = self.distributed_nodes.read().unwrap();
+            let nodes = self
+                .distributed_nodes
+                .read()
+                .expect("lock should not be poisoned");
             nodes.iter().any(|n| n.available)
         };
 
@@ -523,7 +547,7 @@ impl EdgeDeploymentOptimizer {
         request: &VoiceCloneRequest,
         result: VoiceCloneResult,
     ) -> Result<()> {
-        let mut cache = self.cache.write().unwrap();
+        let mut cache = self.cache.write().expect("lock should not be poisoned");
         let cache_key = self.generate_cache_key(request);
 
         // Check cache size limit
@@ -558,7 +582,10 @@ impl EdgeDeploymentOptimizer {
     }
 
     async fn has_available_nodes(&self) -> bool {
-        let nodes = self.distributed_nodes.read().unwrap();
+        let nodes = self
+            .distributed_nodes
+            .read()
+            .expect("lock should not be poisoned");
         nodes.iter().any(|n| n.available)
     }
 

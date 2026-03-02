@@ -22,7 +22,7 @@ impl AudioBuffer {
     /// let buf2 = AudioBuffer::mono(vec![4.0, 5.0, 6.0], 22050);
     /// let buf3 = AudioBuffer::mono(vec![7.0, 8.0, 9.0], 22050);
     ///
-    /// let concatenated = AudioBuffer::concatenate(&[buf1, buf2, buf3]).unwrap();
+    /// let concatenated = AudioBuffer::concatenate(&[buf1, buf2, buf3]).expect("value should be present");
     /// assert_eq!(concatenated.len(), 9);
     /// ```
     pub fn concatenate(buffers: &[AudioBuffer]) -> Result<Self> {

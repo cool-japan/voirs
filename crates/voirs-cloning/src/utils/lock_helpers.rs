@@ -181,7 +181,7 @@ mod tests {
     #[test]
     fn test_try_safe_read() {
         let lock = RwLock::new(42);
-        let _write_guard = lock.write().unwrap(); // Hold write lock
+        let _write_guard = lock.write().expect("lock should not be poisoned"); // Hold write lock
 
         // This should fail because write lock is held
         let result = lock.try_safe_read();
@@ -194,7 +194,7 @@ mod tests {
     #[test]
     fn test_try_safe_write() {
         let lock = RwLock::new(42);
-        let _read_guard = lock.read().unwrap(); // Hold read lock
+        let _read_guard = lock.read().expect("lock should not be poisoned"); // Hold read lock
 
         // This should fail because read lock is held
         let result = lock.try_safe_write();

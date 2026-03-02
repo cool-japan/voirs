@@ -17,7 +17,7 @@ This guide helps you migrate between different VoiRS FFI language bindings and f
 
 **Before (C):**
 ```c
-#include "voirs_ffi.h"
+#include "voirs.h"
 
 int main() {
     voirs_synthesis_config_t config = {0};
@@ -47,21 +47,21 @@ int main() {
 
 **After (Python):**
 ```python
-import voirs_ffi
+import voirs
 
 def main():
-    config = voirs_ffi.SynthesisConfig(
-        quality=voirs_ffi.Quality.HIGH,
+    config = voirs.SynthesisConfig(
+        quality=voirs.Quality.HIGH,
         speed=1.0
     )
     
     try:
-        pipeline = voirs_ffi.Pipeline(config)
+        pipeline = voirs.Pipeline(config)
         result = pipeline.synthesize("Hello World")
         
         # Use result...
         
-    except voirs_ffi.VoirsError as e:
+    except voirs.VoirsError as e:
         print(f"Error: {e}")
         return 1
     
@@ -83,11 +83,11 @@ if __name__ == "__main__":
 
 **Before (Python):**
 ```python
-import voirs_ffi
+import voirs
 
 def synthesize_text(text):
-    config = voirs_ffi.SynthesisConfig(quality=voirs_ffi.Quality.HIGH)
-    pipeline = voirs_ffi.Pipeline(config)
+    config = voirs.SynthesisConfig(quality=voirs.Quality.HIGH)
+    pipeline = voirs.Pipeline(config)
     result = pipeline.synthesize(text)
     return result.audio_data
 
@@ -201,7 +201,7 @@ int main() {
 
 **After (VoiRS FFI):**
 ```c
-#include "voirs_ffi.h"
+#include "voirs.h"
 
 int main() {
     voirs_synthesis_config_t config = {0};
@@ -251,15 +251,15 @@ synthesize_text("Hello World")
 
 **After (VoiRS FFI):**
 ```python
-import voirs_ffi
+import voirs
 
 def synthesize_text(text):
-    config = voirs_ffi.SynthesisConfig(
-        quality=voirs_ffi.Quality.HIGH,
-        output_format=voirs_ffi.Format.WAV
+    config = voirs.SynthesisConfig(
+        quality=voirs.Quality.HIGH,
+        output_format=voirs.Format.WAV
     )
     
-    pipeline = voirs_ffi.Pipeline(config)
+    pipeline = voirs.Pipeline(config)
     result = pipeline.synthesize(text)
     
     # Save or play audio data
@@ -305,23 +305,23 @@ synthesize_speech("Hello World")
 
 **After (VoiRS FFI):**
 ```python
-import voirs_ffi
+import voirs
 
 def synthesize_speech(text):
-    config = voirs_ffi.SynthesisConfig(
-        output_format=voirs_ffi.Format.MP3,
+    config = voirs.SynthesisConfig(
+        output_format=voirs.Format.MP3,
         voice_id="neural_female_01",  # Equivalent voice
-        quality=voirs_ffi.Quality.HIGH
+        quality=voirs.Quality.HIGH
     )
     
     try:
-        pipeline = voirs_ffi.Pipeline(config)
+        pipeline = voirs.Pipeline(config)
         result = pipeline.synthesize(text)
         
         with open('output.mp3', 'wb') as file:
             file.write(result.audio_data)
             
-    except voirs_ffi.VoirsError as error:
+    except voirs.VoirsError as error:
         print(f"Error: {error}")
 
 synthesize_speech("Hello World")
@@ -364,7 +364,7 @@ voirs_error_info_t error_info = voirs_get_detailed_error();
 1. **Use Compatibility Headers:**
 ```c
 #define VOIRS_FFI_COMPATIBILITY_V1
-#include "voirs_ffi.h"
+#include "voirs.h"
 ```
 
 2. **Gradual Migration:**
@@ -414,12 +414,12 @@ for text in texts:
 **After (Parallel):**
 ```python
 import concurrent.futures
-import voirs_ffi
+import voirs
 
 def synthesize_text(text):
     # Each thread gets its own pipeline
-    config = voirs_ffi.SynthesisConfig(quality=voirs_ffi.Quality.HIGH)
-    pipeline = voirs_ffi.Pipeline(config)
+    config = voirs.SynthesisConfig(quality=voirs.Quality.HIGH)
+    pipeline = voirs.Pipeline(config)
     return pipeline.synthesize(text)
 
 with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
@@ -475,14 +475,14 @@ pthread_mutex_t pipeline_mutex = PTHREAD_MUTEX_INITIALIZER;
 **Problem:** Not using optimal configuration
 ```python
 # Suboptimal
-config = voirs_ffi.SynthesisConfig()  # Uses defaults
+config = voirs.SynthesisConfig()  # Uses defaults
 ```
 
 **Solution:** Configure for your use case
 ```python
 # Optimized for real-time
-config = voirs_ffi.SynthesisConfig(
-    quality=voirs_ffi.Quality.MEDIUM,  # Lower quality for speed
+config = voirs.SynthesisConfig(
+    quality=voirs.Quality.MEDIUM,  # Lower quality for speed
     thread_count=2,  # Limit threads for latency
     use_simd=True,   # Enable SIMD acceleration
     cache_size=512*1024  # Smaller cache for real-time
@@ -514,7 +514,7 @@ config = voirs_ffi.SynthesisConfig(
 ```python
 # Convert eSpeak parameters to VoiRS config
 def convert_espeak_config(rate, volume, voice):
-    return voirs_ffi.SynthesisConfig(
+    return voirs.SynthesisConfig(
         speed=rate / 175.0,  # Normalize eSpeak rate
         volume=volume / 100.0,  # Normalize volume
         voice_id=map_espeak_voice(voice)

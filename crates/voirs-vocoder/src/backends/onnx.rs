@@ -330,7 +330,7 @@ impl OnnxVocoder {
             ))?;
 
         // Get output shape
-        let shape = audio_output.shape().unwrap();
+        let shape = audio_output.shape().expect("ONNX output should have a valid shape");
         let audio_samples = if shape.len() == 1 {
             // Shape: [samples]
             audio_data.to_vec()

@@ -61,12 +61,15 @@ impl TensorMemoryPool {
     pub fn get_buffer(&self, size: usize) -> Vec<f32> {
         if size > self.max_buffer_size {
             // Don't pool very large buffers
-            self.stats.lock().unwrap().misses += 1;
+            self.stats
+                .lock()
+                .expect("lock should not be poisoned")
+                .misses += 1;
             return vec![0.0; size];
         }
 
-        let mut buffers = self.buffers.lock().unwrap();
-        let mut stats = self.stats.lock().unwrap();
+        let mut buffers = self.buffers.lock().expect("lock should not be poisoned");
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
 
         if let Some(pool) = buffers.get_mut(&size) {
             if let Some(mut buffer) = pool.pop() {
@@ -93,8 +96,8 @@ impl TensorMemoryPool {
             return;
         }
 
-        let mut buffers = self.buffers.lock().unwrap();
-        let mut stats = self.stats.lock().unwrap();
+        let mut buffers = self.buffers.lock().expect("lock should not be poisoned");
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
 
         let pool = buffers.entry(size).or_default();
 
@@ -108,13 +111,16 @@ impl TensorMemoryPool {
 
     /// Get pool statistics
     pub fn stats(&self) -> PoolStats {
-        self.stats.lock().unwrap().clone()
+        self.stats
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Clear all pooled buffers
     pub fn clear(&self) {
-        let mut buffers = self.buffers.lock().unwrap();
-        let mut stats = self.stats.lock().unwrap();
+        let mut buffers = self.buffers.lock().expect("lock should not be poisoned");
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
 
         buffers.clear();
         stats.total_pooled = 0;
@@ -122,7 +128,7 @@ impl TensorMemoryPool {
 
     /// Get cache hit ratio
     pub fn hit_ratio(&self) -> f32 {
-        let stats = self.stats.lock().unwrap();
+        let stats = self.stats.lock().expect("lock should not be poisoned");
         let total = stats.hits + stats.misses;
         if total == 0 {
             0.0
@@ -165,7 +171,7 @@ where
 
     /// Get value from cache
     pub fn get(&self, key: &K) -> Option<V> {
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().expect("lock should not be poisoned");
 
         if let Some((value, timestamp)) = cache.get(key) {
             if timestamp.elapsed() < self.ttl {
@@ -181,7 +187,7 @@ where
 
     /// Put value in cache
     pub fn put(&self, key: K, value: V) {
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().expect("lock should not be poisoned");
 
         // Clean up expired entries
         self.cleanup_expired(&mut cache);
@@ -212,12 +218,18 @@ where
 
     /// Clear cache
     pub fn clear(&self) {
-        self.cache.lock().unwrap().clear();
+        self.cache
+            .lock()
+            .expect("lock should not be poisoned")
+            .clear();
     }
 
     /// Get cache size
     pub fn size(&self) -> usize {
-        self.cache.lock().unwrap().len()
+        self.cache
+            .lock()
+            .expect("lock should not be poisoned")
+            .len()
     }
 }
 
@@ -251,7 +263,7 @@ impl PerformanceMonitor {
     pub fn record_memory_usage(&self, component: &str, bytes: usize) {
         self.memory_usage
             .lock()
-            .unwrap()
+            .expect("lock should not be poisoned")
             .insert(component.to_string(), bytes);
     }
 
@@ -260,14 +272,14 @@ impl PerformanceMonitor {
         *self
             .counters
             .lock()
-            .unwrap()
+            .expect("lock should not be poisoned")
             .entry(counter.to_string())
             .or_insert(0) += 1;
     }
 
     /// Get average timing for operation
     pub fn average_timing(&self, operation: &str) -> Option<Duration> {
-        let timings = self.timings.lock().unwrap();
+        let timings = self.timings.lock().expect("lock should not be poisoned");
         if let Some(times) = timings.get(operation) {
             if !times.is_empty() {
                 let total: Duration = times.iter().sum();
@@ -282,19 +294,34 @@ impl PerformanceMonitor {
 
     /// Get memory usage summary
     pub fn memory_summary(&self) -> HashMap<String, usize> {
-        self.memory_usage.lock().unwrap().clone()
+        self.memory_usage
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Get counter values
     pub fn counter_values(&self) -> HashMap<String, u64> {
-        self.counters.lock().unwrap().clone()
+        self.counters
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Reset all metrics
     pub fn reset(&self) {
-        self.timings.lock().unwrap().clear();
-        self.memory_usage.lock().unwrap().clear();
-        self.counters.lock().unwrap().clear();
+        self.timings
+            .lock()
+            .expect("lock should not be poisoned")
+            .clear();
+        self.memory_usage
+            .lock()
+            .expect("lock should not be poisoned")
+            .clear();
+        self.counters
+            .lock()
+            .expect("lock should not be poisoned")
+            .clear();
     }
 }
 
@@ -325,7 +352,7 @@ impl OperationTimer {
         let duration = self.start_time.elapsed();
         self.timings
             .lock()
-            .unwrap()
+            .expect("lock should not be poisoned")
             .entry(self.operation.clone())
             .or_default()
             .push(duration);
@@ -510,9 +537,12 @@ pub mod lazy {
 
         /// Get component data, loading if necessary
         pub fn get(&self) -> Result<Arc<Mutex<Option<T>>>> {
-            *self.last_access.lock().unwrap() = Instant::now();
+            *self
+                .last_access
+                .lock()
+                .expect("lock should not be poisoned") = Instant::now();
 
-            let mut data = self.data.lock().unwrap();
+            let mut data = self.data.lock().expect("lock should not be poisoned");
             if data.is_none() {
                 let loaded = (self.loader)()?;
                 *data = Some(loaded);
@@ -523,17 +553,23 @@ pub mod lazy {
 
         /// Check if component is loaded
         pub fn is_loaded(&self) -> bool {
-            self.data.lock().unwrap().is_some()
+            self.data
+                .lock()
+                .expect("lock should not be poisoned")
+                .is_some()
         }
 
         /// Unload component to free memory
         pub fn unload(&self) {
-            *self.data.lock().unwrap() = None;
+            *self.data.lock().expect("lock should not be poisoned") = None;
         }
 
         /// Get last access time
         pub fn last_access(&self) -> Instant {
-            *self.last_access.lock().unwrap()
+            *self
+                .last_access
+                .lock()
+                .expect("lock should not be poisoned")
         }
 
         /// Get component size in bytes
@@ -712,7 +748,10 @@ pub mod lazy {
 
         /// Register component for memory pressure handling
         pub fn register_component(&self, name: String, component: Weak<Mutex<Option<Vec<u8>>>>) {
-            self.components.lock().unwrap().push((name, component));
+            self.components
+                .lock()
+                .expect("lock should not be poisoned")
+                .push((name, component));
         }
 
         /// Check memory pressure and evict if necessary
@@ -729,7 +768,7 @@ pub mod lazy {
 
         /// Evict least recently used components
         fn evict_lru_components(&self) -> Result<usize> {
-            let mut components = self.components.lock().unwrap();
+            let mut components = self.components.lock().expect("lock should not be poisoned");
             let mut evicted = 0;
 
             // Remove dead weak references and evict loaded components
@@ -1225,13 +1264,13 @@ impl AdvancedPerformanceProfiler {
 
                 // Update metrics
                 {
-                    let mut metrics_guard = metrics.lock().unwrap();
+                    let mut metrics_guard = metrics.lock().expect("lock should not be poisoned");
                     *metrics_guard = current_metrics.clone();
                 }
 
                 // Add to history
                 {
-                    let mut history_guard = history.lock().unwrap();
+                    let mut history_guard = history.lock().expect("lock should not be poisoned");
                     let snapshot = PerformanceSnapshot {
                         metrics: current_metrics.clone(),
                         system_info: Self::collect_system_info(),
@@ -1263,17 +1302,23 @@ impl AdvancedPerformanceProfiler {
 
     /// Get current performance metrics
     pub fn current_metrics(&self) -> PerformanceMetrics {
-        self.metrics.lock().unwrap().clone()
+        self.metrics
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Get performance history
     pub fn performance_history(&self) -> Vec<PerformanceSnapshot> {
-        self.history.lock().unwrap().clone()
+        self.history
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Generate performance report
     pub fn generate_report(&self, duration: Duration) -> PerformanceReport {
-        let history = self.history.lock().unwrap();
+        let history = self.history.lock().expect("lock should not be poisoned");
         let current_time = Instant::now();
 
         // Filter history by duration

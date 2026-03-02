@@ -5,6 +5,9 @@
 use clap::Subcommand;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use voirs_sdk::Result;
+
+use super::functions::get_kokoro_config_paths;
 
 /// Voice metadata
 #[derive(Debug, Clone)]

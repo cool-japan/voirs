@@ -536,10 +536,11 @@ impl AdaptiveProcessor {
             counts[index] += 1;
         }
 
+        let max_val = counts.iter().copied().max().unwrap_or(0);
         let max_index = counts
             .iter()
-            .position(|&x| x == *counts.iter().max().unwrap())
-            .unwrap();
+            .position(|&x| x == max_val)
+            .expect("counts is non-empty so max position exists");
         match max_index {
             0 => AudioContentType::Speech,
             1 => AudioContentType::Music,

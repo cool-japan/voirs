@@ -193,7 +193,7 @@ impl MathUtils {
         }
 
         let mut sorted_data = data.to_vec();
-        sorted_data.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted_data.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let index = (percentile / 100.0 * (sorted_data.len() - 1) as f32) as usize;
         sorted_data[index.min(sorted_data.len() - 1)]

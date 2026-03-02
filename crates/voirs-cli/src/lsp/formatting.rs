@@ -336,7 +336,7 @@ mod tests {
         };
 
         let json = edit.to_json();
-        assert_eq!(json["newText"].as_str().unwrap(), "test");
+        assert_eq!(json["newText"].as_str().unwrap_or_default(), "test");
         assert_eq!(json["range"]["start"]["line"].as_u64().unwrap(), 0);
     }
 

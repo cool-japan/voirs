@@ -557,7 +557,7 @@ impl OptimizedScore {
 
         // Simple harmony analysis - extract frequencies and determine chord
         let mut frequencies: Vec<f32> = notes.iter().map(|n| n.event.frequency).collect();
-        frequencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        frequencies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         // Basic chord recognition (simplified)
         HarmonyInfo {

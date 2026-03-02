@@ -50,7 +50,7 @@ setup(
 from IPython.core.magic import Magics, magics_class, line_magic, cell_magic
 from IPython.core.magic_arguments import (argument, magic_arguments, parse_argstring)
 from IPython.display import Audio, display, HTML
-import voirs_ffi
+import voirs
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -74,9 +74,9 @@ class VoiRSMagics(Magics):
     def initialize_engine(self):
         """Initialize VoiRS engine with optimal settings for research"""
         try:
-            self.engine = voirs_ffi.Engine()
-            config = voirs_ffi.SynthesisConfig(
-                quality=voirs_ffi.Quality.HIGH,
+            self.engine = voirs.Engine()
+            config = voirs.SynthesisConfig(
+                quality=voirs.Quality.HIGH,
                 thread_count=2,  # Conservative for notebook environment
                 cache_size=512 * 1024  # 512KB cache
             )
@@ -130,12 +130,12 @@ class VoiRSMagics(Magics):
         
         try:
             # Create synthesis config
-            config = voirs_ffi.SynthesisConfig(
-                quality=getattr(voirs_ffi.Quality, args.quality.upper()),
+            config = voirs.SynthesisConfig(
+                quality=getattr(voirs.Quality, args.quality.upper()),
                 speed=args.speed,
                 volume=args.volume,
                 voice_id=args.voice,
-                output_format=getattr(voirs_ffi.Format, args.format.upper())
+                output_format=getattr(voirs.Format, args.format.upper())
             )
             
             # Perform synthesis
@@ -216,8 +216,8 @@ class VoiRSMagics(Magics):
         print(f"Processing batch of {len(texts)} texts...")
         
         results = []
-        config = voirs_ffi.SynthesisConfig(
-            quality=getattr(voirs_ffi.Quality, args.quality.upper()),
+        config = voirs.SynthesisConfig(
+            quality=getattr(voirs.Quality, args.quality.upper()),
             speed=args.speed,
             voice_id=args.voice
         )
@@ -294,8 +294,8 @@ class VoiRSMagics(Magics):
         results = {}
         for voice in voices:
             try:
-                config = voirs_ffi.SynthesisConfig(
-                    quality=getattr(voirs_ffi.Quality, args.quality.upper()),
+                config = voirs.SynthesisConfig(
+                    quality=getattr(voirs.Quality, args.quality.upper()),
                     speed=args.speed,
                     voice_id=voice
                 )
@@ -514,7 +514,7 @@ import numpy as np
 import scipy.signal
 import scipy.fft
 from scipy.io import wavfile
-import voirs_ffi
+import voirs
 from typing import Tuple, Optional, List, Dict, Any
 import warnings
 
@@ -522,14 +522,14 @@ class VoiRSNumPyInterface:
     """NumPy-optimized interface for VoiRS FFI"""
     
     def __init__(self):
-        self.engine = voirs_ffi.Engine()
+        self.engine = voirs.Engine()
         self.sample_rate = 22050  # Default sample rate
         self.initialized = False
         
     def initialize(self, config: Optional[Dict[str, Any]] = None) -> bool:
         """Initialize VoiRS engine with scientific computing optimizations"""
         default_config = {
-            'quality': voirs_ffi.Quality.HIGH,
+            'quality': voirs.Quality.HIGH,
             'thread_count': 1,  # Single-threaded for reproducibility
             'use_simd': True,   # Enable SIMD for performance
             'cache_size': 2 * 1024 * 1024  # 2MB cache
@@ -538,7 +538,7 @@ class VoiRSNumPyInterface:
         if config:
             default_config.update(config)
         
-        voirs_config = voirs_ffi.SynthesisConfig(**default_config)
+        voirs_config = voirs.SynthesisConfig(**default_config)
         self.initialized = self.engine.initialize(voirs_config)
         return self.initialized
     
@@ -554,9 +554,9 @@ class VoiRSNumPyInterface:
             raise RuntimeError("VoiRS engine not initialized")
         
         # Default synthesis configuration
-        synthesis_config = voirs_ffi.SynthesisConfig(
-            quality=voirs_ffi.Quality.HIGH,
-            output_format=voirs_ffi.Format.WAV
+        synthesis_config = voirs.SynthesisConfig(
+            quality=voirs.Quality.HIGH,
+            output_format=voirs.Format.WAV
         )
         
         if config:
@@ -675,7 +675,7 @@ class VoiRSNumPyInterface:
         
         for quality in quality_levels:
             try:
-                config = {'quality': getattr(voirs_ffi.Quality, quality.upper())}
+                config = {'quality': getattr(voirs.Quality, quality.upper())}
                 result = self.synthesize_with_features(text, config)
                 results[quality] = result
             except Exception as e:
@@ -859,7 +859,7 @@ if __name__ == "__main__":
 ```python
 import pandas as pd
 import numpy as np
-import voirs_ffi
+import voirs
 from typing import Dict, List, Optional, Any, Callable
 import warnings
 import time
@@ -870,7 +870,7 @@ class VoiRSPandasProcessor:
     """Pandas-integrated VoiRS processing for large-scale text-to-speech workflows"""
     
     def __init__(self):
-        self.engine = voirs_ffi.Engine()
+        self.engine = voirs.Engine()
         self.initialized = False
         self.processing_stats = {
             'total_processed': 0,
@@ -882,8 +882,8 @@ class VoiRSPandasProcessor:
     
     def initialize(self, config: Optional[Dict[str, Any]] = None) -> bool:
         """Initialize VoiRS engine"""
-        default_config = voirs_ffi.SynthesisConfig(
-            quality=voirs_ffi.Quality.HIGH,
+        default_config = voirs.SynthesisConfig(
+            quality=voirs.Quality.HIGH,
             thread_count=4
         )
         
@@ -973,9 +973,9 @@ class VoiRSPandasProcessor:
         return result_df
     
     def _build_config_from_row(self, row: pd.Series, 
-                              config_columns: Optional[Dict[str, str]]) -> voirs_ffi.SynthesisConfig:
+                              config_columns: Optional[Dict[str, str]]) -> voirs.SynthesisConfig:
         """Build synthesis config from DataFrame row"""
-        config = voirs_ffi.SynthesisConfig()
+        config = voirs.SynthesisConfig()
         
         if config_columns:
             for config_param, column_name in config_columns.items():
@@ -985,10 +985,10 @@ class VoiRSPandasProcessor:
                     # Handle specific parameter types
                     if config_param == 'quality':
                         if isinstance(value, str):
-                            config.quality = getattr(voirs_ffi.Quality, value.upper())
+                            config.quality = getattr(voirs.Quality, value.upper())
                     elif config_param == 'output_format':
                         if isinstance(value, str):
-                            config.output_format = getattr(voirs_ffi.Format, value.upper())
+                            config.output_format = getattr(voirs.Format, value.upper())
                     else:
                         setattr(config, config_param, value)
         
@@ -1058,7 +1058,7 @@ class VoiRSPandasProcessor:
             'processing_stats': self.processing_stats.copy(),
             'synthesis_analysis': analysis,
             'configuration': {
-                'voirs_version': voirs_ffi.get_version(),
+                'voirs_version': voirs.get_version(),
                 'dataframe_shape': df.shape,
                 'columns': list(df.columns)
             }
@@ -1835,7 +1835,7 @@ Maintainer: VoiRS Team <support@voirs.ai>
 Description: Provides R bindings for the VoiRS FFI library, enabling high-quality
     text-to-speech synthesis directly from R. Supports batch processing, audio analysis,
     and integration with R data analysis workflows.
-License: MIT
+License: Apache-2.0
 Encoding: UTF-8
 LazyData: true
 Depends: R (>= 3.5.0)

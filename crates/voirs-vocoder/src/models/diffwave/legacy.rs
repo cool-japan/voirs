@@ -433,7 +433,7 @@ impl DiffWaveVocoder {
 
         let path_ref = path.as_ref();
         match tokio::runtime::Runtime::new()
-            .unwrap()
+            .expect("tokio runtime creation should succeed")
             .block_on(loader.load_from_file(path_ref))
         {
             Ok(model_info) => {

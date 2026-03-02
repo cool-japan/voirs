@@ -197,7 +197,7 @@ impl RecoveryManager {
 
         Err(RecoveryError::MaxRetriesExceeded {
             attempts: max_retries + 1,
-            last_error: last_error.unwrap(),
+            last_error: last_error.expect("value should be present"),
         })
     }
 
@@ -251,7 +251,7 @@ impl RecoveryManager {
         Err(RecoveryError::BackoffExhausted {
             attempts: max_retries + 1,
             final_delay: current_delay,
-            last_error: last_error.unwrap(),
+            last_error: last_error.expect("value should be present"),
         })
     }
 
@@ -788,7 +788,7 @@ impl FailureTracker {
         // Keep only recent failures (last hour)
         let cutoff = Instant::now()
             .checked_sub(Duration::from_secs(3600))
-            .unwrap();
+            .expect("value should be present");
         self.recent_failures.retain(|(time, _)| *time > cutoff);
     }
 

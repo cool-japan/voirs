@@ -386,7 +386,10 @@ impl ContextAwarePreprocessor {
         let mut back_count = 0;
 
         for vowel in &vowels {
-            let lowercase_vowel = vowel.to_lowercase().next().unwrap();
+            let lowercase_vowel = vowel
+                .to_lowercase()
+                .next()
+                .expect("to_lowercase always yields at least one char");
             if front_vowels.contains(&lowercase_vowel) {
                 front_count += 1;
             } else if back_vowels.contains(&lowercase_vowel) {

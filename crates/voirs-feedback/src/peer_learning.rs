@@ -493,7 +493,7 @@ impl PeerMatchingEngine {
         }
 
         // Sort by compatibility score
-        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         // Select best match
         let best_match_id = candidates[0].0;

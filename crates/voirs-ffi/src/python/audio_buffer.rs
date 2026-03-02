@@ -28,14 +28,14 @@ impl PyAudioBuffer {
 
     /// Get the audio samples as a NumPy array (1D for mono, 2D for multi-channel)
     #[cfg(feature = "numpy")]
-    fn as_numpy<'py>(&self, py: Python<'py>) -> PyResult<PyObject> {
+    fn as_numpy<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let samples = self.inner.samples();
         let channels = self.inner.channels() as usize;
 
         if channels == 1 {
             // Mono audio - return 1D array
             let array = PyArray::from_slice(py, samples);
-            Ok(array.unbind().into())
+            Ok(array.into_any())
         } else {
             // Multi-channel audio - return 2D array [samples, channels]
             let frame_count = samples.len() / channels;
@@ -51,7 +51,7 @@ impl PyAudioBuffer {
             let array = PyArray2::from_vec2(py, &vec![reshaped; 1]).map_err(|e| {
                 PyRuntimeError::new_err(format!("Failed to create 2D array: {}", e))
             })?;
-            Ok(array.unbind().into())
+            Ok(array.into_any())
         }
     }
 
@@ -119,7 +119,7 @@ impl PyAudioBuffer {
 
     /// Get audio as planar NumPy arrays (separate array per channel)
     #[cfg(feature = "numpy")]
-    fn as_planar_numpy<'py>(&self, py: Python<'py>) -> PyResult<PyObject> {
+    fn as_planar_numpy<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let samples = self.inner.samples();
         let channels = self.inner.channels() as usize;
         let frame_count = samples.len() / channels;
@@ -127,10 +127,10 @@ impl PyAudioBuffer {
         if channels == 1 {
             // Mono - return single array
             let array = PyArray::from_slice(py, samples);
-            Ok(array.unbind().into())
+            Ok(array.into_any())
         } else {
             // Multi-channel - return list of arrays, one per channel
-            let mut channel_arrays: Vec<PyObject> = Vec::new();
+            let mut channel_arrays: Vec<Bound<'py, PyAny>> = Vec::new();
 
             for channel in 0..channels {
                 let mut channel_data = Vec::with_capacity(frame_count);
@@ -138,11 +138,12 @@ impl PyAudioBuffer {
                     channel_data.push(samples[frame * channels + channel]);
                 }
                 let array = PyArray::from_vec(py, channel_data);
-                channel_arrays.push(array.unbind().into());
+                channel_arrays.push(array.into_any());
             }
 
-            let list = PyList::new(py, channel_arrays).unwrap();
-            Ok(list.unbind().into())
+            let list = PyList::new(py, channel_arrays)
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to create list: {}", e)))?;
+            Ok(list.into_any())
         }
     }
 
@@ -221,7 +222,11 @@ impl PyAudioBuffer {
 
     /// Get spectral analysis using NumPy FFT integration
     #[cfg(feature = "numpy")]
-    fn get_spectrum<'py>(&self, py: Python<'py>, window_size: Option<usize>) -> PyResult<PyObject> {
+    fn get_spectrum<'py>(
+        &self,
+        py: Python<'py>,
+        window_size: Option<usize>,
+    ) -> PyResult<Bound<'py, PyAny>> {
         let samples = self.inner.samples();
         let window_size = window_size.unwrap_or(1024.min(samples.len()));
 
@@ -233,13 +238,13 @@ impl PyAudioBuffer {
         let mut spectrum = Vec::with_capacity(window_size / 2);
         for i in 0..window_size / 2 {
             let real = window[i];
-            let imag = window.get(i + window_size / 2).unwrap_or(&0.0);
+            let imag = window.get(i + window_size / 2).copied().unwrap_or(0.0);
             let magnitude = (real * real + imag * imag).sqrt();
             spectrum.push(magnitude);
         }
 
         let array = PyArray::from_vec(py, spectrum);
-        Ok(array.unbind().into())
+        Ok(array.into_any())
     }
 
     /// Resample audio to new sample rate using NumPy interpolation
@@ -285,7 +290,7 @@ impl PyAudioBuffer {
         &self,
         py: Python<'py>,
         other: PyReadonlyArrayDyn<f32>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Bound<'py, PyAny>> {
         self._apply_broadcasted_operation(py, &other, |a, b| a + b)
     }
 
@@ -295,7 +300,7 @@ impl PyAudioBuffer {
         &self,
         py: Python<'py>,
         other: PyReadonlyArrayDyn<f32>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Bound<'py, PyAny>> {
         self._apply_broadcasted_operation(py, &other, |a, b| a * b)
     }
 
@@ -305,7 +310,7 @@ impl PyAudioBuffer {
         &self,
         py: Python<'py>,
         other: PyReadonlyArrayDyn<f32>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Bound<'py, PyAny>> {
         self._apply_broadcasted_operation(py, &other, |a, b| a - b)
     }
 
@@ -315,7 +320,7 @@ impl PyAudioBuffer {
         &self,
         py: Python<'py>,
         other: PyReadonlyArrayDyn<f32>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Bound<'py, PyAny>> {
         self._apply_broadcasted_operation(py, &other, |a, b| {
             if b.abs() < f32::EPSILON {
                 0.0 // Avoid division by zero
@@ -332,7 +337,7 @@ impl PyAudioBuffer {
         py: Python<'py>,
         other: PyReadonlyArrayDyn<f32>,
         operation: &str,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Bound<'py, PyAny>> {
         match operation {
             "add" => self.broadcast_add(py, other),
             "multiply" | "mul" => self.broadcast_multiply(py, other),
@@ -380,7 +385,7 @@ impl PyAudioBuffer {
         })?;
 
         // Convert result back to audio buffer
-        let mixed_array: PyReadonlyArrayDyn<f32> = mixed_result.extract(py)?;
+        let mixed_array: PyReadonlyArrayDyn<f32> = mixed_result.extract()?;
         let mixed_samples: Vec<f32> = mixed_array.as_array().iter().cloned().collect();
 
         let new_sample_rate = self.inner.sample_rate().max(other.inner.sample_rate());
@@ -397,7 +402,7 @@ impl PyAudioBuffer {
         py: Python<'py>,
         kernel: PyReadonlyArrayDyn<f32>,
         mode: Option<&str>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Bound<'py, PyAny>> {
         let kernel_array = kernel.as_array();
         let kernel_data: Vec<f32> = kernel_array.iter().cloned().collect();
         let audio_samples = self.inner.samples();
@@ -416,7 +421,7 @@ impl PyAudioBuffer {
         };
 
         let result_array = PyArray::from_vec(py, result);
-        Ok(result_array.unbind().into())
+        Ok(result_array.into_any())
     }
 
     /// Get the sample rate
@@ -609,13 +614,13 @@ impl PyAudioBuffer {
         py: Python<'py>,
         other: &PyReadonlyArrayDyn<f32>,
         op: impl Fn(f32, f32) -> f32,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Bound<'py, PyAny>> {
         let audio_samples = self.inner.samples();
         let other_array = other.as_array();
         let other_shape = other_array.shape();
 
         // Check for broadcasting compatibility
-        let result = if other_shape.len() == 1 && other_shape[0] == 1 {
+        let result: Vec<f32> = if other_shape.len() == 1 && other_shape[0] == 1 {
             // Scalar broadcasting - apply single value to all audio samples
             let scalar_value = other_array[[0]];
             audio_samples.iter().map(|&a| op(a, scalar_value)).collect()
@@ -671,7 +676,7 @@ impl PyAudioBuffer {
         };
 
         let result_array = PyArray::from_vec(py, result);
-        Ok(result_array.unbind().into())
+        Ok(result_array.into_any())
     }
 
     /// Helper method for full convolution

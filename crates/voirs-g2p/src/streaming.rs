@@ -369,7 +369,7 @@ impl StreamingChunker {
 ///     ..Default::default()
 /// };
 ///
-/// let chunks = batch_chunk_text(text, &config).unwrap();
+/// let chunks = batch_chunk_text(text, &config)?;
 /// // With fixed size strategy and text longer than max_chunk_size, we get multiple chunks
 /// assert!(chunks.len() >= 1);
 /// // Verify total text is preserved

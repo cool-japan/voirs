@@ -91,7 +91,7 @@ impl CacheEntry {
     fn new(result: CachedResult) -> Self {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("value should be present")
             .as_secs();
 
         // Estimate size
@@ -111,7 +111,7 @@ impl CacheEntry {
     fn is_expired(&self, ttl_seconds: u64) -> bool {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("value should be present")
             .as_secs();
         (now - self.created_at) > ttl_seconds
     }
@@ -120,7 +120,7 @@ impl CacheEntry {
         self.access_count += 1;
         self.last_accessed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("value should be present")
             .as_secs();
     }
 }

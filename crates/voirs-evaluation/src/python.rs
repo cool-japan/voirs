@@ -546,7 +546,7 @@ impl PyStatisticalAnalyzer {
         }
 
         let mut sorted_data = data.clone();
-        sorted_data.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted_data.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let n = data.len() as f32;
         let mean = data.iter().sum::<f32>() / n;
@@ -554,7 +554,7 @@ impl PyStatisticalAnalyzer {
         let std_dev = variance.sqrt();
         let min = sorted_data[0];
         let max = sorted_data[sorted_data.len() - 1];
-        let median = if sorted_data.len() % 2 == 0 {
+        let median = if sorted_data.len().is_multiple_of(2) {
             (sorted_data[sorted_data.len() / 2 - 1] + sorted_data[sorted_data.len() / 2]) / 2.0
         } else {
             sorted_data[sorted_data.len() / 2]

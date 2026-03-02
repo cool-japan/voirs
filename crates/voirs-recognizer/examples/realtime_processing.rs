@@ -198,9 +198,7 @@ fn create_test_audio_chunks(
         match i % 4 {
             0 => {
                 // Silence
-                for _ in 0..chunk_size {
-                    samples.push(0.0);
-                }
+                samples.extend(std::iter::repeat_n(0.0_f32, chunk_size));
             }
             1 => {
                 // Low-level noise

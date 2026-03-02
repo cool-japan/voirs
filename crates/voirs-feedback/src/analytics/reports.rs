@@ -199,7 +199,7 @@ impl ReportGenerator {
         }
 
         let mut latencies = performance.iter().map(|p| p.latency_ms).collect::<Vec<_>>();
-        latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        latencies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let avg_latency = latencies.iter().sum::<f32>() / latencies.len() as f32;
         let p95_index = (latencies.len() as f32 * 0.95) as usize;

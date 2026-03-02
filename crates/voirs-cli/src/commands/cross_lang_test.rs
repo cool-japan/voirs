@@ -516,7 +516,10 @@ async fn simulate_synthesis_test(
 
     details.insert(
         "consistency_score".to_string(),
-        serde_json::Value::Number(serde_json::Number::from_f64(consistency_score).unwrap()),
+        serde_json::Value::Number(
+            serde_json::Number::from_f64(consistency_score)
+                .unwrap_or_else(|| serde_json::Number::from(0)),
+        ),
     );
 
     if overall_consistency {
@@ -883,7 +886,7 @@ async fn run_performance_comparison(
 
     let most_efficient_binding = memory_usage
         .iter()
-        .min_by(|(_, mem1), (_, mem2)| mem1.partial_cmp(mem2).unwrap())
+        .min_by(|(_, mem1), (_, mem2)| mem1.partial_cmp(mem2).unwrap_or(std::cmp::Ordering::Equal))
         .map(|(name, _)| name.clone())
         .unwrap_or_default();
 

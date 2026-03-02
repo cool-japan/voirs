@@ -417,8 +417,8 @@ impl RegressionTester {
         }
 
         // Calculate overall performance delta (weighted average)
-        let overall_delta = (rtf_change * 0.3 + memory_change * 0.2 + startup_change * 0.2
-            - throughput_change * 0.3);
+        let overall_delta =
+            rtf_change * 0.3 + memory_change * 0.2 + startup_change * 0.2 - throughput_change * 0.3;
 
         RegressionAnalysis {
             has_regressions: !regressions.is_empty(),

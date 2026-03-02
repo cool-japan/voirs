@@ -3,7 +3,6 @@
 //! Provides vectorized implementations for audio processing operations
 //! optimized for x86_64 architecture with AVX2 and AVX-512 support.
 
-
 use std::arch::x86_64::*;
 
 /// AVX2 implementation of vector addition

@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, Host, SampleFormat, SampleRate, StreamConfig};
+use cpal::{Device, Host, SampleFormat, StreamConfig};
 use parking_lot::Mutex;
 use std::sync::Arc;
 
@@ -60,7 +60,7 @@ impl LinuxAudioDriver {
 
         // Try to get default output config
         if let Ok(default_config) = device.default_output_config() {
-            supported_sample_rates.push(default_config.sample_rate().0);
+            supported_sample_rates.push(default_config.sample_rate());
             max_channels = default_config.channels() as u32;
 
             // Get buffer size range if available
@@ -82,7 +82,7 @@ impl LinuxAudioDriver {
             if !supported_sample_rates.contains(&rate) {
                 // Test if this sample rate is supported
                 if device.supported_output_configs().is_ok_and(|mut configs| {
-                    configs.any(|c| c.min_sample_rate().0 <= rate && rate <= c.max_sample_rate().0)
+                    configs.any(|c| c.min_sample_rate() <= rate && rate <= c.max_sample_rate())
                 }) {
                     supported_sample_rates.push(rate);
                 }
@@ -208,7 +208,7 @@ impl super::AudioDriver for LinuxAudioDriver {
         let sample_format = device_config.sample_format();
         let stream_config = StreamConfig {
             channels: config.channels as u16,
-            sample_rate: SampleRate(config.sample_rate),
+            sample_rate: config.sample_rate,
             buffer_size: cpal::BufferSize::Fixed(config.buffer_size),
         };
 
@@ -219,8 +219,8 @@ impl super::AudioDriver for LinuxAudioDriver {
 
         let config_supported = supported_configs.any(|supported_config| {
             supported_config.channels() as u32 >= config.channels
-                && supported_config.min_sample_rate().0 <= config.sample_rate
-                && config.sample_rate <= supported_config.max_sample_rate().0
+                && supported_config.min_sample_rate() <= config.sample_rate
+                && config.sample_rate <= supported_config.max_sample_rate()
                 && supported_config.sample_format() == sample_format
         });
 

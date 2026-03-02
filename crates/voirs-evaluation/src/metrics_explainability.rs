@@ -293,7 +293,11 @@ impl ExplainabilityEngine {
 
         // Sort factors by absolute contribution
         let mut sorted_factors: Vec<_> = factors.iter().collect();
-        sorted_factors.sort_by(|a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap());
+        sorted_factors.sort_by(|a, b| {
+            b.1.abs()
+                .partial_cmp(&a.1.abs())
+                .expect("value should be present")
+        });
 
         for (factor, contribution) in sorted_factors {
             let impact = if *contribution > 0.8 {
@@ -580,7 +584,10 @@ impl ExplainabilityEngine {
     fn estimate_factors(&self, metric_type: MetricType, score: f64) -> HashMap<String, f64> {
         // In production, this would analyze actual audio features
         // For now, we provide estimated factors based on the score
-        let metadata = self.metric_metadata.get(&metric_type).unwrap();
+        let metadata = self
+            .metric_metadata
+            .get(&metric_type)
+            .expect("value should be present");
 
         let base_quality = (score - metadata.range.0) / (metadata.range.1 - metadata.range.0);
 
@@ -642,8 +649,8 @@ impl ExplainabilityEngine {
                 "This score is at the {:.0}th percentile compared to typical results. \
                  Scores range from {:.2} (low) to {:.2} (high) in our benchmark dataset.",
                 percentile * 100.0,
-                benchmarks.first().unwrap(),
-                benchmarks.last().unwrap()
+                benchmarks.first().expect("collection should not be empty"),
+                benchmarks.last().expect("collection should not be empty")
             )
         } else {
             "No benchmark data available for comparison.".to_string()

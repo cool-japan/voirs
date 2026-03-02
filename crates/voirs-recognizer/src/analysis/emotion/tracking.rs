@@ -112,7 +112,7 @@ impl EmotionTracker {
 
         // Calculate dominant emotion
         let dominant_emotion = emotion_distribution.iter()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(emotion, _)| *emotion)
             .unwrap_or(EmotionType::Neutral);
 
@@ -298,7 +298,7 @@ impl EmotionTracker {
                 pattern_type: MoodPatternType::Escalation,
                 emotions: emotions.iter().map(|e| e.emotion).collect(),
                 confidence: 0.8,
-                duration: emotions.last().unwrap().timestamp.duration_since(emotions[0].timestamp),
+                duration: emotions.last().expect("emotions is non-empty (checked above)").timestamp.duration_since(emotions[0].timestamp),
                 frequency: 1,
             };
 
@@ -324,7 +324,7 @@ impl EmotionTracker {
                     pattern_type: MoodPatternType::Stable,
                     emotions: vec![first_emotion],
                     confidence: avg_confidence,
-                    duration: emotions.last().unwrap().timestamp.duration_since(emotions[0].timestamp),
+                    duration: emotions.last().expect("emotions is non-empty (checked above)").timestamp.duration_since(emotions[0].timestamp),
                     frequency: emotions.len(),
                 };
 

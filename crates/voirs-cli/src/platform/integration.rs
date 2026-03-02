@@ -510,14 +510,18 @@ MimeType={};
                 .join("applications")
                 .join("voirs.desktop");
 
-            std::fs::create_dir_all(desktop_file.parent().unwrap())?;
+            if let Some(parent) = desktop_file.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
             std::fs::write(&desktop_file, desktop_entry)?;
 
             // Update MIME database
-            std::process::Command::new("update-desktop-database")
-                .arg(desktop_file.parent().unwrap())
-                .output()
-                .ok(); // Ignore errors, this is optional
+            if let Some(parent) = desktop_file.parent() {
+                std::process::Command::new("update-desktop-database")
+                    .arg(parent)
+                    .output()
+                    .ok(); // Ignore errors, this is optional
+            }
         }
 
         tracing::info!(

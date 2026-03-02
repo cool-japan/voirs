@@ -221,8 +221,14 @@ impl InteractiveTrainer {
 
         let first_score = f32::midpoint(attempts[0].quality_score, attempts[0].pronunciation_score);
         let last_score = f32::midpoint(
-            attempts.last().unwrap().quality_score,
-            attempts.last().unwrap().pronunciation_score,
+            attempts
+                .last()
+                .expect("collection should not be empty")
+                .quality_score,
+            attempts
+                .last()
+                .expect("collection should not be empty")
+                .pronunciation_score,
         );
 
         (last_score - first_score).max(0.0)

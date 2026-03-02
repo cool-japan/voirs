@@ -113,7 +113,7 @@ def check_package():
     # Try importing the package
     import_cmd = [
         'python', '-c',
-        'import voirs_ffi; print(f"✅ Package imported successfully, version: {voirs_ffi.__version__}")'
+        'import voirs; print(f"✅ Package imported successfully, version: {voirs.__version__}")'
     ]
     
     return run_command(import_cmd, "Testing package import")
@@ -200,7 +200,7 @@ def main():
     
     if args.mode == 'develop':
         print("\n📝 Next steps:")
-        print("   • Test the package: python -c 'import voirs_ffi; print(voirs_ffi.__version__)'")
+        print("   • Test the package: python -c 'import voirs; print(voirs.__version__)'")
         print("   • Run tests: python -m pytest tests/python/")
         print("   • Check examples: cd examples && python example.py")
 

@@ -391,7 +391,7 @@ impl RealtimeStreamingEngine {
 
         self.active_sessions
             .write()
-            .unwrap()
+            .expect("lock should not be poisoned")
             .insert(session_id.clone(), session);
 
         Ok(session_id)
@@ -402,7 +402,10 @@ impl RealtimeStreamingEngine {
     pub async fn start_streaming(&mut self, session_id: &str) -> Result<()> {
         // First update session state
         {
-            let mut sessions = self.active_sessions.write().unwrap();
+            let mut sessions = self
+                .active_sessions
+                .write()
+                .expect("lock should not be poisoned");
             let session = sessions
                 .get_mut(session_id)
                 .ok_or_else(|| Error::Validation("Session not found".to_string()))?;
@@ -415,14 +418,20 @@ impl RealtimeStreamingEngine {
         // Initialize and start processing without holding the lock
         // Get session, do work, release lock - repeated pattern
         {
-            let mut sessions = self.active_sessions.write().unwrap();
+            let mut sessions = self
+                .active_sessions
+                .write()
+                .expect("lock should not be poisoned");
             if let Some(session) = sessions.get_mut(&session_id) {
                 self.initialize_audio_streams(session).await?;
             }
         }
 
         {
-            let mut sessions = self.active_sessions.write().unwrap();
+            let mut sessions = self
+                .active_sessions
+                .write()
+                .expect("lock should not be poisoned");
             if let Some(session) = sessions.get_mut(&session_id) {
                 self.start_processing_pipeline(session).await?;
             }
@@ -441,7 +450,10 @@ impl RealtimeStreamingEngine {
 
         // Voice activity detection
         let is_voice_active = {
-            let sessions = self.active_sessions.read().unwrap();
+            let sessions = self
+                .active_sessions
+                .read()
+                .expect("lock should not be poisoned");
             let session = sessions
                 .get(session_id)
                 .ok_or_else(|| Error::Validation("Session not found".to_string()))?;
@@ -547,14 +559,20 @@ impl RealtimeStreamingEngine {
     async fn initialize_audio_streams(&self, session: &mut StreamingSession) -> Result<()> {
         // Initialize input stream
         {
-            let mut input_stream = session.input_stream.lock().unwrap();
+            let mut input_stream = session
+                .input_stream
+                .lock()
+                .expect("lock should not be poisoned");
             input_stream.device_config.sample_rate = self.config.sample_rate;
             input_stream.device_config.buffer_size = self.config.buffer_size_samples;
         }
 
         // Initialize output stream
         {
-            let mut output_stream = session.output_stream.lock().unwrap();
+            let mut output_stream = session
+                .output_stream
+                .lock()
+                .expect("lock should not be poisoned");
             output_stream.device_config.sample_rate = self.config.sample_rate;
             output_stream.device_config.buffer_size = self.config.buffer_size_samples;
         }
@@ -608,7 +626,10 @@ impl RealtimeStreamingEngine {
 
     /// Get current latency for session
     async fn get_current_latency(&self, session_id: &str) -> Result<f32> {
-        let sessions = self.active_sessions.read().unwrap();
+        let sessions = self
+            .active_sessions
+            .read()
+            .expect("lock should not be poisoned");
         let session = sessions
             .get(session_id)
             .ok_or_else(|| Error::Validation("Session not found".to_string()))?;
@@ -647,7 +668,10 @@ impl RealtimeStreamingEngine {
         processing_time: Duration,
         _audio_chunk: &AudioChunk,
     ) -> Result<()> {
-        let mut sessions = self.active_sessions.write().unwrap();
+        let mut sessions = self
+            .active_sessions
+            .write()
+            .expect("lock should not be poisoned");
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| Error::Validation("Session not found".to_string()))?;
@@ -665,7 +689,10 @@ impl RealtimeStreamingEngine {
 
     /// Stop streaming session
     pub async fn stop_session(&mut self, session_id: &str) -> Result<()> {
-        let mut sessions = self.active_sessions.write().unwrap();
+        let mut sessions = self
+            .active_sessions
+            .write()
+            .expect("lock should not be poisoned");
         if let Some(mut session) = sessions.remove(session_id) {
             session.state = SessionState::Terminated;
         }
@@ -1103,7 +1130,11 @@ mod tests {
     async fn test_streaming_engine_creation() {
         let config = StreamingConfig::default();
         let engine = RealtimeStreamingEngine::new(config);
-        assert!(engine.active_sessions.read().unwrap().is_empty());
+        assert!(engine
+            .active_sessions
+            .read()
+            .expect("lock should not be poisoned")
+            .is_empty());
     }
 
     #[tokio::test]
@@ -1121,7 +1152,7 @@ mod tests {
         assert!(engine
             .active_sessions
             .read()
-            .unwrap()
+            .expect("lock should not be poisoned")
             .contains_key(&session_id));
     }
 

@@ -13,33 +13,37 @@ Features:
 - Thread-safe operations
 
 Basic usage:
-    >>> from voirs_ffi import VoirsPipeline
+    >>> from voirs import VoirsPipeline
     >>> pipeline = VoirsPipeline()
     >>> audio = pipeline.synthesize("Hello, world!")
     >>> audio.play()
 """
 
+import sys
+
 try:
     # Import the Rust extension module
-    from .voirs_ffi import *  # noqa: F403,F401
-    
+    from .voirs import *  # noqa: F403,F401
+
     # Re-export main classes for convenient access
-    from .voirs_ffi import (  # noqa: F401
+    from .voirs import (  # noqa: F401
         VoirsPipeline,
         PyAudioBuffer,
-        SynthesisConfig,
-        VoiceInfo,
+        PySynthesisConfig,
+        PyVoiceInfo,
         __version__,
         HAS_NUMPY,
         HAS_GPU,
     )
-    
+
+    # Backward-compatible aliases
+    SynthesisConfig = PySynthesisConfig
+    VoiceInfo = PyVoiceInfo
+
 except ImportError as e:
     # Provide helpful error message if the extension module is not available
-    import sys
-    
     msg = (
-        f"Failed to import voirs_ffi extension module: {e}\n\n"
+        f"Failed to import voirs extension module: {e}\n\n"
         "This usually means:\n"
         "1. The package was not built correctly\n"
         "2. Missing required system dependencies\n"
@@ -125,7 +129,10 @@ def check_compatibility():
 __all__ = [
     # Core classes
     "VoirsPipeline",
-    "PyAudioBuffer", 
+    "PyAudioBuffer",
+    "PySynthesisConfig",
+    "PyVoiceInfo",
+    # Backward-compatible aliases
     "SynthesisConfig",
     "VoiceInfo",
     

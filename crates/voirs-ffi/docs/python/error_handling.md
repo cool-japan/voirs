@@ -37,7 +37,7 @@ class VoirsError(Exception):
 
 **Example:**
 ```python
-from voirs_ffi import VoirsError
+from voirs import VoirsError
 
 try:
     # VoiRS operation
@@ -60,7 +60,7 @@ Raised when text-to-speech synthesis fails.
 
 **Example:**
 ```python
-from voirs_ffi import VoirsPipeline, SynthesisError
+from voirs import VoirsPipeline, SynthesisError
 
 pipeline = VoirsPipeline()
 
@@ -85,7 +85,7 @@ Raised when configuration parameters are invalid.
 
 **Example:**
 ```python
-from voirs_ffi import SynthesisConfig, ConfigurationError
+from voirs import SynthesisConfig, ConfigurationError
 
 try:
     # Invalid sample rate
@@ -106,7 +106,7 @@ Raised when a requested voice is not available.
 
 **Example:**
 ```python
-from voirs_ffi import VoirsPipeline, VoiceNotFoundError, list_voices
+from voirs import VoirsPipeline, VoiceNotFoundError, list_voices
 
 try:
     pipeline = VoirsPipeline()
@@ -133,7 +133,7 @@ Raised when audio processing operations fail.
 
 **Example:**
 ```python
-from voirs_ffi import VoirsPipeline, AudioProcessingError
+from voirs import VoirsPipeline, AudioProcessingError
 
 pipeline = VoirsPipeline()
 audio = pipeline.synthesize("Hello, world!")
@@ -159,7 +159,7 @@ Raised when system requirements are not met.
 
 **Example:**
 ```python
-from voirs_ffi import SynthesisConfig, SystemCompatibilityError, check_compatibility
+from voirs import SynthesisConfig, SystemCompatibilityError, check_compatibility
 
 try:
     # Check compatibility first
@@ -179,7 +179,7 @@ except SystemCompatibilityError as e:
 ### Basic Error Handling
 
 ```python
-from voirs_ffi import VoirsPipeline, VoirsError
+from voirs import VoirsPipeline, VoirsError
 
 def safe_synthesis(text: str) -> Optional[PyAudioBuffer]:
     """Safely synthesize text with error handling."""
@@ -204,7 +204,7 @@ else:
 ### Specific Exception Handling
 
 ```python
-from voirs_ffi import (
+from voirs import (
     VoirsPipeline, VoirsError, SynthesisError, 
     VoiceNotFoundError, ConfigurationError
 )
@@ -249,7 +249,7 @@ audio = robust_synthesis("Hello, world!", "female-1")
 ```python
 import time
 from typing import Optional
-from voirs_ffi import VoirsPipeline, VoirsError, SynthesisError
+from voirs import VoirsPipeline, VoirsError, SynthesisError
 
 def synthesis_with_retry(
     text: str, 
@@ -287,7 +287,7 @@ audio = synthesis_with_retry("Hello, world!", max_retries=3)
 ### Fallback Strategies
 
 ```python
-from voirs_ffi import (
+from voirs import (
     VoirsPipeline, SynthesisConfig, VoirsError, 
     SystemCompatibilityError, check_compatibility
 )
@@ -345,7 +345,7 @@ except VoirsError as e:
 ### Graceful Degradation
 
 ```python
-from voirs_ffi import VoirsPipeline, SynthesisConfig, VoirsError
+from voirs import VoirsPipeline, SynthesisConfig, VoirsError
 
 class RobustTTS:
     def __init__(self):
@@ -425,7 +425,7 @@ audio = tts.synthesize("Hello, world!")
 
 ```python
 import contextlib
-from voirs_ffi import VoirsPipeline, VoirsError
+from voirs import VoirsPipeline, VoirsError
 
 @contextlib.contextmanager
 def synthesis_pipeline(**config_kwargs):
@@ -460,7 +460,7 @@ except VoirsError as e:
 
 ```python
 import logging
-from voirs_ffi import VoirsPipeline, VoirsError
+from voirs import VoirsPipeline, VoirsError
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -477,7 +477,7 @@ def debug_synthesis(text: str):
         logger.debug(f"Configuration: {config.to_dict()}")
         
         # Get system info
-        from voirs_ffi import check_compatibility
+        from voirs import check_compatibility
         compatibility = check_compatibility()
         logger.debug(f"System compatibility: {compatibility}")
         
@@ -505,7 +505,7 @@ except VoirsError as e:
 ```python
 import time
 import psutil
-from voirs_ffi import VoirsPipeline, ProfiledPipeline, VoirsError
+from voirs import VoirsPipeline, ProfiledPipeline, VoirsError
 
 class DiagnosticTTS:
     def __init__(self):
@@ -572,7 +572,7 @@ print(diagnostic_tts.get_summary())
 
 ```python
 from collections import defaultdict
-from voirs_ffi import VoirsPipeline, VoirsError
+from voirs import VoirsPipeline, VoirsError
 
 class ErrorAnalyzer:
     def __init__(self):
@@ -644,7 +644,7 @@ analyzer.print_error_summary()
 
 ```python
 from typing import Optional, List
-from voirs_ffi import VoirsPipeline, VoirsError, SynthesisConfig
+from voirs import VoirsPipeline, VoirsError, SynthesisConfig
 
 class ProductionTTS:
     """Production-ready TTS with comprehensive error handling."""
@@ -759,7 +759,7 @@ else:
 
 ```python
 import pytest
-from voirs_ffi import (
+from voirs import (
     VoirsPipeline, SynthesisConfig, VoirsError, 
     SynthesisError, ConfigurationError, VoiceNotFoundError
 )
@@ -804,7 +804,7 @@ if __name__ == "__main__":
 
 ```python
 # GPU not available
-from voirs_ffi import SynthesisConfig, SystemCompatibilityError
+from voirs import SynthesisConfig, SystemCompatibilityError
 
 try:
     config = SynthesisConfig(use_gpu=True)
@@ -817,7 +817,7 @@ except SystemCompatibilityError:
 
 ```python
 # Out of memory
-from voirs_ffi import VoirsPipeline, VoirsError
+from voirs import VoirsPipeline, VoirsError
 import gc
 
 try:
@@ -833,7 +833,7 @@ except VoirsError as e:
 
 ```python
 # File save errors
-from voirs_ffi import AudioProcessingError
+from voirs import AudioProcessingError
 import os
 
 try:

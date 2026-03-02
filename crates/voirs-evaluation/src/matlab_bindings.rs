@@ -473,7 +473,8 @@ pub unsafe extern "C" fn matlab_compare_systems(
 #[no_mangle]
 pub unsafe extern "C" fn matlab_evaluation_version() -> *const c_char {
     static VERSION_CSTRING: once_cell::sync::Lazy<CString> = once_cell::sync::Lazy::new(|| {
-        CString::new(crate::VERSION).unwrap_or_else(|_| CString::new("unknown").unwrap())
+        CString::new(crate::VERSION)
+            .unwrap_or_else(|_| CString::new("unknown").expect("value should be present"))
     });
     VERSION_CSTRING.as_ptr()
 }

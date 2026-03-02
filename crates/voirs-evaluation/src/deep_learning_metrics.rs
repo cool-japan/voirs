@@ -234,8 +234,11 @@ pub struct DeepMOSPredictor {
 impl DeepMOSPredictor {
     /// Create new deep MOS predictor
     pub async fn new(config: DeepMetricConfig) -> Result<Self, DeepMetricError> {
-        let device = if config.use_gpu && Device::cuda_if_available(0).is_ok() {
-            Device::cuda_if_available(0)?
+        let device = if config.use_gpu {
+            std::panic::catch_unwind(|| Device::cuda_if_available(0))
+                .ok()
+                .and_then(|r| r.ok())
+                .unwrap_or(Device::Cpu)
         } else {
             Device::Cpu
         };

@@ -206,7 +206,10 @@ impl StyleTransferSystem {
 
         // Get target style model
         let transferred_audio = {
-            let style_models = self.style_models.read().unwrap();
+            let style_models = self
+                .style_models
+                .read()
+                .expect("lock should not be poisoned");
             let target_model = style_models.get_model(target_style_id)?;
 
             // Perform style transfer based on method
@@ -259,13 +262,19 @@ impl StyleTransferSystem {
 
     /// Add style model to repository
     pub fn add_style_model(&mut self, model: StyleModel) -> Result<()> {
-        let mut repo = self.style_models.write().unwrap();
+        let mut repo = self
+            .style_models
+            .write()
+            .expect("lock should not be poisoned");
         repo.add_model(model)
     }
 
     /// Remove style model from repository
     pub fn remove_style_model(&mut self, model_id: &str) -> Result<()> {
-        let mut repo = self.style_models.write().unwrap();
+        let mut repo = self
+            .style_models
+            .write()
+            .expect("lock should not be poisoned");
         repo.remove_model(model_id)
     }
 
@@ -291,7 +300,10 @@ impl StyleTransferSystem {
     }
 
     fn check_transfer_cache(&self, cache_key: &str) -> Result<Option<CachedStyleTransfer>> {
-        let cache = self.transfer_cache.read().unwrap();
+        let cache = self
+            .transfer_cache
+            .read()
+            .expect("lock should not be poisoned");
         Ok(cache.get(cache_key).cloned())
     }
 
@@ -303,7 +315,10 @@ impl StyleTransferSystem {
         processing_time: Duration,
         target_style_id: String,
     ) -> Result<()> {
-        let mut cache = self.transfer_cache.write().unwrap();
+        let mut cache = self
+            .transfer_cache
+            .write()
+            .expect("lock should not be poisoned");
         cache.insert(
             cache_key,
             CachedStyleTransfer {

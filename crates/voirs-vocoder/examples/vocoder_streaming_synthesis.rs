@@ -103,7 +103,7 @@ fn generate_streaming_mel(
     sample_rate: u32,
 ) -> Vec<Vec<Vec<f32>>> {
     let chunk_size = 50;
-    let num_chunks = (total_frames + chunk_size - 1) / chunk_size;
+    let num_chunks = total_frames.div_ceil(chunk_size);
 
     let mut chunks = Vec::new();
 

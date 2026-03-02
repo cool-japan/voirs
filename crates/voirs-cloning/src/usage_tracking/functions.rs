@@ -472,7 +472,10 @@ mod tests {
             };
             let _usage_id = tracker.start_tracking(user_context, operation).unwrap();
         }
-        let sessions = tracker.active_sessions.read().unwrap();
+        let sessions = tracker
+            .active_sessions
+            .read()
+            .expect("lock should not be poisoned");
         assert!(sessions.contains_key(session_id));
         let session = sessions.get(session_id).unwrap();
         assert_eq!(session.request_count, 3);

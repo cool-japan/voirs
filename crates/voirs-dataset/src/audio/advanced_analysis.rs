@@ -426,7 +426,7 @@ impl AdvancedAudioAnalyzer {
 
         // Calculate loudness range (LRA) as 95th percentile - 10th percentile
         let mut sorted_loudness = gated_loudness;
-        sorted_loudness.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted_loudness.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let percentile_10_idx =
             ((sorted_loudness.len() as f32 * 0.10) as usize).min(sorted_loudness.len() - 1);

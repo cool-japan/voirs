@@ -103,7 +103,7 @@ impl KeyDetector {
         }
 
         // Sort alternatives by confidence
-        alternatives.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        alternatives.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         alternatives.truncate(3); // Keep top 3 alternatives
 
         // Parse key name

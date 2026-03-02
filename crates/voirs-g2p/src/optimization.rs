@@ -346,13 +346,20 @@ impl RealTimeOptimizer {
 
     /// Record performance measurement
     pub fn record_performance(&self, latency: Duration, accuracy: f32, throughput: f32) {
-        let mut collector = self.metrics_collector.lock().unwrap();
+        let mut collector = self
+            .metrics_collector
+            .lock()
+            .expect("lock should not be poisoned");
         collector.add_measurement(latency, accuracy, throughput);
     }
 
     /// Run optimization cycle
     pub fn optimize(&mut self) -> Result<Vec<OptimizationRecommendation>> {
-        let metrics = self.metrics_collector.lock().unwrap().clone();
+        let metrics = self
+            .metrics_collector
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone();
 
         // Check if we have enough data
         if metrics.latency_measurements.len() < self.config.min_data_points {
@@ -435,7 +442,10 @@ impl RealTimeOptimizer {
 
     /// Capture current performance snapshot
     fn capture_performance_snapshot(&self) -> PerformanceSnapshot {
-        let metrics = self.metrics_collector.lock().unwrap();
+        let metrics = self
+            .metrics_collector
+            .lock()
+            .expect("lock should not be poisoned");
 
         PerformanceSnapshot {
             avg_latency_ms: metrics.average_latency().as_millis() as f32,

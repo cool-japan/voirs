@@ -1054,7 +1054,7 @@ impl SingingEvaluator {
         }
 
         // Find most common interval (simplified)
-        intervals.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        intervals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let median_interval = intervals[intervals.len() / 2];
 
         // Convert to BPM (assumes quarter note intervals)

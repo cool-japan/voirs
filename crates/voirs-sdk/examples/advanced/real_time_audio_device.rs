@@ -8,7 +8,7 @@
 //! - Interactive voice applications
 //! - Audio callback optimization
 
-use cpal::{traits::*, Device, SampleFormat, SampleRate, Stream, StreamConfig};
+use cpal::{traits::*, Device, SampleFormat, Stream, StreamConfig};
 use futures::StreamExt;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -108,7 +108,7 @@ async fn audio_device_discovery_demo() -> Result<()> {
                 println!(
                     "     - {:?} {} Hz, {} channels",
                     config.sample_format(),
-                    config.max_sample_rate().0,
+                    config.max_sample_rate(),
                     config.channels()
                 );
             }
@@ -123,7 +123,7 @@ async fn audio_device_discovery_demo() -> Result<()> {
 
         if let Ok(config) = device.default_output_config() {
             println!("  Default configuration:");
-            println!("    Sample rate: {} Hz", config.sample_rate().0);
+            println!("    Sample rate: {} Hz", config.sample_rate());
             println!("    Channels: {}", config.channels());
             println!("    Sample format: {:?}", config.sample_format());
             println!("    Buffer size: {:?}", config.buffer_size());
@@ -514,10 +514,10 @@ impl AudioDeviceManager {
 
         let device_config = AudioDeviceConfig {
             device_name: device.name().unwrap_or_else(|_| "Unknown".to_string()),
-            sample_rate: config.sample_rate().0,
+            sample_rate: config.sample_rate(),
             channels: config.channels(),
             buffer_size: 1024, // Default buffer size
-            latency_ms: 1024.0 / config.sample_rate().0 as f64 * 1000.0,
+            latency_ms: 1024.0 / config.sample_rate() as f64 * 1000.0,
         };
 
         Ok(Self {
@@ -548,7 +548,7 @@ impl AudioDeviceManager {
         if let Some(device) = &self.current_device {
             let config = StreamConfig {
                 channels: self.config.channels,
-                sample_rate: SampleRate(self.config.sample_rate),
+                sample_rate: self.config.sample_rate,
                 buffer_size: cpal::BufferSize::Fixed(self.config.buffer_size),
             };
 

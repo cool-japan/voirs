@@ -392,7 +392,7 @@ async fn attempt_download(
         pb.set_style(
             ProgressStyle::default_bar()
                 .template("      [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
-                .unwrap()
+                .expect("progress template is valid")
                 .progress_chars("#>-"),
         );
         Some(pb)

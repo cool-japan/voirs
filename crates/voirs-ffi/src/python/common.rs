@@ -3,7 +3,10 @@
 pub(super) use crate::{VoirsAudioFormat, VoirsQualityLevel};
 pub(super) use pyo3::exceptions::{PyRuntimeError, PyValueError};
 pub(super) use pyo3::prelude::*;
-pub(super) use pyo3::types::{PyBytes, PyList};
+pub(super) use pyo3::types::{PyBytes, PyDict, PyList};
+
+/// Type alias for `Py<PyAny>`, replacing the removed `PyObject` from pyo3 0.28+.
+pub(super) type PyObject = Py<PyAny>;
 pub(super) use std::sync::Arc;
 pub(super) use tokio::runtime::Runtime;
 pub(super) use voirs_sdk::{

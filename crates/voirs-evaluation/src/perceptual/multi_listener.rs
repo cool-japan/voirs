@@ -833,9 +833,9 @@ impl EnhancedMultiListenerSimulator {
         let std_dev = variance.sqrt();
 
         let mut sorted_scores = scores.to_vec();
-        sorted_scores.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted_scores.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-        let median = if sorted_scores.len() % 2 == 0 {
+        let median = if sorted_scores.len().is_multiple_of(2) {
             (sorted_scores[sorted_scores.len() / 2 - 1] + sorted_scores[sorted_scores.len() / 2])
                 / 2.0
         } else {

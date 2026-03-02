@@ -223,8 +223,14 @@ impl MetricsCalculator {
             return 0.0;
         }
 
-        let first_score = history.first().unwrap().overall_score;
-        let last_score = history.last().unwrap().overall_score;
+        let first_score = history
+            .first()
+            .expect("collection should not be empty")
+            .overall_score;
+        let last_score = history
+            .last()
+            .expect("collection should not be empty")
+            .overall_score;
 
         last_score - first_score
     }
@@ -238,8 +244,8 @@ impl MetricsCalculator {
             return improvements;
         }
 
-        let first_snapshot = history.first().unwrap();
-        let last_snapshot = history.last().unwrap();
+        let first_snapshot = history.first().expect("collection should not be empty");
+        let last_snapshot = history.last().expect("collection should not be empty");
 
         for (area, &last_score) in &last_snapshot.area_scores {
             if let Some(&first_score) = first_snapshot.area_scores.get(area) {

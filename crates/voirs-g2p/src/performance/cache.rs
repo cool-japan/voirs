@@ -166,8 +166,8 @@ where
 
     /// Get value from cache with advanced access tracking
     pub fn get(&self, key: &K) -> Option<V> {
-        let mut cache = self.cache.lock().unwrap();
-        let mut stats = self.stats.lock().unwrap();
+        let mut cache = self.cache.lock().expect("lock should not be poisoned");
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
 
         if let Some(entry) = cache.get_mut(key) {
             entry.access();
@@ -181,8 +181,8 @@ where
 
     /// Insert value into cache with intelligent eviction
     pub fn insert(&self, key: K, value: V, size_estimate: usize) {
-        let mut cache = self.cache.lock().unwrap();
-        let mut stats = self.stats.lock().unwrap();
+        let mut cache = self.cache.lock().expect("lock should not be poisoned");
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
 
         // Check if we need to evict
         if cache.len() >= self.config.max_size {
@@ -194,7 +194,10 @@ where
 
         // Update popular keys if enabled
         if self.config.preload_popular {
-            let mut popular = self.popular_keys.lock().unwrap();
+            let mut popular = self
+                .popular_keys
+                .lock()
+                .expect("lock should not be poisoned");
             if !popular.contains(&key) {
                 popular.push(key);
                 if popular.len() > 100 {
@@ -236,21 +239,27 @@ where
 
     /// Get cache statistics
     pub fn get_stats(&self) -> CacheStats {
-        self.stats.lock().unwrap().clone()
+        self.stats
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Clear cache
     pub fn clear(&self) {
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().expect("lock should not be poisoned");
         cache.clear();
 
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
         *stats = CacheStats::default();
     }
 
     /// Get current cache size
     pub fn size(&self) -> usize {
-        self.cache.lock().unwrap().len()
+        self.cache
+            .lock()
+            .expect("lock should not be poisoned")
+            .len()
     }
 
     /// Preload popular pronunciations
@@ -266,8 +275,8 @@ where
             return;
         }
 
-        let cache = self.cache.lock().unwrap();
-        let stats = self.stats.lock().unwrap();
+        let cache = self.cache.lock().expect("lock should not be poisoned");
+        let stats = self.stats.lock().expect("lock should not be poisoned");
 
         // If hit rate is low, consider adjusting strategy or size
         if stats.hit_rate() < 0.5 && cache.len() > 1000 {
@@ -314,8 +323,8 @@ where
 
     /// Get value from cache
     pub fn get(&self, key: &K) -> Option<V> {
-        let mut cache = self.cache.lock().unwrap();
-        let mut stats = self.stats.lock().unwrap();
+        let mut cache = self.cache.lock().expect("lock should not be poisoned");
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
 
         if let Some(entry) = cache.get_mut(key) {
             // Check TTL expiration
@@ -341,8 +350,8 @@ where
 
     /// Insert value into cache
     pub fn insert(&self, key: K, value: V) {
-        let mut cache = self.cache.lock().unwrap();
-        let mut stats = self.stats.lock().unwrap();
+        let mut cache = self.cache.lock().expect("lock should not be poisoned");
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
 
         // Evict oldest entries if cache is full
         if cache.len() >= self.max_size {
@@ -380,8 +389,8 @@ where
 
     /// Clear all cache entries
     pub fn clear(&self) {
-        let mut cache = self.cache.lock().unwrap();
-        let mut stats = self.stats.lock().unwrap();
+        let mut cache = self.cache.lock().expect("lock should not be poisoned");
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
 
         cache.clear();
         stats.total_size = 0;
@@ -389,12 +398,18 @@ where
 
     /// Get cache statistics
     pub fn stats(&self) -> CacheStats {
-        self.stats.lock().unwrap().clone()
+        self.stats
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Get current cache size
     pub fn size(&self) -> usize {
-        self.cache.lock().unwrap().len()
+        self.cache
+            .lock()
+            .expect("lock should not be poisoned")
+            .len()
     }
 
     /// Get cache capacity
@@ -404,8 +419,8 @@ where
 
     /// Batch insert multiple key-value pairs efficiently
     pub fn batch_insert(&self, items: Vec<(K, V)>) {
-        let mut cache = self.cache.lock().unwrap();
-        let mut stats = self.stats.lock().unwrap();
+        let mut cache = self.cache.lock().expect("lock should not be poisoned");
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
 
         for (key, value) in items {
             // Evict oldest entries if cache is full

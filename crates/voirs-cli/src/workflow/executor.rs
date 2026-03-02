@@ -553,7 +553,11 @@ mod tests {
 
         assert_eq!(variables.len(), 1);
         assert_eq!(
-            variables.get("test_var").unwrap().as_str().unwrap(),
+            variables
+                .get("test_var")
+                .unwrap()
+                .as_str()
+                .unwrap_or_default(),
             "test_value"
         );
     }
@@ -574,16 +578,20 @@ mod tests {
 
         assert_eq!(result.output.len(), 1);
         assert_eq!(
-            result.output.get("key1").unwrap().as_str().unwrap(),
+            result
+                .output
+                .get("key1")
+                .unwrap()
+                .as_str()
+                .unwrap_or_default(),
             "value1"
         );
     }
 
     #[tokio::test]
     async fn test_step_executor_creation() {
-        let executor = StepExecutor::new();
-        // Just verify creation works
-        assert!(true);
+        let _executor = StepExecutor::new();
+        // Verify creation works without panic
     }
 
     #[test]

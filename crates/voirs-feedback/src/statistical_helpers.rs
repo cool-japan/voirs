@@ -103,7 +103,7 @@ pub fn percentile(data: &[f32], percentile: f32) -> Option<f32> {
 /// use voirs_feedback::statistical_helpers::interquartile_range;
 ///
 /// let data = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
-/// let (q1, q2, q3, iqr) = interquartile_range(&data).unwrap();
+/// let (q1, q2, q3, iqr) = interquartile_range(&data).expect("value should be present");
 /// ```
 #[must_use]
 pub fn interquartile_range(data: &[f32]) -> Option<(f32, f32, f32, f32)> {
@@ -445,7 +445,7 @@ pub fn root_mean_squared_error(actual: &[f32], predicted: &[f32]) -> Option<f32>
 ///
 /// let x = vec![1.0, 2.0, 3.0, 4.0, 5.0];
 /// let y = vec![2.0, 4.0, 6.0, 8.0, 10.0];
-/// let (slope, intercept) = linear_regression(&x, &y).unwrap();
+/// let (slope, intercept) = linear_regression(&x, &y).expect("value should be present");
 /// assert!((slope - 2.0).abs() < 0.001);
 /// ```
 #[must_use]

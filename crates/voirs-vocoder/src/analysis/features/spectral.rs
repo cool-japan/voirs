@@ -378,7 +378,7 @@ mod tests {
 
                 let sorted_mags = {
                     let mut mags = magnitudes.to_vec();
-                    mags.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    mags.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                     mags
                 };
 

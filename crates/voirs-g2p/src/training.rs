@@ -396,13 +396,16 @@ impl TrainingSession {
 
         // Initialize progress tracker
         {
-            let mut tracker = self.progress_tracker.lock().unwrap();
+            let mut tracker = self
+                .progress_tracker
+                .lock()
+                .expect("lock should not be poisoned");
             tracker.start_time = Some(Instant::now());
         }
 
         // Get training configuration
         let config = {
-            let model = self.model.lock().unwrap();
+            let model = self.model.lock().expect("lock should not be poisoned");
             model.config.training.clone()
         };
 
@@ -413,7 +416,10 @@ impl TrainingSession {
 
             // Update progress tracker
             {
-                let mut tracker = self.progress_tracker.lock().unwrap();
+                let mut tracker = self
+                    .progress_tracker
+                    .lock()
+                    .expect("lock should not be poisoned");
                 tracker.add_progress(epoch_progress.clone());
             }
 
@@ -450,7 +456,7 @@ impl TrainingSession {
 
         // Get batch size and total epochs
         let (batch_size, total_epochs) = {
-            let model = self.model.lock().unwrap();
+            let model = self.model.lock().expect("lock should not be poisoned");
             (
                 model.config.training.batch_size,
                 model.config.training.epochs,
@@ -523,7 +529,10 @@ impl TrainingSession {
 
         // Calculate a more realistic loss based on text complexity and epoch
         let epoch = {
-            let tracker = self.progress_tracker.lock().unwrap();
+            let tracker = self
+                .progress_tracker
+                .lock()
+                .expect("lock should not be poisoned");
             tracker.history.len()
         };
 
@@ -550,7 +559,10 @@ impl TrainingSession {
     async fn evaluate_dataset(&self, dataset: &TrainingDataset) -> Result<(f32, f32)> {
         // Enhanced evaluation with more realistic behavior
         let epoch = {
-            let tracker = self.progress_tracker.lock().unwrap();
+            let tracker = self
+                .progress_tracker
+                .lock()
+                .expect("lock should not be poisoned");
             tracker.history.len()
         };
 
@@ -573,7 +585,7 @@ impl TrainingSession {
 
     /// Get current learning rate
     fn get_current_learning_rate(&self) -> f32 {
-        let model = self.model.lock().unwrap();
+        let model = self.model.lock().expect("lock should not be poisoned");
         model.config.training.learning_rate
     }
 
@@ -584,12 +596,15 @@ impl TrainingSession {
         current_step: usize,
         total_steps: usize,
     ) -> Option<Duration> {
-        let tracker = self.progress_tracker.lock().unwrap();
+        let tracker = self
+            .progress_tracker
+            .lock()
+            .expect("lock should not be poisoned");
 
         if let Some(start_time) = tracker.start_time {
             let elapsed = start_time.elapsed();
             let total_epochs = {
-                let model = self.model.lock().unwrap();
+                let model = self.model.lock().expect("lock should not be poisoned");
                 model.config.training.epochs
             };
 
@@ -699,7 +714,13 @@ impl TrainingSession {
     fn get_current_metrics(&self) -> HashMap<String, f32> {
         let mut metrics = HashMap::new();
 
-        if let Some(progress) = self.progress_tracker.lock().unwrap().history.back() {
+        if let Some(progress) = self
+            .progress_tracker
+            .lock()
+            .expect("lock should not be poisoned")
+            .history
+            .back()
+        {
             metrics.insert("train_loss".to_string(), progress.train_loss);
             metrics.insert("train_accuracy".to_string(), progress.train_accuracy);
 

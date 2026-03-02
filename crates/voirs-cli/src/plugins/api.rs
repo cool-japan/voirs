@@ -303,7 +303,7 @@ pub mod utils {
         use std::time::{SystemTime, UNIX_EPOCH};
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("SystemTime should be after UNIX_EPOCH")
             .as_nanos();
         format!("call_{}", timestamp)
     }

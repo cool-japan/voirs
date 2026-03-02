@@ -31,7 +31,10 @@ impl NeuralSpatialProcessor {
     /// Create a new neural spatial processor
     pub fn new(config: NeuralSpatialConfig) -> Result<Self> {
         let device = if config.use_gpu {
-            Device::new_cuda(0).unwrap_or(Device::Cpu)
+            // Use catch_unwind because Device::new_cuda can panic on systems without CUDA
+            std::panic::catch_unwind(|| Device::new_cuda(0))
+                .unwrap_or(Ok(Device::Cpu))
+                .unwrap_or(Device::Cpu)
         } else {
             Device::Cpu
         };

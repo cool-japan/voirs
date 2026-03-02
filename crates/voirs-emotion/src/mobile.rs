@@ -28,15 +28,15 @@
 //! use voirs_emotion::types::*;
 //!
 //! // Create mobile-optimized emotion processor
-//! let mobile_processor = MobileEmotionProcessor::new().await.unwrap();
+//! let mobile_processor = MobileEmotionProcessor::new().await.expect("operation should succeed");
 //!
 //! // Configure for battery optimization
-//! mobile_processor.set_power_mode(PowerMode::PowerSaver).await.unwrap();
+//! mobile_processor.set_power_mode(PowerMode::PowerSaver).await.expect("operation should succeed");
 //!
 //! // Process emotion with thermal awareness
 //! let mut emotion_vector = EmotionVector::new();
 //! emotion_vector.add_emotion(Emotion::Happy, EmotionIntensity::MEDIUM);
-//! mobile_processor.process_emotion_thermal_aware(&emotion_vector).await.unwrap();
+//! mobile_processor.process_emotion_thermal_aware(&emotion_vector).await.expect("operation should succeed");
 //! # });
 //! ```
 

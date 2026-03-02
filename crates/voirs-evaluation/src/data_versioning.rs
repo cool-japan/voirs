@@ -334,7 +334,7 @@ impl DataVersionControl {
                 if entry.path().extension().and_then(|s| s.to_str()) == Some("meta") {
                     let data = fs::read(entry.path())?;
                     let (metadata, _): (VersionMetadata, _) =
-                        bincode::serde::decode_from_slice(&data, bincode::config::standard())
+                        oxicode::serde::decode_from_slice(&data, oxicode::config::standard())
                             .map_err(|e| VersioningError::SerializationError(e.to_string()))?;
                     self.versions.insert(metadata.id.clone(), metadata);
                 }
@@ -349,7 +349,7 @@ impl DataVersionControl {
                 if entry.path().extension().and_then(|s| s.to_str()) == Some("tag") {
                     let data = fs::read(entry.path())?;
                     let (tag, _): (VersionTag, _) =
-                        bincode::serde::decode_from_slice(&data, bincode::config::standard())
+                        oxicode::serde::decode_from_slice(&data, oxicode::config::standard())
                             .map_err(|e| VersioningError::SerializationError(e.to_string()))?;
                     self.tags.insert(tag.name.clone(), tag);
                 }
@@ -364,7 +364,7 @@ impl DataVersionControl {
                 if entry.path().extension().and_then(|s| s.to_str()) == Some("branch") {
                     let data = fs::read(entry.path())?;
                     let (branch, _): (Branch, _) =
-                        bincode::serde::decode_from_slice(&data, bincode::config::standard())
+                        oxicode::serde::decode_from_slice(&data, oxicode::config::standard())
                             .map_err(|e| VersioningError::SerializationError(e.to_string()))?;
                     self.branches.insert(branch.name.clone(), branch);
                 }
@@ -743,7 +743,7 @@ impl DataVersionControl {
             .root_dir
             .join("metadata")
             .join(format!("{}.meta", metadata.id));
-        let data = bincode::serde::encode_to_vec(metadata, bincode::config::standard())
+        let data = oxicode::serde::encode_to_vec(metadata, oxicode::config::standard())
             .map_err(|e| VersioningError::SerializationError(e.to_string()))?;
         fs::write(path, data)?;
         Ok(())
@@ -752,7 +752,7 @@ impl DataVersionControl {
     /// Save tag
     fn save_tag(&self, tag: &VersionTag) -> Result<(), VersioningError> {
         let path = self.root_dir.join("tags").join(format!("{}.tag", tag.name));
-        let data = bincode::serde::encode_to_vec(tag, bincode::config::standard())
+        let data = oxicode::serde::encode_to_vec(tag, oxicode::config::standard())
             .map_err(|e| VersioningError::SerializationError(e.to_string()))?;
         fs::write(path, data)?;
         Ok(())
@@ -764,7 +764,7 @@ impl DataVersionControl {
             .root_dir
             .join("branches")
             .join(format!("{}.branch", branch.name));
-        let data = bincode::serde::encode_to_vec(branch, bincode::config::standard())
+        let data = oxicode::serde::encode_to_vec(branch, oxicode::config::standard())
             .map_err(|e| VersioningError::SerializationError(e.to_string()))?;
         fs::write(path, data)?;
         Ok(())

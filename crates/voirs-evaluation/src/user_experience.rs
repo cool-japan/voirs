@@ -681,12 +681,20 @@ impl UXEvaluator {
 
         let best_segment = segment_scores
             .iter()
-            .max_by(|a, b| a.1.overall_score.partial_cmp(&b.1.overall_score).unwrap())
+            .max_by(|a, b| {
+                a.1.overall_score
+                    .partial_cmp(&b.1.overall_score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .map(|(name, score)| (name.clone(), score.overall_score));
 
         let worst_segment = segment_scores
             .iter()
-            .min_by(|a, b| a.1.overall_score.partial_cmp(&b.1.overall_score).unwrap())
+            .min_by(|a, b| {
+                a.1.overall_score
+                    .partial_cmp(&b.1.overall_score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .map(|(name, score)| (name.clone(), score.overall_score));
 
         SegmentComparison {

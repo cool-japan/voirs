@@ -176,7 +176,10 @@ impl MCDEvaluator {
         let num_frames = (signal.len() - self.frame_len) / self.frame_shift + 1;
         let mut mfcc_features = Array2::zeros((num_frames, self.num_mfcc));
 
-        let mut fft_planner = self.fft_planner.lock().unwrap();
+        let mut fft_planner = self
+            .fft_planner
+            .lock()
+            .expect("lock should not be poisoned");
         let fft = fft_planner.plan_fft_forward(self.frame_len);
         let mut spectrum = vec![scirs2_core::Complex::new(0.0, 0.0); fft.output_len()];
 
@@ -310,7 +313,7 @@ impl MCDEvaluator {
             let (best_i, best_j, _) = candidates
                 .iter()
                 .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
-                .unwrap();
+                .expect("value should be present");
 
             i = *best_i;
             j = *best_j;
@@ -474,7 +477,7 @@ impl MCDEvaluator {
         let mut sorted = mcd_values.to_vec();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-        let median = if sorted.len() % 2 == 0 {
+        let median = if sorted.len().is_multiple_of(2) {
             (sorted[sorted.len() / 2 - 1] + sorted[sorted.len() / 2]) / 2.0
         } else {
             sorted[sorted.len() / 2]

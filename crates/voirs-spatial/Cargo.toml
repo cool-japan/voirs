@@ -11,6 +11,7 @@ keywords = ["voirs", "spatial", "3d-audio", "hrtf", "binaural"]
 categories = ["multimedia::audio", "science", "simulation"]
 rust-version = { workspace = true }
 description = "3D spatial audio and HRTF processing for VoiRS"
+readme = "README.md"
 
 [dependencies]
 # SciRS2 - Scientific computing abstractions

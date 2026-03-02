@@ -172,7 +172,10 @@ impl PerformanceMonitor {
     pub async fn record_measurement(&self, measurement: PerformanceMeasurement) {
         // Add to measurements history
         {
-            let mut measurements = self.measurements.lock().unwrap();
+            let mut measurements = self
+                .measurements
+                .lock()
+                .expect("lock should not be poisoned");
             measurements.push_back(measurement.clone());
 
             // Maintain history size limit
@@ -202,7 +205,7 @@ impl PerformanceMonitor {
 
     /// Get recent alerts
     pub fn get_recent_alerts(&self, limit: usize) -> Vec<PerformanceAlert> {
-        let alerts = self.alerts.lock().unwrap();
+        let alerts = self.alerts.lock().expect("lock should not be poisoned");
         alerts.iter().rev().take(limit).cloned().collect()
     }
 
@@ -392,7 +395,10 @@ impl PerformanceMonitor {
     /// Clear all performance data
     pub async fn clear_data(&self) {
         {
-            let mut measurements = self.measurements.lock().unwrap();
+            let mut measurements = self
+                .measurements
+                .lock()
+                .expect("lock should not be poisoned");
             measurements.clear();
         }
 
@@ -402,7 +408,7 @@ impl PerformanceMonitor {
         }
 
         {
-            let mut alerts = self.alerts.lock().unwrap();
+            let mut alerts = self.alerts.lock().expect("lock should not be poisoned");
             alerts.clear();
         }
     }
@@ -412,7 +418,10 @@ impl PerformanceMonitor {
         let mut stats_cache = self.stats_cache.write().await;
 
         // Get recent measurements for this operation
-        let measurements = self.measurements.lock().unwrap();
+        let measurements = self
+            .measurements
+            .lock()
+            .expect("lock should not be poisoned");
         let operation_measurements: Vec<_> = measurements
             .iter()
             .filter(|m| m.operation == measurement.operation)
@@ -431,8 +440,8 @@ impl PerformanceMonitor {
         let count = durations.len();
         let avg_duration = total_duration as f64 / count as f64;
 
-        let min_duration = *durations.iter().min().unwrap();
-        let max_duration = *durations.iter().max().unwrap();
+        let min_duration = *durations.iter().min().expect("value should be present");
+        let max_duration = *durations.iter().max().expect("value should be present");
 
         // Calculate standard deviation
         let variance = durations
@@ -574,7 +583,7 @@ impl PerformanceMonitor {
 
         // Add alerts
         if !alerts_to_add.is_empty() {
-            let mut alerts = self.alerts.lock().unwrap();
+            let mut alerts = self.alerts.lock().expect("lock should not be poisoned");
             for alert in alerts_to_add {
                 alerts.push_back(alert);
             }
@@ -745,7 +754,7 @@ impl AdvancedProfiler {
             entry_time: Instant::now(),
             memory_at_entry: Self::get_current_memory(),
             parent_index: {
-                let stack = self.call_stack.lock().unwrap();
+                let stack = self.call_stack.lock().expect("lock should not be poisoned");
                 if stack.is_empty() {
                     None
                 } else {
@@ -755,7 +764,7 @@ impl AdvancedProfiler {
         };
 
         let index = {
-            let mut stack = self.call_stack.lock().unwrap();
+            let mut stack = self.call_stack.lock().expect("lock should not be poisoned");
             stack.push(frame);
             stack.len() - 1
         };
@@ -766,7 +775,7 @@ impl AdvancedProfiler {
     /// Exit a function/operation
     pub fn exit_function(&self, frame_index: usize) {
         let frame = {
-            let mut stack = self.call_stack.lock().unwrap();
+            let mut stack = self.call_stack.lock().expect("lock should not be poisoned");
             if frame_index >= stack.len() {
                 return;
             }
@@ -784,7 +793,7 @@ impl AdvancedProfiler {
 
         // Update hotspot data
         {
-            let mut hotspots = self.hotspots.lock().unwrap();
+            let mut hotspots = self.hotspots.lock().expect("lock should not be poisoned");
             let hotspot = hotspots.entry(frame.name).or_insert_with(|| HotspotData {
                 total_time: Duration::ZERO,
                 call_count: 0,
@@ -804,7 +813,7 @@ impl AdvancedProfiler {
 
     /// Get hotspot analysis
     pub fn get_hotspots(&self) -> Vec<(String, HotspotData)> {
-        let hotspots = self.hotspots.lock().unwrap();
+        let hotspots = self.hotspots.lock().expect("lock should not be poisoned");
         let total_time: Duration = hotspots.values().map(|h| h.total_time).sum();
 
         let mut results: Vec<_> = hotspots
@@ -848,8 +857,14 @@ impl AdvancedProfiler {
 
     /// Reset profiling data
     pub fn reset(&self) {
-        self.call_stack.lock().unwrap().clear();
-        self.hotspots.lock().unwrap().clear();
+        self.call_stack
+            .lock()
+            .expect("lock should not be poisoned")
+            .clear();
+        self.hotspots
+            .lock()
+            .expect("lock should not be poisoned")
+            .clear();
     }
 
     /// Enable or disable sampling

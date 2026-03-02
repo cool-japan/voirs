@@ -29,7 +29,7 @@ impl VoiceValidator {
             bail!("Voice name too long (max 64 characters): {}", name.len());
         }
 
-        if !name.chars().next().unwrap().is_alphabetic() {
+        if !name.chars().next().is_some_and(|c| c.is_alphabetic()) {
             bail!("Voice name must start with a letter: '{}'", name);
         }
 

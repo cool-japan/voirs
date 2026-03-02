@@ -469,7 +469,7 @@ impl<M: AcousticModel + Send + Sync + 'static> BatchProcessor<M> {
             return config.max_batch_size.min(pending_count);
         }
 
-        let stats_read = stats.read().unwrap();
+        let stats_read = stats.read().expect("lock should not be poisoned");
         let current_throughput = stats_read.throughput_rps;
         drop(stats_read);
 
@@ -496,7 +496,7 @@ impl<M: AcousticModel + Send + Sync + 'static> BatchProcessor<M> {
         semaphore: &Arc<Semaphore>,
         mut batch: Vec<BatchRequest>,
     ) {
-        let _permit = semaphore.acquire().await.unwrap();
+        let _permit = semaphore.acquire().await.expect("semaphore should be open");
         let start_time = Instant::now();
 
         // Sort by priority
@@ -604,7 +604,7 @@ impl<M: AcousticModel + Send + Sync + 'static> BatchProcessor<M> {
 
     /// Get cached result
     fn get_cached_result(&self, cache_key: &str) -> Option<MelSpectrogram> {
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().expect("lock should not be poisoned");
         if let Some(entry) = cache.get_mut(cache_key) {
             entry.access_count += 1;
             Some(entry.result.clone())
@@ -619,7 +619,7 @@ impl<M: AcousticModel + Send + Sync + 'static> BatchProcessor<M> {
         cache_key: String,
         result: MelSpectrogram,
     ) {
-        let mut cache = cache.lock().unwrap();
+        let mut cache = cache.lock().expect("lock should not be poisoned");
 
         // Implement LRU eviction if cache is full
         if cache.len() >= 1000 {
@@ -646,7 +646,7 @@ impl<M: AcousticModel + Send + Sync + 'static> BatchProcessor<M> {
 
     /// Update cache statistics
     async fn update_cache_stats(&self, cache_hit: bool) {
-        let mut stats = self.stats.write().unwrap();
+        let mut stats = self.stats.write().expect("lock should not be poisoned");
         let total_requests = stats.total_requests + 1;
         let cache_hits = if cache_hit {
             (stats.cache_hit_rate * stats.total_requests as f32) + 1.0
@@ -668,7 +668,7 @@ impl<M: AcousticModel + Send + Sync + 'static> BatchProcessor<M> {
         batch_size: usize,
         latency: Duration,
     ) {
-        let mut stats = stats.write().unwrap();
+        let mut stats = stats.write().expect("lock should not be poisoned");
 
         stats.total_requests += batch_size as u64;
         stats.total_batches += 1;
@@ -704,7 +704,7 @@ impl<M: AcousticModel + Send + Sync + 'static> BatchProcessor<M> {
         stats: &Arc<RwLock<BatchProcessingStats>>,
         error_type: &str,
     ) {
-        let mut stats = stats.write().unwrap();
+        let mut stats = stats.write().expect("lock should not be poisoned");
         stats.error_stats.total_errors += 1;
 
         match error_type {
@@ -718,12 +718,15 @@ impl<M: AcousticModel + Send + Sync + 'static> BatchProcessor<M> {
 
     /// Get current processing statistics
     pub async fn get_stats(&self) -> BatchProcessingStats {
-        self.stats.read().unwrap().clone()
+        self.stats
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Reset statistics
     pub async fn reset_stats(&self) {
-        let mut stats = self.stats.write().unwrap();
+        let mut stats = self.stats.write().expect("lock should not be poisoned");
         *stats = BatchProcessingStats {
             total_requests: 0,
             total_batches: 0,
@@ -757,12 +760,20 @@ impl<M: AcousticModel + Send + Sync + 'static> BatchProcessor<M> {
 
     /// Clear cache
     pub async fn clear_cache(&self) {
-        self.cache.lock().unwrap().clear();
+        self.cache
+            .lock()
+            .expect("lock should not be poisoned")
+            .clear();
     }
 
     /// Shutdown the batch processor
     pub async fn shutdown(&self) -> Result<()> {
-        if let Some(shutdown_tx) = self.shutdown_tx.lock().unwrap().take() {
+        if let Some(shutdown_tx) = self
+            .shutdown_tx
+            .lock()
+            .expect("lock should not be poisoned")
+            .take()
+        {
             let _ = shutdown_tx.send(());
         }
         Ok(())

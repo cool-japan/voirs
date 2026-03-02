@@ -403,8 +403,8 @@ impl ABTestSuite {
 
     fn simulate_quality_metric(&self, metric: &QualityMetric, config: &ModelConfig) -> Result<f64> {
         // Simulate realistic quality scores based on model configuration
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
+        use scirs2_core::random::{thread_rng, Rng};
+        let mut rng = thread_rng();
 
         let base_score = match metric {
             QualityMetric::PESQ => {

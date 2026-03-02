@@ -458,7 +458,7 @@ impl ErrorReporter {
     pub fn get_recent_reports(&self) -> Vec<ErrorReport> {
         self.recent_reports
             .lock()
-            .unwrap()
+            .expect("value should be present")
             .iter()
             .cloned()
             .collect()
@@ -466,14 +466,17 @@ impl ErrorReporter {
 
     /// Get error statistics
     pub fn get_statistics(&self) -> ErrorStatistics {
-        self.statistics.lock().unwrap().clone()
+        self.statistics
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Get reports by component
     pub fn get_reports_by_component(&self, component: &str) -> Vec<ErrorReport> {
         self.recent_reports
             .lock()
-            .unwrap()
+            .expect("value should be present")
             .iter()
             .filter(|report| report.component == component)
             .cloned()
@@ -484,7 +487,7 @@ impl ErrorReporter {
     pub fn get_reports_by_severity(&self, severity: ErrorSeverity) -> Vec<ErrorReport> {
         self.recent_reports
             .lock()
-            .unwrap()
+            .expect("value should be present")
             .iter()
             .filter(|report| report.severity == severity)
             .cloned()
@@ -645,7 +648,7 @@ fn generate_error_id() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .expect("value should be present")
         .as_nanos();
     format!("err_{timestamp}")
 }

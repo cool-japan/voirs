@@ -138,7 +138,7 @@ impl PrivacyBudget {
     pub fn new(total_epsilon: f64, delta: f64) -> Self {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("value should be present")
             .as_secs();
 
         Self {
@@ -178,7 +178,7 @@ impl PrivacyBudget {
         if let Some(interval) = self.reset_interval_seconds {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .expect("value should be present")
                 .as_secs();
 
             if now - self.last_reset >= interval {
@@ -417,7 +417,7 @@ impl PrivacyPreservingEvaluator {
 
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("value should be present")
             .as_secs();
 
         Ok(PrivateEvaluationResult {
@@ -511,7 +511,7 @@ impl PrivacyPreservingEvaluator {
 
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("value should be present")
             .as_secs();
 
         Ok(PrivateEvaluationResult {
@@ -540,7 +540,7 @@ impl PrivacyPreservingEvaluator {
         budget.used_epsilon = 0.0;
         budget.last_reset = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("value should be present")
             .as_secs();
         info!("Privacy budget manually reset");
         Ok(())
@@ -560,7 +560,7 @@ impl PrivacyPreservingEvaluator {
             id: uuid::Uuid::new_v4().to_string(),
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .expect("value should be present")
                 .as_secs(),
             actor: "system".to_string(),
             action: action.to_string(),

@@ -333,7 +333,7 @@ impl FederatedNode {
             capabilities: NodeCapabilities::default(),
             last_heartbeat: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .expect("value should be present")
                 .as_secs(),
             total_evaluations: 0,
             current_load: 0.0,
@@ -395,7 +395,7 @@ impl FederatedNode {
                     weight: 1.0,
                     completed_at: SystemTime::now()
                         .duration_since(UNIX_EPOCH)
-                        .unwrap()
+                        .expect("value should be present")
                         .as_secs(),
                 }
             } else {
@@ -425,7 +425,7 @@ impl FederatedNode {
                 weight: 1.0,
                 completed_at: SystemTime::now()
                     .duration_since(UNIX_EPOCH)
-                    .unwrap()
+                    .expect("value should be present")
                     .as_secs(),
             }
         };
@@ -437,7 +437,7 @@ impl FederatedNode {
             info.total_evaluations += 1;
             info.last_heartbeat = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .expect("value should be present")
                 .as_secs();
         }
 
@@ -455,7 +455,7 @@ impl FederatedNode {
         let mut info = self.info.write().await;
         info.last_heartbeat = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("value should be present")
             .as_secs();
     }
 }
@@ -496,7 +496,7 @@ impl FederatedCoordinator {
             capabilities: NodeCapabilities::default(),
             last_heartbeat: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .expect("value should be present")
                 .as_secs(),
             total_evaluations: 0,
             current_load: 0.0,
@@ -534,7 +534,7 @@ impl FederatedCoordinator {
             priority: 1,
             created_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .expect("value should be present")
                 .as_secs(),
         };
 
@@ -571,7 +571,7 @@ impl FederatedCoordinator {
                 weight: 1.0,
                 completed_at: SystemTime::now()
                     .duration_since(UNIX_EPOCH)
-                    .unwrap()
+                    .expect("value should be present")
                     .as_secs(),
             })
             .collect();
@@ -616,9 +616,9 @@ impl FederatedCoordinator {
             }
             AggregationStrategy::Median => {
                 let mut scores: Vec<f64> = results.iter().map(|r| r.quality_score).collect();
-                scores.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                scores.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                 let mid = scores.len() / 2;
-                if scores.len() % 2 == 0 {
+                if scores.len().is_multiple_of(2) {
                     (scores[mid - 1] + scores[mid]) / 2.0
                 } else {
                     scores[mid]
@@ -626,7 +626,7 @@ impl FederatedCoordinator {
             }
             AggregationStrategy::TrimmedMean => {
                 let mut scores: Vec<f64> = results.iter().map(|r| r.quality_score).collect();
-                scores.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                scores.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                 let trim_count = (scores.len() as f64 * 0.1) as usize; // Trim 10% from each end
                 if scores.len() > 2 * trim_count {
                     let trimmed: Vec<f64> = scores

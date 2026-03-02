@@ -288,7 +288,7 @@ impl CloningWizard {
             "project_{}",
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
+                .expect("SystemTime should be after UNIX_EPOCH")
                 .as_secs()
         );
 
@@ -296,7 +296,7 @@ impl CloningWizard {
             "wizard_{}",
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
+                .expect("SystemTime should be after UNIX_EPOCH")
                 .as_nanos()
         );
 
@@ -328,7 +328,7 @@ impl CloningWizard {
             working_data: HashMap::new(),
         };
 
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().expect("lock should not be poisoned");
         sessions.insert(session_id.clone(), session);
 
         Ok(session_id)
@@ -481,7 +481,7 @@ impl CloningWizard {
 
     /// Add voice sample to current session
     pub async fn add_voice_sample(&self, session_id: &str, sample: VoiceSample) -> Result<()> {
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().expect("lock should not be poisoned");
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| Error::Validation(format!("Session not found: {session_id}")))?;
@@ -543,7 +543,7 @@ impl CloningWizard {
         }
 
         // Mark current step as completed and advance
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().expect("lock should not be poisoned");
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| Error::Validation(format!("Session not found: {session_id}")))?;
@@ -589,7 +589,7 @@ impl CloningWizard {
     /// Validate current wizard step
     pub async fn validate_current_step(&self, session_id: &str) -> Result<Vec<ValidationResult>> {
         let session = {
-            let sessions = self.sessions.read().unwrap();
+            let sessions = self.sessions.read().expect("lock should not be poisoned");
             sessions
                 .get(session_id)
                 .ok_or_else(|| Error::Validation(format!("Session not found: {session_id}")))?
@@ -960,7 +960,7 @@ impl CloningWizard {
         &self,
         session_id: &str,
     ) -> Result<MethodSelectionGuidance> {
-        let sessions = self.sessions.read().unwrap();
+        let sessions = self.sessions.read().expect("lock should not be poisoned");
         let session = sessions
             .get(session_id)
             .ok_or_else(|| Error::Validation(format!("Session not found: {session_id}")))?;
@@ -1042,7 +1042,7 @@ impl CloningWizard {
 
     /// Get current wizard session state
     pub async fn get_session_state(&self, session_id: &str) -> Result<WizardSession> {
-        let sessions = self.sessions.read().unwrap();
+        let sessions = self.sessions.read().expect("lock should not be poisoned");
         let session = sessions
             .get(session_id)
             .ok_or_else(|| Error::Validation(format!("Session not found: {session_id}")))?;
@@ -1052,14 +1052,14 @@ impl CloningWizard {
 
     /// List all active wizard sessions
     pub async fn list_sessions(&self) -> Vec<String> {
-        let sessions = self.sessions.read().unwrap();
+        let sessions = self.sessions.read().expect("lock should not be poisoned");
         sessions.keys().cloned().collect()
     }
 
     /// Save wizard session to file
     pub async fn save_session(&self, session_id: &str, file_path: &str) -> Result<()> {
         let session = {
-            let sessions = self.sessions.read().unwrap();
+            let sessions = self.sessions.read().expect("lock should not be poisoned");
             sessions
                 .get(session_id)
                 .ok_or_else(|| Error::Validation(format!("Session not found: {session_id}")))?
@@ -1083,7 +1083,7 @@ impl CloningWizard {
 
         let session_id = session.session_id.clone();
 
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().expect("lock should not be poisoned");
         sessions.insert(session_id.clone(), session);
 
         Ok(session_id)

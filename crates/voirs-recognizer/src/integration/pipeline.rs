@@ -437,7 +437,7 @@ impl UnifiedVoirsPipeline {
         // Convert bytes to AudioBuffer - assuming 16-bit PCM, mono, 16kHz
         // In a real implementation, this should be configurable
         let samples_per_byte = 2; // 16-bit = 2 bytes per sample
-        if audio_bytes.len() % samples_per_byte != 0 {
+        if !audio_bytes.len().is_multiple_of(samples_per_byte) {
             return Err(RecognitionError::AudioProcessingError {
                 message: "Audio bytes length not aligned to sample size".to_string(),
                 source: None,

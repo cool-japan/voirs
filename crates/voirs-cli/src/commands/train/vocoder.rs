@@ -243,7 +243,7 @@ async fn train_diffwave(args: VocoderTrainingArgs, global: &GlobalOptions) -> Re
     })?;
 
     // Calculate batches per epoch
-    let batches_per_epoch = (data_loader.len() + args.batch_size - 1) / args.batch_size;
+    let batches_per_epoch = data_loader.len().div_ceil(args.batch_size);
 
     if !global.quiet {
         println!("✅ Training setup complete!\n");
@@ -601,7 +601,7 @@ async fn train_hifigan(args: VocoderTrainingArgs, global: &GlobalOptions) -> Res
     })?;
 
     // Calculate batches per epoch
-    let batches_per_epoch = (data_loader.len() + args.batch_size - 1) / args.batch_size;
+    let batches_per_epoch = data_loader.len().div_ceil(args.batch_size);
 
     if !global.quiet {
         println!("✅ Training setup complete!\n");
@@ -1040,7 +1040,7 @@ async fn save_checkpoint(
         "timestamp".to_string(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("SystemTime should be after UNIX_EPOCH")
             .as_secs()
             .to_string(),
     );
@@ -1050,7 +1050,7 @@ async fn save_checkpoint(
 
     // Scope the lock to ensure it's dropped before any await points
     {
-        let varmap_data = varmap.data().lock().unwrap();
+        let varmap_data = varmap.data().lock().expect("lock should not be poisoned");
         for (name, var) in varmap_data.iter() {
             let tensor = var.as_tensor();
             let shape: Vec<usize> = tensor.dims().to_vec();
@@ -1136,7 +1136,7 @@ async fn save_checkpoint(
         "val_loss": val_loss,
         "timestamp": std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("SystemTime should be after UNIX_EPOCH")
             .as_secs(),
         "model_type": "DiffWave",
         "tensors": tensors.iter().map(|(name, (_, shape))| {
@@ -1169,7 +1169,7 @@ async fn run_validation(
     val_samples: usize,
 ) -> f64 {
     // Use a portion of data for validation (don't overlap with training batches)
-    let val_batches = (val_samples + batch_size - 1) / batch_size;
+    let val_batches = val_samples.div_ceil(batch_size);
     let mut total_val_loss = 0.0;
     let mut val_batch_count = 0;
 
@@ -1238,7 +1238,7 @@ async fn run_validation_hifigan(
     val_samples: usize,
 ) -> f64 {
     // Use a portion of data for validation
-    let val_batches = (val_samples + batch_size - 1) / batch_size;
+    let val_batches = val_samples.div_ceil(batch_size);
     let mut total_val_loss = 0.0;
     let mut val_batch_count = 0;
 

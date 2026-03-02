@@ -207,7 +207,7 @@ impl SISdrEvaluator {
 
         // Calculate percentiles
         let mut sorted_scores = si_sdr_scores.clone();
-        sorted_scores.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted_scores.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let median_si_sdr = if sorted_scores.len() % 2 == 0 {
             let mid = sorted_scores.len() / 2;

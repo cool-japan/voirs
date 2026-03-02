@@ -208,7 +208,8 @@ pub use sdk_integration::{
 pub use evaluation_integration::{
     EmotionAwareQualityEvaluator, EmotionEvaluationConfig, EmotionEvaluationContext,
     EmotionEvaluationPlugin, EmotionQualityMetadata, EmotionQualityResult,
-    EmotionRecognitionResult, StandardEmotionEvaluationPlugin,
+    EmotionRecognitionResult as EvaluationEmotionRecognitionResult,
+    StandardEmotionEvaluationPlugin,
 };
 
 /// Result type for emotion processing operations
@@ -360,6 +361,7 @@ pub mod prelude {
     pub use crate::evaluation_integration::{
         EmotionAwareQualityEvaluator, EmotionEvaluationConfig, EmotionEvaluationContext,
         EmotionEvaluationPlugin, EmotionQualityMetadata, EmotionQualityResult,
-        EmotionRecognitionResult, StandardEmotionEvaluationPlugin,
+        EmotionRecognitionResult as EvaluationEmotionRecognitionResult,
+        StandardEmotionEvaluationPlugin,
     };
 }

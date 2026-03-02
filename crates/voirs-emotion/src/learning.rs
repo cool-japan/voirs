@@ -200,7 +200,10 @@ impl EmotionLearner {
     pub fn new(config: EmotionLearningConfig) -> Result<Self> {
         #[cfg(feature = "gpu")]
         let device = if config.use_gpu {
-            Device::cuda_if_available(0).unwrap_or(Device::Cpu)
+            std::panic::catch_unwind(|| Device::cuda_if_available(0))
+                .ok()
+                .and_then(|r| r.ok())
+                .unwrap_or(Device::Cpu)
         } else {
             Device::Cpu
         };

@@ -321,7 +321,10 @@ impl PersonalityTransferEngine {
         // Check cache first
         let cache_key = format!("personality_{}", speaker_profile.id);
         {
-            let cache = self.analysis_cache.read().unwrap();
+            let cache = self
+                .analysis_cache
+                .read()
+                .expect("lock should not be poisoned");
             if let Some(cached_profile) = cache.get(&cache_key) {
                 return Ok(cached_profile.clone());
             }
@@ -369,19 +372,28 @@ impl PersonalityTransferEngine {
 
         // Cache the result
         {
-            let mut cache = self.analysis_cache.write().unwrap();
+            let mut cache = self
+                .analysis_cache
+                .write()
+                .expect("lock should not be poisoned");
             cache.insert(cache_key, personality_profile.clone());
         }
 
         // Store in database
         {
-            let mut db = self.personality_database.write().unwrap();
+            let mut db = self
+                .personality_database
+                .write()
+                .expect("lock should not be poisoned");
             db.insert(speaker_profile.id.clone(), personality_profile.clone());
         }
 
         // Update statistics
         {
-            let mut stats = self.performance_stats.write().unwrap();
+            let mut stats = self
+                .performance_stats
+                .write()
+                .expect("lock should not be poisoned");
             stats.profiles_analyzed += 1;
             let processing_time = start_time.elapsed().as_millis() as f32;
             stats.avg_processing_time_ms =
@@ -424,13 +436,19 @@ impl PersonalityTransferEngine {
 
         // Store the transfer model
         {
-            let mut models = self.transfer_models.write().unwrap();
+            let mut models = self
+                .transfer_models
+                .write()
+                .expect("lock should not be poisoned");
             models.insert(model_id.clone(), transfer_model);
         }
 
         // Update statistics
         {
-            let mut stats = self.performance_stats.write().unwrap();
+            let mut stats = self
+                .performance_stats
+                .write()
+                .expect("lock should not be poisoned");
             stats.models_created += 1;
         }
 
@@ -484,7 +502,10 @@ impl PersonalityTransferEngine {
 
         // Update transfer model usage
         {
-            let mut models = self.transfer_models.write().unwrap();
+            let mut models = self
+                .transfer_models
+                .write()
+                .expect("lock should not be poisoned");
             if let Some(model) = models.get_mut(&model_id) {
                 model.usage_count += 1;
                 model.last_updated = SystemTime::now();
@@ -493,7 +514,10 @@ impl PersonalityTransferEngine {
 
         // Update statistics
         {
-            let mut stats = self.performance_stats.write().unwrap();
+            let mut stats = self
+                .performance_stats
+                .write()
+                .expect("lock should not be poisoned");
             stats.operations_completed += 1;
             let processing_time = start_time.elapsed().as_millis() as f32;
             stats.avg_processing_time_ms =
@@ -752,7 +776,10 @@ impl PersonalityTransferEngine {
         target: &PersonalityProfile,
     ) -> Result<TransferModel> {
         {
-            let models = self.transfer_models.read().unwrap();
+            let models = self
+                .transfer_models
+                .read()
+                .expect("lock should not be poisoned");
             if let Some(model) = models.get(model_id) {
                 return Ok(model.clone());
             }
@@ -773,7 +800,10 @@ impl PersonalityTransferEngine {
         };
 
         {
-            let mut models = self.transfer_models.write().unwrap();
+            let mut models = self
+                .transfer_models
+                .write()
+                .expect("lock should not be poisoned");
             models.insert(model_id.to_string(), model.clone());
         }
 
@@ -864,24 +894,36 @@ impl PersonalityTransferEngine {
 
     /// Get personality profile for a speaker
     pub fn get_personality_profile(&self, speaker_id: &str) -> Option<PersonalityProfile> {
-        let db = self.personality_database.read().unwrap();
+        let db = self
+            .personality_database
+            .read()
+            .expect("lock should not be poisoned");
         db.get(speaker_id).cloned()
     }
 
     /// List all stored personality profiles
     pub fn list_personality_profiles(&self) -> Vec<String> {
-        let db = self.personality_database.read().unwrap();
+        let db = self
+            .personality_database
+            .read()
+            .expect("lock should not be poisoned");
         db.keys().cloned().collect()
     }
 
     /// Get transfer statistics
     pub fn get_statistics(&self) -> TransferStats {
-        self.performance_stats.read().unwrap().clone()
+        self.performance_stats
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Clear analysis cache
     pub fn clear_cache(&self) {
-        let mut cache = self.analysis_cache.write().unwrap();
+        let mut cache = self
+            .analysis_cache
+            .write()
+            .expect("lock should not be poisoned");
         cache.clear();
     }
 
@@ -1133,7 +1175,10 @@ mod tests {
         };
 
         {
-            let mut db = engine.personality_database.write().unwrap();
+            let mut db = engine
+                .personality_database
+                .write()
+                .expect("lock should not be poisoned");
             db.insert("stored_speaker".to_string(), profile.clone());
         }
 

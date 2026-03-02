@@ -569,7 +569,7 @@ mod tests {
             ASRBackend::Whisper { model_size, .. } => {
                 assert_eq!(model_size, WhisperModelSize::Base);
             }
-            _ => assert!(false, "Expected Whisper backend"),
+            _ => panic!("Expected Whisper backend"),
         }
     }
 

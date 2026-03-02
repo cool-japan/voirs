@@ -636,7 +636,7 @@ impl DataStorage for FileDataStorage {
             }
             ExportFormat::Binary => {
                 let binary_data =
-                    bincode::serde::encode_to_vec(package, bincode::config::standard()).map_err(
+                    oxicode::serde::encode_to_vec(package, oxicode::config::standard()).map_err(
                         |e| DataManagementError::ExportError {
                             message: format!("Binary serialization failed: {e}"),
                         },
@@ -678,7 +678,7 @@ impl DataStorage for FileDataStorage {
                 serde_json::from_str(&json_str)?
             }
             ExportFormat::Binary => {
-                bincode::serde::decode_from_slice(&data, bincode::config::standard())
+                oxicode::serde::decode_from_slice(&data, oxicode::config::standard())
                     .map(|(v, _)| v)
                     .map_err(|e| DataManagementError::ImportError {
                         message: format!("Binary deserialization failed: {e}"),

@@ -546,7 +546,7 @@ impl VoiceComparator {
             .max_by(|a, b| {
                 Self::score_voice(a, criteria)
                     .partial_cmp(&Self::score_voice(b, criteria))
-                    .unwrap()
+                    .expect("value should be present")
             })
     }
 

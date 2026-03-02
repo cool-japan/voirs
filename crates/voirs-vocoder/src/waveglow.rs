@@ -527,7 +527,7 @@ impl Vocoder for WaveGlowVocoder {
 
 impl Default for WaveGlowVocoder {
     fn default() -> Self {
-        Self::new(WaveGlowConfig::default()).unwrap()
+        Self::new(WaveGlowConfig::default()).expect("default WaveGlowConfig should be valid")
     }
 }
 

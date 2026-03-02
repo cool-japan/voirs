@@ -451,7 +451,7 @@ impl MultiTargetConverter {
             let semaphore = Arc::clone(&semaphore);
 
             let handle = tokio::spawn(async move {
-                let _permit = semaphore.acquire().await.unwrap();
+                let _permit = semaphore.acquire().await.expect("operation should succeed");
                 let conversion_request = Self::create_single_conversion_request(&request, &target);
                 let result = converter.convert(conversion_request).await;
                 (target.name.clone(), result)

@@ -35,9 +35,10 @@ pub async fn logging_middleware(
 
     // Add request ID to headers for downstream handlers
     let mut request = request;
-    request
-        .headers_mut()
-        .insert("x-request-id", request_id.parse().unwrap());
+    request.headers_mut().insert(
+        "x-request-id",
+        request_id.parse().expect("UUID is valid header value"),
+    );
 
     // Process request
     let response = next.run(request).await;
@@ -100,7 +101,7 @@ pub async fn rate_limiting_middleware(
     let max_requests = 100; // Max 100 requests per minute
 
     let client_ip = addr.ip();
-    let requests = guard.entry(client_ip).or_insert_with(Vec::new);
+    let requests = guard.entry(client_ip).or_default();
 
     // Remove old requests outside the window
     requests.retain(|&time| now.duration_since(time).unwrap_or(Duration::ZERO) < window);
@@ -193,18 +194,31 @@ pub async fn security_headers_middleware(request: Request, next: Next) -> Respon
     let headers = response.headers_mut();
 
     // Add security headers
-    headers.insert("X-Content-Type-Options", "nosniff".parse().unwrap());
-    headers.insert("X-Frame-Options", "DENY".parse().unwrap());
-    headers.insert("X-XSS-Protection", "1; mode=block".parse().unwrap());
+    headers.insert(
+        "X-Content-Type-Options",
+        "nosniff".parse().expect("static header value is valid"),
+    );
+    headers.insert(
+        "X-Frame-Options",
+        "DENY".parse().expect("static header value is valid"),
+    );
+    headers.insert(
+        "X-XSS-Protection",
+        "1; mode=block"
+            .parse()
+            .expect("static header value is valid"),
+    );
     headers.insert(
         "Referrer-Policy",
-        "strict-origin-when-cross-origin".parse().unwrap(),
+        "strict-origin-when-cross-origin"
+            .parse()
+            .expect("static header value is valid"),
     );
     headers.insert(
         "Content-Security-Policy",
         "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
             .parse()
-            .unwrap(),
+            .expect("static header value is valid"),
     );
 
     response
@@ -235,18 +249,26 @@ pub async fn cors_preflight_middleware(
         let mut response = StatusCode::OK.into_response();
         let response_headers = response.headers_mut();
 
-        response_headers.insert("Access-Control-Allow-Origin", "*".parse().unwrap());
+        response_headers.insert(
+            "Access-Control-Allow-Origin",
+            "*".parse().expect("static header value is valid"),
+        );
         response_headers.insert(
             "Access-Control-Allow-Methods",
-            "GET, POST, PUT, DELETE, OPTIONS".parse().unwrap(),
+            "GET, POST, PUT, DELETE, OPTIONS"
+                .parse()
+                .expect("static header value is valid"),
         );
         response_headers.insert(
             "Access-Control-Allow-Headers",
             "Content-Type, Authorization, X-Requested-With"
                 .parse()
-                .unwrap(),
+                .expect("static header value is valid"),
         );
-        response_headers.insert("Access-Control-Max-Age", "86400".parse().unwrap());
+        response_headers.insert(
+            "Access-Control-Max-Age",
+            "86400".parse().expect("static header value is valid"),
+        );
 
         return response;
     }

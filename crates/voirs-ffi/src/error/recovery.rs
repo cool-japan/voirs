@@ -177,6 +177,7 @@ impl ErrorRecoveryManager {
     }
 
     /// Set up default recovery strategies for common error types
+    #[allow(clippy::result_large_err)]
     fn setup_default_strategies(&mut self) {
         // Network errors - retry with exponential backoff
         self.set_recovery_config(
@@ -541,13 +542,16 @@ where
 {
     ERROR_RECOVERY_MANAGER
         .lock()
-        .unwrap()
+        .expect("lock should not be poisoned")
         .attempt_recovery(error, operation)
 }
 
 /// Get recovery statistics from global manager
 pub fn get_recovery_statistics() -> RecoveryStats {
-    ERROR_RECOVERY_MANAGER.lock().unwrap().get_recovery_stats()
+    ERROR_RECOVERY_MANAGER
+        .lock()
+        .expect("lock should not be poisoned")
+        .get_recovery_stats()
 }
 
 /// Configure recovery strategy globally
@@ -558,12 +562,13 @@ pub fn configure_recovery_strategy(
 ) {
     ERROR_RECOVERY_MANAGER
         .lock()
-        .unwrap()
+        .expect("lock should not be poisoned")
         .set_recovery_config(category, subcode, config);
 }
 
 /// C API functions for error recovery
 #[no_mangle]
+#[allow(clippy::result_large_err)]
 pub extern "C" fn voirs_attempt_recovery(
     error_category: VoirsErrorCategory,
     error_subcode: VoirsErrorSubcode,
@@ -620,6 +625,7 @@ pub unsafe extern "C" fn voirs_get_recovery_stats(
 }
 
 #[cfg(test)]
+#[allow(clippy::result_large_err)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};

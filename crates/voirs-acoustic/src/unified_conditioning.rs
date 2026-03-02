@@ -406,7 +406,10 @@ impl UnifiedConditioning {
 
     /// Apply unified conditioning to input tensor
     pub fn apply_conditioning(&self, input: &Tensor) -> CandleResult<Tensor> {
-        let state = self.current_state.lock().unwrap();
+        let state = self
+            .current_state
+            .lock()
+            .expect("lock should not be poisoned");
 
         // Start with input tensor
         let mut conditioned = input.clone();
@@ -456,7 +459,10 @@ impl UnifiedConditioning {
 
     /// Generate emotion-conditioned prosody
     pub fn generate_emotion_prosody(&mut self) -> Result<Option<ProsodyConfig>> {
-        let state = self.current_state.lock().unwrap();
+        let state = self
+            .current_state
+            .lock()
+            .expect("lock should not be poisoned");
 
         if let Some(ref emotion) = state.emotion {
             let prosody = self
@@ -470,7 +476,10 @@ impl UnifiedConditioning {
 
     /// Get current conditioning state
     pub fn get_state(&self) -> ConditioningState {
-        self.current_state.lock().unwrap().clone()
+        self.current_state
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Clear all conditioning
@@ -499,7 +508,10 @@ impl UnifiedConditioning {
 
     /// Get conditioning statistics
     pub fn get_statistics(&self) -> ConditioningStatistics {
-        let state = self.current_state.lock().unwrap();
+        let state = self
+            .current_state
+            .lock()
+            .expect("lock should not be poisoned");
 
         ConditioningStatistics {
             active_features: state.feature_strengths.len(),
@@ -798,7 +810,10 @@ impl ConditioningCache {
 
     /// Cache emotion vector
     pub fn cache_emotion(&self, key: String, emotion: EmotionVector) -> Result<()> {
-        let mut cache = self.emotion_cache.write().unwrap();
+        let mut cache = self
+            .emotion_cache
+            .write()
+            .expect("lock should not be poisoned");
 
         // Remove expired entries
         let now = std::time::Instant::now();
@@ -827,7 +842,10 @@ impl ConditioningCache {
 
     /// Get cached emotion vector
     pub fn get_cached_emotion(&self, key: &str) -> Option<EmotionVector> {
-        let cache = self.emotion_cache.read().unwrap();
+        let cache = self
+            .emotion_cache
+            .read()
+            .expect("lock should not be poisoned");
         let now = std::time::Instant::now();
 
         if let Some((emotion, timestamp)) = cache.get(key) {
@@ -841,7 +859,10 @@ impl ConditioningCache {
 
     /// Cache speaker embedding
     pub fn cache_speaker(&self, key: String, speaker: Tensor) -> Result<()> {
-        let mut cache = self.speaker_cache.write().unwrap();
+        let mut cache = self
+            .speaker_cache
+            .write()
+            .expect("lock should not be poisoned");
 
         // Remove expired entries
         let now = std::time::Instant::now();
@@ -869,7 +890,10 @@ impl ConditioningCache {
 
     /// Get cached speaker embedding
     pub fn get_cached_speaker(&self, key: &str) -> Option<Tensor> {
-        let cache = self.speaker_cache.read().unwrap();
+        let cache = self
+            .speaker_cache
+            .read()
+            .expect("lock should not be poisoned");
         let now = std::time::Instant::now();
 
         if let Some((speaker, timestamp)) = cache.get(key) {
@@ -883,7 +907,10 @@ impl ConditioningCache {
 
     /// Cache prosody configuration
     pub fn cache_prosody(&self, key: String, prosody: ProsodyConfig) -> Result<()> {
-        let mut cache = self.prosody_cache.write().unwrap();
+        let mut cache = self
+            .prosody_cache
+            .write()
+            .expect("lock should not be poisoned");
 
         // Remove expired entries
         let now = std::time::Instant::now();
@@ -911,7 +938,10 @@ impl ConditioningCache {
 
     /// Get cached prosody configuration
     pub fn get_cached_prosody(&self, key: &str) -> Option<ProsodyConfig> {
-        let cache = self.prosody_cache.read().unwrap();
+        let cache = self
+            .prosody_cache
+            .read()
+            .expect("lock should not be poisoned");
         let now = std::time::Instant::now();
 
         if let Some((prosody, timestamp)) = cache.get(key) {
@@ -925,7 +955,10 @@ impl ConditioningCache {
 
     /// Cache style vector
     pub fn cache_style(&self, key: String, style: Tensor) -> Result<()> {
-        let mut cache = self.style_cache.write().unwrap();
+        let mut cache = self
+            .style_cache
+            .write()
+            .expect("lock should not be poisoned");
 
         // Remove expired entries
         let now = std::time::Instant::now();
@@ -953,7 +986,10 @@ impl ConditioningCache {
 
     /// Get cached style vector
     pub fn get_cached_style(&self, key: &str) -> Option<Tensor> {
-        let cache = self.style_cache.read().unwrap();
+        let cache = self
+            .style_cache
+            .read()
+            .expect("lock should not be poisoned");
         let now = std::time::Instant::now();
 
         if let Some((style, timestamp)) = cache.get(key) {
@@ -967,18 +1003,46 @@ impl ConditioningCache {
 
     /// Clear all caches
     pub fn clear_all(&self) {
-        self.emotion_cache.write().unwrap().clear();
-        self.speaker_cache.write().unwrap().clear();
-        self.prosody_cache.write().unwrap().clear();
-        self.style_cache.write().unwrap().clear();
+        self.emotion_cache
+            .write()
+            .expect("lock should not be poisoned")
+            .clear();
+        self.speaker_cache
+            .write()
+            .expect("lock should not be poisoned")
+            .clear();
+        self.prosody_cache
+            .write()
+            .expect("lock should not be poisoned")
+            .clear();
+        self.style_cache
+            .write()
+            .expect("lock should not be poisoned")
+            .clear();
     }
 
     /// Get cache statistics
     pub fn get_cache_stats(&self) -> CacheStatistics {
-        let emotion_count = self.emotion_cache.read().unwrap().len();
-        let speaker_count = self.speaker_cache.read().unwrap().len();
-        let prosody_count = self.prosody_cache.read().unwrap().len();
-        let style_count = self.style_cache.read().unwrap().len();
+        let emotion_count = self
+            .emotion_cache
+            .read()
+            .expect("lock should not be poisoned")
+            .len();
+        let speaker_count = self
+            .speaker_cache
+            .read()
+            .expect("lock should not be poisoned")
+            .len();
+        let prosody_count = self
+            .prosody_cache
+            .read()
+            .expect("lock should not be poisoned")
+            .len();
+        let style_count = self
+            .style_cache
+            .read()
+            .expect("lock should not be poisoned")
+            .len();
 
         CacheStatistics {
             emotion_entries: emotion_count,

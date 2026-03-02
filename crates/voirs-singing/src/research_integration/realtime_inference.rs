@@ -607,7 +607,7 @@ impl LatencyOptimizer {
         }
 
         let mut sorted: Vec<_> = self.latency_history.iter().copied().collect();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let sum: f32 = sorted.iter().sum();
         let mean = sum / sorted.len() as f32;

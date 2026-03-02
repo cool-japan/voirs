@@ -1357,7 +1357,10 @@ fn check_gpu_availability() -> bool {
     #[cfg(feature = "gpu")]
     {
         use candle_core::Device;
-        if let Ok(device) = Device::cuda_if_available(0) {
+        if let Some(device) = std::panic::catch_unwind(|| Device::cuda_if_available(0))
+            .ok()
+            .and_then(|r| r.ok())
+        {
             return !matches!(device, Device::Cpu);
         }
     }
@@ -1376,9 +1379,11 @@ fn get_gpu_info() -> Vec<String> {
     {
         use candle_core::Device;
         let mut cuda_idx = 0;
+        // while_let_loop: complex nested pattern (catch_unwind + Device) cannot use while let
+        #[allow(clippy::while_let_loop)]
         loop {
-            match Device::cuda_if_available(cuda_idx) {
-                Ok(Device::Cuda(_)) => {
+            match std::panic::catch_unwind(move || Device::cuda_if_available(cuda_idx)) {
+                Ok(Ok(Device::Cuda(_))) => {
                     gpu_info.push(format!("CUDA Device {}", cuda_idx));
                     cuda_idx += 1;
                 }

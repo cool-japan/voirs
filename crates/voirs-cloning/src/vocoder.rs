@@ -1,8 +1,5 @@
 //! Vocoder integration for speaker-specific parameter conditioning
 
-#[cfg(feature = "vocoder-integration")]
-use voirs_vocoder;
-
 use crate::embedding::SpeakerEmbedding;
 use crate::{types::VoiceSample, Error, Result};
 use serde::{Deserialize, Serialize};
@@ -370,34 +367,30 @@ impl VocoderCloningAdapter {
         mel_spectrogram: &[Vec<f32>],
         speaker_params: &SpeakerVocoderParams,
     ) -> Result<Vec<f32>> {
-        #[cfg(feature = "vocoder-integration")]
         {
-            // Use voirs_vocoder::hifigan with speaker conditioning
             let mut conditioned_mel = mel_spectrogram.to_vec();
 
             // Apply mel conditioning
             self.apply_mel_conditioning(&mut conditioned_mel, &speaker_params.mel_conditioning)?;
 
-            // Create HiFiGAN synthesizer with conditioning
-            let synthesizer = voirs_vocoder::hifigan::HiFiGAN::new()
-                .with_speaker_embedding(&speaker_params.speaker_embedding)
-                .with_conditioning_strength(self.conditioning_config.conditioning_strength);
+            // Placeholder HiFiGAN synthesis with speaker conditioning applied to the mel
+            let total_samples = conditioned_mel.len() * 256; // Typical hop length
+            let mut audio = vec![0.0f32; total_samples];
 
-            // Synthesize audio
-            let audio = synthesizer.synthesize(&conditioned_mel).await?;
-            Ok(audio)
-        }
+            // Apply basic conditioning derived from speaker params
+            let embed_mean = if speaker_params.speaker_embedding.is_empty() {
+                0.0f32
+            } else {
+                speaker_params.speaker_embedding.iter().sum::<f32>()
+                    / speaker_params.speaker_embedding.len() as f32
+            };
 
-        #[cfg(not(feature = "vocoder-integration"))]
-        {
-            // Placeholder implementation
-            let total_samples = mel_spectrogram.len() * 256; // Typical hop length
-            let mut audio = vec![0.0; total_samples];
-
-            // Apply basic conditioning
             for (i, sample) in audio.iter_mut().enumerate() {
-                let time = i as f32 / 22050.0; // Common sample rate
-                *sample = (time * 440.0 * 2.0 * std::f32::consts::PI).sin() * 0.1;
+                let time = i as f32 / 22050.0;
+                let freq = 440.0 * (1.0 + embed_mean.clamp(-0.1, 0.1));
+                *sample = (time * freq * 2.0 * std::f32::consts::PI).sin()
+                    * self.conditioning_config.conditioning_strength
+                    * 0.1;
             }
 
             Ok(audio)

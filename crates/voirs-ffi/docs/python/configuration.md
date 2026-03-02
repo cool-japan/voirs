@@ -11,7 +11,7 @@ VoiRS uses the `SynthesisConfig` class to manage all synthesis parameters. Confi
 ### Creating Configuration Objects
 
 ```python
-from voirs_ffi import SynthesisConfig
+from voirs import SynthesisConfig
 
 # Default configuration
 config = SynthesisConfig()
@@ -29,7 +29,7 @@ config = SynthesisConfig(
 ### Using Keyword Arguments
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 # Direct configuration during pipeline creation
 pipeline = VoirsPipeline.with_config(
@@ -88,7 +88,7 @@ Enable GPU acceleration.
 - **Impact**: 2-10x speed improvement when available
 
 ```python
-from voirs_ffi import check_compatibility
+from voirs import check_compatibility
 
 # Check GPU availability first
 compatibility = check_compatibility()
@@ -161,7 +161,7 @@ Default voice identifier.
 - **Impact**: Determines voice characteristics
 
 ```python
-from voirs_ffi import list_voices
+from voirs import list_voices
 
 # List available voices
 voices = list_voices()
@@ -391,7 +391,7 @@ production_config = SynthesisConfig(
 
 ```python
 import json
-from voirs_ffi import SynthesisConfig
+from voirs import SynthesisConfig
 
 config = SynthesisConfig(sample_rate=44100, quality="high")
 
@@ -400,7 +400,7 @@ with open("config.json", "w") as f:
     json.dump(config.to_dict(), f, indent=2)
 
 # Using built-in method
-from voirs_ffi import save_config
+from voirs import save_config
 save_config(config, "config.json")
 ```
 
@@ -408,7 +408,7 @@ save_config(config, "config.json")
 
 ```python
 import json
-from voirs_ffi import SynthesisConfig, load_config
+from voirs import SynthesisConfig, load_config
 
 # Load as JSON
 with open("config.json", "r") as f:
@@ -423,7 +423,7 @@ config = load_config("config.json")
 
 ```python
 import yaml
-from voirs_ffi import SynthesisConfig
+from voirs import SynthesisConfig
 
 # Save as YAML
 config = SynthesisConfig(sample_rate=44100, quality="high")
@@ -441,7 +441,7 @@ config = SynthesisConfig.from_dict(config_dict)
 #### Updating Existing Configuration
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 pipeline = VoirsPipeline()
 
@@ -462,7 +462,7 @@ pipeline.update_config(quality="high", sample_rate=44100)
 #### Configuration Validation
 
 ```python
-from voirs_ffi import SynthesisConfig, ConfigurationError
+from voirs import SynthesisConfig, ConfigurationError
 
 try:
     config = SynthesisConfig(
@@ -502,7 +502,7 @@ Using environment variables:
 
 ```python
 import os
-from voirs_ffi import SynthesisConfig
+from voirs import SynthesisConfig
 
 # Environment variables override defaults
 config = SynthesisConfig()
@@ -514,7 +514,7 @@ print(f"Threads: {config.num_threads}")  # Uses VOIRS_NUM_THREADS if set
 ### Custom Voice Configuration
 
 ```python
-from voirs_ffi import VoirsPipeline, SynthesisConfig
+from voirs import VoirsPipeline, SynthesisConfig
 
 # Load custom voice models
 config = SynthesisConfig(
@@ -533,7 +533,7 @@ print(f"Loaded {len(custom_voices)} custom voices")
 ### Multi-language Configuration
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 # Create language-specific pipelines
 configs = {
@@ -562,7 +562,7 @@ for lang, text in text_samples.items():
 ### Dynamic Configuration
 
 ```python
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 import time
 
 pipeline = VoirsPipeline()
@@ -606,7 +606,7 @@ for text in texts:
 #### GPU Not Available
 
 ```python
-from voirs_ffi import check_compatibility, SynthesisConfig
+from voirs import check_compatibility, SynthesisConfig
 
 compatibility = check_compatibility()
 if not compatibility['gpu']:
@@ -621,7 +621,7 @@ else:
 
 ```python
 import psutil
-from voirs_ffi import SynthesisConfig
+from voirs import SynthesisConfig
 
 # Check available memory
 available_mb = psutil.virtual_memory().available // (1024 * 1024)
@@ -651,7 +651,7 @@ else:  # 4GB or more
 #### Voice Not Found
 
 ```python
-from voirs_ffi import VoirsPipeline, VoiceNotFoundError, list_voices
+from voirs import VoirsPipeline, VoiceNotFoundError, list_voices
 
 try:
     config = SynthesisConfig(voice_id="nonexistent-voice")
@@ -673,7 +673,7 @@ except VoiceNotFoundError as e:
 ### Performance Debugging
 
 ```python
-from voirs_ffi import VoirsPipeline, ProfiledPipeline
+from voirs import VoirsPipeline, ProfiledPipeline
 import time
 
 # Create profiled pipeline for performance monitoring

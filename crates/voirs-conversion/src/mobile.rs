@@ -28,10 +28,10 @@
 //! use voirs_conversion::types::*;
 //!
 //! // Create mobile-optimized converter
-//! let mobile_converter = MobileVoiceConverter::new().await.unwrap();
+//! let mobile_converter = MobileVoiceConverter::new().await.expect("operation should succeed");
 //!
 //! // Configure for power efficiency
-//! mobile_converter.set_power_mode(PowerMode::PowerSaver).await.unwrap();
+//! mobile_converter.set_power_mode(PowerMode::PowerSaver).await.expect("operation should succeed");
 //!
 //! // Process audio with mobile optimizations
 //! let request = ConversionRequest::new(
@@ -42,7 +42,7 @@
 //!     ConversionTarget::new(VoiceCharacteristics::default()),
 //! );
 //!
-//! let result = mobile_converter.convert_mobile_optimized(&request).await.unwrap();
+//! let result = mobile_converter.convert_mobile_optimized(&request).await.expect("operation should succeed");
 //! # });
 //! ```
 

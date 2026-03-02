@@ -27,7 +27,7 @@
 //! use voirs_emotion::types::*;
 //!
 //! // Create quality analyzer
-//! let analyzer = QualityAnalyzer::new().unwrap();
+//! let analyzer = QualityAnalyzer::new().expect("operation should succeed");
 //!
 //! // Create test data
 //! let mut emotion_vector = EmotionVector::new();
@@ -35,7 +35,7 @@
 //! let audio_data = vec![0.1; 1024]; // Sample audio data
 //!
 //! // Analyze emotion quality
-//! let metrics = analyzer.analyze_emotion_quality(&emotion_vector, &audio_data).await.unwrap();
+//! let metrics = analyzer.analyze_emotion_quality(&emotion_vector, &audio_data).await.expect("operation should succeed");
 //!
 //! if metrics.meets_production_standards() {
 //!     println!("Quality standards met! ✅");
@@ -317,7 +317,7 @@ impl QualityAnalyzer {
                     "analysis_duration_ms".to_string(),
                     serde_json::Value::Number(
                         serde_json::Number::from_f64(start_time.elapsed().as_secs_f64() * 1000.0)
-                            .unwrap(),
+                            .expect("operation should succeed"),
                     ),
                 );
                 details.insert(

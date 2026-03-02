@@ -1085,7 +1085,7 @@ fn get_temperature_info() -> TemperatureInfo {
                 let path = entry.path();
                 if path
                     .file_name()
-                    .unwrap()
+                    .unwrap_or_default()
                     .to_str()
                     .unwrap_or("")
                     .starts_with("thermal_zone")

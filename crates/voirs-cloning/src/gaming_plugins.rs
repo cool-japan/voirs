@@ -416,7 +416,7 @@ impl GamingPluginManager {
             "game_session_{}",
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
+                .expect("SystemTime should be after UNIX_EPOCH")
                 .as_millis()
         );
 
@@ -450,7 +450,7 @@ impl GamingPluginManager {
             game_object_id,
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
+                .expect("SystemTime should be after UNIX_EPOCH")
                 .as_millis()
         );
 
@@ -962,7 +962,7 @@ pub extern "C" fn voirs_gaming_create_session(
 
         match manager.create_game_session(engine_type) {
             Ok(session_id) => {
-                let c_string = CString::new(session_id).unwrap();
+                let c_string = CString::new(session_id).expect("session_id should not contain NUL bytes");
                 c_string.into_raw()
             }
             Err(_) => std::ptr::null(),

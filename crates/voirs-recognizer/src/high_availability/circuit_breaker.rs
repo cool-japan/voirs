@@ -106,19 +106,25 @@ impl CircuitBreaker {
 
     /// Record successful request
     pub fn record_success(&self) {
-        let mut stats = self.stats.write();
-        stats.successful_requests += 1;
+        {
+            let mut stats = self.stats.write();
+            stats.successful_requests += 1;
+        }
 
-        let mut consecutive_failures = self.consecutive_failures.write();
-        *consecutive_failures = 0;
+        {
+            let mut consecutive_failures = self.consecutive_failures.write();
+            *consecutive_failures = 0;
+        }
 
-        let mut consecutive_successes = self.consecutive_successes.write();
-        *consecutive_successes += 1;
+        let new_successes = {
+            let mut consecutive_successes = self.consecutive_successes.write();
+            *consecutive_successes += 1;
+            *consecutive_successes
+        };
 
         let current_state = *self.state.read();
 
-        if current_state == CircuitState::HalfOpen
-            && *consecutive_successes >= self.config.success_threshold
+        if current_state == CircuitState::HalfOpen && new_successes >= self.config.success_threshold
         {
             self.close_circuit();
         }
@@ -126,21 +132,28 @@ impl CircuitBreaker {
 
     /// Record failed request
     pub fn record_failure(&self) {
-        let mut stats = self.stats.write();
-        stats.failed_requests += 1;
+        {
+            let mut stats = self.stats.write();
+            stats.failed_requests += 1;
+        }
 
-        let mut consecutive_successes = self.consecutive_successes.write();
-        *consecutive_successes = 0;
+        {
+            let mut consecutive_successes = self.consecutive_successes.write();
+            *consecutive_successes = 0;
+        }
 
-        let mut consecutive_failures = self.consecutive_failures.write();
-        *consecutive_failures += 1;
+        let new_failures = {
+            let mut consecutive_failures = self.consecutive_failures.write();
+            *consecutive_failures += 1;
+            *consecutive_failures
+        };
 
         *self.last_failure_time.write() = Some(Instant::now());
 
         let current_state = *self.state.read();
 
         if (current_state == CircuitState::Closed || current_state == CircuitState::HalfOpen)
-            && *consecutive_failures >= self.config.failure_threshold
+            && new_failures >= self.config.failure_threshold
         {
             self.open_circuit();
         }

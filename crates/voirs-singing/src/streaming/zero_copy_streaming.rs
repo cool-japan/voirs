@@ -116,15 +116,24 @@ impl ZeroCopyStreamingPipeline {
         voice_id: String,
     ) -> Result<(), Error> {
         // Update state
-        *self.state.lock().unwrap() = PipelineState::Buffering;
+        *self.state.lock().expect("lock should not be poisoned") = PipelineState::Buffering;
 
         // Store score and voice
-        *self.current_score.lock().unwrap() = Some(score.clone());
-        *self.current_voice.lock().unwrap() = Some(voice.clone());
-        *self.voice_id.lock().unwrap() = voice_id.clone();
+        *self
+            .current_score
+            .lock()
+            .expect("lock should not be poisoned") = Some(score.clone());
+        *self
+            .current_voice
+            .lock()
+            .expect("lock should not be poisoned") = Some(voice.clone());
+        *self.voice_id.lock().expect("lock should not be poisoned") = voice_id.clone();
 
         // Reset playback position
-        *self.playback_position.lock().unwrap() = 0.0;
+        *self
+            .playback_position
+            .lock()
+            .expect("lock should not be poisoned") = 0.0;
 
         // Clear ring buffer
         self.ring_buffer.clear();
@@ -140,7 +149,7 @@ impl ZeroCopyStreamingPipeline {
         self.fill_initial_buffer()?;
 
         // Update state
-        *self.state.lock().unwrap() = PipelineState::Streaming;
+        *self.state.lock().expect("lock should not be poisoned") = PipelineState::Streaming;
 
         Ok(())
     }
@@ -160,10 +169,25 @@ impl ZeroCopyStreamingPipeline {
     fn synthesize_next_chunk(&self) -> Result<(), Error> {
         let start_time = Instant::now();
 
-        let playback_pos = *self.playback_position.lock().unwrap();
-        let score = self.current_score.lock().unwrap().clone();
-        let voice = self.current_voice.lock().unwrap().clone();
-        let voice_id = self.voice_id.lock().unwrap().clone();
+        let playback_pos = *self
+            .playback_position
+            .lock()
+            .expect("lock should not be poisoned");
+        let score = self
+            .current_score
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone();
+        let voice = self
+            .current_voice
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone();
+        let voice_id = self
+            .voice_id
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone();
 
         if score.is_none() || voice.is_none() {
             return Err(Error::Processing(
@@ -171,8 +195,8 @@ impl ZeroCopyStreamingPipeline {
             ));
         }
 
-        let score = score.unwrap();
-        let voice = voice.unwrap();
+        let score = score.expect("operation should succeed");
+        let voice = voice.expect("operation should succeed");
 
         // Find notes in current chunk
         let chunk_duration = self.config.chunk_size as f32 / self.config.sample_rate as f32;
@@ -230,7 +254,10 @@ impl ZeroCopyStreamingPipeline {
         self.update_metrics(synthesis_time, frame_duration);
 
         // Update playback position
-        *self.playback_position.lock().unwrap() += chunk_duration;
+        *self
+            .playback_position
+            .lock()
+            .expect("lock should not be poisoned") += chunk_duration;
 
         // Adaptive quality scaling
         if self.config.enable_adaptive_quality {
@@ -245,7 +272,10 @@ impl ZeroCopyStreamingPipeline {
 
         // Predictive synthesis for upcoming notes
         if self.config.enable_predictive {
-            let playback_pos = *self.playback_position.lock().unwrap();
+            let playback_pos = *self
+                .playback_position
+                .lock()
+                .expect("lock should not be poisoned");
             let upcoming = self
                 .predictive_engine
                 .analyze_upcoming_notes(&score, playback_pos);
@@ -297,7 +327,9 @@ impl ZeroCopyStreamingPipeline {
 
         // Check if we need to synthesize more
         if self.ring_buffer.available_samples() < self.config.chunk_size {
-            if let PipelineState::Streaming = *self.state.lock().unwrap() {
+            if let PipelineState::Streaming =
+                *self.state.lock().expect("lock should not be poisoned")
+            {
                 self.synthesize_next_chunk()?;
             }
         }
@@ -347,14 +379,14 @@ impl ZeroCopyStreamingPipeline {
 
     /// Pause streaming
     pub fn pause(&self) {
-        *self.state.lock().unwrap() = PipelineState::Paused;
+        *self.state.lock().expect("lock should not be poisoned") = PipelineState::Paused;
     }
 
     /// Resume streaming
     pub fn resume(&self) -> Result<(), Error> {
-        let state = *self.state.lock().unwrap();
+        let state = *self.state.lock().expect("lock should not be poisoned");
         if state == PipelineState::Paused {
-            *self.state.lock().unwrap() = PipelineState::Streaming;
+            *self.state.lock().expect("lock should not be poisoned") = PipelineState::Streaming;
             Ok(())
         } else {
             Err(Error::Processing(
@@ -365,19 +397,22 @@ impl ZeroCopyStreamingPipeline {
 
     /// Stop streaming
     pub fn stop(&self) {
-        *self.state.lock().unwrap() = PipelineState::Idle;
+        *self.state.lock().expect("lock should not be poisoned") = PipelineState::Idle;
         self.ring_buffer.clear();
         self.predictive_engine.clear_cache();
     }
 
     /// Get current streaming metrics
     pub fn get_metrics(&self) -> StreamingMetrics {
-        self.metrics.lock().unwrap().clone()
+        self.metrics
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Get current pipeline state
     pub fn get_state(&self) -> PipelineState {
-        *self.state.lock().unwrap()
+        *self.state.lock().expect("lock should not be poisoned")
     }
 
     /// Get buffer fill percentage

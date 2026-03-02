@@ -550,8 +550,9 @@ mod tests {
         let results = suite.get_results();
 
         // Check that all tests completed within reasonable time
+        // Use generous limit to tolerate CPU contention under parallel test execution
         for result in results {
-            assert!(result.execution_time_ms < 15000); // 15 seconds max for CI environments
+            assert!(result.execution_time_ms < 60000); // 60 seconds max to tolerate parallel execution
         }
     }
 

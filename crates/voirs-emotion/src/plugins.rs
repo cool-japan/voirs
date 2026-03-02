@@ -64,7 +64,7 @@
 //! // Register and use the plugin
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let mut manager = PluginManager::new();
-//! manager.register_emotion_model(Box::new(AnxietyModel)).unwrap();
+//! manager.register_emotion_model(Box::new(AnxietyModel)).expect("operation should succeed");
 //! # Ok(())
 //! # }
 //! ```

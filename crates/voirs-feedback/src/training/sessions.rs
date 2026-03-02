@@ -41,13 +41,16 @@ impl InteractiveTrainer {
 
         // Store session
         {
-            let mut sessions = self.active_sessions.write().unwrap();
+            let mut sessions = self
+                .active_sessions
+                .write()
+                .expect("lock should not be poisoned");
             sessions.insert(session_id.clone(), session.clone());
         }
 
         // Update metrics
         {
-            let mut metrics = self.metrics.write().unwrap();
+            let mut metrics = self.metrics.write().expect("lock should not be poisoned");
             metrics.total_sessions += 1;
             metrics.active_sessions += 1;
         }
@@ -61,7 +64,10 @@ impl InteractiveTrainer {
         session_id: &str,
         exercise_id: &str,
     ) -> Result<ExerciseSession, FeedbackError> {
-        let mut sessions = self.active_sessions.write().unwrap();
+        let mut sessions = self
+            .active_sessions
+            .write()
+            .expect("lock should not be poisoned");
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| FeedbackError::TrainingError {
@@ -70,7 +76,10 @@ impl InteractiveTrainer {
             })?;
 
         // Get exercise from library
-        let library = self.exercise_library.read().unwrap();
+        let library = self
+            .exercise_library
+            .read()
+            .expect("lock should not be poisoned");
         let exercise = library
             .exercises
             .iter()
@@ -104,7 +113,10 @@ impl InteractiveTrainer {
     ) -> Result<AttemptResult, FeedbackError> {
         // Extract needed data without holding the lock across await
         let (exercise, attempt_number) = {
-            let sessions = self.active_sessions.read().unwrap();
+            let sessions = self
+                .active_sessions
+                .read()
+                .expect("lock should not be poisoned");
             let session = sessions
                 .get(session_id)
                 .ok_or_else(|| FeedbackError::TrainingError {
@@ -217,7 +229,10 @@ impl InteractiveTrainer {
 
         // Now update the session with the new attempt
         {
-            let mut sessions = self.active_sessions.write().unwrap();
+            let mut sessions = self
+                .active_sessions
+                .write()
+                .expect("lock should not be poisoned");
             let session =
                 sessions
                     .get_mut(session_id)
@@ -302,7 +317,7 @@ impl InteractiveTrainer {
 
         // Update metrics
         {
-            let mut metrics = self.metrics.write().unwrap();
+            let mut metrics = self.metrics.write().expect("lock should not be poisoned");
             metrics.total_attempts += 1;
             if success {
                 metrics.successful_attempts += 1;
@@ -320,7 +335,10 @@ impl InteractiveTrainer {
     ) -> Result<TrainingSessionResult, FeedbackError> {
         // Remove session and get completed exercises without holding locks across await
         let (mut session, completed_exercises) = {
-            let mut sessions = self.active_sessions.write().unwrap();
+            let mut sessions = self
+                .active_sessions
+                .write()
+                .expect("lock should not be poisoned");
             let mut session =
                 sessions
                     .remove(session_id)
@@ -396,7 +414,7 @@ impl InteractiveTrainer {
 
         // Update metrics
         {
-            let mut metrics = self.metrics.write().unwrap();
+            let mut metrics = self.metrics.write().expect("lock should not be poisoned");
             metrics.active_sessions -= 1;
             metrics.completed_sessions += 1;
             metrics.total_session_time += session_duration;

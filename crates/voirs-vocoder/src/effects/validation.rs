@@ -192,7 +192,7 @@ impl AudioValidator {
         // Dynamic range estimation
         let sorted_samples: Vec<f32> = {
             let mut s = samples.iter().map(|x| x.abs()).collect::<Vec<_>>();
-            s.sort_by(|a, b| b.partial_cmp(a).unwrap());
+            s.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
             s
         };
 
@@ -266,7 +266,7 @@ impl AudioValidator {
     fn estimate_noise_energy(&self, samples: &[f32]) -> f32 {
         // Find quietest 10% of samples to estimate noise floor
         let mut sorted_samples: Vec<f32> = samples.iter().map(|x| x.abs()).collect();
-        sorted_samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted_samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let noise_samples_count = samples.len() / 10;
         if noise_samples_count > 0 {

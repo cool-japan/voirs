@@ -676,9 +676,9 @@ impl WhisperBenchmark {
 
     fn calculate_median(values: &[f32]) -> f32 {
         let mut sorted = values.to_vec();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let len = sorted.len();
-        if len % 2 == 0 {
+        if len.is_multiple_of(2) {
             (sorted[len / 2 - 1] + sorted[len / 2]) / 2.0
         } else {
             sorted[len / 2]
@@ -692,7 +692,7 @@ impl WhisperBenchmark {
     )]
     fn calculate_percentile(values: &[f32], percentile: f32) -> f32 {
         let mut sorted = values.to_vec();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         // Acceptable for percentile calculation
         let index = (percentile * (sorted.len() - 1) as f32).round() as usize;
         sorted[index.min(sorted.len() - 1)]

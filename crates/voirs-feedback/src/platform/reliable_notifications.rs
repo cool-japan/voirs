@@ -428,7 +428,10 @@ impl ReliableNotificationManager {
         drop(queue);
 
         // Add to history
-        let mut history = self.delivery_history.write().unwrap();
+        let mut history = self
+            .delivery_history
+            .write()
+            .expect("lock should not be poisoned");
         history.insert(id.clone(), delivery);
         drop(history);
 
@@ -438,7 +441,10 @@ impl ReliableNotificationManager {
     /// Get delivery status
     #[must_use]
     pub fn get_delivery_status(&self, notification_id: &str) -> Option<DeliveryStatus> {
-        let history = self.delivery_history.read().unwrap();
+        let history = self
+            .delivery_history
+            .read()
+            .expect("lock should not be poisoned");
         history.get(notification_id).map(|d| d.status.clone())
     }
 
@@ -447,7 +453,10 @@ impl ReliableNotificationManager {
     where
         F: Fn(DeliveryStatus) + Send + Sync + 'static,
     {
-        let mut callbacks = self.delivery_callbacks.write().unwrap();
+        let mut callbacks = self
+            .delivery_callbacks
+            .write()
+            .expect("lock should not be poisoned");
         callbacks.insert(notification_id, Box::new(callback));
     }
 
@@ -459,7 +468,10 @@ impl ReliableNotificationManager {
         drop(queue);
 
         // Update status in history
-        let mut history = self.delivery_history.write().unwrap();
+        let mut history = self
+            .delivery_history
+            .write()
+            .expect("lock should not be poisoned");
         if let Some(delivery) = history.get_mut(notification_id) {
             delivery.status = DeliveryStatus::Cancelled;
         }
@@ -471,7 +483,10 @@ impl ReliableNotificationManager {
     pub async fn get_comprehensive_stats(&self) -> ReliableNotificationStats {
         // Clone history data to avoid holding lock across await
         let (history_clone, total_notifications) = {
-            let history = self.delivery_history.read().unwrap();
+            let history = self
+                .delivery_history
+                .read()
+                .expect("lock should not be poisoned");
             let clone = history.clone();
             let total = history.len();
             drop(history); // Explicitly drop lock before awaiting
@@ -481,7 +496,11 @@ impl ReliableNotificationManager {
         // Now safe to await without holding locks
         let queue = self.delivery_queue.lock().await;
         let rate_status = self.rate_limiter.lock().await.get_status();
-        let health = self.health_status.read().unwrap().clone();
+        let health = self
+            .health_status
+            .read()
+            .expect("lock should not be poisoned")
+            .clone();
 
         let mut stats = ReliableNotificationStats {
             total_notifications,
@@ -616,7 +635,7 @@ impl ReliableNotificationManager {
                     drop(limiter);
 
                     // Update health
-                    let mut health = health_status.write().unwrap();
+                    let mut health = health_status.write().expect("lock should not be poisoned");
                     health.successful_deliveries += 1;
                     drop(health);
                 }
@@ -640,7 +659,8 @@ impl ReliableNotificationManager {
                         };
 
                         // Update health
-                        let mut health = health_status.write().unwrap();
+                        let mut health =
+                            health_status.write().expect("lock should not be poisoned");
                         health.failed_deliveries += 1;
                         health.last_error = Some(error.to_string());
                         drop(health);
@@ -649,7 +669,9 @@ impl ReliableNotificationManager {
             }
 
             // Update history with the processed delivery
-            let mut history = delivery_history.write().unwrap();
+            let mut history = delivery_history
+                .write()
+                .expect("lock should not be poisoned");
             history.insert(delivery.id.clone(), delivery);
             drop(history);
 
@@ -727,7 +749,9 @@ impl ReliableNotificationManager {
         notification_id: &str,
     ) {
         let delivery_to_retry = {
-            let mut history = delivery_history.write().unwrap();
+            let mut history = delivery_history
+                .write()
+                .expect("lock should not be poisoned");
             if let Some(delivery) = history.get_mut(notification_id) {
                 if matches!(delivery.status, DeliveryStatus::Failed { .. }) {
                     delivery.status = DeliveryStatus::Queued;
@@ -757,7 +781,9 @@ impl ReliableNotificationManager {
         drop(queue);
 
         // Update status in history
-        let mut history = delivery_history.write().unwrap();
+        let mut history = delivery_history
+            .write()
+            .expect("lock should not be poisoned");
         for delivery in history.values_mut() {
             if delivery.is_expired()
                 && matches!(
@@ -776,7 +802,7 @@ impl ReliableNotificationManager {
         start_time: Instant,
     ) {
         let queue_size = delivery_queue.lock().await.len();
-        let mut health = health_status.write().unwrap();
+        let mut health = health_status.write().expect("lock should not be poisoned");
 
         health.queue_size = queue_size;
         health.uptime = start_time.elapsed();

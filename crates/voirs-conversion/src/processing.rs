@@ -279,7 +279,7 @@ impl ProcessingStage {
         let max_val = input
             .iter()
             .map(|x| x.abs())
-            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap_or(1.0);
         if max_val == 0.0 {
             return Ok(input.to_vec());
@@ -841,7 +841,7 @@ impl SignalProcessor {
         let max_val = audio
             .iter()
             .map(|x| x.abs())
-            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap_or(1.0);
         if max_val == 0.0 {
             return Ok(audio.to_vec());

@@ -274,7 +274,10 @@ impl ChallengeSystem {
             progress_list
                 .iter()
                 .filter(|p| p.template_id == template_id && p.status == ChallengeStatus::Completed)
-                .all(|p| Utc::now() - p.completed_at.unwrap() > chrono::Duration::days(3))
+                .all(|p| {
+                    Utc::now() - p.completed_at.expect("value should be present")
+                        > chrono::Duration::days(3)
+                })
         } else {
             true
         }

@@ -37,27 +37,28 @@ impl PyStreamingProcessor {
         &mut self,
         py: Python<'py>,
         chunk: PyReadonlyArray1<f32>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Bound<'py, PyAny>> {
         let chunk_data = chunk.as_array().to_vec();
 
         if let Some(ref callback) = self.callback {
             // Convert to NumPy array and call Python callback
             let input_array = PyArray::from_vec(py, chunk_data.clone());
-            let result = callback.call1(py, (input_array.clone(),))?;
+            let result: Bound<'py, PyAny> =
+                callback.call1(py, (input_array.clone(),))?.into_bound(py);
 
             // Extract processed data
-            if let Ok(processed) = result.extract::<PyReadonlyArray1<f32>>(py) {
-                let processed_data = processed.as_array().to_vec();
+            if let Ok(processed) = result.extract::<PyReadonlyArray1<f32>>() {
+                let processed_data: Vec<f32> = processed.as_array().to_vec();
                 let output_array = PyArray::from_vec(py, processed_data);
-                Ok(output_array.unbind().into())
+                Ok(output_array.into_any())
             } else {
                 // Return original data if callback didn't return array
-                Ok(input_array.unbind().into())
+                Ok(input_array.into_any())
             }
         } else {
             // No callback - return original chunk
             let array = PyArray::from_vec(py, chunk_data);
-            Ok(array.unbind().into())
+            Ok(array.into_any())
         }
     }
 
@@ -66,7 +67,7 @@ impl PyStreamingProcessor {
         &mut self,
         py: Python<'py>,
         samples: PyReadonlyArray1<f32>,
-    ) -> PyResult<Option<PyObject>> {
+    ) -> PyResult<Option<Bound<'py, PyAny>>> {
         let new_samples = samples.as_array().to_vec();
         self.buffer.extend(new_samples);
 
@@ -82,12 +83,12 @@ impl PyStreamingProcessor {
     }
 
     /// Get remaining buffered samples
-    fn flush<'py>(&mut self, py: Python<'py>) -> PyResult<Option<PyObject>> {
+    fn flush<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
         if !self.buffer.is_empty() {
             let remaining = self.buffer.clone();
             self.buffer.clear();
             let array = PyArray::from_vec(py, remaining);
-            Ok(Some(array.unbind().into()))
+            Ok(Some(array.into_any()))
         } else {
             Ok(None)
         }

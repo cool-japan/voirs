@@ -137,7 +137,10 @@ impl PerformanceTargetMonitor {
 
         // Store measurement
         {
-            let mut measurements = self.latency_measurements.lock().unwrap();
+            let mut measurements = self
+                .latency_measurements
+                .lock()
+                .expect("lock should not be poisoned");
             measurements.push(measurement.clone());
 
             // Keep only recent measurements
@@ -172,7 +175,10 @@ impl PerformanceTargetMonitor {
 
         // Store snapshot
         {
-            let mut snapshots = self.memory_snapshots.lock().unwrap();
+            let mut snapshots = self
+                .memory_snapshots
+                .lock()
+                .expect("lock should not be poisoned");
             snapshots.push(snapshot.clone());
 
             // Keep only recent snapshots
@@ -213,7 +219,10 @@ impl PerformanceTargetMonitor {
 
         // Store measurement
         {
-            let mut measurements = self.throughput_measurements.lock().unwrap();
+            let mut measurements = self
+                .throughput_measurements
+                .lock()
+                .expect("lock should not be poisoned");
             measurements.push(measurement.clone());
 
             // Keep only recent measurements
@@ -252,7 +261,10 @@ impl PerformanceTargetMonitor {
                 ),
             };
 
-            self.violations.lock().unwrap().push(violation);
+            self.violations
+                .lock()
+                .expect("lock should not be poisoned")
+                .push(violation);
         }
 
         Ok(())
@@ -282,7 +294,10 @@ impl PerformanceTargetMonitor {
                 ),
             };
 
-            self.violations.lock().unwrap().push(violation);
+            self.violations
+                .lock()
+                .expect("lock should not be poisoned")
+                .push(violation);
         }
 
         Ok(())
@@ -318,7 +333,10 @@ impl PerformanceTargetMonitor {
                 ),
             };
 
-            self.violations.lock().unwrap().push(violation);
+            self.violations
+                .lock()
+                .expect("lock should not be poisoned")
+                .push(violation);
         }
 
         Ok(())
@@ -326,10 +344,19 @@ impl PerformanceTargetMonitor {
 
     /// Get performance summary
     pub fn get_performance_summary(&self) -> PerformanceSummary {
-        let latency_measurements = self.latency_measurements.lock().unwrap();
-        let memory_snapshots = self.memory_snapshots.lock().unwrap();
-        let throughput_measurements = self.throughput_measurements.lock().unwrap();
-        let violations = self.violations.lock().unwrap();
+        let latency_measurements = self
+            .latency_measurements
+            .lock()
+            .expect("lock should not be poisoned");
+        let memory_snapshots = self
+            .memory_snapshots
+            .lock()
+            .expect("lock should not be poisoned");
+        let throughput_measurements = self
+            .throughput_measurements
+            .lock()
+            .expect("lock should not be poisoned");
+        let violations = self.violations.lock().expect("lock should not be poisoned");
 
         // Calculate latency statistics
         let latency_stats = if latency_measurements.is_empty() {
@@ -412,7 +439,7 @@ impl PerformanceTargetMonitor {
 
     /// Check if all targets are currently being met
     pub fn are_targets_met(&self) -> bool {
-        let violations = self.violations.lock().unwrap();
+        let violations = self.violations.lock().expect("lock should not be poisoned");
 
         // No critical violations in recent measurements
         let recent_critical_violations = violations
@@ -590,7 +617,7 @@ fn percentile(values: &[f64], p: f64) -> f64 {
     }
 
     let mut sorted = values.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     let index = ((p / 100.0) * (sorted.len() - 1) as f64).round() as usize;
     sorted[index.min(sorted.len() - 1)]

@@ -287,7 +287,7 @@ impl LockFreeCircularBuffer {
 
         // Write audio buffer
         {
-            let mut buffer = self.buffer.lock().unwrap();
+            let mut buffer = self.buffer.lock().expect("lock should not be poisoned");
             buffer[write_pos] = Some(audio);
         }
 
@@ -318,7 +318,7 @@ impl LockFreeCircularBuffer {
 
         // Read audio buffer
         let audio = {
-            let mut buffer = self.buffer.lock().unwrap();
+            let mut buffer = self.buffer.lock().expect("lock should not be poisoned");
             buffer[read_pos].take()
         };
 
@@ -350,7 +350,10 @@ impl LockFreeCircularBuffer {
 
     /// Get buffer statistics
     pub fn get_stats(&self) -> CircularBufferStats {
-        self.stats.read().unwrap().clone()
+        self.stats
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 }
 
@@ -462,7 +465,7 @@ impl GarbageCollector {
         }
 
         // Check time-based collection
-        let last_gc = *self.last_gc.lock().unwrap();
+        let last_gc = *self.last_gc.lock().expect("lock should not be poisoned");
         Instant::now().duration_since(last_gc) > self.gc_interval
     }
 
@@ -488,7 +491,7 @@ impl GarbageCollector {
                 / stats.total_collections as f32;
         }
 
-        *self.last_gc.lock().unwrap() = Instant::now();
+        *self.last_gc.lock().expect("lock should not be poisoned") = Instant::now();
 
         freed_bytes
     }
@@ -496,7 +499,7 @@ impl GarbageCollector {
     /// Collect from a specific pool tier
     fn collect_pool_tier(&self, tier: &PoolTier) -> usize {
         let mut freed_bytes = 0;
-        let mut buffers = tier.available.lock().unwrap();
+        let mut buffers = tier.available.lock().expect("lock should not be poisoned");
 
         // Remove buffers that haven't been used recently
         let cutoff_time = Instant::now() - Duration::from_secs(60);
@@ -506,7 +509,8 @@ impl GarbageCollector {
             if buffer.allocated_at < cutoff_time && buffer.reuse_count < 5 {
                 // Free this buffer
                 unsafe {
-                    let layout = Layout::from_size_align(buffer.size, 8).unwrap();
+                    let layout = Layout::from_size_align(buffer.size, 8)
+                        .expect("size and alignment are valid for Layout");
                     dealloc(buffer.ptr.as_ptr(), layout);
                 }
                 freed_bytes += buffer.size;
@@ -594,7 +598,10 @@ impl MemoryPool {
     /// Get pool statistics
     #[allow(dead_code)]
     fn get_stats(&self) -> PoolStats {
-        self.stats.read().unwrap().clone()
+        self.stats
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 }
 
@@ -612,7 +619,7 @@ impl PoolTier {
     }
 
     fn try_pop(&self) -> Option<PooledBuffer> {
-        let mut available = self.available.lock().unwrap();
+        let mut available = self.available.lock().expect("lock should not be poisoned");
         if let Some(buffer) = available.pop_front() {
             self.current_size.fetch_sub(1, Ordering::Relaxed);
             Some(buffer)
@@ -622,14 +629,15 @@ impl PoolTier {
     }
 
     fn try_push(&self, buffer: PooledBuffer) {
-        let mut available = self.available.lock().unwrap();
+        let mut available = self.available.lock().expect("lock should not be poisoned");
         if available.len() < self.max_pool_size {
             available.push_back(buffer);
             self.current_size.fetch_add(1, Ordering::Relaxed);
         } else {
             // Pool is full, free the buffer
             unsafe {
-                let layout = Layout::from_size_align(buffer.size, 8).unwrap();
+                let layout = Layout::from_size_align(buffer.size, 8)
+                    .expect("size and alignment are valid for Layout");
                 dealloc(buffer.ptr.as_ptr(), layout);
             }
         }
@@ -661,7 +669,10 @@ impl MemoryEfficientBufferManager {
         stream_id: u64,
         capacity: usize,
     ) -> Result<Arc<LockFreeCircularBuffer>> {
-        let mut buffers = self.circular_buffers.write().unwrap();
+        let mut buffers = self
+            .circular_buffers
+            .write()
+            .expect("lock should not be poisoned");
 
         if let Some(buffer) = buffers.get(&stream_id) {
             Ok(buffer.clone())
@@ -674,7 +685,10 @@ impl MemoryEfficientBufferManager {
 
     /// Allocate audio buffer with optimal strategy
     pub fn allocate_audio_buffer(&self, channels: u32, samples: usize) -> Result<AudioBuffer> {
-        let strategy = *self.allocation_strategy.read().unwrap();
+        let strategy = *self
+            .allocation_strategy
+            .read()
+            .expect("lock should not be poisoned");
         let numa_node = self.numa_topology.get_optimal_node();
 
         match strategy {
@@ -746,7 +760,10 @@ impl MemoryEfficientBufferManager {
 
     /// Run garbage collection if needed
     pub fn maybe_collect_garbage(&self) {
-        let memory_stats = self.memory_stats.read().unwrap();
+        let memory_stats = self
+            .memory_stats
+            .read()
+            .expect("lock should not be poisoned");
         let memory_pressure = memory_stats.total_allocated as f32 / (1024.0 * 1024.0 * 1024.0); // GB
 
         if self.gc_scheduler.should_collect(memory_pressure) {
@@ -756,12 +773,18 @@ impl MemoryEfficientBufferManager {
 
     /// Get comprehensive memory statistics
     pub fn get_memory_stats(&self) -> MemoryStats {
-        self.memory_stats.read().unwrap().clone()
+        self.memory_stats
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Update allocation strategy based on performance
     pub fn update_allocation_strategy(&self, new_strategy: AllocationStrategy) {
-        *self.allocation_strategy.write().unwrap() = new_strategy;
+        *self
+            .allocation_strategy
+            .write()
+            .expect("lock should not be poisoned") = new_strategy;
     }
 }
 

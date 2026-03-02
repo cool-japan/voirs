@@ -411,14 +411,17 @@ pub mod quality {
 
     /// Calculate simple audio metrics
     fn calculate_simple_metrics(audio: &AudioBuffer) -> AudioMetrics {
-        let analyzer = AudioAnalyzer::new(audio.sample_rate(), 1024).unwrap();
-        analyzer.analyze(audio).unwrap()
+        let analyzer =
+            AudioAnalyzer::new(audio.sample_rate(), 1024).expect("valid sample rate and fft size");
+        analyzer
+            .analyze(audio)
+            .expect("audio analysis should succeed for valid audio")
     }
 
     /// Calculate spectral similarity between two audio buffers
     fn calculate_spectral_similarity(audio1: &AudioBuffer, audio2: &AudioBuffer) -> f32 {
-        let spec1 = analyze_spectrum(audio1, 1024).unwrap();
-        let spec2 = analyze_spectrum(audio2, 1024).unwrap();
+        let spec1 = analyze_spectrum(audio1, 1024).expect("spectrum analysis should succeed");
+        let spec2 = analyze_spectrum(audio2, 1024).expect("spectrum analysis should succeed");
 
         if spec1.magnitudes_db.is_empty() || spec2.magnitudes_db.is_empty() {
             return 0.0;

@@ -195,7 +195,7 @@ impl HarmonicFeatureComputer for crate::analysis::features::FeatureExtractor {
             }
             
             // Sort peaks by magnitude
-            peaks.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            peaks.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
             
             // Take the first significant peak as F0 candidate
             if !peaks.is_empty() {
@@ -211,7 +211,7 @@ impl HarmonicFeatureComputer for crate::analysis::features::FeatureExtractor {
         }
         
         // Return median F0 estimate
-        f0_estimates.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        f0_estimates.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         f0_estimates[f0_estimates.len() / 2]
     }
 
@@ -351,7 +351,7 @@ impl HarmonicFeatureComputer for crate::analysis::features::FeatureExtractor {
         }
         
         // Sort by frequency and limit to top 10 peaks
-        peaks.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        peaks.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         peaks.truncate(10);
         
         peaks

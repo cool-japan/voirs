@@ -21,7 +21,7 @@ This guide provides real-world examples of integrating VoiRS Python bindings int
 # views.py
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 import json
 import io
 
@@ -71,7 +71,7 @@ def get_voices(request):
 ```python
 # app.py
 from flask import Flask, request, jsonify, send_file
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 import io
 import tempfile
 
@@ -121,7 +121,7 @@ if __name__ == '__main__':
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 import io
 
 app = FastAPI()
@@ -177,7 +177,7 @@ async def get_voices():
 ```python
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 import threading
 
 class VoiRSGUI:
@@ -325,7 +325,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout,
                              QHBoxLayout, QTextEdit, QComboBox, QPushButton, 
                              QLabel, QWidget, QProgressBar, QFileDialog, QMessageBox)
 from PyQt5.QtCore import QThread, pyqtSignal
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 
 class SynthesisThread(QThread):
     finished = pyqtSignal(object)
@@ -468,7 +468,7 @@ if __name__ == "__main__":
 ```python
 from flask import Flask, request, jsonify, send_file
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 import tempfile
 import os
 
@@ -544,7 +544,7 @@ if __name__ == '__main__':
 ```python
 import graphene
 from graphene import ObjectType, String, List, Field, Mutation, Schema
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 import base64
 
 # Initialize pipeline
@@ -625,7 +625,7 @@ if __name__ == '__main__':
 
 ```python
 import speech_recognition as sr
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 import os
 
 class VoiceAssistant:
@@ -708,7 +708,7 @@ if __name__ == "__main__":
 
 ```python
 import openai
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 import speech_recognition as sr
 
 class ConversationalAI:
@@ -798,7 +798,7 @@ if __name__ == "__main__":
 ```python
 # wordpress_tts.py
 from flask import Flask, request, jsonify
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 import os
 import hashlib
 
@@ -867,7 +867,7 @@ if __name__ == '__main__':
 ```python
 # drupal_tts_service.py
 from flask import Flask, request, jsonify
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 import mysql.connector
 import os
 
@@ -939,7 +939,7 @@ if __name__ == '__main__':
 
 ```python
 # ml_pipeline.py
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
@@ -1071,7 +1071,7 @@ if __name__ == "__main__":
 import asyncio
 import websockets
 import json
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 import base64
 import threading
 
@@ -1218,7 +1218,7 @@ if __name__ == "__main__":
 ```python
 # streaming_server.py
 from flask import Flask, request, Response
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 import queue
 import threading
 import time
@@ -1367,7 +1367,7 @@ if __name__ == '__main__':
 
 ```python
 # batch_processor.py
-from voirs_ffi import VoirsPipeline
+from voirs import VoirsPipeline
 import pandas as pd
 import multiprocessing as mp
 import os

@@ -488,7 +488,9 @@ impl WhisperDecoder {
         let mut tokens = vec![start_token];
 
         for _step in 0..max_length {
-            let last_token = *tokens.last().unwrap();
+            let last_token = *tokens
+                .last()
+                .expect("tokens is initialized with at least start_token");
 
             // Get logits for next token
             let mut logits = self
@@ -706,7 +708,7 @@ impl WhisperDecoder {
                         .partial_cmp(&b.score(sampling_config.length_penalty))
                         .unwrap_or(std::cmp::Ordering::Equal)
                 })
-                .unwrap();
+                .expect("finished_beams is non-empty (checked above)");
             Ok(best_beam.tokens.clone())
         }
     }

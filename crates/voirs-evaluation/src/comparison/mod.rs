@@ -832,7 +832,7 @@ impl ComparativeEvaluatorImpl {
                     (systems.get(name_a), systems.get(name_b))
                 {
                     // Acquire semaphore to limit concurrent memory usage
-                    let _permit = semaphore.acquire().await.unwrap();
+                    let _permit = semaphore.acquire().await.expect("value should be present");
 
                     let comparison = self
                         .compare_systems_streaming(samples_a, samples_b, config)
@@ -878,7 +878,7 @@ impl ComparativeEvaluatorImpl {
 
         // Process in small chunks to maintain low memory footprint
         for chunk in samples.chunks(STREAMING_CHUNK_SIZE) {
-            let _permit = semaphore.acquire().await.unwrap();
+            let _permit = semaphore.acquire().await.expect("value should be present");
 
             // Process chunk and immediately collect results
             let chunk_scores = futures::future::try_join_all(chunk.iter().map(|sample| async {
@@ -1023,7 +1023,7 @@ impl ComparativeEvaluatorImpl {
         let mut all_scores = Vec::new();
 
         for chunk in samples.chunks(chunk_size) {
-            let _permit = semaphore.acquire().await.unwrap();
+            let _permit = semaphore.acquire().await.expect("value should be present");
 
             let chunk_scores = futures::future::try_join_all(chunk.iter().map(|sample| async {
                 self.quality_evaluator
@@ -1064,11 +1064,11 @@ impl ComparativeEvaluatorImpl {
 
             win_matrix
                 .get_mut(system_a)
-                .unwrap()
+                .expect("value should be present")
                 .insert(system_b.clone(), win_rate_a);
             win_matrix
                 .get_mut(system_b)
-                .unwrap()
+                .expect("value should be present")
                 .insert(system_a.clone(), win_rate_b);
         }
 

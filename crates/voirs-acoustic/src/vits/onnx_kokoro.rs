@@ -1,6 +1,6 @@
 //! Kokoro ONNX model loader - Multilingual TTS (Chinese, Japanese, English)
 //!
-//! Based on Kokoro-82M by hexgrad: https://huggingface.co/hexgrad/Kokoro-82M
+//! Based on Kokoro-82M by hexgrad: <https://huggingface.co/hexgrad/Kokoro-82M>
 //! Supports 54 voices across 8 languages with IPA phoneme input.
 
 use std::collections::HashMap;
@@ -114,7 +114,7 @@ impl KokoroOnnxInference {
     /// Load voice embeddings from NPZ file (numpy archive format)
     ///
     /// This loads all voice arrays from a .npz file (e.g., voices-v1.0.bin),
-    /// averages them over the first dimension if needed, and returns a flat Vec<f32>
+    /// averages them over the first dimension if needed, and returns a flat `Vec<f32>`
     /// suitable for use with get_voice_embedding().
     ///
     /// # Arguments
@@ -315,7 +315,7 @@ impl KokoroOnnxInference {
     /// - `speed`: Speech speed (default: 1.0)
     ///
     /// # Returns
-    /// - Audio samples as Vec<f32> at 24kHz sample rate
+    /// - Audio samples as `Vec<f32>` at 24kHz sample rate
     pub fn synthesize(&mut self, phonemes: &str, voice_idx: usize, speed: f32) -> Result<Vec<f32>> {
         self.synthesize_with_options(phonemes, voice_idx, speed, true)
     }

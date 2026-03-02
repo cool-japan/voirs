@@ -236,7 +236,7 @@ impl DiffWaveVocoder {
         let mut vocoder = Self::new(config)?;
 
         match tokio::runtime::Runtime::new()
-            .unwrap()
+            .expect("tokio runtime creation should succeed")
             .block_on(loader.load_from_file(path_ref))
         {
             Ok(model_info) => {
@@ -654,12 +654,15 @@ impl DiffWaveVocoder {
 
     /// Get current performance statistics
     pub fn get_stats(&self) -> DiffWaveStats {
-        self.stats.lock().unwrap().clone()
+        self.stats
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Reset performance statistics
     pub fn reset_stats(&self) {
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
         *stats = DiffWaveStats::default();
     }
 
@@ -673,13 +676,20 @@ impl DiffWaveVocoder {
 
     /// Clear the mel spectrogram cache
     pub fn clear_cache(&self) {
-        self.mel_cache.lock().unwrap().clear();
+        self.mel_cache
+            .lock()
+            .expect("lock should not be poisoned")
+            .clear();
     }
 
     /// Get cache statistics
     pub fn get_cache_stats(&self) -> (usize, u64, u64) {
-        let stats = self.stats.lock().unwrap();
-        let cache_size = self.mel_cache.lock().unwrap().len();
+        let stats = self.stats.lock().expect("lock should not be poisoned");
+        let cache_size = self
+            .mel_cache
+            .lock()
+            .expect("lock should not be poisoned")
+            .len();
         (cache_size, stats.cache_hits, stats.cache_misses)
     }
 
@@ -716,7 +726,7 @@ impl DiffWaveVocoder {
             return;
         }
 
-        let mut cache = self.mel_cache.lock().unwrap();
+        let mut cache = self.mel_cache.lock().expect("lock should not be poisoned");
         let now = Instant::now();
 
         // Remove expired entries
@@ -743,7 +753,7 @@ impl DiffWaveVocoder {
 
         // Clean up cache periodically (use a simple deterministic approach instead of rand)
         if self.cache_enabled {
-            let stats = self.stats.lock().unwrap();
+            let stats = self.stats.lock().expect("lock should not be poisoned");
             if stats.total_inferences.is_multiple_of(100) {
                 drop(stats);
                 self.cleanup_cache();
@@ -763,7 +773,7 @@ impl DiffWaveVocoder {
 
         // Update performance statistics
         let inference_time = start_time.elapsed();
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
         stats.total_inferences += 1;
         stats.total_inference_time += inference_time;
         stats.last_inference_time = Some(inference_time);
@@ -792,12 +802,12 @@ impl DiffWaveVocoder {
 
             // Try to get from cache first
             if let Some(cached_tensor) = self.get_from_cache(&cache_key) {
-                let mut stats = self.stats.lock().unwrap();
+                let mut stats = self.stats.lock().expect("lock should not be poisoned");
                 stats.cache_hits += 1;
                 drop(stats);
                 return self.postprocess_audio(&cached_tensor);
             } else {
-                let mut stats = self.stats.lock().unwrap();
+                let mut stats = self.stats.lock().expect("lock should not be poisoned");
                 stats.cache_misses += 1;
                 drop(stats);
             }
@@ -809,7 +819,7 @@ impl DiffWaveVocoder {
 
     /// Get tensor from cache
     fn get_from_cache(&self, key: &str) -> Option<candle_core::Tensor> {
-        let mut cache = self.mel_cache.lock().unwrap();
+        let mut cache = self.mel_cache.lock().expect("lock should not be poisoned");
         if let Some(entry) = cache.get_mut(key) {
             entry.access_count += 1;
             Some(entry.tensor.clone())
@@ -825,7 +835,7 @@ impl DiffWaveVocoder {
             return;
         }
 
-        let mut cache = self.mel_cache.lock().unwrap();
+        let mut cache = self.mel_cache.lock().expect("lock should not be poisoned");
         let entry = CacheEntry {
             tensor,
             created_at: Instant::now(),
@@ -1052,7 +1062,8 @@ impl Clone for DiffWaveVocoder {
             Ok(vocoder) => vocoder,
             Err(_) => {
                 // Fallback to a default vocoder if clone fails
-                Self::new(DiffWaveConfig::default()).unwrap()
+                Self::new(DiffWaveConfig::default())
+                    .expect("default DiffWaveConfig should be valid")
             }
         }
     }

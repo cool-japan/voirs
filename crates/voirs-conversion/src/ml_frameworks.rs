@@ -668,20 +668,19 @@ impl MLFrameworkManager {
         let device = match &self.config.device_preference {
             DevicePreference::Cpu => Device::Cpu,
             DevicePreference::Gpu { device_index, .. } => match device_index {
-                Some(idx) => Device::cuda_if_available(*idx).map_err(|e| {
-                    Error::model(format!("Failed to create CUDA device {idx}: {e}"))
-                })?,
-                None => Device::cuda_if_available(0)
-                    .map_err(|e| Error::model(format!("Failed to create CUDA device: {e}")))?,
+                Some(idx) => std::panic::catch_unwind(move || Device::cuda_if_available(*idx))
+                    .ok()
+                    .and_then(|r| r.ok())
+                    .ok_or_else(|| Error::model(format!("Failed to create CUDA device {idx}")))?,
+                None => std::panic::catch_unwind(|| Device::cuda_if_available(0))
+                    .ok()
+                    .and_then(|r| r.ok())
+                    .ok_or_else(|| Error::model("Failed to create CUDA device".to_string()))?,
             },
-            DevicePreference::Auto => {
-                if Device::cuda_if_available(0).is_ok() {
-                    Device::cuda_if_available(0)
-                        .map_err(|e| Error::model(format!("Failed to create CUDA device: {e}")))?
-                } else {
-                    Device::Cpu
-                }
-            }
+            DevicePreference::Auto => std::panic::catch_unwind(|| Device::cuda_if_available(0))
+                .ok()
+                .and_then(|r| r.ok())
+                .unwrap_or(Device::Cpu),
             DevicePreference::Custom { .. } => Device::Cpu, // Fallback to CPU for custom
         };
 

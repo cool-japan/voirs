@@ -355,7 +355,10 @@ impl WakeWordDetectorImpl {
 
     /// Check for false positives based on detection history
     async fn is_false_positive(&self, detection: &WakeWordDetection) -> bool {
-        let history = self.detection_history.lock().unwrap();
+        let history = self
+            .detection_history
+            .lock()
+            .expect("lock should not be poisoned");
 
         // Check if too many detections in short time window
         let recent_detections = history
@@ -390,7 +393,7 @@ impl WakeWordDetectorImpl {
         processing_time: Duration,
         is_false_positive: bool,
     ) {
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
 
         stats.total_detections += 1;
 
@@ -421,10 +424,13 @@ impl WakeWordDetectorImpl {
 
     /// Clean up old detection history
     async fn cleanup_history(&self) {
-        let mut history = self.detection_history.lock().unwrap();
+        let mut history = self
+            .detection_history
+            .lock()
+            .expect("lock should not be poisoned");
         let cutoff = Instant::now()
             .checked_sub(Duration::from_secs(300))
-            .unwrap(); // Keep 5 minutes of history
+            .expect("5 minutes should not exceed Instant range");
 
         while let Some(front) = history.front() {
             if front.timestamp < cutoff {
@@ -531,7 +537,10 @@ impl WakeWordDetector for WakeWordDetectorImpl {
 
             // Add to history
             {
-                let mut history = self.detection_history.lock().unwrap();
+                let mut history = self
+                    .detection_history
+                    .lock()
+                    .expect("lock should not be poisoned");
                 history.push_back(detection);
             }
         }
@@ -583,7 +592,7 @@ impl WakeWordDetector for WakeWordDetectorImpl {
     }
 
     async fn get_statistics(&self) -> Result<WakeWordStats, RecognitionError> {
-        let stats = self.stats.lock().unwrap();
+        let stats = self.stats.lock().expect("lock should not be poisoned");
         Ok(stats.clone())
     }
 
@@ -669,6 +678,7 @@ mod tests {
         assert!(features.is_ok());
 
         let features = features.unwrap();
-        assert_eq!(features.len(), 13 * 32); // 13 MFCC coefficients * 32 frames
+        // 13 MFCC coefficients * 32 frames * 3 (base + delta + delta-delta)
+        assert_eq!(features.len(), 13 * 32 * 3);
     }
 }

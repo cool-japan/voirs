@@ -44,10 +44,16 @@ impl DelayEffect {
 
     fn initialize_buffer(&self, sample_rate: u32) {
         let max_delay_samples = (sample_rate as f32 * 2.0) as usize; // 2 seconds max delay
-        let mut buffer = self.delay_buffer.write().unwrap();
+        let mut buffer = self
+            .delay_buffer
+            .write()
+            .expect("lock should not be poisoned");
         if buffer.len() != max_delay_samples {
             *buffer = vec![0.0; max_delay_samples];
-            *self.buffer_position.write().unwrap() = 0;
+            *self
+                .buffer_position
+                .write()
+                .expect("lock should not be poisoned") = 0;
         }
     }
 }
@@ -85,16 +91,23 @@ impl AudioEffect for DelayEffect {
     async fn process_audio(&self, audio: &AudioBuffer) -> Result<AudioBuffer> {
         self.initialize_buffer(audio.sample_rate());
 
-        let delay_samples =
-            (*self.delay_ms.read().unwrap() * audio.sample_rate() as f32 / 1000.0) as usize;
-        let feedback = *self.feedback.read().unwrap();
-        let mix = *self.mix.read().unwrap();
-        let damping = *self.damping.read().unwrap();
+        let delay_samples = (*self.delay_ms.read().expect("lock should not be poisoned")
+            * audio.sample_rate() as f32
+            / 1000.0) as usize;
+        let feedback = *self.feedback.read().expect("lock should not be poisoned");
+        let mix = *self.mix.read().expect("lock should not be poisoned");
+        let damping = *self.damping.read().expect("lock should not be poisoned");
 
         let mut processed = audio.clone();
         let samples = processed.samples_mut();
-        let mut buffer = self.delay_buffer.write().unwrap();
-        let mut pos = *self.buffer_position.read().unwrap();
+        let mut buffer = self
+            .delay_buffer
+            .write()
+            .expect("lock should not be poisoned");
+        let mut pos = *self
+            .buffer_position
+            .read()
+            .expect("lock should not be poisoned");
 
         for sample in samples.iter_mut() {
             let delay_pos = if pos >= delay_samples {
@@ -117,7 +130,10 @@ impl AudioEffect for DelayEffect {
             pos = (pos + 1) % buffer.len();
         }
 
-        *self.buffer_position.write().unwrap() = pos;
+        *self
+            .buffer_position
+            .write()
+            .expect("lock should not be poisoned") = pos;
         Ok(processed)
     }
 
@@ -125,19 +141,19 @@ impl AudioEffect for DelayEffect {
         let mut params = HashMap::new();
         params.insert(
             "delay_ms".to_string(),
-            ParameterValue::Float(*self.delay_ms.read().unwrap()),
+            ParameterValue::Float(*self.delay_ms.read().expect("lock should not be poisoned")),
         );
         params.insert(
             "feedback".to_string(),
-            ParameterValue::Float(*self.feedback.read().unwrap()),
+            ParameterValue::Float(*self.feedback.read().expect("lock should not be poisoned")),
         );
         params.insert(
             "mix".to_string(),
-            ParameterValue::Float(*self.mix.read().unwrap()),
+            ParameterValue::Float(*self.mix.read().expect("lock should not be poisoned")),
         );
         params.insert(
             "damping".to_string(),
-            ParameterValue::Float(*self.damping.read().unwrap()),
+            ParameterValue::Float(*self.damping.read().expect("lock should not be poisoned")),
         );
         params
     }
@@ -146,7 +162,8 @@ impl AudioEffect for DelayEffect {
         match name {
             "delay_ms" => {
                 if let Some(v) = value.as_f32() {
-                    *self.delay_ms.write().unwrap() = v.clamp(1.0, 2000.0);
+                    *self.delay_ms.write().expect("lock should not be poisoned") =
+                        v.clamp(1.0, 2000.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -157,7 +174,8 @@ impl AudioEffect for DelayEffect {
             }
             "feedback" => {
                 if let Some(v) = value.as_f32() {
-                    *self.feedback.write().unwrap() = v.clamp(0.0, 0.95);
+                    *self.feedback.write().expect("lock should not be poisoned") =
+                        v.clamp(0.0, 0.95);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -168,7 +186,7 @@ impl AudioEffect for DelayEffect {
             }
             "mix" => {
                 if let Some(v) = value.as_f32() {
-                    *self.mix.write().unwrap() = v.clamp(0.0, 1.0);
+                    *self.mix.write().expect("lock should not be poisoned") = v.clamp(0.0, 1.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -179,7 +197,7 @@ impl AudioEffect for DelayEffect {
             }
             "damping" => {
                 if let Some(v) = value.as_f32() {
-                    *self.damping.write().unwrap() = v.clamp(0.0, 1.0);
+                    *self.damping.write().expect("lock should not be poisoned") = v.clamp(0.0, 1.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -243,7 +261,7 @@ impl AudioEffect for DelayEffect {
 
     fn get_latency_samples(&self) -> usize {
         // Delay effect adds latency equal to the delay time
-        let delay_ms = *self.delay_ms.read().unwrap();
+        let delay_ms = *self.delay_ms.read().expect("lock should not be poisoned");
         (delay_ms * 44.1) as usize // Assume 44.1 kHz for estimation
     }
 }

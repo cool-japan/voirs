@@ -134,7 +134,7 @@ class EnhancedPerformanceTester:
         """Setup available bindings for testing."""
         # Python bindings
         try:
-            import voirs_ffi as voirs
+            import voirs
             self.available_bindings['python'] = {
                 'module': voirs,
                 'available': True,
@@ -144,7 +144,7 @@ class EnhancedPerformanceTester:
             self.available_bindings['python'] = {
                 'module': None,
                 'available': False,
-                'error': 'voirs_ffi module not found'
+                'error': 'voirs module not found'
             }
         
         # C API bindings (via ctypes)
@@ -154,13 +154,13 @@ class EnhancedPerformanceTester:
             
             # Try to find the library
             lib_paths = [
-                "target/debug/libvoirs_ffi.so",
-                "target/debug/libvoirs_ffi.dylib",
-                "target/debug/voirs_ffi.dll",
-                "../target/debug/libvoirs_ffi.so",
-                "../target/debug/libvoirs_ffi.dylib",
-                "../../target/debug/libvoirs_ffi.so",
-                "../../target/debug/libvoirs_ffi.dylib",
+                "target/debug/libvoirs.so",
+                "target/debug/libvoirs.dylib",
+                "target/debug/voirs.dll",
+                "../target/debug/libvoirs.so",
+                "../target/debug/libvoirs.dylib",
+                "../../target/debug/libvoirs.so",
+                "../../target/debug/libvoirs.dylib",
             ]
             
             lib_path = None

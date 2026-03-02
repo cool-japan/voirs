@@ -77,7 +77,9 @@ mod system_time_serde {
     where
         S: Serializer,
     {
-        let duration = time.duration_since(UNIX_EPOCH).unwrap();
+        let duration = time
+            .duration_since(UNIX_EPOCH)
+            .expect("SystemTime should be after UNIX_EPOCH");
         duration.as_secs().serialize(serializer)
     }
 
@@ -384,7 +386,7 @@ impl QualityMonitor {
         let success_count = state.samples.iter().filter(|s| s.success).count();
         let success_rate = success_count as f64 / state.samples.len() as f64;
 
-        let current_sample = state.samples.back().unwrap();
+        let current_sample = state.samples.back().expect("value should be present");
 
         Ok(DashboardData {
             current_quality_score: current_sample.quality_score,
@@ -605,7 +607,7 @@ impl QualityMonitor {
 
         let values: Vec<f32> = state.samples.iter().map(&extractor).collect();
 
-        let current = *values.last().unwrap();
+        let current = *values.last().expect("collection should not be empty");
         let sum: f32 = values.iter().sum();
         let average = sum / values.len() as f32;
         let min = values.iter().cloned().fold(f32::INFINITY, f32::min);

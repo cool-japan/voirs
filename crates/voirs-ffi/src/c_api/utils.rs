@@ -570,7 +570,7 @@ mod tests {
             assert_eq!(result, VoirsErrorCode::Success);
 
             let version_str = CStr::from_ptr(buffer.as_ptr() as *const c_char);
-            let version = version_str.to_str().unwrap();
+            let version = version_str.to_str().unwrap_or_default();
             assert!(!version.is_empty());
         }
     }
@@ -634,7 +634,7 @@ mod tests {
             assert_eq!(result, VoirsErrorCode::Success);
 
             let desc_str = CStr::from_ptr(buffer.as_ptr() as *const c_char);
-            let description = desc_str.to_str().unwrap();
+            let description = desc_str.to_str().unwrap_or_default();
             assert!(description.contains("Invalid parameter"));
         }
     }

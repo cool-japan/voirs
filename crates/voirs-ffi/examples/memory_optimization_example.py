@@ -27,7 +27,7 @@ from typing import List, Optional
 
 # Import VoiRS FFI if available
 try:
-    import voirs_ffi
+    import voirs
     VOIRS_AVAILABLE = True
     print("VoiRS FFI Memory Optimization Example (Real API)")
     print("===============================================")
@@ -125,7 +125,7 @@ def demonstrate_basic_memory_tracking():
     if VOIRS_AVAILABLE:
         # Use real VoiRS API
         try:
-            pipeline = voirs_ffi.VoirsPipeline()
+            pipeline = voirs.VoirsPipeline()
             monitor.record("Pipeline created")
             
             # Synthesize some text
@@ -173,7 +173,7 @@ def demonstrate_buffer_pool_optimization():
     
     if VOIRS_AVAILABLE:
         try:
-            pipeline = voirs_ffi.VoirsPipeline()
+            pipeline = voirs.VoirsPipeline()
             
             texts = [
                 "Buffer pools reduce allocation overhead.",
@@ -253,7 +253,7 @@ def demonstrate_streaming_memory_efficiency():
     
     if VOIRS_AVAILABLE:
         try:
-            pipeline = voirs_ffi.VoirsPipeline()
+            pipeline = voirs.VoirsPipeline()
             monitor.record("Pipeline ready")
             
             total_samples = 0
@@ -367,7 +367,7 @@ def main():
             print("   • Clean up resources properly")
         else:
             print("\n📝 Install VoiRS FFI to use these optimizations:")
-            print("   pip install voirs-ffi")
+            print("   pip install voirs")
             print("   Then run this example again for real API demonstrations")
         
     except KeyboardInterrupt:

@@ -131,8 +131,8 @@ impl<
             + Sync
             + Serialize
             + for<'de> Deserialize<'de>
-            + bincode::Encode
-            + bincode::Decode<()>
+            + oxicode::Encode
+            + oxicode::Decode<()>
             + 'static,
     > TwoTierCache<T>
 {
@@ -162,9 +162,8 @@ impl<
 
         // Try L2
         if let Some(bytes) = self.l2_cache.get(key).await? {
-            // Deserialize from bytes (bincode 2.0 API)
-            let config = bincode::config::standard();
-            if let Ok((value, _size)) = bincode::decode_from_slice::<T, _>(&bytes, config) {
+            // Deserialize from bytes
+            if let Ok((value, _size)) = oxicode::decode_from_slice::<T>(&bytes) {
                 // Populate L1 cache
                 self.l1_cache.put(key.to_string(), value.clone()).await?;
                 return Ok(Some(value));
@@ -183,9 +182,8 @@ impl<
         // Put in L1
         self.l1_cache.put(key.clone(), value.clone()).await?;
 
-        // Serialize and put in L2 (bincode 2.0 API)
-        let config = bincode::config::standard();
-        if let Ok(bytes) = bincode::encode_to_vec(&value, config) {
+        // Serialize and put in L2
+        if let Ok(bytes) = oxicode::encode_to_vec(&value) {
             self.l2_cache.put(&key, bytes).await?;
         }
 

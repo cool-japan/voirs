@@ -532,4 +532,4 @@ If you use VoiRS for research, please cite:
 
 ## License
 
-VoiRS is released under the MIT License. See LICENSE file for details.
+VoiRS is released under the Apache-2.0 License. See LICENSE file for details.

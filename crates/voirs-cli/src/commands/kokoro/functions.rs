@@ -5,14 +5,14 @@
 use crate::GlobalOptions;
 use clap::Subcommand;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use voirs_sdk::config::AppConfig;
 use voirs_sdk::Result;
 
-use super::types::VoiceInfo;
+use super::types::{KokoroCommands, KokoroConfig, VoiceInfo};
 /// Get standard Kokoro config file paths in order of preference
-fn get_kokoro_config_paths() -> Vec<PathBuf> {
+pub(crate) fn get_kokoro_config_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(cwd) = std::env::current_dir() {
         paths.push(cwd.join("kokoro.toml"));
@@ -101,7 +101,7 @@ pub async fn execute_kokoro_command(
 /// Execute synth command
 async fn execute_synth(
     text: &str,
-    output: &PathBuf,
+    output: &Path,
     lang: &str,
     voice_index: Option<usize>,
     voice_name: Option<&str>,
@@ -227,7 +227,11 @@ async fn execute_synth(
     if output_is_stdout {
         save_wav_to_stdout(&audio_samples, sample_rate)?;
     } else {
-        save_wav(output.to_str().unwrap(), &audio_samples, sample_rate)?;
+        save_wav(
+            output.to_str().unwrap_or_default(),
+            &audio_samples,
+            sample_rate,
+        )?;
         if !quiet {
             let duration = audio_samples.len() as f32 / sample_rate as f32;
             println!();
@@ -1266,7 +1270,7 @@ async fn execute_download(
             pb.set_style(
                 ProgressStyle::default_bar()
                     .template("   [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
-                    .unwrap()
+                    .expect("progress template is valid")
                     .progress_chars("#>-"),
             );
             Some(pb)
@@ -1600,8 +1604,11 @@ async fn execute_batch(
             Ok(audio_samples) => {
                 let output_path = output_dir.join(&item.output_file);
                 let sample_rate = model.sample_rate();
-                if let Err(e) = save_wav(output_path.to_str().unwrap(), &audio_samples, sample_rate)
-                {
+                if let Err(e) = save_wav(
+                    output_path.to_str().unwrap_or_default(),
+                    &audio_samples,
+                    sample_rate,
+                ) {
                     if !global.quiet {
                         println!("❌ (failed to save: {})", e);
                     }
@@ -1638,15 +1645,15 @@ async fn execute_batch(
     Ok(())
 }
 /// Play audio file using platform-specific command
-fn play_audio_file(path: &PathBuf) -> Result<()> {
+fn play_audio_file(path: &Path) -> Result<()> {
     #[cfg(target_os = "macos")]
-    let (command, args) = ("afplay", vec![path.to_str().unwrap()]);
+    let (command, args) = ("afplay", vec![path.to_str().unwrap_or_default()]);
     #[cfg(target_os = "linux")]
     let (command, args) = {
         if Command::new("aplay").arg("--version").output().is_ok() {
-            ("aplay", vec![path.to_str().unwrap()])
+            ("aplay", vec![path.to_str().unwrap_or_default()])
         } else if Command::new("paplay").arg("--version").output().is_ok() {
-            ("paplay", vec![path.to_str().unwrap()])
+            ("paplay", vec![path.to_str().unwrap_or_default()])
         } else {
             return Err(
                 voirs_sdk::VoirsError::config_error(

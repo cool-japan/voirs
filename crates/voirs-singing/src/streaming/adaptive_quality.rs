@@ -210,7 +210,10 @@ impl AdaptiveQualityScaler {
         let trend = self.load_estimator.get_trend();
 
         let mut adjusted = false;
-        let mut current_quality = *self.current_quality.lock().unwrap();
+        let mut current_quality = *self
+            .current_quality
+            .lock()
+            .expect("lock should not be poisoned");
 
         // Check if we need to adjust quality
         if let Ok(last_adjustment) = self.last_adjustment.try_lock() {
@@ -293,7 +296,10 @@ impl AdaptiveQualityScaler {
 
     /// Get current quality level
     pub fn get_quality(&self) -> QualityLevel {
-        *self.current_quality.lock().unwrap()
+        *self
+            .current_quality
+            .lock()
+            .expect("lock should not be poisoned")
     }
 
     /// Get current synthesis parameters
@@ -304,7 +310,10 @@ impl AdaptiveQualityScaler {
     /// Manually set quality level
     pub fn set_quality(&self, quality: QualityLevel) {
         if quality as u8 >= self.min_quality as u8 && quality as u8 <= self.max_quality as u8 {
-            *self.current_quality.lock().unwrap() = quality;
+            *self
+                .current_quality
+                .lock()
+                .expect("lock should not be poisoned") = quality;
         }
     }
 
@@ -315,7 +324,10 @@ impl AdaptiveQualityScaler {
 
     /// Get quality adjustment statistics
     pub fn get_adjustment_stats(&self) -> AdaptiveQualityStats {
-        let history = self.adjustment_history.lock().unwrap();
+        let history = self
+            .adjustment_history
+            .lock()
+            .expect("lock should not be poisoned");
 
         let total_adjustments = history.len() as u64;
         let quality_upgrades = history

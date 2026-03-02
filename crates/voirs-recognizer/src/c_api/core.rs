@@ -1,4 +1,5 @@
 //! Core C API functions for VoiRS speech recognition.
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 use super::error::{handle_error, VoirsErrorHandler};
 use super::memory::{c_string_to_string, string_to_c_string, VoirsMemoryManager};
@@ -75,8 +76,10 @@ pub extern "C" fn voirs_get_version() -> *const VoirsVersion {
     static VERSION: OnceLock<VoirsVersion> = OnceLock::new();
 
     let version = VERSION.get_or_init(|| {
-        let version_str = std::ffi::CString::new(env!("CARGO_PKG_VERSION")).unwrap();
-        let timestamp_str = std::ffi::CString::new("2025-07-20T00:00:00Z").unwrap();
+        let version_str = std::ffi::CString::new(env!("CARGO_PKG_VERSION"))
+            .expect("version string has no NUL bytes");
+        let timestamp_str = std::ffi::CString::new("2025-07-20T00:00:00Z")
+            .expect("timestamp string has no NUL bytes");
 
         // Leak the strings to get stable pointers for C API
         VoirsVersion {

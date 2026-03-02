@@ -42,7 +42,7 @@ impl TrainingProgress {
         epoch_bar.set_style(
             ProgressStyle::default_bar()
                 .template("{prefix:.bold.cyan} [{bar:40.cyan/blue}] {pos}/{len} {msg}")
-                .unwrap()
+                .expect("progress template is valid")
                 .progress_chars("█▓▒░ "),
         );
         epoch_bar.set_prefix("Epochs");
@@ -52,7 +52,7 @@ impl TrainingProgress {
         batch_bar.set_style(
             ProgressStyle::default_bar()
                 .template("{prefix:.bold.green} [{bar:40.green/blue}] {pos}/{len} {msg}")
-                .unwrap()
+                .expect("progress template is valid")
                 .progress_chars("█▓▒░ "),
         );
         batch_bar.set_prefix("Batches");
@@ -62,7 +62,7 @@ impl TrainingProgress {
         metrics_bar.set_style(
             ProgressStyle::default_spinner()
                 .template("{prefix:.bold.yellow} {spinner:.yellow} {msg}")
-                .unwrap(),
+                .expect("progress template is valid"),
         );
         metrics_bar.set_prefix("Metrics");
 
@@ -72,7 +72,7 @@ impl TrainingProgress {
             bar.set_style(
                 ProgressStyle::default_spinner()
                     .template("{prefix:.bold.magenta} {spinner:.magenta} {msg}")
-                    .unwrap(),
+                    .expect("progress template is valid"),
             );
             bar.set_prefix("Resources");
             Some(bar)

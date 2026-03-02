@@ -90,7 +90,7 @@ impl MemoryPool {
         }
 
         if let Some(i) = index {
-            Ok(Some(buffers.remove(i).unwrap()))
+            Ok(Some(buffers.remove(i).expect("index i is valid (checked above)")))
         } else {
             Ok(None)
         }

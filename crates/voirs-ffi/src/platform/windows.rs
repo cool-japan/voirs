@@ -137,7 +137,7 @@ impl WindowsAudioSession {
             }
 
             unsafe {
-                let device_enumerator = self.device_enumerator.unwrap();
+                let device_enumerator = self.device_enumerator.expect("checked is_none above");
                 let mut default_device: *mut winapi::um::mmdeviceapi::IMMDevice = ptr::null_mut();
 
                 // Get default audio endpoint
@@ -216,7 +216,7 @@ impl WindowsAudioSession {
             }
 
             unsafe {
-                let device_enumerator = self.device_enumerator.unwrap();
+                let device_enumerator = self.device_enumerator.expect("checked is_none above");
                 let mut default_device: *mut winapi::um::mmdeviceapi::IMMDevice = ptr::null_mut();
 
                 // Get default audio endpoint
@@ -292,7 +292,7 @@ impl WindowsAudioSession {
             }
 
             unsafe {
-                let device_enumerator = self.device_enumerator.unwrap();
+                let device_enumerator = self.device_enumerator.expect("checked is_none above");
                 let mut device_collection: *mut winapi::um::mmdeviceapi::IMMDeviceCollection =
                     ptr::null_mut();
 

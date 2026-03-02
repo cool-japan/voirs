@@ -598,6 +598,12 @@ pub struct PyPerformanceValidator {
     validator: PerformanceValidator,
 }
 
+impl Default for PyPerformanceValidator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[pymethods]
 impl PyPerformanceValidator {
     #[new]

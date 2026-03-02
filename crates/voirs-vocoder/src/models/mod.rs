@@ -119,7 +119,7 @@ impl ModelLoader {
         let mut loader = ModelLoader::new();
 
         match tokio::runtime::Runtime::new()
-            .unwrap()
+            .expect("tokio runtime creation should succeed")
             .block_on(loader.load_from_file(path))
         {
             Ok(model_info) => {

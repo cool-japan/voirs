@@ -600,7 +600,9 @@ impl LoadBalancer {
                     .enumerate()
                     .filter(|(_, w)| w.status == WorkerStatus::Available)
                     .min_by(|(_, a), (_, b)| {
-                        a.cpu_utilization.partial_cmp(&b.cpu_utilization).unwrap()
+                        a.cpu_utilization
+                            .partial_cmp(&b.cpu_utilization)
+                            .unwrap_or(std::cmp::Ordering::Equal)
                     })
                     .map(|(idx, _)| idx)
             }
@@ -638,7 +640,9 @@ impl LoadBalancer {
                     .enumerate()
                     .filter(|(_, w)| w.status == WorkerStatus::Available)
                     .min_by(|(_, a), (_, b)| {
-                        a.cpu_utilization.partial_cmp(&b.cpu_utilization).unwrap()
+                        a.cpu_utilization
+                            .partial_cmp(&b.cpu_utilization)
+                            .unwrap_or(std::cmp::Ordering::Equal)
                     })
                     .map(|(idx, _)| idx)
             }

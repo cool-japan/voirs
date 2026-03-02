@@ -710,7 +710,7 @@ mod tests {
                 assert!(dictionary.contains("english"));
             }
             PhonemeRecognizerBackend::ForcedAlign { .. } => {
-                assert!(false, "Expected MFA backend for English")
+                panic!("Expected MFA backend for English")
             }
         }
     }

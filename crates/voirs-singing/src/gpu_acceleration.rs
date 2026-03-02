@@ -104,13 +104,25 @@ impl GpuAccelerator {
     fn select_device(device_type: &DeviceType) -> Result<Device, GpuError> {
         match device_type {
             DeviceType::Cpu => Ok(Device::Cpu),
-            DeviceType::Cuda(index) => Device::new_cuda(*index as usize)
-                .map_err(|e| GpuError::DeviceNotAvailable(format!("CUDA device {}: {}", index, e))),
+            DeviceType::Cuda(index) => {
+                let idx = *index as usize;
+                std::panic::catch_unwind(|| Device::new_cuda(idx))
+                    .unwrap_or_else(|_| {
+                        Err(candle_core::Error::Msg(format!(
+                            "CUDA device {} panicked during initialization",
+                            idx
+                        )))
+                    })
+                    .map_err(|e| {
+                        GpuError::DeviceNotAvailable(format!("CUDA device {}: {}", index, e))
+                    })
+            }
             DeviceType::Metal => Device::new_metal(0)
                 .map_err(|e| GpuError::DeviceNotAvailable(format!("Metal device: {}", e))),
             DeviceType::Auto => {
                 // Try CUDA first, then Metal, fallback to CPU
-                if let Ok(device) = Device::new_cuda(0) {
+                // Use catch_unwind because Device::new_cuda can panic on systems without CUDA
+                if let Ok(Ok(device)) = std::panic::catch_unwind(|| Device::new_cuda(0)) {
                     Ok(device)
                 } else if let Ok(device) = Device::new_metal(0) {
                     Ok(device)

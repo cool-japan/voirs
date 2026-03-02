@@ -371,7 +371,13 @@ impl OpenJTalkG2p {
 
         // This is a simplified implementation
         // Real pitch accent would require accent phrase analysis
-        if phoneme.len() > 1 && phoneme.chars().next().unwrap().is_uppercase() {
+        if phoneme.len() > 1
+            && phoneme
+                .chars()
+                .next()
+                .expect("checked len > 1 above")
+                .is_uppercase()
+        {
             features.insert("pitch".to_string(), "high".to_string());
         } else {
             features.insert("pitch".to_string(), "low".to_string());

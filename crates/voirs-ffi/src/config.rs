@@ -633,7 +633,7 @@ mod tests {
 
         // Test save to file
         assert_eq!(
-            save_config_to_file(pipeline_id, file_path.to_str().unwrap()),
+            save_config_to_file(pipeline_id, file_path.to_str().unwrap_or_default()),
             VoirsErrorCode::Success
         );
         assert!(file_path.exists());
@@ -646,7 +646,7 @@ mod tests {
 
         // Test load from file (should restore original value)
         assert_eq!(
-            load_config_from_file(pipeline_id, file_path.to_str().unwrap()),
+            load_config_from_file(pipeline_id, file_path.to_str().unwrap_or_default()),
             VoirsErrorCode::Success
         );
         assert_eq!(

@@ -535,7 +535,7 @@ pub unsafe extern "C" fn voirs_convert_stereo_to_mono(
     output: *mut c_float,
     sample_count: c_uint,
 ) -> VoirsErrorCode {
-    if input.is_null() || output.is_null() || sample_count == 0 || sample_count % 2 != 0 {
+    if input.is_null() || output.is_null() || sample_count == 0 || !sample_count.is_multiple_of(2) {
         return VoirsErrorCode::InvalidParameter;
     }
 
@@ -645,7 +645,7 @@ pub unsafe extern "C" fn voirs_audio_convert_format(
                 max_output_samples * std::mem::size_of::<f32>(),
                 std::mem::align_of::<f32>(),
             )
-            .unwrap(),
+            .expect("f32 layout is valid"),
         ) as *mut c_float;
 
         let result = voirs_convert_sample_rate(
@@ -665,7 +665,7 @@ pub unsafe extern "C" fn voirs_audio_convert_format(
                     max_output_samples * std::mem::size_of::<f32>(),
                     std::mem::align_of::<f32>(),
                 )
-                .unwrap(),
+                .expect("f32 layout is valid"),
             );
             return result;
         }
@@ -687,7 +687,7 @@ pub unsafe extern "C" fn voirs_audio_convert_format(
                     new_length as usize * std::mem::size_of::<f32>(),
                     std::mem::align_of::<f32>(),
                 )
-                .unwrap(),
+                .expect("f32 layout is valid"),
             ) as *mut c_float;
 
             let result = voirs_convert_mono_to_stereo(
@@ -703,7 +703,7 @@ pub unsafe extern "C" fn voirs_audio_convert_format(
                         new_length as usize * std::mem::size_of::<f32>(),
                         std::mem::align_of::<f32>(),
                     )
-                    .unwrap(),
+                    .expect("f32 layout is valid"),
                 );
                 return result;
             }
@@ -720,7 +720,7 @@ pub unsafe extern "C" fn voirs_audio_convert_format(
                     new_length as usize * std::mem::size_of::<f32>(),
                     std::mem::align_of::<f32>(),
                 )
-                .unwrap(),
+                .expect("f32 layout is valid"),
             ) as *mut c_float;
 
             let result = voirs_convert_stereo_to_mono(
@@ -736,7 +736,7 @@ pub unsafe extern "C" fn voirs_audio_convert_format(
                         new_length as usize * std::mem::size_of::<f32>(),
                         std::mem::align_of::<f32>(),
                     )
-                    .unwrap(),
+                    .expect("f32 layout is valid"),
                 );
                 return result;
             }

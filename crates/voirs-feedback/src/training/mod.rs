@@ -196,7 +196,10 @@ impl TrainingProvider for InteractiveTrainer {
     }
 
     fn get_categories(&self) -> Vec<crate::traits::ExerciseCategory> {
-        let library = self.exercise_library.read().unwrap();
+        let library = self
+            .exercise_library
+            .read()
+            .expect("lock should not be poisoned");
         library.categories.clone()
     }
 }

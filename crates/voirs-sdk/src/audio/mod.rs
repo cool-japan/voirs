@@ -23,11 +23,11 @@
 //!
 //! // Apply some processing
 //! let mut processed = buffer.clone();
-//! processed.apply_gain(6.0).unwrap();
-//! processed.normalize(0.8).unwrap();
+//! processed.apply_gain(6.0).expect("value should be present");
+//! processed.normalize(0.8).expect("value should be present");
 //!
 //! // Save to file
-//! processed.save("output.wav", AudioFormat::Wav).unwrap();
+//! processed.save("output.wav", AudioFormat::Wav).expect("value should be present");
 //! ```
 
 pub mod buffer;

@@ -110,8 +110,8 @@ impl DynamicBuffer {
     fn adapt_size(&self) {
         // Get size and capacity atomically to avoid lock contention
         let (current_size, capacity) = {
-            let buffer = self.buffer.lock().unwrap();
-            let cap = *self.capacity.read().unwrap();
+            let buffer = self.buffer.lock().expect("lock should not be poisoned");
+            let cap = *self.capacity.read().expect("lock should not be poisoned");
             (buffer.len(), cap)
         };
 
@@ -122,7 +122,10 @@ impl DynamicBuffer {
         };
 
         let now = Instant::now();
-        let mut last_resize = self.last_resize.lock().unwrap();
+        let mut last_resize = self
+            .last_resize
+            .lock()
+            .expect("lock should not be poisoned");
 
         // Only resize if enough time has passed (avoid thrashing)
         if now.duration_since(*last_resize).as_millis() < 100 {
@@ -161,11 +164,11 @@ impl DynamicBuffer {
 
 impl StreamingBuffer for DynamicBuffer {
     fn push(&self, audio: AudioBuffer) -> Result<()> {
-        let capacity = *self.capacity.read().unwrap();
+        let capacity = *self.capacity.read().expect("lock should not be poisoned");
 
         // First check: can we push without overflow?
         {
-            let mut buffer = self.buffer.lock().unwrap();
+            let mut buffer = self.buffer.lock().expect("lock should not be poisoned");
             if buffer.len() < capacity {
                 buffer.push_back(audio);
 
@@ -193,8 +196,8 @@ impl StreamingBuffer for DynamicBuffer {
 
         // Try again with new capacity
         {
-            let mut buffer = self.buffer.lock().unwrap();
-            let new_capacity = *self.capacity.read().unwrap();
+            let mut buffer = self.buffer.lock().expect("lock should not be poisoned");
+            let new_capacity = *self.capacity.read().expect("lock should not be poisoned");
 
             if buffer.len() >= new_capacity {
                 // Still full after adaptation
@@ -227,7 +230,7 @@ impl StreamingBuffer for DynamicBuffer {
 
     fn pop(&self) -> Option<AudioBuffer> {
         let audio = {
-            let mut buffer = self.buffer.lock().unwrap();
+            let mut buffer = self.buffer.lock().expect("lock should not be poisoned");
             let audio = buffer.pop_front();
 
             // Update statistics
@@ -252,25 +255,31 @@ impl StreamingBuffer for DynamicBuffer {
     }
 
     fn size(&self) -> usize {
-        self.buffer.lock().unwrap().len()
+        self.buffer
+            .lock()
+            .expect("lock should not be poisoned")
+            .len()
     }
 
     fn capacity(&self) -> usize {
-        *self.capacity.read().unwrap()
+        *self.capacity.read().expect("lock should not be poisoned")
     }
 
     fn is_empty(&self) -> bool {
-        self.buffer.lock().unwrap().is_empty()
+        self.buffer
+            .lock()
+            .expect("lock should not be poisoned")
+            .is_empty()
     }
 
     fn is_full(&self) -> bool {
-        let buffer = self.buffer.lock().unwrap();
-        let capacity = *self.capacity.read().unwrap();
+        let buffer = self.buffer.lock().expect("lock should not be poisoned");
+        let capacity = *self.capacity.read().expect("lock should not be poisoned");
         buffer.len() >= capacity
     }
 
     fn clear(&self) {
-        let mut buffer = self.buffer.lock().unwrap();
+        let mut buffer = self.buffer.lock().expect("lock should not be poisoned");
         buffer.clear();
 
         if let Ok(mut stats) = self.stats.write() {
@@ -281,8 +290,8 @@ impl StreamingBuffer for DynamicBuffer {
     fn utilization(&self) -> f32 {
         // Get both values with minimal lock contention
         let (size, capacity) = {
-            let buffer = self.buffer.lock().unwrap();
-            let capacity = *self.capacity.read().unwrap();
+            let buffer = self.buffer.lock().expect("lock should not be poisoned");
+            let capacity = *self.capacity.read().expect("lock should not be poisoned");
             (buffer.len(), capacity)
         };
 
@@ -294,7 +303,10 @@ impl StreamingBuffer for DynamicBuffer {
     }
 
     fn stats(&self) -> BufferStats {
-        self.stats.read().unwrap().clone()
+        self.stats
+            .read()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 }
 
@@ -341,8 +353,8 @@ impl RingBuffer {
 
 impl StreamingBuffer for RingBuffer {
     fn push(&self, audio: AudioBuffer) -> Result<()> {
-        let write_pos = *self.write_pos.read().unwrap();
-        let read_pos = *self.read_pos.read().unwrap();
+        let write_pos = *self.write_pos.read().expect("lock should not be poisoned");
+        let read_pos = *self.read_pos.read().expect("lock should not be poisoned");
         let next_write = self.next_write_pos(write_pos);
 
         // Check if buffer would overflow
@@ -376,8 +388,8 @@ impl StreamingBuffer for RingBuffer {
     }
 
     fn pop(&self) -> Option<AudioBuffer> {
-        let read_pos = *self.read_pos.read().unwrap();
-        let write_pos = *self.write_pos.read().unwrap();
+        let read_pos = *self.read_pos.read().expect("lock should not be poisoned");
+        let write_pos = *self.write_pos.read().expect("lock should not be poisoned");
 
         // Check if buffer is empty
         if read_pos == write_pos {
@@ -409,8 +421,8 @@ impl StreamingBuffer for RingBuffer {
     }
 
     fn size(&self) -> usize {
-        let write_pos = *self.write_pos.read().unwrap();
-        let read_pos = *self.read_pos.read().unwrap();
+        let write_pos = *self.write_pos.read().expect("lock should not be poisoned");
+        let read_pos = *self.read_pos.read().expect("lock should not be poisoned");
 
         if write_pos >= read_pos {
             write_pos - read_pos
@@ -424,14 +436,14 @@ impl StreamingBuffer for RingBuffer {
     }
 
     fn is_empty(&self) -> bool {
-        let write_pos = *self.write_pos.read().unwrap();
-        let read_pos = *self.read_pos.read().unwrap();
+        let write_pos = *self.write_pos.read().expect("lock should not be poisoned");
+        let read_pos = *self.read_pos.read().expect("lock should not be poisoned");
         write_pos == read_pos
     }
 
     fn is_full(&self) -> bool {
-        let write_pos = *self.write_pos.read().unwrap();
-        let read_pos = *self.read_pos.read().unwrap();
+        let write_pos = *self.write_pos.read().expect("lock should not be poisoned");
+        let read_pos = *self.read_pos.read().expect("lock should not be poisoned");
         self.next_write_pos(write_pos) == read_pos
     }
 
@@ -616,10 +628,24 @@ mod tests {
         let _buffer1 = manager.create_buffer();
         let _buffer2 = manager.create_buffer();
 
-        assert_eq!(manager.buffers.read().unwrap().len(), 2);
+        assert_eq!(
+            manager
+                .buffers
+                .read()
+                .expect("lock should not be poisoned")
+                .len(),
+            2
+        );
 
         // Test cleanup (this won't remove buffers since we're holding references)
         manager.cleanup();
-        assert_eq!(manager.buffers.read().unwrap().len(), 2);
+        assert_eq!(
+            manager
+                .buffers
+                .read()
+                .expect("lock should not be poisoned")
+                .len(),
+            2
+        );
     }
 }

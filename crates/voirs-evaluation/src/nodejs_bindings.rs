@@ -529,11 +529,11 @@ impl NodeJsComparativeEvaluator {
     }
 }
 
-/// Helper function to convert Node.js Buffer to Vec<f32>
+/// Helper function to convert Node.js Buffer to `Vec<f32>`
 ///
 /// This would be implemented in the actual N-API binding layer
 pub fn buffer_to_f32_vec(buffer: &[u8]) -> Result<Vec<f32>, EvaluationError> {
-    if buffer.len() % 4 != 0 {
+    if !buffer.len().is_multiple_of(4) {
         return Err(EvaluationError::InvalidInput {
             message: format!("Buffer length {} is not a multiple of 4", buffer.len()),
         });
@@ -554,7 +554,7 @@ pub fn buffer_to_f32_vec(buffer: &[u8]) -> Result<Vec<f32>, EvaluationError> {
     Ok(samples)
 }
 
-/// Helper function to convert Vec<f32> to Node.js Buffer
+/// Helper function to convert `Vec<f32>` to Node.js Buffer
 ///
 /// This would be implemented in the actual N-API binding layer
 #[must_use]

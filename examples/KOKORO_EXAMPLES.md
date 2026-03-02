@@ -609,6 +609,6 @@ All outputs include **100ms padding** at the start when saved to WAV.
 
 ## License
 
-These examples are part of the VoiRS project and are licensed under MIT OR Apache-2.0.
+These examples are part of the VoiRS project and are licensed under Apache-2.0.
 
 The Kokoro-82M model has its own license terms - please refer to the [model card](https://huggingface.co/hexgrad/Kokoro-82M) for details.

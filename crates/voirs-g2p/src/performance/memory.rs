@@ -38,8 +38,8 @@ impl<T> MemoryPool<T> {
 
     /// Get an object from the pool or create new one
     pub fn acquire(&self) -> PooledObject<T> {
-        let mut pool = self.pool.lock().unwrap();
-        let mut stats = self.stats.lock().unwrap();
+        let mut pool = self.pool.lock().expect("lock should not be poisoned");
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
 
         let object = if let Some(obj) = pool.pop() {
             stats.pool_hits += 1;
@@ -55,17 +55,23 @@ impl<T> MemoryPool<T> {
 
     /// Get current pool size
     pub fn size(&self) -> usize {
-        self.pool.lock().unwrap().len()
+        self.pool.lock().expect("lock should not be poisoned").len()
     }
 
     /// Get pool statistics
     pub fn stats(&self) -> PoolStats {
-        self.stats.lock().unwrap().clone()
+        self.stats
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Clear the pool
     pub fn clear(&self) {
-        self.pool.lock().unwrap().clear();
+        self.pool
+            .lock()
+            .expect("lock should not be poisoned")
+            .clear();
     }
 }
 
@@ -87,20 +93,24 @@ impl<T> PooledObject<T> {
 
     /// Get reference to the object
     pub fn get(&self) -> &T {
-        self.object.as_ref().unwrap()
+        self.object
+            .as_ref()
+            .expect("pooled object should be present until drop")
     }
 
     /// Get mutable reference to the object
     pub fn get_mut(&mut self) -> &mut T {
-        self.object.as_mut().unwrap()
+        self.object
+            .as_mut()
+            .expect("pooled object should be present until drop")
     }
 }
 
 impl<T> Drop for PooledObject<T> {
     fn drop(&mut self) {
         if let Some(object) = self.object.take() {
-            let mut pool = self.pool.lock().unwrap();
-            let mut stats = self.stats.lock().unwrap();
+            let mut pool = self.pool.lock().expect("lock should not be poisoned");
+            let mut stats = self.stats.lock().expect("lock should not be poisoned");
 
             stats.deallocations += 1;
             pool.push(object);
@@ -149,7 +159,7 @@ impl EnhancedBatchProcessor {
             // Use the provided language parameter directly
 
             let task = tokio::spawn(async move {
-                let _permit = semaphore.acquire().await.unwrap();
+                let _permit = semaphore.acquire().await.expect("semaphore should be open");
 
                 // Use pooled memory for result
                 let mut pooled_result = pool.acquire();
@@ -169,7 +179,7 @@ impl EnhancedBatchProcessor {
 
         let mut results = Vec::with_capacity(tasks.len());
         for task in tasks {
-            results.push(task.await.unwrap());
+            results.push(task.await.expect("spawned task should not panic"));
         }
 
         Ok(results)

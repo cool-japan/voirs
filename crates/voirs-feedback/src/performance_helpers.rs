@@ -144,8 +144,8 @@ impl OperationProfiler {
             let p95 = sorted[count * 95 / 100];
             let p99 = sorted[count * 99 / 100];
 
-            let min = *sorted.first().unwrap();
-            let max = *sorted.last().unwrap();
+            let min = *sorted.first().expect("collection should not be empty");
+            let max = *sorted.last().expect("collection should not be empty");
 
             OperationStats {
                 operation: operation.to_string(),

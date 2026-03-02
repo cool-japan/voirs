@@ -518,7 +518,7 @@ impl WhisperEncoder {
         }
 
         let mut outputs = Vec::new();
-        let num_chunks = (seq_len + chunk_size - 1) / chunk_size;
+        let num_chunks = seq_len.div_ceil(chunk_size);
 
         for i in 0..num_chunks {
             let start = i * chunk_size;
@@ -537,7 +537,10 @@ impl WhisperEncoder {
 
         // Concatenate outputs
         if outputs.len() == 1 {
-            Ok(outputs.into_iter().next().unwrap())
+            Ok(outputs
+                .into_iter()
+                .next()
+                .expect("outputs has exactly one element"))
         } else {
             let output_refs: Vec<&Tensor> = outputs.iter().collect();
             Tensor::cat(&output_refs, 1).map_err(|e| RecognitionError::ModelError {

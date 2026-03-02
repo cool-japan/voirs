@@ -214,7 +214,7 @@ impl EnhancedSimdProcessor {
 
     /// Exponential moving average using SciRS2-Core operations
     ///
-    /// Computes: y[n] = alpha * x[n] + (1 - alpha) * y[n-1]
+    /// Computes: y\[n\] = alpha \* x\[n\] + (1 - alpha) \* y\[n-1\]
     pub fn exponential_moving_average_scirs2(samples: &[f32], alpha: f32) -> Vec<f32> {
         if samples.is_empty() {
             return vec![];
@@ -226,7 +226,9 @@ impl EnhancedSimdProcessor {
         let one_minus_alpha = 1.0 - alpha;
 
         for &sample in &samples[1..] {
-            let prev = *output.last().unwrap();
+            let prev = *output
+                .last()
+                .expect("output has at least one element from push above");
             output.push(alpha * sample + one_minus_alpha * prev);
         }
 

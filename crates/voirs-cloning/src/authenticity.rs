@@ -230,7 +230,10 @@ impl AuthenticityDetector {
     /// Create a new authenticity detector
     pub fn new(config: AuthenticityConfig) -> Result<Self> {
         let device = if config.use_gpu {
-            Device::cuda_if_available(0).unwrap_or(Device::Cpu)
+            std::panic::catch_unwind(|| Device::cuda_if_available(0))
+                .ok()
+                .and_then(|r| r.ok())
+                .unwrap_or(Device::Cpu)
         } else {
             Device::Cpu
         };

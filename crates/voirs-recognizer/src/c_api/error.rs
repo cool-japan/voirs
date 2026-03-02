@@ -82,42 +82,19 @@ pub extern "C" fn voirs_clear_error() {
 #[no_mangle]
 /// Item
 pub extern "C" fn voirs_error_to_string(error: VoirsError) -> *const c_char {
-    let message = match error {
-        VoirsError::Success => "Success",
-        VoirsError::InvalidArgument => "Invalid argument provided",
-        VoirsError::NullPointer => "Null pointer provided where non-null expected",
-        VoirsError::InitializationFailed => "Failed to initialize recognizer",
-        VoirsError::ModelLoadFailed => "Failed to load recognition model",
-        VoirsError::RecognitionFailed => "Speech recognition failed",
-        VoirsError::UnsupportedFormat => "Audio format not supported",
-        VoirsError::OutOfMemory => "Out of memory",
-        VoirsError::InternalError => "Internal error occurred",
-        VoirsError::StreamingNotStarted => "Streaming mode not started",
-        VoirsError::InvalidConfiguration => "Invalid configuration provided",
-    };
-
-    // Store static strings for each error type
-    // This ensures the pointers remain valid
+    // Use c"" literals for proper null-terminated C strings with static lifetime
     match error {
-        VoirsError::Success => "Success\0".as_ptr() as *const c_char,
-        VoirsError::InvalidArgument => "Invalid argument provided\0".as_ptr() as *const c_char,
-        VoirsError::NullPointer => {
-            "Null pointer provided where non-null expected\0".as_ptr() as *const c_char
-        }
-        VoirsError::InitializationFailed => {
-            "Failed to initialize recognizer\0".as_ptr() as *const c_char
-        }
-        VoirsError::ModelLoadFailed => {
-            "Failed to load recognition model\0".as_ptr() as *const c_char
-        }
-        VoirsError::RecognitionFailed => "Speech recognition failed\0".as_ptr() as *const c_char,
-        VoirsError::UnsupportedFormat => "Audio format not supported\0".as_ptr() as *const c_char,
-        VoirsError::OutOfMemory => "Out of memory\0".as_ptr() as *const c_char,
-        VoirsError::InternalError => "Internal error occurred\0".as_ptr() as *const c_char,
-        VoirsError::StreamingNotStarted => "Streaming mode not started\0".as_ptr() as *const c_char,
-        VoirsError::InvalidConfiguration => {
-            "Invalid configuration provided\0".as_ptr() as *const c_char
-        }
+        VoirsError::Success => c"Success".as_ptr(),
+        VoirsError::InvalidArgument => c"Invalid argument provided".as_ptr(),
+        VoirsError::NullPointer => c"Null pointer provided where non-null expected".as_ptr(),
+        VoirsError::InitializationFailed => c"Failed to initialize recognizer".as_ptr(),
+        VoirsError::ModelLoadFailed => c"Failed to load recognition model".as_ptr(),
+        VoirsError::RecognitionFailed => c"Speech recognition failed".as_ptr(),
+        VoirsError::UnsupportedFormat => c"Audio format not supported".as_ptr(),
+        VoirsError::OutOfMemory => c"Out of memory".as_ptr(),
+        VoirsError::InternalError => c"Internal error occurred".as_ptr(),
+        VoirsError::StreamingNotStarted => c"Streaming mode not started".as_ptr(),
+        VoirsError::InvalidConfiguration => c"Invalid configuration provided".as_ptr(),
     }
 }
 
@@ -214,7 +191,11 @@ mod tests {
         assert!(!error_ptr.is_null());
 
         // Verify the error message
-        let error_msg = unsafe { std::ffi::CStr::from_ptr(error_ptr).to_str().unwrap() };
+        let error_msg = unsafe {
+            std::ffi::CStr::from_ptr(error_ptr)
+                .to_str()
+                .expect("should be valid UTF-8")
+        };
         assert_eq!(error_msg, "Test error message");
 
         // Clear the error
@@ -230,7 +211,11 @@ mod tests {
         let error_str = voirs_error_to_string(VoirsError::InvalidArgument);
         assert!(!error_str.is_null());
 
-        let success_msg = unsafe { std::ffi::CStr::from_ptr(success_str).to_str().unwrap() };
+        let success_msg = unsafe {
+            std::ffi::CStr::from_ptr(success_str)
+                .to_str()
+                .expect("should be valid UTF-8")
+        };
         assert_eq!(success_msg, "Success");
     }
 

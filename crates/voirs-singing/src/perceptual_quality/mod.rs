@@ -230,7 +230,7 @@ pub mod utils {
             return 0.0;
         }
 
-        frame_energies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        frame_energies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         // Use 10th percentile as noise floor estimate
         let percentile_index = (frame_energies.len() as f64 * 0.1) as usize;

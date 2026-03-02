@@ -15,13 +15,13 @@ pub trait StandardApiPattern {
     type Builder: Default + Clone;
 
     /// Create new instance with default configuration
-    /// Should return Result<Self> if initialization can fail
+    /// Should return `Result<Self>` if initialization can fail
     fn new() -> Result<Self>
     where
         Self: Sized;
 
     /// Create new instance with custom configuration
-    /// Should always return Result<Self> for consistent error handling
+    /// Should always return `Result<Self>` for consistent error handling
     fn with_config(config: Self::Config) -> Result<Self>
     where
         Self: Sized;
@@ -45,7 +45,7 @@ pub trait StandardBuilderPattern<T> {
     fn new() -> Self;
 
     /// Build the final instance
-    /// Should always return Result<T> for consistent error handling
+    /// Should always return `Result<T>` for consistent error handling
     fn build(self) -> Result<T>;
 
     /// Reset builder to default state
@@ -166,8 +166,8 @@ pub mod naming_conventions {
     //! Standard method naming conventions for methods
     //!
     //! ## Constructor Methods:
-    //! - `new()` - Create with default configuration (returns Result<Self>)
-    //! - `with_config(config)` - Create with custom configuration (returns Result<Self>)
+    //! - `new()` - Create with default configuration (returns `Result<Self>`)
+    //! - `with_config(config)` - Create with custom configuration (returns `Result<Self>`)
     //! - `builder()` - Get builder instance (returns Builder)
     //!
     //! ## Configuration Methods:

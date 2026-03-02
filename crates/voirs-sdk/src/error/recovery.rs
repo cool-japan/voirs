@@ -143,7 +143,7 @@ impl CircuitBreaker {
     {
         // Check if circuit is open
         {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock().expect("lock should not be poisoned");
             match state.state {
                 CircuitState::Open => {
                     if let Some(last_failure) = state.last_failure_time {
@@ -169,7 +169,7 @@ impl CircuitBreaker {
         match operation.await {
             Ok(result) => {
                 // Success - reset circuit breaker if in half-open state
-                let mut state = self.state.lock().unwrap();
+                let mut state = self.state.lock().expect("lock should not be poisoned");
                 if state.state == CircuitState::HalfOpen {
                     state.state = CircuitState::Closed;
                     state.failure_count = 0;
@@ -179,7 +179,7 @@ impl CircuitBreaker {
             }
             Err(error) => {
                 // Failure - update circuit breaker state
-                let mut state = self.state.lock().unwrap();
+                let mut state = self.state.lock().expect("lock should not be poisoned");
                 state.failure_count += 1;
                 state.last_failure_time = Some(Instant::now());
 
@@ -194,12 +194,15 @@ impl CircuitBreaker {
 
     /// Get current circuit state
     pub fn state(&self) -> CircuitState {
-        self.state.lock().unwrap().state
+        self.state
+            .lock()
+            .expect("lock should not be poisoned")
+            .state
     }
 
     /// Reset circuit breaker to closed state
     pub fn reset(&self) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock().expect("lock should not be poisoned");
         state.state = CircuitState::Closed;
         state.failure_count = 0;
         state.last_failure_time = None;
@@ -518,7 +521,11 @@ impl ErrorRecoveryManager {
 
         // All alternatives failed
         self.record_failed_recovery();
-        let last_error = context.previous_errors.last().unwrap().clone();
+        let last_error = context
+            .previous_errors
+            .last()
+            .expect("collection should not be empty")
+            .clone();
         Err(last_error)
     }
 
@@ -578,7 +585,10 @@ impl ErrorRecoveryManager {
 
     /// Get recovery metrics
     pub fn get_metrics(&self) -> RecoveryMetrics {
-        self.recovery_metrics.lock().unwrap().clone()
+        self.recovery_metrics
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Reset recovery metrics
@@ -763,7 +773,7 @@ mod tests {
             let attempt_count = attempt_count.clone();
             move || -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<i32>> + Send>> {
                 let count = {
-                    let mut guard = attempt_count.lock().unwrap();
+                    let mut guard = attempt_count.lock().expect("lock should not be poisoned");
                     *guard += 1;
                     *guard
                 };
@@ -788,7 +798,10 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 42);
         assert_eq!(context.attempt, 3);
-        assert_eq!(*attempt_count.lock().unwrap(), 3);
+        assert_eq!(
+            *attempt_count.lock().expect("lock should not be poisoned"),
+            3
+        );
     }
 
     #[tokio::test]
@@ -806,7 +819,7 @@ mod tests {
             let attempt_count = attempt_count.clone();
             move || -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String>> + Send>> {
                 let count = {
-                    let mut guard = attempt_count.lock().unwrap();
+                    let mut guard = attempt_count.lock().expect("lock should not be poisoned");
                     *guard += 1;
                     *guard
                 };

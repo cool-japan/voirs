@@ -454,7 +454,9 @@ impl HrtfProcessor {
         let mut nearest_points = Vec::new();
 
         for (&(az, el), left_hrir) in &self.database.left_responses {
-            let right_hrir = self.database.right_responses.get(&(az, el)).unwrap();
+            let Some(right_hrir) = self.database.right_responses.get(&(az, el)) else {
+                continue;
+            };
 
             // Calculate great circle distance (spherical distance)
             let angular_distance = self.calculate_angular_distance(
@@ -468,7 +470,7 @@ impl HrtfProcessor {
         }
 
         // Sort by distance and take the 4 nearest
-        nearest_points.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        nearest_points.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
         nearest_points.truncate(4);
 
         // Use inverse distance weighting with spherical consideration
@@ -508,7 +510,9 @@ impl HrtfProcessor {
 
         // Find nearby measurements and weight by distance
         for (&(az, el), left_hrir) in &self.database.left_responses {
-            let right_hrir = self.database.right_responses.get(&(az, el)).unwrap();
+            let Some(right_hrir) = self.database.right_responses.get(&(az, el)) else {
+                continue;
+            };
 
             // Calculate angular distance
             let angular_distance = self.calculate_angular_distance(
@@ -1438,7 +1442,11 @@ impl HrtfDatabase {
         // Generate enhanced HRTFs with multiple distances
         for &azimuth in &metadata.azimuth_angles {
             for &elevation in &metadata.elevation_angles {
-                for &distance in metadata.distances.as_ref().unwrap() {
+                let distances = metadata
+                    .distances
+                    .as_ref()
+                    .expect("distances must be provided in enhanced HRTF metadata");
+                for &distance in distances {
                     let (left_hrir, right_hrir) = Self::generate_enhanced_hrtf(
                         azimuth,
                         elevation,

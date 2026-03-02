@@ -47,9 +47,9 @@ impl GpuDevice {
     /// Create a new GPU device with automatic selection
     pub fn new(config: GpuConfig) -> Result<Self> {
         let device = if config.prefer_gpu {
-            match Device::cuda_if_available(config.device_id) {
-                Ok(device) => device,
-                Err(_) => {
+            match std::panic::catch_unwind(|| Device::cuda_if_available(config.device_id)) {
+                Ok(Ok(device)) => device,
+                _ => {
                     tracing::warn!("GPU not available, falling back to CPU");
                     Device::Cpu
                 }

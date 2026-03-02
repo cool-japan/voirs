@@ -11,7 +11,7 @@ from setuptools import setup
 
 if __name__ == "__main__":
     setup(
-        name="voirs-ffi",
+        name="voirs",
         zip_safe=False,
         # All other configuration is in pyproject.toml
     )

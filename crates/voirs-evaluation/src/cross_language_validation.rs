@@ -631,14 +631,14 @@ impl CrossLanguageValidator {
         let best_fold = fold_accuracies
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i)
             .unwrap_or(0);
 
         let worst_fold = fold_accuracies
             .iter()
             .enumerate()
-            .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i)
             .unwrap_or(0);
 
@@ -803,7 +803,8 @@ impl CrossLanguageValidator {
                 / pair_errors.len() as f64;
             problematic_pairs.push((source_lang, target_lang, avg_error));
         }
-        problematic_pairs.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
+        problematic_pairs
+            .sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
 
         Ok(ValidationErrorAnalysis {
             error_patterns,

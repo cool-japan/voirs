@@ -926,6 +926,15 @@ impl EmotionTransfer {
             .or_insert(0) += 1;
     }
 
+    /// Extract emotional characteristics from audio (public async wrapper around extract_emotion)
+    pub async fn extract_emotional_characteristics(
+        &self,
+        audio: &[f32],
+        sample_rate: u32,
+    ) -> Result<EmotionalCharacteristics> {
+        self.extract_emotion(audio, sample_rate)
+    }
+
     /// Get current statistics
     pub fn get_statistics(&self) -> &EmotionTransferStatistics {
         &self.statistics
@@ -1109,16 +1118,16 @@ mod tests {
     }
 }
 
-/// Integration with voirs-emotion crate for enhanced emotion control
+/// Integration with voirs-emotion crate for enhanced emotion control.
+/// Note: voirs_emotion is not a direct dependency (to avoid cyclic deps).
+/// This module uses the base EmotionTransfer system for all operations.
 #[cfg(feature = "emotion-integration")]
 pub mod emotion_integration {
     use super::*;
-    use voirs_emotion;
 
-    /// Enhanced emotion transfer system with voirs-emotion integration
+    /// Enhanced emotion transfer system with extended integration configuration
     pub struct IntegratedEmotionTransfer {
         base_system: EmotionTransfer,
-        emotion_synthesizer: voirs_emotion::core::EmotionSynthesizer,
         integration_config: EmotionIntegrationConfig,
     }
 
@@ -1127,11 +1136,11 @@ pub mod emotion_integration {
     pub struct EmotionIntegrationConfig {
         /// Enable real-time emotion adaptation
         pub enable_realtime_adaptation: bool,
-        /// Use voirs-emotion for emotion detection
+        /// Use enhanced emotion detection (uses base system in this implementation)
         pub use_emotion_detection: bool,
-        /// Use voirs-emotion for synthesis
+        /// Use enhanced emotion synthesis (uses base system in this implementation)
         pub use_emotion_synthesis: bool,
-        /// Blend factor between systems (0.0=voirs-emotion only, 1.0=base system only)
+        /// Blend factor between systems (0.0=synthesis only, 1.0=base system only)
         pub system_blend_factor: f32,
         /// Quality threshold for integration
         pub integration_quality_threshold: f32,
@@ -1156,16 +1165,8 @@ pub mod emotion_integration {
             integration_config: EmotionIntegrationConfig,
         ) -> Result<Self> {
             let base_system = EmotionTransfer::new(base_config);
-
-            // Initialize voirs-emotion synthesizer
-            let emotion_synthesizer = voirs_emotion::core::EmotionSynthesizer::new(
-                voirs_emotion::config::EmotionConfig::default(),
-            )
-            .await?;
-
             Ok(Self {
                 base_system,
-                emotion_synthesizer,
                 integration_config,
             })
         }
@@ -1175,31 +1176,23 @@ pub mod emotion_integration {
             &mut self,
             request: EmotionTransferRequest,
         ) -> Result<EmotionTransferResult> {
-            // Use voirs-emotion for emotion detection if enabled
-            let enhanced_source_emotion = if self.integration_config.use_emotion_detection {
-                self.detect_emotion_with_voirs(&request.source_audio, request.sample_rate)
-                    .await?
-            } else {
-                self.base_system
-                    .extract_emotional_characteristics(&request.source_audio, request.sample_rate)
-                    .await?
-            };
+            // Use base system for emotion detection
+            let enhanced_source_emotion = self
+                .base_system
+                .extract_emotional_characteristics(&request.source_audio, request.sample_rate)
+                .await?;
 
-            // Use voirs-emotion for synthesis if enabled
-            let transferred_audio = if self.integration_config.use_emotion_synthesis {
-                self.synthesize_with_voirs(&request, &enhanced_source_emotion)
-                    .await?
-            } else {
-                self.base_system
-                    .apply_emotion_transfer(
-                        &request.target_audio,
-                        &enhanced_source_emotion,
-                        &request.target_emotion,
-                        &request.config,
-                        request.sample_rate,
-                    )
-                    .await?
-            };
+            // Apply emotion transfer via base system
+            let transferred_audio = self
+                .base_system
+                .apply_emotion_transfer(
+                    &request.target_audio,
+                    &enhanced_source_emotion,
+                    &request.target_emotion,
+                    &request.config,
+                    request.sample_rate,
+                )
+                .await?;
 
             // Blend results if configured
             let final_audio = if self.integration_config.system_blend_factor < 1.0 {
@@ -1251,113 +1244,7 @@ pub mod emotion_integration {
             })
         }
 
-        /// Detect emotion using voirs-emotion crate
-        async fn detect_emotion_with_voirs(
-            &self,
-            audio: &[f32],
-            sample_rate: u32,
-        ) -> Result<EmotionalCharacteristics> {
-            // Create audio input for voirs-emotion
-            let audio_input = voirs_emotion::types::AudioInput::new(audio.to_vec(), sample_rate);
-
-            // Detect emotion using voirs-emotion
-            let emotion_result = self
-                .emotion_synthesizer
-                .detect_emotion(&audio_input)
-                .await?;
-
-            // Convert voirs-emotion result to our format
-            let primary_emotion =
-                self.convert_voirs_emotion_to_category(&emotion_result.primary_emotion);
-            let secondary_emotion = emotion_result
-                .secondary_emotion
-                .map(|e| self.convert_voirs_emotion_to_category(&e));
-
-            // Extract prosody features using our system (for compatibility)
-            let prosody = self
-                .base_system
-                .extract_prosody_features(audio, sample_rate)?;
-
-            // Extract temporal dynamics
-            let temporal_dynamics = self
-                .base_system
-                .extract_temporal_dynamics(audio, sample_rate)?;
-
-            Ok(EmotionalCharacteristics {
-                primary_emotion,
-                secondary_emotion,
-                intensity: emotion_result.intensity,
-                prosody,
-                confidence: emotion_result.confidence,
-                temporal_dynamics,
-                metadata: HashMap::new(),
-            })
-        }
-
-        /// Synthesize emotion using voirs-emotion crate
-        async fn synthesize_with_voirs(
-            &self,
-            request: &EmotionTransferRequest,
-            source_emotion: &EmotionalCharacteristics,
-        ) -> Result<Vec<f32>> {
-            // Create emotion transfer request for voirs-emotion
-            let emotion_request = voirs_emotion::types::EmotionTransferRequest {
-                source_audio: request.source_audio.clone(),
-                target_audio: request.target_audio.clone(),
-                target_emotion: self.convert_category_to_voirs_emotion(&request.target_emotion),
-                intensity: source_emotion.intensity,
-                preserve_speaker_identity: request.config.identity_preservation,
-                sample_rate: request.sample_rate,
-            };
-
-            // Perform emotion synthesis
-            let synthesis_result = self
-                .emotion_synthesizer
-                .transfer_emotion(&emotion_request)
-                .await?;
-
-            Ok(synthesis_result.audio)
-        }
-
-        /// Convert voirs-emotion type to our emotion category
-        fn convert_voirs_emotion_to_category(
-            &self,
-            voirs_emotion: &voirs_emotion::types::EmotionType,
-        ) -> EmotionCategory {
-            use voirs_emotion::types::EmotionType;
-
-            match voirs_emotion {
-                EmotionType::Neutral => EmotionCategory::Neutral,
-                EmotionType::Happy => EmotionCategory::Happy,
-                EmotionType::Sad => EmotionCategory::Sad,
-                EmotionType::Angry => EmotionCategory::Angry,
-                EmotionType::Fearful => EmotionCategory::Fearful,
-                EmotionType::Surprised => EmotionCategory::Surprised,
-                EmotionType::Disgusted => EmotionCategory::Disgusted,
-                EmotionType::Custom(name) => EmotionCategory::Custom(name.clone()),
-            }
-        }
-
-        /// Convert our emotion category to voirs-emotion type
-        fn convert_category_to_voirs_emotion(
-            &self,
-            category: &EmotionCategory,
-        ) -> voirs_emotion::types::EmotionType {
-            use voirs_emotion::types::EmotionType;
-
-            match category {
-                EmotionCategory::Neutral => EmotionType::Neutral,
-                EmotionCategory::Happy => EmotionType::Happy,
-                EmotionCategory::Sad => EmotionType::Sad,
-                EmotionCategory::Angry => EmotionType::Angry,
-                EmotionCategory::Fearful => EmotionType::Fearful,
-                EmotionCategory::Surprised => EmotionType::Surprised,
-                EmotionCategory::Disgusted => EmotionType::Disgusted,
-                EmotionCategory::Custom(name) => EmotionType::Custom(name.clone()),
-            }
-        }
-
-        /// Blend audio results from two systems
+        /// Blend audio results from two processing paths
         fn blend_audio_results(
             &self,
             audio1: &[f32],
@@ -1390,14 +1277,10 @@ pub mod emotion_integration {
             }
 
             // Detect current emotion in chunk
-            let current_emotion = if self.integration_config.use_emotion_detection {
-                self.detect_emotion_with_voirs(audio_chunk, sample_rate)
-                    .await?
-            } else {
-                self.base_system
-                    .extract_emotional_characteristics(audio_chunk, sample_rate)
-                    .await?
-            };
+            let current_emotion = self
+                .base_system
+                .extract_emotional_characteristics(audio_chunk, sample_rate)
+                .await?;
 
             // Apply gradual emotion transformation
             if current_emotion.primary_emotion != *target_emotion {
@@ -1414,21 +1297,16 @@ pub mod emotion_integration {
                     sample_rate,
                 };
 
-                // Apply emotion transfer
-                let adapted_audio = if self.integration_config.use_emotion_synthesis {
-                    self.synthesize_with_voirs(&emotion_request, &current_emotion)
-                        .await?
-                } else {
-                    self.base_system
-                        .apply_emotion_transfer(
-                            audio_chunk,
-                            &current_emotion,
-                            target_emotion,
-                            &emotion_request.config,
-                            sample_rate,
-                        )
-                        .await?
-                };
+                let adapted_audio = self
+                    .base_system
+                    .apply_emotion_transfer(
+                        audio_chunk,
+                        &current_emotion,
+                        target_emotion,
+                        &emotion_request.config,
+                        sample_rate,
+                    )
+                    .await?;
 
                 // Copy adapted audio back to chunk
                 let copy_len = audio_chunk.len().min(adapted_audio.len());

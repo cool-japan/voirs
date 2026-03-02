@@ -253,7 +253,7 @@ impl RegressionDetector {
     ) -> BenchmarkMeasurement {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("value should be present")
             .as_secs();
 
         BenchmarkMeasurement {

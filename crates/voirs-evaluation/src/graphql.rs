@@ -432,9 +432,13 @@ impl GraphQLService {
                 "quality_score" => {
                     results.sort_by(|a, b| {
                         if sort_desc {
-                            b.quality_score.partial_cmp(&a.quality_score).unwrap()
+                            b.quality_score
+                                .partial_cmp(&a.quality_score)
+                                .unwrap_or(std::cmp::Ordering::Equal)
                         } else {
-                            a.quality_score.partial_cmp(&b.quality_score).unwrap()
+                            a.quality_score
+                                .partial_cmp(&b.quality_score)
+                                .unwrap_or(std::cmp::Ordering::Equal)
                         }
                     });
                 }
@@ -497,7 +501,7 @@ impl GraphQLService {
 
         // Calculate percentiles
         let mut sorted_scores = scores.clone();
-        sorted_scores.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted_scores.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let mut percentiles = HashMap::new();
         for p in [25, 50, 75, 90, 95, 99] {
@@ -583,7 +587,7 @@ impl GraphQLSchema for GraphQLService {
         let id = uuid::Uuid::new_v4().to_string();
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("value should be present")
             .as_secs();
 
         let result = EvaluationResult {

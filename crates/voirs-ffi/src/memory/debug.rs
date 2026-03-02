@@ -594,7 +594,7 @@ mod tests {
 
     #[test]
     fn test_memory_debugging_lifecycle() {
-        let _guard = TEST_MUTEX.lock().unwrap();
+        let _guard = TEST_MUTEX.lock().expect("lock should not be poisoned");
 
         reset_memory_statistics();
         enable_memory_debugging();
@@ -646,7 +646,7 @@ mod tests {
 
     #[test]
     fn test_allocation_statistics() {
-        let _guard = TEST_MUTEX.lock().unwrap();
+        let _guard = TEST_MUTEX.lock().expect("lock should not be poisoned");
 
         // Ensure clean state before test
         reset_memory_statistics();
@@ -680,7 +680,7 @@ mod tests {
 
     #[test]
     fn test_reallocation_tracking() {
-        let _guard = TEST_MUTEX.lock().unwrap();
+        let _guard = TEST_MUTEX.lock().expect("lock should not be poisoned");
 
         reset_memory_statistics();
         enable_memory_debugging();

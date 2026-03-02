@@ -631,7 +631,7 @@ impl AdvancedPreprocessor {
     fn estimate_noise_level(samples: &[f32], _sample_rate: f32) -> f32 {
         // Simple noise estimation using percentile of absolute values
         let mut abs_samples: Vec<f32> = samples.iter().map(|&s| s.abs()).collect();
-        abs_samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        abs_samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         // Use 20th percentile as noise estimate
         let index = (abs_samples.len() as f32 * 0.2) as usize;

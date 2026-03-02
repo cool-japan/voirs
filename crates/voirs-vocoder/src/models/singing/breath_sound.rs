@@ -491,7 +491,7 @@ impl BreathSoundProcessor {
                 .breath_spectrum
                 .iter()
                 .enumerate()
-                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
                 .map(|(i, _)| i as f32)
                 .unwrap_or(0.0),
         }

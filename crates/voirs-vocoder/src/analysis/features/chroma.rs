@@ -33,7 +33,7 @@ impl ChromaFeatureComputer for crate::analysis::features::FeatureExtractor {
         
         for frame_idx in 0..n_frames {
             let frame = power_spectrogram.row(frame_idx);
-            let chroma_frame = self.chroma_filterbank.apply(frame.as_slice().unwrap());
+            let chroma_frame = self.chroma_filterbank.apply(frame.as_slice().expect("row should be contiguous"));
             
             for (chroma_idx, &chroma_value) in chroma_frame.iter().enumerate() {
                 if chroma_idx < 12 {
@@ -136,7 +136,7 @@ mod tests {
         // A should have the highest weight
         let max_idx = weights.iter()
             .enumerate()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i)
             .unwrap();
         
@@ -184,7 +184,7 @@ mod tests {
         let find_max_chroma = |weights: &[f32]| {
             weights.iter()
                 .enumerate()
-                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
                 .map(|(i, _)| i)
                 .unwrap()
         };

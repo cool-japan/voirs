@@ -644,7 +644,11 @@ impl OptimizedMultiHeadAttention {
 
         // Get keys and values (from cache or current)
         let (final_keys, final_values) = if use_cache && self.kv_cache.is_some() {
-            let (cached_k, cached_v) = self.kv_cache.as_ref().unwrap().get();
+            let (cached_k, cached_v) = self
+                .kv_cache
+                .as_ref()
+                .expect("kv_cache is Some (checked above)")
+                .get();
             (cached_k.to_vec(), cached_v.to_vec())
         } else {
             (k_heads, v_heads)

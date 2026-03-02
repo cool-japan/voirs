@@ -419,7 +419,7 @@ impl ABTestAnalyzer {
         // Calculate median
         let mut sorted_data = valid_data.clone();
         sorted_data.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let median = if n % 2 == 0 {
+        let median = if n.is_multiple_of(2) {
             (sorted_data[n / 2 - 1] + sorted_data[n / 2]) / 2.0
         } else {
             sorted_data[n / 2]

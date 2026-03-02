@@ -9,7 +9,12 @@ rustflags = ["-C", "link-arg=-fuse-ld=lld"]
 rustflags = ["-C", "link-arg=-Wl,-ld_classic"]
 
 [target.aarch64-apple-darwin]
-rustflags = ["-C", "link-arg=-Wl,-ld_classic"]
+rustflags = [
+    "-C", "link-arg=-Wl,-ld_classic",
+    "-C", "link-arg=-F/opt/homebrew/opt/python@3.14/Frameworks",
+    "-C", "link-arg=-framework",
+    "-C", "link-arg=Python",
+]
 
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
@@ -36,8 +41,11 @@ rustflags = [
     "-C", "target-cpu=sm_50",
 ]
 
-# Environment variables for GPU acceleration
+# Environment variables for builds
 [env]
+# Python (for pyo3 bindings) - use Python 3.14 (matches compiled pyo3 rlib)
+PYO3_PYTHON = "/opt/homebrew/bin/python3"
+
 # CUDA configuration
 CUDA_ROOT = { value = "/usr/local/cuda", relative = false }
 CUDNN_ROOT = { value = "/usr/local/cuda", relative = false }

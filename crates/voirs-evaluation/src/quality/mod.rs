@@ -285,7 +285,7 @@ impl QualityEvaluator {
             });
         }
 
-        let reference = reference.unwrap();
+        let reference = reference.expect("value should be present");
 
         // Validate compatibility
         crate::validate_audio_compatibility(audio, reference)?;
@@ -318,7 +318,7 @@ impl QualityEvaluator {
             return self.calculate_no_reference_intelligibility(audio).await;
         }
 
-        let reference = reference.unwrap();
+        let reference = reference.expect("value should be present");
         crate::validate_audio_compatibility(audio, reference)?;
 
         // Use proper STOI implementation
@@ -338,7 +338,7 @@ impl QualityEvaluator {
             });
         }
 
-        let reference = reference.unwrap();
+        let reference = reference.expect("value should be present");
         crate::validate_audio_compatibility(audio, reference)?;
 
         // Use proper MCD implementation with DTW alignment
@@ -397,7 +397,7 @@ impl QualityEvaluator {
             return Ok(0.5); // Neutral score when no reference
         }
 
-        let reference = reference.unwrap();
+        let reference = reference.expect("value should be present");
 
         // Extract speaker characteristics
         let gen_features = self.extract_speaker_features(audio).await?;
@@ -2446,7 +2446,7 @@ impl EcosystemEvaluator for QualityEvaluator {
         // Store stage results
         bridge.processing_state.stage_results.insert(
             "quality_evaluation".to_string(),
-            serde_json::to_value(&quality_result).unwrap(),
+            serde_json::to_value(&quality_result).expect("serialization should succeed"),
         );
 
         // Check if we should generate recommendations
@@ -2497,18 +2497,18 @@ impl EcosystemEvaluator for QualityEvaluator {
             .completed_stages
             .push("quality_evaluation".to_string());
 
-        Ok(serde_json::to_value(&quality_result).unwrap())
+        Ok(serde_json::to_value(&quality_result).expect("serialization should succeed"))
     }
 
     async fn get_ecosystem_results(&self) -> EvaluationResult<EcosystemResults> {
         let mut evaluation_results = HashMap::new();
         evaluation_results.insert(
             "supported_metrics".to_string(),
-            serde_json::to_value(&self.supported_metrics).unwrap(),
+            serde_json::to_value(&self.supported_metrics).expect("serialization should succeed"),
         );
         evaluation_results.insert(
             "metadata".to_string(),
-            serde_json::to_value(&self.metadata).unwrap(),
+            serde_json::to_value(&self.metadata).expect("serialization should succeed"),
         );
 
         let mut quality_scores = HashMap::new();
@@ -2529,7 +2529,8 @@ impl EcosystemEvaluator for QualityEvaluator {
         );
         metadata.insert(
             "languages".to_string(),
-            serde_json::to_value(&self.metadata.supported_languages).unwrap(),
+            serde_json::to_value(&self.metadata.supported_languages)
+                .expect("serialization should succeed"),
         );
 
         let processing_stats = PerformanceMetrics {
@@ -2582,7 +2583,7 @@ impl EcosystemEvaluator for QualityEvaluator {
             propagation_path: vec!["quality_evaluator".to_string()],
             context_data: std::iter::once((
                 "evaluator_metadata".to_string(),
-                serde_json::to_value(&self.metadata).unwrap(),
+                serde_json::to_value(&self.metadata).expect("serialization should succeed"),
             ))
             .collect(),
             timestamp: std::time::SystemTime::now(),

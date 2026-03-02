@@ -26,7 +26,7 @@ impl SimdAudioOps {
     ///
     /// let buf1 = vec![1.0, 2.0, 3.0, 4.0];
     /// let buf2 = vec![0.5, 1.0, 1.5, 2.0];
-    /// let mixed = SimdAudioOps::mix_buffers(&buf1, &buf2, 0.5, 0.5).unwrap();
+    /// let mixed = SimdAudioOps::mix_buffers(&buf1, &buf2, 0.5, 0.5).expect("operation should succeed");
     /// // Result is weighted average of both buffers
     /// ```
     pub fn mix_buffers(buf1: &[f32], buf2: &[f32], weight1: f32, weight2: f32) -> Result<Vec<f32>> {
@@ -206,7 +206,7 @@ impl SimdAudioOps {
     ///
     /// let buf1 = vec![1.0; 100];
     /// let buf2 = vec![0.5; 100];
-    /// let crossfaded = SimdAudioOps::crossfade(&buf1, &buf2, 50).unwrap();
+    /// let crossfaded = SimdAudioOps::crossfade(&buf1, &buf2, 50).expect("operation should succeed");
     /// // First 50 samples gradually transition from buf1 to buf2
     /// ```
     pub fn crossfade(buf1: &[f32], buf2: &[f32], crossfade_samples: usize) -> Result<Vec<f32>> {
@@ -265,7 +265,7 @@ impl SimdAudioOps {
     ///
     /// let buf1 = vec![1.0, 2.0, 3.0];
     /// let buf2 = vec![4.0, 5.0, 6.0];
-    /// let dot = SimdAudioOps::dot_product(&buf1, &buf2).unwrap();
+    /// let dot = SimdAudioOps::dot_product(&buf1, &buf2).expect("operation should succeed");
     /// assert_eq!(dot, 32.0); // 1*4 + 2*5 + 3*6
     /// ```
     pub fn dot_product(buf1: &[f32], buf2: &[f32]) -> Result<f32> {

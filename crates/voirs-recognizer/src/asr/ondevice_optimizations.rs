@@ -864,7 +864,7 @@ impl OnDeviceOptimizer {
             return false;
         }
 
-        let metrics = self.metrics.lock().unwrap();
+        let metrics = self.metrics.lock().expect("lock should not be poisoned");
         let thresholds = &self.config.adaptive_inference.thresholds;
 
         metrics.cpu_usage > thresholds.cpu_threshold
@@ -883,7 +883,7 @@ impl OnDeviceOptimizer {
     /// Adapt quality based on current conditions
     fn adapt_quality(&mut self) {
         let current_variant = &self.model_variants[&self.current_model];
-        let metrics = self.metrics.lock().unwrap();
+        let metrics = self.metrics.lock().expect("lock should not be poisoned");
 
         // Downgrade if under stress
         if metrics.avg_latency_ms > self.config.realtime_constraints.target_latency_ms as f32 {
@@ -935,7 +935,7 @@ impl OnDeviceOptimizer {
 
     /// Update performance metrics
     fn update_metrics(&self, processing_time: Duration) {
-        let mut metrics = self.metrics.lock().unwrap();
+        let mut metrics = self.metrics.lock().expect("lock should not be poisoned");
 
         metrics.total_frames += 1;
         let latency_ms = processing_time.as_millis() as f32;
@@ -953,7 +953,7 @@ impl OnDeviceOptimizer {
     /// Handle deadline miss
     fn handle_deadline_miss(&mut self) {
         {
-            let mut metrics = self.metrics.lock().unwrap();
+            let mut metrics = self.metrics.lock().expect("lock should not be poisoned");
             metrics.deadline_misses += 1;
         }
 
@@ -976,7 +976,10 @@ impl OnDeviceOptimizer {
     /// Get current performance metrics
     #[must_use]
     pub fn get_metrics(&self) -> PerformanceMetrics {
-        self.metrics.lock().unwrap().clone()
+        self.metrics
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 
     /// Get current model quality level
@@ -1175,7 +1178,7 @@ impl PostprocessingOptimizer {
             if let Some((max_idx, _)) = chunk
                 .iter()
                 .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             {
                 if !result.is_empty() {
                     result.push(' ');

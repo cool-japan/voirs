@@ -178,7 +178,7 @@ pub enum WasmSupportLevel {
 impl BrowserCapabilities {
     /// Detect current browser capabilities
     pub fn detect() -> Self {
-        let window = web_sys::window().unwrap();
+        let window = web_sys::window().expect("operation should succeed");
         let navigator = window.navigator();
 
         let web_audio_supported = Self::detect_web_audio_support(&window);
@@ -274,11 +274,11 @@ impl BrowserCapabilities {
         // Simple performance score based on available features
         let mut score = 50; // Base score
 
-        if Self::detect_web_audio_support(&web_sys::window().unwrap()) {
+        if Self::detect_web_audio_support(&web_sys::window().expect("operation should succeed")) {
             score += 20;
         }
 
-        if Self::detect_web_workers_support(&web_sys::window().unwrap()) {
+        if Self::detect_web_workers_support(&web_sys::window().expect("operation should succeed")) {
             score += 15;
         }
 
@@ -671,11 +671,13 @@ impl WasmVoiceConverter {
         let config = self.config.clone();
 
         let closure = Closure::wrap(Box::new(move |event: web_sys::AudioProcessingEvent| {
-            let input_buffer = event.input_buffer().unwrap();
-            let output_buffer = event.output_buffer().unwrap();
+            let input_buffer = event.input_buffer().expect("operation should succeed");
+            let output_buffer = event.output_buffer().expect("operation should succeed");
 
             // Process audio in real-time
-            let channel_data = input_buffer.get_channel_data(0).unwrap();
+            let channel_data = input_buffer
+                .get_channel_data(0)
+                .expect("operation should succeed");
             let audio_vec: Vec<f32> = channel_data.to_vec();
 
             // Create conversion request

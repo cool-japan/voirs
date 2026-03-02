@@ -156,7 +156,9 @@ impl StateManager {
             if let Some(filename) = path.file_name() {
                 if let Some(name_str) = filename.to_str() {
                     if name_str.ends_with(".state.json") {
-                        let workflow_name = name_str.strip_suffix(".state.json").unwrap();
+                        let workflow_name = name_str
+                            .strip_suffix(".state.json")
+                            .expect("checked ends_with above");
                         states.push(workflow_name.to_string());
                     }
                 }
@@ -251,9 +253,8 @@ mod tests {
     #[tokio::test]
     async fn test_state_manager_creation() {
         let temp_dir = env::temp_dir().join("voirs_state_test");
-        let manager = StateManager::new(temp_dir);
-        // Just verify creation works
-        assert!(true);
+        let _manager = StateManager::new(temp_dir);
+        // Verify creation works without panic
     }
 
     #[tokio::test]

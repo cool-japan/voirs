@@ -157,7 +157,7 @@ impl RhythmAnalyzer {
         // Find most common interval (simplified approach)
         let median_interval = {
             let mut sorted_intervals = intervals.clone();
-            sorted_intervals.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            sorted_intervals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             sorted_intervals[sorted_intervals.len() / 2]
         };
 
@@ -396,7 +396,7 @@ impl RhythmAnalyzer {
         }
 
         // Simple median
-        tempo_candidates.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        tempo_candidates.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         tempo_candidates[tempo_candidates.len() / 2]
     }
 
@@ -418,7 +418,8 @@ impl RhythmAnalyzer {
         let dynamics = vec![0.7; onsets.len()]; // Placeholder
 
         let density = if onsets.len() > 1 {
-            let total_duration = onsets.last().unwrap() - onsets.first().unwrap();
+            let total_duration = onsets.last().expect("collection should not be empty")
+                - onsets.first().expect("collection should not be empty");
             onsets.len() as f32 / total_duration.max(1.0)
         } else {
             1.0

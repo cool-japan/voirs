@@ -11,7 +11,6 @@
 //! - Robust: Content must be robust enough to be interpreted reliably by various user agents
 
 use std::time::Duration;
-use uuid;
 use voirs_feedback::prelude::*;
 use voirs_feedback::traits::{
     AdaptiveState, FocusArea, SessionState, SessionStatistics, SessionStats, UserPreferences,
@@ -443,11 +442,7 @@ async fn test_multi_language_accessibility() {
             }
             Err(err) => {
                 // Language differences should not cause errors
-                assert!(
-                    false,
-                    "Multi-language support failed for {}: {:?}",
-                    language, err
-                );
+                panic!("Multi-language support failed for {}: {:?}", language, err);
             }
         }
     }
@@ -1303,7 +1298,7 @@ async fn test_comprehensive_accessibility_compliance() {
         let stream = realtime_system
             .create_stream(user_id, &session_state)
             .await
-            .expect(&format!("Failed to create stream for {}", user_id));
+            .unwrap_or_else(|e| panic!("Failed to create stream for {}: {:?}", user_id, e));
 
         // Test basic accessibility for each user type
         let sample_rate = 16000;

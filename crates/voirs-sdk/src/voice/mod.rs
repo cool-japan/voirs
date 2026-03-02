@@ -72,7 +72,11 @@ mod tests {
                 .gender(Gender::Female);
             let voices = manager.search(&criteria);
             assert!(!voices.is_empty());
-            voices.first().unwrap().id.clone()
+            voices
+                .first()
+                .expect("collection should not be empty")
+                .id
+                .clone()
         };
 
         // Test switching (with download enabled)

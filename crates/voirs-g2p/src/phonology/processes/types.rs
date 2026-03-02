@@ -543,7 +543,7 @@ impl RDroppingProcess {
 /// - Dutch: Similar to German
 /// - Russian: Final devoicing before pauses
 /// - Polish: Final devoicing
-/// - Examples: German "Hund" [hunt] (not [hund]), "Tag" [tak] (not [tag])
+/// - Examples: German "Hund" \[hunt\] (not \[hund\]), "Tag" \[tak\] (not \[tag\])
 pub struct FinalDevoicingProcess {
     pub(super) language: LanguageCode,
 }
@@ -631,13 +631,13 @@ impl ElisionProcess {
         }
     }
 }
-/// T-flapping process - /t/ becomes flap [ɾ] in American English
+/// T-flapping process - /t/ becomes flap \[ɾ\] in American English
 ///
 /// This process is particularly prominent in:
-/// - American English: /t/ → [ɾ] between vowels
+/// - American English: /t/ → \[ɾ\] between vowels
 /// - Canadian English: Similar to American
 /// - Conditions: intervocalic /t/ with following unstressed syllable
-/// - Examples: "better" /bɛtɚ/ → [bɛɾɚ], "water" /wɔtɚ/ → [wɔɾɚ]
+/// - Examples: "better" /bɛtɚ/ → \[bɛɾɚ\], "water" /wɔtɚ/ → \[wɔɾɚ\]
 pub struct TFlappingProcess {
     pub(super) language: LanguageCode,
 }

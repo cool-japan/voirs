@@ -232,10 +232,10 @@ async fn execute_synth(
 
     // Save audio to file
     audio.save_wav(&args.output).map_err(|e| {
-        CliError::Io(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("Failed to save audio: {}", e),
-        ))
+        CliError::Io(std::io::Error::other(format!(
+            "Failed to save audio: {}",
+            e
+        )))
     })?;
 
     output_formatter.success(&format!(
@@ -336,10 +336,10 @@ async fn execute_blend(
 
     // Save audio to file
     audio.save_wav(&args.output).map_err(|e| {
-        CliError::Io(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("Failed to save audio: {}", e),
-        ))
+        CliError::Io(std::io::Error::other(format!(
+            "Failed to save audio: {}",
+            e
+        )))
     })?;
 
     output_formatter.success(&format!(

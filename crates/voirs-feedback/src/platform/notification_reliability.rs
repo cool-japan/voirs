@@ -27,7 +27,9 @@ where
     D: serde::Deserializer<'de>,
 {
     let duration = Duration::deserialize(deserializer)?;
-    Ok(Instant::now().checked_sub(duration).unwrap())
+    Ok(Instant::now()
+        .checked_sub(duration)
+        .expect("value should be present"))
 }
 
 /// Enhanced delivery status with more granular states
@@ -117,7 +119,11 @@ where
     D: serde::Deserializer<'de>,
 {
     let duration_opt = Option::<Duration>::deserialize(deserializer)?;
-    Ok(duration_opt.map(|d| Instant::now().checked_sub(d).unwrap()))
+    Ok(duration_opt.map(|d| {
+        Instant::now()
+            .checked_sub(d)
+            .expect("value should be present")
+    }))
 }
 
 /// Comprehensive notification record with reliability tracking

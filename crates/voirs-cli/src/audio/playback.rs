@@ -2,7 +2,7 @@
 
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
-    ChannelCount, Device, Host, SampleFormat, SampleRate, Stream, StreamConfig, StreamError,
+    ChannelCount, Device, Host, SampleFormat, Stream, StreamConfig, StreamError,
 };
 use hound::{WavReader, WavSpec};
 use std::collections::VecDeque;
@@ -244,8 +244,8 @@ impl AudioPlayer {
 
                 for config in supported_configs {
                     max_channels = max_channels.max(config.channels());
-                    sample_rates.push(config.min_sample_rate().0);
-                    sample_rates.push(config.max_sample_rate().0);
+                    sample_rates.push(config.min_sample_rate());
+                    sample_rates.push(config.max_sample_rate());
                     supported_formats.push(config.sample_format());
                 }
 
@@ -324,7 +324,7 @@ impl AudioPlayer {
 
         let stream_config = StreamConfig {
             channels: self.config.channels as ChannelCount,
-            sample_rate: SampleRate(self.config.sample_rate),
+            sample_rate: self.config.sample_rate,
             buffer_size: cpal::BufferSize::Fixed(self.config.buffer_size),
         };
 
@@ -347,8 +347,9 @@ impl AudioPlayer {
                     }
 
                     // Check if we need new audio data
-                    if current_audio.is_none()
-                        || audio_position >= current_audio.as_ref().unwrap().len()
+                    if current_audio
+                        .as_ref()
+                        .is_none_or(|audio| audio_position >= audio.len())
                     {
                         // Try to get next item from queue
                         if let Ok(mut queue_guard) = queue.lock() {
@@ -514,14 +515,14 @@ pub fn play_audio_file_simple<P: AsRef<Path>>(path: P) -> Result<()> {
     let path = path.as_ref();
 
     #[cfg(target_os = "macos")]
-    let (command, args) = ("afplay", vec![path.to_str().unwrap()]);
+    let (command, args) = ("afplay", vec![path.to_str().unwrap_or_default()]);
 
     #[cfg(target_os = "linux")]
     let (command, args) = {
         if Command::new("aplay").arg("--version").output().is_ok() {
-            ("aplay", vec![path.to_str().unwrap()])
+            ("aplay", vec![path.to_str().unwrap_or_default()])
         } else if Command::new("paplay").arg("--version").output().is_ok() {
-            ("paplay", vec![path.to_str().unwrap()])
+            ("paplay", vec![path.to_str().unwrap_or_default()])
         } else {
             return Err(VoirsError::config_error(
                 "No audio player found. Install 'alsa-utils' (aplay) or 'pulseaudio-utils' (paplay)."

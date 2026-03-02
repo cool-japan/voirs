@@ -160,7 +160,7 @@ impl VoirsIntegrationManager {
 
 impl Default for VoirsIntegrationManager {
     fn default() -> Self {
-        Self::new().unwrap()
+        Self::new().expect("VoirsIntegrationManager default construction should succeed")
     }
 }
 

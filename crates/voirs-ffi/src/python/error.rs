@@ -57,17 +57,12 @@ impl VoirsErrorInfo {
     }
 }
 
-/// Enhanced exception with structured error information
-#[pyclass(extends=PyRuntimeError)]
-pub struct VoirsException {
-    #[pyo3(get)]
-    pub error_info: VoirsErrorInfo,
-}
-
-#[pymethods]
-impl VoirsException {
-    #[new]
-    pub fn new(error_info: VoirsErrorInfo) -> Self {
-        Self { error_info }
-    }
-}
+// Create a proper Python exception type that is compatible with pyo3's abi3 mode.
+// Using `create_exception!` instead of `#[pyclass(extends=PyRuntimeError)]` because
+// abi3 does not support subclassing native Python types from Rust.
+pyo3::create_exception!(
+    voirs_ffi,
+    VoirsException,
+    PyRuntimeError,
+    "Enhanced VoiRS exception with structured error information."
+);

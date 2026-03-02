@@ -761,18 +761,17 @@ impl EmotionProcessor {
     /// Save emotion history to file
     pub async fn save_history_to_file(&self, path: &std::path::Path) -> Result<()> {
         let history = self.history.read().await;
-        history.save_to_file(path).map_err(|e| {
-            Error::Io(std::io::Error::other(format!("{}", e)))
-        })?;
+        history
+            .save_to_file(path)
+            .map_err(|e| Error::Io(std::io::Error::other(format!("{}", e))))?;
         info!("Saved emotion history to file: {:?}", path);
         Ok(())
     }
 
     /// Load emotion history from file
     pub async fn load_history_from_file(&self, path: &std::path::Path) -> Result<()> {
-        let loaded_history = EmotionHistory::load_from_file(path).map_err(|e| {
-            Error::Io(std::io::Error::other(format!("{}", e)))
-        })?;
+        let loaded_history = EmotionHistory::load_from_file(path)
+            .map_err(|e| Error::Io(std::io::Error::other(format!("{}", e))))?;
 
         let mut history = self.history.write().await;
         *history = loaded_history;

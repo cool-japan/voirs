@@ -460,7 +460,10 @@ impl AdaptivePronunciationSystem {
     /// Add user correction
     pub fn add_correction(&mut self, correction: UserCorrection) -> Result<()> {
         {
-            let mut history = self.correction_history.lock().unwrap();
+            let mut history = self
+                .correction_history
+                .lock()
+                .expect("lock should not be poisoned");
 
             // Add to history
             history.push_back(correction.clone());
@@ -760,11 +763,14 @@ impl StreamingG2pProcessor {
 
     /// Add text to processing buffer
     pub fn add_text(&self, text: &str) -> Result<()> {
-        let mut buffer = self.text_buffer.lock().unwrap();
+        let mut buffer = self
+            .text_buffer
+            .lock()
+            .expect("lock should not be poisoned");
         buffer.push_str(text);
 
         // Update statistics
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
         stats.total_chars_processed += text.len();
 
         Ok(())
@@ -775,7 +781,10 @@ impl StreamingG2pProcessor {
         let start_time = Instant::now();
 
         let text_to_process = {
-            let mut buffer = self.text_buffer.lock().unwrap();
+            let mut buffer = self
+                .text_buffer
+                .lock()
+                .expect("lock should not be poisoned");
             let to_process = buffer.clone();
             buffer.clear();
             to_process
@@ -812,7 +821,7 @@ impl StreamingG2pProcessor {
 
         // Update statistics
         let processing_time = start_time.elapsed().as_millis() as f32;
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock().expect("lock should not be poisoned");
         stats.avg_latency_ms = (stats.avg_latency_ms + processing_time) / 2.0;
         if processing_time > stats.peak_latency_ms {
             stats.peak_latency_ms = processing_time;
@@ -823,7 +832,10 @@ impl StreamingG2pProcessor {
 
     /// Get streaming statistics
     pub fn get_statistics(&self) -> StreamingStats {
-        self.stats.lock().unwrap().clone()
+        self.stats
+            .lock()
+            .expect("lock should not be poisoned")
+            .clone()
     }
 }
 
@@ -915,23 +927,35 @@ impl EmotionAwareG2pProcessor {
             // Simple emotion keywords with better matching
             match word_lower.as_str() {
                 "happy" | "joy" | "glad" | "wonderful" | "very" => {
-                    *emotion_scores.get_mut(&EmotionType::Happy).unwrap() += 1.0;
+                    *emotion_scores
+                        .get_mut(&EmotionType::Happy)
+                        .expect("key was pre-initialized") += 1.0;
                 }
                 "sad" | "unhappy" | "depressed" => {
-                    *emotion_scores.get_mut(&EmotionType::Sad).unwrap() += 1.0;
+                    *emotion_scores
+                        .get_mut(&EmotionType::Sad)
+                        .expect("key was pre-initialized") += 1.0;
                 }
                 "angry" | "mad" | "furious" | "hate" => {
-                    *emotion_scores.get_mut(&EmotionType::Angry).unwrap() += 2.0;
+                    *emotion_scores
+                        .get_mut(&EmotionType::Angry)
+                        .expect("key was pre-initialized") += 2.0;
                     // Higher weight for angry
                 }
                 "terrible" => {
-                    *emotion_scores.get_mut(&EmotionType::Sad).unwrap() += 0.5; // Lower weight for terrible
+                    *emotion_scores
+                        .get_mut(&EmotionType::Sad)
+                        .expect("key was pre-initialized") += 0.5; // Lower weight for terrible
                 }
                 "excited" | "amazing" | "fantastic" | "awesome" => {
-                    *emotion_scores.get_mut(&EmotionType::Excited).unwrap() += 1.0;
+                    *emotion_scores
+                        .get_mut(&EmotionType::Excited)
+                        .expect("key was pre-initialized") += 1.0;
                 }
                 _ => {
-                    *emotion_scores.get_mut(&EmotionType::Neutral).unwrap() += 0.1;
+                    *emotion_scores
+                        .get_mut(&EmotionType::Neutral)
+                        .expect("key was pre-initialized") += 0.1;
                 }
             }
         }

@@ -518,7 +518,7 @@ impl From<EvaluationError> for VoirsError {
             EvaluationError::Io(msg) => VoirsError::IoError {
                 path: std::path::PathBuf::from("unknown"),
                 operation: voirs_sdk::error::IoOperation::Read,
-                source: std::io::Error::new(std::io::ErrorKind::Other, msg),
+                source: std::io::Error::other(msg),
             },
             EvaluationError::Other(msg) => VoirsError::InternalError {
                 component: "evaluation".to_string(),

@@ -355,7 +355,11 @@ impl CorrelationAnalyzer {
         let n_vars = variables.len();
 
         // Check all variables have the same length
-        let first_length = data.values().next().unwrap().len();
+        let first_length = data
+            .values()
+            .next()
+            .expect("iterator should have next element")
+            .len();
         for (name, values) in data {
             if values.len() != first_length {
                 return Err(EvaluationError::InvalidInput {

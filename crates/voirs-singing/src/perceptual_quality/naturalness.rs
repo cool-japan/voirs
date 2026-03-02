@@ -287,7 +287,7 @@ impl NaturalnessTester {
         }
 
         // Sort by magnitude and take top 2
-        peaks.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        peaks.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         let f1 = if peaks.len() > 0 {
             peaks[0].0 as f32 * bin_resolution

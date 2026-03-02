@@ -215,15 +215,24 @@ impl ModelQuantizer {
 
     /// Add calibration data for a layer
     pub fn add_calibration_data(&self, layer_name: String, data: Vec<f32>) -> Result<()> {
-        let mut cache = self.calibration_cache.lock().unwrap();
+        let mut cache = self
+            .calibration_cache
+            .lock()
+            .expect("lock should not be poisoned");
         cache.insert(layer_name, data);
         Ok(())
     }
 
     /// Calibrate quantization parameters for all layers
     pub fn calibrate(&self) -> Result<()> {
-        let cache = self.calibration_cache.lock().unwrap();
-        let mut params = self.layer_params.lock().unwrap();
+        let cache = self
+            .calibration_cache
+            .lock()
+            .expect("lock should not be poisoned");
+        let mut params = self
+            .layer_params
+            .lock()
+            .expect("lock should not be poisoned");
 
         for (layer_name, data) in cache.iter() {
             if self.config.skip_layers.contains(layer_name) {
@@ -275,7 +284,10 @@ impl ModelQuantizer {
         data: &[f32],
         shape: Vec<usize>,
     ) -> Result<QuantizedTensor> {
-        let params = self.layer_params.lock().unwrap();
+        let params = self
+            .layer_params
+            .lock()
+            .expect("lock should not be poisoned");
         let qparams = params
             .get(layer_name)
             .ok_or_else(|| AcousticError::ProcessingError {
@@ -293,7 +305,11 @@ impl ModelQuantizer {
 
     /// Get quantization parameters for a layer
     pub fn get_layer_params(&self, layer_name: &str) -> Option<QuantizationParams> {
-        self.layer_params.lock().unwrap().get(layer_name).cloned()
+        self.layer_params
+            .lock()
+            .expect("lock should not be poisoned")
+            .get(layer_name)
+            .cloned()
     }
 
     /// Get configuration
@@ -303,11 +319,17 @@ impl ModelQuantizer {
 
     /// Get calibration progress
     pub fn calibration_progress(&self) -> f32 {
-        let cache = self.calibration_cache.lock().unwrap();
+        let cache = self
+            .calibration_cache
+            .lock()
+            .expect("lock should not be poisoned");
         if cache.is_empty() {
             0.0
         } else {
-            let params = self.layer_params.lock().unwrap();
+            let params = self
+                .layer_params
+                .lock()
+                .expect("lock should not be poisoned");
             params.len() as f32 / cache.len() as f32
         }
     }

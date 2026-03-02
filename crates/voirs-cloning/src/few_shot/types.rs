@@ -146,7 +146,7 @@ impl SampleQuality {
         let signal_energy: f32 = audio.iter().map(|x| x * x).sum();
         let mean_energy = signal_energy / audio.len() as f32;
         let mut sorted_energies: Vec<f32> = audio.iter().map(|x| x * x).collect();
-        sorted_energies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted_energies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let noise_threshold = sorted_energies.len() / 10;
         let noise_energy =
             sorted_energies[..noise_threshold].iter().sum::<f32>() / noise_threshold as f32;
@@ -532,7 +532,7 @@ impl FeatureExtractor {
         }
         for i in 1..f0_values.len() - 1 {
             let mut window = [f0_values[i - 1], f0_values[i], f0_values[i + 1]];
-            window.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            window.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             f0_values[i] = window[1];
         }
         let original = f0_values.to_vec();
@@ -1053,7 +1053,10 @@ impl FewShotLearner {
         if self.meta_model.is_none() {
             self.initialize_meta_model()?;
         }
-        let meta_model = self.meta_model.as_mut().unwrap();
+        let meta_model = self
+            .meta_model
+            .as_mut()
+            .expect("meta_model was just initialized above");
         let (support_features, query_features) = self.split_support_query(features);
         let mut adapted_embedding = vec![0.0; self.config.embedding_dim];
         let mut total_weight = 0.0;
@@ -1182,7 +1185,7 @@ impl FewShotLearner {
         filtered.sort_by(|a, b| {
             b.1.overall_quality
                 .partial_cmp(&a.1.overall_quality)
-                .unwrap()
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
         if filtered.len() > self.config.num_shots * 2 {
             filtered.truncate(self.config.num_shots * 2);

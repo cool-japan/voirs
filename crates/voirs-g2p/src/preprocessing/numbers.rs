@@ -16,7 +16,7 @@ pub fn expand_numbers(text: &str, language: LanguageCode) -> Result<String> {
             // Collect remaining digits and decimal points
             while let Some(&next_ch) = chars.peek() {
                 if next_ch.is_ascii_digit() || next_ch == '.' || next_ch == ',' {
-                    number_str.push(chars.next().unwrap());
+                    number_str.push(chars.next().expect("peek returned Some"));
                 } else {
                     break;
                 }
@@ -103,7 +103,13 @@ fn expand_decimal(number_str: &str, language: LanguageCode) -> Result<String> {
         format!(
             "{separator} {digit}",
             separator = get_decimal_separator(language),
-            digit = digit_to_word(decimal_part.chars().next().unwrap(), language)
+            digit = digit_to_word(
+                decimal_part
+                    .chars()
+                    .next()
+                    .expect("decimal_part has len == 1"),
+                language
+            )
         )
     } else {
         let mut decimal_expansion = String::new();

@@ -470,7 +470,7 @@ impl StreamingWhisperProcessor {
         let segment = TranscriptSegment {
             text: text.trim().to_string(),
             start_time: vad_segments[0].0,
-            end_time: vad_segments.last().unwrap().1,
+            end_time: vad_segments.last().expect("vad_segments is non-empty").1,
             confidence: final_confidence,
             language: segment_language,
         };

@@ -23,17 +23,17 @@
 //! - Memory-efficient streaming
 //! - Performance monitoring
 
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 use voirs_conversion::wasm::{WasmAudioProcessor, WasmConversionConfig, WasmPerformanceMonitor};
 
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 use wasm_bindgen::prelude::*;
 
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 use web_sys::{AudioContext, AudioContextState};
 
 /// Example main entry point for WASM
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 #[wasm_bindgen(start)]
 pub fn main() {
     // Initialize panic hook for better error messages
@@ -46,14 +46,14 @@ pub fn main() {
 }
 
 /// Create and configure voice converter for browser
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 #[wasm_bindgen]
 pub struct BrowserVoiceConverter {
     processor: WasmAudioProcessor,
     monitor: WasmPerformanceMonitor,
 }
 
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 #[wasm_bindgen]
 impl BrowserVoiceConverter {
     /// Create new browser voice converter
@@ -117,7 +117,7 @@ impl BrowserVoiceConverter {
 }
 
 /// Example: Create audio context and connect processor
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 #[wasm_bindgen]
 pub async fn create_audio_pipeline() -> Result<(), JsValue> {
     log::info!("Creating audio pipeline");
@@ -142,7 +142,7 @@ pub async fn create_audio_pipeline() -> Result<(), JsValue> {
 }
 
 /// Example: Batch process audio file
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 #[wasm_bindgen]
 pub async fn process_audio_file(
     audio_data: Vec<f32>,
@@ -302,13 +302,8 @@ pub async fn process_audio_file(
 </html>
 */
 
-#[cfg(not(feature = "wasm"))]
+#[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
 fn main() {
     println!("This example requires the 'wasm' feature.");
     println!("Build with: wasm-pack build --target web --features wasm");
-}
-
-#[cfg(feature = "wasm")]
-fn main() {
-    // Entry point is handled by wasm_bindgen(start)
 }

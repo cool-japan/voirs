@@ -66,7 +66,9 @@ impl AccuracyBenchmark {
     /// Load test cases from a reference file
     pub fn load_from_file<P: AsRef<Path>>(&mut self, path: P) -> Result<(), G2pError> {
         let content = fs::read_to_string(path).map_err(|e| {
-            G2pError::IoError(std::io::Error::other(format!("Failed to read test file: {e}")))
+            G2pError::IoError(std::io::Error::other(format!(
+                "Failed to read test file: {e}"
+            )))
         })?;
 
         for line in content.lines() {

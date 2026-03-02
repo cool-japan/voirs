@@ -360,12 +360,12 @@ impl FairnessEvaluator {
 
             let max = qualities
                 .iter()
-                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-                .unwrap();
+                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .expect("value should be present");
             let min = qualities
                 .iter()
-                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-                .unwrap();
+                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .expect("value should be present");
 
             let magnitude = max.1 - min.1;
 
@@ -392,12 +392,12 @@ impl FairnessEvaluator {
 
             let max = success_rates
                 .iter()
-                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-                .unwrap();
+                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .expect("value should be present");
             let min = success_rates
                 .iter()
-                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-                .unwrap();
+                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .expect("value should be present");
 
             let magnitude = max.1 - min.1;
 

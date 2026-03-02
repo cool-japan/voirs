@@ -90,7 +90,7 @@ pub fn parallel_fft_batch(signals: &[Vec<f32>]) -> Vec<Vec<f32>> {
                 return Vec::new();
             }
 
-            let mut planner_guard = planner.lock().unwrap();
+            let mut planner_guard = planner.lock().expect("lock should not be poisoned");
             let fft = planner_guard.plan_fft_forward(signal.len());
             drop(planner_guard);
 
@@ -307,7 +307,7 @@ where
     // Private helper methods
 
     fn cache_key_to_filename(&self, key: &K) -> Result<String, std::io::Error> {
-        let serialized = bincode::serde::encode_to_vec(key, bincode::config::standard())
+        let serialized = oxicode::serde::encode_to_vec(key, oxicode::config::standard())
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let hash = {
             use std::collections::hash_map::DefaultHasher;
@@ -323,7 +323,7 @@ where
         let filename = self.cache_key_to_filename(key)?;
         let filepath = self.cache_dir.join(filename);
 
-        let serialized = bincode::serde::encode_to_vec(value, bincode::config::standard())
+        let serialized = oxicode::serde::encode_to_vec(value, oxicode::config::standard())
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         // Compress the data using flate2
@@ -355,7 +355,7 @@ where
         let mut decompressed = Vec::new();
         std::io::Read::read_to_end(&mut decoder, &mut decompressed)?;
 
-        bincode::serde::decode_from_slice(&decompressed, bincode::config::standard())
+        oxicode::serde::decode_from_slice(&decompressed, oxicode::config::standard())
             .map(|(v, _)| v)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
@@ -947,7 +947,10 @@ pub mod gpu {
         /// Detect the best available device
         fn detect_best_device() -> Result<Device, EvaluationError> {
             // Try CUDA first
-            if let Ok(device) = Device::cuda_if_available(0) {
+            if let Some(device) = std::panic::catch_unwind(|| Device::cuda_if_available(0))
+                .ok()
+                .and_then(|r| r.ok())
+            {
                 return Ok(device);
             }
 
@@ -1437,8 +1440,7 @@ pub mod multi_gpu {
             }
 
             // Split work across devices
-            let chunk_size =
-                (data_pairs.len() + self.accelerators.len() - 1) / self.accelerators.len();
+            let chunk_size = data_pairs.len().div_ceil(self.accelerators.len());
             let chunks: Vec<_> = data_pairs.chunks(chunk_size).collect();
 
             let mut handles = Vec::new();
@@ -1500,8 +1502,7 @@ pub mod multi_gpu {
                 return Ok(Vec::new());
             }
 
-            let chunk_size =
-                (signals.len() + self.accelerators.len() - 1) / self.accelerators.len();
+            let chunk_size = signals.len().div_ceil(self.accelerators.len());
             let chunks: Vec<_> = signals.chunks(chunk_size).collect();
 
             let mut handles = Vec::new();
@@ -1555,8 +1556,7 @@ pub mod multi_gpu {
                 return Ok(Vec::new());
             }
 
-            let chunk_size =
-                (signals.len() + self.accelerators.len() - 1) / self.accelerators.len();
+            let chunk_size = signals.len().div_ceil(self.accelerators.len());
             let chunks: Vec<_> = signals.chunks(chunk_size).collect();
 
             let mut handles = Vec::new();
@@ -1637,7 +1637,11 @@ pub mod multi_gpu {
 
             // Try to detect CUDA devices
             for device_id in 0..8 {
-                if let Ok(device) = Device::cuda_if_available(device_id) {
+                if let Some(device) =
+                    std::panic::catch_unwind(move || Device::cuda_if_available(device_id))
+                        .ok()
+                        .and_then(|r| r.ok())
+                {
                     accelerators.push(GpuAccelerator::with_device(device));
                 } else {
                     break;

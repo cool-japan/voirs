@@ -16,10 +16,10 @@
 //! # Quick Start
 //!
 //! ```python
-//! import voirs_ffi
+//! import voirs
 //!
 //! # Create a pipeline
-//! pipeline = voirs_ffi.VoirsPipeline()
+//! pipeline = voirs.VoirsPipeline()
 //!
 //! # Synthesize speech
 //! result = pipeline.synthesize("Hello, world!")
@@ -73,7 +73,9 @@ pub use audio_buffer::PyAudioBuffer;
 #[cfg(feature = "python")]
 pub use config::PySynthesisConfig;
 #[cfg(feature = "python")]
-pub use error::{VoirsErrorInfo, VoirsException};
+pub use error::VoirsErrorInfo;
+#[cfg(feature = "python")]
+pub use error::VoirsException;
 #[cfg(feature = "python")]
 pub use metrics::{SynthesisMetrics, SynthesisResult};
 #[cfg(feature = "python")]
@@ -99,7 +101,7 @@ use pyo3::prelude::*;
 /// It is called automatically when the module is imported in Python.
 #[cfg(feature = "python")]
 #[pymodule]
-fn voirs_ffi(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn voirs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Core classes
     m.add_class::<VoirsPipeline>()?;
     m.add_class::<PyAudioBuffer>()?;
@@ -108,7 +110,7 @@ fn voirs_ffi(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Enhanced error handling and metrics
     m.add_class::<VoirsErrorInfo>()?;
-    m.add_class::<VoirsException>()?;
+    m.add("VoirsException", m.py().get_type::<VoirsException>())?;
     m.add_class::<SynthesisMetrics>()?;
     m.add_class::<SynthesisResult>()?;
 

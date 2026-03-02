@@ -89,7 +89,7 @@ async fn detailed_health_check(
 
     details.insert(
         "health".to_string(),
-        serde_json::to_value(basic_health).unwrap(),
+        serde_json::to_value(basic_health).expect("HealthResponse is serializable"),
     );
 
     // System information
@@ -103,7 +103,7 @@ async fn detailed_health_check(
     system_info.insert("git_commit", option_env!("GIT_COMMIT").unwrap_or("unknown"));
     details.insert(
         "system".to_string(),
-        serde_json::to_value(system_info).unwrap(),
+        serde_json::to_value(system_info).expect("system_info is serializable"),
     );
 
     // Pipeline status
@@ -116,7 +116,7 @@ async fn detailed_health_check(
         );
         details.insert(
             "pipeline".to_string(),
-            serde_json::to_value(pipeline_info).unwrap(),
+            serde_json::to_value(pipeline_info).expect("pipeline_info is serializable"),
         );
     } else {
         let mut pipeline_info = HashMap::new();
@@ -124,7 +124,7 @@ async fn detailed_health_check(
         pipeline_info.insert("status", serde_json::Value::String("locked".to_string()));
         details.insert(
             "pipeline".to_string(),
-            serde_json::to_value(pipeline_info).unwrap(),
+            serde_json::to_value(pipeline_info).expect("pipeline_info is serializable"),
         );
     }
 
@@ -141,7 +141,7 @@ async fn detailed_health_check(
     features.insert("rest_api", cfg!(feature = "rest-api"));
     details.insert(
         "features".to_string(),
-        serde_json::to_value(features).unwrap(),
+        serde_json::to_value(features).expect("features is serializable"),
     );
 
     Ok(Json(ApiResponse::success(details)))
@@ -213,7 +213,7 @@ async fn recognize_audio(
 
     // Decode audio data
     let audio_data = if let Some(ref base64_data) = request.audio_data {
-        match general_purpose::STANDARD.decode(&base64_data) {
+        match general_purpose::STANDARD.decode(base64_data) {
             Ok(data) => data,
             Err(e) => {
                 error!("Failed to decode base64 audio data: {}", e);
@@ -222,7 +222,7 @@ async fn recognize_audio(
         }
     } else if let Some(ref url) = request.audio_url {
         // Implement URL fetching
-        match fetch_audio_from_url(&url).await {
+        match fetch_audio_from_url(url).await {
             Ok(data) => data,
             Err(e) => {
                 error!("Failed to fetch audio from URL {}: {}", url, e);
@@ -659,7 +659,7 @@ async fn start_streaming_impl(
 
         // Validate VAD threshold
         if let Some(vad_threshold) = config.vad_threshold {
-            if vad_threshold < 0.0 || vad_threshold > 1.0 {
+            if !(0.0..=1.0).contains(&vad_threshold) {
                 return Err("VAD threshold must be between 0.0 and 1.0".into());
             }
         }

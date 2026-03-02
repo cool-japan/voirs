@@ -448,8 +448,8 @@ impl WfsProcessor {
         // Transform to frequency domain
         let mut spectrum = Array1::zeros(frequency_response.len());
         self.forward_fft.process(
-            padded_signal.as_slice().unwrap(),
-            spectrum.as_slice_mut().unwrap(),
+            padded_signal.as_slice().expect("contiguous array"),
+            spectrum.as_slice_mut().expect("contiguous array"),
         );
 
         // Apply frequency response
@@ -459,8 +459,10 @@ impl WfsProcessor {
 
         // Transform back to time domain
         let mut result = Array1::zeros(buffer_size);
-        self.inverse_fft
-            .process(spectrum.as_slice().unwrap(), result.as_slice_mut().unwrap());
+        self.inverse_fft.process(
+            spectrum.as_slice().expect("contiguous array"),
+            result.as_slice_mut().expect("contiguous array"),
+        );
 
         // Return original length
         Ok(result.slice(s![..signal.len()]).to_owned())

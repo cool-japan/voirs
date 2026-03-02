@@ -301,9 +301,7 @@ pub fn extract_mel_spectrogram(
     n_fft: usize,
     hop_length: usize,
 ) -> Result<FeatureResult> {
-    use rustfft::FftPlanner;
     use scirs2_core::ndarray::Array2;
-    use scirs2_core::Complex32; // Use SciRS2 Complex type (SCIRS2 POLICY)
 
     let sample_rate = audio.sample_rate() as f32;
     let samples = audio.samples();
@@ -320,10 +318,6 @@ pub fn extract_mel_spectrogram(
     } else {
         1
     };
-
-    // Create FFT planner
-    let mut planner = FftPlanner::<f32>::new();
-    let fft = planner.plan_fft_forward(n_fft);
 
     // Create Hann window
     let window: Vec<f32> = (0..n_fft)
@@ -342,8 +336,8 @@ pub fn extract_mel_spectrogram(
     for frame_idx in 0..n_frames {
         let start = frame_idx * hop_length;
 
-        // Extract frame and apply window (Complex32 is compatible with rustfft)
-        let mut frame_data: Vec<Complex32> = (0..n_fft)
+        // Extract windowed frame as f64 for scirs2_fft::fft
+        let windowed_frame: Vec<f64> = (0..n_fft)
             .map(|i| {
                 let sample_idx = start + i;
                 let sample = if sample_idx < samples.len() {
@@ -351,19 +345,20 @@ pub fn extract_mel_spectrogram(
                 } else {
                     0.0_f32
                 };
-                Complex32::new(sample, 0.0_f32)
+                sample as f64
             })
             .collect();
 
-        // Apply FFT
-        fft.process(&mut frame_data);
+        // Apply FFT using scirs2_fft functional API (SCIRS2 POLICY)
+        let fft_result = scirs2_fft::fft(&windowed_frame, Some(n_fft))
+            .map_err(|e| DatasetError::ProcessingError(format!("FFT error: {e}")))?;
 
         // Compute power spectrum (first half + DC and Nyquist)
         let n_freqs = n_fft / 2 + 1;
-        let power_spec: Vec<f32> = frame_data
+        let power_spec: Vec<f32> = fft_result
             .iter()
             .take(n_freqs)
-            .map(|c| c.norm_sqr())
+            .map(|c| (c.re * c.re + c.im * c.im) as f32)
             .collect();
 
         // Apply mel filterbank
@@ -674,7 +669,7 @@ mod tests {
         let result = extract_mfcc(&sample.audio, 13, true).unwrap();
         assert!(!result.is_empty());
         // Should have 14 coefficients (13 MFCC + 1 energy)
-        assert!(result.len() % 14 == 0);
+        assert!(result.len().is_multiple_of(14));
     }
 
     #[tokio::test]
