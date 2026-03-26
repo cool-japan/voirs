@@ -347,7 +347,7 @@ impl CodecSimulator {
         let num_packets = samples.len().div_ceil(packet_size);
 
         for i in 0..num_packets {
-            if rng.gen::<f32>() < self.config.packet_loss_rate {
+            if rng.random::<f32>() < self.config.packet_loss_rate {
                 let start = i * packet_size;
                 let end = (start + packet_size).min(samples.len());
 
@@ -374,11 +374,11 @@ impl CodecSimulator {
         let mut jittered = Vec::with_capacity(samples.len());
 
         for (i, &sample) in samples.iter().enumerate() {
-            if rng.gen::<f32>() < self.config.jitter_rate {
+            if rng.random::<f32>() < self.config.jitter_rate {
                 // Ensure we have a valid range to sample from
                 let max_offset = jitter_samples.min(i);
                 if max_offset > 0 {
-                    let offset = rng.gen_range(0..max_offset);
+                    let offset = rng.random_range(0..max_offset);
                     let src_idx = i.saturating_sub(offset);
                     jittered.push(samples[src_idx]);
                 } else {
@@ -404,9 +404,9 @@ impl CodecSimulator {
         let corrupted: Vec<f32> = samples
             .iter()
             .map(|&s| {
-                if rng.gen::<f32>() < self.config.bit_error_rate {
+                if rng.random::<f32>() < self.config.bit_error_rate {
                     // Flip random bits by adding noise
-                    let noise = rng.gen_range(-0.1..0.1);
+                    let noise = rng.random_range(-0.1..0.1);
                     (s + noise).clamp(-1.0, 1.0)
                 } else {
                     s
@@ -429,7 +429,7 @@ impl CodecSimulator {
         let noisy: Vec<f32> = samples
             .iter()
             .map(|&s| {
-                let noise = (rng.gen::<f32>() - 0.5) * 2.0 * noise_level;
+                let noise = (rng.random::<f32>() - 0.5) * 2.0 * noise_level;
                 (s + noise).clamp(-1.0, 1.0)
             })
             .collect();

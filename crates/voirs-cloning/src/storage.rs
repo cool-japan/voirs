@@ -619,7 +619,7 @@ impl VoiceModelStorage {
         }
 
         // Sort by creation time (newest first)
-        models.sort_by(|a, b| b.storage_info.created_at.cmp(&a.storage_info.created_at));
+        models.sort_by_key(|b| std::cmp::Reverse(b.storage_info.created_at));
 
         // Apply pagination
         let start = offset.unwrap_or(0);

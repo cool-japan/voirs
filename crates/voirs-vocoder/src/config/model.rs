@@ -361,35 +361,28 @@ impl ModelConfig {
 
         // Architecture-specific validation
         match self.architecture {
-            ModelArchitecture::HiFiGAN => {
-                // HiFi-GAN specific validations
-                if self.model_metadata.mel_channels < 32 {
-                    warnings.push("Low mel channels may reduce quality for HiFi-GAN".to_string());
-                }
+            // HiFi-GAN specific validations
+            ModelArchitecture::HiFiGAN if self.model_metadata.mel_channels < 32 => {
+                warnings.push("Low mel channels may reduce quality for HiFi-GAN".to_string());
             }
-            ModelArchitecture::DiffWave => {
-                // DiffWave specific validations
-                if self.optimization.enable_quantization && self.optimization.quantization_bits < 16
-                {
-                    warnings.push("Low quantization may affect DiffWave quality".to_string());
-                }
+            // DiffWave specific validations
+            ModelArchitecture::DiffWave
+                if self.optimization.enable_quantization
+                    && self.optimization.quantization_bits < 16 =>
+            {
+                warnings.push("Low quantization may affect DiffWave quality".to_string());
             }
             _ => {}
         }
 
         // Backend-specific validation
         match self.backend {
-            BackendType::ONNX => {
-                if !self.optimization.enable_graph_optimization {
-                    warnings.push("Graph optimization recommended for ONNX backend".to_string());
-                }
+            BackendType::ONNX if !self.optimization.enable_graph_optimization => {
+                warnings.push("Graph optimization recommended for ONNX backend".to_string());
             }
-            BackendType::Candle => {
-                if self.optimization.quantization_bits == 8 {
-                    warnings.push(
-                        "8-bit quantization may not be fully supported in Candle".to_string(),
-                    );
-                }
+            BackendType::Candle if self.optimization.quantization_bits == 8 => {
+                warnings
+                    .push("8-bit quantization may not be fully supported in Candle".to_string());
             }
             _ => {}
         }

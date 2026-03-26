@@ -99,7 +99,7 @@ impl LoadBalancer {
     fn random_selection(&self, instances: &[&ServiceInstance]) -> Result<ServiceInstance> {
         use scirs2_core::random::{thread_rng, Rng};
         let mut rng = thread_rng();
-        let idx = rng.gen_range(0..instances.len());
+        let idx = rng.random_range(0..instances.len());
         Ok(instances[idx].clone())
     }
 

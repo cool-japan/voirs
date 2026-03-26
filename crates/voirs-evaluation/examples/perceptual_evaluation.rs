@@ -58,7 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Speech signal with added noise
         let speech = 0.3 * (2.0 * std::f32::consts::PI * 400.0 * t).sin()
             + 0.2 * (2.0 * std::f32::consts::PI * 800.0 * t).sin();
-        let noise = 0.1 * (rng.r#gen::<f32>() - 0.5); // Random noise
+        let noise = 0.1 * (rng.random::<f32>() - 0.5); // Random noise
         noisy_samples.push(speech + noise);
     }
 

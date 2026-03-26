@@ -280,7 +280,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## 🔧 Technical Details
 
 ### Dependencies
-- **scirs2-core**: Scientific computing (v0.1.0-rc.1)
+- **scirs2-core**: Scientific computing (v0.3.0-rc.1)
 - **tokio**: Async runtime (v1.47+)
 - **candle-core**: Neural network operations
 - **serde**: Serialization

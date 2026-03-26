@@ -248,8 +248,8 @@ impl GaussianMechanism {
         let mut rng = thread_rng();
 
         // Box-Muller transform for Gaussian sampling
-        let u1: f32 = rng.gen();
-        let u2: f32 = rng.gen();
+        let u1: f32 = rng.random();
+        let u2: f32 = rng.random();
 
         let z0 = (-2.0 * u1.ln()).sqrt() * (2.0 * PI * u2).cos();
         mean + std_dev * z0
@@ -302,7 +302,7 @@ impl LaplaceMechanism {
         use scirs2_core::random::Rng;
         let mut rng = thread_rng();
 
-        let u: f32 = rng.gen_range(-0.5..0.5);
+        let u: f32 = rng.random_range(-0.5..0.5);
         location - scale * u.signum() * (1.0 - 2.0 * u.abs()).ln()
     }
 }

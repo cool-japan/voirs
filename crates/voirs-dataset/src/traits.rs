@@ -270,7 +270,7 @@ pub trait Dataset: Send + Sync {
         let index = {
             use scirs2_core::random::{thread_rng, Rng};
             let mut rng = thread_rng();
-            rng.gen_range(0..len)
+            rng.random_range(0..len)
         };
         self.get(index).await
     }

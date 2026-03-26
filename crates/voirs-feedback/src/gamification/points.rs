@@ -453,7 +453,7 @@ impl PointSystem {
             .get(&user_id)
             .map(|transactions| {
                 let mut sorted_transactions: Vec<&PointTransaction> = transactions.iter().collect();
-                sorted_transactions.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+                sorted_transactions.sort_by_key(|b| std::cmp::Reverse(b.timestamp));
                 if let Some(limit) = limit {
                     sorted_transactions.into_iter().take(limit).collect()
                 } else {

@@ -279,12 +279,10 @@ impl VocodingConfig {
                     warnings.push("Post-processing may add latency in real-time mode".to_string());
                 }
             }
-            VocodingMode::Quality => {
-                if self.inference_steps < 50 {
-                    warnings
-                        .push("Low inference steps may reduce quality in quality mode".to_string());
-                }
+            VocodingMode::Quality if self.inference_steps < 50 => {
+                warnings.push("Low inference steps may reduce quality in quality mode".to_string());
             }
+            VocodingMode::Quality => {}
             _ => {}
         }
 

@@ -37,7 +37,7 @@
 //!         topic: "Speech Training Session".to_string(),
 //!         type_: MeetingType::Scheduled,
 //!         start_time: Some(chrono::Utc::now() + chrono::Duration::hours(1)),
-//!         duration_minutes: 60,
+//!         duration_minutes: Some(60),
 //!         timezone: Some("America/New_York".to_string()),
 //!         password: Some("secure123".to_string()),
 //!         settings: Some(MeetingSettings::default()),
@@ -618,7 +618,7 @@ impl ZoomClient {
     fn mock_create_meeting(&self, request: &CreateMeetingRequest) -> ZoomMeeting {
         use scirs2_core::random::Rng;
         let mut rng = scirs2_core::random::thread_rng();
-        let meeting_id = format!("{}", rng.gen_range(10000000000u64..99999999999u64));
+        let meeting_id = format!("{}", rng.random_range(10000000000u64..99999999999u64));
         let uuid = uuid::Uuid::new_v4().to_string();
 
         ZoomMeeting {

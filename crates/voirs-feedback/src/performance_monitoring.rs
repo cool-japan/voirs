@@ -17,16 +17,17 @@
 //!
 //! # Example
 //!
-//! ```rust
-//! use voirs_feedback::performance_monitoring::{PerformanceMonitor, MetricType};
+//! ```no_run
+//! use voirs_feedback::performance_monitoring::{PerformanceMonitor, MetricType, Label};
 //!
-//! # async fn example() -> anyhow::Result<()> {
+//! # #[tokio::main]
+//! # async fn main() -> anyhow::Result<()> {
 //! let monitor = PerformanceMonitor::new();
 //!
 //! // Record metrics
-//! monitor.record_counter("requests_total", 1.0, vec![("endpoint", "/api/feedback")]);
-//! monitor.record_gauge("cpu_usage_percent", 45.2, vec![]);
-//! monitor.record_histogram("request_duration_ms", 125.3, vec![("method", "POST")]);
+//! monitor.record_counter("requests_total", 1.0, vec![("endpoint".to_string(), "/api/feedback".to_string())]).await?;
+//! monitor.record_gauge("cpu_usage_percent", 45.2, vec![]).await?;
+//! monitor.record_histogram("request_duration_ms", 125.3, vec![("method".to_string(), "POST".to_string())]).await?;
 //!
 //! // Query metrics
 //! let stats = monitor.get_metric_statistics("request_duration_ms", None).await?;

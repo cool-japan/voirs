@@ -434,7 +434,7 @@ impl ConsistencyModel {
 
         for i in 0..batch_size {
             for j in 0..length {
-                noise[[i, j]] = rng.gen_range(-1.0..1.0);
+                noise[[i, j]] = rng.random_range(-1.0..1.0);
             }
         }
 

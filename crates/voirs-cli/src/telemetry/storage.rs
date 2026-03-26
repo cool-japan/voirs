@@ -170,12 +170,12 @@ impl TelemetryStorage {
 
         // Get most used commands
         let mut most_used_commands: Vec<(String, u64)> = command_counts.into_iter().collect();
-        most_used_commands.sort_by(|a, b| b.1.cmp(&a.1));
+        most_used_commands.sort_by_key(|b| std::cmp::Reverse(b.1));
         most_used_commands.truncate(10);
 
         // Get most used voices
         let mut most_used_voices: Vec<(String, u64)> = voice_counts.into_iter().collect();
-        most_used_voices.sort_by(|a, b| b.1.cmp(&a.1));
+        most_used_voices.sort_by_key(|b| std::cmp::Reverse(b.1));
         most_used_voices.truncate(10);
 
         // Calculate storage size

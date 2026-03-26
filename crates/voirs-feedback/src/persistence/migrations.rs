@@ -327,7 +327,7 @@ impl<T: MigrationManager> MigrationRunner<T> {
             .iter()
             .filter(|m| m.version > target_version && m.version <= current_version)
             .collect();
-        rollback_migrations.sort_by(|a, b| b.version.cmp(&a.version));
+        rollback_migrations.sort_by_key(|b| std::cmp::Reverse(b.version));
 
         for migration in rollback_migrations {
             log::info!(

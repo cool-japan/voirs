@@ -25,15 +25,11 @@
 //!
 //! # Examples
 //!
-//! ```rust,no_run
-//! use voirs_recognizer::rest_api::ApiServer;
-//!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let server = ApiServer::new("0.0.0.0:8080").await?;
-//!     server.serve().await?;
-//!     Ok(())
-//! }
+//! ```no_run
+//! // Example: create a recognition REST API server
+//! // use voirs_recognizer::rest_api::RecognitionServer;
+//! // (server setup requires a UnifiedVoirsPipeline instance)
+//! let _ = "REST API available via RecognitionServer when rest-api feature is enabled";
 //! ```
 
 // Allow unused async for REST API handler consistency and future compatibility

@@ -812,7 +812,7 @@ impl NeuralEvaluator {
         use scirs2_core::random::Rng;
         let mut rng = scirs2_core::random::thread_rng();
         let negative_samples: Vec<f32> = (0..samples.len())
-            .map(|_| rng.r#gen::<f32>() * 0.1 - 0.05)
+            .map(|_| rng.random::<f32>() * 0.1 - 0.05)
             .collect();
         let negative_audio = AudioBuffer::mono(negative_samples, audio.sample_rate());
         let negative_features = self.extract_neural_features(&negative_audio)?;
@@ -865,7 +865,7 @@ impl NeuralEvaluator {
             let adversarial_samples: Vec<f32> = samples
                 .iter()
                 .map(|&x| {
-                    let noise = (rng.r#gen::<f32>() - 0.5) * noise_level;
+                    let noise = (rng.random::<f32>() - 0.5) * noise_level;
                     x + noise
                 })
                 .collect();

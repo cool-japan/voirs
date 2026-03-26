@@ -51,8 +51,11 @@ parking_lot = { workspace = true }
 crossbeam-utils = { workspace = true }
 chrono = { workspace = true }
 
+# ONNX Runtime (optional)
+oxionnx = { workspace = true, optional = true }
+
 # Compression for cache optimization
-flate2 = { workspace = true }
+oxiarc-deflate = { workspace = true }
 
 # HTTP client for IoT cloud connectivity
 reqwest = { workspace = true, features = ["json", "rustls"], optional = true }
@@ -64,11 +67,11 @@ voirs-emotion = { workspace = true, optional = true }
 voirs-spatial = { workspace = true, optional = true }
 
 # WebAssembly dependencies
-wasm-bindgen = { version = "0.2.113", optional = true }
-wasm-bindgen-futures = { version = "0.4.63", optional = true }
+wasm-bindgen = { version = "0.2.114", optional = true }
+wasm-bindgen-futures = { version = "0.4.64", optional = true }
 serde-wasm-bindgen = { version = "0.6", optional = true }
-js-sys = { version = "0.3.90", optional = true }
-web-sys = { version = "0.3.90", optional = true, features = [
+js-sys = { version = "0.3.91", optional = true }
+web-sys = { version = "0.3.91", optional = true, features = [
     "console",
     "AudioContext",
     "AudioContextState",
@@ -96,7 +99,7 @@ getrandom_v2 = { package = "getrandom", version = "0.2", features = ["js"], opti
 tokio-test = { workspace = true }
 criterion = { workspace = true }
 proptest = { workspace = true }
-tempfile = "3.26"
+tempfile = "3.27"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [features]
@@ -106,8 +109,9 @@ acoustic-integration = ["voirs-acoustic"]
 cloning-integration = ["voirs-cloning"]
 emotion-integration = ["voirs-emotion"]
 spatial-integration = ["voirs-spatial"]
-gpu = []
+gpu = ["oxionnx?/gpu"]
 cuda = ["candle-core/cuda"]
+onnx = ["dep:oxionnx"]
 metal = ["dep:metal-rs"]
 streaming = ["real-time"]
 wasm = ["wasm-bindgen", "wasm-bindgen-futures", "serde-wasm-bindgen", "js-sys", "web-sys", "getrandom", "getrandom_v2"]

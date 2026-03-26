@@ -12,6 +12,8 @@ pub mod chinese_pinyin;
 pub mod hybrid;
 pub mod japanese_dict;
 pub mod neural;
+#[cfg(feature = "onnx")]
+pub mod onnx;
 pub mod openjtalk;
 pub mod registry;
 pub mod rule_based;

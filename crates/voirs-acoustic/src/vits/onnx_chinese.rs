@@ -6,7 +6,7 @@
 use std::path::Path;
 
 #[cfg(feature = "onnx")]
-use ort::{inputs, session::Session, value::Value};
+use oxionnx::{OptLevel, Session, Tensor};
 
 use crate::{AcousticError, Result};
 
@@ -21,10 +21,8 @@ impl ChineseVitsOnnxInference {
     /// Load Chinese VITS model from ONNX file
     pub fn from_file<P: AsRef<Path>>(model_path: P) -> Result<Self> {
         let session = Session::builder()
-            .map_err(|e| AcousticError::ModelError {
-                message: format!("Failed to create session builder: {}", e),
-            })?
-            .commit_from_file(model_path)
+            .with_optimization_level(OptLevel::All)
+            .load(model_path.as_ref())
             .map_err(|e| AcousticError::ModelError {
                 message: format!("Failed to load ONNX model: {}", e),
             })?;
@@ -41,94 +39,54 @@ impl ChineseVitsOnnxInference {
     /// - `noise_scale_w`: Noise scale W (default: 0.8)
     /// - `speaker_id`: Speaker ID (default: 0)
     pub fn synthesize_with_params(
-        &mut self,
+        &self,
         token_ids: &[i64],
         noise_scale: f32,
         length_scale: f32,
         noise_scale_w: f32,
         speaker_id: i64,
     ) -> Result<Vec<f32>> {
-        // Create input tensors
-        let x = Value::from_array((vec![1, token_ids.len()], token_ids.to_vec())).map_err(|e| {
-            AcousticError::ModelError {
-                message: format!("Failed to create x tensor: {}", e),
-            }
-        })?;
+        use std::collections::HashMap;
 
-        let x_length = Value::from_array((vec![1], vec![token_ids.len() as i64])).map_err(|e| {
-            AcousticError::ModelError {
-                message: format!("Failed to create x_length tensor: {}", e),
-            }
-        })?;
+        // Create input tensors - convert i64 to f32 for oxionnx
+        let x_data: Vec<f32> = token_ids.iter().map(|&id| id as f32).collect();
+        let x = Tensor::new(x_data, vec![1, token_ids.len()]);
+        let x_length = Tensor::new(vec![token_ids.len() as f32], vec![1]);
+        let noise_scale_tensor = Tensor::new(vec![noise_scale], vec![1]);
+        let length_scale_tensor = Tensor::new(vec![length_scale], vec![1]);
+        let noise_scale_w_tensor = Tensor::new(vec![noise_scale_w], vec![1]);
+        let sid = Tensor::new(vec![speaker_id as f32], vec![1]);
 
-        let noise_scale_tensor = Value::from_array((vec![1], vec![noise_scale])).map_err(|e| {
-            AcousticError::ModelError {
-                message: format!("Failed to create noise_scale tensor: {}", e),
-            }
-        })?;
-
-        let length_scale_tensor =
-            Value::from_array((vec![1], vec![length_scale])).map_err(|e| {
-                AcousticError::ModelError {
-                    message: format!("Failed to create length_scale tensor: {}", e),
-                }
-            })?;
-
-        let noise_scale_w_tensor =
-            Value::from_array((vec![1], vec![noise_scale_w])).map_err(|e| {
-                AcousticError::ModelError {
-                    message: format!("Failed to create noise_scale_w tensor: {}", e),
-                }
-            })?;
-
-        let sid = Value::from_array((vec![1], vec![speaker_id])).map_err(|e| {
-            AcousticError::ModelError {
-                message: format!("Failed to create sid tensor: {}", e),
-            }
-        })?;
+        let mut inputs: HashMap<&str, Tensor> = HashMap::new();
+        inputs.insert("x", x);
+        inputs.insert("x_length", x_length);
+        inputs.insert("noise_scale", noise_scale_tensor);
+        inputs.insert("length_scale", length_scale_tensor);
+        inputs.insert("noise_scale_w", noise_scale_w_tensor);
+        inputs.insert("sid", sid);
 
         // Run inference
-        let inputs_vec = inputs![
-            "x" => x,
-            "x_length" => x_length,
-            "noise_scale" => noise_scale_tensor,
-            "length_scale" => length_scale_tensor,
-            "noise_scale_w" => noise_scale_w_tensor,
-            "sid" => sid
-        ];
-
         let outputs = self
             .session
-            .run(inputs_vec)
+            .run(&inputs)
             .map_err(|e| AcousticError::ModelError {
                 message: format!("Inference failed: {}", e),
             })?;
 
         // Extract output audio (first output)
         let audio_tensor = outputs
-            .iter()
+            .values()
             .next()
             .ok_or_else(|| AcousticError::ModelError {
                 message: "No output from model".to_string(),
-            })?
-            .1;
-
-        // Convert to Vec<f32> - output is (1, 1, N) shape, flatten it
-        let (_, audio_slice) =
-            audio_tensor
-                .try_extract_tensor::<f32>()
-                .map_err(|e| AcousticError::ModelError {
-                    message: format!("Failed to extract audio: {}", e),
-                })?;
+            })?;
 
         // Flatten the audio data
-        let audio_data: Vec<f32> = audio_slice.to_vec();
-
-        Ok(audio_data)
+        Ok(audio_tensor.data.clone())
     }
 
     /// Synthesize audio with default parameters
-    pub fn synthesize(&mut self, token_ids: &[i64]) -> Result<Vec<f32>> {
+    pub fn synthesize(&self, token_ids: &[i64]) -> Result<Vec<f32>> {
         self.synthesize_with_params(token_ids, 0.667, 1.0, 0.8, 0)
     }
 }

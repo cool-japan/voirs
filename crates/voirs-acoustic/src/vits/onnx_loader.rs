@@ -5,7 +5,7 @@
 use std::path::Path;
 
 #[cfg(feature = "onnx")]
-use ort::{inputs, session::Session, value::Value};
+use oxionnx::{OptLevel, Session, Tensor};
 
 use crate::{AcousticError, Result};
 
@@ -20,10 +20,8 @@ impl VitsOnnxInference {
     /// Load VITS model from ONNX file
     pub fn from_file<P: AsRef<Path>>(model_path: P) -> Result<Self> {
         let session = Session::builder()
-            .map_err(|e| AcousticError::ModelError {
-                message: format!("Failed to create session builder: {}", e),
-            })?
-            .commit_from_file(model_path)
+            .with_optimization_level(OptLevel::All)
+            .load(model_path.as_ref())
             .map_err(|e| AcousticError::ModelError {
                 message: format!("Failed to load ONNX model: {}", e),
             })?;
@@ -32,21 +30,20 @@ impl VitsOnnxInference {
     }
 
     /// Synthesize audio from token IDs
-    pub fn synthesize(&mut self, token_ids: &[i64]) -> Result<Vec<f32>> {
-        // Create input tensor: 1D array (no batch dimension)
-        let input_shape = vec![token_ids.len()];
-        let token_data = token_ids.to_vec();
-        let input_tensor = Value::from_array((input_shape, token_data)).map_err(|e| {
-            AcousticError::ModelError {
-                message: format!("Failed to create input tensor: {}", e),
-            }
-        })?;
+    pub fn synthesize(&self, token_ids: &[i64]) -> Result<Vec<f32>> {
+        use std::collections::HashMap;
+
+        // Create input tensor: convert i64 to f32 (oxionnx uses f32 tensors)
+        let token_data: Vec<f32> = token_ids.iter().map(|&id| id as f32).collect();
+        let input_tensor = Tensor::new(token_data, vec![token_ids.len()]);
+
+        let mut inputs: HashMap<&str, Tensor> = HashMap::new();
+        inputs.insert("text", input_tensor);
 
         // Run inference
-        let inputs_vec = inputs!["text" => input_tensor];
         let outputs = self
             .session
-            .run(inputs_vec)
+            .run(&inputs)
             .map_err(|e| AcousticError::ModelError {
                 message: format!("Inference failed: {}", e),
             })?;
@@ -58,17 +55,7 @@ impl VitsOnnxInference {
                 message: "No 'wav' output from model".to_string(),
             })?;
 
-        // Convert to Vec<f32>
-        let (_, audio_slice) =
-            audio_tensor
-                .try_extract_tensor::<f32>()
-                .map_err(|e| AcousticError::ModelError {
-                    message: format!("Failed to extract audio: {}", e),
-                })?;
-
-        let audio_data: Vec<f32> = audio_slice.to_vec();
-
-        Ok(audio_data)
+        Ok(audio_tensor.data.clone())
     }
 }
 

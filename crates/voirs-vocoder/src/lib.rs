@@ -2,6 +2,7 @@
 //!
 //! Neural vocoders for converting mel spectrograms to high-quality audio.
 //! Supports HiFi-GAN, WaveGlow, and other state-of-the-art vocoders.
+
 //!
 //! This crate provides a unified interface for neural vocoding with support for:
 //! - Multiple neural architectures (HiFi-GAN, DiffWave, WaveGlow)

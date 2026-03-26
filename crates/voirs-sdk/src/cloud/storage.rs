@@ -1,6 +1,6 @@
 use super::*;
 use chrono::{DateTime, Utc};
-use flate2::{read::GzDecoder, write::GzEncoder, Compression};
+use oxiarc_deflate::{GzipStreamDecoder, GzipStreamEncoder};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
@@ -11,7 +11,7 @@ use tokio::fs;
 use tokio::sync::Mutex;
 
 #[cfg(feature = "cloud")]
-use zstd;
+use oxiarc_zstd;
 
 /// Cloud storage implementation for VoiRS models
 pub struct VoirsCloudStorage {
@@ -310,7 +310,7 @@ impl VoirsCloudStorage {
         match compression_type {
             CompressionType::None => Ok(data.to_vec()),
             CompressionType::Gzip => {
-                let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+                let mut encoder = GzipStreamEncoder::new(Vec::new(), 6);
                 encoder.write_all(data).map_err(|e| {
                     VoirsError::config_error(format!("Failed to compress data with Gzip: {}", e))
                 })?;
@@ -320,7 +320,7 @@ impl VoirsCloudStorage {
             }
             #[cfg(feature = "cloud")]
             CompressionType::Zstd => {
-                zstd::encode_all(data, 3) // Compression level 3 (balanced)
+                oxiarc_zstd::encode_all(data, 3) // Compression level 3 (balanced)
                     .map_err(|e| {
                         VoirsError::config_error(format!(
                             "Failed to compress data with Zstd: {}",
@@ -342,7 +342,7 @@ impl VoirsCloudStorage {
         match compression_type {
             CompressionType::None => Ok(compressed_data.to_vec()),
             CompressionType::Gzip => {
-                let mut decoder = GzDecoder::new(compressed_data);
+                let mut decoder = GzipStreamDecoder::new(compressed_data);
                 let mut decompressed = Vec::new();
                 decoder.read_to_end(&mut decompressed).map_err(|e| {
                     VoirsError::config_error(format!("Failed to decompress Gzip data: {}", e))
@@ -350,7 +350,7 @@ impl VoirsCloudStorage {
                 Ok(decompressed)
             }
             #[cfg(feature = "cloud")]
-            CompressionType::Zstd => zstd::decode_all(compressed_data).map_err(|e| {
+            CompressionType::Zstd => oxiarc_zstd::decode_all(compressed_data).map_err(|e| {
                 VoirsError::config_error(format!("Failed to decompress Zstd data: {}", e))
             }),
             #[cfg(not(feature = "cloud"))]
@@ -375,7 +375,7 @@ impl VoirsCloudStorage {
             .map(|(id, model)| (id.clone(), model.last_accessed))
             .collect();
 
-        models_by_access.sort_by(|a, b| a.1.cmp(&b.1));
+        models_by_access.sort_by_key(|a| a.1);
 
         let mut freed_bytes = 0u64;
         let mut to_remove = Vec::new();

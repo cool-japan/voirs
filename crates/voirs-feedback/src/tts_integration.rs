@@ -623,7 +623,7 @@ impl TtsManager {
     pub async fn queue_speech(&self, utterance: SpeechUtterance) {
         let mut queue = self.speech_queue.write().await;
         queue.push(utterance);
-        queue.sort_by(|a, b| b.priority.cmp(&a.priority));
+        queue.sort_by_key(|b| std::cmp::Reverse(b.priority));
     }
 
     /// Process speech queue

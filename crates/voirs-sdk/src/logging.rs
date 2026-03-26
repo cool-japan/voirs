@@ -352,8 +352,8 @@ pub mod metrics {
 
             let histograms: HashMap<String, HistogramStats> = self
                 .histograms
-                .iter()
-                .filter_map(|(k, _)| self.get_histogram_stats(k).map(|stats| (k.clone(), stats)))
+                .keys()
+                .filter_map(|k| self.get_histogram_stats(k).map(|stats| (k.clone(), stats)))
                 .collect();
 
             let gauges: HashMap<String, u64> = self

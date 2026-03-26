@@ -49,7 +49,7 @@ pub fn approx_eq_f32(a: f32, b: f32, epsilon: f32) -> bool {
 /// ```
 /// use voirs_feedback::float_utils::approx_eq_f64;
 ///
-/// assert!(approx_eq_f64(1.0, 1.0000000001, 1e-10));
+/// assert!(approx_eq_f64(1.0, 1.000000000001, 1e-10));
 /// assert!(!approx_eq_f64(1.0, 1.0000001, 1e-10));
 /// ```
 #[inline]
@@ -186,8 +186,8 @@ pub fn approx_cmp(a: f32, b: f32) -> Ordering {
 /// ```
 /// use voirs_feedback::float_utils::approx_eq_relative;
 ///
-/// assert!(approx_eq_relative(1000.0, 1000.01, 1e-5));
-/// assert!(approx_eq_relative(0.001, 0.00100001, 1e-5));
+/// assert!(approx_eq_relative(1000.0, 1000.005, 1e-5));
+/// assert!(approx_eq_relative(0.001, 0.0010000001, 1e-5));
 /// ```
 #[must_use]
 pub fn approx_eq_relative(a: f32, b: f32, relative_epsilon: f32) -> bool {

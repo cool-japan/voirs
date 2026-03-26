@@ -500,7 +500,7 @@ impl<M: AcousticModel + Send + Sync + 'static> BatchProcessor<M> {
         let start_time = Instant::now();
 
         // Sort by priority
-        batch.sort_by(|a, b| b.priority.cmp(&a.priority));
+        batch.sort_by_key(|b| std::cmp::Reverse(b.priority));
 
         // Group requests by configuration for efficient batching
         let mut config_groups: HashMap<String, Vec<BatchRequest>> = HashMap::new();
@@ -563,7 +563,7 @@ impl<M: AcousticModel + Send + Sync + 'static> BatchProcessor<M> {
         let batch_latency = batch_start.elapsed();
 
         // Send results back and update cache
-        for (request, result) in requests.into_iter().zip(results.into_iter()) {
+        for (request, result) in requests.into_iter().zip(results) {
             // Update cache if enabled
             if config.enable_caching {
                 let cache_key = Self::generate_cache_key_static(&request.phonemes, &request.config);

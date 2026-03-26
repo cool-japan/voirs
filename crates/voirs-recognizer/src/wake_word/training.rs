@@ -224,7 +224,7 @@ impl DataAugmenter {
         for &noise_level in &self.noise_levels {
             let noisy_samples: Vec<f32> = samples
                 .iter()
-                .map(|&x| x + noise_level * (thread_rng().r#gen::<f32>() - 0.5))
+                .map(|&x| x + noise_level * (thread_rng().random::<f32>() - 0.5))
                 .collect();
             augmented.push(AudioBuffer::mono(noisy_samples, sample_rate));
         }
@@ -355,7 +355,7 @@ impl WakeWordTrainerImpl {
 
             // Simulate loss calculation
             let loss = 1.0 - (epoch as f32 / self.config.epochs as f32) * 0.8
-                + thread_rng().r#gen::<f32>() * 0.1; // Add some noise
+                + thread_rng().random::<f32>() * 0.1; // Add some noise
             let accuracy = (epoch as f32 / self.config.epochs as f32) * 0.9 + 0.1;
 
             // Update statistics

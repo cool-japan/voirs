@@ -481,8 +481,8 @@ impl RoomSimulator {
     ) -> Position3D {
         use scirs2_core::random::Rng;
 
-        let theta = rng.gen_range(0.0..std::f32::consts::PI * 2.0);
-        let phi = rng.gen_range(0.0..std::f32::consts::PI);
+        let theta = rng.random_range(0.0..std::f32::consts::PI * 2.0);
+        let phi = rng.random_range(0.0..std::f32::consts::PI);
 
         Position3D::new(phi.sin() * theta.cos(), phi.sin() * theta.sin(), phi.cos())
     }

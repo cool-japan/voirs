@@ -30,7 +30,7 @@
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let dataset = LibriTtsDataset::load(
 //!         Path::new("/path/to/LibriTTS"),
-//!         "train-clean-100"
+//!         Some("train-clean-100")
 //!     ).await?;
 //!
 //!     println!("Loaded {} samples", dataset.len());

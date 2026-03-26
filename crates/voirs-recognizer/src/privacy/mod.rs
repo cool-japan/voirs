@@ -11,14 +11,15 @@
 //!
 //! # Examples
 //!
-//! ```rust,no_run
-//! use voirs_recognizer::privacy::{FederatedLearningServer, DifferentialPrivacy};
+//! ```no_run
+//! use voirs_recognizer::privacy::{DifferentialPrivacy, DPConfig};
 //!
-//! // Create federated learning server
-//! let server = FederatedLearningServer::new(/* config */);
-//!
-//! // Apply differential privacy to training data
-//! let dp = DifferentialPrivacy::new(epsilon: 1.0, delta: 1e-5);
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! // Apply differential privacy to training data (epsilon=1.0, delta=1e-5)
+//! let config = DPConfig { epsilon: 1.0, delta: 1e-5, ..DPConfig::default() };
+//! let dp = DifferentialPrivacy::new(config)?;
+//! # Ok(())
+//! # }
 //! ```
 
 pub mod differential_privacy;

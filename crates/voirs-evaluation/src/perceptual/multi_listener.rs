@@ -383,26 +383,26 @@ impl EnhancedMultiListenerSimulator {
 
     /// Generate diverse demographic profile
     fn generate_demographic_profile(&mut self) -> DemographicProfile {
-        let age_group = match self.rng.gen_range(0..3) {
+        let age_group = match self.rng.random_range(0..3) {
             0 => AgeGroup::Young,
             1 => AgeGroup::MiddleAged,
             _ => AgeGroup::Older,
         };
 
-        let gender = match self.rng.gen_range(0..3) {
+        let gender = match self.rng.random_range(0..3) {
             0 => Gender::Male,
             1 => Gender::Female,
             _ => Gender::Other,
         };
 
-        let education_level = match self.rng.gen_range(0..4) {
+        let education_level = match self.rng.random_range(0..4) {
             0 => EducationLevel::HighSchool,
             1 => EducationLevel::Bachelor,
             2 => EducationLevel::Master,
             _ => EducationLevel::PhD,
         };
 
-        let audio_experience = match self.rng.gen_range(0..4) {
+        let audio_experience = match self.rng.random_range(0..4) {
             0 => ExperienceLevel::Novice,
             1 => ExperienceLevel::Intermediate,
             2 => ExperienceLevel::Advanced,
@@ -411,7 +411,7 @@ impl EnhancedMultiListenerSimulator {
 
         let native_languages = vec!["en", "es", "zh", "hi", "ar", "pt", "ru", "ja", "de", "fr"];
         let native_language =
-            native_languages[self.rng.gen_range(0..native_languages.len())].to_string();
+            native_languages[self.rng.random_range(0..native_languages.len())].to_string();
 
         DemographicProfile {
             age_group,
@@ -446,8 +446,8 @@ impl EnhancedMultiListenerSimulator {
         };
 
         let language_familiarity = vec![demographic.native_language.clone()];
-        let musical_training = self.rng.gen_bool(0.3); // 30% have musical training
-        let accent_tolerance = self.rng.gen_range(0.3..1.0);
+        let musical_training = self.rng.random_bool(0.3); // 30% have musical training
+        let accent_tolerance = self.rng.random_range(0.3..1.0);
 
         CulturalProfile {
             region,
@@ -472,22 +472,22 @@ impl EnhancedMultiListenerSimulator {
         // Age-related hearing loss
         let age_factor = match demographic.age_group {
             AgeGroup::Young => 1.0,
-            AgeGroup::MiddleAged => self.rng.gen_range(0.8..1.0),
-            AgeGroup::Older => self.rng.gen_range(0.6..0.9),
+            AgeGroup::MiddleAged => self.rng.random_range(0.8..1.0),
+            AgeGroup::Older => self.rng.random_range(0.6..0.9),
         };
 
-        let hearing_acuity = age_factor * self.rng.gen_range(0.8..1.0);
+        let hearing_acuity = age_factor * self.rng.random_range(0.8..1.0);
 
         // Frequency-specific loss (higher frequencies more affected with age)
         let mut frequency_loss = Vec::new();
         for i in 0..8 {
             let freq_factor = i as f32 / 8.0; // Higher frequencies
-            let loss = (1.0 - age_factor) * freq_factor * self.rng.gen_range(0.5..1.5);
+            let loss = (1.0 - age_factor) * freq_factor * self.rng.random_range(0.5..1.5);
             frequency_loss.push(loss.min(0.8));
         }
 
-        let noise_tolerance = hearing_acuity * self.rng.gen_range(0.7..1.0);
-        let temporal_processing = hearing_acuity * self.rng.gen_range(0.8..1.0);
+        let noise_tolerance = hearing_acuity * self.rng.random_range(0.7..1.0);
+        let temporal_processing = hearing_acuity * self.rng.random_range(0.8..1.0);
 
         HearingProfile {
             hearing_acuity,
@@ -499,17 +499,17 @@ impl EnhancedMultiListenerSimulator {
 
     /// Generate environmental conditions
     fn generate_environmental_conditions(&mut self) -> EnvironmentalConditions {
-        let noise_level = self.rng.gen_range(-50.0..-20.0); // Quiet to moderate noise
-        let reverberation = self.rng.gen_range(0.0..0.4);
+        let noise_level = self.rng.random_range(-50.0..-20.0); // Quiet to moderate noise
+        let reverberation = self.rng.random_range(0.0..0.4);
 
-        let device_quality = match self.rng.gen_range(0..4) {
+        let device_quality = match self.rng.random_range(0..4) {
             0 => DeviceQuality::HighEnd,
             1 => DeviceQuality::Standard,
             2 => DeviceQuality::LowEnd,
             _ => DeviceQuality::Smartphone,
         };
 
-        let attention_level = self.rng.gen_range(0.6..1.0);
+        let attention_level = self.rng.random_range(0.6..1.0);
 
         EnvironmentalConditions {
             noise_level,
@@ -527,21 +527,21 @@ impl EnhancedMultiListenerSimulator {
     ) -> BiasParameters {
         // Experience affects consistency
         let consistency = match demographic.audio_experience {
-            ExperienceLevel::Novice => self.rng.gen_range(0.5..0.7),
-            ExperienceLevel::Intermediate => self.rng.gen_range(0.7..0.8),
-            ExperienceLevel::Advanced => self.rng.gen_range(0.8..0.9),
-            ExperienceLevel::Expert => self.rng.gen_range(0.9..0.95),
+            ExperienceLevel::Novice => self.rng.random_range(0.5..0.7),
+            ExperienceLevel::Intermediate => self.rng.random_range(0.7..0.8),
+            ExperienceLevel::Advanced => self.rng.random_range(0.8..0.9),
+            ExperienceLevel::Expert => self.rng.random_range(0.9..0.95),
         };
 
         // Cultural factors affect rating bias
         let rating_bias = match cultural.region {
-            CulturalRegion::EastAsia => self.rng.gen_range(-0.1..0.0), // Slightly conservative
-            CulturalRegion::NorthAmerica => self.rng.gen_range(-0.05..0.05), // Neutral
-            _ => self.rng.gen_range(-0.1..0.1),
+            CulturalRegion::EastAsia => self.rng.random_range(-0.1..0.0), // Slightly conservative
+            CulturalRegion::NorthAmerica => self.rng.random_range(-0.05..0.05), // Neutral
+            _ => self.rng.random_range(-0.1..0.1),
         };
 
-        let extreme_tendency = self.rng.gen_range(0.0..0.3);
-        let acquiescence = self.rng.gen_range(0.0..0.2);
+        let extreme_tendency = self.rng.random_range(0.0..0.3);
+        let acquiescence = self.rng.random_range(0.0..0.2);
 
         BiasParameters {
             rating_bias,
@@ -796,7 +796,7 @@ impl EnhancedMultiListenerSimulator {
 
         // Consistency (add random variation)
         let variation = (1.0 - bias.consistency) * 0.2;
-        let random_factor = thread_rng().gen_range(-variation..variation);
+        let random_factor = thread_rng().random_range(-variation..variation);
         adjusted += random_factor;
 
         // Extreme tendency

@@ -603,8 +603,8 @@ impl JvsDataset {
         let val_speakers = (total_speakers as f32 * config.val_ratio).ceil() as usize;
         let test_speakers = total_speakers - train_speakers - val_speakers;
 
-        // Ensure we don't have negative test speakers
-        let _test_speakers = test_speakers.max(0);
+        // Ensure we don't have negative test speakers (usize is always >= 0)
+        let _test_speakers = test_speakers;
 
         // Split speakers into sets
         let mut speaker_iter = speakers.into_iter();

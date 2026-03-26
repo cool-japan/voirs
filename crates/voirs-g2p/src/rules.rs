@@ -218,7 +218,7 @@ impl EnglishRuleG2p {
         self.add_rule("z", "z", 60)?;
 
         // Sort rules by priority (highest first)
-        self.rules.sort_by(|a, b| b.priority.cmp(&a.priority));
+        self.rules.sort_by_key(|b| std::cmp::Reverse(b.priority));
 
         Ok(())
     }

@@ -1367,11 +1367,9 @@ impl MemoryLeakDetector {
             false_positives: stats.potential_leaks.saturating_sub(stats.confirmed_leaks),
             total_leaked_bytes,
             leaks_by_type,
-            avg_leak_size: if stats.potential_leaks > 0 {
-                total_leaked_bytes / stats.potential_leaks
-            } else {
-                0
-            },
+            avg_leak_size: total_leaked_bytes
+                .checked_div(stats.potential_leaks)
+                .unwrap_or(0),
             oldest_leak_age,
         }
     }

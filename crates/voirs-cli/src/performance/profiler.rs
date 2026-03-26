@@ -543,18 +543,18 @@ impl SystemProfiler {
         #[cfg(target_os = "linux")]
         {
             let status_content = std::fs::read_to_string("/proc/self/status")?;
-            let mut vm_peak = 0u64;
+            let mut _vm_peak = 0u64;
             let mut vm_size = 0u64;
-            let mut vm_hwm = 0u64;
+            let mut _vm_hwm = 0u64;
             let mut vm_rss = 0u64;
 
             for line in status_content.lines() {
                 if line.starts_with("VmPeak:") {
-                    vm_peak = parse_proc_memory_value(line)?;
+                    _vm_peak = parse_proc_memory_value(line)?;
                 } else if line.starts_with("VmSize:") {
                     vm_size = parse_proc_memory_value(line)?;
                 } else if line.starts_with("VmHWM:") {
-                    vm_hwm = parse_proc_memory_value(line)?;
+                    _vm_hwm = parse_proc_memory_value(line)?;
                 } else if line.starts_with("VmRSS:") {
                     vm_rss = parse_proc_memory_value(line)?;
                 }

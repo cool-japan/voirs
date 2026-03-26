@@ -53,6 +53,9 @@ aes-gcm = "0.10"
 sha2 = "0.10"
 base64 = "0.22"
 
+# ONNX Runtime (optional)
+oxionnx = { workspace = true, optional = true }
+
 # File handling
 tempfile = { workspace = true }
 walkdir = { workspace = true }
@@ -90,7 +93,7 @@ default = ["acoustic-integration"]
 acoustic-integration = ["voirs-acoustic"]
 g2p-integration = ["voirs-g2p"]
 vocoder-integration = []  # Marker feature for vocoder integration code paths
-gpu = []
+gpu = ["oxionnx?/gpu"]
 cuda = ["candle-core/cuda"]
 metal = ["dep:metal-rs"]
 emotion-integration = []
@@ -102,7 +105,7 @@ wasm = [
     "console_error_panic_hook",
     "wasm-logger"
 ]
-onnx = []
+onnx = ["dep:oxionnx"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 metal-rs = { version = "0.27", optional = true, package = "metal" }

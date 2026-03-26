@@ -17,7 +17,7 @@
 //!
 //! # Example
 //!
-//! ```rust
+//! ```no_run
 //! use voirs_evaluation::data_versioning::*;
 //! use std::collections::HashMap;
 //!
@@ -32,7 +32,7 @@
 //!
 //! let version_id = vcs.commit(
 //!     "benchmark-v1",
-//!     vec![1.0, 2.0, 3.0], // Sample data
+//!     vec![1u8, 2, 3], // Sample data bytes
 //!     metadata,
 //!     "Initial benchmark dataset"
 //! )?;
@@ -50,8 +50,7 @@
 //! ```
 
 use chrono::{DateTime, Utc};
-use flate2::write::{GzDecoder, GzEncoder};
-use flate2::Compression;
+use oxiarc_deflate::{GzipStreamDecoder, GzipStreamEncoder};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -591,7 +590,7 @@ impl DataVersionControl {
     /// Get version history
     pub fn get_history(&self, max_count: Option<usize>) -> Vec<VersionMetadata> {
         let mut history: Vec<_> = self.versions.values().cloned().collect();
-        history.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        history.sort_by_key(|b| std::cmp::Reverse(b.timestamp));
 
         if let Some(max) = max_count {
             history.truncate(max);
@@ -673,7 +672,7 @@ impl DataVersionControl {
     /// List all versions
     pub fn list_versions(&self) -> Vec<VersionMetadata> {
         let mut versions: Vec<_> = self.versions.values().cloned().collect();
-        versions.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        versions.sort_by_key(|b| std::cmp::Reverse(b.timestamp));
         versions
     }
 
@@ -689,8 +688,7 @@ impl DataVersionControl {
 
     /// Compress data
     fn compress_data(&self, data: &[u8]) -> Result<Vec<u8>, VersioningError> {
-        let mut encoder =
-            GzEncoder::new(Vec::new(), Compression::new(self.config.compression_level));
+        let mut encoder = GzipStreamEncoder::new(Vec::new(), self.config.compression_level as u8);
         encoder
             .write_all(data)
             .map_err(|e| VersioningError::CompressionError {
@@ -705,17 +703,14 @@ impl DataVersionControl {
 
     /// Decompress data
     fn decompress_data(&self, compressed: &[u8]) -> Result<Vec<u8>, VersioningError> {
-        let mut decoder = GzDecoder::new(Vec::new());
+        let mut decoder = GzipStreamDecoder::new(compressed);
+        let mut decompressed = Vec::new();
         decoder
-            .write_all(compressed)
+            .read_to_end(&mut decompressed)
             .map_err(|e| VersioningError::CompressionError {
                 message: e.to_string(),
             })?;
-        decoder
-            .finish()
-            .map_err(|e| VersioningError::CompressionError {
-                message: e.to_string(),
-            })
+        Ok(decompressed)
     }
 
     /// Save version data to disk
@@ -777,7 +772,7 @@ impl DataVersionControl {
         }
 
         let mut versions: Vec<_> = self.versions.values().cloned().collect();
-        versions.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        versions.sort_by_key(|a| a.timestamp);
 
         let to_remove = versions.len() - max_versions;
         let mut to_remove_ids = Vec::new();

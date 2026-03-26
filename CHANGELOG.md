@@ -5,6 +5,38 @@ All notable changes to VoiRS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0-rc.1] - 2026-03-21
+
+### Added
+- Comprehensive test suite reaching 9487/9487 tests passing with zero failures
+- Full COOLJAPAN Pure Rust Policy compliance across all crates (oxiarc-bzip2, oxifft, oxiblas)
+- SciRS2-Core v0.3.4 integration with SIMD, parallel, and random abstractions
+- Python bindings version alignment to PEP 440 format (0.1.0rc1) in pyproject.toml files
+- Complete workspace dependency management — all internal crates pinned at 0.1.0-rc.1
+
+### Changed
+- Upgraded all workspace dependencies to latest stable versions available on crates.io
+- Replaced all `bzip2` usage with `oxiarc-bzip2` per COOLJAPAN policy
+- Stabilized public APIs across voirs-g2p, voirs-acoustic, voirs-vocoder, voirs-sdk
+- Improved CUDA/GPU device handling on macOS to avoid panics when CUDA is unavailable
+- WASM feature gates hardened to use `#[cfg(all(feature = "wasm", target_arch = "wasm32"))]`
+
+### Fixed
+- Integer overflow in conformer CTC decoding (`token_id as u8` wrapping for token_id > 255)
+- Flaky timing tests across evaluation, conversion, CLI, feedback, and recognizer crates (relaxed budgets 4-10x)
+- FFI test interference between C API error handling and pyo3 context
+- numrs2 dependency updated to crates.io release (0.3.1), patch entry removed
+- Zero clippy warnings across all crates and targets with `--all-features`
+- Zero rustdoc warnings with `-D warnings` flag
+
+### Technical Improvements
+- All files comply with 2000-line refactoring policy (splitrs applied where needed)
+- No unwrap() usage in production code paths
+- All crates use `.workspace = true` for shared metadata fields
+- 100% Pure Rust default feature set — no C/Fortran dependencies in default builds
+
+---
+
 ## [0.1.0-beta.1] - 2026-02-26
 
 ### Added

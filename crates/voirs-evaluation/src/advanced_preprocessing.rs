@@ -443,7 +443,7 @@ impl AdvancedPreprocessor {
         }
 
         // Sort by priority (highest first)
-        recommendations.sort_by(|a, b| b.priority.cmp(&a.priority));
+        recommendations.sort_by_key(|b| std::cmp::Reverse(b.priority));
         recommendations
     }
 

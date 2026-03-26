@@ -7,9 +7,7 @@ use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use flate2::read::GzDecoder;
-use flate2::write::GzEncoder;
-use flate2::Compression;
+use oxiarc_deflate::{GzipStreamDecoder, GzipStreamEncoder};
 use serde::{Deserialize, Serialize};
 
 use crate::Result;
@@ -66,7 +64,7 @@ where
         let original_size = serialized.len();
 
         // Compress the data
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::new(self.compression_level));
+        let mut encoder = GzipStreamEncoder::new(Vec::new(), self.compression_level as u8);
         encoder
             .write_all(&serialized)
             .map_err(|e| crate::G2pError::InvalidInput(format!("Compression failed: {e}")))?;
@@ -120,7 +118,7 @@ where
             stats.hits += 1;
 
             // Decompress the data
-            let mut decoder = GzDecoder::new(&entry.compressed_data[..]);
+            let mut decoder = GzipStreamDecoder::new(&entry.compressed_data[..]);
             let mut decompressed = Vec::new();
             decoder
                 .read_to_end(&mut decompressed)
@@ -217,7 +215,7 @@ impl AdaptiveCompressionManager {
 
         if serialized.len() > self.compression_threshold {
             // Compress large data
-            let mut encoder = GzEncoder::new(Vec::new(), Compression::new(self.compression_level));
+            let mut encoder = GzipStreamEncoder::new(Vec::new(), self.compression_level as u8);
             encoder
                 .write_all(&serialized)
                 .map_err(|e| crate::G2pError::InvalidInput(format!("Compression failed: {e}")))?;
@@ -254,7 +252,7 @@ impl AdaptiveCompressionManager {
 
         let decompressed = if is_compressed {
             // Decompress
-            let mut decoder = GzDecoder::new(payload);
+            let mut decoder = GzipStreamDecoder::new(payload);
             let mut result = Vec::new();
             decoder
                 .read_to_end(&mut result)

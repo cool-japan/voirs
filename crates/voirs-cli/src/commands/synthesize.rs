@@ -631,9 +631,18 @@ async fn build_enhanced_pipeline(
 ///     quality: QualityLevel::High,
 ///     enhance: false,
 ///     play: false,
+///     auto_detect: false,
 /// };
 /// let config = AppConfig::default();
-/// let global = GlobalOptions::default();
+/// let global = GlobalOptions {
+///     config: None,
+///     verbose: 0,
+///     quiet: false,
+///     format: None,
+///     voice: None,
+///     gpu: false,
+///     threads: None,
+/// };
 /// run_synthesize(args, &config, &global).await?;
 /// # Ok(())
 /// # }

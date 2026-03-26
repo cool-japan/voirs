@@ -283,7 +283,7 @@ impl CacheWarmer {
         }
 
         let mut frequent_voices: Vec<_> = voice_counts.into_iter().collect();
-        frequent_voices.sort_by(|a, b| b.1.cmp(&a.1));
+        frequent_voices.sort_by_key(|b| std::cmp::Reverse(b.1));
         frequent_voices.truncate(10);
 
         // Analyze text patterns
@@ -293,7 +293,7 @@ impl CacheWarmer {
         }
 
         let mut common_patterns: Vec<_> = text_counts.into_iter().collect();
-        common_patterns.sort_by(|a, b| b.1.cmp(&a.1));
+        common_patterns.sort_by_key(|b| std::cmp::Reverse(b.1));
         common_patterns.truncate(10);
 
         // Analyze time-based patterns

@@ -192,12 +192,9 @@ impl OptimizedAnalyticsManager {
             memory_saved_by_interning,
             metadata_compression_savings,
             total_optimization_benefit: memory_saved_by_interning + metadata_compression_savings,
-            interactions_per_kb: if comprehensive_stats.memory_stats.current_usage > 0 {
-                (comprehensive_stats.interactions_count * 1024)
-                    / comprehensive_stats.memory_stats.current_usage
-            } else {
-                0
-            },
+            interactions_per_kb: (comprehensive_stats.interactions_count * 1024)
+                .checked_div(comprehensive_stats.memory_stats.current_usage)
+                .unwrap_or(0),
         }
     }
 

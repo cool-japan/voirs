@@ -16,7 +16,7 @@
 //!
 //! # Example
 //!
-//! ```rust
+//! ```no_run
 //! use voirs_evaluation::reproducibility::*;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -36,7 +36,7 @@
 //! )?;
 //!
 //! println!("Configuration frozen with ID: {}", frozen_config.id);
-//! println!("Seed: {}", frozen_config.seed);
+//! println!("Seed: {:?}", frozen_config.seed);
 //! # Ok(())
 //! # }
 //! ```

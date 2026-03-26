@@ -59,15 +59,15 @@ static ERROR_HANDLER: std::sync::LazyLock<VoirsErrorHandler> =
 ///
 /// Returns a pointer to a null-terminated C string containing the last error message,
 /// or null if no error has occurred. The returned pointer is valid until the next
-/// error occurs or until voirs_clear_error() is called.
+/// error occurs or until voirs_recognizer_clear_error() is called.
 #[no_mangle]
-pub extern "C" fn voirs_get_last_error() -> *const c_char {
+pub extern "C" fn voirs_recognizer_get_last_error() -> *const c_char {
     ERROR_HANDLER.get_error()
 }
 
 /// Clear the last error message
 #[no_mangle]
-pub extern "C" fn voirs_clear_error() {
+pub extern "C" fn voirs_recognizer_clear_error() {
     ERROR_HANDLER.clear_error();
 }
 
@@ -231,16 +231,16 @@ mod tests {
     #[test]
     fn test_global_error_handler() {
         // Clear any existing error
-        voirs_clear_error();
-        assert!(voirs_get_last_error().is_null());
+        voirs_recognizer_clear_error();
+        assert!(voirs_recognizer_get_last_error().is_null());
 
         // Set an error
         ERROR_HANDLER.set_error("Global test error");
-        let error_ptr = voirs_get_last_error();
+        let error_ptr = voirs_recognizer_get_last_error();
         assert!(!error_ptr.is_null());
 
         // Clear the error
-        voirs_clear_error();
-        assert!(voirs_get_last_error().is_null());
+        voirs_recognizer_clear_error();
+        assert!(voirs_recognizer_get_last_error().is_null());
     }
 }

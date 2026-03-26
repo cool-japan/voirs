@@ -394,6 +394,9 @@ pub mod voice_library;
 pub mod voice_morphing;
 pub mod zero_shot;
 
+#[cfg(feature = "onnx")]
+pub mod backends;
+
 #[cfg(feature = "acoustic-integration")]
 pub mod acoustic;
 

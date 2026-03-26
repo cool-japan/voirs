@@ -163,11 +163,10 @@ async fn main() -> Result<(), RecognitionError> {
 
                 // Language-specific ZCR interpretation
                 match lang_code {
-                    LanguageCode::DeDe => {
-                        if *zcr > 0.1 {
-                            println!("     • High ZCR consistent with German fricatives");
-                        }
+                    LanguageCode::DeDe if *zcr > 0.1 => {
+                        println!("     • High ZCR consistent with German fricatives");
                     }
+                    LanguageCode::DeDe => {}
                     LanguageCode::EsEs => {
                         println!("     • ZCR pattern typical for Spanish phonology");
                     }

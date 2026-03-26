@@ -4,18 +4,17 @@ build-backend = "maturin"
 
 [project]
 name = "voirs"
-version = "0.1.0b1"
+version = "0.1.0rc1"
 description = "Python bindings for VoiRS speech synthesis library"
 authors = [
     {name = "COOLJAPAN OU (Team Kitasan)", email = "contact@cooljapan.tech"}
 ]
-license = {text = "MIT"}
+license = {text = "Apache-2.0"}
 readme = "README.md"
 requires-python = ">=3.8"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",

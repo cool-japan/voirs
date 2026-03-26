@@ -686,6 +686,14 @@ pub enum Commands {
         command: commands::kokoro::KokoroCommands,
     },
 
+    /// ONNX model tools (inspect, profile, graph export, info)
+    #[cfg(feature = "onnx")]
+    Onnx {
+        /// ONNX tool subcommand to execute
+        #[command(subcommand)]
+        command: commands::onnx_tools::OnnxCommand,
+    },
+
     /// Accuracy benchmarking commands
     Accuracy {
         /// Accuracy command configuration
@@ -1454,6 +1462,12 @@ impl CliApp {
             Commands::Kokoro { command } => {
                 commands::kokoro::execute_kokoro_command(command, &config, &self.global).await
             }
+
+            #[cfg(feature = "onnx")]
+            Commands::Onnx { command } => commands::onnx_tools::handle_onnx_command(command)
+                .map_err(|e| {
+                    voirs_sdk::VoirsError::config_error(format!("ONNX tool failed: {}", e))
+                }),
 
             Commands::Accuracy { command } => {
                 commands::accuracy::execute_accuracy_command(command.clone())

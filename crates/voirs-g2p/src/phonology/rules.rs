@@ -178,16 +178,16 @@ impl PhonologicalRule {
                         return false;
                     }
                 }
-                RuleCondition::WordBoundary => {
-                    if position != 0 && position != phonemes.len() - 1 {
-                        return false;
-                    }
+                RuleCondition::WordBoundary if position != 0 && position != phonemes.len() - 1 => {
+                    return false;
                 }
-                RuleCondition::NotWordBoundary => {
-                    if position == 0 || position == phonemes.len() - 1 {
-                        return false;
-                    }
+                RuleCondition::WordBoundary => {}
+                RuleCondition::NotWordBoundary
+                    if position == 0 || position == phonemes.len() - 1 =>
+                {
+                    return false;
                 }
+                RuleCondition::NotWordBoundary => {}
                 _ => {} // Other conditions not implemented yet
             }
         }
@@ -317,7 +317,7 @@ impl RuleSet {
     pub fn add_rule(&mut self, rule: PhonologicalRule) {
         self.rules.push(rule);
         // Sort by priority (descending)
-        self.rules.sort_by(|a, b| b.priority.cmp(&a.priority));
+        self.rules.sort_by_key(|b| std::cmp::Reverse(b.priority));
     }
 
     /// Apply all rules to a phoneme sequence

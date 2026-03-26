@@ -611,15 +611,11 @@ impl ScoreProcessor {
         for note in &mut score.notes {
             // Add subtle articulation variations
             match note.articulation {
-                Articulation::Legato => {
-                    if scirs2_core::random::random::<f32>() < 0.1 {
-                        note.articulation = Articulation::Tenuto;
-                    }
+                Articulation::Legato if scirs2_core::random::random::<f32>() < 0.1 => {
+                    note.articulation = Articulation::Tenuto;
                 }
-                Articulation::Staccato => {
-                    if scirs2_core::random::random::<f32>() < 0.1 {
-                        note.articulation = Articulation::Accent;
-                    }
+                Articulation::Staccato if scirs2_core::random::random::<f32>() < 0.1 => {
+                    note.articulation = Articulation::Accent;
                 }
                 _ => {}
             }

@@ -220,6 +220,8 @@
 
 pub mod ambisonics;
 pub mod automotive;
+/// ONNX and other inference backends for spatial audio
+pub mod backends;
 pub mod beamforming;
 pub mod binaural;
 pub mod compression;

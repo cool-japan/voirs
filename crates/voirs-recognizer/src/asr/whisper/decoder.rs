@@ -940,7 +940,7 @@ impl WhisperDecoder {
 
         let mut rng = scirs2_core::random::thread_rng();
         let mut cumulative = 0.0;
-        let threshold = rng.r#gen::<f32>() * total;
+        let threshold = rng.random::<f32>() * total;
 
         for (idx, &prob) in probs.iter().enumerate() {
             cumulative += prob;
@@ -964,7 +964,7 @@ impl WhisperDecoder {
 
         let mut rng = scirs2_core::random::thread_rng();
         let mut cumulative = 0.0;
-        let threshold = rng.r#gen::<f32>() * total;
+        let threshold = rng.random::<f32>() * total;
 
         for (idx, &prob) in probs.iter().enumerate() {
             cumulative += prob;

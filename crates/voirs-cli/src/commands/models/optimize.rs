@@ -1392,7 +1392,7 @@ fn create_graph_optimization_metadata(original: &[u8], optimized: &[u8]) -> serd
 
 /// Compress model file using gzip
 fn compress_model_file(src: &std::path::Path, dst: &std::path::Path) -> Result<()> {
-    use flate2::{write::GzEncoder, Compression};
+    use oxiarc_deflate::GzipStreamEncoder;
     use std::io::{Read, Write};
 
     let mut input_file = std::fs::File::open(src).map_err(|e| voirs_sdk::VoirsError::IoError {
@@ -1407,7 +1407,7 @@ fn compress_model_file(src: &std::path::Path, dst: &std::path::Path) -> Result<(
         source: e,
     })?;
 
-    let mut encoder = GzEncoder::new(output_file, Compression::default());
+    let mut encoder = GzipStreamEncoder::new(output_file, 6);
     let mut buffer = [0; 8192];
 
     loop {

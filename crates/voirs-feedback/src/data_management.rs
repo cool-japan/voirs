@@ -860,11 +860,10 @@ impl FileDataStorage {
 
     /// Compress data using gzip
     fn compress_data(data: &[u8]) -> DataManagementResult<Vec<u8>> {
-        use flate2::write::GzEncoder;
-        use flate2::Compression;
+        use oxiarc_deflate::GzipStreamEncoder;
         use std::io::Write;
 
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        let mut encoder = GzipStreamEncoder::new(Vec::new(), 6);
         encoder
             .write_all(data)
             .map_err(|e| DataManagementError::CompressionError {
@@ -879,10 +878,10 @@ impl FileDataStorage {
 
     /// Decompress gzip data
     fn decompress_data(data: &[u8]) -> DataManagementResult<Vec<u8>> {
-        use flate2::read::GzDecoder;
+        use oxiarc_deflate::GzipStreamDecoder;
         use std::io::Read;
 
-        let mut decoder = GzDecoder::new(data);
+        let mut decoder = GzipStreamDecoder::new(data);
         let mut decompressed = Vec::new();
         decoder.read_to_end(&mut decompressed).map_err(|e| {
             DataManagementError::CompressionError {

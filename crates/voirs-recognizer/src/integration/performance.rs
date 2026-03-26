@@ -280,7 +280,7 @@ impl IntegratedPerformanceMonitor {
         count: usize,
     ) -> Vec<ComponentPerformance> {
         let mut sorted: Vec<_> = components.values().cloned().collect();
-        sorted.sort_by(|a, b| b.processing_time.cmp(&a.processing_time));
+        sorted.sort_by_key(|b| std::cmp::Reverse(b.processing_time));
         sorted.into_iter().take(count).collect()
     }
 

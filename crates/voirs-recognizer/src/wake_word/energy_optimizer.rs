@@ -190,19 +190,19 @@ impl SystemResourceMonitor {
     /// Get current CPU usage (simulated)
     fn get_cpu_usage() -> f32 {
         // Simulate CPU usage with some randomness
-        thread_rng().r#gen::<f32>() * 0.3 + 0.1 // 10-40% usage
+        thread_rng().random::<f32>() * 0.3 + 0.1 // 10-40% usage
     }
 
     /// Get current memory usage (simulated)
     fn get_memory_usage() -> f32 {
         // Simulate memory usage
-        thread_rng().r#gen::<f32>() * 0.2 + 0.4 // 40-60% usage
+        thread_rng().random::<f32>() * 0.2 + 0.4 // 40-60% usage
     }
 
     /// Get battery level (simulated)
     fn get_battery_level() -> Option<f32> {
         // Simulate battery level (would use platform-specific APIs)
-        Some(thread_rng().r#gen::<f32>() * 0.6 + 0.4) // 40-100%
+        Some(thread_rng().random::<f32>() * 0.6 + 0.4) // 40-100%
     }
 
     /// Get average CPU usage

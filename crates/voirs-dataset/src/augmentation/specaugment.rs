@@ -142,14 +142,14 @@ impl SpecAugment {
         }
 
         // Choose mask width
-        let mask_width = rng.gen_range(0..=self.config.time_mask_width.min(num_time_steps));
+        let mask_width = rng.random_range(0..=self.config.time_mask_width.min(num_time_steps));
 
         if mask_width == 0 || mask_width >= num_time_steps {
             return spectrogram.clone();
         }
 
         // Choose start position
-        let start = rng.gen_range(0..=(num_time_steps - mask_width));
+        let start = rng.random_range(0..=(num_time_steps - mask_width));
         let end = start + mask_width;
 
         // Apply mask
@@ -176,14 +176,14 @@ impl SpecAugment {
         }
 
         // Choose mask width
-        let mask_width = rng.gen_range(0..=self.config.freq_mask_width.min(num_freq_bins));
+        let mask_width = rng.random_range(0..=self.config.freq_mask_width.min(num_freq_bins));
 
         if mask_width == 0 || mask_width >= num_freq_bins {
             return spectrogram.clone();
         }
 
         // Choose start position
-        let start = rng.gen_range(0..=(num_freq_bins - mask_width));
+        let start = rng.random_range(0..=(num_freq_bins - mask_width));
         let end = start + mask_width;
 
         // Apply mask
@@ -210,11 +210,11 @@ impl SpecAugment {
 
         // Choose a random center point in the time axis
         let center =
-            rng.gen_range(self.config.time_warp_w..(num_time_steps - self.config.time_warp_w));
+            rng.random_range(self.config.time_warp_w..(num_time_steps - self.config.time_warp_w));
 
         // Choose a random warp distance
-        let warp_distance = rng.gen_range(0..self.config.time_warp_w) as i32;
-        let direction = if rng.gen_bool(0.5) { 1 } else { -1 };
+        let warp_distance = rng.random_range(0..self.config.time_warp_w) as i32;
+        let direction = if rng.random_bool(0.5) { 1 } else { -1 };
         let warp_target = (center as i32 + direction * warp_distance)
             .max(0)
             .min((num_time_steps - 1) as i32) as usize;

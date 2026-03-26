@@ -109,11 +109,14 @@ impl CapabilityManager {
         #[cfg(target_os = "windows")]
         {
             // Conservative default for Windows - could be improved with Windows API calls
-            return Ok(8192); // 8GB default
+            Ok(8192) // 8GB default
         }
 
-        // Conservative fallback
-        Ok(4096) // 4GB default
+        #[cfg(not(target_os = "windows"))]
+        {
+            // Conservative fallback for Linux/macOS when platform detection fails
+            Ok(4096) // 4GB default
+        }
     }
 
     /// Detect GPU capabilities

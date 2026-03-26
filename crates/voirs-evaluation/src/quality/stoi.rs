@@ -945,7 +945,7 @@ impl STOIEvaluator {
             let mut bootstrap_processed = Vec::with_capacity(bootstrap_len);
 
             for _ in 0..bootstrap_len {
-                let idx = scirs2_core::random::thread_rng().gen_range(0..signal_len);
+                let idx = scirs2_core::random::thread_rng().random_range(0..signal_len);
                 bootstrap_clean.push(clean.samples()[idx]);
                 bootstrap_processed.push(processed.samples()[idx]);
             }
@@ -983,7 +983,7 @@ impl STOIEvaluator {
             let mut bootstrap_processed = Vec::with_capacity(bootstrap_len);
 
             for _ in 0..bootstrap_len {
-                let idx = scirs2_core::random::thread_rng().gen_range(0..signal_len);
+                let idx = scirs2_core::random::thread_rng().random_range(0..signal_len);
                 bootstrap_clean.push(clean.samples()[idx]);
                 bootstrap_processed.push(processed.samples()[idx]);
             }

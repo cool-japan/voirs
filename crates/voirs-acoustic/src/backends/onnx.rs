@@ -1,7 +1,7 @@
-//! ONNX Runtime backend for acoustic modeling.
+//! OxiONNX backend for acoustic modeling.
 //!
 //! This module provides ONNX-based implementations for acoustic models,
-//! enabling high-performance inference using pre-trained models.
+//! enabling high-performance inference using pre-trained models via oxionnx.
 
 use crate::{
     speaker::SpeakerEmbedding,
@@ -9,14 +9,7 @@ use crate::{
     AcousticError, MelSpectrogram, Phoneme, Result, SynthesisConfig,
 };
 use async_trait::async_trait;
-use ort::{
-    execution_providers::ExecutionProviderDispatch,
-    session::{
-        builder::{GraphOptimizationLevel, SessionBuilder},
-        Session, SessionOutputs,
-    },
-    value::Value,
-};
+use oxionnx::{OnnxError, OptLevel, Session, SessionBuilder, Tensor};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -65,7 +58,7 @@ impl Default for StreamingState {
 
 /// ONNX-based acoustic model implementation
 pub struct OnnxAcousticModel {
-    /// ONNX Runtime session
+    /// OxiONNX session
     session: Arc<RwLock<Session>>,
 
     /// Model metadata
@@ -121,9 +114,6 @@ pub struct OnnxModelConfig {
     /// Model file path
     pub model_path: PathBuf,
 
-    /// Execution providers (CPU, CUDA, etc.)
-    pub execution_providers: Vec<String>,
-
     /// Number of threads for CPU execution
     pub num_threads: usize,
 
@@ -133,25 +123,26 @@ pub struct OnnxModelConfig {
     /// Enable CPU memory arena
     pub enable_cpu_mem_arena: bool,
 
-    /// Optimization level (store as enum variant name)
-    pub graph_optimization_level: String,
+    /// Optimization level for ONNX graph optimization (default: All)
+    pub opt_level: Option<OptLevel>,
 
-    /// Session options
-    pub inter_op_num_threads: Option<usize>,
-    pub intra_op_num_threads: Option<usize>,
+    /// Enable per-node profiling during inference
+    pub enable_profiling: Option<bool>,
+
+    /// Enable memory pool for buffer reuse
+    pub enable_memory_pool: Option<bool>,
 }
 
 impl Default for OnnxModelConfig {
     fn default() -> Self {
         Self {
             model_path: PathBuf::new(),
-            execution_providers: vec!["CPUExecutionProvider".to_string()],
             num_threads: num_cpus::get(),
             enable_memory_pattern: true,
             enable_cpu_mem_arena: true,
-            graph_optimization_level: "All".to_string(),
-            inter_op_num_threads: Some(1),
-            intra_op_num_threads: Some(num_cpus::get()),
+            opt_level: None,
+            enable_profiling: None,
+            enable_memory_pool: None,
         }
     }
 }
@@ -160,68 +151,19 @@ impl OnnxAcousticModel {
     /// Create a new ONNX acoustic model
     pub async fn new(config: OnnxModelConfig) -> Result<Self> {
         info!(
-            "Initializing ONNX acoustic model from {:?}",
+            "Initializing OxiONNX acoustic model from {:?}",
             config.model_path
         );
 
-        // Ensure ONNX Runtime is initialized
-        if !ort::init().commit() {
-            return Err(AcousticError::ModelError {
-                message: "Failed to initialize ONNX Runtime".to_string(),
-            });
+        // Load the model via oxionnx SessionBuilder
+        let mut builder = Session::builder()
+            .with_optimization_level(config.opt_level.unwrap_or(OptLevel::All))
+            .with_memory_pool(config.enable_memory_pool.unwrap_or(false));
+        if config.enable_profiling.unwrap_or(false) {
+            builder = builder.with_profiling();
         }
-
-        // Configure session builder
-        let mut session_builder = SessionBuilder::new().map_err(|e| AcousticError::ModelError {
-            message: format!("Failed to create session builder: {}", e),
-        })?;
-        // Convert string to GraphOptimizationLevel
-        let opt_level = match config.graph_optimization_level.as_str() {
-            "Disable" => GraphOptimizationLevel::Disable,
-            "Level1" => GraphOptimizationLevel::Level1,
-            "Level2" => GraphOptimizationLevel::Level2,
-            "Level3" | "All" => GraphOptimizationLevel::Level3,
-            _ => GraphOptimizationLevel::Level1,
-        };
-        session_builder = session_builder
-            .with_optimization_level(opt_level)
-            .map_err(|e| AcousticError::ModelError {
-                message: format!("Failed to set optimization level: {}", e),
-            })?
-            .with_memory_pattern(config.enable_memory_pattern)
-            .map_err(|e| AcousticError::ModelError {
-                message: format!("Failed to set memory pattern: {}", e),
-            })?;
-
-        // Set thread counts
-        if let Some(inter_op) = config.inter_op_num_threads {
-            session_builder = session_builder.with_inter_threads(inter_op).map_err(|e| {
-                AcousticError::ModelError {
-                    message: format!("Failed to set inter threads: {}", e),
-                }
-            })?;
-        }
-        if let Some(intra_op) = config.intra_op_num_threads {
-            session_builder = session_builder.with_intra_threads(intra_op).map_err(|e| {
-                AcousticError::ModelError {
-                    message: format!("Failed to set intra threads: {}", e),
-                }
-            })?;
-        }
-
-        // Configure execution providers based on config
-        let execution_providers = Self::configure_execution_providers(&config.execution_providers)?;
-        if !execution_providers.is_empty() {
-            session_builder = session_builder
-                .with_execution_providers(execution_providers)
-                .map_err(|e| AcousticError::ModelError {
-                    message: format!("Failed to set execution providers: {}", e),
-                })?;
-        }
-
-        // Load the model
-        let session = session_builder
-            .commit_from_file(&config.model_path)
+        let session = builder
+            .load(&config.model_path)
             .map_err(|e| AcousticError::ModelError {
                 message: format!("Failed to load ONNX model: {}", e),
             })?;
@@ -229,7 +171,10 @@ impl OnnxAcousticModel {
         // Extract model metadata
         let metadata = Self::extract_metadata(&session, &config.model_path)?;
 
-        info!("ONNX acoustic model loaded successfully: {}", metadata.name);
+        info!(
+            "OxiONNX acoustic model loaded successfully: {}",
+            metadata.name
+        );
         debug!("Model metadata: {:?}", metadata);
 
         Ok(Self {
@@ -241,73 +186,10 @@ impl OnnxAcousticModel {
         })
     }
 
-    /// Configure execution providers based on string names
-    ///
-    /// Converts execution provider names (e.g., "CUDAExecutionProvider", "CPUExecutionProvider")
-    /// into actual ExecutionProvider instances for the new ort 2.0 API.
-    fn configure_execution_providers(
-        provider_names: &[String],
-    ) -> Result<Vec<ExecutionProviderDispatch>> {
-        use ort::execution_providers::{
-            CPUExecutionProvider, CUDAExecutionProvider, CoreMLExecutionProvider,
-        };
-
-        let mut providers = Vec::new();
-
-        for name in provider_names {
-            let provider: ExecutionProviderDispatch = match name.as_str() {
-                "CPUExecutionProvider" | "CPU" => CPUExecutionProvider::default().build(),
-                #[cfg(feature = "cuda")]
-                "CUDAExecutionProvider" | "CUDA" => {
-                    info!("Configuring CUDA execution provider");
-                    CUDAExecutionProvider::default().build()
-                }
-                #[cfg(feature = "coreml")]
-                "CoreMLExecutionProvider" | "CoreML" => {
-                    info!("Configuring CoreML execution provider");
-                    CoreMLExecutionProvider::default().build()
-                }
-                #[cfg(all(target_os = "macos", feature = "metal"))]
-                "MetalExecutionProvider" | "Metal" => {
-                    // Note: Metal support may vary by ort version
-                    warn!("Metal execution provider requested, falling back to CPU");
-                    CPUExecutionProvider::default().build()
-                }
-                _ => {
-                    warn!(
-                        "Unsupported execution provider '{}', falling back to CPU",
-                        name
-                    );
-                    CPUExecutionProvider::default().build()
-                }
-            };
-            providers.push(provider);
-        }
-
-        // If no providers configured, default to CPU
-        if providers.is_empty() {
-            info!("No execution providers specified, defaulting to CPU");
-            providers.push(CPUExecutionProvider::default().build());
-        }
-
-        Ok(providers)
-    }
-
-    /// Extract model metadata from ONNX session with enhanced introspection
+    /// Extract model metadata from oxionnx session
     fn extract_metadata(session: &Session, model_path: &Path) -> Result<ModelMetadata> {
-        // Extract input and output information from session (don't clone, just borrow)
-        let inputs = session.inputs();
-        let outputs = session.outputs();
-
-        let input_names: Vec<String> = inputs
-            .iter()
-            .map(|input| input.name().to_string())
-            .collect();
-
-        let output_names: Vec<String> = outputs
-            .iter()
-            .map(|output| output.name().to_string())
-            .collect();
+        let input_names: Vec<String> = session.input_names().to_vec();
+        let output_names: Vec<String> = session.output_names().to_vec();
 
         debug!("ONNX model inputs: {:?}", input_names);
         debug!("ONNX model outputs: {:?}", output_names);
@@ -319,39 +201,22 @@ impl OnnxAcousticModel {
             .unwrap_or("unknown")
             .to_string();
 
-        // Try to extract metadata from model properties/custom metadata
-        let metadata_model = session.metadata().ok();
+        // oxionnx does not have a metadata() method, use defaults
+        let architecture = "ONNX".to_string();
+        let version = "1.0.0".to_string();
 
-        let (architecture, version) = if let Some(meta) = metadata_model.as_ref() {
-            // Try to extract producer name (architecture) and version
-            let arch = meta.producer().unwrap_or_else(|| "ONNX".to_string());
-
-            let ver = meta
-                .version()
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "1.0.0".to_string());
-
-            debug!("Model producer: {}, version: {}", arch, ver);
-            (arch, ver)
-        } else {
-            ("ONNX".to_string(), "1.0.0".to_string())
-        };
-
-        // Infer mel dimension from output shape if possible
-        // Note: ONNX Runtime API may not expose tensor dimensions directly
-        // Using default mel dimension
-        let mel_dim = 80; // Standard mel dimension
+        // Standard mel dimension
+        let mel_dim = 80;
 
         debug!("Using mel dimension: {}", mel_dim);
 
-        // Enhanced metadata with better defaults
         Ok(ModelMetadata {
             name: model_name,
             version,
             architecture,
             sample_rates: vec![22050, 24000, 48000],
-            vocab_size: 256, // Default phoneme vocabulary size
-            mel_dim: mel_dim as usize,
+            vocab_size: 256,
+            mel_dim,
             max_sequence_length: 1000,
             speakers: vec!["default".to_string()],
             input_names,
@@ -365,10 +230,12 @@ impl OnnxAcousticModel {
         speaker_id: &str,
         embedding: Vec<f32>,
     ) -> Result<()> {
-        let mut embeddings = self
-            .speaker_embeddings
-            .write()
-            .expect("OnnxBackend speaker_embeddings RwLock poisoned");
+        let mut embeddings =
+            self.speaker_embeddings
+                .write()
+                .map_err(|_| AcousticError::ModelError {
+                    message: "Speaker embeddings RwLock poisoned".to_string(),
+                })?;
         embeddings.insert(speaker_id.to_string(), embedding);
         info!("Loaded speaker embedding for: {}", speaker_id);
         Ok(())
@@ -377,60 +244,45 @@ impl OnnxAcousticModel {
     /// Get speaker embedding
     fn get_speaker_embedding(&self, speaker_id: Option<&str>) -> Option<Vec<f32>> {
         if let Some(id) = speaker_id {
-            let embeddings = self
-                .speaker_embeddings
-                .read()
-                .expect("OnnxBackend speaker_embeddings RwLock poisoned");
+            let embeddings = self.speaker_embeddings.read().ok()?;
             embeddings.get(id).cloned()
         } else {
             None
         }
     }
 
-    /// Prepare input tensors for ONNX inference
+    /// Prepare input tensors for oxionnx inference
     async fn prepare_inputs(
         &self,
         phonemes: &[Phoneme],
         config: &SynthesisConfig,
-    ) -> Result<Vec<(String, Value)>> {
-        let mut inputs: Vec<(String, Value)> = Vec::new();
+    ) -> Result<HashMap<String, Tensor>> {
+        let mut inputs: HashMap<String, Tensor> = HashMap::new();
 
-        // Convert phonemes to integer sequence
-        let phoneme_ids: Vec<i64> = phonemes
+        // Convert phonemes to integer sequence, then to f32 (oxionnx uses f32 tensors)
+        let phoneme_ids: Vec<f32> = phonemes
             .iter()
-            .map(|p| self.phoneme_to_id(&p.symbol))
+            .map(|p| self.phoneme_to_id(&p.symbol) as f32)
             .collect();
 
-        // Create phoneme input tensor
-        let phoneme_tensor =
-            Value::from_array(([1, phoneme_ids.len()], phoneme_ids)).map_err(|e| {
-                AcousticError::InferenceError {
-                    message: format!("Failed to create phoneme tensor: {}", e),
-                }
-            })?;
-        inputs.push(("phonemes".to_string(), phoneme_tensor.into_dyn()));
+        // Create phoneme input tensor with shape [1, seq_len]
+        let seq_len = phoneme_ids.len();
+        let phoneme_tensor = Tensor::new(phoneme_ids, vec![1, seq_len]);
+        inputs.insert("phonemes".to_string(), phoneme_tensor);
 
         // Add speaker embedding if available
         if let Some(speaker_id) = config.speaker_id {
             if let Some(embedding) = self.get_speaker_embedding(Some(&speaker_id.to_string())) {
-                let speaker_tensor =
-                    Value::from_array(([1, embedding.len()], embedding)).map_err(|e| {
-                        AcousticError::InferenceError {
-                            message: format!("Failed to create speaker tensor: {}", e),
-                        }
-                    })?;
-                inputs.push(("speaker".to_string(), speaker_tensor.into_dyn()));
+                let emb_len = embedding.len();
+                let speaker_tensor = Tensor::new(embedding, vec![1, emb_len]);
+                inputs.insert("speaker".to_string(), speaker_tensor);
             }
         }
 
         // Add synthesis control parameters
         if self.metadata.input_names.contains(&"speed".to_string()) {
-            let speed_tensor = Value::from_array(([1], vec![config.speed])).map_err(|e| {
-                AcousticError::InferenceError {
-                    message: format!("Failed to create speed tensor: {}", e),
-                }
-            })?;
-            inputs.push(("speed".to_string(), speed_tensor.into_dyn()));
+            let speed_tensor = Tensor::new(vec![config.speed], vec![1]);
+            inputs.insert("speed".to_string(), speed_tensor);
         }
 
         if self
@@ -438,21 +290,13 @@ impl OnnxAcousticModel {
             .input_names
             .contains(&"pitch_shift".to_string())
         {
-            let pitch_tensor = Value::from_array(([1], vec![config.pitch_shift])).map_err(|e| {
-                AcousticError::InferenceError {
-                    message: format!("Failed to create pitch tensor: {}", e),
-                }
-            })?;
-            inputs.push(("pitch_shift".to_string(), pitch_tensor.into_dyn()));
+            let pitch_tensor = Tensor::new(vec![config.pitch_shift], vec![1]);
+            inputs.insert("pitch_shift".to_string(), pitch_tensor);
         }
 
         if self.metadata.input_names.contains(&"energy".to_string()) {
-            let energy_tensor = Value::from_array(([1], vec![config.energy])).map_err(|e| {
-                AcousticError::InferenceError {
-                    message: format!("Failed to create energy tensor: {}", e),
-                }
-            })?;
-            inputs.push(("energy".to_string(), energy_tensor.into_dyn()));
+            let energy_tensor = Tensor::new(vec![config.energy], vec![1]);
+            inputs.insert("energy".to_string(), energy_tensor);
         }
 
         Ok(inputs)
@@ -496,30 +340,35 @@ impl OnnxAcousticModel {
 
         // Prepare input tensors for the chunk
         let inputs = self.prepare_inputs(chunk_phonemes, config).await?;
+        let ref_inputs: HashMap<&str, Tensor> = inputs
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.clone()))
+            .collect();
 
         // Run inference on the chunk
-        let mut session = self
-            .session
-            .write()
-            .expect("OnnxBackend session RwLock poisoned");
-        let outputs = session.run(inputs).map_err(|e| AcousticError::ModelError {
-            message: format!("ONNX chunk inference failed: {}", e),
+        let session = self.session.read().map_err(|_| AcousticError::ModelError {
+            message: "Session RwLock poisoned".to_string(),
         })?;
+        let outputs = session
+            .run(&ref_inputs)
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("ONNX chunk inference failed: {}", e),
+            })?;
 
         // Process outputs
-        let mel_spectrogram = self.process_outputs(outputs)?;
+        let mel_spectrogram = self.process_outputs(&outputs)?;
 
         debug!(
             "ONNX chunk synthesis completed: {} mel frames",
-            mel_spectrogram.data[0].len()
+            mel_spectrogram.n_frames
         );
 
         Ok(mel_spectrogram)
     }
 
-    /// Process ONNX outputs to extract mel spectrogram
-    fn process_outputs(&self, outputs: SessionOutputs) -> Result<MelSpectrogram> {
-        // Extract first output by name or index
+    /// Process oxionnx outputs to extract mel spectrogram
+    fn process_outputs(&self, outputs: &HashMap<String, Tensor>) -> Result<MelSpectrogram> {
+        // Extract first output by name
         let mel_output = outputs
             .get("mel_spectrogram")
             .or_else(|| outputs.get("output"))
@@ -528,25 +377,21 @@ impl OnnxAcousticModel {
                 message: "No outputs received from ONNX model".to_string(),
             })?;
 
-        // Extract mel spectrogram data
-        let (shape, mel_data) =
-            mel_output
-                .try_extract_tensor::<f32>()
-                .map_err(|e| AcousticError::ModelError {
-                    message: format!("Failed to extract tensor: {}", e),
-                })?;
+        // Access tensor data and shape directly
+        let mel_data = &mel_output.data;
+        let shape = &mel_output.shape;
 
-        // Get output shape
-        let (batch_size, mel_dim, seq_len) = if shape.len() == 3 {
-            (shape[0] as usize, shape[1] as usize, shape[2] as usize)
+        // Get output shape: expect [batch_size, mel_dim, seq_len]
+        let (_batch_size, mel_dim, seq_len) = if shape.len() == 3 {
+            (shape[0], shape[1], shape[2])
         } else {
             return Err(AcousticError::ModelError {
                 message: format!("Unexpected mel output shape: {:?}", shape),
             });
         };
 
-        if batch_size != 1 {
-            warn!("Batch size {} > 1, using first sample", batch_size);
+        if _batch_size != 1 {
+            warn!("Batch size {} > 1, using first sample", _batch_size);
         }
 
         // Reshape data to 2D matrix (mel_dim, seq_len)
@@ -562,7 +407,7 @@ impl OnnxAcousticModel {
 
         Ok(MelSpectrogram {
             data: mel_matrix,
-            sample_rate: 22050, // Default sample rate
+            sample_rate: 22050,
             hop_length: 256,
             n_mels: mel_dim,
             n_frames: seq_len,
@@ -602,22 +447,27 @@ impl AcousticModel for OnnxAcousticModel {
         let default_config = SynthesisConfig::default();
         let config = config.unwrap_or(&default_config);
         let inputs = self.prepare_inputs(phonemes, config).await?;
+        let ref_inputs: HashMap<&str, Tensor> = inputs
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.clone()))
+            .collect();
 
         // Run inference
-        let mut session = self
-            .session
-            .write()
-            .expect("OnnxBackend session RwLock poisoned");
-        let outputs = session.run(inputs).map_err(|e| AcousticError::ModelError {
-            message: format!("ONNX inference failed: {}", e),
+        let session = self.session.read().map_err(|_| AcousticError::ModelError {
+            message: "Session RwLock poisoned".to_string(),
         })?;
+        let outputs = session
+            .run(&ref_inputs)
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("ONNX inference failed: {}", e),
+            })?;
 
         // Process outputs
-        let mel_spectrogram = self.process_outputs(outputs)?;
+        let mel_spectrogram = self.process_outputs(&outputs)?;
 
         debug!(
             "ONNX acoustic synthesis completed: {} mel frames",
-            mel_spectrogram.data[0].len()
+            mel_spectrogram.n_frames
         );
 
         Ok(mel_spectrogram)
@@ -649,11 +499,10 @@ impl AcousticModel for OnnxAcousticModel {
             AcousticModelFeature::BatchProcessing => true,
             AcousticModelFeature::StreamingInference => true,
             AcousticModelFeature::StreamingSynthesis => true,
-            AcousticModelFeature::GpuAcceleration => self
-                .config
-                .execution_providers
-                .iter()
-                .any(|p| p.contains("CUDA") || p.contains("ROCm") || p.contains("TensorRT")),
+            AcousticModelFeature::GpuAcceleration => {
+                // oxionnx supports GPU via the gpu feature at compile time
+                cfg!(feature = "gpu")
+            }
             _ => false,
         }
     }
@@ -680,13 +529,11 @@ impl OnnxAcousticModel {
     fn infer_supported_languages(metadata: &ModelMetadata) -> Vec<crate::LanguageCode> {
         use crate::LanguageCode;
 
-        // Try to infer from model name and architecture
         let name_lower = metadata.name.to_lowercase();
         let arch_lower = metadata.architecture.to_lowercase();
 
         let mut languages = Vec::new();
 
-        // Common patterns in model names (using correct LanguageCode variants)
         if name_lower.contains("en") || arch_lower.contains("english") {
             languages.push(LanguageCode::EnUs);
         }
@@ -714,7 +561,6 @@ impl OnnxAcousticModel {
             languages.push(LanguageCode::ItIt);
         }
 
-        // If multilingual or no specific language detected, add English as default
         if (languages.is_empty()
             || name_lower.contains("multilingual")
             || name_lower.contains("multi"))
@@ -736,8 +582,6 @@ impl OnnxAcousticModel {
     }
 
     async fn extract_speaker_embedding(&self, _samples: &[f32]) -> Result<Vec<f32>> {
-        // This would require a separate speaker encoder model
-        // For now, return an error indicating this feature is not implemented
         Err(AcousticError::ConfigError {
             message: "Speaker embedding extraction not implemented for ONNX backend".to_string(),
         })
@@ -751,17 +595,17 @@ impl OnnxAcousticModel {
         let mut state = self
             .streaming_state
             .write()
-            .expect("OnnxBackend streaming_state RwLock poisoned");
+            .map_err(|_| AcousticError::ModelError {
+                message: "Streaming state RwLock poisoned".to_string(),
+            })?;
 
-        // Reset streaming state
         state.config = config.clone();
         state.phoneme_buffer.clear();
         state.context_phonemes.clear();
         state.total_frames = 0;
         state.is_active = true;
 
-        // Configure chunk size based on model constraints
-        let max_chunk = self.metadata.max_sequence_length / 4; // Use 1/4 of max for safety
+        let max_chunk = self.metadata.max_sequence_length / 4;
         state.chunk_size = std::cmp::min(state.chunk_size, max_chunk);
         state.overlap_size = std::cmp::min(state.overlap_size, state.chunk_size / 4);
 
@@ -774,12 +618,13 @@ impl OnnxAcousticModel {
     }
 
     async fn stream_phonemes(&mut self, phonemes: &[Phoneme]) -> Result<MelSpectrogram> {
-        // Extract data from state and drop lock early
-        let (chunk_phonemes, config, chunk_size) = {
-            let mut state = self
-                .streaming_state
-                .write()
-                .expect("OnnxBackend streaming_state RwLock poisoned");
+        let (chunk_phonemes, config, _chunk_size) = {
+            let mut state =
+                self.streaming_state
+                    .write()
+                    .map_err(|_| AcousticError::ModelError {
+                        message: "Streaming state RwLock poisoned".to_string(),
+                    })?;
 
             if !state.is_active {
                 return Err(AcousticError::ConfigError {
@@ -787,7 +632,6 @@ impl OnnxAcousticModel {
                 });
             }
 
-            // Add new phonemes to buffer
             state.phoneme_buffer.extend_from_slice(phonemes);
 
             debug!(
@@ -796,9 +640,7 @@ impl OnnxAcousticModel {
                 state.phoneme_buffer.len()
             );
 
-            // Check if we have enough phonemes to process a chunk
             if state.phoneme_buffer.len() < state.chunk_size {
-                // Not enough phonemes yet, return empty mel spectrogram
                 return Ok(MelSpectrogram {
                     data: vec![vec![]; self.metadata.mel_dim],
                     sample_rate: 22050,
@@ -808,17 +650,14 @@ impl OnnxAcousticModel {
                 });
             }
 
-            // Prepare chunk with context
             let mut chunk_phonemes = state.context_phonemes.clone();
             let chunk_size = std::cmp::min(state.chunk_size, state.phoneme_buffer.len());
             chunk_phonemes.extend_from_slice(&state.phoneme_buffer[..chunk_size]);
 
-            // Update context for next chunk (keep last overlap_size phonemes)
             let context_start =
                 std::cmp::max(0, chunk_size as i32 - state.overlap_size as i32) as usize;
             state.context_phonemes = state.phoneme_buffer[context_start..chunk_size].to_vec();
 
-            // Remove processed phonemes from buffer
             state.phoneme_buffer.drain(..chunk_size);
 
             debug!(
@@ -827,25 +666,23 @@ impl OnnxAcousticModel {
                 chunk_phonemes.len() - chunk_size
             );
 
-            // Return data needed for processing
             (chunk_phonemes, state.config.clone(), chunk_size)
-        }; // Lock is dropped here
+        };
 
-        // Process the chunk using regular synthesis
         let mel_result = self.synthesize_chunk(&chunk_phonemes, &config).await?;
 
-        // Update frame count
         {
-            let mut state = self
-                .streaming_state
-                .write()
-                .expect("OnnxBackend streaming_state RwLock poisoned");
-            state.total_frames += mel_result.data[0].len();
+            let mut state =
+                self.streaming_state
+                    .write()
+                    .map_err(|_| AcousticError::ModelError {
+                        message: "Streaming state RwLock poisoned".to_string(),
+                    })?;
+            state.total_frames += mel_result.n_frames;
 
             debug!(
                 "ONNX streaming: generated {} mel frames, total frames: {}",
-                mel_result.data[0].len(),
-                state.total_frames
+                mel_result.n_frames, state.total_frames
             );
         }
 
@@ -855,21 +692,20 @@ impl OnnxAcousticModel {
     async fn end_stream(&mut self) -> Result<()> {
         info!("Ending ONNX streaming synthesis");
 
-        // Extract final phonemes to process if needed
         let final_data = {
-            let mut state = self
-                .streaming_state
-                .write()
-                .expect("OnnxBackend streaming_state RwLock poisoned");
+            let mut state =
+                self.streaming_state
+                    .write()
+                    .map_err(|_| AcousticError::ModelError {
+                        message: "Streaming state RwLock poisoned".to_string(),
+                    })?;
 
-            // Check if there are remaining phonemes in buffer
             if !state.phoneme_buffer.is_empty() && state.is_active {
                 debug!(
                     "ONNX streaming: processing final {} phonemes",
                     state.phoneme_buffer.len()
                 );
 
-                // Process final chunk with context
                 let mut final_phonemes = state.context_phonemes.clone();
                 final_phonemes.extend_from_slice(&state.phoneme_buffer);
                 let config = state.config.clone();
@@ -878,20 +714,19 @@ impl OnnxAcousticModel {
             } else {
                 None
             }
-        }; // Lock is dropped here
+        };
 
-        // Process final chunk if needed
         if let Some((final_phonemes, config)) = final_data {
-            // This would typically be returned or processed differently in a real implementation
             let _final_mel = self.synthesize_chunk(&final_phonemes, &config).await?;
         }
 
-        // Reset streaming state
         {
-            let mut state = self
-                .streaming_state
-                .write()
-                .expect("OnnxBackend streaming_state RwLock poisoned");
+            let mut state =
+                self.streaming_state
+                    .write()
+                    .map_err(|_| AcousticError::ModelError {
+                        message: "Streaming state RwLock poisoned".to_string(),
+                    })?;
             state.is_active = false;
             state.phoneme_buffer.clear();
             state.context_phonemes.clear();
@@ -925,22 +760,9 @@ impl OnnxAcousticModelBuilder {
         self
     }
 
-    /// Add execution provider
-    pub fn with_execution_provider(mut self, provider: String) -> Self {
-        self.config.execution_providers.push(provider);
-        self
-    }
-
     /// Set number of threads
     pub fn with_num_threads(mut self, num_threads: usize) -> Self {
         self.config.num_threads = num_threads;
-        self.config.intra_op_num_threads = Some(num_threads);
-        self
-    }
-
-    /// Set optimization level
-    pub fn with_optimization_level(mut self, level: String) -> Self {
-        self.config.graph_optimization_level = level;
         self
     }
 
@@ -978,12 +800,13 @@ impl OnnxBackend {
 
     /// Create ONNX backend with options
     pub fn with_options(options: crate::config::BackendOptions) -> Result<Self> {
-        let mut config = OnnxModelConfig::default();
+        let config = OnnxModelConfig::default();
 
-        // Configure based on ONNX options if provided
-        if let Some(onnx_opts) = options.onnx {
-            config.execution_providers = onnx_opts.execution_providers;
-            // Map optimization level if needed
+        // OnnxOptions from config are noted but oxionnx does not support
+        // execution_providers / graph_optimization_level / thread settings.
+        // We still accept the options struct but use defaults.
+        if let Some(ref _onnx_opts) = options.onnx {
+            debug!("ONNX options provided; oxionnx uses defaults for execution/threading");
         }
 
         Ok(Self { config })
@@ -993,28 +816,18 @@ impl OnnxBackend {
 #[async_trait]
 impl crate::backends::Backend for OnnxBackend {
     fn name(&self) -> &'static str {
-        "ONNX Runtime"
+        "OxiONNX"
     }
 
     fn supports_gpu(&self) -> bool {
-        // Check if CUDA provider is available
-        self.config
-            .execution_providers
-            .iter()
-            .any(|p| p == "CUDAExecutionProvider")
+        cfg!(feature = "gpu")
     }
 
     fn available_devices(&self) -> Vec<String> {
         let mut devices = vec!["cpu".to_string()];
 
-        // Check if CUDA provider is configured
-        if self
-            .config
-            .execution_providers
-            .iter()
-            .any(|p| p == "CUDAExecutionProvider")
-        {
-            devices.push("cuda".to_string());
+        if cfg!(feature = "gpu") {
+            devices.push("gpu".to_string());
         }
 
         devices
@@ -1024,7 +837,6 @@ impl crate::backends::Backend for OnnxBackend {
         let model = OnnxAcousticModelBuilder::new()
             .with_model_path(model_path)
             .with_num_threads(self.config.num_threads)
-            .with_optimization_level(self.config.graph_optimization_level.clone())
             .build()
             .await?;
 
@@ -1035,7 +847,7 @@ impl crate::backends::Backend for OnnxBackend {
         crate::backends::BackendCapabilities {
             name: self.name().to_string(),
             supports_gpu: self.supports_gpu(),
-            supports_streaming: true, // Now implemented
+            supports_streaming: true,
             supports_batch_processing: true,
             max_batch_size: Some(32),
             memory_efficient: true,
@@ -1065,7 +877,7 @@ impl crate::backends::Backend for OnnxBackend {
         let compatible = format == crate::backends::ModelFormat::Onnx;
 
         let mut info_metadata = std::collections::HashMap::new();
-        info_metadata.insert("backend".to_string(), "ONNX".to_string());
+        info_metadata.insert("backend".to_string(), "OxiONNX".to_string());
         info_metadata.insert("format".to_string(), format!("{:?}", format));
 
         Ok(crate::backends::ModelInfo {
@@ -1079,11 +891,6 @@ impl crate::backends::Backend for OnnxBackend {
 
     fn optimization_options(&self) -> Vec<crate::backends::OptimizationOption> {
         vec![
-            crate::backends::OptimizationOption {
-                name: "graph_optimization".to_string(),
-                description: "Enable ONNX graph optimization".to_string(),
-                enabled: true,
-            },
             crate::backends::OptimizationOption {
                 name: "memory_pattern".to_string(),
                 description: "Enable memory pattern optimization".to_string(),
@@ -1110,53 +917,46 @@ mod tests {
 
     #[tokio::test]
     async fn test_onnx_model_builder() {
-        let builder = OnnxAcousticModelBuilder::new()
-            .with_num_threads(4)
-            .with_optimization_level("Level1".to_string());
+        let builder = OnnxAcousticModelBuilder::new().with_num_threads(4);
 
-        // Test would require a real ONNX model file
         assert_eq!(builder.config.num_threads, 4);
-        assert_eq!(
-            builder.config.graph_optimization_level,
-            "Level1".to_string()
-        );
     }
 
     #[test]
     fn test_phoneme_to_id() {
+        let vocab_size: usize = 256;
+        let phoneme_to_id = |symbol: &str| -> i64 {
+            let mut hash = 0u64;
+            for byte in symbol.bytes() {
+                hash = hash.wrapping_mul(31).wrapping_add(byte as u64);
+            }
+            (hash % vocab_size as u64) as i64
+        };
+
+        let id1 = phoneme_to_id("a");
+        let id2 = phoneme_to_id("b");
+        assert_ne!(id1, id2);
+        assert!(id1 >= 0 && id1 < vocab_size as i64);
+        assert!(id2 >= 0 && id2 < vocab_size as i64);
+    }
+
+    #[test]
+    fn test_onnx_model_config_default() {
         let config = OnnxModelConfig::default();
-        let metadata = ModelMetadata {
-            name: "test".to_string(),
-            version: "1.0".to_string(),
-            architecture: "test".to_string(),
-            sample_rates: vec![22050],
-            vocab_size: 256,
-            mel_dim: 80,
-            max_sequence_length: 1000,
-            speakers: vec!["default".to_string()],
-            input_names: vec!["phonemes".to_string()],
-            output_names: vec!["mel".to_string()],
-        };
+        assert!(config.model_path.as_os_str().is_empty());
+        assert!(config.num_threads > 0);
+        assert!(config.enable_memory_pattern);
+        assert!(config.enable_cpu_mem_arena);
+    }
 
-        // This would require creating a mock session for full testing
-        // For now, just test the basic ID mapping logic
-        let mock_model = || {
-            let vocab_size = 256;
-            let phoneme_to_id = |symbol: &str| -> i64 {
-                let mut hash = 0u64;
-                for byte in symbol.bytes() {
-                    hash = hash.wrapping_mul(31).wrapping_add(byte as u64);
-                }
-                (hash % vocab_size as u64) as i64
-            };
-
-            let id1 = phoneme_to_id("a");
-            let id2 = phoneme_to_id("b");
-            assert_ne!(id1, id2);
-            assert!(id1 >= 0 && id1 < vocab_size);
-            assert!(id2 >= 0 && id2 < vocab_size);
-        };
-
-        mock_model();
+    #[test]
+    fn test_streaming_state_default() {
+        let state = StreamingState::default();
+        assert_eq!(state.chunk_size, 50);
+        assert_eq!(state.overlap_size, 10);
+        assert!(!state.is_active);
+        assert_eq!(state.total_frames, 0);
+        assert!(state.phoneme_buffer.is_empty());
+        assert!(state.context_phonemes.is_empty());
     }
 }

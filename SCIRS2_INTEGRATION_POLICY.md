@@ -41,10 +41,10 @@ num-traits = "..."            # ❌ Use scirs2-core::numeric
 ```toml
 # ✅ REQUIRED in workspace dependencies
 [workspace.dependencies]
-scirs2-core = { version = "0.1.0-rc.1", features = ["array", "random", "simd", "parallel"] }
-scirs2-fft = "0.1.0-rc.1"
-scirs2-signal = "0.1.0-rc.1"  # Optional - for advanced signal processing
-scirs2-linalg = "0.1.0-rc.1"  # Optional - for linear algebra
+scirs2-core = { version = "0.3.0", features = ["array", "random", "simd", "parallel"] }
+scirs2-fft = "0.3.0"
+scirs2-signal = "0.3.0"  # Optional - for advanced signal processing
+scirs2-linalg = "0.3.0"  # Optional - for linear algebra
 ```
 
 ### Subcrate Cargo.toml Pattern
@@ -305,8 +305,8 @@ pub type Result<T> = std::result::Result<T, VoirsError>;
 
 ### Workspace Cargo.toml Changes
 
-- [x] Update `scirs2-core` to `0.1.0-rc.1`
-- [x] Update `scirs2-fft` to `0.1.0-rc.1`
+- [x] Update `scirs2-core` to `0.3.0`
+- [x] Update `scirs2-fft` to `0.3.0`
 - [x] Add `array` feature to scirs2-core
 - [x] Remove direct `rand` dependency from workspace
 - [x] Remove direct `ndarray` dependency from workspace
@@ -372,7 +372,7 @@ All commands should return **zero results** ✅
 - **Policy Version**: 2.0.0 (Updated for SciRS2 RC.1)
 - **Effective Date**: 2025-10-04
 - **VoiRS Version**: 0.1.0-alpha.3
-- **SciRS2-Core Version**: 0.1.0-rc.1
+- **SciRS2-Core Version**: 0.3.0
 - **Status**: Active - Migration in Progress
 
 ---

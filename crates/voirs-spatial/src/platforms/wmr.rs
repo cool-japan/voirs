@@ -133,7 +133,7 @@ impl WMRPlatform {
             // Simulate device detection
             use scirs2_core::random::Rng;
             let mut rng = scirs2_core::random::thread_rng();
-            self.device_type = match rng.gen_range(0..7) {
+            self.device_type = match rng.random_range(0..7) {
                 0 => WMRDeviceType::HoloLens2,
                 1 => WMRDeviceType::HoloLens1,
                 2 => WMRDeviceType::SamsungOdyssey,

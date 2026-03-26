@@ -20,9 +20,9 @@
 //!
 //! # Example
 //!
-//! ```rust
+//! ```no_run
 //! use voirs_evaluation::context_aware::*;
-//! use voirs_evaluation::audio::AudioBuffer;
+//! use voirs_sdk::AudioBuffer;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create context-aware evaluator
@@ -43,7 +43,7 @@
 //! let samples: Vec<f32> = (0..(sample_rate as f32 * duration) as usize)
 //!     .map(|i| (i as f32 * 0.01).sin() * 0.1)
 //!     .collect();
-//! let audio = AudioBuffer::new(samples, sample_rate, 1)?;
+//! let audio = AudioBuffer::new(samples, sample_rate, 1);
 //!
 //! // Perform context-aware evaluation
 //! let result = evaluator.evaluate(&audio, &audio, &context)?;

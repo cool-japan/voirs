@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 pub mod core_audio;
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "asio"))]
 pub mod asio;
 
 #[cfg(target_os = "linux")]
@@ -178,13 +178,21 @@ impl AudioDriverFactory {
             ))
         }
 
-        #[cfg(target_os = "windows")]
+        #[cfg(all(target_os = "windows", feature = "asio"))]
         {
             if asio::AsioDriver::is_available() {
                 return Ok(Box::new(asio::AsioDriver::new()?));
             }
             return Err(AudioDriverError::InternalError(
                 "ASIO audio driver not available on this system".to_string(),
+            ));
+        }
+
+        #[cfg(all(target_os = "windows", not(feature = "asio")))]
+        {
+            return Err(AudioDriverError::InternalError(
+                "No audio driver available: enable the 'asio' feature for ASIO support on Windows"
+                    .to_string(),
             ));
         }
 
@@ -212,7 +220,7 @@ impl AudioDriverFactory {
             }
         }
 
-        #[cfg(target_os = "windows")]
+        #[cfg(all(target_os = "windows", feature = "asio"))]
         {
             if asio::AsioDriver::is_available() {
                 drivers.push("ASIO");

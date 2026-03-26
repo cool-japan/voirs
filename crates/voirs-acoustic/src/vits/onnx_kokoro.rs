@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 #[cfg(feature = "onnx")]
-use ort::{inputs, session::Session, value::Value};
+use oxionnx::{OptLevel, Session, Tensor};
 
 use crate::{AcousticError, Result};
 
@@ -37,10 +37,8 @@ impl KokoroOnnxInference {
         voice_dim: usize,
     ) -> Result<Self> {
         let session = Session::builder()
-            .map_err(|e| AcousticError::ModelError {
-                message: format!("Failed to create session builder: {}", e),
-            })?
-            .commit_from_file(model_path)
+            .with_optimization_level(OptLevel::All)
+            .load(model_path.as_ref())
             .map_err(|e| AcousticError::ModelError {
                 message: format!("Failed to load ONNX model: {}", e),
             })?;
@@ -316,7 +314,7 @@ impl KokoroOnnxInference {
     ///
     /// # Returns
     /// - Audio samples as `Vec<f32>` at 24kHz sample rate
-    pub fn synthesize(&mut self, phonemes: &str, voice_idx: usize, speed: f32) -> Result<Vec<f32>> {
+    pub fn synthesize(&self, phonemes: &str, voice_idx: usize, speed: f32) -> Result<Vec<f32>> {
         self.synthesize_with_options(phonemes, voice_idx, speed, true)
     }
 
@@ -328,7 +326,7 @@ impl KokoroOnnxInference {
     /// - `speed`: Speech speed (default: 1.0)
     /// - `trim_silence`: Whether to trim leading/trailing silence
     pub fn synthesize_with_options(
-        &mut self,
+        &self,
         phonemes: &str,
         voice_idx: usize,
         speed: f32,
@@ -340,58 +338,34 @@ impl KokoroOnnxInference {
         // Get voice embedding
         let voice_embedding = self.get_voice_embedding(voice_idx)?;
 
-        // Create input tensors
-        let tokens_shape = vec![1, token_ids.len()];
-        let tokens_tensor = Value::from_array((tokens_shape, token_ids)).map_err(|e| {
-            AcousticError::ModelError {
-                message: format!("Failed to create tokens tensor: {}", e),
-            }
-        })?;
+        // Create input tensors - convert i64 to f32 for oxionnx
+        let token_data: Vec<f32> = token_ids.iter().map(|&id| id as f32).collect();
+        let tokens_tensor = Tensor::new(token_data, vec![1, token_ids.len()]);
+        let voice_tensor = Tensor::new(voice_embedding, vec![1, self.voice_dim]);
+        let speed_tensor = Tensor::new(vec![speed], vec![1]);
 
-        let voice_shape = vec![1, self.voice_dim];
-        let voice_tensor = Value::from_array((voice_shape, voice_embedding)).map_err(|e| {
-            AcousticError::ModelError {
-                message: format!("Failed to create voice tensor: {}", e),
-            }
-        })?;
-
-        let speed_tensor =
-            Value::from_array((vec![1], vec![speed])).map_err(|e| AcousticError::ModelError {
-                message: format!("Failed to create speed tensor: {}", e),
-            })?;
+        let mut inputs: HashMap<&str, Tensor> = HashMap::new();
+        inputs.insert("tokens", tokens_tensor);
+        inputs.insert("style", voice_tensor);
+        inputs.insert("speed", speed_tensor);
 
         // Run inference
-        let inputs_vec = inputs![
-            "tokens" => tokens_tensor,
-            "style" => voice_tensor,
-            "speed" => speed_tensor
-        ];
-
         let outputs = self
             .session
-            .run(inputs_vec)
+            .run(&inputs)
             .map_err(|e| AcousticError::ModelError {
                 message: format!("Inference failed: {}", e),
             })?;
 
         // Extract audio output (first output)
         let audio_tensor = outputs
-            .iter()
+            .values()
             .next()
             .ok_or_else(|| AcousticError::ModelError {
                 message: "No output from model".to_string(),
-            })?
-            .1;
+            })?;
 
-        // Convert to Vec<f32>
-        let (_, audio_slice) =
-            audio_tensor
-                .try_extract_tensor::<f32>()
-                .map_err(|e| AcousticError::ModelError {
-                    message: format!("Failed to extract audio: {}", e),
-                })?;
-
-        let mut audio_data: Vec<f32> = audio_slice.to_vec();
+        let mut audio_data: Vec<f32> = audio_tensor.data.clone();
 
         // Trim silence if requested
         if trim_silence {
@@ -406,7 +380,7 @@ impl KokoroOnnxInference {
     /// This is useful when you want to keep the natural beginning but remove
     /// excessive silence at the end.
     pub fn synthesize_trim_end(
-        &mut self,
+        &self,
         phonemes: &str,
         voice_idx: usize,
         speed: f32,
@@ -417,58 +391,34 @@ impl KokoroOnnxInference {
         // Get voice embedding
         let voice_embedding = self.get_voice_embedding(voice_idx)?;
 
-        // Create input tensors
-        let tokens_shape = vec![1, token_ids.len()];
-        let tokens_tensor = Value::from_array((tokens_shape, token_ids)).map_err(|e| {
-            AcousticError::ModelError {
-                message: format!("Failed to create tokens tensor: {}", e),
-            }
-        })?;
+        // Create input tensors - convert i64 to f32 for oxionnx
+        let token_data: Vec<f32> = token_ids.iter().map(|&id| id as f32).collect();
+        let tokens_tensor = Tensor::new(token_data, vec![1, token_ids.len()]);
+        let voice_tensor = Tensor::new(voice_embedding, vec![1, self.voice_dim]);
+        let speed_tensor = Tensor::new(vec![speed], vec![1]);
 
-        let voice_shape = vec![1, self.voice_dim];
-        let voice_tensor = Value::from_array((voice_shape, voice_embedding)).map_err(|e| {
-            AcousticError::ModelError {
-                message: format!("Failed to create voice tensor: {}", e),
-            }
-        })?;
-
-        let speed_tensor =
-            Value::from_array((vec![1], vec![speed])).map_err(|e| AcousticError::ModelError {
-                message: format!("Failed to create speed tensor: {}", e),
-            })?;
+        let mut inputs: HashMap<&str, Tensor> = HashMap::new();
+        inputs.insert("tokens", tokens_tensor);
+        inputs.insert("style", voice_tensor);
+        inputs.insert("speed", speed_tensor);
 
         // Run inference
-        let inputs_vec = inputs![
-            "tokens" => tokens_tensor,
-            "style" => voice_tensor,
-            "speed" => speed_tensor
-        ];
-
         let outputs = self
             .session
-            .run(inputs_vec)
+            .run(&inputs)
             .map_err(|e| AcousticError::ModelError {
                 message: format!("Inference failed: {}", e),
             })?;
 
         // Extract audio output (first output)
         let audio_tensor = outputs
-            .iter()
+            .values()
             .next()
             .ok_or_else(|| AcousticError::ModelError {
                 message: "No output from model".to_string(),
-            })?
-            .1;
+            })?;
 
-        // Convert to Vec<f32>
-        let (_, audio_slice) =
-            audio_tensor
-                .try_extract_tensor::<f32>()
-                .map_err(|e| AcousticError::ModelError {
-                    message: format!("Failed to extract audio: {}", e),
-                })?;
-
-        let audio_data: Vec<f32> = audio_slice.to_vec();
+        let audio_data: Vec<f32> = audio_tensor.data.clone();
 
         // Trim only trailing silence
         let trimmed = Self::trim_trailing_silence(&audio_data, 0.01);
@@ -478,6 +428,10 @@ impl KokoroOnnxInference {
 
     /// Trim leading and trailing silence from audio
     fn trim_silence(audio: &[f32], threshold: f32) -> Vec<f32> {
+        if audio.is_empty() {
+            return Vec::new();
+        }
+
         // Find first sample above threshold
         let start = audio.iter().position(|&s| s.abs() > threshold).unwrap_or(0);
 
@@ -485,8 +439,8 @@ impl KokoroOnnxInference {
         let end = audio
             .iter()
             .rposition(|&s| s.abs() > threshold)
-            .unwrap_or(audio.len() - 1)
-            + 1;
+            .map(|p| p + 1)
+            .unwrap_or(audio.len());
 
         if start < end {
             audio[start..end].to_vec()
@@ -497,11 +451,15 @@ impl KokoroOnnxInference {
 
     /// Trim only trailing silence (keep leading silence)
     fn trim_trailing_silence(audio: &[f32], threshold: f32) -> Vec<f32> {
+        if audio.is_empty() {
+            return Vec::new();
+        }
+
         // Find last sample above threshold
         let end = audio
             .iter()
             .rposition(|&s| s.abs() > threshold)
-            .unwrap_or(audio.len() - 1);
+            .unwrap_or(0);
 
         // Keep 20ms (480 samples at 24kHz) after last significant sample
         let end_with_tail = (end + 480).min(audio.len());

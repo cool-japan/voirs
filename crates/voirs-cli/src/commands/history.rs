@@ -180,7 +180,7 @@ impl HistoryManager {
 
         // Sort by frequency and take top suggestions
         let mut freq_vec: Vec<_> = freq_map.into_iter().collect();
-        freq_vec.sort_by(|a, b| b.1.cmp(&a.1));
+        freq_vec.sort_by_key(|b| std::cmp::Reverse(b.1));
 
         for (cmd, _) in freq_vec.iter().take(limit) {
             suggestions.push(cmd.clone());

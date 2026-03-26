@@ -344,26 +344,28 @@ impl FuzzingTestSuite {
 
     /// Generate random audio buffer
     fn generate_random_audio_buffer(&mut self) -> AudioBuffer {
-        let size = self.rng.gen_range(1..=self.config.max_audio_size);
-        let sample_rate = match self.rng.gen_range(0..4) {
+        let size = self.rng.random_range(1..=self.config.max_audio_size);
+        let sample_rate = match self.rng.random_range(0..4) {
             0 => 8000,
             1 => 16000,
             2 => 22050,
             _ => 44100,
         };
 
-        let samples: Vec<f32> = (0..size).map(|_| self.rng.gen_range(-1.0..=1.0)).collect();
+        let samples: Vec<f32> = (0..size)
+            .map(|_| self.rng.random_range(-1.0..=1.0))
+            .collect();
 
         AudioBuffer::new(samples, sample_rate, 1)
     }
 
     /// Generate extreme audio buffer
     fn generate_extreme_audio_buffer(&mut self) -> AudioBuffer {
-        let size = self.rng.gen_range(1..=1000);
+        let size = self.rng.random_range(1..=1000);
         let sample_rate = 16000;
 
         let samples: Vec<f32> = (0..size)
-            .map(|_| match self.rng.gen_range(0..6) {
+            .map(|_| match self.rng.random_range(0..6) {
                 0 => f32::INFINITY,
                 1 => f32::NEG_INFINITY,
                 2 => f32::NAN,
@@ -378,12 +380,12 @@ impl FuzzingTestSuite {
 
     /// Generate malformed audio buffer
     fn generate_malformed_audio_buffer(&mut self) -> AudioBuffer {
-        let size = self.rng.gen_range(1..=100);
-        let sample_rate = if self.rng.gen_bool(0.5) { 0 } else { 44100 };
+        let size = self.rng.random_range(1..=100);
+        let sample_rate = if self.rng.random_bool(0.5) { 0 } else { 44100 };
 
         let samples: Vec<f32> = (0..size)
             .map(|_| {
-                let extreme_value = self.rng.gen_range(-1e10..=1e10);
+                let extreme_value = self.rng.random_range(-1e10..=1e10);
                 extreme_value
             })
             .collect();
@@ -393,7 +395,7 @@ impl FuzzingTestSuite {
 
     /// Generate random phonemes
     fn generate_random_phonemes(&mut self) -> Vec<Phoneme> {
-        let size = self.rng.gen_range(1..=50);
+        let size = self.rng.random_range(1..=50);
         let phoneme_symbols = vec![
             "a", "e", "i", "o", "u", "t", "n", "s", "r", "l", "d", "k", "m", "p", "w", "f", "g",
             "h", "b", "v",
@@ -401,7 +403,7 @@ impl FuzzingTestSuite {
 
         (0..size)
             .map(|_| {
-                let symbol = phoneme_symbols[self.rng.gen_range(0..phoneme_symbols.len())];
+                let symbol = phoneme_symbols[self.rng.random_range(0..phoneme_symbols.len())];
                 Phoneme::new(symbol)
             })
             .collect()
@@ -409,11 +411,11 @@ impl FuzzingTestSuite {
 
     /// Generate extreme phonemes
     fn generate_extreme_phonemes(&mut self) -> Vec<Phoneme> {
-        let size = self.rng.gen_range(1..=10);
+        let size = self.rng.random_range(1..=10);
 
         (0..size)
             .map(|_| {
-                let symbol = match self.rng.gen_range(0..5) {
+                let symbol = match self.rng.random_range(0..5) {
                     0 => "".to_string(),          // Empty symbol
                     1 => "a".repeat(100),         // Very long symbol
                     2 => "\u{1F600}".to_string(), // Emoji

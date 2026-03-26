@@ -351,7 +351,7 @@ impl CompactInteractionSummary {
         }
 
         // Sort by count (descending) and keep only top N
-        self.top_features.sort_by(|a, b| b.1.cmp(&a.1));
+        self.top_features.sort_by_key(|b| std::cmp::Reverse(b.1));
         self.top_features.truncate(Self::MAX_TOP_FEATURES);
     }
 

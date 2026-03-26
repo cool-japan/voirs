@@ -80,6 +80,14 @@ pub use conformer::{
     create_conformer_asr, create_conformer_asr_with_config, ConformerConfig, ConformerModel,
 };
 
+// ONNX-based ASR backends (via OxiONNX)
+#[cfg(feature = "onnx")]
+pub mod conformer_onnx;
+#[cfg(feature = "onnx")]
+pub mod wav2vec2_onnx;
+#[cfg(feature = "onnx")]
+pub mod whisper_onnx;
+
 /// ASR backend enumeration
 #[derive(Debug, Clone, PartialEq)]
 pub enum ASRBackend {

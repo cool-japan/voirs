@@ -560,7 +560,7 @@ fn generate_noisy_signal(
             let signal = (i as f32 * frequency * 2.0 * std::f32::consts::PI / sample_rate as f32)
                 .sin()
                 * 0.5;
-            let noise = (rng.r#gen::<f32>() - 0.5) * noise_level;
+            let noise = (rng.random::<f32>() - 0.5) * noise_level;
             signal + noise
         })
         .collect()

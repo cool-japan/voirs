@@ -637,7 +637,7 @@ pub fn add_noise(audio: PyReadonlyArray1<f32>, noise_level: f32) -> PyResult<Vec
     let noisy_samples: Vec<f32> = audio_array
         .iter()
         .map(|&sample| {
-            let noise = rng.gen_range(-noise_level..noise_level);
+            let noise = rng.random_range(-noise_level..noise_level);
             sample + noise
         })
         .collect();

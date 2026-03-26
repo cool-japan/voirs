@@ -631,14 +631,14 @@ impl ProfilingReport {
     /// Get the slowest operations
     pub fn slowest_operations(&self, n: usize) -> Vec<&OperationProfile> {
         let mut sorted = self.operation_profiles.iter().collect::<Vec<_>>();
-        sorted.sort_by(|a, b| b.timing.avg_duration.cmp(&a.timing.avg_duration));
+        sorted.sort_by_key(|b| std::cmp::Reverse(b.timing.avg_duration));
         sorted.into_iter().take(n).collect()
     }
 
     /// Get the most memory-intensive operations
     pub fn most_memory_intensive(&self, n: usize) -> Vec<&OperationProfile> {
         let mut sorted = self.operation_profiles.iter().collect::<Vec<_>>();
-        sorted.sort_by(|a, b| b.memory.peak_memory_bytes.cmp(&a.memory.peak_memory_bytes));
+        sorted.sort_by_key(|b| std::cmp::Reverse(b.memory.peak_memory_bytes));
         sorted.into_iter().take(n).collect()
     }
 }

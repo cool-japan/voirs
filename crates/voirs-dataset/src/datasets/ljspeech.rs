@@ -255,12 +255,29 @@ impl LjSpeechDataset {
 
         // Extract archive
         let tar_bz2 = std::io::Cursor::new(bytes);
-        let tar = bzip2::read::BzDecoder::new(tar_bz2);
-        let mut archive = tar::Archive::new(tar);
+        // Decompress bzip2 using oxiarc-bzip2 (COOLJAPAN Pure Rust Policy)
+        let tar_data = oxiarc_bzip2::decompress(tar_bz2)
+            .map_err(|e| DatasetError::IoError(std::io::Error::other(e.to_string())))?;
 
-        archive
-            .unpack(download_path)
-            .map_err(DatasetError::IoError)?;
+        let cursor = std::io::Cursor::new(tar_data);
+        let mut tar_reader = oxiarc_archive::TarReader::new(cursor)
+            .map_err(|e| DatasetError::IoError(std::io::Error::other(e.to_string())))?;
+
+        let entries = tar_reader.entries().to_vec();
+        for entry in &entries {
+            let target_path = download_path.join(&entry.name);
+            if entry.is_dir() {
+                fs::create_dir_all(&target_path).await?;
+            } else if entry.is_file() {
+                if let Some(parent) = target_path.parent() {
+                    fs::create_dir_all(parent).await?;
+                }
+                let data = tar_reader
+                    .extract_to_vec(entry)
+                    .map_err(|e| DatasetError::IoError(std::io::Error::other(e.to_string())))?;
+                fs::write(&target_path, &data).await?;
+            }
+        }
 
         tracing::info!(
             "Successfully downloaded and extracted LJSpeech dataset to {:?}",
@@ -400,7 +417,7 @@ impl LjSpeechDataset {
             .map(|(i, sample)| (i, sample.text.chars().count()))
             .collect();
 
-        indexed_samples.sort_by(|a, b| a.1.cmp(&b.1));
+        indexed_samples.sort_by_key(|a| a.1);
 
         // Group into buckets and shuffle within buckets
         let bucket_size = indexed_samples.len() / 10; // 10 buckets

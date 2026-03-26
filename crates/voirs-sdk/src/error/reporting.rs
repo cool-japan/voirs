@@ -745,11 +745,14 @@ fn get_available_memory_mb() -> u32 {
     {
         // Fallback for Windows - would need Windows API calls
         // For now, return a reasonable default
-        return 2048;
+        2048
     }
 
-    // Fallback for unknown platforms
-    1024
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Fallback for unknown platforms
+        1024
+    }
 }
 
 fn get_cpu_usage() -> f32 {
@@ -819,11 +822,14 @@ fn get_cpu_usage() -> f32 {
     {
         // Fallback for Windows - would need Windows API calls
         // Return a reasonable estimate
-        return 25.0;
+        25.0
     }
 
-    // Fallback: return low usage estimate
-    10.0
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Fallback: return low usage estimate
+        10.0
+    }
 }
 
 fn get_gpu_memory_mb() -> Option<u32> {
@@ -924,13 +930,16 @@ fn get_active_threads() -> u32 {
     {
         // Fallback for Windows - would need Windows API calls
         // Return reasonable estimate
-        return 4;
+        4
     }
 
-    // Fallback: estimate based on CPU cores
-    std::thread::available_parallelism()
-        .map(|n| n.get() as u32)
-        .unwrap_or(1)
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Fallback: estimate based on CPU cores
+        std::thread::available_parallelism()
+            .map(|n| n.get() as u32)
+            .unwrap_or(1)
+    }
 }
 
 fn get_load_average() -> Option<f32> {
@@ -981,10 +990,13 @@ fn get_load_average() -> Option<f32> {
     {
         // Windows doesn't have load average concept
         // Could approximate with CPU usage over time, but returning None for now
-        return None;
+        None
     }
 
-    None
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
 }
 
 fn get_os_info() -> String {

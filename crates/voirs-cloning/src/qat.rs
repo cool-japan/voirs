@@ -332,8 +332,8 @@ impl QatModule {
             let final_val = if self.config.enable_noise_injection {
                 use scirs2_core::random::Rng;
                 let mut rng = scirs2_core::random::thread_rng();
-                if rng.gen::<f32>() < self.config.noise_prob {
-                    let noise = rng.gen_range(-scale..scale) * 0.1;
+                if rng.random::<f32>() < self.config.noise_prob {
+                    let noise = rng.random_range(-scale..scale) * 0.1;
                     dequantized + noise
                 } else {
                     dequantized

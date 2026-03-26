@@ -4,10 +4,10 @@ build-backend = "maturin"
 
 [project]
 name = "voirs-recognizer"
-version = "0.1.0"
+version = "0.1.0rc1"
 description = "Voice recognition and analysis capabilities for VoiRS"
 authors = [{name = "VoiRS Contributors"}]
-license = {text = "MIT OR Apache-2.0"}
+license = {text = "Apache-2.0"}
 requires-python = ">=3.8"
 readme = "README.md"
 homepage = "https://github.com/cool-japan/voirs"
@@ -16,7 +16,6 @@ keywords = ["voice", "recognition", "asr", "speech", "audio", "analysis"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",

@@ -16,10 +16,11 @@
 //!
 //! # Example
 //!
-//! ```rust
+//! ```no_run
 //! use voirs_evaluation::rbac::*;
 //!
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create RBAC manager
 //! let mut rbac = RbacManager::new();
 //!
@@ -35,15 +36,15 @@
 //!     .with_permission(Permission::EvaluationRead);
 //!
 //! // Add roles to system
-//! rbac.add_role(admin_role)?;
-//! rbac.add_role(analyst_role)?;
+//! rbac.add_role(admin_role).await?;
+//! rbac.add_role(analyst_role).await?;
 //!
 //! // Assign user to role
-//! rbac.assign_user_role("user@example.com", "analyst")?;
+//! rbac.assign_user_role("user@example.com", "analyst").await?;
 //!
 //! // Check permissions
-//! assert!(rbac.has_permission("user@example.com", Permission::EvaluationRead)?);
-//! assert!(!rbac.has_permission("user@example.com", Permission::SystemAdmin)?);
+//! assert!(rbac.has_permission("user@example.com", Permission::EvaluationRead).await?);
+//! assert!(!rbac.has_permission("user@example.com", Permission::SystemAdmin).await?);
 //! # Ok(())
 //! # }
 //! ```

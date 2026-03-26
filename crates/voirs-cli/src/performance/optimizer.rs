@@ -612,39 +612,36 @@ impl PerformanceOptimizer {
         weight: f64,
     ) {
         match category {
-            OptimizationCategory::Io => {
+            OptimizationCategory::Io
                 if metrics.system.disk_read_bps > 50_000_000
-                    || metrics.system.disk_write_bps > 50_000_000
-                {
-                    recommendations.push(OptimizationRecommendation {
-                        category: OptimizationCategory::Io,
-                        priority: (6.0 * weight) as u8,
-                        description: "High disk I/O detected".to_string(),
-                        recommendation: "Use SSD storage or enable I/O optimization".to_string(),
-                        expected_improvement: format!(
-                            "{:.0}% I/O performance improvement",
-                            40.0 * weight
-                        ),
-                        difficulty: 3,
-                        performance_impact: 0.3 * weight,
-                    });
-                }
+                    || metrics.system.disk_write_bps > 50_000_000 =>
+            {
+                recommendations.push(OptimizationRecommendation {
+                    category: OptimizationCategory::Io,
+                    priority: (6.0 * weight) as u8,
+                    description: "High disk I/O detected".to_string(),
+                    recommendation: "Use SSD storage or enable I/O optimization".to_string(),
+                    expected_improvement: format!(
+                        "{:.0}% I/O performance improvement",
+                        40.0 * weight
+                    ),
+                    difficulty: 3,
+                    performance_impact: 0.3 * weight,
+                });
             }
-            OptimizationCategory::Network => {
-                if metrics.system.network_bps > 100_000_000 {
-                    recommendations.push(OptimizationRecommendation {
-                        category: OptimizationCategory::Network,
-                        priority: (5.0 * weight) as u8,
-                        description: "High network usage detected".to_string(),
-                        recommendation: "Enable compression or local caching".to_string(),
-                        expected_improvement: format!(
-                            "{:.0}% network efficiency improvement",
-                            25.0 * weight
-                        ),
-                        difficulty: 3,
-                        performance_impact: 0.2 * weight,
-                    });
-                }
+            OptimizationCategory::Network if metrics.system.network_bps > 100_000_000 => {
+                recommendations.push(OptimizationRecommendation {
+                    category: OptimizationCategory::Network,
+                    priority: (5.0 * weight) as u8,
+                    description: "High network usage detected".to_string(),
+                    recommendation: "Enable compression or local caching".to_string(),
+                    expected_improvement: format!(
+                        "{:.0}% network efficiency improvement",
+                        25.0 * weight
+                    ),
+                    difficulty: 3,
+                    performance_impact: 0.2 * weight,
+                });
             }
             OptimizationCategory::Configuration => {
                 recommendations.push(OptimizationRecommendation {
@@ -657,18 +654,16 @@ impl PerformanceOptimizer {
                     performance_impact: 0.15 * weight,
                 });
             }
-            OptimizationCategory::ResourceAllocation => {
-                if metrics.synthesis.queue_depth > 10 {
-                    recommendations.push(OptimizationRecommendation {
-                        category: OptimizationCategory::ResourceAllocation,
-                        priority: (7.0 * weight) as u8,
-                        description: format!("High queue depth: {}", metrics.synthesis.queue_depth),
-                        recommendation: "Optimize resource allocation and scheduling".to_string(),
-                        expected_improvement: format!("{:.0}% latency reduction", 30.0 * weight),
-                        difficulty: 3,
-                        performance_impact: 0.25 * weight,
-                    });
-                }
+            OptimizationCategory::ResourceAllocation if metrics.synthesis.queue_depth > 10 => {
+                recommendations.push(OptimizationRecommendation {
+                    category: OptimizationCategory::ResourceAllocation,
+                    priority: (7.0 * weight) as u8,
+                    description: format!("High queue depth: {}", metrics.synthesis.queue_depth),
+                    recommendation: "Optimize resource allocation and scheduling".to_string(),
+                    expected_improvement: format!("{:.0}% latency reduction", 30.0 * weight),
+                    difficulty: 3,
+                    performance_impact: 0.25 * weight,
+                });
             }
             _ => {} // Already handled in specific methods
         }

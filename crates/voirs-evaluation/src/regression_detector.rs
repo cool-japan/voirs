@@ -216,7 +216,7 @@ impl RegressionDetector {
         }
 
         // Sort by timestamp (most recent first)
-        measurements.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        measurements.sort_by_key(|b| std::cmp::Reverse(b.timestamp));
 
         // Take the baseline window (excluding the most recent measurement)
         let baseline_measurements = &measurements[1..];

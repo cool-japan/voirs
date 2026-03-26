@@ -965,10 +965,10 @@ impl AccuracyBenchmarkRunner {
                 {
                     use scirs2_core::random::{thread_rng, Rng};
                     let mut rng = thread_rng();
-                    if rng.r#gen::<f64>() < 0.05 {
+                    if rng.random::<f64>() < 0.05 {
                         // 5% chance of error
                         if !result.is_empty() {
-                            let idx = rng.gen_range(0..result.len());
+                            let idx = rng.random_range(0..result.len());
                             result[idx] = String::from("UH0"); // Common confusion
                         }
                     }
@@ -979,7 +979,7 @@ impl AccuracyBenchmarkRunner {
                 {
                     use scirs2_core::random::{thread_rng, Rng};
                     let mut rng = thread_rng();
-                    if rng.r#gen::<f64>() < 0.08 {
+                    if rng.random::<f64>() < 0.08 {
                         // 8% chance of error
                         if !result.is_empty() {
                             result.push(String::from("u")); // Extra vowel
@@ -992,7 +992,7 @@ impl AccuracyBenchmarkRunner {
                 {
                     use scirs2_core::random::{thread_rng, Rng};
                     let mut rng = thread_rng();
-                    if rng.r#gen::<f64>() < 0.10 {
+                    if rng.random::<f64>() < 0.10 {
                         if !result.is_empty() {
                             result.pop(); // Drop last phoneme
                         }

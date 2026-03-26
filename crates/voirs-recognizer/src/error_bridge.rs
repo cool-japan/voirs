@@ -277,7 +277,7 @@ impl ErrorReporter {
     pub fn get_most_common_errors(&self, limit: usize) -> Vec<(String, usize)> {
         let counts = self.error_counts.read();
         let mut counts_vec: Vec<_> = counts.iter().map(|(k, v)| (k.clone(), *v)).collect();
-        counts_vec.sort_by(|a, b| b.1.cmp(&a.1));
+        counts_vec.sort_by_key(|b| std::cmp::Reverse(b.1));
         counts_vec.truncate(limit);
         counts_vec
     }

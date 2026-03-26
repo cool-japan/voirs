@@ -137,7 +137,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let model_dir = temp_dir.join("voirs_models/kokoro-zh");
 
         println!("📥 Loading Kokoro multilingual model...");
-        let mut model = KokoroOnnxInference::from_kokoro_files(&model_dir)?;
+        let model = KokoroOnnxInference::from_kokoro_files(&model_dir)?;
         println!("   ✅ Model loaded");
         println!();
 

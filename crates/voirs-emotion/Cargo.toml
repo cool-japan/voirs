@@ -43,6 +43,9 @@ num_cpus = { workspace = true }
 candle-core = { workspace = true, optional = true }
 candle-nn = { workspace = true, optional = true }
 
+# ONNX Runtime (optional)
+oxionnx = { workspace = true, optional = true }
+
 # VoiRS dependencies
 voirs-acoustic = { workspace = true, optional = true }
 # voirs-sdk = { path = "../voirs-sdk", optional = true } # Commented out to break cyclic dependency
@@ -73,7 +76,7 @@ acoustic-integration = ["voirs-acoustic"]
 sdk-integration = []  # Prevent cyclic dependency by not depending on voirs-sdk
 evaluation-integration = []  # Prevent cyclic dependency by not depending on voirs-evaluation
 full-integration = ["acoustic-integration"]
-gpu = ["candle-core", "candle-nn"]
+gpu = ["candle-core", "candle-nn", "oxionnx?/gpu"]
 cuda = ["gpu", "candle-core/cuda"]
 wasm = [
     "wasm-bindgen",
@@ -83,7 +86,7 @@ wasm = [
     "console_error_panic_hook",
     "wasm-logger"
 ]
-onnx = []
+onnx = ["dep:oxionnx"]
 
 [[bench]]
 name = "emotion_processing"

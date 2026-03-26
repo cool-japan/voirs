@@ -123,7 +123,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("📥 Loading Kokoro multilingual model...");
         println!("   Model dir: {}", model_dir.display());
 
-        let mut model = KokoroOnnxInference::from_kokoro_files(&model_dir)?;
+        let model = KokoroOnnxInference::from_kokoro_files(&model_dir)?;
         println!("   ✅ Model loaded");
         println!();
 

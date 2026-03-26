@@ -39,7 +39,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.1.0-beta.1"
+version = "0.1.0-rc.1"
 edition = "2021"
 authors = ["Tetsuya Kitahata <tetsuya@cool-japan.co.jp>"]
 license = "Apache-2.0"
@@ -53,36 +53,37 @@ rust-version = "1.89"
 [workspace.dependencies]
 # SciRS2 Ecosystem - Scientific computing abstractions
 # POLICY: All VoiRS crates MUST use scirs2-core abstractions (see SCIRS2_INTEGRATION_POLICY.md)
-scirs2-core = { version = "0.2.0", features = ["array", "random", "simd", "parallel"] }
-scirs2-fft = { version = "0.2.0", features = ["rustfft-backend"] }
+scirs2-core = { version = "0.3.4", features = ["array", "random", "simd", "parallel"] }
+scirs2-fft = { version = "0.3.4", features = ["rustfft-backend"] }
 
 # NumRS2 - NumPy-like numerical computing (for numpy .npz file support)
-numrs2 = "0.2"
+numrs2 = "0.3.1"
 
 # Internal VoiRS crates
-voirs-g2p = { version = "0.1.0-beta.1", path = "crates/voirs-g2p" }
-voirs-acoustic = { version = "0.1.0-beta.1", path = "crates/voirs-acoustic" }
-voirs-vocoder = { version = "0.1.0-beta.1", path = "crates/voirs-vocoder" }
-voirs-dataset = { version = "0.1.0-beta.1", path = "crates/voirs-dataset" }
-voirs-sdk = { version = "0.1.0-beta.1", path = "crates/voirs-sdk" }
-voirs-cli = { version = "0.1.0-beta.1", path = "crates/voirs-cli" }
-voirs-ffi = { version = "0.1.0-beta.1", path = "crates/voirs-ffi" }
-voirs-recognizer = { version = "0.1.0-beta.1", path = "crates/voirs-recognizer" }
-voirs-evaluation = { version = "0.1.0-beta.1", path = "crates/voirs-evaluation" }
-voirs-feedback = { version = "0.1.0-beta.1", path = "crates/voirs-feedback" }
-voirs-emotion = { version = "0.1.0-beta.1", path = "crates/voirs-emotion" }
-voirs-cloning = { version = "0.1.0-beta.1", path = "crates/voirs-cloning" }
-voirs-conversion = { version = "0.1.0-beta.1", path = "crates/voirs-conversion" }
-voirs-singing = { version = "0.1.0-beta.1", path = "crates/voirs-singing" }
-voirs-spatial = { version = "0.1.0-beta.1", path = "crates/voirs-spatial" }
+voirs-g2p = { version = "0.1.0-rc.1", path = "crates/voirs-g2p" }
+voirs-acoustic = { version = "0.1.0-rc.1", path = "crates/voirs-acoustic" }
+voirs-vocoder = { version = "0.1.0-rc.1", path = "crates/voirs-vocoder" }
+voirs-dataset = { version = "0.1.0-rc.1", path = "crates/voirs-dataset" }
+voirs-sdk = { version = "0.1.0-rc.1", path = "crates/voirs-sdk" }
+voirs-cli = { version = "0.1.0-rc.1", path = "crates/voirs-cli" }
+voirs-ffi = { version = "0.1.0-rc.1", path = "crates/voirs-ffi" }
+voirs-recognizer = { version = "0.1.0-rc.1", path = "crates/voirs-recognizer" }
+voirs-evaluation = { version = "0.1.0-rc.1", path = "crates/voirs-evaluation" }
+voirs-feedback = { version = "0.1.0-rc.1", path = "crates/voirs-feedback" }
+voirs-emotion = { version = "0.1.0-rc.1", path = "crates/voirs-emotion" }
+voirs-cloning = { version = "0.1.0-rc.1", path = "crates/voirs-cloning" }
+voirs-conversion = { version = "0.1.0-rc.1", path = "crates/voirs-conversion" }
+voirs-singing = { version = "0.1.0-rc.1", path = "crates/voirs-singing" }
+voirs-spatial = { version = "0.1.0-rc.1", path = "crates/voirs-spatial" }
 
 # Core tensor/ML libraries
 candle-core = "0.9.2"
 candle-nn = "0.9.2"
 candle-transformers = "0.9.2"
-ort = "2.0.0-rc.11"
+oxionnx = "0.1.0"
 safetensors = "0.7.0"
 hf-hub = "0.5.0"
+openssl = "0.10"  # Transitively needed by hf-hub via native-tls; system openssl used (installed via before-script-linux)
 tract-onnx = "0.22.1"  # ONNX model loading and inference
 tract-core = "0.22.1"  # Core tract functionality for ONNX conversion
 
@@ -103,7 +104,7 @@ mp4 = "0.14"  # MP4 container support
 # NOTE: ndarray and num-complex removed - use scirs2-core::ndarray and scirs2-core::numeric
 oxifft = "0.1.3"
 # NOTE: wide and simba kept for direct SIMD in specific optimized paths (non-array operations)
-wide = "1.1.1"  # SIMD processing
+wide = "1.2.0"  # SIMD processing
 simba = "0.9"  # SIMD abstractions
 
 # Text processing
@@ -111,7 +112,7 @@ unicode-normalization = "0.1"
 unicode-segmentation = "1.12"
 
 # Async/concurrency
-tokio = { version = "1.49.0", features = ["full"] }
+tokio = { version = "1.50.0", features = ["full"] }
 tokio-stream = "0.1"
 async-stream = "0.3"
 # NOTE: rayon removed - use scirs2-core::parallel_ops
@@ -119,11 +120,11 @@ async-stream = "0.3"
 # Serialization
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0"
-oxicode = { version = "0.1.1", features = ["serde"] }
+oxicode = { version = "0.2", features = ["serde"] }
 ordered-float = "5.1"
 
 # CLI and utilities
-clap = { version = "4.5.60", features = ["derive"] }
+clap = { version = "4.6.0", features = ["derive"] }
 anyhow = "1.0.102"
 thiserror = "2.0.18"
 log = "0.4.29"
@@ -139,13 +140,13 @@ async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 # NOTE: rand removed - use scirs2-core::random for statistical distributions
-uuid = { version = "1.21", features = ["v4", "serde", "js"] }
+uuid = { version = "1.22", features = ["v4", "serde", "js"] }
 
 # Additional CLI dependencies
 indicatif = "0.18"
 console = "0.16"
 dialoguer = "0.12"
-clap_complete = "4.5"
+clap_complete = "4.6"
 lru = "0.16.3"
 
 # Terminal UI dependencies
@@ -158,15 +159,15 @@ axum = { version = "0.8", features = ["json", "query", "ws"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace", "compression-br", "compression-gzip", "limit", "request-id"] }
 hyper = { version = "1.8", features = ["full"] }
-flate2 = "1.1"
-zstd = "0.13"
-tar = "0.4"
-oxiarc-archive = "0.2.1"
-bzip2 = "0.6"
+oxiarc-deflate = { version = "0.2.5", path = "../oxiarc/oxiarc-deflate" }
+oxiarc-zstd = "0.2.5"
+oxiarc-archive = "0.2.5"
+oxiarc-bzip2 = "0.2.5"
 csv = "1.4"
 walkdir = "2.5"
-tempfile = "3.26"
-libc = "0.2.182"
+glob = "0.3"
+tempfile = "3.27"
+libc = "0.2.183"
 once_cell = "1.21"
 num_cpus = "1.17"
 
@@ -215,7 +216,7 @@ notify = "8.2.0"
 
 # Dynamic loading and plugin support
 libloading = "0.9"
-wasmtime = "42.0.1"
+wasmtime = "43.0.0"
 
 # Data format support
 parquet = "58.0.0"
@@ -233,11 +234,11 @@ midly = "0.5.3"
 winapi = { version = "0.3", features = ["processthreadsapi", "psapi", "winnt", "handleapi"] }
 
 # GPU/OpenCL support
-opencl3 = "0.12.1"
+opencl3 = "0.12.3"
 
 # HTTP/Web dependencies
 mime = "0.3"
-tokio-tungstenite = "0.28"
+tokio-tungstenite = "0.29"
 
 
 [patch.crates-io]

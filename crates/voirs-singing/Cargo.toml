@@ -36,7 +36,11 @@ musicxml = { workspace = true, optional = true }
 midly = { workspace = true, optional = true }
 
 # Utilities
+num_cpus = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
+
+# ONNX inference backend
+oxionnx = { workspace = true, optional = true }
 chrono = { workspace = true, features = ["serde"] }
 async-trait = { workspace = true }
 base64 = { workspace = true }
@@ -67,6 +71,8 @@ wasm-bindgen-test = { workspace = true }
 
 [features]
 default = []
+onnx = ["dep:oxionnx"]
+gpu = ["oxionnx?/gpu"]
 musicxml-support = ["musicxml"]
 midi-support = ["midly"]
 advanced-effects = []

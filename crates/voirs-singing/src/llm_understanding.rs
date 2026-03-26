@@ -450,7 +450,7 @@ impl LlmMusicalUnderstanding {
         let mut seeded_rng = scirs2_core::random::StdRng::seed_from_u64(seed);
 
         (0..self.config.embedding_dim)
-            .map(|_| seeded_rng.gen_range(-1.0..1.0))
+            .map(|_| seeded_rng.random_range(-1.0..1.0))
             .collect()
     }
 

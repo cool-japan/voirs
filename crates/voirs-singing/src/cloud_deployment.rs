@@ -399,7 +399,7 @@ impl CloudDeploymentManager {
         let mut workers = self.workers.write().await;
 
         // Sort queue by priority (highest first)
-        queue.sort_by(|a, b| b.priority.cmp(&a.priority));
+        queue.sort_by_key(|b| std::cmp::Reverse(b.priority));
 
         for job in queue.iter_mut() {
             if job.status != JobStatus::Queued {
@@ -629,7 +629,7 @@ impl LoadBalancer {
                 if available.is_empty() {
                     None
                 } else {
-                    let idx = rng.gen_range(0..available.len());
+                    let idx = rng.random_range(0..available.len());
                     Some(available[idx])
                 }
             }

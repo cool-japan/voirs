@@ -53,19 +53,16 @@ pub fn diagnose_conversion_error(
 
     // Language-specific checks
     match language {
-        LanguageCode::Ja => {
-            if text.chars().any(|c| c.is_ascii_alphabetic()) && !text.is_ascii() {
-                report
-                    .warnings
-                    .push("Mixed script detected in Japanese text".to_string());
-            }
+        LanguageCode::Ja if text.chars().any(|c| c.is_ascii_alphabetic()) && !text.is_ascii() => {
+            report
+                .warnings
+                .push("Mixed script detected in Japanese text".to_string());
         }
-        LanguageCode::EnUs | LanguageCode::EnGb => {
-            if !text.is_ascii() {
-                report
-                    .warnings
-                    .push("Non-ASCII characters in English text".to_string());
-            }
+        LanguageCode::Ja => {}
+        LanguageCode::EnUs | LanguageCode::EnGb if !text.is_ascii() => {
+            report
+                .warnings
+                .push("Non-ASCII characters in English text".to_string());
         }
         _ => {}
     }

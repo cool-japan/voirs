@@ -354,7 +354,7 @@ impl PerformanceMonitor {
 
             // Sort by severity (highest first)
             let mut sorted_recommendations = recommendations;
-            sorted_recommendations.sort_by(|a, b| b.severity.cmp(&a.severity));
+            sorted_recommendations.sort_by_key(|b| std::cmp::Reverse(b.severity));
 
             for (i, rec) in sorted_recommendations.iter().enumerate() {
                 let priority = match rec.severity {
@@ -830,7 +830,7 @@ impl AdvancedProfiler {
             .collect();
 
         // Sort by total time descending
-        results.sort_by(|a, b| b.1.total_time.cmp(&a.1.total_time));
+        results.sort_by_key(|b| std::cmp::Reverse(b.1.total_time));
         results
     }
 

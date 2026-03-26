@@ -1,10 +1,38 @@
 # VoiRS Development Roadmap & TODO
 
-> **Status**: Current Version 0.1.0-alpha.2 - **PRODUCTION READY** ✅🚀
-> **Last Updated**: 2025-10-03
+> **Status**: Current Version 0.1.0-rc.1 - **PRODUCTION READY**
+> **Last Updated**: 2026-03-25
 > **Next Milestone**: Version 0.2.0 - Advanced Neural Features & Production Optimization
 
-## 🎉 **Latest Development Session** (2025-10-03)
+## Latest Development Session (2026-03-25)
+
+**OxiONNX Integration Expansion - Pure Rust ONNX Runtime Across All Crates:**
+
+- [x] **Phase 1: Foundation** - Unified `OnnxSession` wrapper in voirs-sdk (`model_runtime` module) with `SessionBuilder`, `OptLevel`, profiling, `model_info()`, `export_dot()`, format auto-detection
+- [x] **Phase 1B**: Fixed voirs-recognizer oxionnx dependency to optional + feature-gated
+- [x] **Phase 1C**: Upgraded existing acoustic/vocoder backends to use `SessionBuilder` with configurable optimization levels, profiling, and memory pool
+- [x] **Phase 2: voirs-recognizer ONNX** - `OnnxWhisper` (encoder-decoder), `OnnxConformer` (CTC), `OnnxWav2Vec2` (raw waveform CTC) ASR backends with 11 tests
+- [x] **Phase 3: voirs-singing ONNX** - `OnnxDiffSinger` (acoustic+vocoder pipeline) and `OnnxSingingModel` (generic) with streaming support, 4 tests
+- [x] **Phase 4A: voirs-emotion ONNX** - `OnnxEmotionClassifier` with 7-emotion softmax classification from mel spectrograms
+- [x] **Phase 4B: voirs-cloning ONNX** - `OnnxSpeakerEncoder` (L2-normalized embeddings) + `OnnxVoiceCloner` (text+embedding -> mel)
+- [x] **Phase 4C: voirs-conversion ONNX** - `OnnxVoiceConverter` with 3-session pipeline (content encoder, speaker encoder, decoder)
+- [x] **Phase 5A: voirs-spatial ONNX** - `OnnxNeuralHrtf` for neural HRTF synthesis from position coordinates
+- [x] **Phase 5B: voirs-evaluation ONNX** - `OnnxMosPredictor` for MOS score prediction (1.0-5.0)
+- [x] **Phase 5C: voirs-g2p ONNX** - `OnnxG2p` for neural grapheme-to-phoneme conversion
+- [x] **Phase 6: CLI ONNX Tools** - `voirs onnx inspect/profile/dot/info` commands using OxiONNX model inspection, profiling, and Graphviz export
+- [x] **Phase 7: GPU Propagation** - `oxionnx?/gpu` (wgpu) feature across all 12 ONNX-using crates with SDK/CLI propagation
+- [x] **OxiONNX Enhancement** - Added `weights()` public API to OxiONNX Session for weight extraction
+
+**Technical Details:**
+- OxiONNX: Pure Rust ONNX runtime, 88 operators, graph optimizations (constant folding, operator fusion), wgpu GPU backend
+- All backends use `Session::builder().with_optimization_level().with_profiling().with_memory_pool().load()` pattern
+- Thread-safe: `Arc<RwLock<Session>>` for concurrent access
+- All ONNX code feature-gated: `#[cfg(feature = "onnx")]` + `onnx = ["dep:oxionnx"]`
+- Zero clippy warnings, zero compilation errors with `--all-features`
+
+---
+
+## Previous Development Session (2025-10-03)
 
 **✅ DIFFWAVE VOCODER TRAINING IMPLEMENTATION COMPLETE:**
 - ✅ **Real Parameter Saving**: Successfully implemented extraction of all 370 DiffWave model parameters from Candle VarMap to SafeTensors format (30MB checkpoints vs 164KB dummy)
@@ -158,14 +186,17 @@ VoiRS has achieved production readiness with comprehensive neural speech synthes
 ## 📊 **Component-Specific Roadmaps**
 
 ### voirs-acoustic
+- [x] **ONNX Backend** - OxiONNX-based inference with SessionBuilder, profiling, GPU support
+- [x] **VITS ONNX Loaders** - Generic VITS, Chinese VITS, Kokoro multilingual (54 voices, 8 languages)
 - [ ] VITS2 architecture implementation
 - [ ] FastSpeech2++ integration
 - [ ] Controllable synthesis parameters
 - [ ] Multi-speaker support enhancements
 - [ ] Emotion conditioning improvements
 
-### voirs-vocoder ✅ DIFFWAVE TRAINING COMPLETE (2025-10-03)
-- [x] **DiffWave Training Pipeline** - Complete end-to-end training with real parameter saving and backward pass ✅ *COMPLETED 2025-10-03*
+### voirs-vocoder
+- [x] **ONNX Backend** - OxiONNX-based vocoder inference with SessionBuilder, profiling, GPU support
+- [x] **DiffWave Training Pipeline** - Complete end-to-end training with real parameter saving and backward pass
 - [x] **Parameter Persistence** - SafeTensors checkpoint saving with all 370 model parameters (30MB per checkpoint) ✅ *COMPLETED 2025-10-03*
 - [x] **Gradient-based Learning** - Full backward pass with optimizer.backward_step() integration ✅ *COMPLETED 2025-10-03*
 - [x] **Shape/DType Fixes** - All 8 tensor shape and dtype bugs resolved for production use ✅ *COMPLETED 2025-10-03*
@@ -178,13 +209,16 @@ VoiRS has achieved production readiness with comprehensive neural speech synthes
 - [ ] Resume training from checkpoint
 
 ### voirs-emotion
+- [x] **ONNX Emotion Classifier** - 7-emotion classification from mel spectrograms via OxiONNX
 - [ ] Multi-dimensional emotion spaces
 - [ ] Emotion intensity control
 - [ ] Cross-cultural emotion mapping
 - [ ] Emotion interpolation refinement
 - [ ] Real-time emotion adaptation
 
-### voirs-cloning ✅ SECURITY & ETHICS COMPLETE (2025-07-23)
+### voirs-cloning
+- [x] **ONNX Speaker Encoder** - L2-normalized speaker embedding extraction via OxiONNX
+- [x] **ONNX Voice Cloner** - Text+embedding to mel synthesis via OxiONNX
 - [x] **Cross-lingual cloning support** - Complete implementation with phonetic adaptation ✅ *COMPLETED 2025-07-22*
 - [x] **Real-time adaptation** - Streaming adaptation with real-time model updates ✅ *COMPLETED 2025-07-22*
 - [x] **Voice similarity metrics** - Multi-dimensional similarity assessment with statistical analysis ✅ *COMPLETED 2025-07-23*
@@ -195,13 +229,16 @@ VoiRS has achieved production readiness with comprehensive neural speech synthes
 - [x] **Misuse Prevention** - Anomaly detection, deepfake detection, user blocking ✅ *COMPLETED 2025-07-23*
 
 ### voirs-singing
+- [x] **ONNX DiffSinger Backend** - OxiONNX-based DiffSinger with acoustic+vocoder pipeline and streaming
+- [x] **Generic ONNX Singing Model** - Flexible ONNX model loader for VISinger, ACE, NNSVS, etc.
 - [ ] Phoneme-level pitch control
 - [ ] Breath pattern modeling
 - [ ] Vibrato customization
 - [ ] Multi-voice harmony
 - [ ] Real-time performance mode
 
-### voirs-spatial ✅ ADVANCED FEATURES COMPLETE (2025-07-23)
+### voirs-spatial
+- [x] **ONNX Neural HRTF** - Neural HRTF synthesis from position coordinates via OxiONNX
 - [x] **Wave Field Synthesis** - Advanced spatial audio reproduction with speaker arrays ✅
 - [x] **Beamforming** - Directional audio capture and playback with adaptive algorithms ✅  
 - [x] **Spatial Compression** - Efficient compression with perceptual optimization ✅
@@ -212,7 +249,8 @@ VoiRS has achieved production readiness with comprehensive neural speech synthes
 - [x] **Haptic Integration** - Complete tactile feedback system with spatial audio mapping ✅ *COMPLETED 2025-07-23*
 - [ ] VR/AR platform support - Final integration remaining
 
-### voirs-conversion ✅ PRODUCTION READY (2025-07-23)
+### voirs-conversion
+- [x] **ONNX Voice Converter** - 3-session pipeline (content encoder, speaker encoder, decoder) via OxiONNX
 - [x] **Real-time conversion optimization** - Advanced pipeline optimization with intelligent caching ✅
 - [x] **Graceful degradation system** - Comprehensive error handling with fallback strategies ✅
 - [x] **Quality monitoring** - Real-time quality assessment and artifact detection ✅
@@ -225,7 +263,10 @@ VoiRS has achieved production readiness with comprehensive neural speech synthes
 - [ ] Quality-preserving conversion  
 - [ ] Batch conversion pipelines
 
-### voirs-recognizer ✅ ADVANCED VAD COMPLETE (2025-07-23)
+### voirs-recognizer
+- [x] **ONNX Whisper Backend** - Encoder-decoder Whisper ASR via OxiONNX with autoregressive decoding
+- [x] **ONNX Conformer Backend** - CTC-based Conformer ASR via OxiONNX
+- [x] **ONNX Wav2Vec2 Backend** - Raw waveform ASR via OxiONNX with CTC decoding
 - [ ] Whisper v3 integration
 - [ ] Real-time transcription
 - [ ] Speaker diarization
@@ -233,11 +274,28 @@ VoiRS has achieved production readiness with comprehensive neural speech synthes
 - ✅ **Voice activity detection** - Enhanced with spectral features and adaptive thresholding *(Completed 2025-07-23)*
 
 ### voirs-evaluation
+- [x] **ONNX MOS Predictor** - Neural MOS prediction (1.0-5.0) from raw waveforms via OxiONNX
 - [ ] Perceptual quality metrics
-- [ ] Automated MOS prediction
-- [ ] A/B testing framework
+- [ ] Automated MOS prediction (enhanced models)
 - [ ] Benchmark suite expansion
 - [ ] Quality regression detection
+
+### voirs-g2p
+- [x] **ONNX G2P Backend** - Neural grapheme-to-phoneme conversion via OxiONNX
+- [ ] Multi-language neural G2P models
+- [ ] Pronunciation dictionary integration
+
+### voirs-sdk
+- [x] **Unified Model Runtime** - `OnnxSession` wrapper with SessionBuilder, profiling, format detection
+- [x] **Model Format Detector** - Auto-detection for ONNX, SafeTensors, PyTorch, NumPy formats
+- [x] **Profiling Summary** - Aggregated profiling with bottleneck identification
+- [ ] Model caching and lazy loading
+- [ ] Batch inference API
+
+### voirs-cli
+- [x] **ONNX Tools** - `voirs onnx inspect/profile/dot/info` commands
+- [ ] Model export and quantization commands
+- [ ] Model benchmarking CLI
 
 ### voirs-feedback
 - [ ] Adaptive learning algorithms

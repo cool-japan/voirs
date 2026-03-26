@@ -3,16 +3,15 @@
 //! This module provides Windows ASIO (Audio Stream Input/Output) support
 //! for professional low-latency audio applications using the ASIO API through cpal.
 
+#![cfg(all(target_os = "windows", feature = "asio"))]
+
 use super::{
     AudioCallback, AudioDeviceInfo, AudioDriver, AudioDriverError, AudioStreamConfig,
     AudioStreamMetrics, DriverResult,
 };
 use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{
-    BuildStreamError, Device, Host, SampleFormat, SampleRate, Stream, StreamConfig,
-    SupportedStreamConfig,
-};
+use cpal::{BuildStreamError, Device, Host, Stream, StreamConfig};
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -65,10 +64,10 @@ impl AsioDriver {
         }
 
         // Sort by sample rate for consistent ordering
-        supported_configs.sort_by_key(|config| config.min_sample_rate().0);
+        supported_configs.sort_by_key(|config| config.min_sample_rate());
 
         let config = &supported_configs[0];
-        let sample_rate_range = config.min_sample_rate().0..=config.max_sample_rate().0;
+        let sample_rate_range = config.min_sample_rate()..=config.max_sample_rate();
         let supported_sample_rates = vec![
             16000, 22050, 24000, 32000, 44100, 48000, 88200, 96000, 176400, 192000,
         ]
@@ -106,14 +105,14 @@ impl AsioDriver {
         // Find a configuration that matches our requirements
         for supported_config in supported_configs {
             let sample_rate_range =
-                supported_config.min_sample_rate().0..=supported_config.max_sample_rate().0;
+                supported_config.min_sample_rate()..=supported_config.max_sample_rate();
 
             if sample_rate_range.contains(&config.sample_rate)
                 && supported_config.channels() >= config.channels as u16
             {
                 let stream_config = StreamConfig {
                     channels: config.channels as u16,
-                    sample_rate: SampleRate(config.sample_rate),
+                    sample_rate: config.sample_rate,
                     buffer_size: cpal::BufferSize::Fixed(config.buffer_size),
                 };
 
@@ -174,7 +173,7 @@ impl AudioDriver for AsioDriver {
         // Get the device
         let device = if let Some(id) = device_id {
             // Find device by ID/name
-            let devices = self.host.output_devices().map_err(|e| {
+            let mut devices = self.host.output_devices().map_err(|e| {
                 AudioDriverError::InternalError(format!("Failed to enumerate devices: {e}"))
             })?;
 

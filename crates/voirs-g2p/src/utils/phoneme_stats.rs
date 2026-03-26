@@ -304,7 +304,7 @@ impl PhonemeStatistics {
             .iter()
             .map(|(k, &v)| (k.clone(), v))
             .collect();
-        freq_vec.sort_by(|a, b| b.1.cmp(&a.1));
+        freq_vec.sort_by_key(|b| std::cmp::Reverse(b.1));
         freq_vec.into_iter().take(n).collect()
     }
 
@@ -338,7 +338,7 @@ impl PhonemeStatistics {
             .iter()
             .map(|(k, &v)| (k.clone(), v))
             .collect();
-        freq_vec.sort_by(|a, b| b.1.cmp(&a.1));
+        freq_vec.sort_by_key(|b| std::cmp::Reverse(b.1));
         freq_vec.into_iter().take(n).collect()
     }
 
@@ -355,7 +355,7 @@ impl PhonemeStatistics {
             .iter()
             .map(|(k, &v)| (k.clone(), v))
             .collect();
-        freq_vec.sort_by(|a, b| b.1.cmp(&a.1));
+        freq_vec.sort_by_key(|b| std::cmp::Reverse(b.1));
         freq_vec.into_iter().take(n).collect()
     }
 

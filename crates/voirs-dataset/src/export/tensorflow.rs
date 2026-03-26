@@ -496,18 +496,18 @@ impl TensorFlowExporter {
         let final_data = match self.config.compression_type {
             CompressionType::None => buffer,
             CompressionType::Gzip => {
-                use flate2::{write::GzEncoder, Compression};
+                use oxiarc_deflate::GzipStreamEncoder;
                 use std::io::Write;
 
-                let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+                let mut encoder = GzipStreamEncoder::new(Vec::new(), 6);
                 encoder.write_all(&buffer)?;
                 encoder.finish()?
             }
             CompressionType::Zlib => {
-                use flate2::{write::ZlibEncoder, Compression};
+                use oxiarc_deflate::ZlibStreamEncoder;
                 use std::io::Write;
 
-                let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+                let mut encoder = ZlibStreamEncoder::new(Vec::new(), 6);
                 encoder.write_all(&buffer)?;
                 encoder.finish()?
             }

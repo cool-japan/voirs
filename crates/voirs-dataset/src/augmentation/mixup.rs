@@ -168,12 +168,12 @@ impl MixUpAugmentor {
         // For simplicity, we approximate Beta distribution
         let lambda = if self.config.alpha == 1.0 {
             // Beta(1,1) = Uniform(0,1)
-            rng.gen_range(0.0..1.0)
+            rng.random_range(0.0..1.0)
         } else {
             // Approximate Beta distribution using two gamma samples
             // For alpha == beta, we can use a simpler approximation
-            let u1: f32 = rng.gen();
-            let u2: f32 = rng.gen();
+            let u1: f32 = rng.random();
+            let u2: f32 = rng.random();
             let x = u1.powf(1.0 / self.config.alpha);
             let y = u2.powf(1.0 / self.config.alpha);
             x / (x + y)
@@ -235,7 +235,7 @@ impl MixUpAugmentor {
 
         let cut_size = ((1.0 - lambda) * len as f32) as usize;
         let cut_start = if len > cut_size {
-            rng.gen_range(0..=(len - cut_size))
+            rng.random_range(0..=(len - cut_size))
         } else {
             0
         };
@@ -291,7 +291,7 @@ impl MixUpAugmentor {
         for i in 0..len {
             let segment = i / segment_size.max(1);
             // Vary lambda slightly per segment
-            let segment_lambda = (lambda + rng.gen_range(-0.1..0.1)).clamp(0.0, 1.0);
+            let segment_lambda = (lambda + rng.random_range(-0.1..0.1)).clamp(0.0, 1.0);
 
             let s1 = if i < audio1.len() { audio1[i] } else { 0.0 };
             let s2 = if i < audio2.len() { audio2[i] } else { 0.0 };
@@ -432,7 +432,7 @@ impl BatchMixUpAugmentor {
 
         for sample in samples {
             // Choose a random other sample to mix with
-            let other_idx = rng.gen_range(0..samples.len());
+            let other_idx = rng.random_range(0..samples.len());
             let other_sample = &samples[other_idx];
 
             let mixed = self.augmenter.mix_samples(sample, other_sample)?;

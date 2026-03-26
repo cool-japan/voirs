@@ -429,11 +429,11 @@ impl NetworkStreamingDataset {
                 multiplier,
                 jitter_factor,
             } => {
-                use scirs2_core::random::Rng;
+                use scirs2_core::random::RngExt;
                 let base_delay = (current_delay.as_millis() as f64 * multiplier) as u64;
                 let jitter = (base_delay as f64
                     * jitter_factor
-                    * scirs2_core::random::thread_rng().r#gen::<f64>())
+                    * scirs2_core::random::thread_rng().random::<f64>())
                     as u64;
                 let new_delay = Duration::from_millis(base_delay + jitter);
                 new_delay.min(self.config.retry_config.max_delay)

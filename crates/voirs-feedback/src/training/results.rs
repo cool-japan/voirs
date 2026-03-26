@@ -53,16 +53,12 @@ impl InteractiveTrainer {
 
         // Exercise-specific feedback
         match exercise.exercise_type {
-            ExerciseType::Pronunciation => {
-                if pronunciation_score.overall_score < 0.7 {
-                    suggestions.push("Focus on clear articulation of each phoneme".to_string());
-                }
+            ExerciseType::Pronunciation if pronunciation_score.overall_score < 0.7 => {
+                suggestions.push("Focus on clear articulation of each phoneme".to_string());
             }
-            ExerciseType::Quality => {
-                if quality_score.overall_score < 0.7 {
-                    suggestions
-                        .push("Improve recording quality and reduce background noise".to_string());
-                }
+            ExerciseType::Quality if quality_score.overall_score < 0.7 => {
+                suggestions
+                    .push("Improve recording quality and reduce background noise".to_string());
             }
             ExerciseType::Rhythm => {
                 suggestions.push("Pay attention to timing and pacing".to_string());

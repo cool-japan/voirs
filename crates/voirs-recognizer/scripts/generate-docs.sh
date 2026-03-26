@@ -297,12 +297,12 @@ Gets the confidence score.
 
 ## Error Handling
 
-All functions return `NULL` or error codes on failure. Use `voirs_get_last_error()`
+All functions return `NULL` or error codes on failure. Use `voirs_recognizer_get_last_error()`
 to get detailed error information:
 
 ```c
 if (!result) {
-    const char* error = voirs_get_last_error();
+    const char* error = voirs_recognizer_get_last_error();
     fprintf(stderr, "Recognition failed: %s\n", error);
 }
 ```

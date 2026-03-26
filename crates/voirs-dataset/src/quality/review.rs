@@ -559,7 +559,7 @@ impl ReviewReport {
             .iter()
             .map(|(k, v)| (k.clone(), *v))
             .collect();
-        issues.sort_by(|a, b| b.1.cmp(&a.1));
+        issues.sort_by_key(|b| std::cmp::Reverse(b.1));
         issues.into_iter().take(limit).collect()
     }
 }

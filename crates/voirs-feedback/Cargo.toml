@@ -91,7 +91,7 @@ urlencoding = "2.1"
 sqlx = { version = "0.8.6", features = ["sqlite", "postgres", "runtime-tokio-rustls", "chrono", "uuid", "json"], optional = true }
 sea-orm = { version = "1.1", features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros", "chrono", "uuid"], optional = true }
 oxicode = { workspace = true }
-flate2 = "1.1"
+oxiarc-deflate.workspace = true
 
 # Privacy and encryption
 aes-gcm = { version = "0.10", optional = true }
@@ -131,7 +131,7 @@ all-features = [
 [dev-dependencies]
 tokio-test = "0.4"
 criterion = "0.8"
-tempfile = "3.26"
+tempfile = "3.27"
 
 [package.metadata.docs.rs]
 features = ["all-features"]

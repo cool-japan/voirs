@@ -588,7 +588,7 @@ impl AdvancedErrorHandler {
 
         // Try recovery suggestions in priority order
         let mut sorted_suggestions = error.recovery_suggestions.clone();
-        sorted_suggestions.sort_by(|a, b| b.priority.cmp(&a.priority));
+        sorted_suggestions.sort_by_key(|b| std::cmp::Reverse(b.priority));
 
         for suggestion in sorted_suggestions {
             if suggestion.category == RecoveryCategory::AutomaticRecovery {

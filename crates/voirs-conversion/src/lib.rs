@@ -78,6 +78,9 @@ pub mod types;
 pub mod webrtc_integration;
 pub mod zero_shot;
 
+#[cfg(feature = "onnx")]
+pub mod backends;
+
 #[cfg(feature = "acoustic-integration")]
 pub mod acoustic;
 

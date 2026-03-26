@@ -116,7 +116,7 @@ impl OculusPlatform {
         // For simulation, randomly return true 70% of the time
         use scirs2_core::random::Rng;
         let mut rng = scirs2_core::random::thread_rng();
-        rng.gen_bool(0.7)
+        rng.random_bool(0.7)
     }
 
     /// Check if this is a Rift-type device (simulated)

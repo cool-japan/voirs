@@ -53,6 +53,7 @@ fastrand.workspace = true
 hf-hub.workspace = true
 reqwest.workspace = true
 regex.workspace = true
+glob.workspace = true
 memmap2.workspace = true
 semver.workspace = true
 thread_local.workspace = true
@@ -87,11 +88,14 @@ chrono.workspace = true
 num_cpus.workspace = true
 
 # Cloud Integration dependencies
-flate2 = { workspace = true, optional = true }
-zstd = { workspace = true, optional = true }
+oxiarc-deflate = { workspace = true, optional = true }
+oxiarc-zstd = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 aes-gcm = { workspace = true, optional = true }
 oxicode = { workspace = true, optional = true }
+
+# ONNX runtime
+oxionnx = { workspace = true, optional = true }
 
 # Plugin loading dependencies
 libloading = { workspace = true, optional = true }
@@ -100,16 +104,16 @@ wasmtime = { workspace = true, optional = true }
 [dev-dependencies]
 tempfile.workspace = true
 wasm-bindgen-test = "0.3"
-tokio-tungstenite = "0.28"
+tokio-tungstenite = "0.29"
 criterion.workspace = true
 
 [features]
 default = []
-gpu = ["voirs-acoustic/gpu", "voirs-vocoder/gpu", "voirs-cloning/gpu", "voirs-conversion/gpu"]
-onnx = ["voirs-acoustic/onnx", "voirs-vocoder/onnx", "voirs-cloning/onnx"]
+gpu = ["oxionnx?/gpu", "voirs-acoustic/gpu", "voirs-vocoder/gpu", "voirs-g2p/gpu", "voirs-cloning?/gpu", "voirs-conversion?/gpu", "voirs-emotion?/gpu", "voirs-spatial?/gpu"]
+onnx = ["dep:oxionnx", "voirs-acoustic/onnx", "voirs-vocoder/onnx", "voirs-g2p/onnx", "voirs-cloning?/onnx", "voirs-conversion?/onnx", "voirs-emotion?/onnx", "voirs-spatial?/onnx"]
 wasm = ["wasm-bindgen", "wasm-bindgen-futures", "web-sys", "js-sys", "console_error_panic_hook", "wasm-logger"]
 http = ["axum", "tower", "tower-http"]
-cloud = ["flate2", "zstd", "sha2", "aes-gcm", "oxicode"]
+cloud = ["oxiarc-deflate", "oxiarc-zstd", "sha2", "aes-gcm", "oxicode"]
 plugins = ["libloading", "wasmtime"]
 
 # Advanced voice features

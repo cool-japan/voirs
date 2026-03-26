@@ -967,8 +967,7 @@ impl FailureHistory {
 
         // Limit pattern history
         if self.success_patterns.len() > self.max_history_length / 2 {
-            self.success_patterns
-                .sort_by(|a, b| a.usage_count.cmp(&b.usage_count));
+            self.success_patterns.sort_by_key(|a| a.usage_count);
             self.success_patterns.remove(0);
         }
     }

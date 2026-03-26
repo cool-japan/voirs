@@ -21,7 +21,7 @@ crate-type = ["lib"]
 # ML/Tensor libraries
 candle-core = { workspace = true, optional = true }
 candle-nn = { workspace = true, optional = true }
-ort = { workspace = true, optional = true }
+oxionnx = { workspace = true, optional = true }
 safetensors.workspace = true
 hf-hub.workspace = true
 
@@ -87,11 +87,12 @@ criterion.workspace = true
 [features]
 default = ["candle"]
 candle = ["dep:candle-core", "dep:candle-nn"]
-onnx = ["dep:ort"]
-gpu = ["metal"]  # On macOS, use Metal; on Linux/Windows would use cuda
-cuda = ["candle-core?/cuda", "ort?/cuda"]
+onnx = ["dep:oxionnx"]
+gpu = ["metal", "oxionnx?/gpu"]  # On macOS, use Metal; on Linux/Windows would use cuda
+cuda = ["candle-core?/cuda", "oxionnx?/gpu"]
 metal = ["dep:metal-rs"]  # Only available on macOS
-coreml = ["ort?/coreml"]
+coreml = []  # oxionnx does not have a separate coreml feature; GPU via oxionnx/gpu
+asio = ["cpal/asio"]  # Windows ASIO low-latency audio (requires ASIO SDK)
 
 [target.'cfg(target_os = "macos")'.dependencies]
 metal-rs = { version = "0.27", optional = true, package = "metal" }

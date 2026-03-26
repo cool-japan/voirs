@@ -638,7 +638,7 @@ impl AuditTrail {
         }
 
         // Sort by timestamp (newest first)
-        results.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        results.sort_by_key(|b| std::cmp::Reverse(b.timestamp));
 
         // Apply limit
         if let Some(limit) = query.limit {
@@ -755,7 +755,7 @@ impl AuditTrail {
         }
 
         let mut sorted: Vec<_> = actor_counts.into_iter().collect();
-        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        sorted.sort_by_key(|b| std::cmp::Reverse(b.1));
         sorted.truncate(limit);
         sorted
     }

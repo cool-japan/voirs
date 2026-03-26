@@ -352,7 +352,7 @@ impl MultiTargetConverter {
 
         // Sort targets by priority (higher priority first)
         let mut sorted_targets = request.targets.clone();
-        sorted_targets.sort_by(|a, b| b.priority.cmp(&a.priority));
+        sorted_targets.sort_by_key(|b| std::cmp::Reverse(b.priority));
 
         // Process targets based on mode
         let target_results = if use_parallel {

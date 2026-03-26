@@ -69,7 +69,7 @@ pub trait AudioEffect: Send + Sync {
 ///
 /// ```no_run
 /// use voirs_sdk::prelude::*;
-/// use voirs_sdk::audio::effects::ReverbEffect;
+/// use voirs_sdk::audio::effects::{ReverbEffect, AudioEffect};
 ///
 /// # async fn example() -> Result<()> {
 /// let pipeline = VoirsPipelineBuilder::new().build().await?;
@@ -293,7 +293,7 @@ impl AudioEffect for ReverbEffect {
 ///
 /// ```no_run
 /// use voirs_sdk::prelude::*;
-/// use voirs_sdk::audio::effects::DelayEffect;
+/// use voirs_sdk::audio::effects::{DelayEffect, AudioEffect};
 ///
 /// # async fn example() -> Result<()> {
 /// let pipeline = VoirsPipelineBuilder::new().build().await?;
@@ -391,7 +391,7 @@ impl AudioEffect for DelayEffect {
 ///
 /// ```no_run
 /// use voirs_sdk::prelude::*;
-/// use voirs_sdk::audio::effects::ChorusEffect;
+/// use voirs_sdk::audio::effects::{ChorusEffect, AudioEffect};
 ///
 /// # async fn example() -> Result<()> {
 /// let pipeline = VoirsPipelineBuilder::new().build().await?;
@@ -524,7 +524,7 @@ impl AudioEffect for ChorusEffect {
 ///
 /// ```no_run
 /// use voirs_sdk::prelude::*;
-/// use voirs_sdk::audio::effects::CompressorEffect;
+/// use voirs_sdk::audio::effects::{CompressorEffect, AudioEffect};
 ///
 /// # async fn example() -> Result<()> {
 /// let pipeline = VoirsPipelineBuilder::new().build().await?;
@@ -659,7 +659,7 @@ impl AudioEffect for CompressorEffect {
 ///
 /// ```no_run
 /// use voirs_sdk::prelude::*;
-/// use voirs_sdk::audio::effects::EqualizerEffect;
+/// use voirs_sdk::audio::effects::{EqualizerEffect, AudioEffect};
 ///
 /// # async fn example() -> Result<()> {
 /// let pipeline = VoirsPipelineBuilder::new().build().await?;

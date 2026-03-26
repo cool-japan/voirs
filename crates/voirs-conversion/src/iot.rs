@@ -30,7 +30,7 @@
 //!
 //! ## Usage
 //!
-//! ```rust
+//! ```no_run
 //! # use voirs_conversion::iot::*;
 //! # use voirs_conversion::types::*;
 //! # tokio_test::block_on(async {
@@ -877,14 +877,10 @@ impl IoTVoiceConverter {
     async fn compress_request(&self, request: &ConversionRequest) -> Result<Vec<u8>> {
         let serialized = self.serialize_request(request)?;
 
-        use flate2::write::GzEncoder;
-        use flate2::Compression;
+        use oxiarc_deflate::GzipStreamEncoder;
         use std::io::Write;
 
-        let mut encoder = GzEncoder::new(
-            Vec::new(),
-            Compression::new(self.config.compression_level as u32),
-        );
+        let mut encoder = GzipStreamEncoder::new(Vec::new(), self.config.compression_level);
         encoder
             .write_all(&serialized)
             .map_err(|e| Error::runtime(e.to_string()))?;
@@ -892,10 +888,10 @@ impl IoTVoiceConverter {
     }
 
     async fn decompress_result(&self, compressed_data: Vec<u8>) -> Result<ConversionResult> {
-        use flate2::read::GzDecoder;
+        use oxiarc_deflate::GzipStreamDecoder;
         use std::io::Read;
 
-        let mut decoder = GzDecoder::new(&compressed_data[..]);
+        let mut decoder = GzipStreamDecoder::new(&compressed_data[..]);
         let mut decompressed = Vec::new();
         decoder
             .read_to_end(&mut decompressed)

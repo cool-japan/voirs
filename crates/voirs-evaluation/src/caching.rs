@@ -155,11 +155,9 @@ impl CacheStatistics {
 
     /// Calculate average entry size
     pub fn avg_entry_size(&self) -> usize {
-        if self.current_size == 0 {
-            0
-        } else {
-            self.memory_used_bytes / self.current_size
-        }
+        self.memory_used_bytes
+            .checked_div(self.current_size)
+            .unwrap_or(0)
     }
 }
 

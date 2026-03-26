@@ -362,7 +362,7 @@ impl AnnotationStatistics {
         }
 
         // Sort common issues by frequency
-        self.common_issues.sort_by(|a, b| b.1.cmp(&a.1));
+        self.common_issues.sort_by_key(|b| std::cmp::Reverse(b.1));
     }
 
     /// Get the number of unique annotators

@@ -726,11 +726,7 @@ impl AdvancedModelCache {
             memory_utilization: (current_usage as f64 / self.max_memory_bytes as f64) * 100.0,
             total_accesses,
             pinned_models: pinned_count,
-            avg_model_size: if model_count > 0 {
-                current_usage / model_count
-            } else {
-                0
-            },
+            avg_model_size: current_usage.checked_div(model_count).unwrap_or(0),
         }
     }
 
@@ -816,7 +812,7 @@ impl AdvancedModelCache {
             .map(|(key, model)| (key.clone(), model.access_count))
             .collect();
 
-        models_by_access.sort_by(|a, b| b.1.cmp(&a.1));
+        models_by_access.sort_by_key(|b| std::cmp::Reverse(b.1));
 
         let hot_threshold = models_by_access.len() / 4; // Top 25%
         let cold_threshold = models_by_access.len() * 3 / 4; // Bottom 25%

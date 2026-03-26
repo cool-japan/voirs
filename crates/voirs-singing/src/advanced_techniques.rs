@@ -864,7 +864,7 @@ impl VocalRunProcessor {
         {
             use scirs2_core::random::{thread_rng, Rng};
             let mut rng = thread_rng();
-            patterns[rng.gen_range(0..patterns.len())].clone()
+            patterns[rng.random_range(0..patterns.len())].clone()
         }
     }
 

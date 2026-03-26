@@ -364,21 +364,17 @@ impl VoirsPipelineBuilder {
         // Check if quality level is compatible with streaming settings
         if let Some(chunk_size) = self.config.default_synthesis.streaming_chunk_size {
             match quality {
-                crate::types::QualityLevel::Ultra => {
-                    if chunk_size < 100 {
-                        tracing::warn!(
-                            "Ultra quality with small chunk size ({}) may cause artifacts",
-                            chunk_size
-                        );
-                    }
+                crate::types::QualityLevel::Ultra if chunk_size < 100 => {
+                    tracing::warn!(
+                        "Ultra quality with small chunk size ({}) may cause artifacts",
+                        chunk_size
+                    );
                 }
-                crate::types::QualityLevel::Low => {
-                    if chunk_size > 500 {
-                        tracing::warn!(
-                            "Low quality with large chunk size ({}) may not improve latency",
-                            chunk_size
-                        );
-                    }
+                crate::types::QualityLevel::Low if chunk_size > 500 => {
+                    tracing::warn!(
+                        "Low quality with large chunk size ({}) may not improve latency",
+                        chunk_size
+                    );
                 }
                 _ => {}
             }

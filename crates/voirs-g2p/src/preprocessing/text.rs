@@ -12,7 +12,7 @@ pub fn expand_abbreviations(text: &str, language: LanguageCode) -> Result<String
 
     // Sort abbreviations by length (longest first) to avoid partial matches
     let mut sorted_abbrevs: Vec<_> = abbreviations.iter().collect();
-    sorted_abbrevs.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+    sorted_abbrevs.sort_by_key(|b| std::cmp::Reverse(b.0.len()));
 
     for (abbrev, expansion) in sorted_abbrevs {
         result = result.replace(abbrev, expansion);

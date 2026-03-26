@@ -9,10 +9,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use voirs_ffi::c_api::config::*;
-use voirs_ffi::c_api::core::*;
-use voirs_ffi::c_api::synthesis::*;
-use voirs_ffi::{VoirsErrorCode, VoirsSynthesisResult};
+use voirs::c_api::config::*;
+use voirs::c_api::core::*;
+use voirs::c_api::synthesis::*;
+use voirs::{VoirsErrorCode, VoirsSynthesisResult};
 
 #[test]
 fn test_burst_synthesis_load() {

@@ -321,10 +321,10 @@ impl EncryptedInference {
         use scirs2_core::random::Rng;
         let mut rng = thread_rng();
 
-        let n: Vec<u8> = (0..key_size / 8).map(|_| rng.gen()).collect();
-        let g: Vec<u8> = (0..key_size / 8).map(|_| rng.gen()).collect();
-        let lambda: Vec<u8> = (0..key_size / 8).map(|_| rng.gen()).collect();
-        let mu: Vec<u8> = (0..key_size / 8).map(|_| rng.gen()).collect();
+        let n: Vec<u8> = (0..key_size / 8).map(|_| rng.random()).collect();
+        let g: Vec<u8> = (0..key_size / 8).map(|_| rng.random()).collect();
+        let lambda: Vec<u8> = (0..key_size / 8).map(|_| rng.random()).collect();
+        let mu: Vec<u8> = (0..key_size / 8).map(|_| rng.random()).collect();
 
         let public_key = PublicKey {
             n,

@@ -878,12 +878,10 @@ impl GpuLoadBalancer {
 
                 // Update average latency
                 let total_ops = info.performance_metrics.operations_count;
-                if total_ops > 0 {
-                    info.avg_latency = Duration::from_nanos(
-                        (info.avg_latency.as_nanos() as u64 * (total_ops - 1)
-                            + execution_time.as_nanos() as u64)
-                            / total_ops,
-                    );
+                let numerator = info.avg_latency.as_nanos() as u64 * (total_ops - 1)
+                    + execution_time.as_nanos() as u64;
+                if let Some(nanos) = numerator.checked_div(total_ops) {
+                    info.avg_latency = Duration::from_nanos(nanos);
                 }
             }
         }

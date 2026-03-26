@@ -1,23 +1,14 @@
-//! ONNX Runtime backend for neural vocoders.
+//! OxiONNX backend for neural vocoders.
 //!
 //! This module provides ONNX-based implementations for neural vocoders,
 //! enabling high-performance audio generation using pre-trained models.
 
 use crate::{AudioBuffer, MelSpectrogram, Result, Vocoder, VocoderError, VocoderMetadata, VocoderFeature, SynthesisConfig};
 use async_trait::async_trait;
-use ort::{
-    environment::Environment,
-    execution_providers::ExecutionProvider,
-    session::{
-        builder::{GraphOptimizationLevel, SessionBuilder},
-        Session,
-    },
-    value::Value,
-};
+use oxionnx::{OptLevel, Session, Tensor};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    sync::Arc,
 };
 use tracing::{debug, info, warn};
 
@@ -34,9 +25,6 @@ pub struct OnnxVocoder {
 
     /// Model configuration
     config: OnnxVocoderConfig,
-
-    /// ONNX environment
-    environment: Arc<Environment>,
 }
 
 /// ONNX-specific vocoder metadata
@@ -70,27 +58,23 @@ pub struct OnnxVocoderConfig {
     /// Model file path
     pub model_path: PathBuf,
 
-    /// Execution providers (CPU, CUDA, etc.)
-    pub execution_providers: Vec<String>,
-
     /// Number of threads for CPU execution
     pub num_threads: usize,
 
-    /// Enable memory pattern optimization
-    pub enable_memory_pattern: bool,
-
-    /// Enable CPU memory arena
-    pub enable_cpu_mem_arena: bool,
-
-    /// Optimization level
-    pub graph_optimization_level: GraphOptimizationLevel,
-
-    /// Session options
-    pub inter_op_num_threads: Option<usize>,
-    pub intra_op_num_threads: Option<usize>,
-
     /// Audio generation settings
     pub audio_config: AudioConfig,
+
+    /// Whether GPU acceleration is requested
+    pub use_gpu: bool,
+
+    /// Optimization level for ONNX graph optimization (default: All)
+    pub opt_level: Option<OptLevel>,
+
+    /// Enable per-node profiling during inference
+    pub enable_profiling: Option<bool>,
+
+    /// Enable memory pool for buffer reuse
+    pub enable_memory_pool: Option<bool>,
 }
 
 /// Audio generation configuration
@@ -128,14 +112,12 @@ impl Default for OnnxVocoderConfig {
     fn default() -> Self {
         Self {
             model_path: PathBuf::new(),
-            execution_providers: vec!["CPU".to_string()],
             num_threads: num_cpus::get(),
-            enable_memory_pattern: true,
-            enable_cpu_mem_arena: true,
-            graph_optimization_level: GraphOptimizationLevel::Level3,
-            inter_op_num_threads: Some(1),
-            intra_op_num_threads: Some(num_cpus::get()),
             audio_config: AudioConfig::default(),
+            use_gpu: false,
+            opt_level: None,
+            enable_profiling: None,
+            enable_memory_pool: None,
         }
     }
 }
@@ -143,55 +125,16 @@ impl Default for OnnxVocoderConfig {
 impl OnnxVocoder {
     /// Create a new ONNX vocoder
     pub async fn new(config: OnnxVocoderConfig) -> Result<Self> {
-        info!("Initializing ONNX vocoder from {:?}", config.model_path);
+        info!("Initializing OxiONNX vocoder from {:?}", config.model_path);
 
-        // Initialize ONNX Runtime environment
-        let environment = Arc::new(
-            Environment::builder()
-                .with_name("VoiRS-Vocoder")
-                .build()
-                .map_err(|e| VocoderError::ModelError(
-                    format!("Failed to create ONNX environment: {e}"),
-                ))?,
-        );
-
-        // Configure session builder
-        let mut session_builder = SessionBuilder::new(&environment)?;
-        session_builder = session_builder
-            .with_optimization_level(config.graph_optimization_level)?
-            .with_memory_pattern(config.enable_memory_pattern)?
-            .with_cpu_mem_arena(config.enable_cpu_mem_arena)?;
-
-        // Set thread counts
-        if let Some(inter_op) = config.inter_op_num_threads {
-            session_builder = session_builder.with_inter_threads(inter_op)?;
+        // Load the model via oxionnx SessionBuilder
+        let mut builder = Session::builder()
+            .with_optimization_level(config.opt_level.unwrap_or(OptLevel::All))
+            .with_memory_pool(config.enable_memory_pool.unwrap_or(false));
+        if config.enable_profiling.unwrap_or(false) {
+            builder = builder.with_profiling();
         }
-        if let Some(intra_op) = config.intra_op_num_threads {
-            session_builder = session_builder.with_intra_threads(intra_op)?;
-        }
-
-        // Add execution providers
-        for provider_name in &config.execution_providers {
-            match provider_name.as_str() {
-                "CPU" => {
-                    session_builder = session_builder
-                        .with_execution_providers([ExecutionProvider::CPU(Default::default())])?;
-                }
-                "CUDA" => {
-                    session_builder = session_builder
-                        .with_execution_providers([ExecutionProvider::CUDA(Default::default())])?;
-                }
-                _ => {
-                    // Default to CPU for unknown providers
-                    session_builder = session_builder
-                        .with_execution_providers([ExecutionProvider::CPU(Default::default())])?;
-                }
-            }
-        }
-
-        // Load the model
-        let session = session_builder
-            .commit_from_file(&config.model_path)
+        let session = builder.load(&config.model_path)
             .map_err(|e| VocoderError::ModelError(
                 format!("Failed to load ONNX vocoder model: {e}"),
             ))?;
@@ -199,7 +142,7 @@ impl OnnxVocoder {
         // Extract model metadata
         let (metadata, onnx_details) = Self::extract_metadata(&session, &config.model_path, &config.audio_config)?;
 
-        info!("ONNX vocoder loaded successfully: {}", metadata.name);
+        info!("OxiONNX vocoder loaded successfully: {}", metadata.name);
         debug!("Vocoder metadata: {:?}", metadata);
 
         Ok(Self {
@@ -207,7 +150,6 @@ impl OnnxVocoder {
             metadata,
             onnx_details,
             config,
-            environment,
         })
     }
 
@@ -218,17 +160,8 @@ impl OnnxVocoder {
         audio_config: &AudioConfig,
     ) -> Result<(VocoderMetadata, OnnxVocoderDetails)> {
         // Get input and output names
-        let input_names: Vec<String> = session
-            .inputs
-            .iter()
-            .map(|input| input.name.clone())
-            .collect();
-
-        let output_names: Vec<String> = session
-            .outputs
-            .iter()
-            .map(|output| output.name.clone())
-            .collect();
+        let input_names: Vec<String> = session.input_names().to_vec();
+        let output_names: Vec<String> = session.output_names().to_vec();
 
         // Extract model name from file path
         let model_name = model_path
@@ -237,29 +170,8 @@ impl OnnxVocoder {
             .unwrap_or("unknown")
             .to_string();
 
-        // Try to extract input shape from model
-        let input_shape = if let Some(input) = session.inputs.first() {
-            if let Some(shape) = &input.input_type.tensor_dimensions() {
-                let dims: Vec<i64> = shape.iter().cloned().collect();
-                if dims.len() >= 3 {
-                    Some((
-                        dims[0] as usize, // batch_size
-                        dims[1] as usize, // mel_dim
-                        if dims[2] > 0 {
-                            Some(dims[2] as usize)
-                        } else {
-                            None
-                        }, // time_steps
-                    ))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        // oxionnx doesn't expose per-input shape info; leave as None
+        let input_shape = None;
 
         // Standard VoiRS metadata
         let metadata = VocoderMetadata {
@@ -286,9 +198,9 @@ impl OnnxVocoder {
         Ok((metadata, onnx_details))
     }
 
-    /// Prepare input tensors for ONNX inference
-    async fn prepare_inputs(&self, mel_spectrogram: &MelSpectrogram) -> Result<Vec<Value>> {
-        let mut inputs = Vec::new();
+    /// Prepare input tensors for OxiONNX inference
+    async fn prepare_inputs(&self, mel_spectrogram: &MelSpectrogram) -> Result<HashMap<&str, Tensor>> {
+        let mut inputs = HashMap::new();
 
         // Convert mel spectrogram to tensor format
         let (mel_dim, time_steps) = (mel_spectrogram.data.len(), mel_spectrogram.data[0].len());
@@ -302,14 +214,19 @@ impl OnnxVocoder {
         }
 
         // Create mel input tensor with shape [1, mel_dim, time_steps]
-        let mel_tensor = Value::from_array(([1, mel_dim, time_steps], mel_data))?;
-        inputs.push(mel_tensor);
+        let mel_tensor = Tensor::new(mel_data, vec![1, mel_dim, time_steps]);
+
+        // Use the first input name from the model
+        let input_name = self.onnx_details.input_names.first()
+            .map(|s| s.as_str())
+            .unwrap_or("mel");
+        inputs.insert(input_name, mel_tensor);
 
         Ok(inputs)
     }
 
-    /// Process ONNX outputs to extract audio
-    fn process_outputs(&self, outputs: Vec<Value>) -> Result<AudioBuffer> {
+    /// Process OxiONNX outputs to extract audio
+    fn process_outputs(&self, outputs: &HashMap<String, Tensor>) -> Result<AudioBuffer> {
         if outputs.is_empty() {
             return Err(VocoderError::ModelError(
                 "No outputs received from ONNX vocoder model".to_string(),
@@ -317,29 +234,21 @@ impl OnnxVocoder {
         }
 
         // Extract audio from first output
-        let audio_output = &outputs[0];
-        let audio_data = audio_output
-            .try_extract_tensor::<f32>()
-            .map_err(|e| VocoderError::ModelError(
-                format!("Failed to extract tensor: {e}"),
-            ))?
-            .view()
-            .to_slice()
+        let audio_tensor = outputs.values().next()
             .ok_or_else(|| VocoderError::ModelError(
-                "Failed to extract audio data".to_string(),
+                "No output tensor found".to_string(),
             ))?;
 
-        // Get output shape
-        let shape = audio_output.shape().expect("ONNX output should have a valid shape");
+        let shape = &audio_tensor.shape;
         let audio_samples = if shape.len() == 1 {
             // Shape: [samples]
-            audio_data.to_vec()
+            audio_tensor.data.clone()
         } else if shape.len() == 2 && shape[0] == 1 {
             // Shape: [1, samples] - remove batch dimension
-            audio_data.to_vec()
+            audio_tensor.data.clone()
         } else if shape.len() == 3 && shape[0] == 1 && shape[1] == 1 {
             // Shape: [1, 1, samples] - remove batch and channel dimensions
-            audio_data.to_vec()
+            audio_tensor.data.clone()
         } else {
             return Err(VocoderError::ModelError(
                 format!("Unexpected audio output shape: {:?}", shape),
@@ -539,13 +448,13 @@ impl Vocoder for OnnxVocoder {
         // Run inference
         let outputs = self
             .session
-            .run(inputs)
+            .run(&inputs)
             .map_err(|e| VocoderError::ModelError(
                 format!("ONNX vocoder inference failed: {e}"),
             ))?;
 
         // Process outputs
-        let mut audio_buffer = self.process_outputs(outputs)?;
+        let mut audio_buffer = self.process_outputs(&outputs)?;
 
         // Apply synthesis config if provided
         if let Some(config) = config {
@@ -594,7 +503,7 @@ impl Vocoder for OnnxVocoder {
     fn supports(&self, feature: VocoderFeature) -> bool {
         match feature {
             VocoderFeature::BatchProcessing => true,
-            VocoderFeature::GpuAcceleration => self.config.execution_providers.contains(&"CUDA".to_string()),
+            VocoderFeature::GpuAcceleration => cfg!(feature = "gpu") && self.config.use_gpu,
             VocoderFeature::HighQuality => true,
             VocoderFeature::FastInference => true,
             VocoderFeature::StreamingInference => false,
@@ -623,22 +532,15 @@ impl OnnxVocoderBuilder {
         self
     }
 
-    /// Add execution provider
-    pub fn with_execution_provider(mut self, provider: &str) -> Self {
-        self.config.execution_providers.push(provider.to_string());
-        self
-    }
-
     /// Set number of threads
     pub fn with_num_threads(mut self, num_threads: usize) -> Self {
         self.config.num_threads = num_threads;
-        self.config.intra_op_num_threads = Some(num_threads);
         self
     }
 
-    /// Set optimization level
-    pub fn with_optimization_level(mut self, level: GraphOptimizationLevel) -> Self {
-        self.config.graph_optimization_level = level;
+    /// Enable GPU acceleration
+    pub fn with_gpu(mut self, enabled: bool) -> Self {
+        self.config.use_gpu = enabled;
         self
     }
 
@@ -705,14 +607,14 @@ impl OnnxVocoderBackend {
         // Configure based on device type
         match device {
             crate::config::DeviceType::Cpu => {
-                config.execution_providers = vec!["CPU".to_string()];
+                config.use_gpu = false;
             }
             crate::config::DeviceType::Cuda => {
-                config.execution_providers = vec!["CUDA".to_string(), "CPU".to_string()];
+                config.use_gpu = true;
             }
             crate::config::DeviceType::Metal => {
-                // ONNX doesn't support Metal, fallback to CPU
-                config.execution_providers = vec!["CPU".to_string()];
+                // oxionnx doesn't support Metal, fallback to CPU
+                config.use_gpu = false;
             }
         }
 
@@ -742,20 +644,19 @@ impl crate::backends::Backend for OnnxBackend {
         // Configure ONNX backend based on model config
         match config.device {
             crate::config::DeviceType::Cpu => {
-                self.config.execution_providers = vec!["CPU".to_string()];
+                self.config.use_gpu = false;
             }
             crate::config::DeviceType::Cuda => {
-                self.config.execution_providers = vec!["CUDA".to_string(), "CPU".to_string()];
+                self.config.use_gpu = true;
             }
             crate::config::DeviceType::Metal => {
-                // ONNX doesn't support Metal, fallback to CPU
-                self.config.execution_providers = vec!["CPU".to_string()];
+                // oxionnx doesn't support Metal, fallback to CPU
+                self.config.use_gpu = false;
             }
         }
         
         if let Some(threads) = config.num_threads {
             self.config.num_threads = threads;
-            self.config.intra_op_num_threads = Some(threads);
         }
         
         Ok(())
@@ -788,14 +689,14 @@ impl crate::backends::Backend for OnnxBackend {
 
     fn metadata(&self) -> crate::backends::BackendMetadata {
         crate::backends::BackendMetadata {
-            name: "ONNX Runtime".to_string(),
-            version: "2.0.0".to_string(),
+            name: "OxiONNX".to_string(),
+            version: "0.1.0".to_string(),
             supported_devices: vec![
                 crate::config::DeviceType::Cpu,
                 crate::config::DeviceType::Cuda,
             ],
             supported_formats: vec!["onnx".to_string()],
-            gpu_acceleration: self.config.execution_providers.contains(&"CUDA".to_string()),
+            gpu_acceleration: cfg!(feature = "gpu") && self.config.use_gpu,
             mixed_precision: false,
             quantization: false,
         }
@@ -843,17 +744,14 @@ mod tests {
             .with_sample_rate(24000)
             .with_hop_length(512)
             .with_denoising(true)
-            .with_optimization_level(GraphOptimizationLevel::Level1);
+            .with_gpu(true);
 
         // Test would require a real ONNX model file
         assert_eq!(builder.config.num_threads, 4);
         assert_eq!(builder.config.audio_config.sample_rate, 24000);
         assert_eq!(builder.config.audio_config.hop_length, 512);
         assert!(builder.config.audio_config.enable_denoising);
-        assert_eq!(
-            builder.config.graph_optimization_level,
-            ort::GraphOptimizationLevel::Level1
-        );
+        assert!(builder.config.use_gpu);
     }
 
     #[test]

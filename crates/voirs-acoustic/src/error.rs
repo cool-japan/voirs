@@ -199,7 +199,7 @@ impl ErrorContext {
         if !self.suggestions.is_empty() {
             report.push_str("\nRecovery Suggestions:\n");
             let mut sorted_suggestions = self.suggestions.clone();
-            sorted_suggestions.sort_by(|a, b| b.priority.cmp(&a.priority));
+            sorted_suggestions.sort_by_key(|b| std::cmp::Reverse(b.priority));
 
             for (i, suggestion) in sorted_suggestions.iter().enumerate() {
                 let auto_marker = if suggestion.automatable {

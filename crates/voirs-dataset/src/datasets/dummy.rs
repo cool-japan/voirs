@@ -9,7 +9,7 @@ use crate::{
     Result, SpeakerInfo, ValidationReport,
 };
 use async_trait::async_trait;
-use scirs2_core::random::{Random, Rng, SeedableRng};
+use scirs2_core::random::{Random, Rng, RngExt, SeedableRng};
 use std::collections::HashMap;
 
 /// Configuration for dummy dataset generation
@@ -111,7 +111,7 @@ impl DummyDataset {
         let mut total_duration = 0.0f32;
 
         for i in 0..config.num_samples {
-            let duration = rng.gen_range(config.min_duration..=config.max_duration);
+            let duration = rng.random_range(config.min_duration..=config.max_duration);
             total_duration += duration;
 
             let audio = Self::generate_audio(&config, duration, &mut rng);
@@ -132,11 +132,11 @@ impl DummyDataset {
                 }),
                 language: config.language,
                 quality: QualityMetrics {
-                    snr: Some(40.0 + rng.gen_range(-10.0..10.0)),
-                    clipping: Some(rng.gen_range(0.0..0.1)),
-                    dynamic_range: Some(30.0 + rng.gen_range(-5.0..15.0)),
-                    spectral_quality: Some(rng.gen_range(0.7..1.0)),
-                    overall_quality: Some(rng.gen_range(0.6..1.0)),
+                    snr: Some(40.0 + rng.random_range(-10.0..10.0)),
+                    clipping: Some(rng.random_range(0.0..0.1)),
+                    dynamic_range: Some(30.0 + rng.random_range(-5.0..15.0)),
+                    spectral_quality: Some(rng.random_range(0.7..1.0)),
+                    overall_quality: Some(rng.random_range(0.6..1.0)),
                 },
                 phonemes: None,
                 metadata: {
@@ -215,7 +215,7 @@ impl DummyDataset {
 
         match config.audio_type {
             AudioType::SineWave => {
-                let frequency = rng.gen_range(200.0..800.0);
+                let frequency = rng.random_range(200.0..800.0);
                 let angular_frequency =
                     2.0 * std::f32::consts::PI * frequency / config.sample_rate as f32;
 
@@ -227,14 +227,14 @@ impl DummyDataset {
             }
             AudioType::WhiteNoise => {
                 for _ in 0..num_samples {
-                    samples.push(rng.gen_range(-0.5..0.5));
+                    samples.push(rng.random_range(-0.5..0.5));
                 }
             }
             AudioType::PinkNoise => {
                 // Simple pink noise approximation
                 let mut b = [0.0; 7];
                 for _ in 0..num_samples {
-                    let white = rng.gen_range(-1.0..1.0);
+                    let white = rng.random_range(-1.0..1.0);
                     b[0] = 0.99886 * b[0] + white * 0.0555179;
                     b[1] = 0.99332 * b[1] + white * 0.0750759;
                     b[2] = 0.96900 * b[2] + white * 0.153_852;
@@ -255,7 +255,7 @@ impl DummyDataset {
                 let mut pos = 0;
 
                 // Sine wave segment
-                let frequency = rng.gen_range(200.0..800.0);
+                let frequency = rng.random_range(200.0..800.0);
                 let angular_frequency =
                     2.0 * std::f32::consts::PI * frequency / config.sample_rate as f32;
                 for i in 0..segment_size {
@@ -267,7 +267,7 @@ impl DummyDataset {
 
                 // White noise segment
                 for _ in 0..segment_size {
-                    samples.push(rng.gen_range(-0.3..0.3));
+                    samples.push(rng.random_range(-0.3..0.3));
                 }
                 pos += segment_size;
 
@@ -360,13 +360,13 @@ impl DummyDataset {
                     "laborum",
                 ];
 
-                let num_words = rng.gen_range(5..20);
+                let num_words = rng.random_range(5..20);
                 let mut text = String::new();
                 for i in 0..num_words {
                     if i > 0 {
                         text.push(' ');
                     }
-                    let word = lorem_words[rng.gen_range(0..lorem_words.len())];
+                    let word = lorem_words[rng.random_range(0..lorem_words.len())];
                     text.push_str(word);
                 }
                 text
@@ -443,13 +443,13 @@ impl DummyDataset {
                     "conclusion",
                 ];
 
-                let num_words = rng.gen_range(3..12);
+                let num_words = rng.random_range(3..12);
                 let mut text = String::new();
                 for i in 0..num_words {
                     if i > 0 {
                         text.push(' ');
                     }
-                    let word = words[rng.gen_range(0..words.len())];
+                    let word = words[rng.random_range(0..words.len())];
                     text.push_str(word);
                 }
                 text

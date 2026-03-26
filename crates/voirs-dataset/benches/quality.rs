@@ -290,7 +290,7 @@ fn bench_signal_degradation(c: &mut Criterion) {
     use scirs2_core::Rng;
     let mut rng = Random::seed(42); // Fixed seed for reproducibility
     let noise_samples: Vec<f32> = (0..reference.samples().len())
-        .map(|_| rng.r#gen::<f32>() - 0.5)
+        .map(|_| rng.random::<f32>() - 0.5)
         .collect();
 
     // Benchmark different levels of degradation

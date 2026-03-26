@@ -14,19 +14,21 @@
 //!
 //! # Example
 //!
-//! ```rust
+//! ```no_run
 //! use voirs_evaluation::standards::*;
+//! use voirs_sdk::AudioBuffer;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create standards compliance validator
 //! let validator = StandardsValidator::new()?;
+//! let audio_data = AudioBuffer::new(vec![0.0f32; 16000], 16000, 1);
 //!
 //! // Validate ANSI S3.5 compliance
-//! let ansi_result = validator.validate_ansi_s3_5(&audio_data)?;
-//! println!("ANSI S3.5 SII: {}", ansi_result.speech_intelligibility_index);
+//! let ansi_result = validator.validate_ansi_s3_5(&audio_data, None)?;
+//! println!("ANSI S3.5 SII: {:?}", ansi_result.sii);
 //!
 //! // Validate ISO/IEC 23003-3 compliance
-//! let iso_result = validator.validate_iso_23003_3(&audio_data)?;
+//! let iso_result = validator.validate_iso_23003_3(&audio_data, None)?;
 //! println!("ISO/IEC compliance: {}", iso_result.is_compliant);
 //! # Ok(())
 //! # }

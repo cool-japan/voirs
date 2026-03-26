@@ -36,21 +36,30 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target:
-          - x86_64
-          - aarch64
+        include:
+          - target: x86_64
+            manylinux: auto
+            aws_lc_no_asm: ""
+            extra_args: ""
+          - target: aarch64
+            manylinux: manylinux_2_28
+            aws_lc_no_asm: "1"
+            extra_args: "--features vendored-openssl"
     steps:
       - uses: actions/checkout@v4
 
       - name: Build wheels
         uses: PyO3/maturin-action@v1
+        env:
+          AWS_LC_SYS_NO_ASM: ${{ matrix.aws_lc_no_asm }}
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist --find-interpreter
-          manylinux: auto
+          args: --release --out dist --find-interpreter ${{ matrix.extra_args }}
+          manylinux: ${{ matrix.manylinux }}
           working-directory: crates/voirs-ffi
           before-script-linux: |
             yum install -y openssl-devel perl-IPC-Cmd || true
+            yum install -y clang lld || true
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
@@ -71,8 +80,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Create cmake policy wrapper
+        run: |
+          CMAKE_BIN=$(which cmake)
+          {
+            echo '#!/bin/bash'
+            echo '# Only inject -DCMAKE_POLICY_VERSION_MINIMUM=3.5 for configure steps, not --build/--install/-E'
+            echo 'for arg in "$@"; do'
+            echo '  case "$arg" in'
+            echo '    --build|--install|-E) exec "'"$CMAKE_BIN"'" "$@" ;;'
+            echo '  esac'
+            echo 'done'
+            echo 'exec "'"$CMAKE_BIN"'" "$@" -DCMAKE_POLICY_VERSION_MINIMUM=3.5'
+          } > /tmp/cmake-wrapper.sh
+          chmod +x /tmp/cmake-wrapper.sh
+
       - name: Build wheels
         uses: PyO3/maturin-action@v1
+        env:
+          CMAKE: /tmp/cmake-wrapper.sh
         with:
           target: ${{ matrix.target }}
           args: --release --out dist --find-interpreter

@@ -526,7 +526,7 @@ impl CacheManager {
     async fn evict_lru_entries(&mut self, count: usize) {
         // Evict LRU HRTF entries
         let mut entries: Vec<_> = self.hrtf_cache.iter().collect();
-        entries.sort_by(|a, b| a.1.last_accessed.cmp(&b.1.last_accessed));
+        entries.sort_by_key(|a| a.1.last_accessed);
 
         let to_remove: Vec<_> = entries
             .iter()

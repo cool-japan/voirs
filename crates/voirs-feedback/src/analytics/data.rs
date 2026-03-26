@@ -504,7 +504,7 @@ impl DataCollector {
             });
         }
 
-        trends.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        trends.sort_by_key(|a| a.timestamp);
         trends
     }
 
@@ -549,7 +549,7 @@ impl DataCollector {
         }
 
         let mut sorted = interactions.to_vec();
-        sorted.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        sorted.sort_by_key(|a| a.timestamp);
 
         let recent_scores = sorted
             .iter()
@@ -590,7 +590,7 @@ impl DataCollector {
         }
 
         let mut sorted = interactions.to_vec();
-        sorted.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        sorted.sort_by_key(|a| a.timestamp);
 
         let total_improvement = sorted
             .windows(2)
@@ -689,7 +689,7 @@ impl DataCollector {
 
         // Analyze each user's journey
         for (user_id, mut interactions) in user_paths {
-            interactions.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+            interactions.sort_by_key(|a| a.timestamp);
 
             let journey = UserJourney {
                 user_id,

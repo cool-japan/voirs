@@ -543,7 +543,7 @@ impl RuleBasedPosTagger {
             .iter()
             .filter(|(suffix, _)| word_lower.ends_with(suffix.as_str()))
             .collect();
-        suffix_matches.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+        suffix_matches.sort_by_key(|b| std::cmp::Reverse(b.0.len()));
 
         if let Some((_, pos_tag)) = suffix_matches.first() {
             return Ok((*pos_tag).clone());

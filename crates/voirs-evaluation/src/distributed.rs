@@ -673,7 +673,7 @@ impl DistributedEvaluator {
         queue.push(task.clone());
 
         // Sort by priority
-        queue.sort_by(|a, b| b.priority.cmp(&a.priority));
+        queue.sort_by_key(|b| std::cmp::Reverse(b.priority));
 
         // Send to distribution channel
         self.task_sender
@@ -782,7 +782,7 @@ impl DistributedEvaluator {
                     None
                 } else {
                     let mut rng = scirs2_core::random::Random::seed(0);
-                    let idx = rng.gen_range(0..available_workers.len());
+                    let idx = rng.random_range(0..available_workers.len());
                     Some(available_workers[idx].id)
                 }
             }
@@ -862,17 +862,17 @@ impl DistributedEvaluator {
         let start_time = std::time::SystemTime::now();
 
         // Simulate task execution time
-        let execution_time = Duration::from_millis(rng.r#gen::<u64>() % 5000 + 1000);
+        let execution_time = Duration::from_millis(rng.random::<u64>() % 5000 + 1000);
         tokio::time::sleep(execution_time).await;
 
         // Simulate task result
-        let result = if rng.r#gen::<f32>() > 0.1 {
+        let result = if rng.random::<f32>() > 0.1 {
             // 90% success rate
             Ok(EvaluationOutput {
                 quality_scores: {
                     let mut scores = HashMap::new();
-                    scores.insert("pesq".to_string(), rng.r#gen::<f32>() * 5.0);
-                    scores.insert("stoi".to_string(), rng.r#gen::<f32>());
+                    scores.insert("pesq".to_string(), rng.random::<f32>() * 5.0);
+                    scores.insert("stoi".to_string(), rng.random::<f32>());
                     scores
                 },
                 metrics: HashMap::new(),
@@ -888,10 +888,10 @@ impl DistributedEvaluator {
             result,
             execution_time,
             resource_usage: ResourceUsage {
-                cpu_usage: rng.r#gen::<f32>() * 100.0,
-                memory_usage: rng.r#gen::<f32>() * 1024.0,
-                disk_io: rng.r#gen::<f32>() * 100.0,
-                network_io: rng.r#gen::<f32>() * 50.0,
+                cpu_usage: rng.random::<f32>() * 100.0,
+                memory_usage: rng.random::<f32>() * 1024.0,
+                disk_io: rng.random::<f32>() * 100.0,
+                network_io: rng.random::<f32>() * 50.0,
             },
             completed_at: start_time,
         }

@@ -682,7 +682,7 @@ impl ContextAnalyzer {
     pub fn add_rule(&mut self, rule: ContextRule) {
         self.rules.push(rule);
         // Sort by priority
-        self.rules.sort_by(|a, b| b.priority.cmp(&a.priority));
+        self.rules.sort_by_key(|b| std::cmp::Reverse(b.priority));
     }
 
     /// Add custom pattern

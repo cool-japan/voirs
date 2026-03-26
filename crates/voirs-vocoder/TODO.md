@@ -79,7 +79,7 @@
   - **Generic fallback** - Scalar implementations for unsupported platforms
   - **No optimization opportunities identified** - Existing implementations already optimal
 - ✅ **Dependency Audit** - Verified workspace dependencies are up-to-date ✅
-  - **SciRS2 ecosystem** - Latest RC.2 versions (scirs2-core 0.1.0-rc.2, scirs2-fft 0.1.0-rc.2)
+  - **SciRS2 ecosystem** - Latest RC.2 versions (scirs2-core 0.3.0, scirs2-fft 0.3.0)
   - **ML frameworks** - Candle 0.9.1, ORT 2.0.0-rc.10 (latest stable)
   - **Async runtime** - Tokio 1.48.0 (latest)
   - **Serialization** - Serde 1.0.228 (latest)

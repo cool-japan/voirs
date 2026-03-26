@@ -251,6 +251,7 @@ pub mod diagnostics;
 pub mod error;
 pub mod logging;
 pub mod memory;
+pub mod model_runtime;
 pub mod performance;
 pub mod pipeline;
 pub mod plugins;

@@ -697,7 +697,7 @@ impl BenchmarkUtils {
     /// Generate white noise for testing
     pub fn generate_white_noise(length: usize) -> Array1<f32> {
         let mut rng = thread_rng();
-        Array1::from_iter((0..length).map(|_| rng.gen::<f32>() * 2.0 - 1.0))
+        Array1::from_iter((0..length).map(|_| rng.random::<f32>() * 2.0 - 1.0))
     }
 }
 

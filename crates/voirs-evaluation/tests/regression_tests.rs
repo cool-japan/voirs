@@ -4,7 +4,7 @@
 //! and that performance doesn't regress over time.
 
 use scirs2_core::random::rngs::StdRng;
-use scirs2_core::random::{Random, Rng, SeedableRng};
+use scirs2_core::random::{Random, Rng, RngExt, SeedableRng};
 use std::collections::HashMap;
 use std::time::Instant;
 use voirs_evaluation::quality::{mcd::MCDEvaluator, pesq::PESQEvaluator, stoi::STOIEvaluator};
@@ -48,7 +48,7 @@ fn generate_regression_test_audio(
             + 0.1 * (2.0 * std::f32::consts::PI * 1320.0 * t).sin();
 
         // Generate degraded signal with controlled noise and distortion
-        let noise = (rng.r#gen::<f32>() - 0.5) * 0.1;
+        let noise = (rng.random::<f32>() - 0.5) * 0.1;
         let degraded_sample = ref_sample * 0.8 + noise;
 
         reference_samples.push(ref_sample);
@@ -411,7 +411,7 @@ async fn test_metric_correlation_stability() {
             *sample *= scaling;
 
             // Add deterministic white noise
-            let noise = (rng.r#gen::<f32>() - 0.5) * noise_level;
+            let noise = (rng.random::<f32>() - 0.5) * noise_level;
             *sample += noise;
 
             // Add mild harmonic distortion for spectral degradation

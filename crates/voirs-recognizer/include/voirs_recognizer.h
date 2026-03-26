@@ -385,12 +385,12 @@ VoirsError voirs_get_streaming_stats(
  * 
  * @return Pointer to error message string, or NULL if no error
  */
-const char* voirs_get_last_error(void);
+const char* voirs_recognizer_get_last_error(void);
 
 /**
  * Clear the last error message.
  */
-void voirs_clear_error(void);
+void voirs_recognizer_clear_error(void);
 
 /**
  * Convert a VoirsError to a human-readable string.

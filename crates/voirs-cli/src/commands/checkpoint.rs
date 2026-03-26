@@ -392,14 +392,14 @@ async fn list_checkpoints(
     // Sort checkpoints
     match sort_by {
         "name" => checkpoints.sort_by(|a, b| a.name.cmp(&b.name)),
-        "epoch" => checkpoints.sort_by(|a, b| b.epoch.cmp(&a.epoch)),
+        "epoch" => checkpoints.sort_by_key(|b| std::cmp::Reverse(b.epoch)),
         "loss" => checkpoints.sort_by(|a, b| {
             a.val_loss
                 .partial_cmp(&b.val_loss)
                 .unwrap_or(std::cmp::Ordering::Equal)
         }),
-        "size" => checkpoints.sort_by(|a, b| b.size.cmp(&a.size)),
-        "date" => checkpoints.sort_by(|a, b| b.modified.cmp(&a.modified)),
+        "size" => checkpoints.sort_by_key(|b| std::cmp::Reverse(b.size)),
+        "date" => checkpoints.sort_by_key(|b| std::cmp::Reverse(b.modified)),
         _ => {}
     }
 
@@ -820,7 +820,7 @@ async fn prune_checkpoints(
     if let Some(n) = keep_latest {
         // Sort by modification time (descending - newer first)
         let mut sorted = checkpoints.clone();
-        sorted.sort_by(|a, b| b.modified.cmp(&a.modified));
+        sorted.sort_by_key(|b| std::cmp::Reverse(b.modified));
 
         // Keep latest N
         let to_keep: std::collections::HashSet<_> =

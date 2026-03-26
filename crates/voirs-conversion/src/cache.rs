@@ -699,11 +699,11 @@ impl ConversionCacheSystem {
             Error::processing(format!("Failed to serialize data for compression: {e}"))
         })?;
 
-        // Use flate2 for real compression with high compression level for cache efficiency
-        use flate2::{write::GzEncoder, Compression};
+        // Use oxiarc-deflate for real compression with high compression level for cache efficiency
+        use oxiarc_deflate::GzipStreamEncoder;
         use std::io::Write;
 
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
+        let mut encoder = GzipStreamEncoder::new(Vec::new(), 9);
         encoder
             .write_all(&serialized)
             .map_err(|e| Error::processing(format!("Failed to compress data: {e}")))?;
@@ -713,11 +713,11 @@ impl ConversionCacheSystem {
     }
 
     fn decompress_data(&self, compressed: &[u8]) -> Result<CachedData> {
-        // Use flate2 for real decompression
-        use flate2::read::GzDecoder;
+        // Use oxiarc-deflate for real decompression
+        use oxiarc_deflate::GzipStreamDecoder;
         use std::io::Read;
 
-        let mut decoder = GzDecoder::new(compressed);
+        let mut decoder = GzipStreamDecoder::new(compressed);
         let mut decompressed = Vec::new();
         decoder
             .read_to_end(&mut decompressed)
@@ -733,10 +733,10 @@ impl ConversionCacheSystem {
         })?;
 
         // Use maximum compression level for long-term storage
-        use flate2::{write::GzEncoder, Compression};
+        use oxiarc_deflate::GzipStreamEncoder;
         use std::io::Write;
 
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
+        let mut encoder = GzipStreamEncoder::new(Vec::new(), 9);
         encoder.write_all(&serialized).map_err(|e| {
             Error::processing(format!("Failed to compress data with max compression: {e}"))
         })?;

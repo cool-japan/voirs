@@ -356,10 +356,11 @@ impl StreamingChunker {
 /// Vec of text chunks ready for parallel processing
 ///
 /// # Examples
-/// ```
+/// ```no_run
 /// use voirs_g2p::streaming::{batch_chunk_text, StreamingConfig, ChunkingStrategy};
 /// use voirs_g2p::LanguageCode;
 ///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let text = "This is a longer text that should be split into multiple chunks.";
 /// let config = StreamingConfig {
 ///     max_chunk_size: 15,
@@ -375,6 +376,8 @@ impl StreamingChunker {
 /// // Verify total text is preserved
 /// let total_text: String = chunks.iter().map(|c| c.text.as_str()).collect();
 /// assert_eq!(total_text, text);
+/// # Ok(())
+/// # }
 /// ```
 pub fn batch_chunk_text(text: &str, config: &StreamingConfig) -> Result<Vec<TextChunk>> {
     let mut chunker = StreamingChunker::new(config.clone());

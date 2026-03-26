@@ -674,20 +674,14 @@ fn generate_recommendations(
 fn generate_optimizations(feature: &str, metrics: &PerformanceMetrics) -> Vec<String> {
     let mut optimizations = Vec::new();
     match feature {
-        "synthesis" => {
-            if metrics.latency_ms > 200.0 {
-                optimizations.push("Use streaming synthesis for better responsiveness".to_string());
-            }
+        "synthesis" if metrics.latency_ms > 200.0 => {
+            optimizations.push("Use streaming synthesis for better responsiveness".to_string());
         }
-        "cloning" => {
-            if metrics.error_rate > 5.0 {
-                optimizations.push("Improve reference audio quality".to_string());
-            }
+        "cloning" if metrics.error_rate > 5.0 => {
+            optimizations.push("Improve reference audio quality".to_string());
         }
-        "singing" => {
-            if metrics.real_time_factor < 0.5 {
-                optimizations.push("Pre-process musical scores for better performance".to_string());
-            }
+        "singing" if metrics.real_time_factor < 0.5 => {
+            optimizations.push("Pre-process musical scores for better performance".to_string());
         }
         _ => {}
     }
@@ -1092,15 +1086,11 @@ fn generate_feature_recommendations(feature: &str, success_rate: f64) -> Vec<Str
         recommendations.push("Consider updating models or checking configuration".to_string());
     }
     match feature {
-        "cloning" => {
-            if success_rate < 0.8 {
-                recommendations.push("Ensure high-quality reference audio".to_string());
-            }
+        "cloning" if success_rate < 0.8 => {
+            recommendations.push("Ensure high-quality reference audio".to_string());
         }
-        "singing" => {
-            if success_rate < 0.7 {
-                recommendations.push("Verify musical score format compatibility".to_string());
-            }
+        "singing" if success_rate < 0.7 => {
+            recommendations.push("Verify musical score format compatibility".to_string());
         }
         _ => {}
     }

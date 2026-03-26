@@ -155,7 +155,7 @@ impl ARKitPlatform {
             // For simulation, randomly assign a device type
             use scirs2_core::random::Rng;
             let mut rng = scirs2_core::random::thread_rng();
-            match rng.gen_range(0..5) {
+            match rng.random_range(0..5) {
                 0 => IOSDeviceModel::IPadPro,
                 1 => IOSDeviceModel::IPhoneModern,
                 2 => IOSDeviceModel::IPhoneBasic,

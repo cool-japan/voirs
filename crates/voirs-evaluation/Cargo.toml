@@ -59,14 +59,17 @@ tracing.workspace = true
 once_cell.workspace = true
 parking_lot.workspace = true
 chrono.workspace = true
-flate2.workspace = true
-uuid = { version = "1.21", features = ["v4", "serde"] }
+oxiarc-deflate.workspace = true
+uuid = { version = "1.22", features = ["v4", "serde"] }
 base64 = "0.22"
 md5 = "0.8"
 
 # Machine learning
 candle-core.workspace = true
 candle-nn.workspace = true
+
+# ONNX inference backend
+oxionnx = { workspace = true, optional = true }
 
 # Text processing
 unicode-normalization.workspace = true
@@ -76,7 +79,7 @@ regex.workspace = true
 # Enable necessary warp features after upgrade (websocket and server)
 warp = { version = "0.4", features = ["websocket", "server"] }
 futures-util = "0.3"
-tokio-tungstenite = "0.28"
+tokio-tungstenite = "0.29"
 
 # Performance
 crossbeam-utils.workspace = true
@@ -85,11 +88,11 @@ libc.workspace = true
 fastrand.workspace = true
 
 # Python bindings (optional)
-pyo3 = { workspace = true, features = ["extension-module"], optional = true }
+pyo3 = { workspace = true, features = ["abi3-py38"], optional = true }
 numpy = { workspace = true, optional = true }
 
 # CLI dependencies
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.6", features = ["derive"] }
 
 # Audio metrics
 # Note: In a real implementation, you might add specialized audio quality libraries
@@ -109,6 +112,8 @@ perceptual = []
 python = ["pyo3", "numpy"]
 r-integration = []
 all-metrics = ["quality", "pronunciation", "comparison", "perceptual"]
+onnx = ["dep:oxionnx"]
+gpu = ["oxionnx?/gpu"]
 
 [[example]]
 name = "perceptual_evaluation"

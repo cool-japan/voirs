@@ -299,7 +299,7 @@ impl ReportGenerator {
         }
 
         let mut features: Vec<_> = usage_counts.into_iter().collect();
-        features.sort_by(|a, b| b.1.cmp(&a.1));
+        features.sort_by_key(|b| std::cmp::Reverse(b.1));
 
         features
             .into_iter()
@@ -341,7 +341,7 @@ impl ReportGenerator {
             });
         }
 
-        trends.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        trends.sort_by_key(|a| a.timestamp);
         trends
     }
 
@@ -371,7 +371,7 @@ impl ReportGenerator {
             });
         }
 
-        trends.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        trends.sort_by_key(|a| a.timestamp);
         trends
     }
 

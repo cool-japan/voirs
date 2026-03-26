@@ -1624,8 +1624,8 @@ The voirs-emotion crate has been comprehensively enhanced and verified:
 Following the "Latest crates policy" from CLAUDE.md, updated all workspace dependencies to their latest versions:
 
 - **SciRS2 Ecosystem Updates**:
-  - `scirs2-core`: 0.1.0-rc.1 → 0.1.0-rc.2 (CRITICAL UPDATE)
-  - `scirs2-fft`: 0.1.0-rc.1 → 0.1.0-rc.2
+  - `scirs2-core`: 0.3.0 → 0.3.0 (CRITICAL UPDATE)
+  - `scirs2-fft`: 0.3.0 → 0.3.0
 
 - **Core Async/Concurrency**:
   - `tokio`: 1.47.1 → 1.48.0

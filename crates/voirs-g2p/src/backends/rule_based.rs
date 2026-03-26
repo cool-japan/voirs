@@ -196,7 +196,7 @@ impl RuleBasedG2p {
         self.rules.push(PhonologicalRule::new("z", "z"));
 
         // Sort rules by priority (highest first)
-        self.rules.sort_by(|a, b| b.priority.cmp(&a.priority));
+        self.rules.sort_by_key(|b| std::cmp::Reverse(b.priority));
     }
 
     /// Load German phonological rules
@@ -245,7 +245,7 @@ impl RuleBasedG2p {
         self.rules.push(PhonologicalRule::new("o", "o"));
         self.rules.push(PhonologicalRule::new("u", "u"));
 
-        self.rules.sort_by(|a, b| b.priority.cmp(&a.priority));
+        self.rules.sort_by_key(|b| std::cmp::Reverse(b.priority));
     }
 
     /// Load French phonological rules
@@ -269,7 +269,7 @@ impl RuleBasedG2p {
         self.rules.push(PhonologicalRule::new("o", "o"));
         self.rules.push(PhonologicalRule::new("u", "u"));
 
-        self.rules.sort_by(|a, b| b.priority.cmp(&a.priority));
+        self.rules.sort_by_key(|b| std::cmp::Reverse(b.priority));
     }
 
     /// Load Spanish phonological rules
@@ -309,7 +309,7 @@ impl RuleBasedG2p {
         self.rules.push(PhonologicalRule::new("y", "j"));
         self.rules.push(PhonologicalRule::new("z", "θ")); // European Spanish
 
-        self.rules.sort_by(|a, b| b.priority.cmp(&a.priority));
+        self.rules.sort_by_key(|b| std::cmp::Reverse(b.priority));
     }
 
     /// Load Italian phonological rules
@@ -378,7 +378,7 @@ impl RuleBasedG2p {
         self.rules.push(PhonologicalRule::new("v", "v"));
         self.rules.push(PhonologicalRule::new("z", "ts"));
 
-        self.rules.sort_by(|a, b| b.priority.cmp(&a.priority));
+        self.rules.sort_by_key(|b| std::cmp::Reverse(b.priority));
     }
 
     /// Load Portuguese phonological rules
@@ -461,7 +461,7 @@ impl RuleBasedG2p {
         self.rules.push(PhonologicalRule::new("y", "i"));
         self.rules.push(PhonologicalRule::new("z", "z"));
 
-        self.rules.sort_by(|a, b| b.priority.cmp(&a.priority));
+        self.rules.sort_by_key(|b| std::cmp::Reverse(b.priority));
     }
 
     /// Load basic Japanese phonological rules

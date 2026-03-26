@@ -63,6 +63,8 @@ pub mod kokoro;
 pub mod model_inspect;
 pub mod models;
 pub mod monitoring;
+#[cfg(feature = "onnx")]
+pub mod onnx_tools;
 pub mod performance;
 pub mod server;
 #[cfg(feature = "singing")]

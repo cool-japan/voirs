@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-VoiRS is a pure-Rust neural speech synthesis (TTS) framework with modular architecture. Current version: **0.1.0-beta.1**.
+VoiRS is a pure-Rust neural speech synthesis (TTS) framework with modular architecture. Current version: **0.3.0**.
 
 ### Core Architecture
 
@@ -228,8 +228,8 @@ serde.workspace = true             # ✅ Use workspace
    ```toml
    [workspace.dependencies]
    # ✅ REQUIRED - SciRS2 ecosystem crates (RC.1)
-   scirs2-core = { version = "0.1.0-rc.1", features = ["array", "random", "simd", "parallel"] }
-   scirs2-fft = "0.1.0-rc.1"
+   scirs2-core = { version = "0.3.0", features = ["array", "random", "simd", "parallel"] }
+   scirs2-fft = "0.3.0"
 
    # ❌ REMOVED - These dependencies are NO LONGER in workspace
    # rand, ndarray, num-complex, rayon, nalgebra
@@ -359,7 +359,7 @@ Cross-platform code should use conditional compilation for platform-specific opt
 
 ## Version and Release Notes
 
-Current version is 0.1.0-beta.1. This is a beta release with:
+Current version is 0.3.0. This is a beta release with:
 - ✅ Core TTS pipeline working and tested
 - ✅ Advanced features (emotion, cloning, spatial) implemented
 - ✅ CLI tool and examples functional

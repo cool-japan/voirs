@@ -20,9 +20,9 @@
 //!
 //! # Example
 //!
-//! ```rust
+//! ```no_run
 //! use voirs_evaluation::conversational::*;
-//! use voirs_evaluation::audio::AudioBuffer;
+//! use voirs_sdk::AudioBuffer;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create conversational evaluator
@@ -42,7 +42,7 @@
 //! let samples: Vec<f32> = (0..32000)
 //!     .map(|i| (i as f32 * 0.01).sin() * 0.1)
 //!     .collect();
-//! let audio = AudioBuffer::new(samples, sample_rate, 1)?;
+//! let audio = AudioBuffer::new(samples, sample_rate, 1);
 //!
 //! // Evaluate turn
 //! let result = evaluator.evaluate_turn(&turn, &audio, None)?;

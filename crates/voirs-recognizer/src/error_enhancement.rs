@@ -348,13 +348,14 @@ impl ErrorEnhancer for RecognitionError {
                         .push_str("⚠️  System memory may be insufficient for this model size.\n");
                 }
             }
-            RecognitionError::DeviceNotAvailable { device, .. } => {
-                if device.to_lowercase().contains("gpu") && !system_info.has_gpu {
-                    contextual_message.push_str(
-                        "ℹ️  No GPU detected on this system. Consider using CPU-only mode.\n",
-                    );
-                }
+            RecognitionError::DeviceNotAvailable { device, .. }
+                if device.to_lowercase().contains("gpu") && !system_info.has_gpu =>
+            {
+                contextual_message.push_str(
+                    "ℹ️  No GPU detected on this system. Consider using CPU-only mode.\n",
+                );
             }
+            RecognitionError::DeviceNotAvailable { .. } => {}
             RecognitionError::ModelLoadError { .. } => {
                 if system_info.available_disk_mb < 1000 {
                     contextual_message.push_str("⚠️  Low disk space detected. Consider freeing up space for model storage.\n");

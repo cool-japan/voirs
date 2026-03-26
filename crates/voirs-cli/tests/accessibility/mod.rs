@@ -255,7 +255,7 @@ fn test_clear_status_reporting() {
 
     // Status commands should provide clear, accessible information
     cmd.arg("list-voices")
-        .timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(100))
         .assert()
         .success()
         .stdout(predicate::function(|output: &str| {

@@ -192,7 +192,7 @@ impl TextPreprocessor {
 
         // Process entities from end to start to preserve positions
         let mut sorted_entities: Vec<_> = entities.iter().collect();
-        sorted_entities.sort_by(|a, b| b.2.cmp(&a.2));
+        sorted_entities.sort_by_key(|b| std::cmp::Reverse(b.2));
 
         for (entity_text, entity_type, start, end) in sorted_entities {
             match entity_type {

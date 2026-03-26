@@ -47,6 +47,9 @@ fastrand = { workspace = true }
 # Date and time
 chrono = { workspace = true }
 
+# ONNX inference backend
+oxionnx = { workspace = true, optional = true }
+
 # File handling
 tempfile = { workspace = true }
 walkdir = { workspace = true }
@@ -79,7 +82,8 @@ proptest = { workspace = true }
 
 [features]
 default = []
-gpu = []
+gpu = ["oxionnx?/gpu"]
+onnx = ["dep:oxionnx"]
 cuda = ["candle-core/cuda"]
 metal = ["dep:metal-rs"]
 

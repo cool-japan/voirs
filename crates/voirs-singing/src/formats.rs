@@ -471,10 +471,8 @@ impl MidiParser {
                                     accidentals: sharps_flats,
                                 };
                             }
-                            MetaMessage::TrackName(name) => {
-                                if score.title == "MIDI Score" {
-                                    score.title = String::from_utf8_lossy(name).to_string();
-                                }
+                            MetaMessage::TrackName(name) if score.title == "MIDI Score" => {
+                                score.title = String::from_utf8_lossy(name).to_string();
                             }
                             _ => {} // Ignore other meta messages
                         }

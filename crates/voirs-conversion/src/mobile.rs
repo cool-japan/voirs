@@ -1036,11 +1036,10 @@ impl MobileConversionStats {
         let total_conversions = self.total_conversions.load(Ordering::Relaxed);
         let total_processing_time_ns = self.total_processing_time.load(Ordering::Relaxed);
 
-        let average_processing_time_ms = if total_conversions > 0 {
-            (total_processing_time_ns / total_conversions) as f64 / 1_000_000.0
-        } else {
-            0.0
-        };
+        let average_processing_time_ms = total_processing_time_ns
+            .checked_div(total_conversions)
+            .map(|t| t as f64 / 1_000_000.0)
+            .unwrap_or(0.0);
 
         MobileConversionStatistics {
             total_conversions,

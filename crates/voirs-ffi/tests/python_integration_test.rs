@@ -12,7 +12,7 @@ mod python_tests {
     use pyo3::types::*;
     use pyo3::IntoPyObject;
     use std::sync::Arc;
-    use voirs_ffi::python::*;
+    use voirs::python::*;
 
     #[test]
     fn test_python_module_creation() {

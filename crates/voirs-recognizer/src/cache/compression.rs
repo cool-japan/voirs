@@ -7,7 +7,7 @@ use std::io::{Read, Write};
 pub fn compress_data(data: &[u8], level: u8) -> Result<Vec<u8>, RecognitionError> {
     use std::io::Cursor;
     
-    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::new(level.into()));
+    let mut encoder = oxiarc_deflate::ZlibStreamEncoder::new(Vec::new(), level);
     encoder.write_all(data).map_err(|e| {
         RecognitionError::ResourceError {
             message: format!("Compression failed: {}", e),
@@ -27,7 +27,7 @@ pub fn compress_data(data: &[u8], level: u8) -> Result<Vec<u8>, RecognitionError
 pub fn decompress_data(compressed_data: &[u8]) -> Result<Vec<u8>, RecognitionError> {
     use std::io::Cursor;
     
-    let mut decoder = flate2::read::ZlibDecoder::new(Cursor::new(compressed_data));
+    let mut decoder = oxiarc_deflate::ZlibStreamDecoder::new(Cursor::new(compressed_data));
     let mut decompressed = Vec::new();
     
     decoder.read_to_end(&mut decompressed).map_err(|e| {

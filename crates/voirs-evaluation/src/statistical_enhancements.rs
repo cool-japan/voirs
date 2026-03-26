@@ -394,13 +394,13 @@ impl EnhancedStatisticalAnalyzer {
         for _ in 0..self.bootstrap_samples {
             let sample1: Vec<f64> = (0..group1.len())
                 .map(|_| {
-                    let idx = rng.gen_range(0..group1.len());
+                    let idx = rng.random_range(0..group1.len());
                     group1[idx]
                 })
                 .collect();
             let sample2: Vec<f64> = (0..group2.len())
                 .map(|_| {
-                    let idx = rng.gen_range(0..group2.len());
+                    let idx = rng.random_range(0..group2.len());
                     group2[idx]
                 })
                 .collect();
@@ -538,7 +538,7 @@ impl EnhancedStatisticalAnalyzer {
             // Fisher-Yates shuffle for sampling without replacement
             let mut indices: Vec<usize> = (0..n).collect();
             for i in (1..n).rev() {
-                let j = rng.gen_range(0..=i);
+                let j = rng.random_range(0..=i);
                 indices.swap(i, j);
             }
             let sample_x: Vec<f64> = indices.iter().map(|&i| x[i]).collect();

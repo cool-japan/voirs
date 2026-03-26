@@ -643,12 +643,12 @@ impl AuditLogger {
 
         // Top users (clone before consuming)
         let mut top_users: Vec<(String, usize)> = by_user.clone().into_iter().collect();
-        top_users.sort_by(|a, b| b.1.cmp(&a.1));
+        top_users.sort_by_key(|b| std::cmp::Reverse(b.1));
         top_users.truncate(10);
 
         // Top actions
         let mut top_actions: Vec<(AuditAction, usize)> = by_action.clone().into_iter().collect();
-        top_actions.sort_by(|a, b| b.1.cmp(&a.1));
+        top_actions.sort_by_key(|b| std::cmp::Reverse(b.1));
         top_actions.truncate(10);
 
         Ok(AuditStatistics {

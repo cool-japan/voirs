@@ -840,7 +840,7 @@ impl DomainAdapterImpl {
 
         // Create vocabulary statistics
         let mut frequent_words: Vec<_> = word_counts.into_iter().collect();
-        frequent_words.sort_by(|a, b| b.1.cmp(&a.1));
+        frequent_words.sort_by_key(|b| std::cmp::Reverse(b.1));
         frequent_words.truncate(100); // Top 100 words
 
         text_stats.vocabulary_stats = VocabularyStatistics {

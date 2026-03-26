@@ -53,8 +53,7 @@ tempfile.workspace = true
 reqwest.workspace = true
 
 # Compression support
-flate2.workspace = true
-tar.workspace = true
+oxiarc-deflate.workspace = true
 
 # FFI for OpenJTalk
 libc.workspace = true
@@ -63,6 +62,9 @@ libc.workspace = true
 candle-core.workspace = true
 candle-nn.workspace = true
 candle-transformers.workspace = true
+
+# ONNX inference backend
+oxionnx = { workspace = true, optional = true }
 
 # Model serialization
 oxicode.workspace = true
@@ -85,6 +87,8 @@ scirs2-core = { workspace = true, features = ["random"] }
 
 [features]
 default = []
+onnx = ["dep:oxionnx"]
+gpu = ["oxionnx?/gpu"]
 
 [[bench]]
 name = "g2p_benchmarks"

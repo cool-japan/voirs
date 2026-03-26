@@ -575,8 +575,8 @@ impl DifferentialPrivacyEngine {
 
         for feature in features.iter_mut() {
             // Generate Laplace noise using uniform random variables
-            let u1: f64 = rng.gen_range(-0.5..0.5);
-            let _u2: f64 = rng.gen_range(-0.5..0.5);
+            let u1: f64 = rng.random_range(-0.5..0.5);
+            let _u2: f64 = rng.random_range(-0.5..0.5);
 
             let noise = if u1 >= 0.0 {
                 -scale * (1.0_f64 - 2.0 * u1).ln()

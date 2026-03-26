@@ -705,7 +705,7 @@ impl FederatedLearningClient {
         let mut rng = thread_rng();
 
         for param in &mut updated_params {
-            *param += rng.gen_range(-0.01..0.01);
+            *param += rng.random_range(-0.01..0.01);
         }
 
         // Apply gradient clipping if configured
@@ -720,14 +720,14 @@ impl FederatedLearningClient {
         }
 
         // Calculate training loss (simulated)
-        let training_loss = rng.gen_range(0.1..1.0);
+        let training_loss = rng.random_range(0.1..1.0);
 
         let update = ClientUpdate {
             client_id: self.client_id.clone(),
             parameters: updated_params,
             num_samples: training_data.len(),
             training_loss,
-            validation_accuracy: Some(rng.gen_range(0.7..0.95)),
+            validation_accuracy: Some(rng.random_range(0.7..0.95)),
             training_time_ms: training_start.elapsed().as_millis() as u64,
             round: 0, // Will be set by server
             secure_shares: None,

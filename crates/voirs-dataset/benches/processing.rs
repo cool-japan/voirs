@@ -140,7 +140,7 @@ fn bench_dataset_access(c: &mut Criterion) {
                         use scirs2_core::random::*;
                         use scirs2_core::Rng;
                         let mut rng = thread_rng();
-                        (0..len).map(|_| rng.gen_range(0..len)).collect()
+                        (0..len).map(|_| rng.random_range(0..len)).collect()
                     };
                     let mut total_duration = 0.0f32;
                     for &i in &indices {

@@ -136,7 +136,7 @@ async fn execute_synth(
             voirs_sdk::VoirsError::config_error(format!("Failed to flush stdout: {}", e))
         })?;
     }
-    let mut model = KokoroOnnxInference::from_kokoro_files(&model_path)?;
+    let model = KokoroOnnxInference::from_kokoro_files(&model_path)?;
     if !quiet {
         println!("✓");
     }
@@ -1093,7 +1093,7 @@ async fn execute_test(
             voirs_sdk::VoirsError::config_error(format!("Failed to flush stdout: {}", e))
         })?;
     }
-    let mut model = KokoroOnnxInference::from_kokoro_files(&model_path)?;
+    let model = KokoroOnnxInference::from_kokoro_files(&model_path)?;
     if !global.quiet {
         println!("✓");
         println!();
@@ -1521,7 +1521,7 @@ async fn execute_batch(
     }
     let temp_dir = std::env::temp_dir();
     let model_path = temp_dir.join("voirs_models/kokoro-zh");
-    let mut model = KokoroOnnxInference::from_kokoro_files(&model_path)?;
+    let model = KokoroOnnxInference::from_kokoro_files(&model_path)?;
     if !global.quiet {
         println!("✓");
         println!();

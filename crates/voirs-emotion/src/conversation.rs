@@ -588,22 +588,19 @@ impl ConversationContext {
         confidence: &mut f32,
     ) {
         match style {
-            CommunicationStyle::Reserved => {
-                if intensity.value() > 0.7 {
-                    *intensity = EmotionIntensity::new(intensity.value() * 0.8);
-                    reasoning
-                        .push("Reduced intensity for reserved communication style".to_string());
-                    *confidence += 0.1;
-                }
+            CommunicationStyle::Reserved if intensity.value() > 0.7 => {
+                *intensity = EmotionIntensity::new(intensity.value() * 0.8);
+                reasoning.push("Reduced intensity for reserved communication style".to_string());
+                *confidence += 0.1;
             }
-            CommunicationStyle::Expressive => {
-                if intensity.value() < 0.5 {
-                    *intensity = EmotionIntensity::new(intensity.value() * 1.2);
-                    reasoning
-                        .push("Increased intensity for expressive communication style".to_string());
-                    *confidence += 0.1;
-                }
+            CommunicationStyle::Reserved => {}
+            CommunicationStyle::Expressive if intensity.value() < 0.5 => {
+                *intensity = EmotionIntensity::new(intensity.value() * 1.2);
+                reasoning
+                    .push("Increased intensity for expressive communication style".to_string());
+                *confidence += 0.1;
             }
+            CommunicationStyle::Expressive => {}
             CommunicationStyle::Professional => {
                 // Moderate emotions for professional contexts
                 if matches!(emotion, Emotion::Excited) {
@@ -648,14 +645,15 @@ impl ConversationContext {
                     *confidence += 0.1;
                 }
             }
-            TopicContext::Emotional => {
+            TopicContext::Emotional
+                if intensity.value() < 0.6 && !matches!(emotion, Emotion::Neutral) =>
+            {
                 // Allow higher emotional intensity
-                if intensity.value() < 0.6 && !matches!(emotion, Emotion::Neutral) {
-                    *intensity = EmotionIntensity::new(intensity.value() * 1.2);
-                    reasoning.push("Increased intensity for emotional context".to_string());
-                    *confidence += 0.1;
-                }
+                *intensity = EmotionIntensity::new(intensity.value() * 1.2);
+                reasoning.push("Increased intensity for emotional context".to_string());
+                *confidence += 0.1;
             }
+            TopicContext::Emotional => {}
             TopicContext::Entertainment => {
                 // Encourage positive emotions
                 if matches!(emotion, Emotion::Neutral) {
@@ -688,31 +686,29 @@ impl ConversationContext {
         confidence: &mut f32,
     ) {
         match relationship {
-            SpeakerRelationship::Superior => {
+            SpeakerRelationship::Superior if intensity.value() > 0.6 => {
                 // More respectful, moderate emotions
-                if intensity.value() > 0.6 {
-                    *intensity = EmotionIntensity::new(0.6);
-                    reasoning.push("Moderated emotion for superior relationship".to_string());
-                    *confidence += 0.1;
-                }
+                *intensity = EmotionIntensity::new(0.6);
+                reasoning.push("Moderated emotion for superior relationship".to_string());
+                *confidence += 0.1;
             }
-            SpeakerRelationship::Family | SpeakerRelationship::Partner => {
+            SpeakerRelationship::Superior => {}
+            SpeakerRelationship::Family | SpeakerRelationship::Partner
+                if intensity.value() < 0.4 && !matches!(emotion, Emotion::Neutral) =>
+            {
                 // Allow more emotional expression
-                if intensity.value() < 0.4 && !matches!(emotion, Emotion::Neutral) {
-                    *intensity = EmotionIntensity::new(intensity.value() * 1.3);
-                    reasoning
-                        .push("Increased emotional expression for close relationship".to_string());
-                    *confidence += 0.1;
-                }
+                *intensity = EmotionIntensity::new(intensity.value() * 1.3);
+                reasoning.push("Increased emotional expression for close relationship".to_string());
+                *confidence += 0.1;
             }
-            SpeakerRelationship::Stranger => {
+            SpeakerRelationship::Family | SpeakerRelationship::Partner => {}
+            SpeakerRelationship::Stranger if intensity.value() > 0.5 => {
                 // Conservative, polite emotions
-                if intensity.value() > 0.5 {
-                    *intensity = EmotionIntensity::new(0.5);
-                    reasoning.push("Conservative emotion for stranger relationship".to_string());
-                    *confidence += 0.1;
-                }
+                *intensity = EmotionIntensity::new(0.5);
+                reasoning.push("Conservative emotion for stranger relationship".to_string());
+                *confidence += 0.1;
             }
+            SpeakerRelationship::Stranger => {}
             SpeakerRelationship::Customer => {
                 // Professional, helpful emotions
                 if matches!(emotion, Emotion::Sad | Emotion::Angry) {

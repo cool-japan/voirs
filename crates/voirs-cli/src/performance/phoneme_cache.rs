@@ -17,13 +17,13 @@
 //! let cache = PhonemeCache::new(1000); // Cache 1000 entries
 //!
 //! // First call: performs actual G2P conversion
-//! let phonemes1 = cache.get_or_compute("hello", "en", || {
-//!     vec!["h", "ə", "l", "oʊ"]
+//! let phonemes1 = cache.get_or_compute("hello", "en", "phonetisaurus", || {
+//!     vec!["h".to_string(), "ə".to_string(), "l".to_string(), "oʊ".to_string()]
 //! });
 //!
 //! // Second call: retrieved from cache (much faster)
-//! let phonemes2 = cache.get_or_compute("hello", "en", || {
-//!     vec!["h", "ə", "l", "oʊ"]
+//! let phonemes2 = cache.get_or_compute("hello", "en", "phonetisaurus", || {
+//!     vec!["h".to_string(), "ə".to_string(), "l".to_string(), "oʊ".to_string()]
 //! });
 //! ```
 
@@ -268,7 +268,7 @@ impl PhonemeCache {
     ///
     /// ```no_run
     /// # use voirs_cli::performance::phoneme_cache::PhonemeCache;
-    /// let cache = PhonemeCache::new(1000);
+    /// let mut cache = PhonemeCache::new(1000);
     /// cache.resize(2000); // Increase capacity to 2000
     /// ```
     pub fn resize(&mut self, new_capacity: usize) {

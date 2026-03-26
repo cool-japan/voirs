@@ -491,16 +491,16 @@ impl ListeningTestSimulator {
         }
 
         // Apply session fatigue (simulates listening fatigue over time)
-        let fatigue_bias = self.bias_model.fatigue_factor * thread_rng().gen_range(0.0..1.0);
+        let fatigue_bias = self.bias_model.fatigue_factor * thread_rng().random_range(0.0..1.0);
         biased_score -= fatigue_bias;
 
         // Apply context bias (order effects, previous ratings influence)
-        let context_bias = self.bias_model.context_factor * thread_rng().gen_range(-0.5..0.5);
+        let context_bias = self.bias_model.context_factor * thread_rng().random_range(-0.5..0.5);
         biased_score += context_bias;
 
         // Apply consistency-based random noise
         let noise_factor = 1.0 - listener.consistency;
-        let noise = thread_rng().gen_range(-noise_factor..noise_factor) * 0.1;
+        let noise = thread_rng().random_range(-noise_factor..noise_factor) * 0.1;
         biased_score += noise;
 
         // Apply listening environment bias
@@ -515,19 +515,19 @@ impl ListeningTestSimulator {
         let mut rng = thread_rng();
 
         // Background noise effect
-        let noise_level = rng.gen_range(0.0..0.3);
+        let noise_level = rng.random_range(0.0..0.3);
         let noise_bias = -noise_level * 0.1;
 
         // Room acoustics effect
-        let reverb_level = rng.gen_range(0.0..0.5);
+        let reverb_level = rng.random_range(0.0..0.5);
         let reverb_bias = -reverb_level * 0.05;
 
         // Equipment quality effect
-        let equipment_quality = rng.gen_range(0.5..1.0);
+        let equipment_quality = rng.random_range(0.5..1.0);
         let equipment_bias = (equipment_quality - 0.75) * 0.2;
 
         // Attention level effect
-        let attention = rng.gen_range(0.7..1.0);
+        let attention = rng.random_range(0.7..1.0);
         let attention_bias = (attention - 0.85) * 0.3;
 
         ((noise_bias + reverb_bias + equipment_bias + attention_bias) as f32).clamp(-0.2, 0.1)
@@ -672,10 +672,10 @@ impl VirtualListener {
             ExpertiseLevel::Novice => 6.0,
         };
 
-        let response_time: f32 = base_response_time + rng.gen_range(-1.0..1.0);
-        let hesitation_count = rng.gen_range(0..=2);
+        let response_time: f32 = base_response_time + rng.random_range(-1.0..1.0);
+        let hesitation_count = rng.random_range(0..=2);
         let revision_count = if self.consistency < 0.7 {
-            rng.gen_range(0..=1)
+            rng.random_range(0..=1)
         } else {
             0
         };

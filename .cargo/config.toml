@@ -2,8 +2,10 @@
 # Use multiple cores for compilation (0 = auto-detect, commented out to use default)
 
 [target.x86_64-unknown-linux-gnu]
-linker = "clang"
-rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+# Link against Python shared library for PyO3 test binaries (extension modules loaded by Python don't need this)
+rustflags = [
+    "-C", "link-arg=-Wl,-rpath,/usr/lib/x86_64-linux-gnu",
+]
 
 [target.x86_64-apple-darwin]
 rustflags = ["-C", "link-arg=-Wl,-ld_classic"]
@@ -43,8 +45,9 @@ rustflags = [
 
 # Environment variables for builds
 [env]
-# Python (for pyo3 bindings) - use Python 3.14 (matches compiled pyo3 rlib)
-PYO3_PYTHON = "/opt/homebrew/bin/python3"
+# Python (for pyo3 bindings) - use system python3
+# Override via env var if needed (e.g. PYO3_PYTHON=python3.11)
+PYO3_PYTHON = { value = "python3", force = false }
 
 # CUDA configuration
 CUDA_ROOT = { value = "/usr/local/cuda", relative = false }

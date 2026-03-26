@@ -576,7 +576,7 @@ impl ErrorTracker {
 
         // Top errors
         let mut top_errors: Vec<ErrorGroup> = groups.values().cloned().collect();
-        top_errors.sort_by(|a, b| b.occurrence_count.cmp(&a.occurrence_count));
+        top_errors.sort_by_key(|b| std::cmp::Reverse(b.occurrence_count));
         top_errors.truncate(10);
 
         let stats = ErrorStatistics {

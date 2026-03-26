@@ -278,11 +278,7 @@ impl MemoryTracker {
         } else {
             0.0
         };
-        let avg_allocation_size = if total_allocs > 0 {
-            current_memory / total_allocs
-        } else {
-            0
-        };
+        let avg_allocation_size = current_memory.checked_div(total_allocs).unwrap_or(0);
 
         // Enhanced memory statistics with system-level information
         let mut stats = ResourceStats {

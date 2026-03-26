@@ -443,6 +443,15 @@ pub enum VoirsError {
         message: String,
         channel_count: Option<u32>,
     },
+
+    // === Model Runtime Errors ===
+    /// Model loading failed
+    #[error("Model load error: {0}")]
+    ModelLoadError(String),
+
+    /// Inference failed
+    #[error("Inference error: {0}")]
+    InferenceError(String),
 }
 
 impl Clone for VoirsError {
@@ -864,6 +873,8 @@ impl Clone for VoirsError {
                 feature: feature.clone(),
                 reason: reason.clone(),
             },
+            Self::ModelLoadError(msg) => Self::ModelLoadError(msg.clone()),
+            Self::InferenceError(msg) => Self::InferenceError(msg.clone()),
         }
     }
 }
@@ -1209,6 +1220,9 @@ impl VoirsError {
             | Self::BinauralRenderingError { .. } => "spatial_audio",
 
             Self::FeatureUnavailable { .. } => "feature",
+
+            Self::ModelLoadError(_) => "model",
+            Self::InferenceError(_) => "model",
         }
     }
 

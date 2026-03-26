@@ -4,9 +4,9 @@ use std::ffi::CString;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use voirs_ffi::c_api::synthesis::VoirsSynthesisResult;
-use voirs_ffi::c_api::*;
-use voirs_ffi::{voirs_free_audio_buffer, VoirsErrorCode, VoirsSynthesisConfig};
+use voirs::c_api::synthesis::VoirsSynthesisResult;
+use voirs::c_api::*;
+use voirs::{voirs_free_audio_buffer, VoirsErrorCode, VoirsSynthesisConfig};
 
 /// Cross-language performance benchmarks
 ///

@@ -925,11 +925,10 @@ impl WebRTCProcessingStats {
         let total_frames = self.total_frames_processed.load(Ordering::Relaxed);
         let total_time_us = self.total_processing_time.load(Ordering::Relaxed);
 
-        if total_frames > 0 {
-            Duration::from_micros(total_time_us / total_frames)
-        } else {
-            Duration::from_micros(0)
-        }
+        total_time_us
+            .checked_div(total_frames)
+            .map(Duration::from_micros)
+            .unwrap_or(Duration::from_micros(0))
     }
 }
 

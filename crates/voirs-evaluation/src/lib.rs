@@ -145,6 +145,8 @@ pub mod audio;
 /// Audit trail system for compliance and security monitoring
 pub mod audit;
 pub mod automated_benchmarks;
+/// ONNX and other inference backends for evaluation
+pub mod backends;
 pub mod benchmark_export;
 pub mod benchmark_runner;
 pub mod benchmarks;

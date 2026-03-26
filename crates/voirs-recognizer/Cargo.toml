@@ -61,7 +61,7 @@ num_cpus.workspace = true
 candle-core.workspace = true
 candle-nn.workspace = true
 candle-transformers.workspace = true
-ort.workspace = true
+oxionnx = { workspace = true, optional = true }
 safetensors.workspace = true
 hf-hub.workspace = true
 
@@ -83,7 +83,7 @@ crossbeam-utils.workspace = true
 half.workspace = true  # For F16 support
 
 # Compression
-flate2.workspace = true
+oxiarc-deflate.workspace = true
 
 # Configuration
 toml = "1.0"
@@ -134,7 +134,8 @@ wasm = ["wasm-bindgen", "wasm-bindgen-futures", "js-sys", "web-sys", "console_er
 c-api = []  # C/C++ API bindings
 rest-api = ["axum", "tower", "tower-http", "hyper", "tokio-tungstenite", "base64", "mime", "reqwest", "url"]  # REST API and microservice support
 all-models = ["whisper", "whisper-pure", "deepspeech", "wav2vec2", "transformer", "conformer", "forced-align", "mfa"]
-gpu = ["ort/cuda"]
+onnx = ["dep:oxionnx"]
+gpu = ["oxionnx?/gpu"]
 
 # Windows-specific dependencies
 [target.'cfg(windows)'.dependencies]

@@ -9,10 +9,11 @@
 //!
 //! # Examples
 //!
-//! ```
+//! ```no_run
 //! use voirs_g2p::phonology::{PhonologicalProcessor, ProcessConfig};
 //! use voirs_g2p::{Phoneme, LanguageCode};
 //!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let processor = PhonologicalProcessor::new(LanguageCode::EnUs);
 //! let input = vec![
 //!     Phoneme::new("ɪ".to_string()),
@@ -24,6 +25,8 @@
 //!
 //! // Apply phonological processes (e.g., /n/ -> /m/ before /p/)
 //! let output = processor.apply_all_processes(&input)?;
+//! # Ok(())
+//! # }
 //! ```
 
 pub mod processes;

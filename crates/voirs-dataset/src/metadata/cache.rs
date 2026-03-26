@@ -530,14 +530,10 @@ impl MetadataCache {
     }
 
     fn compress_data(&self, data: &[u8]) -> Result<Vec<u8>> {
-        use flate2::write::GzEncoder;
-        use flate2::Compression;
+        use oxiarc_deflate::GzipStreamEncoder;
         use std::io::Write;
 
-        let mut encoder = GzEncoder::new(
-            Vec::new(),
-            Compression::new(self.config.compression_level as u32),
-        );
+        let mut encoder = GzipStreamEncoder::new(Vec::new(), self.config.compression_level);
         encoder
             .write_all(data)
             .map_err(|e| DatasetError::ConfigError(format!("Compression failed: {e}")))?;
@@ -547,10 +543,10 @@ impl MetadataCache {
     }
 
     fn decompress_data(&self, compressed: &[u8]) -> Result<Vec<u8>> {
-        use flate2::read::GzDecoder;
+        use oxiarc_deflate::GzipStreamDecoder;
         use std::io::Read;
 
-        let mut decoder = GzDecoder::new(compressed);
+        let mut decoder = GzipStreamDecoder::new(compressed);
         let mut decompressed = Vec::new();
         decoder
             .read_to_end(&mut decompressed)

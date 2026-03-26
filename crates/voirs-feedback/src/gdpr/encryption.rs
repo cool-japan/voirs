@@ -144,7 +144,7 @@ impl DifferentialPrivacy {
 
     /// Sample from Laplace distribution
     fn sample_laplace(&self, scale: f64) -> f64 {
-        let u: f64 = thread_rng().gen_range(-0.5..0.5);
+        let u: f64 = thread_rng().random_range(-0.5..0.5);
         -scale * u.signum() * (1.0 - 2.0 * u.abs()).ln()
     }
 

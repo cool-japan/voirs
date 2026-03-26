@@ -79,6 +79,9 @@ pub mod sdk_integration;
 #[cfg(feature = "evaluation-integration")]
 pub mod evaluation_integration;
 
+#[cfg(feature = "onnx")]
+pub mod backends;
+
 #[cfg(feature = "gpu")]
 pub mod gpu;
 

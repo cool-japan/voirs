@@ -503,13 +503,12 @@ impl TtsPipeline {
         let mut result = Vec::new();
         for word in words {
             match language {
+                LanguageCode::DeDe if word.len() > 10 => {
+                    let parts = self.split_german_compound(&word);
+                    result.extend(parts);
+                }
                 LanguageCode::DeDe => {
-                    if word.len() > 10 {
-                        let parts = self.split_german_compound(&word);
-                        result.extend(parts);
-                    } else {
-                        result.push(word);
-                    }
+                    result.push(word);
                 }
                 _ => {
                     result.push(word);

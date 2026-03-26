@@ -22,7 +22,7 @@
 //! if !result.is_valid() {
 //!     for error in result.errors() {
 //!         println!("Error: {}", error.message);
-//!         for suggestion in error.suggestions {
+//!         for suggestion in &error.suggestions {
 //!             println!("  Suggestion: {}", suggestion);
 //!         }
 //!     }

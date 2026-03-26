@@ -517,7 +517,7 @@ impl ConsistentHashRing {
         }
 
         // Sort nodes by hash value
-        nodes.sort_by(|a, b| a.hash.cmp(&b.hash));
+        nodes.sort_by_key(|a| a.hash);
 
         Self {
             nodes,

@@ -890,7 +890,7 @@ impl VoiceLibraryManager {
 
         // Most popular voices (top 10 by access count)
         let mut popular_voices: Vec<_> = voices.values().collect();
-        popular_voices.sort_by(|a, b| b.access_count.cmp(&a.access_count));
+        popular_voices.sort_by_key(|b| std::cmp::Reverse(b.access_count));
         let most_popular = popular_voices
             .iter()
             .take(10)
@@ -899,7 +899,7 @@ impl VoiceLibraryManager {
 
         // Recently added voices (last 10)
         let mut recent_voices: Vec<_> = voices.values().collect();
-        recent_voices.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        recent_voices.sort_by_key(|b| std::cmp::Reverse(b.created_at));
         let recently_added = recent_voices
             .iter()
             .take(10)

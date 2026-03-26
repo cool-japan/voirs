@@ -240,13 +240,8 @@ impl QuantizationStats {
                     (0, 15)
                 }
             }
-            QuantizationPrecision::Int8 => {
-                if symmetric {
-                    (-128, 127)
-                } else {
-                    (0, 255)
-                }
-            }
+            QuantizationPrecision::Int8 if symmetric => (-128, 127),
+            QuantizationPrecision::Int8 => (0, 255),
             QuantizationPrecision::Int16 => {
                 if symmetric {
                     (-32768, 32767)

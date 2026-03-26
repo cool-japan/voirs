@@ -357,7 +357,7 @@ impl UsageAnalytics {
         }
 
         let mut top_endpoints: Vec<_> = endpoint_counts.into_iter().collect();
-        top_endpoints.sort_by(|a, b| b.1.cmp(&a.1));
+        top_endpoints.sort_by_key(|b| std::cmp::Reverse(b.1));
         top_endpoints.truncate(10);
 
         // Calculate top users
@@ -369,7 +369,7 @@ impl UsageAnalytics {
         }
 
         let mut top_users: Vec<_> = user_counts.into_iter().collect();
-        top_users.sort_by(|a, b| b.1.cmp(&a.1));
+        top_users.sort_by_key(|b| std::cmp::Reverse(b.1));
         top_users.truncate(10);
 
         // Calculate hourly distribution
@@ -532,7 +532,7 @@ impl UsageAnalytics {
             });
         }
 
-        cohorts.sort_by(|a, b| a.cohort_start.cmp(&b.cohort_start));
+        cohorts.sort_by_key(|a| a.cohort_start);
 
         Ok(cohorts)
     }

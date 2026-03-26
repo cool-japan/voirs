@@ -1014,20 +1014,18 @@ impl HrtfDatabase {
                         }
                     }
                 }
-                "POSITION" => {
-                    if line.starts_with("SourcePosition") {
-                        // Parse source position: SourcePosition=azimuth,elevation,distance
-                        if let Some((_, coords)) = line.split_once('=') {
-                            let parts: Vec<&str> = coords.split(',').collect();
-                            if parts.len() >= 3 {
-                                if let (Ok(azimuth), Ok(elevation), Ok(distance)) = (
-                                    parts[0].trim().parse::<f32>(),
-                                    parts[1].trim().parse::<f32>(),
-                                    parts[2].trim().parse::<f32>(),
-                                ) {
-                                    current_measurement = Some((azimuth as i32, elevation as i32));
-                                    metadata.distances = Some(vec![distance]);
-                                }
+                "POSITION" if line.starts_with("SourcePosition") => {
+                    // Parse source position: SourcePosition=azimuth,elevation,distance
+                    if let Some((_, coords)) = line.split_once('=') {
+                        let parts: Vec<&str> = coords.split(',').collect();
+                        if parts.len() >= 3 {
+                            if let (Ok(azimuth), Ok(elevation), Ok(distance)) = (
+                                parts[0].trim().parse::<f32>(),
+                                parts[1].trim().parse::<f32>(),
+                                parts[2].trim().parse::<f32>(),
+                            ) {
+                                current_measurement = Some((azimuth as i32, elevation as i32));
+                                metadata.distances = Some(vec![distance]);
                             }
                         }
                     }

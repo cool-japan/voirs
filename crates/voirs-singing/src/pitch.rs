@@ -358,7 +358,7 @@ impl PitchContour {
                         -1.0
                     }
                 }
-                VibratoWaveform::Random => (thread_rng().gen::<f32>() - 0.5) * 2.0,
+                VibratoWaveform::Random => (thread_rng().random::<f32>() - 0.5) * 2.0,
             };
 
             let depth_cents = params.depth * (1.0 + params.depth_variation * (phase * 0.1).sin());
@@ -625,13 +625,13 @@ impl PitchGenerator {
         // Add intonation accuracy
         if self.model_params.intonation_accuracy < 1.0 {
             let deviation = (1.0 - self.model_params.intonation_accuracy) * 0.05;
-            multiplier *= 1.0 + (thread_rng().gen::<f32>() - 0.5) * deviation;
+            multiplier *= 1.0 + (thread_rng().random::<f32>() - 0.5) * deviation;
         }
 
         // Add microtonal deviation
         if self.model_params.microtonal_deviation > 0.0 {
             let deviation = self.model_params.microtonal_deviation * 0.02;
-            multiplier *= 1.0 + (thread_rng().gen::<f32>() - 0.5) * deviation;
+            multiplier *= 1.0 + (thread_rng().random::<f32>() - 0.5) * deviation;
         }
 
         // Add pitch variation

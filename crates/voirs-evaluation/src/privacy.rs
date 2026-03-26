@@ -37,7 +37,7 @@
 //! ```
 
 use async_trait::async_trait;
-use scirs2_core::random::{Rng, SeedableRng};
+use scirs2_core::random::{Rng, RngExt, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -470,15 +470,15 @@ impl PrivacyPreservingEvaluator {
     /// Sample from Laplace distribution
     async fn sample_laplace(&self, scale: f64) -> f64 {
         let mut rng = self.rng.write().await;
-        let u: f64 = rng.gen_range(-0.5..0.5);
+        let u: f64 = rng.random_range(-0.5..0.5);
         -scale * u.signum() * (1.0 - 2.0 * u.abs()).ln()
     }
 
     /// Sample from Gaussian distribution (Box-Muller transform)
     async fn sample_gaussian(&self, mean: f64, std_dev: f64) -> f64 {
         let mut rng = self.rng.write().await;
-        let u1: f64 = rng.gen();
-        let u2: f64 = rng.gen();
+        let u1: f64 = rng.random();
+        let u2: f64 = rng.random();
         let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
         mean + std_dev * z
     }

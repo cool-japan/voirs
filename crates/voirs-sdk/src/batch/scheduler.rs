@@ -63,7 +63,7 @@ impl BatchScheduler {
             }
             SchedulingStrategy::PriorityBased => {
                 // Sort by priority (descending)
-                requests.sort_by(|a, b| b.priority.cmp(&a.priority));
+                requests.sort_by_key(|b| std::cmp::Reverse(b.priority));
             }
             SchedulingStrategy::LoadBalanced => {
                 // Distribute evenly across workers

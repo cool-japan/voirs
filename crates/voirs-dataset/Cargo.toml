@@ -40,10 +40,9 @@ minimp3.workspace = true
 mp3lame-encoder.workspace = true
 
 # Compression and archives
-flate2.workspace = true
-tar.workspace = true
+oxiarc-deflate.workspace = true
 oxiarc-archive.workspace = true
-bzip2.workspace = true
+oxiarc-bzip2.workspace = true
 
 # Serialization and data formats
 serde.workspace = true

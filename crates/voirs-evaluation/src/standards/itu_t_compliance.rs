@@ -402,7 +402,7 @@ impl ItuTComplianceValidator {
         let certification_id = format!(
             "VOIRS-ITU-T-{}-{}",
             Utc::now().format("%Y%m%d%H%M%S"),
-            rng.gen::<u64>()
+            rng.random::<u64>()
         );
 
         Ok(ComplianceCertificationReport {
@@ -679,7 +679,7 @@ impl ItuTComplianceValidator {
         let samples: Vec<f32> = audio
             .samples()
             .iter()
-            .map(|&s| s * quality_factor + rng.gen::<f32>() * 0.01 * (1.0 - quality_factor))
+            .map(|&s| s * quality_factor + rng.random::<f32>() * 0.01 * (1.0 - quality_factor))
             .collect();
 
         AudioBuffer::new(samples, audio.sample_rate(), audio.channels())

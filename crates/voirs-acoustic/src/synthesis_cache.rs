@@ -242,7 +242,7 @@ impl AccessPatternAnalyzer {
 
         // Sort by frequency and keep top 100
         let mut sorted: Vec<_> = frequency.into_iter().collect();
-        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        sorted.sort_by_key(|b| std::cmp::Reverse(b.1));
         sorted.truncate(100);
         self.hot_keys = sorted;
     }
@@ -258,7 +258,7 @@ impl AccessPatternAnalyzer {
                     *freq.entry(key).or_insert(0) += 1;
                 }
                 let mut sorted: Vec<_> = freq.into_iter().collect();
-                sorted.sort_by(|a, b| b.1.cmp(&a.1));
+                sorted.sort_by_key(|b| std::cmp::Reverse(b.1));
                 sorted.into_iter().take(5).map(|(k, _)| k.clone()).collect()
             })
             .unwrap_or_default()

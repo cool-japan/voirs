@@ -355,7 +355,7 @@ impl AdversarialRobustness {
         for _ in 0..self.config.num_smoothing_samples {
             let mut noisy = input.clone();
             for i in 0..noisy.len() {
-                let noise: f32 = rng.gen_range(-1.0..1.0) * self.config.smoothing_sigma;
+                let noise: f32 = rng.random_range(-1.0..1.0) * self.config.smoothing_sigma;
                 noisy[i] += noise;
             }
 

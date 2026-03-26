@@ -616,16 +616,13 @@ impl ElisionProcess {
             return false;
         }
         match self.language {
-            LanguageCode::EnUs | LanguageCode::EnGb => {
-                if phoneme.symbol == "ə" {
-                    let prev = &phonemes[position - 1].symbol;
-                    let next = &phonemes[position + 1].symbol;
-                    !has_feature(prev, PhonologicalFeature::Vowel)
-                        && !has_feature(next, PhonologicalFeature::Vowel)
-                } else {
-                    false
-                }
+            LanguageCode::EnUs | LanguageCode::EnGb if phoneme.symbol == "ə" => {
+                let prev = &phonemes[position - 1].symbol;
+                let next = &phonemes[position + 1].symbol;
+                !has_feature(prev, PhonologicalFeature::Vowel)
+                    && !has_feature(next, PhonologicalFeature::Vowel)
             }
+            LanguageCode::EnUs | LanguageCode::EnGb => false,
             LanguageCode::Fr => phoneme.symbol == "ə" && position > 0,
             _ => false,
         }

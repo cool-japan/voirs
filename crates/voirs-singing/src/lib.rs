@@ -107,6 +107,8 @@ pub mod adaptive_learning;
 pub mod advanced_techniques;
 pub mod ai;
 pub mod audio_processing;
+/// Backend implementations for singing synthesis (ONNX, etc.).
+pub mod backends;
 /// Cloud deployment and distributed synthesis infrastructure
 pub mod cloud_deployment;
 /// AI-driven composition assistance for melody and harmony generation

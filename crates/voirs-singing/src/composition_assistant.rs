@@ -766,19 +766,19 @@ impl MelodyGenerator {
 
         while current_beat < total_beats {
             // Randomize pitch with creativity factor (within one octave range)
-            let pitch_idx = rng.gen_range(0..7);
+            let pitch_idx = rng.random_range(0..7);
             let pitches = ["C", "D", "E", "F", "G", "A", "B"];
             let pitch = pitches[pitch_idx];
             let octave = 4;
 
             // Randomize duration
-            let duration = if rng.gen_bool((0.7 + creativity * 0.3) as f64) {
+            let duration = if rng.random_bool((0.7 + creativity * 0.3) as f64) {
                 0.5 // Quarter note
             } else {
                 1.0 // Half note
             };
 
-            let velocity = rng.gen_range(0.6..0.9);
+            let velocity = rng.random_range(0.6..0.9);
 
             notes.push(Self::create_note(
                 pitch,
@@ -808,7 +808,7 @@ impl MelodyGenerator {
         let mut notes = Vec::new();
 
         for i in 0..num_measures * 4 {
-            let pitch_idx = rng.gen_range(0..7);
+            let pitch_idx = rng.random_range(0..7);
             let pitches = ["C", "D", "E", "F", "G", "A", "B"];
             let pitch = pitches[pitch_idx];
 

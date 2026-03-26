@@ -374,7 +374,7 @@ impl FlowMatchingModel {
                         // Add stochastic component
                         if self.config.sigma > 0.0 {
                             let mut rng = scirs2_core::random::thread_rng();
-                            let noise: f32 = rng.gen_range(-1.0..1.0);
+                            let noise: f32 = rng.random_range(-1.0..1.0);
                             velocity[[i, j]] += self.config.sigma * noise;
                         }
                     }
@@ -392,7 +392,7 @@ impl FlowMatchingModel {
 
         for i in 0..batch_size {
             for j in 0..length {
-                noise[[i, j]] = rng.gen_range(-1.0..1.0);
+                noise[[i, j]] = rng.random_range(-1.0..1.0);
             }
         }
 
@@ -647,7 +647,7 @@ mod tests {
 
         // Noisy output should have lower quality
         let mut rng = scirs2_core::random::thread_rng();
-        let noisy = Array2::from_shape_fn((1, 100), |(_i, _j)| rng.gen_range(-5.0..5.0));
+        let noisy = Array2::from_shape_fn((1, 100), |(_i, _j)| rng.random_range(-5.0..5.0));
         let quality_noisy = model.estimate_quality(&noisy).unwrap();
 
         assert!(quality_smooth > quality_noisy);

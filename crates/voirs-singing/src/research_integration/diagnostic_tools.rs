@@ -336,7 +336,7 @@ impl BottleneckDetector {
             })
             .collect();
 
-        bottlenecks.sort_by(|a, b| b.average_time.cmp(&a.average_time));
+        bottlenecks.sort_by_key(|b| std::cmp::Reverse(b.average_time));
 
         Ok(bottlenecks)
     }

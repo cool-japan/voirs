@@ -528,12 +528,13 @@ mod recognition_bindings {
 
     // Re-export for main module with aliases to avoid conflicts
     pub use {
-        PyASRModel as RecognitionASRModel, PyAudioAnalysis as RecognitionAudioAnalysis,
-        PyAudioAnalyzer as RecognitionAudioAnalyzer,
-        PyPerformanceMetrics as RecognitionPerformanceMetrics,
-        PyPhonemeAlignment as RecognitionPhonemeAlignment,
-        PyPhonemeRecognizer as RecognitionPhonemeRecognizer,
-        PyRecognitionResult as RecognitionResult, PyTranscript as RecognitionTranscript,
+        self::PyASRModel as RecognitionASRModel, self::PyAudioAnalysis as RecognitionAudioAnalysis,
+        self::PyAudioAnalyzer as RecognitionAudioAnalyzer,
+        self::PyPerformanceMetrics as RecognitionPerformanceMetrics,
+        self::PyPhonemeAlignment as RecognitionPhonemeAlignment,
+        self::PyPhonemeRecognizer as RecognitionPhonemeRecognizer,
+        self::PyRecognitionResult as RecognitionResult,
+        self::PyTranscript as RecognitionTranscript,
     };
 }
 

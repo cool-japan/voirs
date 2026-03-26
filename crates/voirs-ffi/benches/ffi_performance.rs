@@ -3,12 +3,12 @@ use std::ffi::c_void;
 use std::ffi::CString;
 use std::ptr;
 use std::time::Duration;
-use voirs_ffi::c_api::convert::VoirsEndianness;
-use voirs_ffi::c_api::synthesis::{VoirsSynthesisResult, VoirsSynthesisStats};
-use voirs_ffi::c_api::*;
-use voirs_ffi::error::recovery::attempt_error_recovery;
-use voirs_ffi::error::structured::VoirsStructuredError;
-use voirs_ffi::{voirs_free_audio_buffer, VoirsAudioBuffer, VoirsErrorCode, VoirsSynthesisConfig};
+use voirs::c_api::convert::VoirsEndianness;
+use voirs::c_api::synthesis::{VoirsSynthesisResult, VoirsSynthesisStats};
+use voirs::c_api::*;
+use voirs::error::recovery::attempt_error_recovery;
+use voirs::error::structured::VoirsStructuredError;
+use voirs::{voirs_free_audio_buffer, VoirsAudioBuffer, VoirsErrorCode, VoirsSynthesisConfig};
 use voirs_sdk::types::{LanguageCode, QualityLevel};
 
 /// FFI performance benchmarking suite

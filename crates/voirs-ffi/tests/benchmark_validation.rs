@@ -4,8 +4,8 @@
 //! and detect performance regressions.
 
 use std::time::{Duration, Instant};
-use voirs_ffi::c_api::config::*;
-use voirs_ffi::c_api::core::*;
+use voirs::c_api::config::*;
+use voirs::c_api::core::*;
 
 #[test]
 #[allow(unused_unsafe)]

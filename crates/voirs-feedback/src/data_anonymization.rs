@@ -461,7 +461,7 @@ impl DataAnonymizer {
     fn perturb_value(&self, value: &str, noise_level: f32) -> String {
         // Try to parse as number and add noise
         if let Ok(num) = value.parse::<f64>() {
-            let noise = f64::from(thread_rng().gen_range(-noise_level..noise_level));
+            let noise = f64::from(thread_rng().random_range(-noise_level..noise_level));
             return (num + noise).to_string();
         }
 
@@ -469,8 +469,8 @@ impl DataAnonymizer {
         value
             .chars()
             .map(|c| {
-                if thread_rng().gen::<f32>() < noise_level && c.is_alphanumeric() {
-                    thread_rng().gen_range(b'a'..=b'z') as char
+                if thread_rng().random::<f32>() < noise_level && c.is_alphanumeric() {
+                    thread_rng().random_range(b'a'..=b'z') as char
                 } else {
                     c
                 }
@@ -494,7 +494,7 @@ impl DataAnonymizer {
     fn randomize_value(&self, value: &str) -> String {
         // Generate random string of same length
         (0..value.len())
-            .map(|_| thread_rng().gen_range(b'a'..=b'z') as char)
+            .map(|_| thread_rng().random_range(b'a'..=b'z') as char)
             .collect()
     }
 

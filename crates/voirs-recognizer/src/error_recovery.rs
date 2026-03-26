@@ -863,7 +863,7 @@ impl ErrorRecoveryManager {
         // Apply decorrelated jitter (between base_delay and exp_backoff)
         let mut rng = thread_rng();
         let min_delay = base_delay_ms as f32;
-        let jitter_delay = rng.gen_range(min_delay..=exp_backoff.max(min_delay));
+        let jitter_delay = rng.random_range(min_delay..=exp_backoff.max(min_delay));
 
         Duration::from_millis(jitter_delay as u64)
     }

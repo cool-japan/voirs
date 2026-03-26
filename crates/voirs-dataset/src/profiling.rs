@@ -343,7 +343,7 @@ impl DatasetProfiler {
 
         // Get top 10 most common words
         let mut word_vec: Vec<_> = word_counts.into_iter().collect();
-        word_vec.sort_by(|a, b| b.1.cmp(&a.1));
+        word_vec.sort_by_key(|b| std::cmp::Reverse(b.1));
         let common_words: Vec<_> = word_vec.into_iter().take(10).collect();
 
         let mut char_vec: Vec<char> = character_set.into_iter().collect();

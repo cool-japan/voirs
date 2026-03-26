@@ -215,7 +215,7 @@ int main(int argc, char* argv[]) {
         voirs_free_result(recognizer, result);
     } else {
         fprintf(stderr, "Recognition failed: %s\n", voirs_error_to_string(error));
-        const char* last_error = voirs_get_last_error();
+        const char* last_error = voirs_recognizer_get_last_error();
         if (last_error) {
             fprintf(stderr, "Last error: %s\n", last_error);
         }

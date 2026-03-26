@@ -19,6 +19,7 @@
 //! use voirs_dataset::processing::quality_gate::{QualityGate, QualityRule, RuleType};
 //! use voirs_dataset::DatasetSample;
 //!
+//! # fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let mut gate = QualityGate::strict();
 //!
 //! // Add custom rules
@@ -36,6 +37,8 @@
 //! } else {
 //!     println!("Quality gate failed: {} errors", report.error_count);
 //! }
+//! # Ok(())
+//! # }
 //! ```
 
 use crate::{DatasetSample, Result};

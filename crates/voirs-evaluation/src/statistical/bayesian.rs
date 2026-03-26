@@ -4,7 +4,7 @@
 //! including parameter estimation, hypothesis testing, and model comparison.
 
 use crate::EvaluationError;
-use scirs2_core::random::{Normal, Rng, SeedableRng};
+use scirs2_core::random::{Normal, Rng, RngExt, SeedableRng};
 use serde::{Deserialize, Serialize};
 
 /// Bayesian A/B test result
