@@ -53,11 +53,11 @@ rust-version = "1.89"
 [workspace.dependencies]
 # SciRS2 Ecosystem - Scientific computing abstractions
 # POLICY: All VoiRS crates MUST use scirs2-core abstractions (see SCIRS2_INTEGRATION_POLICY.md)
-scirs2-core = { version = "0.3.4", features = ["array", "random", "simd", "parallel"] }
-scirs2-fft = { version = "0.3.4", features = ["rustfft-backend"] }
+scirs2-core = { version = "0.4.1", features = ["array", "random", "simd", "parallel"] }
+scirs2-fft = { version = "0.4.1", features = ["rustfft-backend"] }
 
 # NumRS2 - NumPy-like numerical computing (for numpy .npz file support)
-numrs2 = "0.3.1"
+numrs2 = "0.3.2"
 
 # Internal VoiRS crates
 voirs-g2p = { version = "0.1.0-rc.1", path = "crates/voirs-g2p" }
@@ -80,7 +80,7 @@ voirs-spatial = { version = "0.1.0-rc.1", path = "crates/voirs-spatial" }
 candle-core = "0.9.2"
 candle-nn = "0.9.2"
 candle-transformers = "0.9.2"
-oxionnx = "0.1.0"
+oxionnx = "0.1.1"
 safetensors = "0.7.0"
 hf-hub = "0.5.0"
 openssl = "0.10"  # Transitively needed by hf-hub via native-tls; system openssl used (installed via before-script-linux)
@@ -102,7 +102,7 @@ mp4 = "0.14"  # MP4 container support
 
 # DSP and math
 # NOTE: ndarray and num-complex removed - use scirs2-core::ndarray and scirs2-core::numeric
-oxifft = "0.1.3"
+oxifft = "0.2.0"
 # NOTE: wide and simba kept for direct SIMD in specific optimized paths (non-array operations)
 wide = "1.2.0"  # SIMD processing
 simba = "0.9"  # SIMD abstractions
