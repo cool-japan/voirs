@@ -80,7 +80,7 @@ voirs-spatial = { version = "0.1.0-rc.1", path = "crates/voirs-spatial" }
 candle-core = "0.9.2"
 candle-nn = "0.9.2"
 candle-transformers = "0.9.2"
-oxionnx = "0.1.1"
+oxionnx = "0.1.2"
 safetensors = "0.7.0"
 hf-hub = "0.5.0"
 openssl = "0.10"  # Transitively needed by hf-hub via native-tls; system openssl used (installed via before-script-linux)
