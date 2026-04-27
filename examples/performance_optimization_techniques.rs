@@ -23,12 +23,12 @@
 //! cargo run --example performance_optimization_techniques
 //! ```
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock, Semaphore};
-use tracing::{debug, info, warn};
+use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -241,6 +241,12 @@ impl PerformanceOptimizer {
 /// CPU-specific optimization techniques
 pub struct CpuOptimizer;
 
+impl Default for CpuOptimizer {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl CpuOptimizer {
     pub fn new() -> Self {
         Self
@@ -253,11 +259,11 @@ impl CpuOptimizer {
         let audio_data = generate_test_audio(1024)?;
 
         let start = Instant::now();
-        let result_standard = process_audio_standard(&audio_data)?;
+        let _result_standard = process_audio_standard(&audio_data)?;
         let standard_time = start.elapsed();
 
         let start = Instant::now();
-        let result_simd = process_audio_simd(&audio_data)?;
+        let _result_simd = process_audio_simd(&audio_data)?;
         let simd_time = start.elapsed();
 
         let speedup = standard_time.as_micros() as f64 / simd_time.as_micros() as f64;
@@ -326,12 +332,12 @@ impl CpuOptimizer {
 
         // Array of Structures (cache-unfriendly for partial access)
         let start = Instant::now();
-        let aos_result = process_aos_data(data_size)?;
+        let _aos_result = process_aos_data(data_size)?;
         let aos_time = start.elapsed();
 
         // Structure of Arrays (cache-friendly for partial access)
         let start = Instant::now();
-        let soa_result = process_soa_data(data_size)?;
+        let _soa_result = process_soa_data(data_size)?;
         let soa_time = start.elapsed();
 
         let speedup = aos_time.as_micros() as f64 / soa_time.as_micros() as f64;
@@ -356,12 +362,12 @@ impl CpuOptimizer {
 
         // Scalar implementation
         let start = Instant::now();
-        let result_scalar = vector_add_scalar(&a, &b);
+        let _result_scalar = vector_add_scalar(&a, &b);
         let scalar_time = start.elapsed();
 
         // Vectorized implementation
         let start = Instant::now();
-        let result_vectorized = vector_add_vectorized(&a, &b);
+        let _result_vectorized = vector_add_vectorized(&a, &b);
         let vectorized_time = start.elapsed();
 
         let speedup = scalar_time.as_micros() as f64 / vectorized_time.as_micros() as f64;
@@ -379,6 +385,7 @@ impl CpuOptimizer {
 }
 
 /// Memory-specific optimization techniques
+#[allow(dead_code)]
 pub struct MemoryOptimizer {
     memory_pools: Arc<RwLock<HashMap<String, MemoryPool>>>,
     cache_manager: Arc<Mutex<CacheManager>>,
@@ -531,7 +538,7 @@ impl MemoryOptimizer {
     async fn benchmark_cache_strategy(&self, strategy: CacheStrategy) -> Result<CachePerformance> {
         // Simulate cache performance with different strategies
         let mut hit_count = 0;
-        let mut total_accesses = 1000;
+        let total_accesses = 1000;
         let mut total_time_us = 0;
 
         for i in 0..total_accesses {
@@ -555,6 +562,12 @@ impl MemoryOptimizer {
 /// GPU acceleration optimization techniques
 pub struct GpuOptimizer;
 
+impl Default for GpuOptimizer {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl GpuOptimizer {
     pub fn new() -> Self {
         Self
@@ -565,12 +578,12 @@ impl GpuOptimizer {
 
         // CPU-based computation
         let start = Instant::now();
-        let cpu_result = simulate_cpu_computation(10000)?;
+        let _cpu_result = simulate_cpu_computation(10000)?;
         let cpu_time = start.elapsed();
 
         // GPU-accelerated computation (simulated)
         let start = Instant::now();
-        let gpu_result = simulate_gpu_computation(10000)?;
+        let _gpu_result = simulate_gpu_computation(10000)?;
         let gpu_time = start.elapsed();
 
         let speedup = cpu_time.as_millis() as f64 / gpu_time.as_millis() as f64;
@@ -591,12 +604,12 @@ impl GpuOptimizer {
 
         // Full precision (FP32)
         let start = Instant::now();
-        let fp32_result = compute_fp32_inference(1000)?;
+        let _fp32_result = compute_fp32_inference(1000)?;
         let fp32_time = start.elapsed();
 
         // Mixed precision (FP16/FP32)
         let start = Instant::now();
-        let mixed_result = compute_mixed_precision_inference(1000)?;
+        let _mixed_result = compute_mixed_precision_inference(1000)?;
         let mixed_time = start.elapsed();
 
         let speedup = fp32_time.as_micros() as f64 / mixed_time.as_micros() as f64;
@@ -645,6 +658,12 @@ impl GpuOptimizer {
 /// Model optimization techniques
 pub struct ModelOptimizer;
 
+impl Default for ModelOptimizer {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl ModelOptimizer {
     pub fn new() -> Self {
         Self
@@ -655,12 +674,12 @@ impl ModelOptimizer {
 
         // Full precision model (FP32)
         let start = Instant::now();
-        let fp32_inference = simulate_fp32_model_inference()?;
+        let _fp32_inference = simulate_fp32_model_inference()?;
         let fp32_time = start.elapsed();
 
         // Quantized model (INT8)
         let start = Instant::now();
-        let int8_inference = simulate_int8_model_inference()?;
+        let _int8_inference = simulate_int8_model_inference()?;
         let int8_time = start.elapsed();
 
         let speedup = fp32_time.as_micros() as f64 / int8_time.as_micros() as f64;
@@ -684,12 +703,12 @@ impl ModelOptimizer {
 
         // Full model
         let start = Instant::now();
-        let full_model_result = simulate_full_model_inference()?;
+        let _full_model_result = simulate_full_model_inference()?;
         let full_time = start.elapsed();
 
         // Pruned model (30% sparsity)
         let start = Instant::now();
-        let pruned_model_result = simulate_pruned_model_inference(0.3)?;
+        let _pruned_model_result = simulate_pruned_model_inference(0.3)?;
         let pruned_time = start.elapsed();
 
         let speedup = full_time.as_micros() as f64 / pruned_time.as_micros() as f64;
@@ -880,7 +899,7 @@ impl PipelineOptimizer {
         drop(stage1_tx);
 
         let _results = stage2_handle.await?;
-        let _ = stage1_handle.await?;
+        stage1_handle.await?;
         let parallel_time = start.elapsed();
 
         let speedup = sequential_time.as_millis() as f64 / parallel_time.as_millis() as f64;
@@ -954,6 +973,12 @@ impl PipelineOptimizer {
 
 /// Platform-specific optimization techniques
 pub struct PlatformOptimizer;
+
+impl Default for PlatformOptimizer {
+    fn default() -> Self {
+        Self
+    }
+}
 
 impl PlatformOptimizer {
     pub fn new() -> Self {
@@ -1266,6 +1291,7 @@ impl OptimizationResult {
 // Supporting types and implementations
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct MemoryPool {
     buffer_size: usize,
     pool_size: usize,
@@ -1478,6 +1504,7 @@ fn process_audio_simd(data: &[f32]) -> Result<Vec<f32>> {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct SynthesisTask {
     id: usize,
     text: String,
@@ -1492,13 +1519,14 @@ fn generate_synthesis_tasks(count: usize) -> Vec<SynthesisTask> {
         .collect()
 }
 
-async fn process_synthesis_task(task: &SynthesisTask) -> Result<Vec<f32>> {
+async fn process_synthesis_task(_task: &SynthesisTask) -> Result<Vec<f32>> {
     // Simulate synthesis work
     tokio::time::sleep(Duration::from_millis(10)).await;
     Ok(vec![0.0; 1024])
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct AudioPoint {
     frequency: f32,
     amplitude: f32,

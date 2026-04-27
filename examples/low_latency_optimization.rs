@@ -25,14 +25,10 @@
 //!
 //! Note: Use --release flag for accurate latency measurements
 
-use anyhow::{Context, Result};
-use crossbeam::channel;
-use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Barrier};
+use anyhow::Result;
 use std::thread;
 use std::time::{Duration, Instant};
-use tracing::{debug, info, warn};
+use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -424,6 +420,12 @@ impl LowLatencyOptimizer {
 /// Streaming optimization techniques for minimal latency
 pub struct StreamingOptimizer;
 
+impl Default for StreamingOptimizer {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl StreamingOptimizer {
     pub fn new() -> Self {
         Self
@@ -523,6 +525,12 @@ impl StreamingOptimizer {
 
 /// Predictive processing for anticipatory computation
 pub struct PredictiveProcessor;
+
+impl Default for PredictiveProcessor {
+    fn default() -> Self {
+        Self
+    }
+}
 
 impl PredictiveProcessor {
     pub fn new() -> Self {
@@ -724,6 +732,12 @@ impl HardwareOptimizer {
 /// Memory optimization for real-time constraints
 pub struct LowLatencyMemoryOptimizer;
 
+impl Default for LowLatencyMemoryOptimizer {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl LowLatencyMemoryOptimizer {
     pub fn new() -> Self {
         Self
@@ -816,6 +830,12 @@ impl LowLatencyMemoryOptimizer {
 
 /// Ultra-low latency quality control
 pub struct UltraLowLatencyQualityController;
+
+impl Default for UltraLowLatencyQualityController {
+    fn default() -> Self {
+        Self
+    }
+}
 
 impl UltraLowLatencyQualityController {
     pub fn new() -> Self {
@@ -939,6 +959,7 @@ struct SynthesisResult {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct LatencyAwareResult {
     latency: f64,
     quality: f64,
@@ -1138,7 +1159,7 @@ async fn benchmark_cache_friendly_layout() -> Result<f64> {
 
 async fn dynamic_quality_scaling(target_latency: f64) -> Result<(f64, f64)> {
     // Simulate dynamic quality adjustment
-    let achieved_latency = target_latency * (0.95 + 0.1 * rand::random::<f64>());
+    let achieved_latency = target_latency * (0.95 + 0.1 * rand::random());
     let quality_score = if target_latency < 10.0 {
         3.0 + target_latency / 10.0 // Lower quality for ultra-low latency
     } else {
@@ -1152,7 +1173,7 @@ async fn latency_aware_synthesis(
     _scenario: &str,
     target_latency: f64,
 ) -> Result<LatencyAwareResult> {
-    let achieved_latency = target_latency * (0.9 + 0.2 * rand::random::<f64>());
+    let achieved_latency = target_latency * (0.9 + 0.2 * rand::random());
     let quality = match _scenario {
         "Gaming" => 3.5,
         "Conversational" => 4.0,
@@ -1187,7 +1208,7 @@ async fn progressive_enhancement_step(_text: &str, step: usize) -> Result<Synthe
 async fn predict_synthesis_quality(_text: &str) -> Result<f64> {
     // Predict quality based on text complexity
     let complexity = _text.len() as f64;
-    let predicted_quality = (4.0 - complexity / 100.0).max(2.0).min(5.0);
+    let predicted_quality = (4.0 - complexity / 100.0).clamp(2.0, 5.0);
     Ok(predicted_quality)
 }
 
@@ -1208,13 +1229,10 @@ mod rand {
     use std::cell::Cell;
 
     thread_local! {
-        static RNG: Cell<u64> = Cell::new(1);
+        static RNG: Cell<u64> = const { Cell::new(1) };
     }
 
-    pub fn random<T>() -> f64
-    where
-        T: Copy,
-    {
+    pub fn random() -> f64 {
         RNG.with(|rng| {
             let mut x = rng.get();
             x ^= x << 13;

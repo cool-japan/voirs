@@ -39,11 +39,11 @@
 
 use anyhow::{Context, Result};
 use regex::Regex;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 /// Comprehensive documentation tester
 pub struct DocumentationTester {
@@ -402,7 +402,7 @@ impl DocumentationTester {
         let mut issues = Vec::new();
 
         // Check for outdated API references
-        let api_pattern = Regex::new(r"```rust\n([^`]+)\n```").unwrap();
+        let _api_pattern = Regex::new(r"```rust\n([^`]+)\n```").unwrap();
         for (line_no, line) in content.lines().enumerate() {
             if line.contains("deprecated") || line.contains("DEPRECATED") {
                 issues.push(ApiConsistencyIssue {
@@ -620,7 +620,11 @@ impl DocumentationTester {
                 let status = if version_a == version_b {
                     CompatibilityStatus::Compatible
                 } else if version_a.starts_with("0.1") && version_b.starts_with("0.1") {
-                    CompatibilityStatus::Compatible
+                    // Same minor series but different patch versions: API-compatible,
+                    // but bug-fix differences between patches may affect behaviour.
+                    CompatibilityStatus::PartiallyCompatible(vec![
+                        "Patch-level changes may affect edge-case behaviour".to_string(),
+                    ])
                 } else {
                     CompatibilityStatus::PartiallyCompatible(vec!["Some API changes".to_string()])
                 };
@@ -684,7 +688,7 @@ impl DocumentationTester {
             "- Issues Found: {}\n",
             self.test_results.accuracy_results.issues_found
         ));
-        report.push_str("\n");
+        report.push('\n');
 
         // Link Results
         report.push_str("## Link Validation Results\n");
@@ -700,7 +704,7 @@ impl DocumentationTester {
             "- Broken Links: {}\n",
             self.test_results.link_results.broken_links
         ));
-        report.push_str("\n");
+        report.push('\n');
 
         // Code Results
         report.push_str("## Code Example Testing Results\n");
@@ -716,7 +720,7 @@ impl DocumentationTester {
             "- Executed Examples: {}\n",
             self.test_results.code_results.executed_examples
         ));
-        report.push_str("\n");
+        report.push('\n');
 
         // Version Results
         report.push_str("## Version Compatibility Results\n");

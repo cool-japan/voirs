@@ -180,7 +180,7 @@ impl PerformanceBenchmarkSuite {
 
         // Get process ID and initial memory
         let pid = sysinfo::Pid::from(std::process::id() as usize);
-        system.refresh_process(pid);
+        system.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
 
         let initial_memory = if let Some(process) = system.process(pid) {
             process.memory()
@@ -194,7 +194,7 @@ impl PerformanceBenchmarkSuite {
         let duration = start_time.elapsed();
 
         // Refresh and get peak memory
-        system.refresh_process(pid);
+        system.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
         let peak_memory = if let Some(process) = system.process(pid) {
             process.memory()
         } else {
@@ -238,7 +238,7 @@ impl PerformanceBenchmarkSuite {
 
         for quality in quality_levels {
             let pipeline = VoirsPipelineBuilder::new()
-                .with_quality(quality.clone())
+                .with_quality(quality)
                 .build()
                 .await?;
 
@@ -469,6 +469,7 @@ impl PerformanceBenchmarkSuite {
 }
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 struct BenchmarkResult {
     test_name: String,
     num_runs: usize,

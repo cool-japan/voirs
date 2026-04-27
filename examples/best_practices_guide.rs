@@ -90,6 +90,12 @@ pub struct BestPracticesGuide {
     pub community_favorites: Vec<String>,
 }
 
+impl Default for BestPracticesGuide {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BestPracticesGuide {
     pub fn new() -> Self {
         Self {
@@ -107,18 +113,18 @@ impl BestPracticesGuide {
 
         self.category_index
             .entry(practice.category.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(id.clone());
 
         self.difficulty_index
             .entry(practice.difficulty_level.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(id.clone());
 
         for tag in &practice.tags {
             self.tag_index
                 .entry(tag.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(id.clone());
         }
 

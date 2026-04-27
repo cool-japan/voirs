@@ -47,7 +47,6 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info, warn};
-use voirs::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -366,7 +365,9 @@ impl VoirsMonitoringSystem {
         loop {
             let error_metrics = self.collect_error_metrics().await?;
 
-            self.error_tracker.update_metrics(error_metrics.clone());
+            self.error_tracker
+                .update_metrics(error_metrics.clone())
+                .await?;
 
             // Check for error rate issues
             if error_metrics.error_rate_percent > 5.0 {
@@ -454,7 +455,7 @@ impl VoirsMonitoringSystem {
                     }
                     Err(e) => {
                         // Record error
-                        self.error_tracker.record_error(VoirsError {
+                        self.error_tracker.record_error(SynthesisError {
                             error_type: "synthesis_error".to_string(),
                             message: e.to_string(),
                             timestamp: self.get_current_timestamp(),
@@ -466,17 +467,16 @@ impl VoirsMonitoringSystem {
                 }
 
                 // Add some variability to request timing
-                tokio::time::sleep(Duration::from_millis(100 + (rand::random::<u64>() % 200)))
-                    .await;
+                tokio::time::sleep(Duration::from_millis(100 + (fastrand::u64(0..200)))).await;
             }
 
             // Simulate some load patterns
-            if rand::random::<f64>() < 0.1 {
+            if fastrand::f64() < 0.1 {
                 // 10% chance of high load spike
                 self.simulate_load_spike().await?;
             }
 
-            if rand::random::<f64>() < 0.05 {
+            if fastrand::f64() < 0.05 {
                 // 5% chance of simulated error
                 self.simulate_error_condition().await?;
             }
@@ -491,12 +491,12 @@ impl VoirsMonitoringSystem {
     async fn simulate_synthesis_request(&self, text: &str) -> Result<Vec<f32>> {
         // Simulate synthesis processing time based on text length
         let processing_time =
-            Duration::from_millis(50 + (text.len() as u64 * 2) + (rand::random::<u64>() % 100));
+            Duration::from_millis(50 + (text.len() as u64 * 2) + fastrand::u64(0..100));
 
         tokio::time::sleep(processing_time).await;
 
         // Simulate occasional failures
-        if rand::random::<f64>() < 0.02 {
+        if fastrand::f64() < 0.02 {
             anyhow::bail!("Simulated synthesis failure");
         }
 
@@ -520,7 +520,7 @@ impl VoirsMonitoringSystem {
     async fn simulate_error_condition(&self) -> Result<()> {
         warn!("Simulating error condition");
 
-        self.error_tracker.record_error(VoirsError {
+        self.error_tracker.record_error(SynthesisError {
             error_type: "simulated_error".to_string(),
             message: "Simulated error for testing monitoring system".to_string(),
             timestamp: self.get_current_timestamp(),
@@ -599,7 +599,7 @@ impl VoirsMonitoringSystem {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         // Random health status for simulation
-        match rand::random::<u8>() % 10 {
+        match fastrand::u8(0..10) {
             0 => Ok(HealthStatus::Degraded),
             1 => Ok(HealthStatus::Unhealthy),
             _ => Ok(HealthStatus::Healthy),
@@ -631,42 +631,42 @@ impl VoirsMonitoringSystem {
 
     async fn measure_current_rtf(&self) -> Result<f64> {
         tokio::time::sleep(Duration::from_millis(5)).await;
-        Ok(0.3 + rand::random::<f64>() * 0.8) // 0.3 to 1.1
+        Ok(0.3 + fastrand::f64() * 0.8) // 0.3 to 1.1
     }
 
     async fn measure_current_latency(&self) -> Result<f64> {
         tokio::time::sleep(Duration::from_millis(5)).await;
-        Ok(50.0 + rand::random::<f64>() * 100.0) // 50 to 150ms
+        Ok(50.0 + fastrand::f64() * 100.0) // 50 to 150ms
     }
 
     async fn measure_current_throughput(&self) -> Result<f64> {
         tokio::time::sleep(Duration::from_millis(5)).await;
-        Ok(8.0 + rand::random::<f64>() * 4.0) // 8 to 12 req/sec
+        Ok(8.0 + fastrand::f64() * 4.0) // 8 to 12 req/sec
     }
 
     async fn get_cpu_usage(&self) -> Result<f64> {
         tokio::time::sleep(Duration::from_millis(5)).await;
-        Ok(20.0 + rand::random::<f64>() * 60.0) // 20% to 80%
+        Ok(20.0 + fastrand::f64() * 60.0) // 20% to 80%
     }
 
     async fn get_memory_usage(&self) -> Result<f64> {
         tokio::time::sleep(Duration::from_millis(5)).await;
-        Ok(300.0 + rand::random::<f64>() * 500.0) // 300MB to 800MB
+        Ok(300.0 + fastrand::f64() * 500.0) // 300MB to 800MB
     }
 
     async fn get_disk_usage(&self) -> Result<f64> {
         tokio::time::sleep(Duration::from_millis(5)).await;
-        Ok(45.0 + rand::random::<f64>() * 30.0) // 45% to 75%
+        Ok(45.0 + fastrand::f64() * 30.0) // 45% to 75%
     }
 
     async fn measure_quality_score(&self) -> Result<f64> {
         tokio::time::sleep(Duration::from_millis(10)).await;
-        Ok(0.85 + rand::random::<f64>() * 0.14) // 0.85 to 0.99
+        Ok(0.85 + fastrand::f64() * 0.14) // 0.85 to 0.99
     }
 
     async fn calculate_error_rate(&self) -> Result<f64> {
         tokio::time::sleep(Duration::from_millis(5)).await;
-        Ok(rand::random::<f64>() * 3.0) // 0% to 3%
+        Ok(fastrand::f64() * 3.0) // 0% to 3%
     }
 
     async fn collect_performance_metrics(&self) -> Result<PerformanceMetrics> {
@@ -684,7 +684,7 @@ impl VoirsMonitoringSystem {
             cpu_usage_percent: self.get_cpu_usage().await?,
             memory_usage_mb: self.get_memory_usage().await?,
             disk_usage_percent: self.get_disk_usage().await?,
-            network_throughput_mbps: 10.0 + rand::random::<f64>() * 20.0,
+            network_throughput_mbps: 10.0 + fastrand::f64() * 20.0,
             timestamp: self.get_current_timestamp(),
         })
     }
@@ -692,9 +692,9 @@ impl VoirsMonitoringSystem {
     async fn collect_error_metrics(&self) -> Result<ErrorMetrics> {
         Ok(ErrorMetrics {
             error_rate_percent: self.calculate_error_rate().await?,
-            total_errors: (rand::random::<u32>() % 10) as usize,
-            critical_errors: (rand::random::<u32>() % 3) as usize,
-            warning_errors: (rand::random::<u32>() % 5) as usize,
+            total_errors: fastrand::usize(0..10),
+            critical_errors: fastrand::usize(0..3),
+            warning_errors: fastrand::usize(0..5),
             timestamp: self.get_current_timestamp(),
         })
     }
@@ -865,7 +865,7 @@ impl VoirsMonitoringSystem {
     fn get_current_timestamp(&self) -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("system clock is before UNIX epoch")
             .as_secs()
     }
 
@@ -876,8 +876,10 @@ impl VoirsMonitoringSystem {
 }
 
 // Monitoring components
+type MetricHistory = Arc<Mutex<HashMap<String, VecDeque<(f64, u64)>>>>;
+
 struct MetricsCollector {
-    metrics: Arc<Mutex<HashMap<String, VecDeque<(f64, u64)>>>>,
+    metrics: MetricHistory,
 }
 
 impl MetricsCollector {
@@ -888,10 +890,8 @@ impl MetricsCollector {
     }
 
     fn record_metric(&self, name: &str, value: f64, timestamp: u64) {
-        let mut metrics = self.metrics.lock().unwrap();
-        let metric_history = metrics
-            .entry(name.to_string())
-            .or_insert_with(VecDeque::new);
+        let mut metrics = self.metrics.lock().expect("metrics lock poisoned");
+        let metric_history = metrics.entry(name.to_string()).or_default();
 
         metric_history.push_back((value, timestamp));
 
@@ -902,7 +902,7 @@ impl MetricsCollector {
     }
 
     fn get_latest_metrics(&self) -> HashMap<String, f64> {
-        let metrics = self.metrics.lock().unwrap();
+        let metrics = self.metrics.lock().expect("metrics lock poisoned");
         metrics
             .iter()
             .filter_map(|(name, history)| history.back().map(|(value, _)| (name.clone(), *value)))
@@ -922,19 +922,19 @@ impl HealthMonitor {
     }
 
     fn update_health_status(&self, status: HealthCheckResult) {
-        let mut current = self.current_health.lock().unwrap();
+        let mut current = self.current_health.lock().expect("health lock poisoned");
         *current = Some(status);
     }
 
     fn get_current_health(&self) -> HealthCheckResult {
-        let current = self.current_health.lock().unwrap();
+        let current = self.current_health.lock().expect("health lock poisoned");
         current.clone().unwrap_or_else(|| HealthCheckResult {
             overall_status: HealthStatus::Healthy,
             description: "No health check performed yet".to_string(),
             components: Vec::new(),
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .expect("system clock is before UNIX epoch")
                 .as_secs(),
         })
     }
@@ -952,7 +952,7 @@ impl AlertManager {
     }
 
     async fn send_alert(&self, alert: Alert) -> Result<()> {
-        let mut alerts = self.alerts.lock().unwrap();
+        let mut alerts = self.alerts.lock().expect("alerts lock poisoned");
         alerts.push(alert.clone());
 
         // Log alert
@@ -981,7 +981,7 @@ impl AlertManager {
     }
 
     async fn get_alert_summary(&self) -> AlertSummary {
-        let alerts = self.alerts.lock().unwrap();
+        let alerts = self.alerts.lock().expect("alerts lock poisoned");
 
         let total_alerts = alerts.len();
         let critical_alerts = alerts
@@ -1018,7 +1018,10 @@ impl PerformanceTracker {
     }
 
     fn update_metrics(&self, metrics: PerformanceMetrics) {
-        let mut history = self.metrics_history.lock().unwrap();
+        let mut history = self
+            .metrics_history
+            .lock()
+            .expect("performance history lock poisoned");
         history.push(metrics);
 
         // Keep only last 100 entries
@@ -1028,7 +1031,10 @@ impl PerformanceTracker {
     }
 
     fn get_performance_summary(&self) -> PerformanceSummary {
-        let history = self.metrics_history.lock().unwrap();
+        let history = self
+            .metrics_history
+            .lock()
+            .expect("performance history lock poisoned");
 
         if history.is_empty() {
             return PerformanceSummary {
@@ -1070,7 +1076,10 @@ impl ResourceMonitor {
     }
 
     fn update_metrics(&self, metrics: ResourceMetrics) {
-        let mut history = self.metrics_history.lock().unwrap();
+        let mut history = self
+            .metrics_history
+            .lock()
+            .expect("resource history lock poisoned");
         history.push(metrics);
 
         // Keep only last 100 entries
@@ -1080,7 +1089,10 @@ impl ResourceMonitor {
     }
 
     fn get_resource_summary(&self) -> ResourceSummary {
-        let history = self.metrics_history.lock().unwrap();
+        let history = self
+            .metrics_history
+            .lock()
+            .expect("resource history lock poisoned");
 
         if history.is_empty() {
             return ResourceSummary {
@@ -1111,7 +1123,7 @@ impl ResourceMonitor {
 }
 
 struct ErrorTracker {
-    errors: Arc<Mutex<Vec<VoirsError>>>,
+    errors: Arc<Mutex<Vec<SynthesisError>>>,
 }
 
 impl ErrorTracker {
@@ -1121,8 +1133,8 @@ impl ErrorTracker {
         }
     }
 
-    fn record_error(&self, error: VoirsError) {
-        let mut errors = self.errors.lock().unwrap();
+    fn record_error(&self, error: SynthesisError) {
+        let mut errors = self.errors.lock().expect("errors lock poisoned");
         errors.push(error);
 
         // Keep only last 1000 errors
@@ -1137,7 +1149,7 @@ impl ErrorTracker {
     }
 
     fn get_error_summary(&self) -> ErrorSummary {
-        let errors = self.errors.lock().unwrap();
+        let errors = self.errors.lock().expect("errors lock poisoned");
 
         let total_errors = errors.len();
         let critical_errors = errors
@@ -1174,6 +1186,7 @@ struct Alert {
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
+#[allow(dead_code)]
 enum AlertSeverity {
     Critical,
     Warning,
@@ -1230,14 +1243,18 @@ struct ErrorMetrics {
 }
 
 #[derive(Clone, Debug)]
-struct VoirsError {
+struct SynthesisError {
+    #[allow(dead_code)]
     error_type: String,
+    #[allow(dead_code)]
     message: String,
+    #[allow(dead_code)]
     timestamp: u64,
     severity: ErrorSeverity,
 }
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 enum ErrorSeverity {
     Critical,
     Warning,

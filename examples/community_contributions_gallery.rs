@@ -69,6 +69,12 @@ pub struct CommunityGallery {
     pub verified_authors: Vec<String>,
 }
 
+impl Default for CommunityGallery {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CommunityGallery {
     pub fn new() -> Self {
         Self {
@@ -108,19 +114,16 @@ impl CommunityGallery {
 
         self.examples.insert(id.clone(), example);
 
-        self.categories
-            .entry(category)
-            .or_insert_with(Vec::new)
-            .push(id);
+        self.categories.entry(category).or_default().push(id);
     }
 
     pub fn build_indices(&mut self) {
         let mut examples: Vec<_> = self.examples.values().collect();
 
-        examples.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        examples.sort_by_key(|e| std::cmp::Reverse(e.created_at));
         self.recent_examples = examples.iter().take(10).map(|e| e.id.clone()).collect();
 
-        examples.sort_by(|a, b| b.downloads.cmp(&a.downloads));
+        examples.sort_by_key(|e| std::cmp::Reverse(e.downloads));
         self.most_downloaded = examples.iter().take(10).map(|e| e.id.clone()).collect();
 
         self.featured_examples = examples
@@ -223,7 +226,7 @@ impl ContributionSubmission {
 
     pub fn to_community_example(&self) -> CommunityExample {
         CommunityExample {
-            id: format!("contrib_{}", uuid::Uuid::new_v4().to_string()),
+            id: format!("contrib_{}", uuid::Uuid::new_v4()),
             title: self.title.clone(),
             description: self.description.clone(),
             author: self.author.clone(),
@@ -270,7 +273,7 @@ impl CommunityManager {
 
         self.moderation_queue.push(submission.clone());
 
-        let submission_id = format!("submission_{}", uuid::Uuid::new_v4().to_string());
+        let submission_id = format!("submission_{}", uuid::Uuid::new_v4());
 
         println!("✅ Contribution submitted successfully!");
         println!("   Submission ID: {}", submission_id);

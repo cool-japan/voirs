@@ -60,6 +60,12 @@ pub struct FAQDatabase {
     pub trending_questions: Vec<String>,
 }
 
+impl Default for FAQDatabase {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FAQDatabase {
     pub fn new() -> Self {
         Self {
@@ -77,13 +83,13 @@ impl FAQDatabase {
 
         self.category_index
             .entry(entry.category.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(id.clone());
 
         for tag in &entry.tags {
             self.tag_index
                 .entry(tag.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(id.clone());
         }
 
@@ -95,7 +101,7 @@ impl FAQDatabase {
         let mut entries: Vec<_> = self.entries.iter().collect();
 
         // Sort by view count for popular questions
-        entries.sort_by(|a, b| b.1.view_count.cmp(&a.1.view_count));
+        entries.sort_by_key(|e| std::cmp::Reverse(e.1.view_count));
         self.popular_questions = entries
             .iter()
             .take(10)
@@ -103,7 +109,7 @@ impl FAQDatabase {
             .collect();
 
         // Sort by last updated for recent questions
-        entries.sort_by(|a, b| b.1.last_updated.cmp(&a.1.last_updated));
+        entries.sort_by_key(|e| std::cmp::Reverse(e.1.last_updated));
         self.recent_questions = entries
             .iter()
             .take(10)
@@ -986,7 +992,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut sorted_tags: Vec<_> = tag_counts.into_iter().collect();
-    sorted_tags.sort_by(|a, b| b.1.cmp(&a.1));
+    sorted_tags.sort_by_key(|b| std::cmp::Reverse(b.1));
 
     for (tag, count) in sorted_tags.iter().take(5) {
         println!("   🏷️  {}: {} questions", tag, count);

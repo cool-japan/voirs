@@ -36,9 +36,9 @@
 use anyhow::{Context, Result};
 use futures::StreamExt;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tracing::{debug, info, warn};
-use voirs::prelude::*;
+use voirs_sdk::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -47,27 +47,18 @@ async fn main() -> Result<()> {
         .with_max_level(tracing::Level::INFO)
         .init();
 
-    println!("🎵 VoiRS Streaming Synthesis Example");
+    println!("VoiRS Streaming Synthesis Example");
     println!("=====================================");
     println!();
 
-    // Create TTS components with error handling
-    info!("Setting up streaming TTS components...");
-    let g2p = create_g2p(G2pBackend::RuleBased);
-    let acoustic = create_acoustic(AcousticBackend::Vits);
-    let vocoder = create_vocoder(VocoderBackend::HifiGan);
-
-    println!("🔧 Building streaming pipeline...");
+    println!("Building streaming pipeline...");
     let pipeline = Arc::new(
         VoirsPipelineBuilder::new()
-            .with_g2p(g2p)
-            .with_acoustic_model(acoustic)
-            .with_vocoder(vocoder)
             .build()
             .await
             .context("Failed to build streaming synthesis pipeline")?,
     );
-    println!("✅ Streaming pipeline ready!");
+    println!("Streaming pipeline ready!");
 
     let text = "This is a comprehensive demonstration of streaming speech synthesis technology. \
                 Each audio chunk will be generated and delivered as quickly as possible, \
@@ -75,7 +66,7 @@ async fn main() -> Result<()> {
                 The advanced streaming system processes text incrementally, allowing for \
                 immediate audio feedback and responsive interactive applications.";
 
-    println!("\n📝 Input Text Analysis:");
+    println!("\nInput Text Analysis:");
     println!("   Text: \"{}\"", text);
     println!("   Length: {} characters", text.len());
     println!("   Words: ~{} words", text.split_whitespace().count());
@@ -84,19 +75,19 @@ async fn main() -> Result<()> {
     let stream_start = Instant::now();
     info!("Initiating streaming synthesis...");
 
-    let mut stream = pipeline
+    let mut stream = Arc::clone(&pipeline)
         .synthesize_stream(text)
         .await
         .context("Failed to start streaming synthesis")?;
 
-    println!("\n🎵 Processing Audio Stream:");
+    println!("\nProcessing Audio Stream:");
     println!("   Processing chunks in real-time...");
 
     // Stream processing with comprehensive metrics
-    let mut total_chunks = 0;
+    let mut total_chunks = 0u32;
     let mut total_duration = 0.0f32;
     let mut combined_samples = Vec::new();
-    let mut sample_rate = 22050; // Default sample rate
+    let mut sample_rate = 22050u32; // Default sample rate
     let mut chunk_timings = Vec::new();
     let mut largest_chunk = 0.0f32;
     let mut smallest_chunk = f32::MAX;
@@ -129,7 +120,7 @@ async fn main() -> Result<()> {
         combined_samples.extend_from_slice(chunk.samples());
 
         // Real-time progress feedback
-        let real_time_factor = chunk_processing_time.as_secs_f64() / chunk_duration as f64;
+        let real_time_factor = chunk_processing_time.as_secs_f64() / f64::from(chunk_duration);
         println!(
             "   Chunk {:2}: {:.2}s audio | Processing: {:.1}ms | RTF: {:.2}x | Total: {:.2}s",
             total_chunks,
@@ -158,8 +149,8 @@ async fn main() -> Result<()> {
     let total_streaming_time = stream_start.elapsed();
 
     // Comprehensive streaming analysis
-    println!("\n✅ Streaming synthesis complete!");
-    println!("\n📊 Streaming Performance Analysis:");
+    println!("\nStreaming synthesis complete!");
+    println!("\nStreaming Performance Analysis:");
     println!("   Total Chunks: {}", total_chunks);
     println!("   Total Audio Duration: {:.2} seconds", total_duration);
     println!(
@@ -168,19 +159,19 @@ async fn main() -> Result<()> {
     );
     println!(
         "   Overall Real-time Factor: {:.2}x",
-        total_streaming_time.as_secs_f64() / total_duration as f64
+        total_streaming_time.as_secs_f64() / f64::from(total_duration)
     );
 
     if total_chunks > 0 {
         println!(
             "   Average Chunk Size: {:.2} seconds",
-            total_duration as f64 / total_chunks as f64
+            f64::from(total_duration) / f64::from(total_chunks)
         );
         println!("   Largest Chunk: {:.2} seconds", largest_chunk);
         println!(
             "   Smallest Chunk: {:.2} seconds",
             if smallest_chunk == f32::MAX {
-                0.0
+                0.0f32
             } else {
                 smallest_chunk
             }
@@ -195,7 +186,7 @@ async fn main() -> Result<()> {
     }
 
     // Save combined audio with error handling
-    println!("\n💾 Saving combined audio...");
+    println!("\nSaving combined audio...");
     let output_file = "streaming_output.wav";
 
     let final_audio = AudioBuffer::new(combined_samples, sample_rate, 1);
@@ -203,10 +194,10 @@ async fn main() -> Result<()> {
         .save_wav(output_file)
         .context("Failed to save streaming audio output")?;
 
-    println!("✅ Audio saved to: {}", output_file);
+    println!("Audio saved to: {}", output_file);
 
     // Final audio information
-    println!("\n📊 Final Audio Information:");
+    println!("\nFinal Audio Information:");
     println!("   File: {}", output_file);
     println!("   Sample Rate: {} Hz", sample_rate);
     println!("   Duration: {:.2} seconds", final_audio.duration());
@@ -214,24 +205,21 @@ async fn main() -> Result<()> {
     println!("   Total Samples: {}", final_audio.samples().len());
 
     // Performance assessment
-    let overall_rtf = total_streaming_time.as_secs_f64() / total_duration as f64;
-    println!("\n🚀 Performance Assessment:");
+    let overall_rtf = total_streaming_time.as_secs_f64() / f64::from(total_duration);
+    println!("\nPerformance Assessment:");
     if overall_rtf < 0.5 {
         println!(
-            "   ✅ Excellent real-time performance (RTF: {:.2}x)",
+            "   Excellent real-time performance (RTF: {:.2}x)",
             overall_rtf
         );
     } else if overall_rtf < 1.0 {
-        println!(
-            "   ✅ Good real-time performance (RTF: {:.2}x)",
-            overall_rtf
-        );
+        println!("   Good real-time performance (RTF: {:.2}x)", overall_rtf);
     } else {
-        println!("   ⚠️  Slower than real-time (RTF: {:.2}x)", overall_rtf);
+        println!("   Slower than real-time (RTF: {:.2}x)", overall_rtf);
     }
 
-    println!("\n🎉 Streaming synthesis demonstration complete!");
-    println!("💡 Next steps:");
+    println!("\nStreaming synthesis demonstration complete!");
+    println!("Next steps:");
     println!("   - Play '{}' to hear the streaming result", output_file);
     println!("   - Try with longer or shorter text for different chunk patterns");
     println!("   - Explore real-time applications with this streaming capability");

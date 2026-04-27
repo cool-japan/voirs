@@ -39,15 +39,15 @@
 //! - Performance comparison before/after optimization
 //! - Resource utilization analysis
 
+#![allow(dead_code)]
+
 use anyhow::{Context, Result};
+use scirs2_core::random::thread_rng;
 use std::collections::HashMap;
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc, Mutex,
-};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
-use tracing::{debug, error, info, warn};
-use voirs::*;
+use tracing::{debug, info};
+use voirs_sdk::prelude::*;
 
 /// Comprehensive profiler for VoiRS applications
 pub struct VoirsProfiler {
@@ -97,7 +97,7 @@ struct ProfilingMetrics {
     /// CPU utilization samples
     cpu_samples: Vec<CpuSample>,
     /// Memory usage snapshots
-    memory_snapshots: Vec<MemorySnapshot>,
+    memory_snapshots: Vec<ProfilingMemorySnapshot>,
     /// I/O performance measurements
     io_measurements: Vec<IoMeasurement>,
     /// GPU utilization data
@@ -105,7 +105,7 @@ struct ProfilingMetrics {
     /// Function call statistics
     function_stats: HashMap<String, FunctionStatistics>,
     /// Performance counters
-    performance_counters: HashMap<String, AtomicU64>,
+    performance_counters: HashMap<String, u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,7 +125,7 @@ struct CpuSample {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-struct MemorySnapshot {
+struct ProfilingMemorySnapshot {
     #[serde(skip)]
     timestamp: Instant,
     #[serde(rename = "timestamp_ms")]
@@ -222,9 +222,9 @@ impl Default for CpuSample {
     }
 }
 
-impl Default for MemorySnapshot {
+impl Default for ProfilingMemorySnapshot {
     fn default() -> Self {
-        MemorySnapshot {
+        ProfilingMemorySnapshot {
             timestamp: Instant::now(),
             timestamp_ms: 0,
             total_allocated: 0,
@@ -510,10 +510,10 @@ impl VoirsProfiler {
     }
 
     /// Capture comprehensive performance snapshot
-    async fn capture_snapshot(&self) -> PerformanceSnapshot {
+    async fn capture_snapshot(&self) -> ProfilingPerformanceSnapshot {
         let timestamp = Instant::now();
 
-        PerformanceSnapshot {
+        ProfilingPerformanceSnapshot {
             timestamp,
             cpu_usage: Self::get_current_cpu_usage(),
             memory_usage: Self::get_current_memory_usage(),
@@ -528,8 +528,8 @@ impl VoirsProfiler {
     async fn generate_profiling_report(
         &self,
         operation_name: &str,
-        pre_metrics: &PerformanceSnapshot,
-        post_metrics: &PerformanceSnapshot,
+        pre_metrics: &ProfilingPerformanceSnapshot,
+        post_metrics: &ProfilingPerformanceSnapshot,
         duration: Duration,
         success: bool,
     ) -> Result<ProfilingReport> {
@@ -922,45 +922,45 @@ let processed = tensor.conv1d(&kernel, 1, 0, 1, 1)?;
         CpuSample {
             timestamp,
             timestamp_ms: timestamp.elapsed().as_millis() as u64,
-            cpu_percent: 45.0 + (rand::random::<f32>() * 20.0), // 45-65%
-            core_usage: vec![40.0, 50.0, 35.0, 60.0],           // 4 cores
-            context_switches: 1000 + rand::random::<u64>() % 500,
-            instructions_per_cycle: 2.5 + rand::random::<f32>() * 0.5,
-            cache_misses: rand::random::<u64>() % 10000,
-            branch_mispredictions: rand::random::<u64>() % 1000,
+            cpu_percent: 45.0 + (thread_rng().random::<f32>() * 20.0), // 45-65%
+            core_usage: vec![40.0, 50.0, 35.0, 60.0],                  // 4 cores
+            context_switches: 1000 + thread_rng().random::<u64>() % 500,
+            instructions_per_cycle: 2.5 + thread_rng().random::<f32>() * 0.5,
+            cache_misses: thread_rng().random::<u64>() % 10000,
+            branch_mispredictions: thread_rng().random::<u64>() % 1000,
         }
     }
 
-    fn collect_memory_snapshot() -> MemorySnapshot {
+    fn collect_memory_snapshot() -> ProfilingMemorySnapshot {
         // Simulate memory metrics collection
         let timestamp = Instant::now();
-        MemorySnapshot {
+        ProfilingMemorySnapshot {
             timestamp,
             timestamp_ms: timestamp.elapsed().as_millis() as u64,
-            total_allocated: 500_000_000 + rand::random::<u64>() % 100_000_000,
-            heap_usage: 200_000_000 + rand::random::<u64>() % 50_000_000,
-            stack_usage: 1_000_000 + rand::random::<u64>() % 500_000,
-            gpu_memory: 100_000_000 + rand::random::<u64>() % 20_000_000,
-            memory_fragmentation: 0.1 + rand::random::<f32>() * 0.2,
-            allocation_rate: 100.0 + rand::random::<f32>() * 50.0,
-            deallocation_rate: 95.0 + rand::random::<f32>() * 45.0,
-            active_allocations: 10000 + rand::random::<u64>() % 5000,
+            total_allocated: 500_000_000 + thread_rng().random::<u64>() % 100_000_000,
+            heap_usage: 200_000_000 + thread_rng().random::<u64>() % 50_000_000,
+            stack_usage: 1_000_000 + thread_rng().random::<u64>() % 500_000,
+            gpu_memory: 100_000_000 + thread_rng().random::<u64>() % 20_000_000,
+            memory_fragmentation: 0.1 + thread_rng().random::<f32>() * 0.2,
+            allocation_rate: 100.0 + thread_rng().random::<f32>() * 50.0,
+            deallocation_rate: 95.0 + thread_rng().random::<f32>() * 45.0,
+            active_allocations: 10000 + thread_rng().random::<u64>() % 5000,
         }
     }
 
     fn collect_gpu_measurement() -> Option<GpuMeasurement> {
         // Simulate GPU metrics collection (return None if no GPU)
-        if rand::random::<f32>() > 0.5 {
+        if thread_rng().random::<f32>() > 0.5 {
             let timestamp = Instant::now();
             Some(GpuMeasurement {
                 timestamp,
                 timestamp_ms: timestamp.elapsed().as_millis() as u64,
-                gpu_utilization: 30.0 + rand::random::<f32>() * 40.0,
-                memory_utilization: 25.0 + rand::random::<f32>() * 35.0,
-                temperature: 65.0 + rand::random::<f32>() * 15.0,
-                power_consumption: 150.0 + rand::random::<f32>() * 50.0,
-                compute_units_active: 20 + rand::random::<u32>() % 10,
-                memory_bandwidth_used: 0.6 + rand::random::<f32>() * 0.3,
+                gpu_utilization: 30.0 + thread_rng().random::<f32>() * 40.0,
+                memory_utilization: 25.0 + thread_rng().random::<f32>() * 35.0,
+                temperature: 65.0 + thread_rng().random::<f32>() * 15.0,
+                power_consumption: 150.0 + thread_rng().random::<f32>() * 50.0,
+                compute_units_active: 20 + thread_rng().random::<u32>() % 10,
+                memory_bandwidth_used: 0.6 + thread_rng().random::<f32>() * 0.3,
             })
         } else {
             None
@@ -974,35 +974,35 @@ let processed = tensor.conv1d(&kernel, 1, 0, 1, 1)?;
             timestamp,
             timestamp_ms: timestamp.elapsed().as_millis() as u64,
             operation_type: "file_read".to_string(),
-            bytes_read: 1024 + rand::random::<u64>() % 4096,
-            bytes_written: 512 + rand::random::<u64>() % 2048,
-            read_latency: Duration::from_micros(100 + rand::random::<u64>() % 500),
-            read_latency_ms: (100 + rand::random::<u64>() % 500) / 1000,
-            write_latency: Duration::from_micros(150 + rand::random::<u64>() % 600),
-            write_latency_ms: (150 + rand::random::<u64>() % 600) / 1000,
-            throughput_mbps: 50.0 + rand::random::<f32>() * 100.0,
-            iops: 100.0 + rand::random::<f32>() * 200.0,
+            bytes_read: 1024 + thread_rng().random::<u64>() % 4096,
+            bytes_written: 512 + thread_rng().random::<u64>() % 2048,
+            read_latency: Duration::from_micros(100 + thread_rng().random::<u64>() % 500),
+            read_latency_ms: (100 + thread_rng().random::<u64>() % 500) / 1000,
+            write_latency: Duration::from_micros(150 + thread_rng().random::<u64>() % 600),
+            write_latency_ms: (150 + thread_rng().random::<u64>() % 600) / 1000,
+            throughput_mbps: 50.0 + thread_rng().random::<f32>() * 100.0,
+            iops: 100.0 + thread_rng().random::<f32>() * 200.0,
         }
     }
 
     // Helper methods for metrics analysis
     fn get_current_cpu_usage() -> f32 {
-        50.0 + rand::random::<f32>() * 20.0
+        50.0 + thread_rng().random::<f32>() * 20.0
     }
     fn get_current_memory_usage() -> u64 {
-        200_000_000 + rand::random::<u64>() % 50_000_000
+        200_000_000 + thread_rng().random::<u64>() % 50_000_000
     }
     fn get_current_io_stats() -> f32 {
-        10.0 + rand::random::<f32>() * 5.0
+        10.0 + thread_rng().random::<f32>() * 5.0
     }
     fn get_current_gpu_usage() -> f32 {
-        30.0 + rand::random::<f32>() * 30.0
+        30.0 + thread_rng().random::<f32>() * 30.0
     }
     fn get_thread_count() -> u32 {
-        8 + rand::random::<u32>() % 4
+        8 + thread_rng().random::<u32>() % 4
     }
     fn get_open_fd_count() -> u32 {
-        50 + rand::random::<u32>() % 20
+        50 + thread_rng().random::<u32>() % 20
     }
 
     fn get_average_cpu_usage(&self) -> f32 {
@@ -1070,7 +1070,7 @@ let processed = tensor.conv1d(&kernel, 1, 0, 1, 1)?;
     }
 
     fn generate_session_id(&self) -> String {
-        format!("{:x}", rand::random::<u64>())
+        format!("{:x}", thread_rng().random::<u64>())
     }
 
     // Placeholder synthesis methods for benchmarking
@@ -1137,7 +1137,7 @@ let processed = tensor.conv1d(&kernel, 1, 0, 1, 1)?;
 
 // Data structures for profiling results
 #[derive(Debug)]
-struct PerformanceSnapshot {
+struct ProfilingPerformanceSnapshot {
     timestamp: Instant,
     cpu_usage: f32,
     memory_usage: u64,
@@ -1148,7 +1148,7 @@ struct PerformanceSnapshot {
 }
 
 #[derive(Debug)]
-struct ProfilingReport {
+pub struct ProfilingReport {
     timestamp: SystemTime,
     operation_analysis: PerformanceAnalysis,
     detailed_metrics: DetailedMetrics,
@@ -1237,7 +1237,7 @@ enum ComplexityLevel {
 }
 
 #[derive(Debug)]
-struct OptimizationBenchmark {
+pub struct OptimizationBenchmark {
     timestamp: SystemTime,
     test_iterations: usize,
     results: Vec<BenchmarkResult>,
@@ -1316,7 +1316,7 @@ enum RecommendationPriority {
 }
 
 #[derive(Debug)]
-enum ExportFormat {
+pub enum ExportFormat {
     Json,
     Csv,
     FlameGraph,
@@ -1328,7 +1328,7 @@ use serde::{Deserialize, Serialize};
 struct ProfilingExportData {
     timestamp: SystemTime,
     cpu_samples: Vec<CpuSample>,
-    memory_snapshots: Vec<MemorySnapshot>,
+    memory_snapshots: Vec<ProfilingMemorySnapshot>,
     io_measurements: Vec<IoMeasurement>,
     gpu_data: Vec<GpuMeasurement>,
 }

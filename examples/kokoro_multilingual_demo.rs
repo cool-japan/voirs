@@ -14,13 +14,11 @@
 //! - Japanese & Chinese: misaki library (Python)
 //! - Other languages: eSpeak NG (via command-line)
 
-use std::collections::HashMap;
-use std::process::Command;
-
 #[cfg(feature = "onnx")]
 use voirs_acoustic::vits::onnx_kokoro::KokoroOnnxInference;
 
 /// Language configuration
+#[allow(dead_code)]
 struct LanguageConfig {
     name: &'static str,
     text: &'static str,
@@ -39,7 +37,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // Language configurations
-    let languages = vec![
+    let _languages = vec![
         LanguageConfig {
             name: "English (American)",
             text: "Hello, the world is beautiful today",
@@ -128,9 +126,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!();
 
         // Synthesize for each language
-        for (idx, lang) in languages.iter().enumerate() {
+        for (idx, lang) in _languages.iter().enumerate() {
             println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-            println!("🌐 {} ({}/{})", lang.name, idx + 1, languages.len());
+            println!("🌐 {} ({}/{})", lang.name, idx + 1, _languages.len());
             println!();
             println!("📝 Input: \"{}\"", lang.text);
             println!("   IPA Phonemes: \"{}\"", lang.ipa_phonemes);
@@ -163,7 +161,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 lang.voice_name
             );
             let output_path = temp_dir.join(&filename);
-            save_wav(output_path.to_str().unwrap(), &audio_samples, sample_rate)?;
+            let output_str = output_path
+                .to_str()
+                .ok_or("output path contains invalid UTF-8")?;
+            save_wav(output_str, &audio_samples, sample_rate)?;
 
             println!("💾 Saved to: {}", output_path.display());
             println!();
@@ -172,7 +173,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         println!(
             "✅ All {} languages synthesized successfully!",
-            languages.len()
+            _languages.len()
         );
         println!();
         println!("🎧 To play audio files:");
@@ -180,18 +181,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("   Linux:  aplay <file.wav>");
         println!();
 
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(feature = "onnx"))]
     {
         eprintln!("❌ ONNX feature not enabled!");
         eprintln!("   Run with: cargo run --example kokoro_multilingual_demo --features onnx");
-        return Err("ONNX feature required".into());
+        Err("ONNX feature required".into())
     }
 }
 
 /// Save audio samples as WAV file with 100ms padding
+#[cfg(feature = "onnx")]
 fn save_wav(
     path: &str,
     samples: &[f32],

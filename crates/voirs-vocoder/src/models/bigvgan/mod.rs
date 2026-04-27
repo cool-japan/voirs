@@ -81,6 +81,9 @@ pub mod config;
 pub mod generator;
 pub mod inference;
 
+#[cfg(feature = "candle")]
+pub mod vocoder;
+
 // Re-export main types
 pub use activation::{ActivationConfig, SnakeActivationCpu};
 pub use config::{BigVGANConfig, BigVGANMetadata, BigVGANVariant};

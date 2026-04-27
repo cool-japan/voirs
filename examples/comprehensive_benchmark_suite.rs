@@ -27,10 +27,9 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tokio::sync::{Mutex, RwLock, Semaphore};
+use std::time::{Duration, Instant, SystemTime};
+use tokio::sync::{RwLock, Semaphore};
 use tokio::task::JoinSet;
-use uuid::Uuid;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -1105,7 +1104,7 @@ impl ComprehensiveBenchmarkSuite {
                 "- CPU utilization: {:.1}%\n",
                 result.average_performance.cpu_utilization_percent.mean
             ));
-            report.push_str("\n");
+            report.push('\n');
         }
 
         println!(
@@ -1374,7 +1373,7 @@ impl ComprehensiveBenchmarkSuite {
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let mean = values.iter().sum::<f64>() / values.len() as f64;
-        let median = if sorted.len() % 2 == 0 {
+        let median = if sorted.len().is_multiple_of(2) {
             (sorted[sorted.len() / 2 - 1] + sorted[sorted.len() / 2]) / 2.0
         } else {
             sorted[sorted.len() / 2]
@@ -1468,7 +1467,7 @@ mod rand {
     use std::cell::RefCell;
 
     thread_local! {
-        static RNG_STATE: RefCell<u64> = RefCell::new(12345);
+        static RNG_STATE: RefCell<u64> = const { RefCell::new(12345) };
     }
 
     pub fn random<T>() -> T
@@ -1489,9 +1488,12 @@ mod voirs_sdk {
     pub mod prelude {
         use super::super::{QualityLevel, Result};
 
+        #[allow(dead_code)]
         pub struct VoirsPipelineBuilder;
+        #[allow(dead_code)]
         pub struct VoirsPipeline;
 
+        #[allow(dead_code)]
         impl VoirsPipelineBuilder {
             pub fn new() -> Self {
                 Self
@@ -1504,6 +1506,7 @@ mod voirs_sdk {
             }
         }
 
+        #[allow(dead_code)]
         impl VoirsPipeline {
             pub async fn synthesize(&self, _text: &str) -> Result<Vec<u8>> {
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;

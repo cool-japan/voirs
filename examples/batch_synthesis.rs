@@ -1,21 +1,20 @@
+//! Batch Synthesis Example - VoiRS Text-to-Speech
+//!
+//! Demonstrates synthesizing multiple texts in sequence using the VoiRS pipeline.
+//! Outputs are written to a temporary batch directory.
+
 use anyhow::Result;
 use tokio::fs;
-use voirs::prelude::*;
+use voirs_sdk::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
-    let g2p = create_g2p(G2pBackend::RuleBased);
-    let acoustic = create_acoustic(AcousticBackend::Vits);
-    let vocoder = create_vocoder(VocoderBackend::HifiGan);
-
     let pipeline = VoirsPipelineBuilder::new()
-        .with_g2p(g2p)
-        .with_acoustic_model(acoustic)
-        .with_vocoder(vocoder)
         .build()
-        .await?;
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to build pipeline: {e}"))?;
 
     let texts = [
         "This is the first sentence to synthesize.",
@@ -28,11 +27,18 @@ async fn main() -> Result<()> {
     for (i, text) in texts.iter().enumerate() {
         println!("Processing text {}: {}", i + 1, text);
 
-        let audio = pipeline.synthesize(text).await?;
-        let output_path = format!("batch_output/output_{:02}.wav", i + 1);
+        let audio = pipeline
+            .synthesize(text)
+            .await
+            .map_err(|e| anyhow::anyhow!("Synthesis failed for text {}: {e}", i + 1))?;
 
-        audio.save_wav(&output_path)?;
-        println!("Saved: {output_path}");
+        let output_path = std::path::PathBuf::from(format!("batch_output/output_{:02}.wav", i + 1));
+
+        audio
+            .save_wav(&output_path)
+            .map_err(|e| anyhow::anyhow!("Failed to save {}: {e}", output_path.display()))?;
+
+        println!("Saved: {}", output_path.display());
     }
 
     println!("Batch synthesis complete!");

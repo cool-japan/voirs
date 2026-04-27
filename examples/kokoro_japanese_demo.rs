@@ -11,8 +11,6 @@
 //! print(phonemes)  # Output: koɲɲiʨiβa
 //! ```
 
-use std::collections::HashMap;
-
 #[cfg(feature = "onnx")]
 use voirs_acoustic::vits::onnx_kokoro::KokoroOnnxInference;
 
@@ -33,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     #[cfg(feature = "onnx")]
-    {
+    let result: Result<(), Box<dyn std::error::Error>> = {
         // Load Kokoro model
         let temp_dir = std::env::temp_dir();
         let model_dir = temp_dir.join("voirs_models/kokoro-zh");
@@ -84,17 +82,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("   Linux:  aplay {}", output_path.display());
         println!();
 
-        return Ok(());
-    }
+        Ok(())
+    };
+
+    #[cfg(feature = "onnx")]
+    return result;
 
     #[cfg(not(feature = "onnx"))]
     {
         eprintln!("❌ ONNX feature not enabled!");
         eprintln!("   Run with: cargo run --example kokoro_japanese_demo --features onnx");
-        return Err("ONNX feature required".into());
+        Err("ONNX feature required".into())
     }
 }
 
+#[cfg(feature = "onnx")]
 /// Save audio samples as WAV file
 fn save_wav(
     path: &str,

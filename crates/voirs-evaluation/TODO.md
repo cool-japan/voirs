@@ -2368,3 +2368,8 @@ if report.is_fully_compliant() {
   - ✅ Performance benchmarking suite
   - ✅ Cross-language validation framework
   - ✅ Commercial tool comparison capabilities
+---
+
+## Session 2026-04-27
+
+- ✅ `QualityRegressionDetector`: new `src/quality/quality_regression.rs` — wraps `RegressionDetector` with optional PESQ/STOI/MCD evaluators; MCD stored as `-mcd` internally (higher MCD = positive change = regression); async `evaluate_and_record`; `save_baseline`/`load_baseline` via JSON snapshot; `generate_report`; 5 inline tests pass (922/922 suite).

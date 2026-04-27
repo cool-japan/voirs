@@ -96,6 +96,7 @@ flac-bound = "0.5"  # FLAC encoding/decoding
 symphonia = "0.5.5"  # Comprehensive audio codec support
 opus = "0.3"  # Opus audio codec
 lewton = "0.10"  # OGG Vorbis decoding
+ogg = "0.9"       # OGG container parsing (used with opus crate for Ogg-Opus support)
 minimp3 = "0.6"  # MP3 decoding
 mp3lame-encoder = "0.2"  # MP3 encoding
 mp4 = "0.14"  # MP4 container support

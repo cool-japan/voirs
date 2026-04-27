@@ -24,13 +24,12 @@
  */
 
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
-use std::sync::Arc;
+use std::collections::HashMap;
 use std::time::{Duration, Instant, SystemTime};
-use tokio::sync::RwLock;
 use uuid::Uuid;
 
 /// Educational voice synthesis system for language learning
+#[allow(dead_code)]
 pub struct EducationalVoiceSystem {
     /// Language learning engine
     language_engine: LanguageLearningEngine,
@@ -49,6 +48,7 @@ pub struct EducationalVoiceSystem {
 }
 
 /// Core language learning engine
+#[allow(dead_code)]
 pub struct LanguageLearningEngine {
     /// Supported languages and their configurations
     supported_languages: HashMap<String, LanguageConfig>,
@@ -61,6 +61,7 @@ pub struct LanguageLearningEngine {
 }
 
 /// Pronunciation assessment and feedback system
+#[allow(dead_code)]
 pub struct PronunciationAssessor {
     /// Phonetic analysis engine
     phonetic_analyzer: PhoneticAnalyzer,
@@ -73,6 +74,7 @@ pub struct PronunciationAssessor {
 }
 
 /// Adaptive learning system that adjusts to learner needs
+#[allow(dead_code)]
 pub struct AdaptiveLearningManager {
     /// Learner profiling system
     learner_profiler: LearnerProfiler,
@@ -85,6 +87,7 @@ pub struct AdaptiveLearningManager {
 }
 
 /// Multi-language voice synthesis system
+#[allow(dead_code)]
 pub struct MultilingualSynthesizer {
     /// Voice models for different languages
     language_voices: HashMap<String, LanguageVoiceSet>,
@@ -97,6 +100,7 @@ pub struct MultilingualSynthesizer {
 }
 
 /// Interactive lesson management system
+#[allow(dead_code)]
 pub struct InteractiveLessonManager {
     /// Lesson content database
     lesson_database: LessonDatabase,
@@ -109,6 +113,7 @@ pub struct InteractiveLessonManager {
 }
 
 /// Learning progress tracking and analytics
+#[allow(dead_code)]
 pub struct ProgressTracker {
     /// Learning analytics
     analytics_engine: AnalyticsEngine,
@@ -121,6 +126,7 @@ pub struct ProgressTracker {
 }
 
 /// Gamification system for engaging learning
+#[allow(dead_code)]
 pub struct GamificationEngine {
     /// Point and reward system
     reward_system: RewardSystem,
@@ -1454,7 +1460,7 @@ impl EducationalVoiceSystem {
         tokio::time::sleep(Duration::from_millis(200)).await;
 
         // Mock phonetic analysis based on text length and complexity
-        let word_count = target_text.split_whitespace().count();
+        let _word_count = target_text.split_whitespace().count();
         let target_phonemes = self.text_to_phonemes(target_text, language);
         let spoken_phonemes = self.simulate_spoken_phonemes(&target_phonemes);
 
@@ -1491,11 +1497,11 @@ impl EducationalVoiceSystem {
         let stress_score = 0.82; // Mock stress score
         let fluency_score = (phoneme_accuracy + rhythm_score) / 2.0;
 
-        let overall_score = (phoneme_accuracy * 0.4
+        let overall_score = phoneme_accuracy * 0.4
             + rhythm_score * 0.2
             + intonation_score * 0.2
             + stress_score * 0.1
-            + fluency_score * 0.1);
+            + fluency_score * 0.1;
 
         Ok(PronunciationScore {
             overall_score,
@@ -1579,7 +1585,7 @@ impl EducationalVoiceSystem {
 
     async fn generate_improvement_suggestions(
         &self,
-        analysis: &PhoneticAnalysis,
+        _analysis: &PhoneticAnalysis,
         score: &PronunciationScore,
     ) -> Result<Vec<ImprovementSuggestion>, EducationalVoiceError> {
         let mut suggestions = Vec::new();
@@ -1683,7 +1689,7 @@ impl EducationalVoiceSystem {
     async fn generate_vocabulary_activities(
         &self,
         word: &str,
-        language: &str,
+        _language: &str,
     ) -> Result<Vec<LearningActivity>, EducationalVoiceError> {
         Ok(vec![
             LearningActivity {
@@ -1730,8 +1736,8 @@ impl EducationalVoiceSystem {
 
     async fn generate_usage_examples(
         &self,
-        word: &str,
-        language: &str,
+        _word: &str,
+        _language: &str,
     ) -> Result<Vec<Example>, EducationalVoiceError> {
         // Simulate generation of usage examples
         Ok(vec![Example, Example, Example]) // Mock examples
@@ -1769,7 +1775,7 @@ impl EducationalVoiceSystem {
 
     async fn generate_cultural_activities(
         &self,
-        language: &str,
+        _language: &str,
         scenario: &str,
     ) -> Result<Vec<LearningActivity>, EducationalVoiceError> {
         Ok(vec![
@@ -2033,6 +2039,12 @@ impl EducationalVoiceSystem {
                     "Adjust difficulty dynamically and incorporate learner's interests".to_string(),
             },
         ])
+    }
+}
+
+impl Default for EducationalVoiceSystem {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

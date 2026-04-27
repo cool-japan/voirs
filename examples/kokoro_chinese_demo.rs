@@ -11,8 +11,6 @@
 //! print(phonemes)  # Output: ni↓xau↓
 //! ```
 
-use std::collections::HashMap;
-
 #[cfg(feature = "onnx")]
 use voirs_acoustic::vits::onnx_kokoro::KokoroOnnxInference;
 
@@ -72,7 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Save audio file
         let output_path = temp_dir.join("kokoro_chinese_rust.wav");
-        save_wav(output_path.to_str().unwrap(), &audio_samples, sample_rate)?;
+        save_wav(&output_path, &audio_samples, sample_rate)?;
 
         println!("💾 Saved to: {}", output_path.display());
         println!();
@@ -85,27 +83,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("   Linux:  aplay {}", output_path.display());
         println!();
 
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(feature = "onnx"))]
     {
         eprintln!("❌ ONNX feature not enabled!");
         eprintln!("   Run with: cargo run --example kokoro_chinese_demo --features onnx");
-        return Err("ONNX feature required".into());
+        Err("ONNX feature required".into())
     }
 }
 
 /// Save audio samples as WAV file
+#[cfg(feature = "onnx")]
 fn save_wav(
-    path: &str,
+    path: impl AsRef<std::path::Path>,
     samples: &[f32],
     sample_rate: u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use std::fs::File;
     use std::io::Write;
 
-    let mut file = File::create(path)?;
+    let mut file = File::create(path.as_ref())?;
 
     // Add 100ms of silence padding at the beginning
     let padding_samples = (sample_rate as f32 * 0.1) as usize; // 100ms

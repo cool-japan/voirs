@@ -70,7 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("   Model: {}", model_path.display());
         println!();
 
-        let mut model = ChineseVitsOnnxInference::from_file(&model_path)?;
+        let model = ChineseVitsOnnxInference::from_file(&model_path)?;
         println!("   ✅ Model loaded");
         println!();
 
@@ -97,14 +97,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("   Linux:  aplay {}", output_path.display());
         println!();
 
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(feature = "onnx"))]
     {
         eprintln!("❌ ONNX feature not enabled!");
         eprintln!("   Run with: cargo run --example chinese_tts_demo --features onnx");
-        return Err("ONNX feature required".into());
+        Err("ONNX feature required".into())
     }
 }
 
@@ -125,15 +125,18 @@ fn pinyin_to_phonemes(pinyin: &str) -> Vec<String> {
 
         // Special handling for y/w (not true initials in token map)
         // ye3 → e3, yi3 → i3, wu3 → u3, wa3 → ua3, etc.
-        if syllable.starts_with('y') || syllable.starts_with('w') {
+        if let Some(stripped) = syllable
+            .strip_prefix('y')
+            .or_else(|| syllable.strip_prefix('w'))
+        {
             // Remove y/w and keep the rest
-            final_part = &syllable[1..];
+            final_part = stripped;
         } else {
             // Extract initial (声母) for other syllables
             for init in &initials {
-                if syllable.starts_with(init) {
+                if let Some(remainder) = syllable.strip_prefix(init) {
                     initial = init;
-                    final_part = &syllable[init.len()..];
+                    final_part = remainder;
                     break;
                 }
             }
@@ -394,6 +397,7 @@ fn load_chinese_token_map() -> HashMap<String, i64> {
 }
 
 /// Save audio samples as WAV file
+#[cfg(feature = "onnx")]
 fn save_wav(
     path: &str,
     samples: &[f32],

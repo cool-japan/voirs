@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
     println!("\n2. Different Text Examples");
     println!("--------------------------");
 
-    let texts = vec![
+    let texts = [
         "Welcome to the VoiRS speech synthesis system!",
         "This technology can convert text into natural-sounding speech.",
         "The system supports various features and configurations.",
@@ -72,7 +72,7 @@ async fn main() -> Result<()> {
     println!("\n4. Emotion Controller Status");
     println!("----------------------------");
 
-    if let Some(emotion_controller) = pipeline.emotion_controller() {
+    if let Some(_emotion_controller) = pipeline.emotion_controller() {
         println!("✓ Emotion controller is available");
 
         // You would use emotion controller methods here if they were implemented

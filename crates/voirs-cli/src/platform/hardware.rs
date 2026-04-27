@@ -282,7 +282,7 @@ fn detect_windows_gpu() -> GpuInfo {
         let output_str = String::from_utf8_lossy(&output.stdout);
         if let Some(line) = output_str.lines().next() {
             let parts: Vec<&str> = line.split(',').collect();
-            let name = parts.get(0).unwrap_or(&"NVIDIA GPU").trim().to_string();
+            let name = parts.first().unwrap_or(&"NVIDIA GPU").trim().to_string();
             let vram = parts
                 .get(1)
                 .and_then(|s| s.trim().parse::<u64>().ok())
@@ -690,7 +690,7 @@ fn detect_linux_cpu() -> CpuInfo {
 fn parse_lspci_gpu_line(line: &str) -> GpuInfo {
     let name = line
         .split(':')
-        .last()
+        .next_back()
         .unwrap_or("Unknown GPU")
         .trim()
         .to_string();
@@ -718,7 +718,7 @@ fn parse_lspci_gpu_line(line: &str) -> GpuInfo {
 #[cfg(target_os = "linux")]
 fn parse_nvidia_smi_line(line: &str) -> GpuInfo {
     let parts: Vec<&str> = line.split(',').collect();
-    let name = parts.get(0).unwrap_or(&"NVIDIA GPU").trim().to_string();
+    let name = parts.first().unwrap_or(&"NVIDIA GPU").trim().to_string();
     let vram = parts
         .get(1)
         .and_then(|s| s.trim().parse::<u64>().ok())

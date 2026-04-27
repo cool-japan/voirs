@@ -40,10 +40,7 @@
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::fs;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tracing::{debug, info, warn};
-use voirs::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -191,17 +188,21 @@ impl VoirsTestSuite {
         invalid_config.sample_rate = 1000; // Too low
 
         // This should fail validation
-        match self.validate_config(&invalid_config).await {
-            Ok(_) => anyhow::bail!("Expected validation to fail for invalid config"),
-            Err(_) => {} // Expected failure
+        if self.validate_config(&invalid_config).await.is_ok() {
+            anyhow::bail!("Expected validation to fail for invalid config");
         }
 
         Ok(())
     }
 
-    async fn validate_config(&self, _config: &VoirsConfig) -> Result<()> {
-        // Mock config validation
+    async fn validate_config(&self, config: &VoirsConfig) -> Result<()> {
         tokio::time::sleep(Duration::from_millis(10)).await;
+        if config.sample_rate < 8000 {
+            anyhow::bail!(
+                "Sample rate {} is below minimum of 8000 Hz",
+                config.sample_rate
+            );
+        }
         Ok(())
     }
 
@@ -687,7 +688,7 @@ impl VoirsTestSuite {
 
     fn get_memory_usage(&self) -> f64 {
         // Mock memory usage measurement
-        50.0 + (rand::random::<f64>() * 5.0)
+        50.0 + (fastrand::f64() * 5.0)
     }
 
     async fn run_performance_tests(&mut self) -> Result<()> {
@@ -970,13 +971,13 @@ impl VoirsTestSuite {
     async fn measure_snr(&self) -> Result<f64> {
         // Mock SNR measurement
         tokio::time::sleep(Duration::from_millis(50)).await;
-        Ok(35.0 + rand::random::<f64>() * 10.0)
+        Ok(35.0 + fastrand::f64() * 10.0)
     }
 
     async fn measure_thd(&self) -> Result<f64> {
         // Mock THD measurement
         tokio::time::sleep(Duration::from_millis(30)).await;
-        Ok(1.0 + rand::random::<f64>() * 2.0)
+        Ok(1.0 + fastrand::f64() * 2.0)
     }
 
     async fn test_format_compliance(&self) -> Result<()> {
@@ -1002,7 +1003,7 @@ impl VoirsTestSuite {
         tokio::time::sleep(Duration::from_millis(40)).await;
 
         // Randomly detect 0-2 artifacts
-        Ok((rand::random::<f64>() * 3.0) as usize)
+        Ok((fastrand::f64() * 3.0) as usize)
     }
 
     async fn validate_consistency(&self) -> Result<f64> {
@@ -1010,7 +1011,7 @@ impl VoirsTestSuite {
         tokio::time::sleep(Duration::from_millis(60)).await;
 
         // Return consistency score between 0.9 and 1.0
-        Ok(0.9 + rand::random::<f64>() * 0.1)
+        Ok(0.9 + fastrand::f64() * 0.1)
     }
 
     async fn run_regression_tests(&mut self) -> Result<()> {
@@ -1268,16 +1269,10 @@ impl VoirsTestSuite {
         println!("\n📋 Test Execution Summary");
         println!("=========================");
         println!("Total tests: {}", total_tests);
-        println!(
-            "Passed: {} ({}%)",
-            passed_tests,
-            (passed_tests * 100) / total_tests
-        );
-        println!(
-            "Failed: {} ({}%)",
-            failed_tests,
-            (failed_tests * 100) / total_tests
-        );
+        let pass_pct = (passed_tests * 100).checked_div(total_tests).unwrap_or(0);
+        let fail_pct = (failed_tests * 100).checked_div(total_tests).unwrap_or(0);
+        println!("Passed: {} ({}%)", passed_tests, pass_pct);
+        println!("Failed: {} ({}%)", failed_tests, fail_pct);
 
         if failed_tests == 0 {
             println!("\n🎉 All tests passed! VoiRS is functioning correctly.");
@@ -1378,15 +1373,11 @@ struct TestReport {
 // Mock VoiRS types and implementations
 struct VoirsConfig {
     sample_rate: u32,
-    buffer_size: usize,
 }
 
 impl VoirsConfig {
     fn default() -> Self {
-        Self {
-            sample_rate: 22050,
-            buffer_size: 1024,
-        }
+        Self { sample_rate: 22050 }
     }
 
     fn sample_rate(&self) -> u32 {

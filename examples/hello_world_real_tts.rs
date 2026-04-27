@@ -54,7 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("   Model: {}", model_path.display());
         println!();
 
-        let mut model = VitsOnnxInference::from_file(&model_path)?;
+        let model = VitsOnnxInference::from_file(&model_path)?;
         println!("   ✅ Model loaded");
         println!();
 
@@ -81,14 +81,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("   Linux:  aplay {}", output_path.display());
         println!();
 
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(feature = "onnx"))]
     {
         eprintln!("❌ ONNX feature not enabled!");
         eprintln!("   Run with: cargo run --example hello_world_real_tts --features onnx");
-        return Err("ONNX feature required".into());
+        Err("ONNX feature required".into())
     }
 }
 
@@ -214,6 +214,7 @@ fn create_token_map() -> HashMap<String, i64> {
 }
 
 /// Save audio samples as WAV file
+#[cfg(feature = "onnx")]
 fn save_wav(
     path: &str,
     samples: &[f32],

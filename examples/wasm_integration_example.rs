@@ -43,9 +43,9 @@ use std::time::Instant;
 use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
-use web_sys::{console, AudioBuffer, AudioBufferSourceNode, AudioContext};
+use web_sys::{AudioBuffer, AudioContext};
 
-use voirs::*;
+use voirs_sdk::prelude::*;
 
 // WebAssembly-specific error handling
 #[cfg(target_arch = "wasm32")]
@@ -78,29 +78,23 @@ impl WasmVoirsSynthesizer {
     /// Create a new WebAssembly VoiRS synthesizer
     #[wasm_bindgen(constructor)]
     pub async fn new() -> Result<WasmVoirsSynthesizer, JsValue> {
-        console_log!("🌐 Initializing WebAssembly VoiRS Synthesizer");
-
-        // Create lightweight components optimized for WASM
-        let g2p = create_g2p(G2pBackend::RuleBased);
-        let acoustic = create_acoustic(AcousticBackend::Vits); // Use lighter model in production
-        let vocoder = create_vocoder(VocoderBackend::HifiGan);
+        console_log!("Initializing WebAssembly VoiRS Synthesizer");
 
         let pipeline = VoirsPipelineBuilder::new()
-            .with_g2p(g2p)
-            .with_acoustic_model(acoustic)
-            .with_vocoder(vocoder)
+            .with_quality(QualityLevel::Medium) // Lighter model for WASM browser budget
+            .with_gpu_acceleration(false) // No GPU in browser WASM
             .build()
             .await
             .map_err(|e| JsValue::from_str(&format!("Failed to build WASM pipeline: {}", e)))?;
 
-        console_log!("✅ WebAssembly synthesizer ready");
+        console_log!("WebAssembly synthesizer ready");
         Ok(WasmVoirsSynthesizer { pipeline })
     }
 
     /// Synthesize text to audio in WebAssembly environment
     #[wasm_bindgen]
     pub async fn synthesize(&self, text: &str) -> Result<js_sys::Float32Array, JsValue> {
-        console_log!("🎵 Synthesizing in WebAssembly: '{}'", text);
+        console_log!("Synthesizing in WebAssembly: '{}'", text);
 
         let start_time = Instant::now();
 
@@ -112,7 +106,7 @@ impl WasmVoirsSynthesizer {
 
         let synthesis_time = start_time.elapsed();
         console_log!(
-            "✅ Synthesis complete ({:.2}s, RTF: {:.2}x)",
+            "Synthesis complete ({:.2}s, RTF: {:.2}x)",
             synthesis_time.as_secs_f32(),
             synthesis_time.as_secs_f32() / audio.duration()
         );
@@ -125,7 +119,7 @@ impl WasmVoirsSynthesizer {
         Ok(js_array)
     }
 
-    /// Get audio information
+    /// Get audio information for the given text
     #[wasm_bindgen]
     pub async fn get_audio_info(&self, text: &str) -> Result<JsValue, JsValue> {
         let audio = self
@@ -159,7 +153,7 @@ impl WasmVoirsSynthesizer {
         // Create Web Audio API buffer
         let buffer = audio_context
             .create_buffer(
-                audio.channels() as u32,
+                audio.channels(),
                 audio.samples().len() as u32,
                 audio.sample_rate() as f32,
             )
@@ -174,10 +168,7 @@ impl WasmVoirsSynthesizer {
             channel_data.set_index(i as u32, sample);
         }
 
-        console_log!(
-            "✅ Web Audio buffer created: {:.2}s audio",
-            audio.duration()
-        );
+        console_log!("Web Audio buffer created: {:.2}s audio", audio.duration());
         Ok(buffer)
     }
 }
@@ -186,41 +177,34 @@ impl WasmVoirsSynthesizer {
 #[cfg(not(target_arch = "wasm32"))]
 #[tokio::main]
 async fn main() -> Result<()> {
-    use tracing::{info, warn};
-
     // Initialize logging
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .init();
 
-    console_log!("🌐 VoiRS WebAssembly Integration Example");
+    console_log!("VoiRS WebAssembly Integration Example");
     console_log!("========================================");
     console_log!();
 
-    console_log!("📝 Note: This example demonstrates WebAssembly integration patterns.");
+    console_log!("Note: This example demonstrates WebAssembly integration patterns.");
     console_log!("     When compiled for WASM, it provides browser-compatible bindings.");
     console_log!("     Running natively to show the integration structure.");
     console_log!();
 
-    // Create the synthesizer (demonstrates the WASM-compatible API)
-    console_log!("🔧 Creating WASM-compatible synthesizer...");
+    // Create the synthesizer using the real VoiRS SDK API
+    console_log!("Creating WASM-compatible synthesizer...");
     let setup_start = Instant::now();
 
-    let g2p = create_g2p(G2pBackend::RuleBased);
-    let acoustic = create_acoustic(AcousticBackend::Vits);
-    let vocoder = create_vocoder(VocoderBackend::HifiGan);
-
     let pipeline = VoirsPipelineBuilder::new()
-        .with_g2p(g2p)
-        .with_acoustic_model(acoustic)
-        .with_vocoder(vocoder)
+        .with_quality(QualityLevel::Medium) // Lighter for WASM parity
+        .with_gpu_acceleration(false)
         .build()
         .await
         .context("Failed to build WASM-compatible pipeline")?;
 
     let setup_time = setup_start.elapsed();
     console_log!(
-        "✅ WASM-compatible synthesizer ready in {:.2} seconds",
+        "WASM-compatible synthesizer ready in {:.2} seconds",
         setup_time.as_secs_f32()
     );
 
@@ -231,9 +215,10 @@ async fn main() -> Result<()> {
         "Real-time voice generation is now possible in modern web browsers.",
     ];
 
-    console_log!("\n🎵 WebAssembly Synthesis Demonstration:");
+    console_log!("\nWebAssembly Synthesis Demonstration:");
     console_log!("--------------------------------------");
 
+    let tmp_dir = std::env::temp_dir();
     for (i, text) in wasm_examples.iter().enumerate() {
         console_log!("   Processing WASM example {}...", i + 1);
 
@@ -241,19 +226,20 @@ async fn main() -> Result<()> {
         let audio = pipeline
             .synthesize(text)
             .await
-            .context(format!("Failed to synthesize WASM example {}", i + 1))?;
+            .with_context(|| format!("Failed to synthesize WASM example {}", i + 1))?;
         let wasm_time = wasm_start.elapsed();
 
-        // Simulate WASM output patterns
+        // Simulate WASM output patterns using the temp directory
         let filename = format!("wasm_example_{:02}.wav", i + 1);
+        let output_path = tmp_dir.join(&filename);
         audio
-            .save_wav(&filename)
+            .save_wav(&output_path)
             .context("Failed to save WASM example audio")?;
 
         console_log!(
-            "   ✅ WASM example {}: {} ({:.2}s, RTF: {:.2}x)",
+            "   WASM example {}: {} ({:.2}s, RTF: {:.2}x)",
             i + 1,
-            filename,
+            output_path.display(),
             wasm_time.as_secs_f32(),
             wasm_time.as_secs_f32() / audio.duration()
         );
@@ -268,7 +254,7 @@ async fn main() -> Result<()> {
     }
 
     // WebAssembly integration guidance
-    console_log!("\n📋 WebAssembly Integration Guide:");
+    console_log!("\nWebAssembly Integration Guide:");
     console_log!("--------------------------------");
     console_log!("1. Install wasm-pack: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh");
     console_log!("2. Add to Cargo.toml:");
@@ -280,7 +266,7 @@ async fn main() -> Result<()> {
     console_log!("3. Build: wasm-pack build --target web");
     console_log!("4. Use in HTML/JavaScript with generated bindings");
 
-    console_log!("\n💡 Browser Integration Pattern:");
+    console_log!("\nBrowser Integration Pattern:");
     console_log!("------------------------------");
     console_log!("```javascript");
     console_log!("import init, {{ WasmVoirsSynthesizer }} from './pkg/voirs.js';");
@@ -289,8 +275,8 @@ async fn main() -> Result<()> {
     console_log!("const audioData = await synthesizer.synthesize('Hello WebAssembly!');");
     console_log!("```");
 
-    console_log!("\n🎉 WebAssembly Integration Example Complete!");
-    console_log!("Generated files: wasm_example_01.wav, wasm_example_02.wav, wasm_example_03.wav");
+    console_log!("\nWebAssembly Integration Example Complete!");
+    console_log!("Generated files in: {}", tmp_dir.display());
 
     Ok(())
 }
@@ -298,7 +284,7 @@ async fn main() -> Result<()> {
 /// WASM module initialization
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(start)]
-pub fn main() {
+pub fn wasm_main() {
     console_error_panic_hook::set_once();
-    console_log!("🌐 VoiRS WebAssembly module initialized");
+    console_log!("VoiRS WebAssembly module initialized");
 }

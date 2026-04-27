@@ -23,10 +23,10 @@
 //! - Optimization recommendations
 //! - Memory efficiency benchmarks
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock;
 use tokio::time::interval;
@@ -58,6 +58,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct MemoryProfiler {
     config: MemoryProfilingConfig,
@@ -1349,7 +1350,7 @@ impl MemoryProfiler {
     async fn generate_optimization_recommendations(&self) -> Result<()> {
         println!("  💡 Generating optimization recommendations...");
 
-        let recommendations = vec![
+        let recommendations = [
             MemoryOptimizationRecommendation {
                 priority: RecommendationPriority::Critical,
                 category: OptimizationCategory::LeakFixes,
@@ -1528,6 +1529,7 @@ impl MemoryProfiler {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 struct ConstrainedScenarioResult {
     success: bool,
@@ -1633,7 +1635,7 @@ mod rand {
     use std::cell::RefCell;
 
     thread_local! {
-        static RNG_STATE: RefCell<u64> = RefCell::new(54321);
+        static RNG_STATE: RefCell<u64> = const { RefCell::new(54321) };
     }
 
     pub fn random<T>() -> T

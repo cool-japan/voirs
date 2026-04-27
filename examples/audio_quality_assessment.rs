@@ -24,14 +24,14 @@
 //! cargo run --example audio_quality_assessment
 //! ```
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::f32::consts::PI;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{Mutex, RwLock};
-use tracing::{debug, info, warn};
+use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -230,6 +230,12 @@ impl QualityAssessmentSuite {
 /// Objective quality metrics analyzer
 pub struct ObjectiveQualityAnalyzer;
 
+impl Default for ObjectiveQualityAnalyzer {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl ObjectiveQualityAnalyzer {
     pub fn new() -> Self {
         Self
@@ -268,6 +274,12 @@ impl ObjectiveQualityAnalyzer {
 /// Perceptual quality evaluator using human-like assessment
 pub struct PerceptualQualityEvaluator;
 
+impl Default for PerceptualQualityEvaluator {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl PerceptualQualityEvaluator {
     pub fn new() -> Self {
         Self
@@ -276,7 +288,7 @@ impl PerceptualQualityEvaluator {
     pub async fn evaluate_naturalness(&self) -> Result<()> {
         info!("🔍 Evaluating naturalness");
 
-        let test_cases = vec![
+        let test_cases = [
             "Natural human speech sounds effortless and flowing",
             "Technical jargon requires careful pronunciation",
             "Emotional content needs appropriate expression",
@@ -370,6 +382,7 @@ impl PerceptualQualityEvaluator {
 }
 
 /// A/B testing framework for systematic quality comparison
+#[allow(dead_code)]
 pub struct ABTestingFramework {
     test_cases: Arc<RwLock<Vec<ABTestCase>>>,
     results: Arc<Mutex<Vec<ABTestResult>>>,
@@ -502,6 +515,7 @@ impl ABTestingFramework {
 pub struct AutomatedQualityMonitor {
     quality_history: Arc<RwLock<VecDeque<QualityMeasurement>>>,
     alert_thresholds: QualityThresholds,
+    #[allow(dead_code)]
     monitoring_active: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -658,13 +672,13 @@ impl AutomatedQualityMonitor {
     async fn take_quality_measurement(&self) -> Result<QualityMeasurement> {
         // Simulate taking a quality measurement
         let base_quality = 4.0;
-        let variation = (rand::random::<f64>() - 0.5) * 0.8;
-        let quality = (base_quality + variation).max(1.0).min(5.0);
+        let variation = (rand::random() - 0.5) * 0.8;
+        let quality = (base_quality + variation).clamp(1.0, 5.0);
 
         Ok(QualityMeasurement {
             timestamp: SystemTime::now(),
             overall_quality: quality,
-            latency_ms: 45.0 + rand::random::<f64>() * 20.0,
+            latency_ms: 45.0 + rand::random() * 20.0,
             objective_metrics: ObjectiveMetrics::default(),
         })
     }
@@ -765,6 +779,12 @@ impl AutomatedQualityMonitor {
 /// Quality regression detector
 pub struct QualityRegressionDetector;
 
+impl Default for QualityRegressionDetector {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl QualityRegressionDetector {
     pub fn new() -> Self {
         Self
@@ -818,8 +838,8 @@ impl QualityRegressionDetector {
             ("Week 5", 3.8, 54.0), // Slight recovery
         ];
 
-        let mut baseline_quality = performance_data[0].1;
-        let mut baseline_latency = performance_data[0].2;
+        let baseline_quality = performance_data[0].1;
+        let baseline_latency = performance_data[0].2;
 
         for (period, quality, latency) in performance_data {
             let quality_change = quality - baseline_quality;
@@ -862,7 +882,7 @@ impl QualityRegressionDetector {
             // Simulate gradual quality drift
             let base_quality = 4.0;
             let drift = (day as f64 - 15.0) * 0.01; // Gradual drift
-            let noise = (rand::random::<f64>() - 0.5) * 0.2;
+            let noise = (rand::random() - 0.5) * 0.2;
             let quality = base_quality + drift + noise;
 
             quality_samples.push(quality);
@@ -898,6 +918,12 @@ impl QualityRegressionDetector {
 
 /// Comparative quality analyzer
 pub struct ComparativeQualityAnalyzer;
+
+impl Default for ComparativeQualityAnalyzer {
+    fn default() -> Self {
+        Self
+    }
+}
 
 impl ComparativeQualityAnalyzer {
     pub fn new() -> Self {
@@ -1113,15 +1139,18 @@ impl SynthesisConfig {
     pub fn parametric() -> Self {
         Self::fast()
     }
-    pub fn default() -> Self {
-        Self::balanced()
-    }
     pub fn optimized() -> Self {
         let mut config = Self::balanced();
         config
             .parameters
             .insert("optimization_level".to_string(), 2.0);
         config
+    }
+}
+
+impl Default for SynthesisConfig {
+    fn default() -> Self {
+        Self::balanced()
     }
 }
 
@@ -1374,7 +1403,7 @@ fn synthesize_with_config(_reference: &[f32], config: SynthesisConfig) -> Result
     for sample in &mut synthesized {
         *sample *= quality_factor as f32;
         // Add some noise based on quality
-        let noise: f32 = (rand::random::<f32>() as f32) - 0.5f32;
+        let noise: f32 = rand::random() as f32 - 0.5f32;
         let degradation: f32 = 1.0f32 - quality_factor as f32;
         *sample += noise * degradation * 0.1f32;
     }
@@ -1407,29 +1436,29 @@ fn calculate_thd(audio: &[f32]) -> Result<f64> {
 fn calculate_pesq(_reference: &[f32], _synthesized: &[f32]) -> Result<f64> {
     // Simplified PESQ simulation (normally would use ITU-T P.862)
     let base_pesq = 3.5;
-    let variation = (rand::random::<f64>() - 0.5) * 0.6;
-    Ok((base_pesq + variation).max(1.0).min(4.5))
+    let variation = (rand::random() - 0.5) * 0.6;
+    Ok((base_pesq + variation).clamp(1.0, 4.5))
 }
 
 fn calculate_stoi(_reference: &[f32], _synthesized: &[f32]) -> Result<f64> {
     // Simplified STOI calculation
     let base_stoi = 0.85;
-    let variation = (rand::random::<f64>() - 0.5) * 0.2;
-    Ok((base_stoi + variation).max(0.0).min(1.0))
+    let variation = (rand::random() - 0.5) * 0.2;
+    Ok((base_stoi + variation).clamp(0.0, 1.0))
 }
 
 fn calculate_mcd(_reference: &[f32], _synthesized: &[f32]) -> Result<f64> {
     // Simplified Mel-Cepstral Distortion
     let base_mcd = 6.5;
-    let variation = (rand::random::<f64>() - 0.5) * 2.0;
-    Ok((base_mcd + variation).max(3.0).min(12.0))
+    let variation = (rand::random() - 0.5) * 2.0;
+    Ok((base_mcd + variation).clamp(3.0, 12.0))
 }
 
 fn calculate_spectral_distance(_reference: &[f32], _synthesized: &[f32]) -> Result<f64> {
     // Simplified spectral distance calculation
     let base_distance = 2.1;
-    let variation = (rand::random::<f64>() - 0.5) * 0.8;
-    Ok((base_distance + variation).max(1.0).min(4.0))
+    let variation = (rand::random() - 0.5) * 0.8;
+    Ok((base_distance + variation).clamp(1.0, 4.0))
 }
 
 fn calculate_overall_objective_score(snr: f64, thd: f64, pesq: f64, stoi: f64, mcd: f64) -> f64 {
@@ -1442,37 +1471,31 @@ fn calculate_overall_objective_score(snr: f64, thd: f64, pesq: f64, stoi: f64, m
 
     let weighted_score =
         snr_score * 0.2 + thd_score * 0.2 + pesq_score * 0.3 + stoi_score * 0.2 + mcd_score * 0.1;
-    (weighted_score * 5.0).max(1.0).min(5.0)
+    (weighted_score * 5.0).clamp(1.0, 5.0)
 }
 
 async fn assess_naturalness(_text: &str) -> Result<f64> {
     // Simulate naturalness assessment
     let base_score = 4.0;
     let complexity_penalty = _text.len() as f64 * 0.001;
-    let variation = (rand::random::<f64>() - 0.5) * 0.4;
-    Ok((base_score - complexity_penalty + variation)
-        .max(1.0)
-        .min(5.0))
+    let variation = (rand::random() - 0.5) * 0.4;
+    Ok((base_score - complexity_penalty + variation).clamp(1.0, 5.0))
 }
 
 async fn assess_clarity(_text: &str) -> Result<f64> {
     // Simulate clarity assessment
     let base_score = 4.2;
     let complexity_penalty = _text.chars().filter(|c| !c.is_alphabetic()).count() as f64 * 0.02;
-    let variation = (rand::random::<f64>() - 0.5) * 0.3;
-    Ok((base_score - complexity_penalty + variation)
-        .max(1.0)
-        .min(5.0))
+    let variation = (rand::random() - 0.5) * 0.3;
+    Ok((base_score - complexity_penalty + variation).clamp(1.0, 5.0))
 }
 
 async fn measure_intelligibility(_text: &str) -> Result<f64> {
     // Simulate intelligibility measurement
     let base_intelligibility = 0.90;
     let complexity_factor = 1.0 - (_text.len() as f64 * 0.001);
-    let variation = (rand::random::<f64>() - 0.5) * 0.1;
-    Ok((base_intelligibility * complexity_factor + variation)
-        .max(0.5)
-        .min(1.0))
+    let variation = (rand::random() - 0.5) * 0.1;
+    Ok((base_intelligibility * complexity_factor + variation).clamp(0.5, 1.0))
 }
 
 async fn assess_speaker_similarity(_speaker: &str) -> Result<f64> {
@@ -1484,8 +1507,8 @@ async fn assess_speaker_similarity(_speaker: &str) -> Result<f64> {
         "Elderly" => 3.9,
         _ => 3.7,
     };
-    let variation = (rand::random::<f64>() - 0.5) * 0.4;
-    Ok((base_score + variation).max(1.0).min(5.0))
+    let variation = (rand::random() - 0.5) * 0.4;
+    Ok((base_score + variation).clamp(1.0, 5.0))
 }
 
 async fn evaluate_synthesis_quality(_text: &str, _config: &SynthesisConfig) -> Result<f64> {
@@ -1499,11 +1522,9 @@ async fn evaluate_synthesis_quality(_text: &str, _config: &SynthesisConfig) -> R
     };
 
     let text_complexity = _text.len() as f64 * 0.002;
-    let variation = (rand::random::<f64>() - 0.5) * 0.3;
+    let variation = (rand::random() - 0.5) * 0.3;
 
-    Ok((base_quality - text_complexity + variation)
-        .max(1.0)
-        .min(5.0))
+    Ok((base_quality - text_complexity + variation).clamp(1.0, 5.0))
 }
 
 fn calculate_statistical_significance(scores_a: &[f64], scores_b: &[f64]) -> Result<f64> {
@@ -1517,7 +1538,7 @@ fn calculate_statistical_significance(scores_a: &[f64], scores_b: &[f64]) -> Res
     let diff = (mean_a - mean_b).abs();
 
     // Simulate confidence based on difference magnitude
-    let confidence = (diff * 2.0).min(0.95).max(0.5);
+    let confidence = (diff * 2.0).clamp(0.5, 0.95);
     Ok(confidence)
 }
 
@@ -1548,10 +1569,10 @@ mod rand {
     use std::cell::Cell;
 
     thread_local! {
-        static RNG: Cell<u64> = Cell::new(1);
+        static RNG: Cell<u64> = const { Cell::new(1) };
     }
 
-    pub fn random<T>() -> f64 {
+    pub fn random() -> f64 {
         RNG.with(|rng| {
             let mut x = rng.get();
             x ^= x << 13;

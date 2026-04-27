@@ -204,6 +204,7 @@ pub struct MultiModalProcessor {
     content_cache: Arc<RwLock<HashMap<String, MultiModalContent>>>,
 }
 
+#[allow(dead_code)]
 pub struct TextAnalyzer {
     emotion_model: EmotionDetectionModel,
     language_detector: LanguageDetector,
@@ -211,18 +212,21 @@ pub struct TextAnalyzer {
     semantic_analyzer: SemanticAnalyzer,
 }
 
+#[allow(dead_code)]
 pub struct AudioSynthesizer {
     voice_engine: VoiceEngine,
     effect_processor: EffectProcessor,
     quality_metrics: QualityMetrics,
 }
 
+#[allow(dead_code)]
 pub struct VisualGenerator {
     style_engine: StyleEngine,
     animation_processor: AnimationProcessor,
     sync_calculator: SyncCalculator,
 }
 
+#[allow(dead_code)]
 pub struct ContentSynchronizer {
     timing_calculator: TimingCalculator,
     sync_optimizer: SyncOptimizer,
@@ -699,6 +703,12 @@ impl MultiModalProcessor {
     }
 }
 
+impl Default for MultiModalProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // Supporting types for multi-modal processing
 #[derive(Debug, Clone)]
 pub struct ProcessingOptions {
@@ -952,8 +962,8 @@ impl TextAnalyzer {
         let estimated_reading_time = Duration::from_secs((word_count as f32 / 200.0 * 60.0) as u64);
 
         TextComplexity {
-            reading_level: reading_level.max(1.0).min(20.0),
-            vocabulary_complexity: vocab_complexity.max(0.0).min(1.0),
+            reading_level: reading_level.clamp(1.0, 20.0),
+            vocabulary_complexity: vocab_complexity.clamp(0.0, 1.0),
             sentence_complexity: (avg_words_per_sentence / 25.0).min(1.0),
             estimated_reading_time,
         }
@@ -1112,8 +1122,8 @@ impl AudioSynthesizer {
         };
 
         SynthesisParameters {
-            speed: speed.max(0.5).min(2.0),
-            pitch: pitch.max(0.8).min(1.2),
+            speed: speed.clamp(0.5, 2.0),
+            pitch: pitch.clamp(0.8, 1.2),
             volume: 0.8,
             emotional_intensity,
             breathing_patterns: options.voice_style == "narrative",
@@ -1346,7 +1356,7 @@ impl VisualGenerator {
                 sync_points.push(SyncPoint {
                     timestamp,
                     audio_cue: format!("word: {}", word),
-                    visual_event: format!("highlight_effect"),
+                    visual_event: "highlight_effect".to_string(),
                     description: format!("Visual emphasis synchronized with the word '{}'", word),
                 });
             }
@@ -1461,20 +1471,12 @@ impl ContentSynchronizer {
             // Find the closest segment to this sync point
             let closest_segment = segments.iter().min_by_key(|segment| {
                 let segment_mid = segment.start_time + (segment.end_time - segment.start_time) / 2;
-                if sync_point.timestamp > segment_mid {
-                    sync_point.timestamp - segment_mid
-                } else {
-                    segment_mid - sync_point.timestamp
-                }
+                sync_point.timestamp.abs_diff(segment_mid)
             });
 
             if let Some(segment) = closest_segment {
                 let segment_mid = segment.start_time + (segment.end_time - segment.start_time) / 2;
-                let time_diff = if sync_point.timestamp > segment_mid {
-                    sync_point.timestamp - segment_mid
-                } else {
-                    segment_mid - sync_point.timestamp
-                };
+                let time_diff = sync_point.timestamp.abs_diff(segment_mid);
 
                 // Convert to accuracy (0-1, where 1 is perfect sync)
                 let accuracy = (1.0 - time_diff.as_secs_f32() / 1.0).max(0.0); // 1 second tolerance

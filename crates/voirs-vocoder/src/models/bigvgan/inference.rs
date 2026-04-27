@@ -7,7 +7,7 @@ use crate::Result;
 #[cfg(feature = "candle")]
 use candle_core::{DType, Device, Tensor};
 #[cfg(feature = "candle")]
-use candle_nn::VarBuilder;
+use candle_nn::{VarBuilder, VarMap};
 
 use std::path::Path;
 
@@ -20,14 +20,17 @@ pub struct BigVGANInference {
     device: Device,
     /// Configuration
     config: BigVGANConfig,
+    /// VarMap holding all learnable parameters (enables real weight loading)
+    varmap: VarMap,
 }
 
 #[cfg(feature = "candle")]
 impl BigVGANInference {
     /// Create a new inference engine with specified configuration
     pub fn new(config: BigVGANConfig, device: Device) -> Result<Self> {
-        // Create variable builder with zeros (weights will be loaded later)
-        let vb = VarBuilder::zeros(DType::F32, &device);
+        let varmap = VarMap::new();
+        // Use from_varmap so that all generator parameters are registered in varmap
+        let vb = VarBuilder::from_varmap(&varmap, DType::F32, &device);
 
         // Create generator
         let generator = BigVGANGenerator::new(vb, config.clone())?;
@@ -36,6 +39,7 @@ impl BigVGANInference {
             generator,
             device,
             config,
+            varmap,
         })
     }
 
@@ -50,14 +54,102 @@ impl BigVGANInference {
         Self::new(config, device)
     }
 
-    /// Load model weights from safetensors file
+    /// Load model weights from safetensors file.
+    ///
+    /// Reads the file, parses it as SafeTensors, and calls `VarMap::set_one` for
+    /// every tensor whose name matches a variable already registered in the VarMap
+    /// (i.e. every parameter that was created when the generator was built).
+    /// F16 tensors are up-cast to F32 in-place.
     pub fn load_weights<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
-        let path_ref = path.as_ref();
+        use safetensors::SafeTensors;
 
+        let path_ref = path.as_ref();
         tracing::info!("Loading BigVGAN weights from: {:?}", path_ref);
 
-        // In a full implementation, this would use safetensors to load weights
-        // and update the generator's parameters
+        let data = std::fs::read(path_ref).map_err(|e| {
+            crate::VocoderError::ModelError(format!(
+                "Failed to read BigVGAN weights file {:?}: {}",
+                path_ref, e
+            ))
+        })?;
+
+        let st = SafeTensors::deserialize(&data).map_err(|e| {
+            crate::VocoderError::ModelError(format!(
+                "Failed to parse SafeTensors for BigVGAN: {}",
+                e
+            ))
+        })?;
+
+        let mut loaded: usize = 0;
+        let mut skipped_dtype: usize = 0;
+        let mut shape_mismatches: usize = 0;
+
+        for (name, view) in st.tensors() {
+            let shape: Vec<usize> = view.shape().to_vec();
+            let raw = view.data();
+
+            let float_data: Option<Vec<f32>> = match view.dtype() {
+                safetensors::Dtype::F32 => {
+                    let values = raw
+                        .chunks_exact(4)
+                        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                        .collect();
+                    Some(values)
+                }
+                safetensors::Dtype::F16 => {
+                    let values = raw
+                        .chunks_exact(2)
+                        .map(|c| {
+                            let bits = u16::from_le_bytes([c[0], c[1]]);
+                            half::f16::from_bits(bits).to_f32()
+                        })
+                        .collect();
+                    Some(values)
+                }
+                other => {
+                    tracing::warn!(
+                        "BigVGAN: skipping tensor {:?} — unsupported dtype {:?}",
+                        name,
+                        other
+                    );
+                    skipped_dtype += 1;
+                    None
+                }
+            };
+
+            if let Some(values) = float_data {
+                match candle_core::Tensor::from_vec(values, shape, &self.device) {
+                    Ok(tensor) => {
+                        match self.varmap.set_one(&name, &tensor) {
+                            Ok(()) => {
+                                loaded += 1;
+                            }
+                            Err(_) => {
+                                // The name is not in the VarMap — shape mismatch or unknown key
+                                shape_mismatches += 1;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("BigVGAN: failed to create tensor for {:?}: {}", name, e);
+                        shape_mismatches += 1;
+                    }
+                }
+            }
+        }
+
+        tracing::info!(
+            "BigVGAN weight loading complete: {} loaded, {} skipped (bad dtype), {} shape mismatches",
+            loaded,
+            skipped_dtype,
+            shape_mismatches
+        );
+
+        if loaded == 0 {
+            return Err(crate::VocoderError::ModelError(
+                "No BigVGAN weights matched VarMap entries".to_string(),
+            ));
+        }
 
         Ok(())
     }
@@ -183,7 +275,7 @@ impl BigVGANInference {
             return Ok(chunks[0].clone());
         }
 
-        let overlap_samples = overlap * self.config.total_upsample_factor();
+        let _overlap_samples = overlap * self.config.total_upsample_factor();
 
         // Start with first chunk
         let mut result = chunks[0].clone();
@@ -229,6 +321,41 @@ impl BigVGANInference {
 
         // Scale by complexity
         base_rtf * complexity_factor * (1.0 + (num_mel_frames as f32 / 1000.0) * 0.1)
+    }
+}
+
+#[cfg(feature = "candle")]
+impl Clone for BigVGANInference {
+    fn clone(&self) -> Self {
+        // Reconstruct the generator from the existing varmap so the clone carries
+        // the same learned weights.  A new VarMap is created and the generator is
+        // rebuilt against it; then each variable is copied from the source map.
+        let mut new_varmap = VarMap::new();
+        let vb = VarBuilder::from_varmap(&new_varmap, DType::F32, &self.device);
+        let generator = BigVGANGenerator::new(vb, self.config.clone())
+            .expect("BigVGANInference::clone: failed to rebuild generator");
+
+        // Copy every named variable from the source varmap into the new one.
+        {
+            let src_data = self
+                .varmap
+                .data()
+                .lock()
+                .expect("BigVGANInference::clone: VarMap data mutex should not be poisoned");
+            for (name, var) in src_data.iter() {
+                let tensor = var.as_tensor().clone();
+                // set_one only succeeds when the name exists in the map,
+                // which it will since the generator was just rebuilt with the same config.
+                let _ = new_varmap.set_one(name, &tensor);
+            }
+        }
+
+        Self {
+            generator,
+            device: self.device.clone(),
+            config: self.config.clone(),
+            varmap: new_varmap,
+        }
     }
 }
 
@@ -340,6 +467,7 @@ mod tests {
         assert!(rtf < 1.0); // Should be faster than real-time for fast model
     }
 
+    #[cfg(feature = "candle")]
     #[test]
     fn test_all_variants_loadable() {
         for variant in [

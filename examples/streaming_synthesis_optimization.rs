@@ -28,10 +28,7 @@
 use anyhow::{Context, Result};
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
-use voirs::{
-    create_acoustic, create_g2p, create_vocoder, AcousticBackend, G2pBackend, SynthesisConfig,
-    VocoderBackend, VoirsPipelineBuilder,
-};
+use voirs_sdk::prelude::*;
 
 /// Simple optimization metrics tracking
 #[derive(Debug, Clone)]
@@ -64,28 +61,21 @@ async fn main() -> Result<()> {
         .with_max_level(tracing::Level::INFO)
         .init();
 
-    println!("🚀 VoiRS Streaming Synthesis Optimization Example");
+    println!("VoiRS Streaming Synthesis Optimization Example");
     println!("=================================================");
     println!();
 
-    // Create streaming synthesis pipeline
-    println!("🔧 Creating optimized synthesis pipeline...");
-    let g2p = create_g2p(G2pBackend::RuleBased);
-    let acoustic = create_acoustic(AcousticBackend::Vits);
-    let vocoder = create_vocoder(VocoderBackend::HifiGan);
-
+    // Create synthesis pipeline
+    println!("Creating optimized synthesis pipeline...");
     let pipeline = VoirsPipelineBuilder::new()
-        .with_g2p(g2p)
-        .with_acoustic_model(acoustic)
-        .with_vocoder(vocoder)
         .build()
         .await
         .context("Failed to build synthesis pipeline")?;
 
-    info!("✅ Synthesis pipeline created successfully");
+    info!("Synthesis pipeline created successfully");
 
     // Test phrases of different lengths
-    let test_phrases = vec![
+    let test_phrases = [
         "Hello",                                       // Short (1 word)
         "Hello world",                                 // Medium (2 words)
         "The quick brown fox jumps",                   // Long (5 words)
@@ -96,7 +86,7 @@ async fn main() -> Result<()> {
     let mut optimized_metrics = OptimizationMetrics::default();
 
     // Run baseline benchmarks
-    println!("\n📊 Running baseline performance benchmarks...");
+    println!("\nRunning baseline performance benchmarks...");
     for (i, phrase) in test_phrases.iter().enumerate() {
         info!("Testing phrase {}: '{}'", i + 1, phrase);
 
@@ -116,7 +106,7 @@ async fn main() -> Result<()> {
     }
 
     // Simulate optimized benchmarks (in a real implementation, this would use actual optimizations)
-    println!("\n⚡ Running optimized performance benchmarks...");
+    println!("\nRunning optimized performance benchmarks...");
     optimized_metrics.optimization_enabled = true;
 
     for (i, phrase) in test_phrases.iter().enumerate() {
@@ -167,7 +157,7 @@ async fn main() -> Result<()> {
     }
 
     // Display comprehensive results
-    println!("\n📈 Performance Comparison Results");
+    println!("\nPerformance Comparison Results");
     println!("=================================");
 
     print_metrics_comparison(&baseline_metrics, &optimized_metrics);
@@ -175,7 +165,7 @@ async fn main() -> Result<()> {
     // Provide optimization recommendations
     provide_optimization_recommendations(&optimized_metrics);
 
-    info!("🎉 Streaming synthesis optimization example completed!");
+    info!("Streaming synthesis optimization example completed!");
     Ok(())
 }
 
@@ -196,17 +186,22 @@ fn split_into_chunks(text: &str) -> Vec<String> {
         .collect()
 }
 
-fn combine_audio_chunks(chunks: Vec<voirs::AudioBuffer>) -> voirs::AudioBuffer {
-    // Simple concatenation for demonstration
-    // In a real implementation, this would properly merge audio samples
+fn combine_audio_chunks(chunks: Vec<AudioBuffer>) -> AudioBuffer {
+    // Concatenate audio chunks by collecting all samples from every chunk
+    // then assembling a single buffer at the common sample rate.
     if chunks.is_empty() {
-        return voirs::AudioBuffer::new(vec![], 22050, 1);
+        return AudioBuffer::new(vec![], 22050, 1);
     }
-    // For now, just return the first chunk as a demonstration
-    chunks
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| voirs::AudioBuffer::new(vec![], 22050, 1))
+
+    let sample_rate = chunks[0].sample_rate();
+    let channels = chunks[0].channels();
+
+    let combined_samples: Vec<f32> = chunks
+        .iter()
+        .flat_map(|c| c.samples().iter().copied())
+        .collect();
+
+    AudioBuffer::new(combined_samples, sample_rate, channels)
 }
 
 fn print_metrics_comparison(baseline: &OptimizationMetrics, optimized: &OptimizationMetrics) {
@@ -229,30 +224,38 @@ fn print_metrics_comparison(baseline: &OptimizationMetrics, optimized: &Optimiza
     let meets_target = optimized.avg_latency_ms < 100.0;
     println!(
         "Meets <100ms Target: {}",
-        if meets_target { "✅ YES" } else { "❌ NO" }
+        if meets_target { "YES" } else { "NO" }
     );
 }
 
 fn provide_optimization_recommendations(metrics: &OptimizationMetrics) {
-    println!("\n🔧 Optimization Recommendations:");
+    println!("\nOptimization Recommendations:");
 
     if metrics.avg_latency_ms > 100.0 {
-        println!("  • Average latency exceeds 100ms target");
-        println!("  • Consider enabling GPU acceleration");
-        println!("  • Reduce model complexity or quality settings");
-        println!("  • Implement more aggressive chunking");
+        println!("  - Average latency exceeds 100ms target");
+        println!("  - Consider enabling GPU acceleration");
+        println!("  - Reduce model complexity or quality settings");
+        println!("  - Implement more aggressive chunking");
     } else {
-        println!("  • ✅ Latency target achieved!");
-        println!("  • Consider quality improvements while maintaining latency");
+        println!("  - Latency target achieved!");
+        println!("  - Consider quality improvements while maintaining latency");
     }
 
     if metrics.max_latency_ms > metrics.avg_latency_ms * 2.0 {
-        println!("  • High latency variance detected");
-        println!("  • Implement adaptive buffering");
-        println!("  • Consider precomputation strategies");
+        println!("  - High latency variance detected");
+        println!("  - Implement adaptive buffering");
+        println!("  - Consider precomputation strategies");
     }
 
-    println!("  • Monitor memory usage for long-running sessions");
-    println!("  • Implement warming strategies for cold starts");
-    println!("  • Consider streaming output for very long texts");
+    // Emit a structured warning when variance is high so the `warn` import is used
+    if metrics.max_latency_ms > metrics.avg_latency_ms * 2.0 {
+        warn!(
+            "High latency variance: max={:.2}ms avg={:.2}ms",
+            metrics.max_latency_ms, metrics.avg_latency_ms
+        );
+    }
+
+    println!("  - Monitor memory usage for long-running sessions");
+    println!("  - Implement warming strategies for cold starts");
+    println!("  - Consider streaming output for very long texts");
 }

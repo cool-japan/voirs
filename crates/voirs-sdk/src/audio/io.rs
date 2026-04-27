@@ -835,35 +835,94 @@ impl AudioBuffer {
         Ok(AudioBuffer::new(samples, sample_rate, channels))
     }
 
-    /// Load audio from Opus file
+    /// Load audio from an Ogg Opus file.
+    ///
+    /// Parses the Ogg container with the `ogg` crate and decodes each Opus packet with the
+    /// `opus` crate.  The OpusHead identification header is read to determine the channel
+    /// count and the original input sample rate stored by the encoder.  Opus always outputs
+    /// PCM at 48 000 Hz internally; we advertise the original sample rate so callers can
+    /// resample if needed, but the raw PCM is at 48 kHz.
     pub fn load_opus(path: impl AsRef<Path>) -> Result<AudioBuffer> {
+        use ogg::reading::PacketReader;
         use opus::{Channels, Decoder};
         use std::fs::File;
-        use std::io::Read;
 
-        let mut file = File::open(path)
+        let file = File::open(path.as_ref())
             .map_err(|e| VoirsError::audio_error(format!("Failed to open Opus file: {e}")))?;
 
-        let mut encoded_data = Vec::new();
-        file.read_to_end(&mut encoded_data)
-            .map_err(|e| VoirsError::audio_error(format!("Failed to read Opus file: {e}")))?;
+        let mut reader = PacketReader::new(file);
 
-        // Note: This assumes raw Opus data, not in an Ogg container
-        // For production use, you'd want to parse the Ogg container format
+        // --- OpusHead (first logical packet) ---
+        let head = reader
+            .read_packet_expected()
+            .map_err(|e| VoirsError::audio_error(format!("Failed to read Opus header: {e:?}")))?;
 
-        // We'll assume stereo 48kHz for now (could be improved with proper container parsing)
-        let sample_rate = 48000;
-        let channels = Channels::Stereo;
+        if head.data.len() < 19 || &head.data[..8] != b"OpusHead" {
+            return Err(VoirsError::audio_error(
+                "Not a valid Ogg Opus file — missing OpusHead magic",
+            ));
+        }
+        let n_channels = head.data[9] as u32;
+        let pre_skip = u16::from_le_bytes([head.data[10], head.data[11]]) as usize;
+        let input_sample_rate =
+            u32::from_le_bytes([head.data[12], head.data[13], head.data[14], head.data[15]]);
+        // Advertise the original rate; Opus PCM is always at 48 kHz.
+        let sample_rate = if input_sample_rate > 0 {
+            input_sample_rate
+        } else {
+            48_000
+        };
 
-        let _decoder = Decoder::new(sample_rate, channels).map_err(|e| {
+        let opus_channels = if n_channels == 1 {
+            Channels::Mono
+        } else {
+            Channels::Stereo
+        };
+        let mut decoder = Decoder::new(48_000, opus_channels).map_err(|e| {
             VoirsError::audio_error(format!("Failed to create Opus decoder: {e:?}"))
         })?;
 
-        // For now, return an error since raw Opus decoding without container is complex
-        tracing::warn!("Raw Opus decoding not fully implemented - needs Ogg container support");
-        Err(VoirsError::audio_error(
-            "Opus loading requires Ogg container support (not yet implemented)",
-        ))
+        // --- OpusTags (second logical packet — skip) ---
+        reader
+            .read_packet_expected()
+            .map_err(|e| VoirsError::audio_error(format!("Failed to skip OpusTags: {e:?}")))?;
+
+        // --- Audio packets ---
+        // Maximum Opus frame size: 120 ms at 48 kHz = 5760 samples per channel.
+        const MAX_FRAME_SAMPLES: usize = 5760;
+        let mut decode_buf = vec![0.0_f32; MAX_FRAME_SAMPLES * n_channels as usize];
+        let mut samples: Vec<f32> = Vec::new();
+
+        loop {
+            match reader.read_packet() {
+                Ok(Some(pkt)) => {
+                    let samples_per_channel = decoder
+                        .decode_float(&pkt.data, &mut decode_buf, false)
+                        .map_err(|e| {
+                            VoirsError::audio_error(format!("Opus decode error: {e:?}"))
+                        })?;
+                    samples.extend_from_slice(
+                        &decode_buf[..samples_per_channel * n_channels as usize],
+                    );
+                }
+                Ok(None) => break,
+                Err(e) => return Err(VoirsError::audio_error(format!("Ogg read error: {e:?}"))),
+            }
+        }
+
+        // Remove encoder pre-skip padding from the start of the decoded PCM.
+        let skip_samples = pre_skip * n_channels as usize;
+        let samples = if skip_samples < samples.len() {
+            samples[skip_samples..].to_vec()
+        } else {
+            Vec::new()
+        };
+
+        if samples.is_empty() {
+            return Err(VoirsError::audio_error("No audio data found in Opus file"));
+        }
+
+        Ok(AudioBuffer::new(samples, sample_rate, n_channels))
     }
 
     /// Get audio information without loading samples
@@ -1029,13 +1088,45 @@ impl AudioBuffer {
         })
     }
 
-    /// Get Opus file information
-    pub fn get_opus_info(_path: impl AsRef<Path>) -> Result<AudioInfo> {
-        // For now, return an error since raw Opus info reading without container is complex
-        tracing::warn!("Opus info reading requires Ogg container support (not yet implemented)");
-        Err(VoirsError::audio_error(
-            "Opus info reading requires Ogg container support (not yet implemented)",
-        ))
+    /// Get audio information from an Ogg Opus file without decoding the full stream.
+    ///
+    /// Reads only the OpusHead identification packet to determine channel count and the
+    /// original input sample rate.  `sample_count` and `duration` are set to 0 because
+    /// determining them precisely would require decoding all packets; callers that need
+    /// accurate duration should call `load_opus` instead.
+    pub fn get_opus_info(path: impl AsRef<Path>) -> Result<AudioInfo> {
+        use ogg::reading::PacketReader;
+        use std::fs::File;
+
+        let file = File::open(path.as_ref())
+            .map_err(|e| VoirsError::audio_error(format!("Failed to open Opus file: {e}")))?;
+
+        let mut reader = PacketReader::new(file);
+        let head = reader
+            .read_packet_expected()
+            .map_err(|e| VoirsError::audio_error(format!("Failed to read Opus header: {e:?}")))?;
+
+        if head.data.len() < 19 || &head.data[..8] != b"OpusHead" {
+            return Err(VoirsError::audio_error(
+                "Not a valid Ogg Opus file — missing OpusHead magic",
+            ));
+        }
+        let channels = head.data[9] as u32;
+        let input_sample_rate =
+            u32::from_le_bytes([head.data[12], head.data[13], head.data[14], head.data[15]]);
+        let sample_rate = if input_sample_rate > 0 {
+            input_sample_rate
+        } else {
+            48_000
+        };
+
+        Ok(AudioInfo {
+            sample_rate,
+            channels,
+            duration: 0.0,
+            sample_count: 0,
+            format: AudioFormat::Opus,
+        })
     }
 
     /// Stream audio to callback function (for real-time processing)

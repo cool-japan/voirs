@@ -3186,3 +3186,12 @@
 ---
 
 This TODO list provides a comprehensive implementation roadmap for the voirs-vocoder crate, focusing on high-quality neural vocoding with real-time performance and streaming capabilities.
+---
+
+## Session 2026-04-27
+
+- ✅ BigVGAN `load_weights`: replaced stub with real safetensors loader — `varmap: VarMap` field added, `VarBuilder::from_varmap` construction, F32/F16 decode, `set_one` update, error if 0 loaded.
+- ✅ BigVGAN `Vocoder` trait: `models/bigvgan/vocoder.rs` — full vocode/vocode_stream/vocode_batch/metadata/supports implementation.
+- ✅ UnivNet `load_weights`: identical pattern applied in `models/univnet/inference.rs`.
+- ✅ UnivNet `Vocoder` trait: `models/univnet/vocoder.rs`.
+- DiffWave trainer resume (save/load model weights, not just JSON) remains deferred — module is disabled at `mod.rs:14` due to Candle API compatibility issues.

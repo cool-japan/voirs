@@ -24,7 +24,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
@@ -45,6 +45,7 @@ pub struct AIVoiceSystem {
 }
 
 /// Large Language Model integration engine
+#[allow(dead_code)]
 pub struct LLMEngine {
     /// Model configuration
     model_config: LLMConfig,
@@ -57,6 +58,7 @@ pub struct LLMEngine {
 }
 
 /// Conversational AI context and state management
+#[allow(dead_code)]
 pub struct ConversationManager {
     /// Active conversations
     active_conversations: Arc<RwLock<HashMap<Uuid, Conversation>>>,
@@ -67,6 +69,7 @@ pub struct ConversationManager {
 }
 
 /// AI-enhanced voice synthesis
+#[allow(dead_code)]
 pub struct AIVoiceSynthesizer {
     /// Voice models with AI enhancement
     voice_models: HashMap<String, AIVoiceModel>,
@@ -79,6 +82,7 @@ pub struct AIVoiceSynthesizer {
 }
 
 /// Personality and emotion analysis engine
+#[allow(dead_code)]
 pub struct PersonalityEngine {
     /// Personality trait analyzer
     trait_analyzer: PersonalityTraitAnalyzer,
@@ -89,6 +93,7 @@ pub struct PersonalityEngine {
 }
 
 /// Real-time chat management
+#[allow(dead_code)]
 pub struct RealTimeChatManager {
     /// Active chat sessions
     active_sessions: Arc<RwLock<HashMap<Uuid, ChatSession>>>,
@@ -99,6 +104,7 @@ pub struct RealTimeChatManager {
 }
 
 /// AI content generation system
+#[allow(dead_code)]
 pub struct AIContentGenerator {
     /// Content templates and patterns
     content_templates: ContentTemplateEngine,
@@ -1292,7 +1298,7 @@ impl AIVoiceSystem {
     async fn synthesize_narration(
         &self,
         content: &str,
-        voice: &AIVoiceModel,
+        _voice: &AIVoiceModel,
         analysis: &NarrationAnalysis,
     ) -> Result<Vec<VoiceSegment>, AIVoiceError> {
         let sentences = content.split(&['.', '!', '?'][..]).collect::<Vec<_>>();
@@ -1452,6 +1458,12 @@ impl AIVoiceSystem {
     }
 }
 
+impl Default for AIVoiceSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // Supporting data structures for content generation
 #[derive(Debug, Clone)]
 pub struct ContentRequest {
@@ -1548,7 +1560,7 @@ impl LLMEngine {
 
     async fn generate_response(
         &self,
-        conversation_id: Uuid,
+        _conversation_id: Uuid,
         message: &str,
         emotion: &EmotionAnalysis,
     ) -> Result<String, AIVoiceError> {
@@ -1792,7 +1804,7 @@ impl PersonalityEngine {
             (positive_count + negative_count) as f32 / message.split_whitespace().count() as f32;
 
         let sentiment = SentimentScore {
-            polarity: polarity.max(-1.0).min(1.0),
+            polarity: polarity.clamp(-1.0, 1.0),
             magnitude: magnitude.min(1.0),
             confidence: 0.75,
         };

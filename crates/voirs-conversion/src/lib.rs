@@ -124,7 +124,7 @@ pub use compression_research::{
     PsychoacousticAnalyzer, TonalityDetector, VectorQuantizer,
 };
 pub use config::{ConversionConfig, ConversionConfigBuilder};
-pub use core::{VoiceConverter, VoiceConverterBuilder};
+pub use core::{BatchConfig, BatchConverter, BatchResult, VoiceConverter, VoiceConverterBuilder};
 pub use diagnostics::{
     DiagnosticAnalysis, DiagnosticSystem, HealthAssessment, IdentifiedIssue, IssueCategory,
     IssueSeverity, Recommendation, ReportType,
@@ -1315,7 +1315,7 @@ pub mod prelude {
             PsychoacousticAnalyzer, TonalityDetector, VectorQuantizer,
         },
         config::{ConversionConfig, ConversionConfigBuilder},
-        core::{VoiceConverter, VoiceConverterBuilder},
+        core::{BatchConfig, BatchConverter, BatchResult, VoiceConverter, VoiceConverterBuilder},
         diagnostics::{
             DiagnosticAnalysis, DiagnosticSystem, HealthAssessment, IdentifiedIssue, IssueCategory,
             IssueSeverity, Recommendation, ReportType,

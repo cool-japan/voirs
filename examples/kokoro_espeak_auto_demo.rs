@@ -19,6 +19,7 @@ use std::process::Command;
 use voirs_acoustic::vits::onnx_kokoro::KokoroOnnxInference;
 
 /// Language configuration with eSpeak NG support
+#[allow(dead_code)]
 struct Language {
     name: &'static str,
     espeak_voice: &'static str,
@@ -27,6 +28,7 @@ struct Language {
 }
 
 /// Generate IPA phonemes using eSpeak NG
+#[cfg(feature = "onnx")]
 fn generate_ipa(text: &str, espeak_voice: &str) -> Result<String, Box<dyn std::error::Error>> {
     let output = Command::new("espeak-ng")
         .arg("-v")
@@ -73,65 +75,65 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✅ eSpeak NG detected");
     println!();
 
-    // Language configurations
-    let languages = vec![
-        Language {
-            name: "English (American)",
-            espeak_voice: "en-us",
-            voice_idx: 4,
-            voice_name: "af_jessica",
-        },
-        Language {
-            name: "English (British)",
-            espeak_voice: "en-gb",
-            voice_idx: 20,
-            voice_name: "bf_alice",
-        },
-        Language {
-            name: "Spanish",
-            espeak_voice: "es",
-            voice_idx: 28,
-            voice_name: "ef_dora",
-        },
-        Language {
-            name: "French",
-            espeak_voice: "fr-fr",
-            voice_idx: 31,
-            voice_name: "ff_siwis",
-        },
-        Language {
-            name: "Hindi",
-            espeak_voice: "hi",
-            voice_idx: 32,
-            voice_name: "hf_alpha",
-        },
-        Language {
-            name: "Italian",
-            espeak_voice: "it",
-            voice_idx: 36,
-            voice_name: "if_sara",
-        },
-        Language {
-            name: "Portuguese (Brazilian)",
-            espeak_voice: "pt-br",
-            voice_idx: 43,
-            voice_name: "pf_dora",
-        },
-    ];
-
-    // Sample texts for each language
-    let texts = vec![
-        "Hello, the world is beautiful today",    // English (US)
-        "Hello, the world is beautiful today",    // English (UK)
-        "Hola, el mundo es hermoso hoy",          // Spanish
-        "Bonjour, le monde est beau aujourd'hui", // French
-        "नमस्ते, दुनिया आज सुंदर है",                   // Hindi
-        "Ciao, il mondo è bello oggi",            // Italian
-        "Olá, o mundo está lindo hoje",           // Portuguese
-    ];
-
     #[cfg(feature = "onnx")]
-    {
+    let result: Result<(), Box<dyn std::error::Error>> = {
+        // Language configurations
+        let languages = [
+            Language {
+                name: "English (American)",
+                espeak_voice: "en-us",
+                voice_idx: 4,
+                voice_name: "af_jessica",
+            },
+            Language {
+                name: "English (British)",
+                espeak_voice: "en-gb",
+                voice_idx: 20,
+                voice_name: "bf_alice",
+            },
+            Language {
+                name: "Spanish",
+                espeak_voice: "es",
+                voice_idx: 28,
+                voice_name: "ef_dora",
+            },
+            Language {
+                name: "French",
+                espeak_voice: "fr-fr",
+                voice_idx: 31,
+                voice_name: "ff_siwis",
+            },
+            Language {
+                name: "Hindi",
+                espeak_voice: "hi",
+                voice_idx: 32,
+                voice_name: "hf_alpha",
+            },
+            Language {
+                name: "Italian",
+                espeak_voice: "it",
+                voice_idx: 36,
+                voice_name: "if_sara",
+            },
+            Language {
+                name: "Portuguese (Brazilian)",
+                espeak_voice: "pt-br",
+                voice_idx: 43,
+                voice_name: "pf_dora",
+            },
+        ];
+
+        // Sample texts for each language
+        let texts = [
+            "Hello, the world is beautiful today",    // English (US)
+            "Hello, the world is beautiful today",    // English (UK)
+            "Hola, el mundo es hermoso hoy",          // Spanish
+            "Bonjour, le monde est beau aujourd'hui", // French
+            "नमस्ते, दुनिया आज सुंदर है",                   // Hindi
+            "Ciao, il mondo è bello oggi",            // Italian
+            "Olá, o mundo está lindo hoje",           // Portuguese
+        ];
+
         // Load Kokoro model
         let temp_dir = std::env::temp_dir();
         let model_dir = temp_dir.join("voirs_models/kokoro-zh");
@@ -204,17 +206,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("   Linux:  aplay <file.wav>");
         println!();
 
-        return Ok(());
-    }
+        Ok(())
+    };
+
+    #[cfg(feature = "onnx")]
+    return result;
 
     #[cfg(not(feature = "onnx"))]
     {
         eprintln!("❌ ONNX feature not enabled!");
         eprintln!("   Run with: cargo run --example kokoro_espeak_auto_demo --features onnx");
-        return Err("ONNX feature required".into());
+        Err("ONNX feature required".into())
     }
 }
 
+#[cfg(feature = "onnx")]
 /// Save audio samples as WAV file with 100ms padding
 fn save_wav(
     path: &str,

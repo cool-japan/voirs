@@ -66,6 +66,9 @@ pub mod lvc;
 #[cfg(feature = "candle")]
 pub mod inference;
 
+#[cfg(feature = "candle")]
+pub mod vocoder;
+
 pub use config::{UnivNetConfig, UnivNetVariant};
 pub use generator::UnivNetGenerator;
 pub use lvc::{LVCBlock, LVCConfig};

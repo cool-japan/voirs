@@ -26,7 +26,7 @@
 //! - Error recovery strategies
 //! - Resource cleanup guarantees
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -232,6 +232,7 @@ pub enum SystemErrorCode {
 
 #[derive(Debug, Clone)]
 pub struct ErrorHandlingDemo {
+    #[allow(dead_code)]
     config: ErrorHandlingConfig,
     error_tracker: Arc<RwLock<ErrorTracker>>,
     circuit_breakers: Arc<RwLock<HashMap<String, CircuitBreaker>>>,
@@ -338,10 +339,10 @@ impl CircuitBreaker {
         }
     }
 
-    pub fn call<F, T, E>(&mut self, f: F) -> Result<T, VoirsError>
+    pub fn call<F, T, E>(&mut self, f: F) -> Result<T, Box<VoirsError>>
     where
         F: FnOnce() -> Result<T, E>,
-        E: Into<VoirsError>,
+        E: Into<Box<VoirsError>>,
     {
         self.total_requests += 1;
 
@@ -352,12 +353,12 @@ impl CircuitBreaker {
                         self.state = CircuitBreakerState::HalfOpen;
                         self.call(f)
                     } else {
-                        Err(VoirsError::System {
+                        Err(Box::new(VoirsError::System {
                             message: "Circuit breaker is open - service unavailable".to_string(),
                             error_code: SystemErrorCode::ServiceDown,
                             context: ErrorContext::new("circuit_breaker".to_string()),
                             is_recoverable: true,
-                        })
+                        }))
                     }
                 } else {
                     self.call(f)
@@ -845,13 +846,13 @@ impl ErrorHandlingDemo {
         // Simulate multiple failures to trigger circuit breaker
         println!("    Simulating failures to trigger circuit breaker...");
         for i in 1..=5 {
-            let result = breaker.call(|| -> Result<String, VoirsError> {
-                Err(VoirsError::System {
+            let result = breaker.call(|| -> Result<String, Box<VoirsError>> {
+                Err(Box::new(VoirsError::System {
                     message: format!("Service failure {}", i),
                     error_code: SystemErrorCode::ServiceDown,
                     context: ErrorContext::new("circuit_breaker_demo".to_string()),
                     is_recoverable: true,
-                })
+                }))
             });
 
             match result {
@@ -1427,7 +1428,7 @@ mod rand {
     use std::cell::RefCell;
 
     thread_local! {
-        static RNG_STATE: RefCell<u64> = RefCell::new(67890);
+        static RNG_STATE: RefCell<u64> = const { RefCell::new(67890) };
     }
 
     pub fn random<T>() -> T

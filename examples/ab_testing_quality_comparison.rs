@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use tracing::{info, warn};
+use tracing::info;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -403,62 +403,62 @@ impl ABTestSuite {
 
     fn simulate_quality_metric(&self, metric: &QualityMetric, config: &ModelConfig) -> Result<f64> {
         // Simulate realistic quality scores based on model configuration
-        use scirs2_core::random::{thread_rng, Rng};
+        use scirs2_core::random::thread_rng;
         let mut rng = thread_rng();
 
         let base_score = match metric {
             QualityMetric::PESQ => {
                 // PESQ typically ranges from 1.0 to 4.5
                 match config.quality_preset {
-                    QualityPreset::Fast => 2.5 + rng.r#gen::<f64>() * 0.5,
-                    QualityPreset::Balanced => 3.2 + rng.r#gen::<f64>() * 0.4,
-                    QualityPreset::HighQuality => 3.8 + rng.r#gen::<f64>() * 0.3,
-                    QualityPreset::Custom => 3.0 + rng.r#gen::<f64>() * 0.8,
+                    QualityPreset::Fast => 2.5 + rng.random::<f64>() * 0.5,
+                    QualityPreset::Balanced => 3.2 + rng.random::<f64>() * 0.4,
+                    QualityPreset::HighQuality => 3.8 + rng.random::<f64>() * 0.3,
+                    QualityPreset::Custom => 3.0 + rng.random::<f64>() * 0.8,
                 }
             }
             QualityMetric::STOI => {
                 // STOI ranges from 0.0 to 1.0
                 match config.quality_preset {
-                    QualityPreset::Fast => 0.75 + rng.r#gen::<f64>() * 0.15,
-                    QualityPreset::Balanced => 0.85 + rng.r#gen::<f64>() * 0.10,
-                    QualityPreset::HighQuality => 0.92 + rng.r#gen::<f64>() * 0.06,
-                    QualityPreset::Custom => 0.80 + rng.r#gen::<f64>() * 0.15,
+                    QualityPreset::Fast => 0.75 + rng.random::<f64>() * 0.15,
+                    QualityPreset::Balanced => 0.85 + rng.random::<f64>() * 0.10,
+                    QualityPreset::HighQuality => 0.92 + rng.random::<f64>() * 0.06,
+                    QualityPreset::Custom => 0.80 + rng.random::<f64>() * 0.15,
                 }
             }
             QualityMetric::MCD => {
                 // MCD (lower is better), typically 2-20 dB
                 match config.quality_preset {
-                    QualityPreset::Fast => 8.0 + rng.r#gen::<f64>() * 4.0,
-                    QualityPreset::Balanced => 5.5 + rng.r#gen::<f64>() * 2.0,
-                    QualityPreset::HighQuality => 3.2 + rng.r#gen::<f64>() * 1.5,
-                    QualityPreset::Custom => 6.0 + rng.r#gen::<f64>() * 3.0,
+                    QualityPreset::Fast => 8.0 + rng.random::<f64>() * 4.0,
+                    QualityPreset::Balanced => 5.5 + rng.random::<f64>() * 2.0,
+                    QualityPreset::HighQuality => 3.2 + rng.random::<f64>() * 1.5,
+                    QualityPreset::Custom => 6.0 + rng.random::<f64>() * 3.0,
                 }
             }
             QualityMetric::RTF => {
                 // Real-Time Factor (lower is better for performance)
                 match config.quality_preset {
-                    QualityPreset::Fast => 0.1 + rng.r#gen::<f64>() * 0.05,
-                    QualityPreset::Balanced => 0.3 + rng.r#gen::<f64>() * 0.1,
-                    QualityPreset::HighQuality => 0.8 + rng.r#gen::<f64>() * 0.2,
-                    QualityPreset::Custom => 0.4 + rng.r#gen::<f64>() * 0.3,
+                    QualityPreset::Fast => 0.1 + rng.random::<f64>() * 0.05,
+                    QualityPreset::Balanced => 0.3 + rng.random::<f64>() * 0.1,
+                    QualityPreset::HighQuality => 0.8 + rng.random::<f64>() * 0.2,
+                    QualityPreset::Custom => 0.4 + rng.random::<f64>() * 0.3,
                 }
             }
             QualityMetric::SubjectiveScore => {
                 // Subjective Mean Opinion Score (1-5)
                 match config.quality_preset {
-                    QualityPreset::Fast => 3.2 + rng.r#gen::<f64>() * 0.6,
-                    QualityPreset::Balanced => 3.8 + rng.r#gen::<f64>() * 0.4,
-                    QualityPreset::HighQuality => 4.3 + rng.r#gen::<f64>() * 0.3,
-                    QualityPreset::Custom => 3.5 + rng.r#gen::<f64>() * 0.8,
+                    QualityPreset::Fast => 3.2 + rng.random::<f64>() * 0.6,
+                    QualityPreset::Balanced => 3.8 + rng.random::<f64>() * 0.4,
+                    QualityPreset::HighQuality => 4.3 + rng.random::<f64>() * 0.3,
+                    QualityPreset::Custom => 3.5 + rng.random::<f64>() * 0.8,
                 }
             }
             _ => {
                 // Generic normalized score for other metrics
                 match config.quality_preset {
-                    QualityPreset::Fast => 0.6 + rng.r#gen::<f64>() * 0.2,
-                    QualityPreset::Balanced => 0.75 + rng.r#gen::<f64>() * 0.15,
-                    QualityPreset::HighQuality => 0.85 + rng.r#gen::<f64>() * 0.1,
-                    QualityPreset::Custom => 0.7 + rng.r#gen::<f64>() * 0.25,
+                    QualityPreset::Fast => 0.6 + rng.random::<f64>() * 0.2,
+                    QualityPreset::Balanced => 0.75 + rng.random::<f64>() * 0.15,
+                    QualityPreset::HighQuality => 0.85 + rng.random::<f64>() * 0.1,
+                    QualityPreset::Custom => 0.7 + rng.random::<f64>() * 0.25,
                 }
             }
         };
@@ -596,7 +596,7 @@ impl ABTestSuite {
         let relative_diff = difference / ((score_a + score_b) / 2.0);
 
         // Simulate p-value: larger differences -> smaller p-values
-        let p_value = (1.0 - relative_diff).max(0.001).min(0.999);
+        let p_value = (1.0 - relative_diff).clamp(0.001, 0.999);
         Ok(p_value)
     }
 
@@ -792,7 +792,7 @@ impl ABTestSuite {
     fn generate_text_summary(&self, report: &ABTestReport) -> Result<String> {
         let mut summary = String::new();
 
-        summary.push_str(&format!("🧪 VoiRS A/B Testing Report\n"));
+        summary.push_str("🧪 VoiRS A/B Testing Report\n");
         summary.push_str(&"=".repeat(60));
         summary.push_str(&format!("\nTest: {}\n", report.config.test_name));
         summary.push_str(&format!("ID: {}\n", report.test_id));
@@ -804,7 +804,7 @@ impl ABTestSuite {
 
         summary.push_str("📊 Test Results Summary:\n");
         summary.push_str(&"-".repeat(30));
-        summary.push_str(&format!("\n"));
+        summary.push('\n');
 
         for result in &report.results {
             summary.push_str(&format!("\n🔬 {}\n", result.case_name));
@@ -819,9 +819,9 @@ impl ABTestSuite {
             }
         }
 
-        summary.push_str(&format!("\n🏆 Rankings:\n"));
+        summary.push_str("\n🏆 Rankings:\n");
         summary.push_str(&"-".repeat(20));
-        summary.push_str(&format!("\n"));
+        summary.push('\n');
 
         for ranking in &report.comparative_analysis.rankings {
             summary.push_str(&format!("\n📈 {} Rankings:\n", ranking.metric));
@@ -835,9 +835,9 @@ impl ABTestSuite {
             }
         }
 
-        summary.push_str(&format!("\n💡 Recommendations:\n"));
+        summary.push_str("\n💡 Recommendations:\n");
         summary.push_str(&"-".repeat(25));
-        summary.push_str(&format!("\n"));
+        summary.push('\n');
 
         for rec in &report.recommendations {
             let priority_emoji = match rec.priority {

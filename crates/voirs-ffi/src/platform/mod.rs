@@ -86,7 +86,7 @@ impl PlatformInfo {
             if std::fs::metadata("/dev/snd").is_ok() {
                 return "alsa".to_string();
             }
-            return "dummy".to_string();
+            "dummy".to_string()
         }
 
         #[cfg(target_os = "ios")]
@@ -201,7 +201,7 @@ impl PlatformInfo {
         #[cfg(target_os = "linux")]
         {
             // Linux might have OpenCL or CUDA available
-            return self.has_avx2 || self.has_sse2;
+            self.has_avx2 || self.has_sse2
         }
 
         #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]

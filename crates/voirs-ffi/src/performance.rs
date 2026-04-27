@@ -193,9 +193,7 @@ pub mod simd {
         }
 
         // Handle remaining elements
-        for i in simd_len..len {
-            output[i] = input[i];
-        }
+        output[simd_len..len].copy_from_slice(&input[simd_len..len]);
     }
 
     /// AVX2 optimized buffer copying
@@ -212,9 +210,7 @@ pub mod simd {
         }
 
         // Handle remaining elements
-        for i in simd_len..len {
-            output[i] = input[i];
-        }
+        output[simd_len..len].copy_from_slice(&input[simd_len..len]);
     }
 
     /// SSE2 optimized buffer copying
@@ -231,9 +227,7 @@ pub mod simd {
         }
 
         // Handle remaining elements
-        for i in simd_len..len {
-            output[i] = input[i];
-        }
+        output[simd_len..len].copy_from_slice(&input[simd_len..len]);
     }
 
     /// Fallback scalar buffer copying

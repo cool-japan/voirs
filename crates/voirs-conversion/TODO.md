@@ -1395,3 +1395,9 @@ With this implementation, **voirs-conversion Version 1.0.0 is now officially pro
 *Next review: 2025-08-05*
 
 *Recent Implementation Session: Production Monitoring System completed with comprehensive test coverage - Version 1.0.0 Production Ready milestone achieved*
+---
+
+## Session 2026-04-27
+
+- ✅ Test fix: `tests/memory_tests.rs:509,515` — `Error::RuntimeError` → `Error::runtime(...)`.
+- ✅ `BatchConverter`: new `src/core/batch.rs` — `BatchConfig` (max_concurrency, fail_fast, preserve_order), `BatchResult` (successes, failures, total_duration_ms), `BatchConverter::convert_batch` + `convert_stream`; tokio `Semaphore`-based concurrency; 5 tests in `tests/batch_tests.rs`; 387/387 suite pass.

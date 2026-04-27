@@ -40,9 +40,9 @@
 
 use anyhow::{Context, Result};
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tracing::{debug, info, warn};
-use voirs::*;
+use voirs_sdk::prelude::*;
 
 /// Creative synthesis configuration for artistic applications
 #[derive(Debug, Clone)]
@@ -114,9 +114,11 @@ impl Default for CreativeConfig {
 pub struct CreativeVoiceSynthesizer {
     pipeline: VoirsPipeline,
     config: CreativeConfig,
+    #[allow(dead_code)]
     creative_state: CreativeState,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 struct CreativeState {
     composition_layers: Vec<AudioLayer>,
@@ -125,6 +127,7 @@ struct CreativeState {
     artistic_parameters: ArtisticParameters,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 struct AudioLayer {
     id: String,
@@ -134,28 +137,32 @@ struct AudioLayer {
     position_in_composition: f32, // 0.0-1.0
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
-struct VoiceCharacter {
-    name: String,
-    emotional_profile: EmotionalProfile,
-    artistic_traits: Vec<String>,
-    voice_color: String, // Artistic description of voice timbre
+pub struct VoiceCharacter {
+    pub name: String,
+    pub emotional_profile: EmotionalProfile,
+    pub artistic_traits: Vec<String>,
+    pub voice_color: String, // Artistic description of voice timbre
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
-struct EmotionalProfile {
-    base_emotion: String,
-    intensity: f32,
-    artistic_expression: String,
+pub struct EmotionalProfile {
+    pub base_emotion: String,
+    pub intensity: f32,
+    pub artistic_expression: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
-struct ArtisticEffect {
-    effect_type: String,
-    parameters: HashMap<String, f32>,
-    creative_description: String,
+pub struct ArtisticEffect {
+    pub effect_type: String,
+    pub parameters: HashMap<String, f32>,
+    pub creative_description: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 struct ArtisticParameters {
     texture_density: f32,
@@ -188,11 +195,8 @@ impl CreativeVoiceSynthesizer {
         info!("🎨 Creating creative voice synthesizer for artistic applications");
         info!("Creative configuration: {:?}", config);
 
-        // Create an artistic pipeline optimized for creative expression
-        let pipeline = VoirsPipeline::builder()
-            .with_creative_mode(true)
-            .with_experimental_features(config.experimental_features)
-            .with_artistic_style(config.artistic_style.clone())
+        // Build the VoiRS pipeline for creative synthesis
+        let pipeline = VoirsPipelineBuilder::new()
             .build()
             .await
             .context("Failed to build creative pipeline")?;
@@ -562,14 +566,14 @@ impl CreativeVoiceSynthesizer {
         match profile.base_emotion.as_str() {
             "joy" | "happiness" => {
                 // Brighten the voice, add slight pitch elevation
-                for (i, sample) in samples.iter_mut().enumerate() {
+                for sample in samples.iter_mut() {
                     let brightness = 1.0 + intensity * 0.1;
                     *sample *= brightness;
                 }
             }
             "sadness" | "melancholy" => {
                 // Darken the voice, add slight pitch reduction
-                for (i, sample) in samples.iter_mut().enumerate() {
+                for sample in samples.iter_mut() {
                     let darkness = 1.0 - intensity * 0.05;
                     *sample *= darkness;
                 }
@@ -881,6 +885,7 @@ pub struct VocalLayer {
 }
 
 /// Artistic synthesis request
+#[allow(dead_code)]
 struct ArtisticSynthesisRequest {
     text: String,
     voice_character: VoiceCharacter,
@@ -889,64 +894,12 @@ struct ArtisticSynthesisRequest {
 }
 
 /// Creative parameters for synthesis
+#[allow(dead_code)]
 struct CreativeParameters {
     expressiveness: f32,
     artistic_flair: f32,
     experimental_factor: f32,
     style_adaptation: f32,
-}
-
-/// Extended VoirsPipeline for creative applications
-struct VoirsPipeline {
-    // Placeholder implementation
-}
-
-impl VoirsPipeline {
-    pub fn builder() -> VoirsPipelineBuilder {
-        VoirsPipelineBuilder::new()
-    }
-
-    pub async fn synthesize(&self, text: &str) -> Result<AudioBuffer> {
-        // Placeholder synthesis
-        let samples = vec![0.0f32; 22050]; // 1 second of silence
-        Ok(AudioBuffer::new(samples, 22050, 1))
-    }
-}
-
-/// Builder for creative VoiRS pipeline
-struct VoirsPipelineBuilder {
-    creative_mode: bool,
-    experimental_features: bool,
-    artistic_style: Option<ArtisticStyle>,
-}
-
-impl VoirsPipelineBuilder {
-    pub fn new() -> Self {
-        Self {
-            creative_mode: false,
-            experimental_features: false,
-            artistic_style: None,
-        }
-    }
-
-    pub fn with_creative_mode(mut self, enabled: bool) -> Self {
-        self.creative_mode = enabled;
-        self
-    }
-
-    pub fn with_experimental_features(mut self, enabled: bool) -> Self {
-        self.experimental_features = enabled;
-        self
-    }
-
-    pub fn with_artistic_style(mut self, style: ArtisticStyle) -> Self {
-        self.artistic_style = Some(style);
-        self
-    }
-
-    pub async fn build(self) -> Result<VoirsPipeline> {
-        Ok(VoirsPipeline {})
-    }
 }
 
 #[tokio::main]
@@ -987,7 +940,7 @@ async fn main() -> Result<()> {
     info!("   Channels: {}", artistic_audio.channels());
 
     // Save the artistic creation
-    artistic_audio.save("creative_composition.wav", AudioFormat::Wav)?;
+    artistic_audio.save_wav("creative_composition.wav")?;
     info!("💾 Artistic composition saved to: creative_composition.wav");
 
     // Demonstrate individual creative techniques
@@ -1105,13 +1058,9 @@ fn create_sample_composition() -> ArtisticComposition {
 async fn demonstrate_creative_techniques() -> Result<()> {
     info!("🎨 Demonstrating individual creative techniques...");
 
-    // Create base audio for effects demonstration
-    let base_text = "Artistic voice transformation";
-    let base_audio = AudioBuffer::new(vec![0.1; 22050], 22050, 1); // 1 second of gentle tone
-
-    // Demonstrate granular synthesis
+    // Demonstrate granular synthesis effect configuration
     info!("   🔹 Granular synthesis texture...");
-    let granular_effect = ArtisticEffect {
+    let _granular_effect = ArtisticEffect {
         effect_type: "granular".to_string(),
         parameters: HashMap::from([
             ("grain_size".to_string(), 0.08),
@@ -1120,25 +1069,25 @@ async fn demonstrate_creative_techniques() -> Result<()> {
         creative_description: "Dense granular texture".to_string(),
     };
 
-    // Demonstrate voice morphing
+    // Demonstrate voice morphing effect configuration
     info!("   🔹 Voice morphing transformation...");
-    let morphing_effect = ArtisticEffect {
+    let _morphing_effect = ArtisticEffect {
         effect_type: "morphing".to_string(),
         parameters: HashMap::from([("morph_amount".to_string(), 0.8)]),
         creative_description: "Dynamic voice morphing".to_string(),
     };
 
-    // Demonstrate harmonic layering
+    // Demonstrate harmonic layering effect configuration
     info!("   🔹 Harmonic layering enhancement...");
-    let harmonic_effect = ArtisticEffect {
+    let _harmonic_effect = ArtisticEffect {
         effect_type: "harmonics".to_string(),
         parameters: HashMap::from([("harmonic_strength".to_string(), 0.6)]),
         creative_description: "Rich harmonic layers".to_string(),
     };
 
-    // Demonstrate spatial positioning
+    // Demonstrate spatial positioning effect configuration
     info!("   🔹 Spatial positioning effect...");
-    let spatial_effect = ArtisticEffect {
+    let _spatial_effect = ArtisticEffect {
         effect_type: "spatial".to_string(),
         parameters: HashMap::from([("spatial_width".to_string(), 1.0)]),
         creative_description: "Wide spatial presence".to_string(),

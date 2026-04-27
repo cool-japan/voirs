@@ -49,42 +49,8 @@
 use anyhow::{Context, Result};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tracing::{debug, info, warn};
-use voirs::*;
-
-// Use placeholder types for components that would be properly imported in production
-type G2pComponent = String; // Placeholder for actual G2P component
-type AcousticComponent = String; // Placeholder for actual acoustic component
-type VocoderComponent = String; // Placeholder for actual vocoder component
-
-/// Placeholder pipeline for mobile integration example
-pub struct VoirsPipeline {
-    g2p: G2pComponent,
-    acoustic: AcousticComponent,
-    vocoder: VocoderComponent,
-}
-
-impl VoirsPipeline {
-    pub fn new(g2p: G2pComponent, acoustic: AcousticComponent, vocoder: VocoderComponent) -> Self {
-        Self {
-            g2p,
-            acoustic,
-            vocoder,
-        }
-    }
-
-    pub async fn synthesize(&self, text: &str) -> Result<AudioBuffer> {
-        // Placeholder synthesis - in production this would do actual synthesis
-        info!(
-            "Synthesizing with components: G2P={}, Acoustic={}, Vocoder={}",
-            self.g2p, self.acoustic, self.vocoder
-        );
-
-        // Return a placeholder audio buffer
-        let samples = vec![0.0f32; 22050]; // 1 second of silence at 22.05kHz
-        Ok(AudioBuffer::new(samples, 22050, 1))
-    }
-}
+use tracing::{debug, info};
+use voirs_sdk::prelude::*;
 
 /// Mobile-specific synthesis configuration
 #[derive(Debug, Clone)]
@@ -135,6 +101,16 @@ impl Default for MobileConfig {
     }
 }
 
+/// Maps a `MobileQualityLevel` to the SDK `QualityLevel`.
+fn mobile_quality_to_sdk(level: &MobileQualityLevel) -> QualityLevel {
+    match level {
+        MobileQualityLevel::UltraLow => QualityLevel::Low,
+        MobileQualityLevel::Low => QualityLevel::Low,
+        MobileQualityLevel::Balanced => QualityLevel::Medium,
+        MobileQualityLevel::High => QualityLevel::High,
+    }
+}
+
 /// Mobile-optimized VoiRS synthesizer
 pub struct MobileSynthesizer {
     pipeline: Arc<VoirsPipeline>,
@@ -143,114 +119,78 @@ pub struct MobileSynthesizer {
 }
 
 #[derive(Debug, Default)]
-struct MobileStats {
+pub struct MobileStats {
     synthesis_count: usize,
     total_processing_time: Duration,
     total_audio_duration: f64,
-    memory_usage_mb: f64,
     battery_efficient_ops: usize,
+}
+
+impl Clone for MobileStats {
+    fn clone(&self) -> Self {
+        MobileStats {
+            synthesis_count: self.synthesis_count,
+            total_processing_time: self.total_processing_time,
+            total_audio_duration: self.total_audio_duration,
+            battery_efficient_ops: self.battery_efficient_ops,
+        }
+    }
 }
 
 impl MobileSynthesizer {
     /// Create a new mobile-optimized synthesizer
     pub async fn new(config: MobileConfig) -> Result<Self> {
-        info!("📱 Creating mobile-optimized VoiRS synthesizer");
+        info!("Creating mobile-optimized VoiRS synthesizer");
         info!("Configuration: {:?}", config);
 
-        // Create mobile-optimized components
-        let g2p = Self::create_mobile_g2p(&config)?;
-        let acoustic = Self::create_mobile_acoustic(&config)?;
-        let vocoder = Self::create_mobile_vocoder(&config)?;
+        let sdk_quality = mobile_quality_to_sdk(&config.quality_level);
+        info!(
+            "Memory budget: {}MB, battery mode: {:?}",
+            config.max_memory_mb, config.battery_optimization
+        );
 
-        // Create a placeholder pipeline for demonstration
-        // In production, this would use actual VoirsPipelineBuilder
-        let pipeline = Arc::new(VoirsPipeline::new(g2p, acoustic, vocoder));
+        let pipeline = VoirsPipelineBuilder::new()
+            .with_quality(sdk_quality)
+            .with_gpu_acceleration(false) // Mobile defaults to CPU-only
+            .build()
+            .await
+            .context("Failed to build mobile-optimized VoiRS pipeline")?;
 
         Ok(MobileSynthesizer {
-            pipeline,
+            pipeline: Arc::new(pipeline),
             config,
             stats: Arc::new(Mutex::new(MobileStats::default())),
         })
     }
 
-    /// Create mobile-optimized G2P component
-    fn create_mobile_g2p(config: &MobileConfig) -> Result<G2pComponent> {
-        match config.quality_level {
-            MobileQualityLevel::UltraLow | MobileQualityLevel::Low => {
-                // Use lightweight rule-based G2P for battery efficiency
-                info!("Using lightweight G2P for battery efficiency");
-                Ok("mobile_lightweight_g2p".to_string())
-            }
-            _ => {
-                // Use standard G2P for better quality
-                info!("Using standard G2P for better quality");
-                Ok("mobile_standard_g2p".to_string())
-            }
-        }
-    }
-
-    /// Create mobile-optimized acoustic model
-    fn create_mobile_acoustic(config: &MobileConfig) -> Result<AcousticComponent> {
-        match config.quality_level {
-            MobileQualityLevel::UltraLow => {
-                // Use most lightweight model
-                info!("Using ultra-low quality acoustic model for maximum battery efficiency");
-                Ok("mobile_ultralow_acoustic".to_string())
-            }
-            MobileQualityLevel::Low => {
-                info!("Using low quality acoustic model for battery efficiency");
-                Ok("mobile_low_acoustic".to_string())
-            }
-            _ => {
-                info!("Using standard acoustic model");
-                Ok("mobile_standard_acoustic".to_string())
-            }
-        }
-    }
-
-    /// Create mobile-optimized vocoder
-    fn create_mobile_vocoder(config: &MobileConfig) -> Result<VocoderComponent> {
-        match config.battery_optimization {
-            BatteryMode::MaxSaver => {
-                info!("Using battery-optimized vocoder");
-                Ok("mobile_battery_vocoder".to_string())
-            }
-            BatteryMode::Balanced => {
-                info!("Using balanced vocoder");
-                Ok("mobile_balanced_vocoder".to_string())
-            }
-            BatteryMode::Performance => {
-                info!("Using performance vocoder");
-                Ok("mobile_performance_vocoder".to_string())
-            }
-        }
-    }
-
-    /// Mobile-optimized synthesis with chunking
+    /// Mobile-optimized synthesis with chunking for UI responsiveness
     pub async fn synthesize_mobile(&self, text: &str) -> Result<AudioBuffer> {
         let start_time = Instant::now();
-        info!("📱 Starting mobile synthesis: '{}'", text);
+        info!("Starting mobile synthesis: '{}'", text);
 
-        // Check if we should process in chunks for better responsiveness
+        // Use chunked synthesis for longer texts or when background processing is enabled
         let should_chunk = text.len() > 100 || self.config.background_processing;
 
         let audio = if should_chunk {
             self.synthesize_chunked(text).await?
         } else {
-            self.pipeline.synthesize(text).await?
+            self.pipeline
+                .synthesize(text)
+                .await
+                .context("Mobile synthesis failed")?
         };
 
         let processing_time = start_time.elapsed();
 
         // Update mobile statistics
-        self.update_stats(processing_time, audio.duration() as f64)
+        self.update_stats(processing_time, f64::from(audio.duration()))
             .await;
 
         // Log mobile-specific metrics
-        let rtf = processing_time.as_secs_f64() / (audio.duration() as f64);
+        let rtf = processing_time.as_secs_f64() / f64::from(audio.duration());
         let battery_efficient = rtf < 0.5; // Consider < 0.5 RTF as battery efficient
 
-        info!("✅ Mobile synthesis complete:");
+        info!("Mobile synthesis complete:");
         info!("   Processing time: {:.2}s", processing_time.as_secs_f32());
         info!("   Real-time factor: {:.2}x", rtf);
         info!("   Battery efficient: {}", battery_efficient);
@@ -264,12 +204,12 @@ impl MobileSynthesizer {
 
     /// Chunked synthesis for mobile responsiveness
     async fn synthesize_chunked(&self, text: &str) -> Result<AudioBuffer> {
-        debug!("📱 Using chunked synthesis for mobile");
+        debug!("Using chunked synthesis for mobile");
 
         // Split text into mobile-friendly chunks
         let chunks = self.split_text_for_mobile(text);
-        let mut combined_samples = Vec::new();
-        let mut sample_rate = 22050;
+        let mut combined_samples: Vec<f32> = Vec::new();
+        let mut sample_rate = 22050u32;
 
         for (i, chunk) in chunks.iter().enumerate() {
             debug!(
@@ -279,7 +219,11 @@ impl MobileSynthesizer {
                 chunk
             );
 
-            let chunk_audio = self.pipeline.synthesize(chunk).await?;
+            let chunk_audio = self
+                .pipeline
+                .synthesize(chunk)
+                .await
+                .with_context(|| format!("Failed to synthesize mobile chunk {}", i + 1))?;
 
             if combined_samples.is_empty() {
                 sample_rate = chunk_audio.sample_rate();
@@ -337,7 +281,7 @@ impl MobileSynthesizer {
 
     /// Update mobile performance statistics
     async fn update_stats(&self, processing_time: Duration, audio_duration: f64) {
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock().expect("MobileStats mutex poisoned");
         stats.synthesis_count += 1;
         stats.total_processing_time += processing_time;
         stats.total_audio_duration += audio_duration;
@@ -349,21 +293,10 @@ impl MobileSynthesizer {
 
     /// Get mobile performance statistics
     pub async fn get_mobile_stats(&self) -> MobileStats {
-        let stats = self.stats.lock().unwrap();
-        stats.clone()
-    }
-}
-
-// Enable clone for MobileStats
-impl Clone for MobileStats {
-    fn clone(&self) -> Self {
-        MobileStats {
-            synthesis_count: self.synthesis_count,
-            total_processing_time: self.total_processing_time,
-            total_audio_duration: self.total_audio_duration,
-            memory_usage_mb: self.memory_usage_mb,
-            battery_efficient_ops: self.battery_efficient_ops,
-        }
+        self.stats
+            .lock()
+            .expect("MobileStats mutex poisoned")
+            .clone()
     }
 }
 
@@ -372,38 +305,21 @@ pub mod platform_integration {
     /// iOS FFI integration patterns
     #[cfg(target_os = "ios")]
     pub mod ios {
-        use super::*;
+        use super::super::MobileSynthesizer;
 
         // Example C FFI functions for iOS integration
         #[no_mangle]
         pub extern "C" fn voirs_mobile_create() -> *mut MobileSynthesizer {
-            // In real implementation, would handle this properly
+            // In real implementation, would handle this properly with Box::into_raw
             std::ptr::null_mut()
         }
 
         #[no_mangle]
         pub extern "C" fn voirs_mobile_synthesize(
-            synthesizer: *mut MobileSynthesizer,
-            text: *const std::os::raw::c_char,
+            _synthesizer: *mut MobileSynthesizer,
+            _text: *const std::os::raw::c_char,
         ) -> i32 {
             // C FFI implementation for iOS
-            0
-        }
-    }
-
-    /// Android JNI integration patterns
-    #[cfg(target_os = "android")]
-    pub mod android {
-        use jni::objects::{JClass, JString};
-        use jni::{JNIEnv, JavaVM};
-
-        // Example JNI functions for Android integration
-        #[no_mangle]
-        pub extern "system" fn Java_com_voirs_VoirsSynthesizer_createNative(
-            env: JNIEnv,
-            _class: JClass,
-        ) -> i64 {
-            // JNI implementation for Android
             0
         }
     }
@@ -416,7 +332,7 @@ async fn main() -> Result<()> {
         .with_max_level(tracing::Level::INFO)
         .init();
 
-    println!("📱 VoiRS Mobile Integration Example");
+    println!("VoiRS Mobile Integration Example");
     println!("===================================");
     println!();
 
@@ -444,15 +360,15 @@ async fn main() -> Result<()> {
     ];
 
     for (config_name, config) in mobile_configs.iter() {
-        println!("🔧 Testing {} Mobile Configuration", config_name);
-        println!("{}{}", "-".repeat(35), "-".repeat(config_name.len()));
+        println!("Testing {} Mobile Configuration", config_name);
+        println!("{}", "-".repeat(35 + config_name.len()));
 
         let mobile_start = Instant::now();
         let synthesizer = MobileSynthesizer::new(config.clone()).await?;
         let setup_time = mobile_start.elapsed();
 
         println!(
-            "✅ Mobile synthesizer ready in {:.2}s",
+            "Mobile synthesizer ready in {:.2}s",
             setup_time.as_secs_f32()
         );
 
@@ -462,70 +378,76 @@ async fn main() -> Result<()> {
             "This is a longer mobile text that will be processed in chunks to maintain UI responsiveness and optimize battery usage.",
         ];
 
+        let tmp_dir = std::env::temp_dir();
         for (i, text) in mobile_texts.iter().enumerate() {
-            println!("   📱 Mobile synthesis {}...", i + 1);
+            println!("   Mobile synthesis {}...", i + 1);
 
             let audio = synthesizer.synthesize_mobile(text).await?;
             let filename = format!(
                 "mobile_{}_{:02}.wav",
-                config_name.to_lowercase().replace(" ", "_"),
+                config_name.to_lowercase().replace(' ', "_"),
                 i + 1
             );
-            audio.save_wav(&filename)?;
+            let output_path = tmp_dir.join(&filename);
+            audio
+                .save_wav(&output_path)
+                .context("Failed to save mobile audio")?;
 
             println!(
-                "   ✅ Generated: {} ({:.2}s audio)",
-                filename,
+                "   Generated: {} ({:.2}s audio)",
+                output_path.display(),
                 audio.duration()
             );
         }
 
         // Display mobile statistics
         let stats = synthesizer.get_mobile_stats().await;
-        println!("📊 Mobile Performance Stats:");
+        println!("Mobile Performance Stats:");
         println!("   Syntheses: {}", stats.synthesis_count);
         println!(
             "   Battery efficient ops: {}/{}",
             stats.battery_efficient_ops, stats.synthesis_count
         );
-        println!(
-            "   Average RTF: {:.2}x",
-            stats.total_processing_time.as_secs_f64() / stats.total_audio_duration
-        );
+        if stats.total_audio_duration > 0.0 {
+            println!(
+                "   Average RTF: {:.2}x",
+                stats.total_processing_time.as_secs_f64() / stats.total_audio_duration
+            );
+        }
         println!();
     }
 
     // Mobile integration guidance
-    println!("📋 Mobile Platform Integration Guide:");
+    println!("Mobile Platform Integration Guide:");
     println!("====================================");
     println!();
 
-    println!("📱 iOS Integration (Swift):");
+    println!("iOS Integration (Swift):");
     println!("  1. Build Rust library: cargo build --target aarch64-apple-ios --release");
     println!("  2. Create C headers for Swift bridging");
     println!("  3. Import in Swift project and use C FFI");
     println!();
 
-    println!("🤖 Android Integration (Kotlin/Java):");
+    println!("Android Integration (Kotlin/Java):");
     println!("  1. Build Rust library: cargo build --target aarch64-linux-android --release");
     println!("  2. Create JNI wrapper functions");
     println!("  3. Load native library in Android app");
     println!();
 
-    println!("⚛️ React Native Integration:");
+    println!("React Native Integration:");
     println!("  1. Create native module wrapper");
     println!("  2. Expose async JavaScript interface");
     println!("  3. Handle background processing properly");
     println!();
 
-    println!("🚀 Mobile Optimization Tips:");
-    println!("  • Use chunked synthesis for responsiveness");
-    println!("  • Monitor memory usage and clean up resources");
-    println!("  • Implement background/foreground state handling");
-    println!("  • Cache frequently used voice models");
-    println!("  • Consider offline model deployment for better UX");
+    println!("Mobile Optimization Tips:");
+    println!("  - Use chunked synthesis for responsiveness");
+    println!("  - Monitor memory usage and clean up resources");
+    println!("  - Implement background/foreground state handling");
+    println!("  - Cache frequently used voice models");
+    println!("  - Consider offline model deployment for better UX");
 
-    println!("\n🎉 Mobile Integration Example Complete!");
+    println!("\nMobile Integration Example Complete!");
 
     Ok(())
 }

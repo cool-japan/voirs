@@ -506,13 +506,13 @@ fn get_memory_usage() -> Result<u64> {
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() >= 2 {
                     let kb: u64 = parts[1].parse().map_err(|e| {
-                        Error::RuntimeError(format!("Failed to parse memory value: {}", e))
+                        Error::runtime(format!("Failed to parse memory value: {}", e))
                     })?;
                     return Ok(kb * 1024); // Convert KB to bytes
                 }
             }
         }
-        Err(Error::RuntimeError(
+        Err(Error::runtime(
             "Could not parse VmRSS from /proc/self/status".to_string(),
         ))
     }

@@ -103,7 +103,6 @@ path = "faq_examples.rs"
 [[example]]
 name = "wasm_integration_example"
 path = "wasm_integration_example.rs"
-crate-type = ["cdylib", "rlib"]
 
 [[example]]
 name = "streaming_synthesis_optimization"
@@ -178,6 +177,7 @@ serde_json = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 scirs2-core = { workspace = true }  # For random number generation (replaced rand)
+fastrand = { workspace = true }     # For simple random simulation in examples
 thiserror = "2.0"
 num_cpus = "1.17"
 md5 = "0.8"

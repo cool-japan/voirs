@@ -113,9 +113,9 @@
 //! - **Alternative**: Use `--no-default-features` flag
 //!
 //! ### "No audio device":
-//! - **macOS**: Check System Preferences → Sound → Output
+//! - **macOS**: Check System Preferences -> Sound -> Output
 //! - **Linux**: Run `aplay -l` to list audio devices
-//! - **Windows**: Check Device Manager → Sound devices
+//! - **Windows**: Check Device Manager -> Sound devices
 //!
 //! ### Slow synthesis (RTF > 1.0):
 //! - **Immediate**: Close other applications to free memory
@@ -128,8 +128,8 @@
 
 use anyhow::{Context, Result};
 use std::time::Instant;
-use tracing::{info, warn};
-use voirs::*;
+use tracing::info;
+use voirs_sdk::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -138,29 +138,20 @@ async fn main() -> Result<()> {
         .with_max_level(tracing::Level::INFO)
         .init();
 
-    println!("🎤 VoiRS Simple Synthesis Example");
+    println!("VoiRS Simple Synthesis Example");
     println!("=================================");
-
-    // Create components using bridge pattern
-    info!("Creating TTS components...");
-    let g2p = create_g2p(G2pBackend::RuleBased);
-    let acoustic = create_acoustic(AcousticBackend::Vits);
-    let vocoder = create_vocoder(VocoderBackend::HifiGan);
 
     // Build pipeline with error context
     info!("Building synthesis pipeline...");
     let pipeline = VoirsPipelineBuilder::new()
-        .with_g2p(g2p)
-        .with_acoustic_model(acoustic)
-        .with_vocoder(vocoder)
         .build()
         .await
         .context("Failed to build synthesis pipeline")?;
 
-    println!("✅ Pipeline ready!");
+    println!("Pipeline ready!");
 
     let text = "Hello, world! This is VoiRS speaking in pure Rust.";
-    println!("📝 Text to synthesize: \"{}\"", text);
+    println!("Text to synthesize: \"{}\"", text);
 
     // Synthesize with timing and error handling
     let start_time = Instant::now();
@@ -173,22 +164,22 @@ async fn main() -> Result<()> {
 
     let synthesis_time = start_time.elapsed();
     println!(
-        "✅ Synthesis completed in {:.2} seconds",
+        "Synthesis completed in {:.2} seconds",
         synthesis_time.as_secs_f32()
     );
 
     // Save audio with error handling
     let output_file = "output.wav";
-    println!("💾 Saving audio to: {}", output_file);
+    println!("Saving audio to: {}", output_file);
 
     audio
         .save_wav(output_file)
         .context("Failed to save audio file")?;
 
-    println!("✅ Audio saved successfully!");
+    println!("Audio saved successfully!");
 
     // Display comprehensive audio information
-    println!("\n📊 Audio Information:");
+    println!("\nAudio Information:");
     println!("   File: {}", output_file);
     println!("   Sample Rate: {} Hz", audio.sample_rate());
     println!("   Duration: {:.2} seconds", audio.duration());
@@ -199,8 +190,8 @@ async fn main() -> Result<()> {
     );
 
     // Provide helpful next steps
-    println!("\n🎉 Simple synthesis complete!");
-    println!("💡 Try these next:");
+    println!("\nSimple synthesis complete!");
+    println!("Next steps:");
     println!("   - Play '{}' to hear the result", output_file);
     println!("   - Modify the text above for different content");
     println!("   - Explore other examples for advanced features");

@@ -582,38 +582,73 @@ impl DiffWaveVocoder {
     }
 
     /// Load weights into VarMap
+    ///
+    /// Uses Candle's `VarMap::set_one` to update each existing variable in-place so
+    /// the already-constructed U-Net references automatically pick up the loaded values.
     fn load_weights_into_varmap(
         &mut self,
         weights: std::collections::HashMap<String, candle_core::Tensor>,
     ) -> Result<()> {
-        use candle_nn::VarMap;
+        let mut loaded: usize = 0;
+        let mut unmapped: usize = 0;
+        let mut shape_mismatches: usize = 0;
+        let mut device_failures: usize = 0;
 
-        // Create a new VarMap and load the weights
-        let _new_varmap = VarMap::new();
+        for (external_name, tensor) in weights {
+            let Some(internal_name) = self.map_weight_name(&external_name) else {
+                unmapped += 1;
+                tracing::debug!("Skipping unmappable checkpoint weight: {}", external_name);
+                continue;
+            };
 
-        for (name, _tensor) in weights {
-            // Map external weight names to internal U-Net parameter names
-            let mapped_name = self.map_weight_name(&name);
-
-            // Try to insert the weight into the VarMap
-            if let Some(internal_name) = mapped_name {
-                // Note: VarMap doesn't have a direct public API to insert tensors
-                // In a real implementation, we would need to use the internal APIs
-                // or reconstruct the model with loaded weights
-                eprintln!("Mapped weight {name} -> {internal_name}");
+            // Move tensor to the correct device when necessary.
+            let device_tensor = if tensor.device().same_device(&self.device) {
+                tensor
             } else {
-                eprintln!("Warning: Could not map weight name: {name}");
+                match tensor.to_device(&self.device) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        device_failures += 1;
+                        tracing::warn!(
+                            "Could not move weight '{external_name}' to {:?}: {e}",
+                            self.device
+                        );
+                        continue;
+                    }
+                }
+            };
+
+            // `set_one` updates the existing Var in the map (the U-Net must already be
+            // initialized so its parameters are registered).  A shape mismatch means the
+            // checkpoint was produced from a differently-configured model.
+            match self._varmap.set_one(&internal_name, &device_tensor) {
+                Ok(()) => {
+                    tracing::trace!("Loaded '{external_name}' → '{internal_name}'");
+                    loaded += 1;
+                }
+                Err(e) => {
+                    shape_mismatches += 1;
+                    tracing::warn!(
+                        "Shape mismatch for '{internal_name}' (from '{external_name}'): {e}"
+                    );
+                }
             }
         }
 
-        // For now, we keep the existing VarMap as modifying it directly is complex
-        // In a production implementation, we would need to:
-        // 1. Create a new model with pre-loaded weights
-        // 2. Or use Candle's checkpoint loading mechanisms
-        // 3. Or reconstruct the VarMap with the loaded tensors
+        tracing::info!(
+            "DiffWave checkpoint load complete: \
+             {loaded} loaded, {unmapped} unmapped, \
+             {shape_mismatches} shape mismatches, {device_failures} device errors"
+        );
 
-        eprintln!("Note: Weight loading framework in place, but direct VarMap modification not yet implemented");
-        eprintln!("Consider using Candle's built-in checkpoint loading for production use");
+        if loaded == 0 {
+            return Err(VocoderError::ModelError(
+                "No DiffWave weights could be loaded into the model — \
+                 verify checkpoint name mapping (see map_weight_name) \
+                 and that the U-Net configuration matches the checkpoint"
+                    .to_string(),
+            ));
+        }
 
         Ok(())
     }
@@ -1076,5 +1111,90 @@ impl std::fmt::Debug for DiffWaveVocoder {
             .field("device", &self.device)
             .field("is_legacy", &self.is_legacy())
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_load_weights_into_varmap_loads_known_names() {
+        let mut vocoder =
+            DiffWaveVocoder::new(DiffWaveConfig::default()).expect("default config must be valid");
+
+        // Enumerate the variables the VarMap already holds after U-Net initialization.
+        let existing_names: Vec<String> = {
+            let guard = vocoder
+                ._varmap
+                .data()
+                .lock()
+                .expect("VarMap lock should not be poisoned");
+            guard.keys().cloned().collect()
+        };
+
+        if existing_names.is_empty() {
+            // Legacy fallback was used — no VarMap variables to update; pass trivially.
+            return;
+        }
+
+        // Build a synthetic weight map: use the first registered name with the same shape.
+        let mut synthetic_weights: std::collections::HashMap<String, candle_core::Tensor> =
+            std::collections::HashMap::new();
+        let first_name = existing_names[0].clone();
+        let shape = {
+            let guard = vocoder._varmap.data().lock().expect("VarMap lock");
+            guard[&first_name].shape().clone()
+        };
+        let dims: Vec<usize> = shape.dims().to_vec();
+        let n: usize = dims.iter().product();
+        let tensor =
+            candle_core::Tensor::zeros(dims, candle_core::DType::F32, &candle_core::Device::Cpu)
+                .expect("tensor creation must succeed");
+        // Use the internal name directly so map_weight_name passes it through.
+        synthetic_weights.insert(first_name.clone(), tensor);
+
+        let result = vocoder.load_weights_into_varmap(synthetic_weights);
+        assert!(
+            result.is_ok(),
+            "load_weights_into_varmap should succeed when given a correctly-shaped weight: {result:?}"
+        );
+
+        // Verify the loaded value can be read back and has the right number of elements.
+        let guard = vocoder._varmap.data().lock().expect("VarMap lock");
+        let var = guard
+            .get(&first_name)
+            .expect("weight should still be in map");
+        let elem_count: usize = var.shape().dims().iter().product();
+        assert_eq!(
+            elem_count, n,
+            "loaded weight should retain its original shape"
+        );
+    }
+
+    #[test]
+    fn test_load_weights_into_varmap_rejects_empty_after_all_unmapped() {
+        let mut vocoder =
+            DiffWaveVocoder::new(DiffWaveConfig::default()).expect("default config must be valid");
+
+        // Feed a weight with a name that will never match any registered variable.
+        let mut bad_weights: std::collections::HashMap<String, candle_core::Tensor> =
+            std::collections::HashMap::new();
+        // A name that the current map_weight_name maps to something, but with wrong shape.
+        // Use a nonsense name so map_weight_name returns it as-is, then set_one fails.
+        // We rely on the "0 loaded → Err" guard:
+        let tensor = candle_core::Tensor::zeros(
+            vec![999, 999],
+            candle_core::DType::F32,
+            &candle_core::Device::Cpu,
+        )
+        .expect("tensor creation must succeed");
+        bad_weights.insert("__nonexistent_parameter__".to_string(), tensor);
+
+        let result = vocoder.load_weights_into_varmap(bad_weights);
+        assert!(
+            result.is_err(),
+            "loading only unmappable/wrong-shape weights must return Err"
+        );
     }
 }

@@ -24,6 +24,7 @@ pub mod p56_loudness;
 pub mod pesq;
 pub mod polqa;
 pub mod psychoacoustic;
+pub mod quality_regression;
 pub mod realtime_monitor;
 pub mod si_sdr;
 pub mod singing;
@@ -34,6 +35,10 @@ pub mod universal_phoneme_mapping;
 pub mod vuv;
 
 pub use evaluator::QualityEvaluator;
+pub use quality_regression::{
+    QualityRegressionConfig, QualityRegressionDetector, QualityRegressionMeasurement,
+    QualityRegressionReport,
+};
 
 pub use advanced_metrics::{
     AdvancedQualityConfig, AdvancedQualityEvaluator, AudioMetadata, IntelligibilityDomainScores,

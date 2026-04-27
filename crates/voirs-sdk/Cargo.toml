@@ -70,6 +70,7 @@ flac-bound.workspace = true
 symphonia.workspace = true
 opus.workspace = true
 lewton.workspace = true
+ogg.workspace = true
 minimp3.workspace = true
 mp3lame-encoder.workspace = true
 

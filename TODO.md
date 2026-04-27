@@ -1,10 +1,21 @@
 # VoiRS Development Roadmap & TODO
 
 > **Status**: Current Version 0.1.0-rc.1 - **PRODUCTION READY**
-> **Last Updated**: 2026-03-25
+> **Last Updated**: 2026-04-27
 > **Next Milestone**: Version 0.2.0 - Advanced Neural Features & Production Optimization
 
-## Latest Development Session (2026-03-25)
+## Latest Development Session (2026-04-27)
+
+**Build Fix, DiffWave Checkpoint Loading, Opus Decode:**
+
+- [x] **Build fix**: `memory-detection` feature now activates `dep:procfs` (Linux) and `dep:windows` (Windows) so the default build succeeds without `linux-platform` — resolves `E0433: cannot find module or crate 'procfs'`
+- [x] **voirs-ffi clippy**: Fixed 15 pre-existing clippy errors exposed after build was restored — manual slice copy, `.args(&[…])` style, unsafe `extern "C"` safety annotations and signatures, unnecessary `return` statements
+- [x] **DiffWave checkpoint loading**: Replaced stub `load_weights_into_varmap` (which only printed `eprintln!` comments) with a real implementation using Candle's `VarMap::set_one` API to propagate pre-trained weights into the initialized U-Net in-place. Added 2 unit tests (`test_load_weights_into_varmap_loads_known_names`, `test_load_weights_into_varmap_rejects_empty_after_all_unmapped`)
+- [x] **Opus Ogg decode**: `voirs-sdk` `load_opus` and `get_opus_info` now fully decode Ogg Opus files via the `ogg` + `opus` crates (OpusHead header parsing, pre-skip stripping, per-channel interleaving). Added `ogg = "0.9"` to workspace deps
+
+**Test Results**: 309/309 voirs-ffi ✅ | 866/868 voirs-vocoder (2 ALSA hardware skips, pre-existing) ✅ | 556/558 voirs-sdk (2 ALSA/trace env failures, pre-existing) ✅
+
+## Previous Development Session (2026-03-25)
 
 **OxiONNX Integration Expansion - Pure Rust ONNX Runtime Across All Crates:**
 
@@ -633,3 +644,21 @@ For detailed development history, see git commit log and release notes.
   - Serde serialization compatibility for all data structures
   - Memory-safe implementations with proper borrowing patterns
   - Performance optimization with caching and resource management
+
+---
+
+## Session 2026-04-27 (Round 2)
+
+### Completed
+
+- ✅ **voirs-conversion test fix**: `tests/memory_tests.rs:509,515` updated from removed `Error::RuntimeError` to `Error::runtime(...)` — all 387 conversion tests now compile and pass.
+- ✅ **BigVGAN real weight loading**: `models/bigvgan/inference.rs` — added `varmap: VarMap` field, switched constructor to `VarBuilder::from_varmap`, replaced stub `load_weights` with safetensors F32/F16 loader using `varmap.set_one`; returns `Err` if no weights matched.
+- ✅ **BigVGAN Vocoder trait**: new `models/bigvgan/vocoder.rs` — `impl Vocoder for BigVGANInference`; vocode/vocode_stream/vocode_batch/metadata/supports; streaming via unbounded channel + tokio::spawn.
+- ✅ **UnivNet real weight loading**: identical pattern applied in `models/univnet/inference.rs`.
+- ✅ **UnivNet Vocoder trait**: new `models/univnet/vocoder.rs` — `impl Vocoder for UnivNetInference`.
+- ✅ **QualityRegressionDetector**: new `crates/voirs-evaluation/src/quality/quality_regression.rs` — wraps `RegressionDetector` with PESQ/STOI/MCD evaluators; MCD stored negated so higher=worse maps to positive change = regression; baseline save/load; 5 inline tests pass.
+- ✅ **BatchConverter**: new `crates/voirs-conversion/src/core/batch.rs` — `BatchConverter` + `BatchConfig` + `BatchResult`; tokio Semaphore-based concurrency control; `convert_batch` + `convert_stream`; 5 integration tests in `tests/batch_tests.rs`; 387/387 tests pass.
+
+### Build status
+
+`cargo check --workspace` green. `cargo clippy -p voirs-vocoder -p voirs-evaluation -p voirs-conversion --all-targets -- -D warnings` clean. voirs-vocoder 874/874 (2 skip = pre-existing ALSA hardware only). voirs-evaluation 922/922. voirs-conversion 387/387.

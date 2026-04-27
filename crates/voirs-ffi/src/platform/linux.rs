@@ -89,7 +89,7 @@ impl LinuxPulseAudio {
 
             // Try to get devices using pactl command first
             if let Ok(output) = Command::new("pactl")
-                .args(&["list", "short", "sinks"])
+                .args(["list", "short", "sinks"])
                 .output()
             {
                 if output.status.success() {
@@ -114,7 +114,7 @@ impl LinuxPulseAudio {
 
             // Try to get input devices
             if let Ok(output) = Command::new("pactl")
-                .args(&["list", "short", "sources"])
+                .args(["list", "short", "sources"])
                 .output()
             {
                 if output.status.success() {
@@ -192,7 +192,7 @@ impl LinuxPulseAudio {
             // Implementation would use pactl set-sink-volume
             let volume_percent = (volume * 100.0) as u32;
             let _ = Command::new("pactl")
-                .args(&[
+                .args([
                     "set-sink-volume",
                     &device_id.to_string(),
                     &format!("{}%", volume_percent),
@@ -430,7 +430,7 @@ impl LinuxDBus {
             }
 
             // Implementation would use dbus-send or libdbus
-            let _result = Command::new("notify-send").args(&[title, message]).output();
+            let _result = Command::new("notify-send").args([title, message]).output();
 
             Ok(())
         }
@@ -519,7 +519,7 @@ impl LinuxSystemD {
             }
 
             let result = Command::new("systemctl")
-                .args(&["start", service_name])
+                .args(["start", service_name])
                 .output();
 
             match result {
@@ -619,12 +619,13 @@ pub extern "C" fn voirs_linux_init_pulseaudio() -> *mut LinuxPulseAudio {
     }
 }
 
+/// # Safety
+/// `pulse` must be a pointer returned by `voirs_linux_init_pulseaudio` or null.
+/// After this call the pointer is dangling and must not be used again.
 #[no_mangle]
-pub extern "C" fn voirs_linux_destroy_pulseaudio(pulse: *mut LinuxPulseAudio) {
+pub unsafe extern "C" fn voirs_linux_destroy_pulseaudio(pulse: *mut LinuxPulseAudio) {
     if !pulse.is_null() {
-        unsafe {
-            let _ = Box::from_raw(pulse);
-        }
+        let _ = Box::from_raw(pulse);
     }
 }
 
@@ -636,12 +637,13 @@ pub extern "C" fn voirs_linux_init_alsa() -> *mut LinuxALSA {
     }
 }
 
+/// # Safety
+/// `alsa` must be a pointer returned by `voirs_linux_init_alsa` or null.
+/// After this call the pointer is dangling and must not be used again.
 #[no_mangle]
-pub extern "C" fn voirs_linux_destroy_alsa(alsa: *mut LinuxALSA) {
+pub unsafe extern "C" fn voirs_linux_destroy_alsa(alsa: *mut LinuxALSA) {
     if !alsa.is_null() {
-        unsafe {
-            let _ = Box::from_raw(alsa);
-        }
+        let _ = Box::from_raw(alsa);
     }
 }
 
@@ -653,17 +655,22 @@ pub extern "C" fn voirs_linux_init_dbus() -> *mut LinuxDBus {
     }
 }
 
+/// # Safety
+/// `dbus` must be a pointer returned by `voirs_linux_init_dbus` or null.
+/// After this call the pointer is dangling and must not be used again.
 #[no_mangle]
-pub extern "C" fn voirs_linux_destroy_dbus(dbus: *mut LinuxDBus) {
+pub unsafe extern "C" fn voirs_linux_destroy_dbus(dbus: *mut LinuxDBus) {
     if !dbus.is_null() {
-        unsafe {
-            let _ = Box::from_raw(dbus);
-        }
+        let _ = Box::from_raw(dbus);
     }
 }
 
+/// # Safety
+/// `dbus` must be a valid non-null pointer to a `LinuxDBus` obtained from `voirs_linux_init_dbus`.
+/// `app_name`, `title`, and `message` must be valid null-terminated C strings for the duration of
+/// this call.
 #[no_mangle]
-pub extern "C" fn voirs_linux_send_notification(
+pub unsafe extern "C" fn voirs_linux_send_notification(
     dbus: *mut LinuxDBus,
     app_name: *const std::os::raw::c_char,
     title: *const std::os::raw::c_char,
@@ -673,26 +680,24 @@ pub extern "C" fn voirs_linux_send_notification(
         return false;
     }
 
-    unsafe {
-        let app_name_str = match CStr::from_ptr(app_name).to_str() {
-            Ok(s) => s,
-            Err(_) => return false,
-        };
+    let app_name_str = match CStr::from_ptr(app_name).to_str() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
 
-        let title_str = match CStr::from_ptr(title).to_str() {
-            Ok(s) => s,
-            Err(_) => return false,
-        };
+    let title_str = match CStr::from_ptr(title).to_str() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
 
-        let message_str = match CStr::from_ptr(message).to_str() {
-            Ok(s) => s,
-            Err(_) => return false,
-        };
+    let message_str = match CStr::from_ptr(message).to_str() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
 
-        (*dbus)
-            .send_notification(app_name_str, title_str, message_str)
-            .is_ok()
-    }
+    (*dbus)
+        .send_notification(app_name_str, title_str, message_str)
+        .is_ok()
 }
 
 #[no_mangle]

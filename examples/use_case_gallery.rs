@@ -146,7 +146,7 @@ pub struct QualityRequirements {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum PlatformTarget {
     Web,
-    iOS,
+    Ios,
     Android,
     Desktop,
     Server,
@@ -213,6 +213,12 @@ pub struct UseCaseGallery {
     pub success_stories: Vec<String>,
 }
 
+impl Default for UseCaseGallery {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UseCaseGallery {
     pub fn new() -> Self {
         Self {
@@ -231,22 +237,22 @@ impl UseCaseGallery {
 
         self.industry_index
             .entry(use_case.industry.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(id.clone());
 
         self.use_case_type_index
             .entry(use_case.use_case_type.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(id.clone());
 
         self.company_size_index
             .entry(use_case.company_size.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(id.clone());
 
         self.deployment_scale_index
             .entry(use_case.deployment_scale.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(id.clone());
 
         if use_case.featured {
@@ -323,7 +329,7 @@ impl UseCaseGallery {
                     || use_case
                         .company
                         .as_ref()
-                        .map_or(false, |c| c.to_lowercase().contains(&query))
+                        .is_some_and(|c| c.to_lowercase().contains(&query))
             })
             .collect()
     }
@@ -399,7 +405,7 @@ fn create_sample_use_cases() -> Vec<RealWorldUseCase> {
                     multilingual_support: true,
                     voice_consistency: true,
                 },
-                platform_targets: vec![PlatformTarget::Server, PlatformTarget::Web, PlatformTarget::iOS, PlatformTarget::Android],
+                platform_targets: vec![PlatformTarget::Server, PlatformTarget::Web, PlatformTarget::Ios, PlatformTarget::Android],
                 integration_points: vec!["Electronic Health Records".to_string(), "Appointment System".to_string(), "Pharmacy Management".to_string()],
                 scalability_needs: ScalabilityNeeds {
                     concurrent_users: 5000,
@@ -702,7 +708,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut sorted_lessons: Vec<_> = lesson_counts.into_iter().collect();
-    sorted_lessons.sort_by(|a, b| b.1.cmp(&a.1));
+    sorted_lessons.sort_by_key(|&(_, count)| std::cmp::Reverse(count));
 
     for (lesson, count) in sorted_lessons.iter().take(5) {
         println!("   📝 {} (mentioned {} times)", lesson, count);
