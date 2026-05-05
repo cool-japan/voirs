@@ -643,7 +643,54 @@ impl OAuth2Manager {
                 access_token_expiry: Duration::hours(1),
                 refresh_token_expiry: Duration::days(30),
             },
-            _ => panic!("Provider configuration not implemented"),
+            OAuth2Provider::Auth0 => {
+                let domain = std::env::var("AUTH0_DOMAIN").unwrap_or_default();
+                OAuth2Config {
+                    provider: provider.clone(),
+                    client_id: std::env::var("AUTH0_CLIENT_ID").unwrap_or_default(),
+                    client_secret: std::env::var("AUTH0_CLIENT_SECRET").unwrap_or_default(),
+                    redirect_uri: String::from("http://localhost:3000/auth/callback/auth0"),
+                    authorization_endpoint: format!("https://{}/authorize", domain),
+                    token_endpoint: format!("https://{}/oauth/token", domain),
+                    user_info_endpoint: Some(format!("https://{}/userinfo", domain)),
+                    scopes: vec![
+                        String::from("openid"),
+                        String::from("email"),
+                        String::from("profile"),
+                    ],
+                    default_scopes: vec![String::from("openid"), String::from("email")],
+                    enable_pkce: true,
+                    jwt_secret: std::env::var("JWT_SECRET")
+                        .unwrap_or_else(|_| String::from("default-secret")),
+                    access_token_expiry: Duration::hours(1),
+                    refresh_token_expiry: Duration::days(30),
+                }
+            }
+            OAuth2Provider::Custom { ref name, ref base_url } => {
+                let env_prefix = name.to_uppercase().replace('-', "_");
+                OAuth2Config {
+                    provider: provider.clone(),
+                    client_id: std::env::var(format!("{}_CLIENT_ID", env_prefix))
+                        .unwrap_or_default(),
+                    client_secret: std::env::var(format!("{}_CLIENT_SECRET", env_prefix))
+                        .unwrap_or_default(),
+                    redirect_uri: format!("http://localhost:3000/auth/callback/{}", name),
+                    authorization_endpoint: format!("{}/authorize", base_url.trim_end_matches('/')),
+                    token_endpoint: format!("{}/oauth/token", base_url.trim_end_matches('/')),
+                    user_info_endpoint: Some(format!("{}/userinfo", base_url.trim_end_matches('/'))),
+                    scopes: vec![
+                        String::from("openid"),
+                        String::from("email"),
+                        String::from("profile"),
+                    ],
+                    default_scopes: vec![String::from("openid"), String::from("email")],
+                    enable_pkce: true,
+                    jwt_secret: std::env::var("JWT_SECRET")
+                        .unwrap_or_else(|_| String::from("default-secret")),
+                    access_token_expiry: Duration::hours(1),
+                    refresh_token_expiry: Duration::days(30),
+                }
+            }
         }
     }
 }
@@ -768,5 +815,52 @@ mod tests {
 
         let insufficient = vec![String::from("openid")];
         assert!(manager.validate_scopes(&required, &insufficient).is_err());
+    }
+
+    #[test]
+    fn test_get_provider_config_auth0() {
+        // SAFETY: test-only, single-threaded env manipulation
+        unsafe { std::env::set_var("AUTH0_DOMAIN", "tenant.auth0.com") };
+        let config = OAuth2Manager::get_provider_config(OAuth2Provider::Auth0);
+        assert_eq!(
+            config.authorization_endpoint,
+            "https://tenant.auth0.com/authorize"
+        );
+        assert_eq!(config.token_endpoint, "https://tenant.auth0.com/oauth/token");
+        assert!(config.enable_pkce);
+        unsafe { std::env::remove_var("AUTH0_DOMAIN") };
+    }
+
+    #[test]
+    fn test_get_provider_config_custom() {
+        let config = OAuth2Manager::get_provider_config(OAuth2Provider::Custom {
+            name: "myprov".to_string(),
+            base_url: "https://idp.example.com".to_string(),
+        });
+        assert_eq!(
+            config.authorization_endpoint,
+            "https://idp.example.com/authorize"
+        );
+        assert_eq!(
+            config.redirect_uri,
+            "http://localhost:3000/auth/callback/myprov"
+        );
+        assert!(config.enable_pkce);
+    }
+
+    #[test]
+    fn test_get_provider_config_custom_trailing_slash() {
+        let config_with = OAuth2Manager::get_provider_config(OAuth2Provider::Custom {
+            name: "myprov".to_string(),
+            base_url: "https://idp.example.com/".to_string(),
+        });
+        let config_without = OAuth2Manager::get_provider_config(OAuth2Provider::Custom {
+            name: "myprov".to_string(),
+            base_url: "https://idp.example.com".to_string(),
+        });
+        assert_eq!(
+            config_with.authorization_endpoint,
+            config_without.authorization_endpoint
+        );
     }
 }

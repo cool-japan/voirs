@@ -217,7 +217,10 @@ impl MCDEvaluator {
                         message: "Failed to get frame slice".to_string(),
                         source: None,
                     })?;
-            fft.process(frame_slice, &mut spectrum);
+            fft.process(frame_slice, &mut spectrum).map_err(|e| EvaluationError::AudioProcessingError {
+                message: e.to_string(),
+                source: None,
+            })?;
 
             // Compute power spectrum
             let power_spectrum: Vec<f32> = spectrum

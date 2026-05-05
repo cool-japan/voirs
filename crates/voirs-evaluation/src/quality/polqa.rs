@@ -411,7 +411,10 @@ impl PolqaEvaluator {
 
         let mut fft = planner.plan_fft_forward(fft_size);
         let mut spectrum = vec![Complex::new(0.0, 0.0); fft.output_len()];
-        fft.process(&mut padded_signal, &mut spectrum);
+        fft.process(&mut padded_signal, &mut spectrum).map_err(|e| EvaluationError::AudioProcessingError {
+            message: e.to_string(),
+            source: None,
+        })?;
 
         // Calculate power spectrum
         let power_spectrum: Vec<f32> = spectrum.iter().map(|c| c.re * c.re + c.im * c.im).collect();

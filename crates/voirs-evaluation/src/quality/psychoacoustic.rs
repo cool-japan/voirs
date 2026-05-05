@@ -399,7 +399,10 @@ impl PsychoacousticEvaluator {
         let mut output_buffer = vec![Complex::new(0.0, 0.0); n / 2 + 1];
 
         // Perform FFT
-        fft.process(&input_buffer, &mut output_buffer);
+        fft.process(&input_buffer, &mut output_buffer).map_err(|e| EvaluationError::AudioProcessingError {
+            message: e.to_string(),
+            source: None,
+        })?;
 
         // Convert to magnitude spectrum
         let magnitude_spectrum: Vec<f32> = output_buffer.iter().map(|c| c.norm()).collect();
