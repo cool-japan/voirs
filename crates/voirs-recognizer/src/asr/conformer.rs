@@ -8,7 +8,8 @@
 
 use crate::integration::PipelineResult;
 use crate::traits::{
-    ASRConfig, ASRFeature, ASRMetadata, ASRModel, AudioStream, Transcript, TranscriptStream,
+    ASRConfig, ASRFeature, ASRMetadata, ASRModel, AudioStream, Transcript, TranscriptChunk,
+    TranscriptStream,
 };
 use crate::{RecognitionError, VoirsError};
 use serde::{Deserialize, Serialize};
@@ -209,6 +210,7 @@ pub struct PositionalEncoding {
 }
 
 /// Conformer model implementation
+#[derive(Clone)]
 pub struct ConformerModel {
     /// Model configuration
     config: ConformerConfig,
@@ -955,15 +957,110 @@ impl ASRModel for ConformerModel {
 
     async fn transcribe_streaming(
         &self,
-        _audio_stream: AudioStream,
-        _config: Option<&ASRConfig>,
+        audio_stream: AudioStream,
+        config: Option<&ASRConfig>,
     ) -> crate::traits::RecognitionResult<TranscriptStream> {
-        // Placeholder implementation for streaming
-        Err(VoirsError::ModelError {
-            model_type: voirs_sdk::error::ModelType::ASR,
-            message: "Streaming not yet implemented for Conformer".to_string(),
-            source: None,
-        })
+        use futures::StreamExt;
+
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let model = self.clone();
+        let config_owned = config.cloned();
+
+        tokio::spawn(async move {
+            // `audio_stream` is a Pin<Box<dyn Stream<Item = AudioBuffer> + Send>>;
+            // we need it to be Unpin so that `.next()` works in async move.
+            let mut audio_stream = audio_stream;
+            let mut chunk_index: usize = 0;
+            let mut accumulated_text = String::new();
+            // Lookahead buffer: accumulate raw samples across chunks so the
+            // Conformer encoder sees sufficient context (≥ one mel-spectrogram
+            // window) before producing a partial transcript.
+            let mut sample_buffer: Vec<f32> = Vec::new();
+            // Number of raw samples per chunk emit — 1 second at 16 kHz.
+            const CHUNK_SAMPLES: usize = 16_000;
+
+            while let Some(audio_chunk) = audio_stream.next().await {
+                // Buffer incoming samples.
+                let new_samples = audio_chunk.samples();
+                sample_buffer.extend_from_slice(new_samples);
+
+                // Only run inference once the buffer holds enough context.
+                while sample_buffer.len() >= CHUNK_SAMPLES {
+                    let window: Vec<f32> = sample_buffer[..CHUNK_SAMPLES].to_vec();
+                    sample_buffer.drain(..CHUNK_SAMPLES);
+
+                    // Build a temporary AudioBuffer for the window.
+                    let window_buf = AudioBuffer::new(window, 16_000, 1);
+
+                    // Extract features and run a forward pass.
+                    let partial_result = async {
+                        let features = model.extract_features(&window_buf).await?;
+                        let logits = model.forward(features).await?;
+                        model.decode_logits(logits).await
+                    }
+                    .await;
+
+                    let start_time = chunk_index as f32;
+                    let end_time = start_time + 1.0;
+
+                    match partial_result {
+                        Ok(text) => {
+                            accumulated_text.push_str(&text);
+                            accumulated_text.push(' ');
+
+                            let chunk = TranscriptChunk {
+                                text,
+                                is_final: false,
+                                start_time,
+                                end_time,
+                                confidence: 0.75,
+                            };
+                            if sender.send(Ok(chunk)).is_err() {
+                                return;
+                            }
+                        }
+                        Err(e) => {
+                            if sender.send(Err(e.into())).is_err() {
+                                return;
+                            }
+                        }
+                    }
+                    chunk_index += 1;
+                }
+            }
+
+            // Flush any remaining samples in the lookahead buffer.
+            if !sample_buffer.is_empty() {
+                let remainder_buf = AudioBuffer::new(sample_buffer.clone(), 16_000, 1);
+                let flush_result = async {
+                    let features = model.extract_features(&remainder_buf).await?;
+                    let logits = model.forward(features).await?;
+                    model.decode_logits(logits).await
+                }
+                .await;
+
+                if let Ok(text) = flush_result {
+                    accumulated_text.push_str(&text);
+                    accumulated_text.push(' ');
+                }
+            }
+
+            // Emit the final consolidated transcript chunk.
+            let final_text = accumulated_text.trim().to_string();
+            let total_duration = chunk_index as f32;
+            let final_chunk = TranscriptChunk {
+                text: final_text,
+                is_final: true,
+                start_time: 0.0,
+                end_time: total_duration,
+                confidence: 0.85,
+            };
+            let _ = sender.send(Ok(final_chunk));
+        });
+
+        Ok(Box::pin(
+            tokio_stream::wrappers::UnboundedReceiverStream::new(receiver),
+        ))
     }
 }
 

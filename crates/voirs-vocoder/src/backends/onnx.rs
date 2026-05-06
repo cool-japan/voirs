@@ -472,12 +472,63 @@ impl Vocoder for OnnxVocoder {
 
     async fn vocode_stream(
         &self,
-        _mel_stream: Box<dyn futures::Stream<Item = MelSpectrogram> + Send + Unpin>,
-        _config: Option<&SynthesisConfig>,
+        mut mel_stream: Box<dyn futures::Stream<Item = MelSpectrogram> + Send + Unpin>,
+        config: Option<&SynthesisConfig>,
     ) -> Result<Box<dyn futures::Stream<Item = Result<AudioBuffer>> + Send + Unpin>> {
-        Err(VocoderError::StreamingError(
-            "Streaming not yet implemented for ONNX vocoder".to_string(),
-        ))
+        use futures::StreamExt;
+
+        // Drain the incoming mel stream, running one ONNX inference pass per
+        // chunk, and collect results.  Because `Session` is not `Clone` (it
+        // holds non-cloneable GPU/thread-pool resources), we run inference
+        // eagerly here rather than spawning a separate task that would need
+        // its own owned copy of the session.  The resulting `Vec` is then
+        // wrapped in `futures::stream::iter` and returned as a ready stream.
+        // This keeps memory bounded to the synthesised audio for each chunk
+        // (not the full mel buffer) while still exposing the streaming API
+        // contract to callers.
+        let mut results: Vec<Result<AudioBuffer>> = Vec::new();
+
+        while let Some(mel) = mel_stream.next().await {
+            if mel.data.is_empty() || mel.data.iter().all(|row| row.is_empty()) {
+                // Skip empty chunks rather than propagating an error.
+                continue;
+            }
+
+            let mel_dim = mel.data.len();
+            if mel_dim != self.onnx_details.mel_dim {
+                warn!(
+                    "Streaming: mel dimension mismatch on chunk — expected {}, got {}; skipping",
+                    self.onnx_details.mel_dim, mel_dim
+                );
+                continue;
+            }
+
+            // Prepare input, run inference, process output.
+            let audio_result = async {
+                let inputs = self.prepare_inputs(&mel).await?;
+                let outputs = self
+                    .session
+                    .run(&inputs)
+                    .map_err(|e| VocoderError::ModelError(
+                        format!("ONNX streaming inference failed: {e}"),
+                    ))?;
+                let mut audio_buffer = self.process_outputs(&outputs)?;
+                if let Some(cfg) = config {
+                    audio_buffer = self.apply_synthesis_config(&audio_buffer, cfg)?;
+                }
+                debug!(
+                    "ONNX streaming chunk synthesised: {} samples at {} Hz",
+                    audio_buffer.samples.len(),
+                    audio_buffer.sample_rate
+                );
+                Ok(audio_buffer)
+            }
+            .await;
+
+            results.push(audio_result);
+        }
+
+        Ok(Box::new(futures::stream::iter(results)))
     }
 
     async fn vocode_batch(

@@ -689,11 +689,46 @@ impl AudioReader {
         }
     }
 
-    /// Basic WAV file reading (placeholder)
+    /// Read WAV file using hound
     fn read_wav_placeholder<P: AsRef<Path>>(path: P) -> Result<AudioData> {
-        // Placeholder implementation - in real code would use hound crate
-        let format = AudioFormat::new(AudioFormatType::Wav, 44100, 2);
-        let samples = vec![0.0f32; 44100]; // 1 second of silence
+        let mut reader =
+            hound::WavReader::open(path.as_ref()).map_err(|e| {
+                Error::audio(format!("Failed to open WAV file: {e}"))
+            })?;
+
+        let spec = reader.spec();
+        let sample_rate = spec.sample_rate;
+        let channels = spec.channels;
+        let bits_per_sample = spec.bits_per_sample;
+
+        let samples: Vec<f32> = match spec.sample_format {
+            hound::SampleFormat::Float => reader
+                .samples::<f32>()
+                .map(|s| {
+                    s.map_err(|e| Error::audio(format!("WAV sample read error: {e}")))
+                })
+                .collect::<Result<Vec<f32>>>()?,
+            hound::SampleFormat::Int => {
+                let max_val = (1i64 << (bits_per_sample - 1)) as f32;
+                reader
+                    .samples::<i32>()
+                    .map(|s| {
+                        s.map(|v| v as f32 / max_val)
+                            .map_err(|e| Error::audio(format!("WAV sample read error: {e}")))
+                    })
+                    .collect::<Result<Vec<f32>>>()?
+            }
+        };
+
+        let format_type = match bits_per_sample {
+            32 if spec.sample_format == hound::SampleFormat::Float => AudioFormatType::Wav32f,
+            24 => AudioFormatType::Wav24,
+            _ => AudioFormatType::Wav,
+        };
+
+        let format = AudioFormat::new(format_type, sample_rate, channels)
+            .with_bits_per_sample(bits_per_sample);
+
         Ok(AudioData::new(samples, format))
     }
 
@@ -711,9 +746,43 @@ impl AudioReader {
     }
 
     fn read_wav_buffer(buffer: &[u8]) -> Result<AudioData> {
-        // Placeholder - would parse WAV header and data
-        let format = AudioFormat::new(AudioFormatType::Wav, 44100, 2);
-        let samples = vec![0.0f32; 1024]; // Placeholder data
+        let cursor = std::io::Cursor::new(buffer);
+        let mut reader = hound::WavReader::new(cursor)
+            .map_err(|e| Error::audio(format!("Failed to parse WAV buffer: {e}")))?;
+
+        let spec = reader.spec();
+        let sample_rate = spec.sample_rate;
+        let channels = spec.channels;
+        let bits_per_sample = spec.bits_per_sample;
+
+        let samples: Vec<f32> = match spec.sample_format {
+            hound::SampleFormat::Float => reader
+                .samples::<f32>()
+                .map(|s| {
+                    s.map_err(|e| Error::audio(format!("WAV sample read error: {e}")))
+                })
+                .collect::<Result<Vec<f32>>>()?,
+            hound::SampleFormat::Int => {
+                let max_val = (1i64 << (bits_per_sample - 1)) as f32;
+                reader
+                    .samples::<i32>()
+                    .map(|s| {
+                        s.map(|v| v as f32 / max_val)
+                            .map_err(|e| Error::audio(format!("WAV sample read error: {e}")))
+                    })
+                    .collect::<Result<Vec<f32>>>()?
+            }
+        };
+
+        let format_type = match bits_per_sample {
+            32 if spec.sample_format == hound::SampleFormat::Float => AudioFormatType::Wav32f,
+            24 => AudioFormatType::Wav24,
+            _ => AudioFormatType::Wav,
+        };
+
+        let format = AudioFormat::new(format_type, sample_rate, channels)
+            .with_bits_per_sample(bits_per_sample);
+
         Ok(AudioData::new(samples, format))
     }
 }
@@ -743,7 +812,46 @@ impl AudioWriter {
     }
 
     fn write_wav_placeholder<P: AsRef<Path>>(audio: &AudioData, path: P) -> Result<()> {
-        // Placeholder - would use hound crate to write WAV file
+        let bits_per_sample = audio.format.bits_per_sample.unwrap_or(16);
+        let (sample_format, bits) = match audio.format.format_type {
+            AudioFormatType::Wav32f => (hound::SampleFormat::Float, 32u16),
+            AudioFormatType::Wav24 => (hound::SampleFormat::Int, 24u16),
+            _ => (hound::SampleFormat::Int, bits_per_sample),
+        };
+
+        let spec = hound::WavSpec {
+            channels: audio.format.channels,
+            sample_rate: audio.format.sample_rate,
+            bits_per_sample: bits,
+            sample_format,
+        };
+
+        let mut writer = hound::WavWriter::create(path.as_ref(), spec)
+            .map_err(|e| Error::audio(format!("Failed to create WAV file: {e}")))?;
+
+        let max_val = (1i64 << (bits.saturating_sub(1))) as f32;
+
+        for &sample in &audio.samples {
+            match sample_format {
+                hound::SampleFormat::Float => {
+                    writer
+                        .write_sample(sample)
+                        .map_err(|e| Error::audio(format!("WAV write error: {e}")))?;
+                }
+                hound::SampleFormat::Int => {
+                    let clamped = sample.clamp(-1.0, 1.0 - f32::EPSILON);
+                    let int_sample = (clamped * max_val) as i32;
+                    writer
+                        .write_sample(int_sample)
+                        .map_err(|e| Error::audio(format!("WAV write error: {e}")))?;
+                }
+            }
+        }
+
+        writer
+            .finalize()
+            .map_err(|e| Error::audio(format!("Failed to finalize WAV file: {e}")))?;
+
         Ok(())
     }
 
@@ -758,8 +866,49 @@ impl AudioWriter {
     }
 
     fn write_wav_buffer(audio: &AudioData) -> Result<Vec<u8>> {
-        // Placeholder - would create WAV file in memory
-        Ok(vec![])
+        let bits_per_sample = audio.format.bits_per_sample.unwrap_or(16);
+        let (sample_format, bits) = match audio.format.format_type {
+            AudioFormatType::Wav32f => (hound::SampleFormat::Float, 32u16),
+            AudioFormatType::Wav24 => (hound::SampleFormat::Int, 24u16),
+            _ => (hound::SampleFormat::Int, bits_per_sample),
+        };
+
+        let spec = hound::WavSpec {
+            channels: audio.format.channels,
+            sample_rate: audio.format.sample_rate,
+            bits_per_sample: bits,
+            sample_format,
+        };
+
+        let buf: Vec<u8> = Vec::new();
+        let cursor = std::io::Cursor::new(buf);
+        let mut writer = hound::WavWriter::new(cursor, spec)
+            .map_err(|e| Error::audio(format!("Failed to create WAV buffer writer: {e}")))?;
+
+        let max_val = (1i64 << (bits.saturating_sub(1))) as f32;
+
+        for &sample in &audio.samples {
+            match sample_format {
+                hound::SampleFormat::Float => {
+                    writer
+                        .write_sample(sample)
+                        .map_err(|e| Error::audio(format!("WAV write error: {e}")))?;
+                }
+                hound::SampleFormat::Int => {
+                    let clamped = sample.clamp(-1.0, 1.0 - f32::EPSILON);
+                    let int_sample = (clamped * max_val) as i32;
+                    writer
+                        .write_sample(int_sample)
+                        .map_err(|e| Error::audio(format!("WAV write error: {e}")))?;
+                }
+            }
+        }
+
+        let cursor = writer
+            .into_inner()
+            .map_err(|e| Error::audio(format!("Failed to finalize WAV buffer: {e}")))?;
+
+        Ok(cursor.into_inner())
     }
 }
 

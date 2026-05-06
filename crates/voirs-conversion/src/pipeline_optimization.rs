@@ -815,10 +815,7 @@ impl OptimizedPipeline {
                 return self.execute_optimized_processing(plan, request).await;
             }
             PlanType::Standard => {
-                // Fallback to standard processing
-                return Err(Error::runtime(
-                    "Standard processing not implemented".to_string(),
-                ));
+                return self.execute_standard_processing(plan, request).await;
             }
         }
 
@@ -862,6 +859,34 @@ impl OptimizedPipeline {
     async fn check_cache(&self, key: &CacheKey) -> Result<Option<CachedResult>> {
         let cache = self.cache_system.read().await;
         Ok(cache.get(key).cloned())
+    }
+
+    /// Execute standard (non-optimized) processing plan sequentially
+    async fn execute_standard_processing(
+        &self,
+        plan: &OptimizedConversionPlan,
+        request: &ConversionRequest,
+    ) -> Result<ConversionResult> {
+        let start_time = Instant::now();
+
+        // Execute processing stages sequentially without optimizations
+        let mut audio_data = request.source_audio.clone();
+
+        for stage in &plan.processing_stages {
+            audio_data = self.execute_processing_stage(stage, &audio_data).await?;
+        }
+
+        let total_time = start_time.elapsed();
+
+        let result = ConversionResult::success(
+            request.id.clone(),
+            audio_data,
+            request.source_sample_rate,
+            total_time,
+            request.conversion_type.clone(),
+        );
+
+        Ok(result)
     }
 
     async fn execute_optimized_processing(

@@ -59,6 +59,11 @@ oxionnx = { workspace = true, optional = true }
 # File handling
 tempfile = { workspace = true }
 walkdir = { workspace = true }
+memmap2 = { workspace = true }
+
+# Compression (COOLJAPAN OxiARC)
+oxiarc-deflate = { workspace = true }
+oxiarc-zstd = { workspace = true }
 
 # VoiRS dependencies
 voirs-acoustic = { workspace = true, optional = true }

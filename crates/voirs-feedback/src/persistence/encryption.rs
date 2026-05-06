@@ -418,8 +418,69 @@ impl PrivacyExportService {
                 );
                 Ok(csv_data.into_bytes())
             }
-            ExportFormat::Xml | ExportFormat::Pdf => Err(PersistenceError::ConfigError {
-                message: format!("Export format {format:?} not yet implemented"),
+            ExportFormat::Xml => {
+                fn xml_escape(s: &str) -> String {
+                    s.replace('&', "&amp;")
+                        .replace('<', "&lt;")
+                        .replace('>', "&gt;")
+                        .replace('"', "&quot;")
+                        .replace('\'', "&apos;")
+                }
+
+                let mut xml = String::with_capacity(512);
+                xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+                xml.push_str("<user_data_export>\n");
+                xml.push_str(&format!(
+                    "  <user_id>{}</user_id>\n",
+                    xml_escape(&export_data.user_id)
+                ));
+                xml.push_str(&format!(
+                    "  <export_timestamp>{}</export_timestamp>\n",
+                    xml_escape(&export_data.export_timestamp.to_rfc3339())
+                ));
+                xml.push_str(&format!(
+                    "  <total_sessions>{}</total_sessions>\n",
+                    export_data.sessions.len()
+                ));
+                xml.push_str(&format!(
+                    "  <total_feedback>{}</total_feedback>\n",
+                    export_data.feedback_history.len()
+                ));
+
+                // Progress summary
+                xml.push_str("  <progress>\n");
+                xml.push_str(&format!(
+                    "    <user_id>{}</user_id>\n",
+                    xml_escape(&export_data.progress.user_id)
+                ));
+                xml.push_str(&format!(
+                    "    <session_count>{}</session_count>\n",
+                    export_data.progress.session_count
+                ));
+                xml.push_str(&format!(
+                    "    <overall_skill_level>{:.4}</overall_skill_level>\n",
+                    export_data.progress.overall_skill_level
+                ));
+                xml.push_str("  </progress>\n");
+
+                // Metadata
+                if !export_data.metadata.is_empty() {
+                    xml.push_str("  <metadata>\n");
+                    for (k, v) in &export_data.metadata {
+                        xml.push_str(&format!(
+                            "    <entry key=\"{}\">{}</entry>\n",
+                            xml_escape(k),
+                            xml_escape(v)
+                        ));
+                    }
+                    xml.push_str("  </metadata>\n");
+                }
+
+                xml.push_str("</user_data_export>\n");
+                Ok(xml.into_bytes())
+            }
+            ExportFormat::Pdf => Err(PersistenceError::ConfigError {
+                message: "Export format Pdf not yet implemented".to_string(),
             }),
         }
     }

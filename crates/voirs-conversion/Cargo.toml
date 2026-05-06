@@ -57,6 +57,9 @@ oxionnx = { workspace = true, optional = true }
 # Compression for cache optimization
 oxiarc-deflate = { workspace = true }
 
+# Audio file I/O
+hound = { workspace = true }
+
 # HTTP client for IoT cloud connectivity
 reqwest = { workspace = true, features = ["json", "rustls"], optional = true }
 

@@ -9,14 +9,14 @@
 pub mod candle;
 pub mod loader;
 
-// #[cfg(feature = "onnx")]
-// pub mod onnx;
+#[cfg(feature = "onnx")]
+pub mod onnx;
 
 pub use candle::*;
 pub use loader::*;
 
-// #[cfg(feature = "onnx")]
-// pub use onnx::*;
+#[cfg(feature = "onnx")]
+pub use onnx::{OnnxVocoder, OnnxVocoderBuilder, OnnxVocoderConfig};
 
 use crate::config::{DeviceType, ModelConfig};
 use crate::{AudioBuffer, MelSpectrogram, Result, VocoderError};
