@@ -417,8 +417,6 @@ pub enum TimelineRange {
     All,
 }
 
-#[cfg(not(feature = "ui"))]
-
 /// Progress visualization configuration (enhanced implementation)
 #[cfg(not(feature = "ui"))]
 #[derive(Debug, Clone)]

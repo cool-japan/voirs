@@ -1007,7 +1007,7 @@ impl InteractiveTimeline {
         self.events.push(event);
 
         // Sort events by timestamp
-        self.events.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        self.events.sort_by_key(|e| e.timestamp);
 
         // Update time range
         self.update_time_range();
@@ -1381,8 +1381,7 @@ impl RichProgressVisualization {
         self.progress_data.push(data_point);
 
         // Sort by timestamp
-        self.progress_data
-            .sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        self.progress_data.sort_by_key(|p| p.timestamp);
 
         // Invalidate analysis cache
         self.analysis_cache = None;
@@ -1393,8 +1392,7 @@ impl RichProgressVisualization {
         self.milestones.push(milestone);
 
         // Sort by achievement time
-        self.milestones
-            .sort_by(|a, b| a.achieved_at.cmp(&b.achieved_at));
+        self.milestones.sort_by_key(|m| m.achieved_at);
     }
 
     /// Add a goal
