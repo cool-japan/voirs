@@ -144,7 +144,7 @@ async fn test_error_recovery_manager() {
         move || -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, VoirsError>> + Send>> {
             let count = count.clone();
             Box::pin(async move {
-                let mut counter = count.lock().unwrap();
+                let mut counter = count.lock().unwrap_or_else(|e| e.into_inner());
                 *counter += 1;
                 if *counter < 3 {
                     Err(VoirsError::InternalError {
@@ -161,7 +161,7 @@ async fn test_error_recovery_manager() {
     let result = manager.execute_with_recovery("synthesis", operation).await;
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "success");
-    assert_eq!(*operation_count.lock().unwrap(), 3);
+    assert_eq!(*operation_count.lock().unwrap_or_else(|e| e.into_inner()), 3);
 }
 
 #[test]

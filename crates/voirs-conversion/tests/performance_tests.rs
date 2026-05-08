@@ -690,7 +690,7 @@ async fn test_cpu_usage_monitoring() -> Result<()> {
                     let lines: Vec<&str> = output_str.lines().collect();
                     if lines.len() >= 2 {
                         if let Ok(cpu_percent) = lines[1].trim().parse::<f64>() {
-                            cpu_usage_clone.lock().unwrap().push(cpu_percent);
+                            cpu_usage_clone.lock().unwrap_or_else(|e| e.into_inner()).push(cpu_percent);
                         }
                     }
                 }
@@ -711,7 +711,7 @@ async fn test_cpu_usage_monitoring() -> Result<()> {
 
     match result {
         Ok(result) => {
-            let cpu_measurements = cpu_usage.lock().unwrap();
+            let cpu_measurements = cpu_usage.lock().unwrap_or_else(|e| e.into_inner());
 
             if !cpu_measurements.is_empty() {
                 let avg_cpu = cpu_measurements.iter().sum::<f64>() / cpu_measurements.len() as f64;

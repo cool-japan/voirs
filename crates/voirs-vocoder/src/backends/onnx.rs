@@ -463,7 +463,7 @@ impl Vocoder for OnnxVocoder {
 
         debug!(
             "ONNX vocoder synthesis completed: {} samples at {} Hz",
-            audio_buffer.data.len(),
+            audio_buffer.samples.len(),
             audio_buffer.sample_rate
         );
 
@@ -559,6 +559,8 @@ impl Vocoder for OnnxVocoder {
             VocoderFeature::FastInference => true,
             VocoderFeature::StreamingInference => false,
             VocoderFeature::RealtimeProcessing => false,
+            // ONNX backend does not support emotion/conversion/singing/spatial features
+            _ => false,
         }
     }
 }
@@ -667,6 +669,10 @@ impl OnnxVocoderBackend {
                 // oxionnx doesn't support Metal, fallback to CPU
                 config.use_gpu = false;
             }
+            crate::config::DeviceType::Auto => {
+                // Auto: prefer GPU if available, fall back to CPU
+                config.use_gpu = cfg!(feature = "gpu");
+            }
         }
 
         Ok(Self { config })
@@ -704,12 +710,18 @@ impl crate::backends::Backend for OnnxBackend {
                 // oxionnx doesn't support Metal, fallback to CPU
                 self.config.use_gpu = false;
             }
+            crate::config::DeviceType::Auto => {
+                // Auto: prefer GPU if feature is enabled, otherwise CPU
+                self.config.use_gpu = cfg!(feature = "gpu");
+            }
         }
-        
-        if let Some(threads) = config.num_threads {
-            self.config.num_threads = threads;
+
+        // Apply thread count from optimization config (0 = let runtime auto-detect)
+        let max_threads = config.optimization.max_threads;
+        if max_threads > 0 {
+            self.config.num_threads = max_threads;
         }
-        
+
         Ok(())
     }
 
@@ -758,6 +770,8 @@ impl crate::backends::Backend for OnnxBackend {
             crate::config::DeviceType::Cpu => true,
             crate::config::DeviceType::Cuda => true,
             crate::config::DeviceType::Metal => false,
+            // Auto maps to whichever device is available; report as supported
+            crate::config::DeviceType::Auto => true,
         }
     }
 

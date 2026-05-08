@@ -153,13 +153,13 @@ mod tests {
 
         // Test adding config
         {
-            let mut reg = registry.lock().unwrap();
+            let mut reg = registry.lock().unwrap_or_else(|e| e.into_inner());
             reg.insert(1, MockConfig::default());
         }
 
         // Test getting config
         {
-            let reg = registry.lock().unwrap();
+            let reg = registry.lock().unwrap_or_else(|e| e.into_inner());
             let config = reg.get(&1).unwrap();
             assert_eq!(config.name, "default");
             assert_eq!(config.value, 42);
@@ -167,7 +167,7 @@ mod tests {
 
         // Test updating config
         {
-            let mut reg = registry.lock().unwrap();
+            let mut reg = registry.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(config) = reg.get_mut(&1) {
                 config.value = 100;
             }
@@ -175,14 +175,14 @@ mod tests {
 
         // Verify update
         {
-            let reg = registry.lock().unwrap();
+            let reg = registry.lock().unwrap_or_else(|e| e.into_inner());
             let config = reg.get(&1).unwrap();
             assert_eq!(config.value, 100);
         }
 
         // Test removing config
         {
-            let mut reg = registry.lock().unwrap();
+            let mut reg = registry.lock().unwrap_or_else(|e| e.into_inner());
             assert!(reg.remove(&1).is_some());
             assert!(reg.get(&1).is_none());
         }

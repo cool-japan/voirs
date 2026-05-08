@@ -1240,7 +1240,7 @@ mod tests {
     async fn test_websocket_session_manager_creation() {
         let config = WebSocketConfig::default();
         let manager = WebSocketSessionManager::new(config).await.unwrap();
-        assert_eq!(manager.sessions.read().unwrap().len(), 0);
+        assert_eq!(manager.sessions.read().unwrap_or_else(|e| e.into_inner()).len(), 0);
     }
 
     #[test]

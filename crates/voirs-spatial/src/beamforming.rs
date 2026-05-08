@@ -328,7 +328,9 @@ impl BeamformingProcessor {
             padded_input.resize(frequency_bins * 2 - 2, 0.0);
 
             let mut spectrum = vec![Complex32::new(0.0, 0.0); frequency_bins];
-            self.forward_fft.process(&padded_input, &mut spectrum);
+            self.forward_fft
+                .process(&padded_input, &mut spectrum)
+                .map_err(|e| Error::LegacyProcessing(e.to_string()))?;
 
             for (freq_idx, &spectrum_value) in spectrum.iter().enumerate() {
                 self.input_buffer[[ch_idx, freq_idx]] = spectrum_value;
@@ -363,7 +365,9 @@ impl BeamformingProcessor {
         let mut spectrum = self.output_buffer.to_vec();
         let mut output = vec![0.0; buffer_size];
 
-        self.inverse_fft.process(&spectrum, &mut output);
+        self.inverse_fft
+            .process(&spectrum, &mut output)
+            .map_err(|e| Error::LegacyProcessing(e.to_string()))?;
 
         Ok(Array1::from_vec(output))
     }

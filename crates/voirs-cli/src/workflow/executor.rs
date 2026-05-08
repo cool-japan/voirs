@@ -358,7 +358,7 @@ impl StepExecutor {
         let mut resolved = HashMap::new();
 
         for (key, value) in params {
-            let resolved_value = self.resolve_value(value, variables);
+            let resolved_value = Self::resolve_value(value, variables);
             resolved.insert(key.clone(), resolved_value);
         }
 
@@ -367,7 +367,6 @@ impl StepExecutor {
 
     /// Resolve a single value with variable substitution
     fn resolve_value(
-        &self,
         value: &serde_json::Value,
         variables: &HashMap<String, serde_json::Value>,
     ) -> serde_json::Value {
@@ -384,12 +383,12 @@ impl StepExecutor {
             }
             serde_json::Value::Array(arr) => serde_json::Value::Array(
                 arr.iter()
-                    .map(|v| self.resolve_value(v, variables))
+                    .map(|v| Self::resolve_value(v, variables))
                     .collect(),
             ),
             serde_json::Value::Object(obj) => serde_json::Value::Object(
                 obj.iter()
-                    .map(|(k, v)| (k.clone(), self.resolve_value(v, variables)))
+                    .map(|(k, v)| (k.clone(), Self::resolve_value(v, variables)))
                     .collect(),
             ),
             _ => value.clone(),

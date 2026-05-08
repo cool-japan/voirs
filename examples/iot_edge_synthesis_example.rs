@@ -368,7 +368,7 @@ impl IoTEdgeEngine {
                     thread::sleep(Duration::from_secs(2)); // Space out requests
 
                     let request_id = {
-                        let mut id = next_id.lock().unwrap();
+                        let mut id = next_id.lock().unwrap_or_else(|e| e.into_inner());
                         let current_id = *id;
                         *id += 1;
                         current_id

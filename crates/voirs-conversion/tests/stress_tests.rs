@@ -123,7 +123,7 @@ async fn test_high_concurrency_stress() -> Result<()> {
                         let task_duration = task_start.elapsed();
                         if result.success {
                             success_count_clone.fetch_add(1, Ordering::Relaxed);
-                            let mut total_time = total_processing_time_clone.lock().unwrap();
+                            let mut total_time = total_processing_time_clone.lock().unwrap_or_else(|e| e.into_inner());
                             *total_time += task_duration;
                         } else {
                             failure_count_clone.fetch_add(1, Ordering::Relaxed);
@@ -161,7 +161,7 @@ async fn test_high_concurrency_stress() -> Result<()> {
         let success_rate = (successful as f64 / concurrency_level as f64) * 100.0;
 
         let avg_processing_time = if successful > 0 {
-            let total_processing = total_processing_time.lock().unwrap();
+            let total_processing = total_processing_time.lock().unwrap_or_else(|e| e.into_inner());
             total_processing.as_millis() as f64 / successful as f64
         } else {
             0.0

@@ -668,14 +668,12 @@ pub enum FormatQuality {
 pub struct AudioReader;
 
 impl AudioReader {
-    /// Read audio from file (basic WAV support)
+    /// Read audio from file
+    ///
+    /// Supported formats: WAV (via `hound`).
+    /// FLAC, OGG/Vorbis, MP3, and AAC are not supported with the current
+    /// dependency set. MP3 and AAC have no pure-Rust decoder available.
     pub fn read_file<P: AsRef<Path>>(path: P) -> Result<AudioData> {
-        // This is a placeholder implementation
-        // In a real implementation, you would:
-        // 1. Detect the format
-        // 2. Use appropriate decoder (hound for WAV, symphonia for others)
-        // 3. Convert to our internal format
-
         let format_type = FormatDetector::detect_from_extension(&path)
             .ok_or_else(|| Error::audio("Unsupported file format".to_string()))?;
 
@@ -683,8 +681,20 @@ impl AudioReader {
             AudioFormatType::Wav | AudioFormatType::Wav24 | AudioFormatType::Wav32f => {
                 Self::read_wav_placeholder(path)
             }
+            AudioFormatType::Flac => Err(Error::audio(
+                "flac: decoder not available (claxon not in dependencies)".to_string(),
+            )),
+            AudioFormatType::Ogg => Err(Error::audio(
+                "ogg/vorbis: decoder not available (lewton not in dependencies)".to_string(),
+            )),
+            AudioFormatType::Mp3 => Err(Error::audio(
+                "mp3: no pure-Rust decoder available".to_string(),
+            )),
+            AudioFormatType::Aac => Err(Error::audio(
+                "aac: no pure-Rust decoder available".to_string(),
+            )),
             _ => Err(Error::audio(format!(
-                "Format {format_type:?} not yet implemented - requires additional dependencies"
+                "Format {format_type:?} is not supported"
             ))),
         }
     }
@@ -880,33 +890,34 @@ impl AudioWriter {
             sample_format,
         };
 
-        let buf: Vec<u8> = Vec::new();
-        let cursor = std::io::Cursor::new(buf);
-        let mut writer = hound::WavWriter::new(cursor, spec)
-            .map_err(|e| Error::audio(format!("Failed to create WAV buffer writer: {e}")))?;
+        let mut cursor = std::io::Cursor::new(Vec::<u8>::new());
+        {
+            let mut writer = hound::WavWriter::new(&mut cursor, spec)
+                .map_err(|e| Error::audio(format!("Failed to create WAV buffer writer: {e}")))?;
 
-        let max_val = (1i64 << (bits.saturating_sub(1))) as f32;
+            let max_val = (1i64 << (bits.saturating_sub(1))) as f32;
 
-        for &sample in &audio.samples {
-            match sample_format {
-                hound::SampleFormat::Float => {
-                    writer
-                        .write_sample(sample)
-                        .map_err(|e| Error::audio(format!("WAV write error: {e}")))?;
-                }
-                hound::SampleFormat::Int => {
-                    let clamped = sample.clamp(-1.0, 1.0 - f32::EPSILON);
-                    let int_sample = (clamped * max_val) as i32;
-                    writer
-                        .write_sample(int_sample)
-                        .map_err(|e| Error::audio(format!("WAV write error: {e}")))?;
+            for &sample in &audio.samples {
+                match sample_format {
+                    hound::SampleFormat::Float => {
+                        writer
+                            .write_sample(sample)
+                            .map_err(|e| Error::audio(format!("WAV write error: {e}")))?;
+                    }
+                    hound::SampleFormat::Int => {
+                        let clamped = sample.clamp(-1.0, 1.0 - f32::EPSILON);
+                        let int_sample = (clamped * max_val) as i32;
+                        writer
+                            .write_sample(int_sample)
+                            .map_err(|e| Error::audio(format!("WAV write error: {e}")))?;
+                    }
                 }
             }
-        }
 
-        let cursor = writer
-            .into_inner()
-            .map_err(|e| Error::audio(format!("Failed to finalize WAV buffer: {e}")))?;
+            writer
+                .finalize()
+                .map_err(|e| Error::audio(format!("Failed to finalize WAV buffer: {e}")))?;
+        }
 
         Ok(cursor.into_inner())
     }

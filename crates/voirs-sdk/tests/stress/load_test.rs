@@ -143,7 +143,7 @@ impl StressTest {
                 }
 
                 // Update metrics
-                let mut metrics = metrics_clone.lock().unwrap();
+                let mut metrics = metrics_clone.lock().unwrap_or_else(|e| e.into_inner());
                 metrics.operations_completed += operations_completed;
                 metrics.operations_failed += operations_failed;
                 

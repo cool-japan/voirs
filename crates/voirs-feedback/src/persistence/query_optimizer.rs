@@ -646,7 +646,7 @@ impl QueryOptimizer {
         if let Some(plan_array) = plan.as_array() {
             if let Some(plan_obj) = plan_array.first() {
                 if let Some(plan_data) = plan_obj.get("Plan") {
-                    self.analyze_plan_node(
+                    Self::analyze_plan_node(
                         plan_data,
                         &mut recommendations,
                         &mut index_usage,
@@ -667,7 +667,6 @@ impl QueryOptimizer {
 
     /// Recursively analyze plan nodes
     fn analyze_plan_node(
-        &self,
         node: &serde_json::Value,
         recommendations: &mut Vec<String>,
         index_usage: &mut Vec<String>,
@@ -719,7 +718,7 @@ impl QueryOptimizer {
             // Recursively analyze child plans
             if let Some(plans) = node.get("Plans").and_then(|v| v.as_array()) {
                 for plan in plans {
-                    self.analyze_plan_node(
+                    Self::analyze_plan_node(
                         plan,
                         recommendations,
                         index_usage,

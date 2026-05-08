@@ -304,7 +304,7 @@ impl DesktopSynthesizer {
 
                     // Update statistics
                     if let Ok(ref synthesis_result) = result {
-                        let mut stats = stats.lock().unwrap();
+                        let mut stats = stats.lock().unwrap_or_else(|e| e.into_inner());
                         stats.total_syntheses += 1;
                         stats.total_processing_time += synthesis_result.processing_time;
                         stats.total_audio_duration += synthesis_result.audio.duration();
@@ -403,7 +403,7 @@ impl DesktopSynthesizer {
         priority: SynthesisPriority,
     ) -> Result<DesktopSynthesisResult> {
         let id = {
-            let mut next_id = self.next_request_id.lock().unwrap();
+            let mut next_id = self.next_request_id.lock().unwrap_or_else(|e| e.into_inner());
             let id = *next_id;
             *next_id += 1;
             id
@@ -451,7 +451,7 @@ impl DesktopSynthesizer {
 
     /// Get desktop statistics
     pub fn get_desktop_stats(&self) -> DesktopStats {
-        let stats = self.stats.lock().unwrap();
+        let stats = self.stats.lock().unwrap_or_else(|e| e.into_inner());
         DesktopStats {
             total_syntheses: stats.total_syntheses,
             total_processing_time: stats.total_processing_time,

@@ -992,7 +992,7 @@ mod tests {
         let alert_received_clone = alert_received.clone();
 
         monitor.add_alert_callback(move |_alert| {
-            *alert_received_clone.lock().unwrap() = true;
+            *alert_received_clone.lock().unwrap_or_else(|e| e.into_inner()) = true;
         });
 
         // Process low-quality audio to trigger alert

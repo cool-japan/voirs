@@ -193,7 +193,7 @@ impl WorkflowValidator {
 
         // Check dependency depth
         for step in &workflow.steps {
-            let depth = self.calculate_dependency_depth(&step.name, workflow, &mut HashSet::new());
+            let depth = Self::calculate_dependency_depth(&step.name, workflow, &mut HashSet::new());
             if depth > self.max_dependency_depth {
                 warnings.push(format!(
                     "Step '{}' has dependency depth of {}, which exceeds recommended limit of {}",
@@ -245,7 +245,7 @@ impl WorkflowValidator {
         let mut recursion_stack = Vec::new();
 
         for step in &workflow.steps {
-            if self.has_cycle_dfs(&step.name, workflow, &mut visited, &mut recursion_stack) {
+            if Self::has_cycle_dfs(&step.name, workflow, &mut visited, &mut recursion_stack) {
                 return Some(recursion_stack);
             }
         }
@@ -255,7 +255,6 @@ impl WorkflowValidator {
 
     /// DFS-based cycle detection
     fn has_cycle_dfs(
-        &self,
         node: &str,
         workflow: &Workflow,
         visited: &mut HashSet<String>,
@@ -276,7 +275,7 @@ impl WorkflowValidator {
         // Find step and check dependencies
         if let Some(step) = workflow.steps.iter().find(|s| s.name == node) {
             for dep in &step.depends_on {
-                if self.has_cycle_dfs(&dep.step_name, workflow, visited, recursion_stack) {
+                if Self::has_cycle_dfs(&dep.step_name, workflow, visited, recursion_stack) {
                     return true;
                 }
             }
@@ -288,7 +287,6 @@ impl WorkflowValidator {
 
     /// Calculate dependency depth
     fn calculate_dependency_depth(
-        &self,
         step_name: &str,
         workflow: &Workflow,
         visited: &mut HashSet<String>,
@@ -309,7 +307,7 @@ impl WorkflowValidator {
             let max_dep_depth = step
                 .depends_on
                 .iter()
-                .map(|dep| self.calculate_dependency_depth(&dep.step_name, workflow, visited))
+                .map(|dep| Self::calculate_dependency_depth(&dep.step_name, workflow, visited))
                 .max()
                 .unwrap_or(0);
 

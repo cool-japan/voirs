@@ -1010,7 +1010,7 @@ mod tests {
 
         let lazy_comp = LazyComponent::new(
             move || {
-                let mut c = counter_clone.lock().unwrap();
+                let mut c = counter_clone.lock().unwrap_or_else(|e| e.into_inner());
                 *c += 1;
                 Ok(format!("loaded_{}", *c))
             },
@@ -1023,22 +1023,22 @@ mod tests {
         // First access loads the component
         let data = lazy_comp.get().unwrap();
         assert!(lazy_comp.is_loaded());
-        assert_eq!(*data.lock().unwrap(), Some("loaded_1".to_string()));
+        assert_eq!(*data.lock().unwrap_or_else(|e| e.into_inner()), Some("loaded_1".to_string()));
 
         // Second access uses cached value
         let data2 = lazy_comp.get().unwrap();
-        assert_eq!(*data2.lock().unwrap(), Some("loaded_1".to_string()));
+        assert_eq!(*data2.lock().unwrap_or_else(|e| e.into_inner()), Some("loaded_1".to_string()));
 
         // Counter should only be incremented once
-        assert_eq!(*counter.lock().unwrap(), 1);
+        assert_eq!(*counter.lock().unwrap_or_else(|e| e.into_inner()), 1);
 
         // Unload and reload
         lazy_comp.unload();
         assert!(!lazy_comp.is_loaded());
 
         let data3 = lazy_comp.get().unwrap();
-        assert_eq!(*data3.lock().unwrap(), Some("loaded_2".to_string()));
-        assert_eq!(*counter.lock().unwrap(), 2);
+        assert_eq!(*data3.lock().unwrap_or_else(|e| e.into_inner()), Some("loaded_2".to_string()));
+        assert_eq!(*counter.lock().unwrap_or_else(|e| e.into_inner()), 2);
     }
 
     #[test]
@@ -1052,19 +1052,19 @@ mod tests {
         // Add stages with different priorities and memory requirements
         let loaded1 = loaded.clone();
         loader.add_stage("stage1".to_string(), 1, 300, move || {
-            loaded1.lock().unwrap().push("stage1");
+            loaded1.lock().unwrap_or_else(|e| e.into_inner()).push("stage1");
             Ok(())
         });
 
         let loaded2 = loaded.clone();
         loader.add_stage("stage2".to_string(), 2, 400, move || {
-            loaded2.lock().unwrap().push("stage2");
+            loaded2.lock().unwrap_or_else(|e| e.into_inner()).push("stage2");
             Ok(())
         });
 
         let loaded3 = loaded.clone();
         loader.add_stage("stage3".to_string(), 3, 400, move || {
-            loaded3.lock().unwrap().push("stage3");
+            loaded3.lock().unwrap_or_else(|e| e.into_inner()).push("stage3");
             Ok(())
         });
 
@@ -1073,7 +1073,7 @@ mod tests {
         assert!(loader.load_next_stage().unwrap()); // stage2: 700 bytes total
         assert!(!loader.load_next_stage().unwrap()); // stage3: would exceed budget
 
-        let loaded_stages = loaded.lock().unwrap();
+        let loaded_stages = loaded.lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(loaded_stages.len(), 2);
         assert!(loaded_stages.contains(&"stage1"));
         assert!(loaded_stages.contains(&"stage2"));

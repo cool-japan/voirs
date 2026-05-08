@@ -683,7 +683,7 @@ impl ProductionSynthesizer {
             interval.tick().await;
 
             // In production, would collect actual system metrics
-            let mut metrics = metrics.write().unwrap();
+            let mut metrics = metrics.write().unwrap_or_else(|e| e.into_inner());
             metrics.memory_usage_mb = 512.0; // Simulated
             metrics.cpu_usage_percent = 25.0; // Simulated
         }
@@ -701,7 +701,7 @@ impl ProductionSynthesizer {
 
         // Update metrics
         {
-            let mut metrics = self.metrics.write().unwrap();
+            let mut metrics = self.metrics.write().unwrap_or_else(|e| e.into_inner());
             metrics.total_requests += 1;
             metrics.queue_depth += 1;
         }
@@ -721,7 +721,7 @@ impl ProductionSynthesizer {
 
         // Update metrics
         {
-            let mut metrics = self.metrics.write().unwrap();
+            let mut metrics = self.metrics.write().unwrap_or_else(|e| e.into_inner());
             metrics.queue_depth -= 1;
             match response.status {
                 ResponseStatus::Success => metrics.successful_requests += 1,
@@ -741,7 +741,7 @@ impl ProductionSynthesizer {
 
     /// Get production metrics for monitoring
     pub fn get_production_metrics(&self) -> ProductionMetrics {
-        let metrics = self.metrics.read().unwrap();
+        let metrics = self.metrics.read().unwrap_or_else(|e| e.into_inner());
         ProductionMetrics {
             total_requests: metrics.total_requests,
             successful_requests: metrics.successful_requests,
@@ -804,7 +804,7 @@ impl MonitoringService {
     }
 
     async fn get_health_status(&self) -> HealthStatus {
-        self.health_status.read().unwrap().clone()
+        self.health_status.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 }
 

@@ -89,7 +89,7 @@ mod tests {
 
         // Use a test-specific lock to ensure sequential execution
         static TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         // Clear any existing errors
         clear_error_aggregator();

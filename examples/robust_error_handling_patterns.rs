@@ -791,7 +791,7 @@ impl ErrorHandlingDemo {
                     move || {
                         let attempt_count = Arc::clone(&attempt_count);
                         async move {
-                            let mut count = attempt_count.lock().unwrap();
+                            let mut count = attempt_count.lock().unwrap_or_else(|e| e.into_inner());
                             *count += 1;
                             let current_attempt = *count;
                             drop(count);

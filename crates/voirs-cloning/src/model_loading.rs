@@ -811,6 +811,37 @@ impl ModelLoadingManager {
     }
 }
 
+/// Read a file using buffered I/O, mimicking the sequential-access pattern of
+/// a memory-mapped load without requiring `unsafe`.  Production callers that
+/// need true lazy/paged access should use `memmap2::Mmap` directly behind an
+/// `Arc<Mmap>`-backed `ModelInterface` implementation.
+///
+/// Uses a 4 MiB read buffer for efficient sequential streaming.
+fn read_file_mmap_style(path: &std::path::Path) -> crate::Result<Vec<u8>> {
+    use std::io::Read;
+
+    const BUF_SIZE: usize = 4 * 1024 * 1024; // 4 MiB
+
+    let mut file = std::fs::File::open(path).map_err(crate::Error::Io)?;
+    let capacity = file
+        .metadata()
+        .map(|m| m.len() as usize)
+        .unwrap_or(BUF_SIZE);
+
+    let mut data: Vec<u8> = Vec::with_capacity(capacity);
+    let mut buf = vec![0u8; BUF_SIZE];
+
+    loop {
+        let n = file.read(&mut buf).map_err(crate::Error::Io)?;
+        if n == 0 {
+            break;
+        }
+        data.extend_from_slice(&buf[..n]);
+    }
+
+    Ok(data)
+}
+
 /// Loading strategy enumeration
 #[derive(Debug, Clone, Copy)]
 pub enum LoadingStrategy {

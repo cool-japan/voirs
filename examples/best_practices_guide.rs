@@ -373,7 +373,7 @@ impl VoiceModelCache {
     }
 
     fn get_from_cache(&self, voice_id: &str) -> Option<VoiceModel> {
-        let mut models = self.models.write().unwrap();
+        let mut models = self.models.write().unwrap_or_else(|e| e.into_inner());
         
         if let Some(cached) = models.get_mut(voice_id) {
             // Check TTL
@@ -403,14 +403,14 @@ impl VoiceModelCache {
             memory_size_mb: model_size,
         };
         
-        let mut models = self.models.write().unwrap();
+        let mut models = self.models.write().unwrap_or_else(|e| e.into_inner());
         models.insert(voice_id.to_string(), cached_model);
         
         Ok(())
     }
 
     async fn ensure_memory_capacity(&self, required_mb: usize) -> Result<(), VoirsError> {
-        let mut models = self.models.write().unwrap();
+        let mut models = self.models.write().unwrap_or_else(|e| e.into_inner());
         let current_usage: usize = models.values().map(|m| m.memory_size_mb).sum();
         
         if current_usage + required_mb <= self.max_memory_mb {

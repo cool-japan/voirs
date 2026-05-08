@@ -351,8 +351,10 @@ impl VoiceMorpher {
             let mut spectrum1 = vec![Complex::new(0.0, 0.0); window_size / 2 + 1];
             let mut spectrum2 = vec![Complex::new(0.0, 0.0); window_size / 2 + 1];
 
-            fft.process(&window1, &mut spectrum1);
-            fft.process(&window2, &mut spectrum2);
+            fft.process(&window1, &mut spectrum1)
+                .map_err(|e| Error::processing(e.to_string()))?;
+            fft.process(&window2, &mut spectrum2)
+                .map_err(|e| Error::processing(e.to_string()))?;
 
             // Interpolate in frequency domain
             let mut blended_spectrum = vec![Complex::new(0.0, 0.0); window_size / 2 + 1];
@@ -380,7 +382,8 @@ impl VoiceMorpher {
 
             // IFFT
             let mut time_domain = vec![0.0; window_size];
-            ifft.process(&blended_spectrum, &mut time_domain);
+            ifft.process(&blended_spectrum, &mut time_domain)
+                .map_err(|e| Error::processing(e.to_string()))?;
 
             // Overlap-add
             for (i, &sample) in time_domain.iter().enumerate() {
@@ -532,7 +535,8 @@ impl PitchTransform {
 
             // Forward FFT
             let mut spectrum = vec![Complex::new(0.0, 0.0); window_size / 2 + 1];
-            fft.process(&window, &mut spectrum);
+            fft.process(&window, &mut spectrum)
+                .map_err(|e| Error::processing(e.to_string()))?;
 
             // Phase vocoder processing
             let mut modified_spectrum = vec![Complex::new(0.0, 0.0); window_size / 2 + 1];
@@ -575,7 +579,8 @@ impl PitchTransform {
 
             // Inverse FFT
             let mut time_domain = vec![0.0; window_size];
-            ifft.process(&modified_spectrum, &mut time_domain);
+            ifft.process(&modified_spectrum, &mut time_domain)
+                .map_err(|e| Error::processing(e.to_string()))?;
 
             // Apply window and overlap-add
             for (i, &sample) in time_domain.iter().enumerate() {

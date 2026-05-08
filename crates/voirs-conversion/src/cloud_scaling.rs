@@ -1033,7 +1033,7 @@ mod tests {
         };
 
         // Test synchronous parts only
-        let nodes = controller.nodes.read().unwrap();
+        let nodes = controller.nodes.read().unwrap_or_else(|e| e.into_inner());
         assert_eq!(nodes.len(), 0);
     }
 

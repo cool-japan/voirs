@@ -247,7 +247,7 @@ impl WorkflowEngine {
         let mut recursion_stack = HashSet::new();
 
         for step in &workflow.steps {
-            if self.has_cycle(&step.name, &graph, &mut visited, &mut recursion_stack) {
+            if Self::has_cycle(&step.name, &graph, &mut visited, &mut recursion_stack) {
                 return Err(CliError::Workflow(format!(
                     "Circular dependency detected involving step '{}'",
                     step.name
@@ -260,7 +260,6 @@ impl WorkflowEngine {
 
     /// Check for cycles in dependency graph
     fn has_cycle(
-        &self,
         node: &str,
         graph: &HashMap<String, Vec<String>>,
         visited: &mut HashSet<String>,
@@ -279,7 +278,7 @@ impl WorkflowEngine {
 
         if let Some(neighbors) = graph.get(node) {
             for neighbor in neighbors {
-                if self.has_cycle(neighbor, graph, visited, recursion_stack) {
+                if Self::has_cycle(neighbor, graph, visited, recursion_stack) {
                     return true;
                 }
             }

@@ -153,7 +153,7 @@ impl MemoryLeakMonitor {
             while active_clone.load(Ordering::Relaxed) {
                 if let Ok(current_memory) = get_memory_usage() {
                     {
-                        let mut stats = stats_clone.lock().unwrap();
+                        let mut stats = stats_clone.lock().unwrap_or_else(|e| e.into_inner());
                         stats.update(current_memory);
 
                         // Check for memory leaks every 5 seconds
@@ -195,12 +195,12 @@ impl MemoryLeakMonitor {
                 .map_err(|_| Error::Processing("Failed to join monitoring thread".to_string()))?;
         }
 
-        let stats = self.stats.lock().unwrap().clone();
+        let stats = self.stats.lock().unwrap_or_else(|e| e.into_inner()).clone();
         Ok(stats)
     }
 
     pub fn get_current_stats(&self) -> MemoryStats {
-        self.stats.lock().unwrap().clone()
+        self.stats.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 }
 

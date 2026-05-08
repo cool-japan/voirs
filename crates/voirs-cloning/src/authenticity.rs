@@ -577,7 +577,7 @@ impl AuthenticityDetector {
             }
 
             // Compute FFT
-            fft.process(&input_buffer, &mut spectrum);
+            let _ = fft.process(&input_buffer, &mut spectrum);
 
             let magnitudes: Vec<f32> = spectrum.iter().map(|c| c.norm()).collect();
             let frequencies: Vec<f32> = (0..magnitudes.len())

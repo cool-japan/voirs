@@ -121,7 +121,7 @@ impl VoiceCoach {
 
         // Store session
         {
-            let mut sessions = self.active_sessions.lock().unwrap();
+            let mut sessions = self.active_sessions.lock().unwrap_or_else(|e| e.into_inner());
             sessions.insert(session.session_id.clone(), session.clone());
         }
 
@@ -250,7 +250,7 @@ impl VoiceCoach {
     }
 
     async fn update_session_progress(&self, session_id: &str) -> Result<()> {
-        let sessions = self.active_sessions.lock().unwrap();
+        let sessions = self.active_sessions.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(session) = sessions.get(session_id) {
             let elapsed = session.start_time.elapsed();
             println!("⏱️  Session Progress: {:.0}s elapsed", elapsed.as_secs());
@@ -282,7 +282,7 @@ impl VoiceCoach {
         println!("\n🏁 Ending coaching session...");
 
         // Generate session summary
-        let sessions = self.active_sessions.lock().unwrap();
+        let sessions = self.active_sessions.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(session) = sessions.get(session_id) {
             let duration = session.start_time.elapsed();
 
@@ -300,7 +300,7 @@ impl VoiceCoach {
 
         // Remove session
         drop(sessions);
-        let mut sessions = self.active_sessions.lock().unwrap();
+        let mut sessions = self.active_sessions.lock().unwrap_or_else(|e| e.into_inner());
         sessions.remove(session_id);
 
         Ok(())
@@ -355,7 +355,7 @@ impl FeedbackRenderer {
     }
 
     pub async fn render_realtime_feedback(&self, session_id: &str, feedback: &RealtimeFeedback) {
-        let mut last = self.last_render.lock().unwrap();
+        let mut last = self.last_render.lock().unwrap_or_else(|e| e.into_inner());
 
         // Throttle rendering to avoid spam
         if last.elapsed() > Duration::from_millis(500) {

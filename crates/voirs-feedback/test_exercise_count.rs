@@ -3,7 +3,7 @@ use voirs_feedback::training::InteractiveTrainer;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let trainer = InteractiveTrainer::new().await?;
-    let library = trainer.exercise_library.read().unwrap();
+    let library = trainer.exercise_library.read().unwrap_or_else(|e| e.into_inner());
     let total_exercises = library.exercises.len();
     
     println\!("Total exercises in library: {}", total_exercises);

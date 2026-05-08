@@ -327,7 +327,7 @@ impl VoirsProfiler {
                 let cpu_sample = Self::collect_cpu_sample();
 
                 {
-                    let mut metrics_guard = metrics.lock().unwrap();
+                    let mut metrics_guard = metrics.lock().unwrap_or_else(|e| e.into_inner());
                     metrics_guard.cpu_samples.push(cpu_sample);
                 }
 
@@ -358,7 +358,7 @@ impl VoirsProfiler {
                 let memory_snapshot = Self::collect_memory_snapshot();
 
                 {
-                    let mut metrics_guard = metrics.lock().unwrap();
+                    let mut metrics_guard = metrics.lock().unwrap_or_else(|e| e.into_inner());
                     metrics_guard.memory_snapshots.push(memory_snapshot);
                 }
 
@@ -392,7 +392,7 @@ impl VoirsProfiler {
                 let io_measurement = Self::collect_io_measurement();
 
                 {
-                    let mut metrics_guard = metrics.lock().unwrap();
+                    let mut metrics_guard = metrics.lock().unwrap_or_else(|e| e.into_inner());
                     metrics_guard.io_measurements.push(io_measurement);
                 }
 
@@ -428,7 +428,7 @@ impl VoirsProfiler {
             while measurement_count < max_measurements {
                 if let Some(gpu_measurement) = Self::collect_gpu_measurement() {
                     {
-                        let mut metrics_guard = metrics.lock().unwrap();
+                        let mut metrics_guard = metrics.lock().unwrap_or_else(|e| e.into_inner());
                         metrics_guard.gpu_data.push(gpu_measurement);
                     }
                     measurement_count += 1;
@@ -470,7 +470,7 @@ impl VoirsProfiler {
         };
 
         {
-            let mut active_sessions = self.active_sessions.lock().unwrap();
+            let mut active_sessions = self.active_sessions.lock().unwrap_or_else(|e| e.into_inner());
             active_sessions.insert(session_id.clone(), session);
         }
 
@@ -486,7 +486,7 @@ impl VoirsProfiler {
 
         // Remove session
         {
-            let mut active_sessions = self.active_sessions.lock().unwrap();
+            let mut active_sessions = self.active_sessions.lock().unwrap_or_else(|e| e.into_inner());
             active_sessions.remove(&session_id);
         }
 
@@ -567,7 +567,7 @@ impl VoirsProfiler {
 
     /// Identify performance hotspots
     async fn identify_hotspots(&self) -> Vec<PerformanceHotspot> {
-        let metrics = self.metrics.lock().unwrap();
+        let metrics = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
         let mut hotspots = Vec::new();
 
         // Analyze function statistics to find hotspots
@@ -869,7 +869,7 @@ let processed = tensor.conv1d(&kernel, 1, 0, 1, 1)?;
     pub async fn export_profiling_data(&self, format: ExportFormat) -> Result<String> {
         info!("📤 Exporting profiling data in format: {:?}", format);
 
-        let metrics = self.metrics.lock().unwrap();
+        let metrics = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
 
         match format {
             ExportFormat::Json => {

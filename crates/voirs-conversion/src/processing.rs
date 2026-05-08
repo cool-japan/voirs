@@ -598,7 +598,8 @@ impl FeatureExtractor {
         let input = audio.to_vec();
         let mut output = vec![Complex::new(0.0, 0.0); audio.len() / 2 + 1];
 
-        fft.process(&input, &mut output);
+        fft.process(&input, &mut output)
+            .map_err(|e| Error::processing(e.to_string()))?;
 
         Ok(output.iter().map(|c| c.norm()).collect())
     }
