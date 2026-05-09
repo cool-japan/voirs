@@ -100,3 +100,5 @@ crates/voirs-recognizer/coverage-reports/
 crates/voirs-recognizer/coverage-report/
 crates/voirs-evaluation/audit_logs/*.jsonl
 crates/voirs-recognizer/tests/benchmarks/history.json
+
+target
