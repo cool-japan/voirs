@@ -119,7 +119,6 @@ fn test_correlation_test() -> Result<(), Box<dyn std::error::Error>> {
     let x: Vec<f32> = (1..=10).map(|i| i as f32).collect();
     let y: Vec<f32> = x.iter().map(|&val| 2.0 * val + 1.0).collect(); // Perfect linear relationship
 
-    // TODO: Implement correlation_test method
     let result = analyzer.correlation_test(&x, &y)?;
 
     // Should find significant correlation

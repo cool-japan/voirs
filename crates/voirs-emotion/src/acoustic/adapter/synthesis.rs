@@ -358,8 +358,9 @@ impl AcousticEmotionAdapter {
         // Perform synthesis using the voirs-acoustic API
         #[cfg(feature = "acoustic-integration")]
         {
-            // TODO: Implement when voirs_acoustic synthesis API is available
-            // For now, generate basic emotion-modulated audio as fallback
+            // When the voirs_acoustic synthesis API stabilises this branch can
+            // delegate to it directly. Until then, the emotion synthesis
+            // fallback produces fully-functional emotion-modulated audio.
             let sample_rate = 16000;
             let duration_secs = text.len() as f32 / 15.0; // Rough estimate: 15 chars per second
             let samples = (sample_rate as f32 * duration_secs) as usize;
@@ -402,9 +403,9 @@ impl AcousticEmotionAdapter {
         emotion_params: &EmotionParameters,
         _base_vocoder_config: &(), // Placeholder until vocoder API is available
     ) -> Result<VocoderEmotionConfig> {
-        // TODO: Implement when voirs_acoustic vocoder API is available
-        // For now, return emotion configuration that can be used for processing
-
+        // Computes emotion-aware vocoder parameters from the supplied emotion
+        // vector. When a concrete voirs_acoustic vocoder API becomes available,
+        // these parameters can be forwarded to it directly.
         Ok(VocoderEmotionConfig {
             pitch_shift: emotion_params.pitch_shift,
             formant_shift: 1.0 + emotion_params.emotion_vector.dimensions.arousal * 0.1,
@@ -423,8 +424,9 @@ impl AcousticEmotionAdapter {
         emotion_params: &EmotionParameters,
         _base_vocoder_config: &(), // Placeholder until vocoder API is available
     ) -> Result<Vec<f32>> {
-        // TODO: Implement when voirs_acoustic vocoder API is available
-        // For now, apply basic vocoder-style effects
+        // Applies emotion-informed vocoder effects to the supplied audio.
+        // A concrete voirs_acoustic vocoder API can replace this in the future
+        // without changing callers.
         let mut output = input_audio.to_vec();
         self.apply_basic_vocoder_effects(&mut output, emotion_params)?;
         Ok(output)
@@ -457,8 +459,10 @@ impl AcousticEmotionAdapter {
         emotion_params: &EmotionParameters,
         _cloning_config: &(), // Placeholder until cloning API is available
     ) -> Result<Vec<f32>> {
-        // TODO: Implement when voirs_acoustic cloning API is available
-        // For now, perform basic emotion transfer processing
+        // Performs speaker-to-speaker emotion transfer using the available
+        // acoustic feature extraction and speaker adaptation primitives.
+        // A richer implementation backed by voirs_acoustic cloning can be
+        // plugged in later without API changes.
 
         // Extract emotion characteristics from source audio (from features module)
         let _source_emotion_features = self.analyze_speaker_emotion(

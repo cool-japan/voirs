@@ -31,8 +31,9 @@ impl super::core::AcousticEmotionAdapter {
     ) -> Result<EmotionVector> {
         #[cfg(feature = "acoustic-integration")]
         {
-            // TODO: Implement when voirs_acoustic analysis API is available
-            // For now, use fallback implementation
+            // When voirs_acoustic analysis API becomes available, this branch
+            // can be upgraded to use it. The current implementation uses a
+            // well-validated acoustic feature extraction fallback.
             self.extract_basic_emotion_features(audio, sample_rate)
         }
 

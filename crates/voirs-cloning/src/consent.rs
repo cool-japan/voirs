@@ -163,7 +163,7 @@ pub struct ConsentVerification {
 }
 
 /// Methods for verifying consent
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ConsentVerificationMethod {
     /// Digital signature
     DigitalSignature,
@@ -897,6 +897,66 @@ impl ConsentManager {
         }
     }
 
+    /// Get all consent records for a specific user (GDPR right of access).
+    ///
+    /// Returns all consent records associated with the given `subject_id`.
+    /// This is an alias for [`get_consents_by_subject`][Self::get_consents_by_subject]
+    /// that matches the naming convention expected by compliance tests.
+    pub fn get_user_consents(&self, subject_id: &str) -> Vec<&ConsentRecord> {
+        self.get_consents_by_subject(subject_id)
+    }
+
+    /// Delete all data associated with a subject (GDPR / CCPA right to erasure).
+    ///
+    /// Removes every consent record linked to `subject_id` from both the primary
+    /// consent store and the subject index. Returns the number of records deleted.
+    ///
+    /// Note: Audit log entries are intentionally preserved for legal and regulatory
+    /// purposes; only personally-identifiable consent data is erased.
+    pub fn delete_user_data(&mut self, subject_id: &str) -> Result<usize> {
+        let consent_ids: Vec<Uuid> = self
+            .subject_index
+            .remove(subject_id)
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+
+        let deleted = consent_ids.len();
+
+        for id in &consent_ids {
+            self.consent_store.remove(id);
+        }
+
+        // Log the deletion event if an audit logger is configured.
+        if let Some(ref logger) = self.audit_logger {
+            for id in consent_ids {
+                let action = ConsentAuditAction {
+                    action_id: Uuid::new_v4(),
+                    consent_id: id,
+                    action_type: ConsentActionType::ConsentRevoked,
+                    actor: "system:gdpr_erasure".to_string(),
+                    timestamp: SystemTime::now(),
+                    details: {
+                        let mut d = HashMap::new();
+                        d.insert(
+                            "reason".to_string(),
+                            format!(
+                                "User data deletion request for subject {subject_id}"
+                            ),
+                        );
+                        d
+                    },
+                    ip_address: None,
+                    user_agent: None,
+                };
+                // Best-effort: ignore logging errors so erasure always succeeds.
+                let _ = logger.log_consent_action(action);
+            }
+        }
+
+        Ok(deleted)
+    }
+
     /// Export consent record for compliance
     pub fn export_consent(&self, consent_id: Uuid) -> Result<String> {
         let consent = self
@@ -1125,5 +1185,78 @@ mod tests {
             .check_consent_for_use(consent_id, "commercial", &context)
             .unwrap();
         assert!(matches!(result, ConsentUsageResult::Denied(_)));
+    }
+
+    #[test]
+    fn test_get_user_consents_returns_records() {
+        let mut manager = ConsentManager::new();
+        let subject_id = "test-gdpr-subject";
+
+        // No records yet — should return an empty list.
+        assert!(manager.get_user_consents(subject_id).is_empty());
+
+        // Create a consent record.
+        let _id = manager
+            .create_consent(SubjectIdentity {
+                subject_id: subject_id.to_string(),
+                verification_method: IdentityVerificationMethod::DigitalSignature,
+                verification_status: VerificationStatus::Verified,
+                biometric_hash: None,
+                encrypted_name: None,
+                encrypted_contact: None,
+            })
+            .expect("create consent should succeed");
+
+        let consents = manager.get_user_consents(subject_id);
+        assert_eq!(consents.len(), 1);
+        assert_eq!(consents[0].subject_identity.subject_id, subject_id);
+    }
+
+    #[test]
+    fn test_delete_user_data_erases_all_consents() {
+        let mut manager = ConsentManager::new();
+        let subject_id = "test-erasure-subject";
+
+        // Create two consent records for the same subject.
+        let _id1 = manager
+            .create_consent(SubjectIdentity {
+                subject_id: subject_id.to_string(),
+                verification_method: IdentityVerificationMethod::DigitalSignature,
+                verification_status: VerificationStatus::Verified,
+                biometric_hash: None,
+                encrypted_name: None,
+                encrypted_contact: None,
+            })
+            .expect("create first consent");
+        let _id2 = manager
+            .create_consent(SubjectIdentity {
+                subject_id: subject_id.to_string(),
+                verification_method: IdentityVerificationMethod::DigitalSignature,
+                verification_status: VerificationStatus::Verified,
+                biometric_hash: None,
+                encrypted_name: None,
+                encrypted_contact: None,
+            })
+            .expect("create second consent");
+
+        assert_eq!(manager.get_user_consents(subject_id).len(), 2);
+
+        // Delete all data for this subject.
+        let deleted = manager
+            .delete_user_data(subject_id)
+            .expect("delete_user_data should succeed");
+        assert_eq!(deleted, 2);
+
+        // Records should be gone.
+        assert!(manager.get_user_consents(subject_id).is_empty());
+    }
+
+    #[test]
+    fn test_delete_user_data_unknown_subject_returns_zero() {
+        let mut manager = ConsentManager::new();
+        let deleted = manager
+            .delete_user_data("non-existent-subject")
+            .expect("delete on unknown subject is not an error");
+        assert_eq!(deleted, 0);
     }
 }

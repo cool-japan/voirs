@@ -1004,6 +1004,81 @@ impl UsageTracker {
             generated_at: SystemTime::now(),
         })
     }
+
+    /// Retrieve the audit trail for a user over a rolling window (SOX / compliance).
+    ///
+    /// Returns up to all [`AuditEntry`] records belonging to `user_id` whose
+    /// `timestamp` falls within the last `days` calendar days.
+    /// The returned list is sorted oldest-first and is never empty when records
+    /// exist (callers may check `.is_empty()` to distinguish "no activity" from errors).
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` – subject whose records to retrieve
+    /// * `days` – look-back window in days (e.g. `30` → last 30 days)
+    pub async fn get_audit_trail(&self, user_id: &str, days: u32) -> Result<Vec<AuditEntry>> {
+        let cutoff = SystemTime::now()
+            .checked_sub(Duration::from_secs(u64::from(days) * 86_400))
+            .ok_or_else(|| {
+                Error::InvalidInput(format!(
+                    "Overflow computing audit window for {days} days"
+                ))
+            })?;
+
+        let filters = UsageQueryFilters {
+            user_id: Some(user_id.to_string()),
+            application_id: None,
+            limit: None,
+            operation_type: None,
+            start_time: Some(cutoff),
+            end_time: None,
+            status: None,
+        };
+
+        let records = self.query_usage_records(&filters)?;
+
+        let mut entries: Vec<AuditEntry> = records
+            .into_iter()
+            .map(|r| AuditEntry {
+                entry_id: r.usage_id,
+                user_id: r
+                    .user_context
+                    .user_id
+                    .clone()
+                    .unwrap_or_else(|| user_id.to_string()),
+                operation_type: format!("{:?}", r.operation.operation_type),
+                speaker_id: r
+                    .operation
+                    .speaker_id
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_string()),
+                timestamp: r.timestamps.request_received,
+                outcome: format!("{:?}", r.outcome.status),
+                application_id: r.user_context.application_id.clone(),
+                metadata: r.metadata.clone(),
+            })
+            .collect();
+
+        // Sort oldest-first for chronological audit review.
+        // SystemTime doesn't implement Ord, so we use a stable comparison via
+        // duration_since(UNIX_EPOCH). Entries with pre-epoch timestamps (which
+        // should never occur in practice) are sorted to the front.
+        entries.sort_by(|a, b| {
+            let a_secs = a
+                .timestamp
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let b_secs = b
+                .timestamp
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            a_secs.cmp(&b_secs)
+        });
+
+        Ok(entries)
+    }
 }
 /// User preferences for operations
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1061,4 +1136,119 @@ pub struct MemoryUsage {
     pub average_memory_mb: f64,
     pub memory_allocated_mb: f64,
     pub memory_freed_mb: f64,
+}
+
+/// A single entry in an immutable audit trail.
+///
+/// Produced by [`UsageTracker::get_audit_trail`] for SOX / GDPR compliance
+/// reporting. Each entry corresponds to one completed (or in-progress) voice
+/// cloning operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditEntry {
+    /// Unique identifier matching the source [`UsageRecord::usage_id`]
+    pub entry_id: Uuid,
+    /// Subject / user who initiated the operation
+    pub user_id: String,
+    /// Human-readable operation type (e.g. `"SynthesisGeneration"`)
+    pub operation_type: String,
+    /// Speaker profile that was used
+    pub speaker_id: String,
+    /// Wall-clock time the request was received
+    pub timestamp: SystemTime,
+    /// Human-readable outcome (e.g. `"Success"`, `"Failed"`)
+    pub outcome: String,
+    /// Originating application identifier
+    pub application_id: String,
+    /// Additional key-value metadata forwarded from the usage record
+    pub metadata: HashMap<String, String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::usage_tracking::UsageTrackingConfig;
+
+    #[tokio::test]
+    async fn test_get_audit_trail_empty_for_new_tracker() {
+        let config = UsageTrackingConfig::default();
+        let tracker = UsageTracker::new(config);
+        let trail = tracker
+            .get_audit_trail("user-no-history", 30)
+            .await
+            .expect("get_audit_trail should not fail");
+        assert!(
+            trail.is_empty(),
+            "Audit trail should be empty for a user with no operations"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_audit_trail_includes_recent_operations() {
+        let config = UsageTrackingConfig::default();
+        let tracker = UsageTracker::new(config);
+
+        let user_id = "audit-trail-user";
+        let speaker_id = "speaker-xyz";
+
+        // Record an operation.
+        let _record = tracker
+            .start_operation(
+                user_id.to_string(),
+                speaker_id.to_string(),
+                CloningOperationType::SynthesisGeneration,
+            )
+            .await
+            .expect("start_operation should succeed");
+
+        let trail = tracker
+            .get_audit_trail(user_id, 30)
+            .await
+            .expect("get_audit_trail should succeed");
+
+        assert_eq!(trail.len(), 1);
+        assert_eq!(trail[0].user_id, user_id);
+        assert_eq!(trail[0].speaker_id, speaker_id);
+    }
+
+    #[tokio::test]
+    async fn test_get_audit_trail_filters_by_user() {
+        let config = UsageTrackingConfig::default();
+        let tracker = UsageTracker::new(config);
+
+        let user_a = "audit-user-a";
+        let user_b = "audit-user-b";
+        let speaker_id = "sp-001";
+
+        tracker
+            .start_operation(
+                user_a.to_string(),
+                speaker_id.to_string(),
+                CloningOperationType::SynthesisGeneration,
+            )
+            .await
+            .expect("start_operation for user_a");
+
+        tracker
+            .start_operation(
+                user_b.to_string(),
+                speaker_id.to_string(),
+                CloningOperationType::SynthesisGeneration,
+            )
+            .await
+            .expect("start_operation for user_b");
+
+        let trail_a = tracker
+            .get_audit_trail(user_a, 30)
+            .await
+            .expect("trail for user_a");
+        let trail_b = tracker
+            .get_audit_trail(user_b, 30)
+            .await
+            .expect("trail for user_b");
+
+        assert_eq!(trail_a.len(), 1, "User A should have exactly 1 audit entry");
+        assert_eq!(trail_b.len(), 1, "User B should have exactly 1 audit entry");
+        assert_eq!(trail_a[0].user_id, user_a);
+        assert_eq!(trail_b[0].user_id, user_b);
+    }
 }
