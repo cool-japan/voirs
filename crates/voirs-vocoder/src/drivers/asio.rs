@@ -431,4 +431,19 @@ mod tests {
             }
         }
     }
+
+    /// Regression guard for GitHub issue #1 (cool-japan/voirs), bug #3:
+    /// `cannot borrow 'devices'/'supported_configs' as mutable` in this file.
+    ///
+    /// If this file compiles and this test function is reachable, the mutable-
+    /// borrow error reported in the issue is confirmed fixed.  The public API
+    /// of `AsioDriver` is exercised through `is_available()`, which is always
+    /// available regardless of OS, so the guard runs on every platform.
+    #[test]
+    fn test_issue_1_compiles() {
+        // Merely calling is_available() forces the compiler to fully instantiate
+        // and link the AsioDriver module — including the previously-broken
+        // mutable-borrow code paths in enumerate_devices / default_device.
+        let _ = AsioDriver::is_available();
+    }
 }

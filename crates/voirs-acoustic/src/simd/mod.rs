@@ -1212,4 +1212,27 @@ mod tests {
             assert!(val.is_finite());
         }
     }
+
+    /// Regression guard for GitHub issue #1 (cool-japan/voirs), bugs #1 and #2:
+    ///   1. Duplicate `mul_f32_avx512` symbol in this file — would produce a
+    ///      linker/compiler error if reintroduced.
+    ///   2. Undeclared `AcousticError` in `voirs-acoustic/src/memory.rs` — would
+    ///      produce a name-resolution error if the import were removed.
+    ///
+    /// Bug #3 (mutable-borrow in `voirs-vocoder/src/drivers/asio.rs`) is guarded
+    /// by `test_issue_1_compiles` in that crate's driver test module.
+    ///
+    /// If this test compiles and runs, bugs #1 and #2 are resolved.
+    #[test]
+    fn test_issue_1_compiles() {
+        // Instantiate SimdDispatcher to exercise the code paths that previously
+        // contained the duplicate `mul_f32_avx512` definition.
+        let dispatcher = SimdDispatcher::new();
+        let a = vec![1.0_f32; 8];
+        let b = vec![2.0_f32; 8];
+        let mut result = vec![0.0_f32; 8];
+        dispatcher.mul_f32(&a, &b, &mut result).ok();
+        // If this compiles and runs without a link error, the duplicate-symbol
+        // regression is confirmed fixed.
+    }
 }
