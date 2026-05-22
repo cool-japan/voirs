@@ -161,7 +161,10 @@ async fn test_error_recovery_manager() {
     let result = manager.execute_with_recovery("synthesis", operation).await;
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "success");
-    assert_eq!(*operation_count.lock().unwrap_or_else(|e| e.into_inner()), 3);
+    assert_eq!(
+        *operation_count.lock().unwrap_or_else(|e| e.into_inner()),
+        3
+    );
 }
 
 #[test]

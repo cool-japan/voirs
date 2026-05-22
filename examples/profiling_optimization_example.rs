@@ -470,7 +470,10 @@ impl VoirsProfiler {
         };
 
         {
-            let mut active_sessions = self.active_sessions.lock().unwrap_or_else(|e| e.into_inner());
+            let mut active_sessions = self
+                .active_sessions
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             active_sessions.insert(session_id.clone(), session);
         }
 
@@ -486,7 +489,10 @@ impl VoirsProfiler {
 
         // Remove session
         {
-            let mut active_sessions = self.active_sessions.lock().unwrap_or_else(|e| e.into_inner());
+            let mut active_sessions = self
+                .active_sessions
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             active_sessions.remove(&session_id);
         }
 

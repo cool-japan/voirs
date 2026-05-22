@@ -666,7 +666,10 @@ impl OAuth2Manager {
                     refresh_token_expiry: Duration::days(30),
                 }
             }
-            OAuth2Provider::Custom { ref name, ref base_url } => {
+            OAuth2Provider::Custom {
+                ref name,
+                ref base_url,
+            } => {
                 let env_prefix = name.to_uppercase().replace('-', "_");
                 OAuth2Config {
                     provider: provider.clone(),
@@ -677,7 +680,10 @@ impl OAuth2Manager {
                     redirect_uri: format!("http://localhost:3000/auth/callback/{}", name),
                     authorization_endpoint: format!("{}/authorize", base_url.trim_end_matches('/')),
                     token_endpoint: format!("{}/oauth/token", base_url.trim_end_matches('/')),
-                    user_info_endpoint: Some(format!("{}/userinfo", base_url.trim_end_matches('/'))),
+                    user_info_endpoint: Some(format!(
+                        "{}/userinfo",
+                        base_url.trim_end_matches('/')
+                    )),
                     scopes: vec![
                         String::from("openid"),
                         String::from("email"),
@@ -826,7 +832,10 @@ mod tests {
             config.authorization_endpoint,
             "https://tenant.auth0.com/authorize"
         );
-        assert_eq!(config.token_endpoint, "https://tenant.auth0.com/oauth/token");
+        assert_eq!(
+            config.token_endpoint,
+            "https://tenant.auth0.com/oauth/token"
+        );
         assert!(config.enable_pkce);
         unsafe { std::env::remove_var("AUTH0_DOMAIN") };
     }

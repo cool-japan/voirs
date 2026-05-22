@@ -376,12 +376,14 @@ impl ModelLoadingManager {
 
         // Search well-known directories.
         let search_dirs: Vec<PathBuf> = {
-            let mut dirs = vec![
-                PathBuf::from("."),
-                PathBuf::from("models"),
-            ];
+            let mut dirs = vec![PathBuf::from("."), PathBuf::from("models")];
             if let Ok(home) = std::env::var("HOME") {
-                dirs.push(PathBuf::from(home).join(".cache").join("voirs").join("models"));
+                dirs.push(
+                    PathBuf::from(home)
+                        .join(".cache")
+                        .join("voirs")
+                        .join("models"),
+                );
             }
             dirs
         };
@@ -400,8 +402,7 @@ impl ModelLoadingManager {
 
         Err(Error::Model(format!(
             "Model file not found for id '{}'. Searched: {:?}",
-            model_id,
-            search_dirs
+            model_id, search_dirs
         )))
     }
 
@@ -420,9 +421,7 @@ impl ModelLoadingManager {
 
         info!(model_id = %model_id, path = %path.display(), "Loading model directly into memory");
 
-        let bytes = std::fs::read(&path).map_err(|e| {
-            Error::Io(e)
-        })?;
+        let bytes = std::fs::read(&path).map_err(|e| Error::Io(e))?;
 
         let size_bytes = bytes.len();
         debug!(model_id = %model_id, size_bytes, "Direct load: read {} bytes", size_bytes);
@@ -554,32 +553,32 @@ impl ModelLoadingManager {
         let raw_len = raw_bytes.len();
 
         // Detect compression format from magic bytes.
-        let (decompressed, compressed_label): (Vec<u8>, &str) =
-            if raw_bytes.len() >= 2 && raw_bytes[0] == 0x1f && raw_bytes[1] == 0x8b {
-                debug!(model_id = %model_id, "Detected gzip magic bytes, decompressing with oxiarc-deflate");
-                let data = gzip_decompress(&raw_bytes).map_err(|e| {
-                    Error::Processing(format!("gzip decompression failed: {}", e))
-                })?;
-                (data, "gzip")
-            } else if raw_bytes.len() >= 4
-                && raw_bytes[0] == 0x28
-                && raw_bytes[1] == 0xb5
-                && raw_bytes[2] == 0x2f
-                && raw_bytes[3] == 0xfd
-            {
-                debug!(model_id = %model_id, "Detected zstd magic bytes, decompressing with oxiarc-zstd");
-                let data = zstd_decompress(&raw_bytes).map_err(|e| {
-                    Error::Processing(format!("zstd decompression failed: {}", e))
-                })?;
-                (data, "zstd")
-            } else {
-                // Not a recognised compressed format; treat as raw.
-                warn!(
-                    model_id = %model_id,
-                    "No recognised compression magic bytes found; treating as uncompressed"
-                );
-                (raw_bytes.clone(), "none")
-            };
+        let (decompressed, compressed_label): (Vec<u8>, &str) = if raw_bytes.len() >= 2
+            && raw_bytes[0] == 0x1f
+            && raw_bytes[1] == 0x8b
+        {
+            debug!(model_id = %model_id, "Detected gzip magic bytes, decompressing with oxiarc-deflate");
+            let data = gzip_decompress(&raw_bytes)
+                .map_err(|e| Error::Processing(format!("gzip decompression failed: {}", e)))?;
+            (data, "gzip")
+        } else if raw_bytes.len() >= 4
+            && raw_bytes[0] == 0x28
+            && raw_bytes[1] == 0xb5
+            && raw_bytes[2] == 0x2f
+            && raw_bytes[3] == 0xfd
+        {
+            debug!(model_id = %model_id, "Detected zstd magic bytes, decompressing with oxiarc-zstd");
+            let data = zstd_decompress(&raw_bytes)
+                .map_err(|e| Error::Processing(format!("zstd decompression failed: {}", e)))?;
+            (data, "zstd")
+        } else {
+            // Not a recognised compressed format; treat as raw.
+            warn!(
+                model_id = %model_id,
+                "No recognised compression magic bytes found; treating as uncompressed"
+            );
+            (raw_bytes.clone(), "none")
+        };
 
         let decompressed_len = decompressed.len();
         let compression_ratio = if decompressed_len > 0 {

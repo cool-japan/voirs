@@ -1020,9 +1020,7 @@ impl UsageTracker {
         let cutoff = SystemTime::now()
             .checked_sub(Duration::from_secs(u64::from(days) * 86_400))
             .ok_or_else(|| {
-                Error::InvalidInput(format!(
-                    "Overflow computing audit window for {days} days"
-                ))
+                Error::InvalidInput(format!("Overflow computing audit window for {days} days"))
             })?;
 
         let filters = UsageQueryFilters {

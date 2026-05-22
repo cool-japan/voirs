@@ -940,9 +940,7 @@ impl ConsentManager {
                         let mut d = HashMap::new();
                         d.insert(
                             "reason".to_string(),
-                            format!(
-                                "User data deletion request for subject {subject_id}"
-                            ),
+                            format!("User data deletion request for subject {subject_id}"),
                         );
                         d
                     },

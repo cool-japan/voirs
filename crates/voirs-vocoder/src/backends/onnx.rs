@@ -3,7 +3,10 @@
 //! This module provides ONNX-based implementations for neural vocoders,
 //! enabling high-performance audio generation using pre-trained models.
 
-use crate::{AudioBuffer, MelSpectrogram, Result, Vocoder, VocoderError, VocoderMetadata, VocoderFeature, SynthesisConfig};
+use crate::{
+    AudioBuffer, MelSpectrogram, Result, SynthesisConfig, Vocoder, VocoderError, VocoderFeature,
+    VocoderMetadata,
+};
 use async_trait::async_trait;
 use oxionnx::{OptLevel, Session, Tensor};
 use std::{
@@ -134,13 +137,13 @@ impl OnnxVocoder {
         if config.enable_profiling.unwrap_or(false) {
             builder = builder.with_profiling();
         }
-        let session = builder.load(&config.model_path)
-            .map_err(|e| VocoderError::ModelError(
-                format!("Failed to load ONNX vocoder model: {e}"),
-            ))?;
+        let session = builder.load(&config.model_path).map_err(|e| {
+            VocoderError::ModelError(format!("Failed to load ONNX vocoder model: {e}"))
+        })?;
 
         // Extract model metadata
-        let (metadata, onnx_details) = Self::extract_metadata(&session, &config.model_path, &config.audio_config)?;
+        let (metadata, onnx_details) =
+            Self::extract_metadata(&session, &config.model_path, &config.audio_config)?;
 
         info!("OxiONNX vocoder loaded successfully: {}", metadata.name);
         debug!("Vocoder metadata: {:?}", metadata);
@@ -179,8 +182,8 @@ impl OnnxVocoder {
             version: "1.0.0".to_string(),
             architecture: "ONNX".to_string(),
             sample_rate: audio_config.sample_rate,
-            mel_channels: 80, // Standard mel dimension
-            latency_ms: 10.0, // Estimated latency
+            mel_channels: 80,   // Standard mel dimension
+            latency_ms: 10.0,   // Estimated latency
             quality_score: 4.0, // Good quality score
         };
 
@@ -199,7 +202,10 @@ impl OnnxVocoder {
     }
 
     /// Prepare input tensors for OxiONNX inference
-    async fn prepare_inputs(&self, mel_spectrogram: &MelSpectrogram) -> Result<HashMap<&str, Tensor>> {
+    async fn prepare_inputs(
+        &self,
+        mel_spectrogram: &MelSpectrogram,
+    ) -> Result<HashMap<&str, Tensor>> {
         let mut inputs = HashMap::new();
 
         // Convert mel spectrogram to tensor format
@@ -217,7 +223,10 @@ impl OnnxVocoder {
         let mel_tensor = Tensor::new(mel_data, vec![1, mel_dim, time_steps]);
 
         // Use the first input name from the model
-        let input_name = self.onnx_details.input_names.first()
+        let input_name = self
+            .onnx_details
+            .input_names
+            .first()
             .map(|s| s.as_str())
             .unwrap_or("mel");
         inputs.insert(input_name, mel_tensor);
@@ -234,10 +243,10 @@ impl OnnxVocoder {
         }
 
         // Extract audio from first output
-        let audio_tensor = outputs.values().next()
-            .ok_or_else(|| VocoderError::ModelError(
-                "No output tensor found".to_string(),
-            ))?;
+        let audio_tensor = outputs
+            .values()
+            .next()
+            .ok_or_else(|| VocoderError::ModelError("No output tensor found".to_string()))?;
 
         let shape = &audio_tensor.shape;
         let audio_samples = if shape.len() == 1 {
@@ -250,9 +259,10 @@ impl OnnxVocoder {
             // Shape: [1, 1, samples] - remove batch and channel dimensions
             audio_tensor.data.clone()
         } else {
-            return Err(VocoderError::ModelError(
-                format!("Unexpected audio output shape: {:?}", shape),
-            ));
+            return Err(VocoderError::ModelError(format!(
+                "Unexpected audio output shape: {:?}",
+                shape
+            )));
         };
 
         // Apply audio scaling and clipping
@@ -361,7 +371,7 @@ impl OnnxVocoder {
 
         // Convert semitones to pitch ratio
         let pitch_ratio = 2.0f32.powf(pitch_shift / 12.0);
-        
+
         // Clamp pitch shift to reasonable ranges to avoid extreme artifacts
         let clamped_pitch_ratio = pitch_ratio.clamp(0.5, 2.0);
 
@@ -449,9 +459,7 @@ impl Vocoder for OnnxVocoder {
         let outputs = self
             .session
             .run(&inputs)
-            .map_err(|e| VocoderError::ModelError(
-                format!("ONNX vocoder inference failed: {e}"),
-            ))?;
+            .map_err(|e| VocoderError::ModelError(format!("ONNX vocoder inference failed: {e}")))?;
 
         // Process outputs
         let mut audio_buffer = self.process_outputs(&outputs)?;
@@ -506,12 +514,9 @@ impl Vocoder for OnnxVocoder {
             // Prepare input, run inference, process output.
             let audio_result = async {
                 let inputs = self.prepare_inputs(&mel).await?;
-                let outputs = self
-                    .session
-                    .run(&inputs)
-                    .map_err(|e| VocoderError::ModelError(
-                        format!("ONNX streaming inference failed: {e}"),
-                    ))?;
+                let outputs = self.session.run(&inputs).map_err(|e| {
+                    VocoderError::ModelError(format!("ONNX streaming inference failed: {e}"))
+                })?;
                 let mut audio_buffer = self.process_outputs(&outputs)?;
                 if let Some(cfg) = config {
                     audio_buffer = self.apply_synthesis_config(&audio_buffer, cfg)?;
@@ -537,13 +542,13 @@ impl Vocoder for OnnxVocoder {
         configs: Option<&[SynthesisConfig]>,
     ) -> Result<Vec<AudioBuffer>> {
         let mut results = Vec::with_capacity(mels.len());
-        
+
         for (i, mel) in mels.iter().enumerate() {
             let config = configs.and_then(|c| c.get(i));
             let audio = self.vocode(mel, config).await?;
             results.push(audio);
         }
-        
+
         Ok(results)
     }
 
@@ -564,7 +569,6 @@ impl Vocoder for OnnxVocoder {
         }
     }
 }
-
 
 /// Builder for ONNX vocoder
 pub struct OnnxVocoderBuilder {
@@ -624,9 +628,10 @@ impl OnnxVocoderBuilder {
     /// Build the vocoder
     pub async fn build(self) -> Result<OnnxVocoder> {
         if !self.config.model_path.exists() {
-            return Err(VocoderError::ModelError(
-                format!("Vocoder model file not found: {:?}", self.config.model_path),
-            ));
+            return Err(VocoderError::ModelError(format!(
+                "Vocoder model file not found: {:?}",
+                self.config.model_path
+            )));
         }
 
         OnnxVocoder::new(self.config).await
@@ -735,18 +740,14 @@ impl crate::backends::Backend for OnnxBackend {
     async fn inference(&self, mel: &MelSpectrogram) -> Result<AudioBuffer> {
         match &self.vocoder {
             Some(vocoder) => vocoder.vocode(mel, None).await,
-            None => Err(VocoderError::ModelError(
-                "Model not loaded".to_string(),
-            )),
+            None => Err(VocoderError::ModelError("Model not loaded".to_string())),
         }
     }
 
     async fn batch_inference(&self, mels: &[MelSpectrogram]) -> Result<Vec<AudioBuffer>> {
         match &self.vocoder {
             Some(vocoder) => vocoder.vocode_batch(mels, None).await,
-            None => Err(VocoderError::ModelError(
-                "Model not loaded".to_string(),
-            )),
+            None => Err(VocoderError::ModelError("Model not loaded".to_string())),
         }
     }
 
@@ -865,7 +866,7 @@ mod tests {
 
     #[test]
     fn test_synthesis_config_application() {
-        use crate::{SynthesisConfig, AudioBuffer};
+        use crate::{AudioBuffer, SynthesisConfig};
 
         // Create mock vocoder for testing synthesis configuration
         let mock_test = || {

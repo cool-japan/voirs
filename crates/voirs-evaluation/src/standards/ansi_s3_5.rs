@@ -285,7 +285,8 @@ impl AnsiS35Evaluator {
                 buffer.resize(fft_size, 0.0);
 
                 let mut spectrum = vec![scirs2_core::Complex::new(0.0, 0.0); fft_size / 2 + 1];
-                fft.process(&mut buffer, &mut spectrum).map_err(|e| StandardsError::Other(e.to_string()))?;
+                fft.process(&mut buffer, &mut spectrum)
+                    .map_err(|e| StandardsError::Other(e.to_string()))?;
 
                 // Sum power in band bins
                 for bin in lower_bin..=upper_bin.min(spectrum.len() - 1) {

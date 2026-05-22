@@ -712,8 +712,12 @@ impl ModelOptimizer {
                 let zero_point = zero_point_raw.clamp(0.0, 255.0) as u8;
 
                 // Quantise the range boundaries as a sanity check.
-                let q_min = (min_w / scale + zero_point as f32).round().clamp(0.0, 255.0) as u8;
-                let q_max = (max_w / scale + zero_point as f32).round().clamp(0.0, 255.0) as u8;
+                let q_min = (min_w / scale + zero_point as f32)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+                let q_max = (max_w / scale + zero_point as f32)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
 
                 DynamicQuantTensor {
                     layer_name: name.to_string(),
@@ -837,11 +841,12 @@ impl ModelOptimizer {
         _model: Arc<dyn AcousticModel>,
     ) -> Result<Arc<dyn AcousticModel>> {
         Err(AcousticError::ProcessingError {
-            message: "Fisher pruning requires per-parameter gradient information (gradient²) which \
+            message:
+                "Fisher pruning requires per-parameter gradient information (gradient²) which \
                       is not exposed by the AcousticModel trait.  Use magnitude pruning or \
                       extend the trait with a get_gradients() method before applying Fisher \
                       pruning."
-                .to_string(),
+                    .to_string(),
         })
     }
 
@@ -877,7 +882,7 @@ impl ModelOptimizer {
         });
 
         let batch_size = (n / 10).max(1); // 10% batches
-        // Perplexity proxy tolerance: stop if synthetic "cost" rises > 5%.
+                                          // Perplexity proxy tolerance: stop if synthetic "cost" rises > 5%.
         let max_proxy_degradation: f32 = 0.05;
         let mut zeroed = 0usize;
 
@@ -918,7 +923,11 @@ impl ModelOptimizer {
             .filter(|&&v| v != 0.0)
             .map(|&v| v.abs())
             .fold(f32::INFINITY, f32::min);
-        let final_threshold = if threshold.is_infinite() { 0.0 } else { threshold };
+        let final_threshold = if threshold.is_infinite() {
+            0.0
+        } else {
+            threshold
+        };
 
         tracing::info!(
             model = %metadata.name,
@@ -1174,9 +1183,7 @@ pub enum OptimizationTransform {
         assignments: Vec<MixedPrecisionLayerAssignment>,
     },
     /// Dynamic per-tensor quantization.
-    Dynamic {
-        per_tensor: Vec<DynamicQuantTensor>,
-    },
+    Dynamic { per_tensor: Vec<DynamicQuantTensor> },
     /// Magnitude pruning statistics.
     MagnitudePruning {
         threshold: f32,
@@ -1252,9 +1259,10 @@ impl AcousticModel for OptimizedModelWrapper {
         // for the wrapper we propagate a ProcessingError explaining the constraint.
         let _ = speaker_id;
         Err(AcousticError::ProcessingError {
-            message: "set_speaker is not forwarded through OptimizedModelWrapper because the inner \
+            message:
+                "set_speaker is not forwarded through OptimizedModelWrapper because the inner \
                       model is held as Arc<dyn AcousticModel>. Unwrap the inner model first."
-                .to_string(),
+                    .to_string(),
         })
     }
 }

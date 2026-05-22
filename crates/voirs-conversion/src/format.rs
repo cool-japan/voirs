@@ -701,10 +701,8 @@ impl AudioReader {
 
     /// Read WAV file using hound
     fn read_wav_placeholder<P: AsRef<Path>>(path: P) -> Result<AudioData> {
-        let mut reader =
-            hound::WavReader::open(path.as_ref()).map_err(|e| {
-                Error::audio(format!("Failed to open WAV file: {e}"))
-            })?;
+        let mut reader = hound::WavReader::open(path.as_ref())
+            .map_err(|e| Error::audio(format!("Failed to open WAV file: {e}")))?;
 
         let spec = reader.spec();
         let sample_rate = spec.sample_rate;
@@ -714,9 +712,7 @@ impl AudioReader {
         let samples: Vec<f32> = match spec.sample_format {
             hound::SampleFormat::Float => reader
                 .samples::<f32>()
-                .map(|s| {
-                    s.map_err(|e| Error::audio(format!("WAV sample read error: {e}")))
-                })
+                .map(|s| s.map_err(|e| Error::audio(format!("WAV sample read error: {e}"))))
                 .collect::<Result<Vec<f32>>>()?,
             hound::SampleFormat::Int => {
                 let max_val = (1i64 << (bits_per_sample - 1)) as f32;
@@ -768,9 +764,7 @@ impl AudioReader {
         let samples: Vec<f32> = match spec.sample_format {
             hound::SampleFormat::Float => reader
                 .samples::<f32>()
-                .map(|s| {
-                    s.map_err(|e| Error::audio(format!("WAV sample read error: {e}")))
-                })
+                .map(|s| s.map_err(|e| Error::audio(format!("WAV sample read error: {e}"))))
                 .collect::<Result<Vec<f32>>>()?,
             hound::SampleFormat::Int => {
                 let max_val = (1i64 << (bits_per_sample - 1)) as f32;

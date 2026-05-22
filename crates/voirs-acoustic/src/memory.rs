@@ -1023,11 +1023,17 @@ mod tests {
         // First access loads the component
         let data = lazy_comp.get().unwrap();
         assert!(lazy_comp.is_loaded());
-        assert_eq!(*data.lock().unwrap_or_else(|e| e.into_inner()), Some("loaded_1".to_string()));
+        assert_eq!(
+            *data.lock().unwrap_or_else(|e| e.into_inner()),
+            Some("loaded_1".to_string())
+        );
 
         // Second access uses cached value
         let data2 = lazy_comp.get().unwrap();
-        assert_eq!(*data2.lock().unwrap_or_else(|e| e.into_inner()), Some("loaded_1".to_string()));
+        assert_eq!(
+            *data2.lock().unwrap_or_else(|e| e.into_inner()),
+            Some("loaded_1".to_string())
+        );
 
         // Counter should only be incremented once
         assert_eq!(*counter.lock().unwrap_or_else(|e| e.into_inner()), 1);
@@ -1037,7 +1043,10 @@ mod tests {
         assert!(!lazy_comp.is_loaded());
 
         let data3 = lazy_comp.get().unwrap();
-        assert_eq!(*data3.lock().unwrap_or_else(|e| e.into_inner()), Some("loaded_2".to_string()));
+        assert_eq!(
+            *data3.lock().unwrap_or_else(|e| e.into_inner()),
+            Some("loaded_2".to_string())
+        );
         assert_eq!(*counter.lock().unwrap_or_else(|e| e.into_inner()), 2);
     }
 
@@ -1052,19 +1061,28 @@ mod tests {
         // Add stages with different priorities and memory requirements
         let loaded1 = loaded.clone();
         loader.add_stage("stage1".to_string(), 1, 300, move || {
-            loaded1.lock().unwrap_or_else(|e| e.into_inner()).push("stage1");
+            loaded1
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push("stage1");
             Ok(())
         });
 
         let loaded2 = loaded.clone();
         loader.add_stage("stage2".to_string(), 2, 400, move || {
-            loaded2.lock().unwrap_or_else(|e| e.into_inner()).push("stage2");
+            loaded2
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push("stage2");
             Ok(())
         });
 
         let loaded3 = loaded.clone();
         loader.add_stage("stage3".to_string(), 3, 400, move || {
-            loaded3.lock().unwrap_or_else(|e| e.into_inner()).push("stage3");
+            loaded3
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push("stage3");
             Ok(())
         });
 

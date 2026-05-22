@@ -690,7 +690,10 @@ async fn test_cpu_usage_monitoring() -> Result<()> {
                     let lines: Vec<&str> = output_str.lines().collect();
                     if lines.len() >= 2 {
                         if let Ok(cpu_percent) = lines[1].trim().parse::<f64>() {
-                            cpu_usage_clone.lock().unwrap_or_else(|e| e.into_inner()).push(cpu_percent);
+                            cpu_usage_clone
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .push(cpu_percent);
                         }
                     }
                 }

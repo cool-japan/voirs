@@ -796,9 +796,7 @@ async fn test_data_protection_security() -> Result<()> {
 
     // Test 4: Right to deletion (GDPR compliance)
     // Simulate user requesting data deletion
-    let deleted_count = fixture
-        .consent_manager
-        .delete_user_data(&user_id)?;
+    let deleted_count = fixture.consent_manager.delete_user_data(&user_id)?;
     // Deletion count may be 0 if the user had no consents registered; still a valid call.
     println!("Deleted {deleted_count} consent record(s) for user {user_id}");
 
@@ -978,18 +976,14 @@ async fn test_compliance_standards() -> Result<()> {
     assert!(!consent_record.consent_id.to_string().is_empty());
 
     // Test right of access
-    let user_consents = fixture
-        .consent_manager
-        .get_user_consents(&eu_user_id);
+    let user_consents = fixture.consent_manager.get_user_consents(&eu_user_id);
     assert!(!user_consents.is_empty());
 
     // Test right to rectification
     // (Would test updating consent record information)
 
     // Test right to erasure
-    let deleted = fixture
-        .consent_manager
-        .delete_user_data(&eu_user_id)?;
+    let deleted = fixture.consent_manager.delete_user_data(&eu_user_id)?;
     // User just created one consent above; it should be deleted now.
     assert_eq!(deleted, 1, "Expected exactly 1 consent record to be erased");
 
