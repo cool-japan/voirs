@@ -226,6 +226,8 @@ async fn download_model_files(
         None
     };
 
+    let mut failed_files: Vec<String> = Vec::new();
+
     for file in metadata.files.iter() {
         if let Some(pb) = &progress_bar {
             pb.set_message(format!("Downloading {}", file.name));
@@ -238,18 +240,15 @@ async fn download_model_files(
             Ok(downloaded_path) => {
                 // File successfully downloaded by hf-hub, copy it to our location
                 if let Err(e) = std::fs::copy(&downloaded_path, &file_path) {
-                    tracing::warn!("Failed to copy {}: {}, creating placeholder", file.name, e);
-                    create_placeholder_file(&file_path, &file.name, &metadata.name)?;
+                    tracing::error!("Failed to copy {}: {}", file.name, e);
+                    failed_files.push(format!("{}: copy failed: {}", file.name, e));
                 }
             }
             Err(e) => {
-                // Download failed, create a placeholder file
-                tracing::warn!(
-                    "Failed to download {}: {}, creating placeholder",
-                    file.name,
-                    e
-                );
-                create_placeholder_file(&file_path, &file.name, &metadata.name)?;
+                // Download failed — propagate the error; do NOT create placeholder files
+                // as that masks real failures and causes false "success" reports.
+                tracing::error!("Failed to download {}: {}", file.name, e);
+                failed_files.push(format!("{}: {}", file.name, e));
             }
         }
 
@@ -257,65 +256,30 @@ async fn download_model_files(
             pb.inc(1);
         }
 
-        // Verify file was created
-        if !file_path.exists() {
-            return Err(voirs_sdk::VoirsError::config_error(format!(
-                "Failed to create file: {}",
-                file_path.display()
-            )));
-        }
-
         // Small delay to be gentle on the API
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    }
+
+    if !failed_files.is_empty() {
+        if let Some(pb) = &progress_bar {
+            pb.abandon_with_message("Download failed");
+        }
+        return Err(voirs_sdk::VoirsError::config_error(format!(
+            "Model download failed for '{}'. {} file(s) could not be downloaded:\n{}",
+            metadata.name,
+            failed_files.len(),
+            failed_files
+                .iter()
+                .map(|f| format!("  - {}", f))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )));
     }
 
     if let Some(pb) = &progress_bar {
         pb.finish_with_message("Download complete");
     }
 
-    Ok(())
-}
-
-/// Create a placeholder file when download fails
-fn create_placeholder_file(file_path: &Path, file_name: &str, model_id: &str) -> Result<()> {
-    match file_name {
-        "config.json" => {
-            let config = serde_json::json!({
-                "model_id": model_id,
-                "model_type": "acoustic",
-                "version": "1.0.0",
-                "sample_rate": 22050,
-                "downloaded_at": chrono::Utc::now().to_rfc3339(),
-                "_placeholder": true,
-                "_note": "This is a placeholder file created when download failed"
-            });
-            std::fs::write(file_path, serde_json::to_string_pretty(&config)?)?;
-        }
-        "pytorch_model.bin" | "model.safetensors" => {
-            // Create a small placeholder binary file
-            let dummy_data = vec![0u8; 1024]; // 1KB placeholder instead of full size
-            std::fs::write(file_path, dummy_data)?;
-        }
-        "tokenizer.json" => {
-            let tokenizer = serde_json::json!({
-                "model_id": model_id,
-                "vocab_size": 50000,
-                "_placeholder": true,
-                "_note": "This is a placeholder file created when download failed"
-            });
-            std::fs::write(file_path, serde_json::to_string_pretty(&tokenizer)?)?;
-        }
-        "vocab.txt" => {
-            std::fs::write(file_path, "# Placeholder vocab file\n<unk>\n<s>\n</s>\n")?;
-        }
-        _ => {
-            // Generic placeholder file
-            std::fs::write(
-                file_path,
-                format!("# Placeholder {} for model {}\n", file_name, model_id),
-            )?;
-        }
-    }
     Ok(())
 }
 
@@ -340,21 +304,25 @@ async fn verify_downloaded_files(
         }
 
         let file_metadata = std::fs::metadata(&file_path)?;
+        // A size mismatch means the file was not correctly downloaded — treat as error.
         if file_metadata.len() != file.size_bytes {
-            tracing::warn!(
-                "File size mismatch for {}: expected {}, got {}",
+            return Err(voirs_sdk::VoirsError::model_error(format!(
+                "File size mismatch for {}: expected {} bytes, got {} bytes. \
+                The download may have been truncated or corrupted.",
                 file.name,
                 file.size_bytes,
                 file_metadata.len()
-            );
+            )));
         }
 
         // Verify SHA256 checksum if available
         if let Some(expected_hash) = &file.sha256 {
-            if let Err(e) = verify_file_checksum(&file_path, expected_hash) {
-                tracing::warn!("Checksum verification failed for {}: {}", file.name, e);
-                // Continue anyway, as this might be a placeholder file
-            }
+            verify_file_checksum(&file_path, expected_hash).map_err(|e| {
+                voirs_sdk::VoirsError::model_error(format!(
+                    "Checksum verification failed for {}: {}",
+                    file.name, e
+                ))
+            })?;
         }
     }
 
@@ -616,6 +584,125 @@ mod tests {
         assert!(temp_dir.join("config.json").exists());
         assert!(temp_dir.join("model.pt").exists());
         assert!(temp_dir.join("tokenizer.json").exists());
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    /// Regression test for issue #3: verify_downloaded_files must return Err when
+    /// file size does not match expected size (e.g. a truncated/placeholder download).
+    ///
+    /// Before the fix the function silently warned on size mismatch and returned Ok,
+    /// causing the CLI to print "Model downloaded successfully!" even when the
+    /// actual download had failed with HTTP 401.
+    #[tokio::test]
+    async fn test_size_mismatch_is_an_error() {
+        let temp_dir = std::env::temp_dir().join("voirs_test_size_mismatch");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // Write a file whose real size (5 bytes) is smaller than the declared size.
+        let file_path = temp_dir.join("config.json");
+        std::fs::write(&file_path, b"hello").unwrap();
+
+        let metadata = ModelMetadata {
+            name: "test-model".to_string(),
+            description: "test".to_string(),
+            total_size_mb: 0.001,
+            files: vec![ModelFile {
+                name: "config.json".to_string(),
+                size_bytes: 2048, // declared 2048, actual 5
+                sha256: None,
+            }],
+        };
+
+        let global = GlobalOptions {
+            quiet: true,
+            verbose: 0,
+            config: None,
+            format: None,
+            voice: None,
+            gpu: false,
+            threads: None,
+        };
+
+        let result = verify_downloaded_files(&metadata, &temp_dir, &global).await;
+        assert!(
+            result.is_err(),
+            "verify_downloaded_files must return Err on size mismatch (regression for issue #3)"
+        );
+
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("size mismatch") || msg.contains("mismatch"),
+            "error message should mention size mismatch, got: {msg}"
+        );
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    /// Regression test for issue #3: download_model_files must propagate errors
+    /// rather than silently falling back to placeholder files on download failure.
+    ///
+    /// This test injects a metadata list that cannot be satisfied by the filesystem
+    /// (no HF repo) and expects download_model_files to return Err.
+    #[tokio::test]
+    async fn test_failed_download_returns_error_not_placeholder() {
+        let temp_dir = std::env::temp_dir().join("voirs_test_failed_download");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // Use a model path that definitely does not exist in any local HF cache.
+        // The hf_hub API will fail to resolve it, which should now produce Err.
+        let api = hf_hub::api::sync::Api::new().unwrap();
+        let repo = api.repo(hf_hub::Repo::new(
+            "this-org-definitely-does-not-exist/no-such-model-xxxxxxx".to_string(),
+            hf_hub::RepoType::Model,
+        ));
+
+        let metadata = ModelMetadata {
+            name: "no-such-model-xxxxxxx".to_string(),
+            description: "nonexistent".to_string(),
+            total_size_mb: 50.0,
+            files: vec![
+                ModelFile {
+                    name: "config.json".to_string(),
+                    size_bytes: 2048,
+                    sha256: None,
+                },
+                ModelFile {
+                    name: "pytorch_model.bin".to_string(),
+                    size_bytes: 50 * 1024 * 1024,
+                    sha256: None,
+                },
+            ],
+        };
+
+        let global = GlobalOptions {
+            quiet: true,
+            verbose: 0,
+            config: None,
+            format: None,
+            voice: None,
+            gpu: false,
+            threads: None,
+        };
+
+        let result = download_model_files(&repo, &metadata, &temp_dir, &global).await;
+        assert!(
+            result.is_err(),
+            "download_model_files must return Err when the HF repo does not exist (regression for issue #3); \
+             previously it silently wrote placeholder files and returned Ok"
+        );
+
+        // Crucially: no placeholder files should have been written.
+        assert!(
+            !temp_dir.join("config.json").exists(),
+            "no placeholder config.json should be created on download failure"
+        );
+        assert!(
+            !temp_dir.join("pytorch_model.bin").exists(),
+            "no placeholder pytorch_model.bin should be created on download failure"
+        );
 
         // Cleanup
         std::fs::remove_dir_all(&temp_dir).unwrap();
