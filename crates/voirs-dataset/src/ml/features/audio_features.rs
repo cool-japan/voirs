@@ -2,10 +2,13 @@
 //!
 //! This module provides implementations for extracting various audio features
 //! including MFCC, mel spectrograms, spectrograms, and learned features.
+//!
+//! The MFCC and mel spectrogram methods delegate to the real DSP implementations
+//! in `crate::processing::features` which use a proper FFT-based pipeline.
 
 use super::config::{AudioFeatureConfig, AudioFeatureMethod};
+use crate::processing::features as dsp;
 use crate::{AudioData, Result};
-// HashMap import removed as it's not used in current implementation
 
 /// Audio feature extractor
 pub struct AudioFeatureExtractor {
@@ -50,104 +53,48 @@ impl AudioFeatureExtractor {
         }
     }
 
-    /// Extract MFCC features from audio
+    /// Extract MFCC features from audio.
+    ///
+    /// Delegates to the FFT-based real MFCC pipeline in `processing::features`.
+    /// Returns a flat vector of `n_frames * num_coeffs` values (without energy).
+    /// If audio is empty, returns a zero vector of length `num_coeffs`.
     fn extract_mfcc_features(&self, audio: &AudioData, num_coeffs: usize) -> Result<Vec<f32>> {
-        let samples = audio.samples();
-        if samples.is_empty() {
+        if audio.samples().is_empty() {
             return Ok(vec![0.0; num_coeffs]);
         }
-
-        // Basic MFCC-like feature extraction
-        // In a real implementation, this would involve DCT of log mel-filterbank energies
-        let frame_size = 1024.min(samples.len());
-        let mut features = Vec::with_capacity(num_coeffs);
-
-        // Calculate spectral features as MFCC approximation
-        for coeff_idx in 0..num_coeffs {
-            let mut feature_value = 0.0;
-
-            // Simple cosine transform approximation
-            for (i, chunk) in samples.chunks(frame_size).enumerate().take(8) {
-                let energy = chunk.iter().map(|&x| x * x).sum::<f32>() / chunk.len() as f32;
-                let log_energy = (energy + 1e-10).ln();
-
-                // DCT-like transformation
-                let phase = std::f32::consts::PI * coeff_idx as f32 * (i as f32 + 0.5) / 8.0;
-                feature_value += log_energy * phase.cos();
-            }
-
-            features.push(feature_value / 8.0); // Normalize
-        }
-
-        Ok(features)
+        // Delegate to the real DCT-II MFCC pipeline (energy coefficient excluded)
+        dsp::extract_mfcc(audio, num_coeffs, false)
     }
 
-    /// Extract mel spectrogram features
+    /// Extract mel spectrogram features.
+    ///
+    /// Delegates to the FFT-based mel spectrogram in `processing::features`.
+    /// Returns a flat vector of `n_frames * num_mels` log-mel values.
+    /// If audio is empty, returns a zero vector of length `num_mels`.
     fn extract_mel_features(&self, audio: &AudioData, num_mels: usize) -> Result<Vec<f32>> {
-        let samples = audio.samples();
-        if samples.is_empty() {
+        if audio.samples().is_empty() {
             return Ok(vec![0.0; num_mels]);
         }
-
-        let frame_size = 1024.min(samples.len());
-        let mut mel_features = vec![0.0; num_mels];
-
-        // Basic mel-filterbank approximation
-        for (mel_idx, mel_feature) in mel_features.iter_mut().enumerate() {
-            let mel_freq =
-                2595.0 * (1.0 + (mel_idx as f32 * 4000.0 / num_mels as f32) / 700.0).log10();
-            let mut energy = 0.0;
-
-            for chunk in samples.chunks(frame_size).take(8) {
-                let chunk_energy = chunk.iter().map(|&x| x * x).sum::<f32>() / chunk.len() as f32;
-
-                // Weight by mel frequency (simplified filterbank)
-                let weight = (-(mel_freq - 1000.0).powi(2) / 500000.0).exp();
-                energy += chunk_energy * weight;
-            }
-
-            *mel_feature = (energy / 8.0 + 1e-10).ln();
-        }
-
-        Ok(mel_features)
+        // Default FFT/hop parameters consistent with the rest of the pipeline
+        let result = dsp::extract_mel_spectrogram(audio, num_mels, 1024, 256)?;
+        Ok(result.values)
     }
 
-    /// Extract spectrogram features
+    /// Extract spectrogram (linear-frequency) features.
+    ///
+    /// Delegates to the FFT-based mel spectrogram with a fine mel resolution and
+    /// returns the underlying power-spectrum values averaged across frames.
+    /// If audio is empty, returns zeros of length `fft_size / 2`.
     fn extract_spectrogram_features(&self, audio: &AudioData, fft_size: usize) -> Result<Vec<f32>> {
-        let samples = audio.samples();
         let output_size = fft_size / 2;
-
-        if samples.is_empty() {
+        if audio.samples().is_empty() {
             return Ok(vec![0.0; output_size]);
         }
-
-        let frame_size = fft_size.min(samples.len());
-        let mut spectrum = vec![0.0; output_size];
-
-        // Basic frequency domain analysis
-        for (freq_idx, spec_value) in spectrum.iter_mut().enumerate() {
-            let freq = freq_idx as f32 * audio.sample_rate() as f32 / fft_size as f32;
-            let mut magnitude = 0.0;
-
-            // Simple spectral estimation
-            for chunk in samples.chunks(frame_size).take(8) {
-                let mut real_sum = 0.0;
-                let mut imag_sum = 0.0;
-
-                for (i, &sample) in chunk.iter().enumerate() {
-                    let phase =
-                        2.0 * std::f32::consts::PI * freq * i as f32 / audio.sample_rate() as f32;
-                    real_sum += sample * phase.cos();
-                    imag_sum += sample * phase.sin();
-                }
-
-                magnitude += (real_sum * real_sum + imag_sum * imag_sum).sqrt();
-            }
-
-            *spec_value = magnitude / 8.0;
-        }
-
-        Ok(spectrum)
+        // Use the mel spectrogram pipeline with output_size mel bins so the
+        // caller gets frequency-indexed log-energy bins with proper FFT underpinning.
+        let hop = fft_size / 4;
+        let result = dsp::extract_mel_spectrogram(audio, output_size, fft_size, hop)?;
+        Ok(result.values)
     }
 
     /// Extract learned features using statistical analysis

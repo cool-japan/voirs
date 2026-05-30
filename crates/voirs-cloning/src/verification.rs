@@ -573,33 +573,91 @@ impl SpeakerVerifier {
         (audio.iter().map(|x| x * x).sum::<f32>() / audio.len() as f32).sqrt()
     }
 
+    /// Compute the power spectrum of an audio frame using a Hann window and RFFT.
+    ///
+    /// Returns a `Vec<f32>` of length `n_fft / 2 + 1` (the one-sided power spectrum).
+    /// `n_fft` is clamped to `audio.len()` when the signal is shorter than `n_fft`.
+    fn compute_power_spectrum(&self, audio: &[f32], n_fft: usize) -> Vec<f32> {
+        if audio.is_empty() {
+            return vec![0.0; n_fft / 2 + 1];
+        }
+
+        // Build the (windowed) frame as f64 for scirs2_fft
+        let frame_len = n_fft.min(audio.len());
+        let mut frame_f64: Vec<f64> = Vec::with_capacity(n_fft);
+        for i in 0..frame_len {
+            // Hann window: w(n) = 0.5 * (1 − cos(2π n / (N−1)))
+            let w = if frame_len > 1 {
+                0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / (frame_len - 1) as f64).cos())
+            } else {
+                1.0
+            };
+            frame_f64.push(audio[i] as f64 * w);
+        }
+        // Zero-pad to n_fft if needed
+        frame_f64.resize(n_fft, 0.0);
+
+        let n_out = n_fft / 2 + 1;
+        match scirs2_fft::rfft(&frame_f64, Some(n_fft)) {
+            Ok(spectrum) => spectrum
+                .iter()
+                .take(n_out)
+                .map(|c| (c.re * c.re + c.im * c.im) as f32)
+                .collect(),
+            Err(_) => vec![0.0; n_out],
+        }
+    }
+
     fn compute_spectral_centroid(&self, audio: &[f32], sample_rate: u32) -> f32 {
-        // Simplified spectral centroid computation
         if audio.is_empty() {
             return 0.0;
         }
 
-        let window_size = 1024.min(audio.len());
-        let mut centroid = 0.0;
-        let mut magnitude_sum = 0.0;
+        let n_fft = 512.min(audio.len()).next_power_of_two().max(2);
+        let power = self.compute_power_spectrum(audio, n_fft);
+        let n_out = power.len(); // n_fft / 2 + 1
 
-        for k in 0..window_size / 2 {
-            let frequency = k as f32 * sample_rate as f32 / window_size as f32;
-            let magnitude = audio.get(k).unwrap_or(&0.0).abs();
+        let mut centroid = 0.0_f32;
+        let mut magnitude_sum = 0.0_f32;
+        for (k, &p) in power.iter().enumerate() {
+            let magnitude = p.sqrt();
+            let frequency = k as f32 * sample_rate as f32 / n_fft as f32;
             centroid += frequency * magnitude;
             magnitude_sum += magnitude;
         }
 
         if magnitude_sum > 0.0 {
-            (centroid / magnitude_sum) / (sample_rate as f32 / 2.0) // Normalize to 0-1
+            let nyquist = sample_rate as f32 / 2.0;
+            (centroid / magnitude_sum / nyquist).clamp(0.0, 1.0)
         } else {
             0.5
         }
     }
 
-    fn compute_spectral_rolloff(&self, _audio: &[f32], _sample_rate: u32) -> f32 {
-        // Simplified implementation
-        0.85 // Typical rolloff value
+    fn compute_spectral_rolloff(&self, audio: &[f32], sample_rate: u32) -> f32 {
+        if audio.is_empty() {
+            return 0.0;
+        }
+
+        let n_fft = 512.min(audio.len()).next_power_of_two().max(2);
+        let power = self.compute_power_spectrum(audio, n_fft);
+        let total_energy: f32 = power.iter().sum();
+
+        if total_energy <= 0.0 {
+            return 0.0;
+        }
+
+        let rolloff_threshold = total_energy * 0.85;
+        let mut cumulative = 0.0_f32;
+        let n_out = power.len();
+        for (k, &p) in power.iter().enumerate() {
+            cumulative += p;
+            if cumulative >= rolloff_threshold {
+                // Normalize to [0, 1] relative to Nyquist
+                return (k as f32 / (n_out - 1).max(1) as f32).clamp(0.0, 1.0);
+            }
+        }
+        1.0
     }
 
     fn compute_zero_crossing_rate(&self, audio: &[f32]) -> f32 {
@@ -613,9 +671,94 @@ impl SpeakerVerifier {
         crossings as f32 / (audio.len() - 1) as f32
     }
 
-    fn compute_mel_features(&self, _audio: &[f32], _sample_rate: u32) -> Result<Vec<f32>> {
-        // Simplified mel-like features (placeholder for full MFCC implementation)
-        Ok(vec![0.5; 13]) // 13 MFCC coefficients
+    fn compute_mel_features(&self, audio: &[f32], sample_rate: u32) -> Result<Vec<f32>> {
+        // Real MFCC implementation: FFT → mel filterbank → log → DCT-II → 13 coefficients
+        const N_FFT: usize = 512;
+        const N_MEL: usize = 26;
+        const N_MFCC: usize = 13;
+        const F_MIN_HZ: f64 = 80.0;
+
+        if audio.is_empty() {
+            return Ok(vec![0.0; N_MFCC]);
+        }
+
+        let f_max_hz = sample_rate as f64 / 2.0;
+
+        // --- 1. Power spectrum (one-sided, length N_FFT/2+1) ---
+        let n_out = N_FFT / 2 + 1;
+        let power = self.compute_power_spectrum(audio, N_FFT);
+
+        // --- 2. Mel filterbank (N_MEL triangular filters) ---
+        // hz_to_mel / mel_to_hz using standard formula
+        let hz_to_mel = |hz: f64| -> f64 { 2595.0 * (1.0 + hz / 700.0).log10() };
+        let mel_to_hz = |mel: f64| -> f64 { 700.0 * (10.0_f64.powf(mel / 2595.0) - 1.0) };
+
+        let mel_min = hz_to_mel(F_MIN_HZ);
+        let mel_max = hz_to_mel(f_max_hz);
+
+        // N_MEL + 2 evenly-spaced mel points (include lower and upper edges)
+        let n_points = N_MEL + 2;
+        let mel_points: Vec<f64> = (0..n_points)
+            .map(|i| mel_min + (mel_max - mel_min) * i as f64 / (n_points - 1) as f64)
+            .collect();
+
+        // Convert mel points to FFT bin indices
+        let bin_indices: Vec<f64> = mel_points
+            .iter()
+            .map(|&m| {
+                let hz = mel_to_hz(m);
+                hz * (N_FFT as f64) / (sample_rate as f64)
+            })
+            .collect();
+
+        // Apply filterbank → mel energies
+        let mut mel_energies = vec![0.0_f32; N_MEL];
+        for m in 0..N_MEL {
+            let f_left = bin_indices[m];
+            let f_center = bin_indices[m + 1];
+            let f_right = bin_indices[m + 2];
+
+            for k in 0..n_out {
+                let k_f = k as f64;
+                let weight = if k_f >= f_left && k_f <= f_center {
+                    if (f_center - f_left).abs() < 1e-12 {
+                        1.0
+                    } else {
+                        (k_f - f_left) / (f_center - f_left)
+                    }
+                } else if k_f > f_center && k_f <= f_right {
+                    if (f_right - f_center).abs() < 1e-12 {
+                        1.0
+                    } else {
+                        (f_right - k_f) / (f_right - f_center)
+                    }
+                } else {
+                    0.0
+                };
+                mel_energies[m] += power[k] * weight as f32;
+            }
+        }
+
+        // --- 3. Log scale ---
+        let log_mel: Vec<f64> = mel_energies
+            .iter()
+            .map(|&e| ((e as f64) + 1e-10_f64).ln())
+            .collect();
+
+        // --- 4. DCT-II to obtain MFCCs, skip k=0 (DC), take k=1..=N_MFCC ---
+        let mut mfcc = vec![0.0_f32; N_MFCC];
+        for (idx, coeff) in mfcc.iter_mut().enumerate() {
+            let k = idx + 1; // skip DC (k=0)
+            let mut sum = 0.0_f64;
+            for (n, &lm) in log_mel.iter().enumerate() {
+                sum += lm
+                    * (std::f64::consts::PI * k as f64 * (2 * n + 1) as f64 / (2 * N_MEL) as f64)
+                        .cos();
+            }
+            *coeff = sum as f32;
+        }
+
+        Ok(mfcc)
     }
 
     fn extract_f0_contour(&self, audio: &[f32], sample_rate: u32) -> Result<Vec<f32>> {
@@ -1440,5 +1583,108 @@ mod tests {
         // High quality sample should have better scores
         assert!(quality_high.overall_score > quality_low.overall_score);
         assert!(quality_high.snr > quality_low.snr);
+    }
+
+    // --- MFCC / acoustic feature tests ---
+
+    #[test]
+    fn test_compute_mel_features_length() {
+        let config = VerificationConfig::default();
+        let verifier = SpeakerVerifier::new(config).unwrap();
+
+        let sample_rate = 16000_u32;
+        let audio: Vec<f32> = (0..8000)
+            .map(|i| {
+                let t = i as f32 / sample_rate as f32;
+                (2.0 * std::f32::consts::PI * 220.0 * t).sin() * 0.5
+            })
+            .collect();
+
+        let mfcc = verifier.compute_mel_features(&audio, sample_rate).unwrap();
+        assert_eq!(
+            mfcc.len(),
+            13,
+            "compute_mel_features must return exactly 13 coefficients"
+        );
+    }
+
+    #[test]
+    fn test_compute_mel_features_not_constant() {
+        let config = VerificationConfig::default();
+        let verifier = SpeakerVerifier::new(config).unwrap();
+
+        let sample_rate = 16000_u32;
+        let n = 8000_usize;
+
+        // Sine wave at 440 Hz
+        let sine_audio: Vec<f32> = (0..n)
+            .map(|i| {
+                let t = i as f32 / sample_rate as f32;
+                (2.0 * std::f32::consts::PI * 440.0 * t).sin() * 0.8
+            })
+            .collect();
+
+        // Alternating noise-like signal (broadband)
+        let noise_audio: Vec<f32> = (0..n)
+            .map(|i| {
+                // Deterministic pseudo-noise via simple LCG for reproducibility
+                let v = ((i as u64)
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407)
+                    >> 33) as f32
+                    / u32::MAX as f32;
+                v * 2.0 - 1.0
+            })
+            .collect();
+
+        let mfcc_sine = verifier
+            .compute_mel_features(&sine_audio, sample_rate)
+            .unwrap();
+        let mfcc_noise = verifier
+            .compute_mel_features(&noise_audio, sample_rate)
+            .unwrap();
+
+        // The two feature vectors must not be identical (real computation, not hardcoded)
+        let all_equal = mfcc_sine
+            .iter()
+            .zip(mfcc_noise.iter())
+            .all(|(a, b)| (a - b).abs() < 1e-6);
+        assert!(
+            !all_equal,
+            "MFCC must differ for different input signals; got {:?} == {:?}",
+            mfcc_sine, mfcc_noise
+        );
+
+        // Also confirm nothing is still the hardcoded placeholder [0.5; 13]
+        let all_half = mfcc_sine.iter().all(|&v| (v - 0.5).abs() < 1e-6);
+        assert!(
+            !all_half,
+            "compute_mel_features still returns hardcoded [0.5; 13]"
+        );
+    }
+
+    #[test]
+    fn test_extract_acoustic_features_length() {
+        let config = VerificationConfig::default();
+        let verifier = SpeakerVerifier::new(config).unwrap();
+
+        let sample_rate = 16000_u32;
+        let audio: Vec<f32> = (0..8000)
+            .map(|i| {
+                let t = i as f32 / sample_rate as f32;
+                (2.0 * std::f32::consts::PI * 300.0 * t).sin() * 0.6
+            })
+            .collect();
+
+        let features = verifier
+            .extract_acoustic_features(&audio, sample_rate)
+            .unwrap();
+
+        // 4 basic features + 13 MFCC = 17 minimum
+        assert!(
+            features.len() >= 17,
+            "extract_acoustic_features must return at least 17 values (4 basic + 13 MFCC), got {}",
+            features.len()
+        );
     }
 }

@@ -397,14 +397,17 @@ impl DurationPredictor {
         Ok(durations)
     }
 
-    /// Align phoneme sequence to mel spectrogram using predicted durations
+    /// Align phoneme sequence to mel spectrogram using predicted durations.
+    ///
+    /// Each phoneme encoding is repeated exactly `round(duration[b][p]).max(1)` times
+    /// along the time axis so that the output faithfully reflects per-phoneme duration.
     ///
     /// # Arguments
-    /// * `text_encoding` - Text encoder outputs [batch, input_dim, seq_len]
-    /// * `durations` - Duration predictions [batch, 1, seq_len]
+    /// * `text_encoding` - Text encoder outputs `[batch, input_dim, seq_len]`
+    /// * `durations`     - Duration predictions `[batch, 1, seq_len]` (float frames)
     ///
     /// # Returns
-    /// * Aligned text encoding [batch, input_dim, total_frames]
+    /// * Aligned text encoding `[batch, input_dim, total_frames]`
     pub fn align_text_to_mel(&self, text_encoding: &Tensor, durations: &Tensor) -> Result<Tensor> {
         let (batch_size, input_dim, seq_len) =
             text_encoding
@@ -418,121 +421,351 @@ impl DurationPredictor {
                 message: format!("Failed to get duration dimensions: {e}"),
             })?;
 
-        // Validate dimensions
         if batch_size != dur_batch || seq_len != dur_seq || dur_channels != 1 {
             return Err(AcousticError::InputError {
                 message: format!(
-                    "Dimension mismatch: text [{batch_size}, {input_dim}, {seq_len}], durations [{dur_batch}, {dur_channels}, {dur_seq}]"
+                    "Dimension mismatch: text [{batch_size}, {input_dim}, {seq_len}], \
+                     durations [{dur_batch}, {dur_channels}, {dur_seq}]"
                 ),
             });
         }
 
-        // Squeeze duration channel dimension
-        let durations = durations
+        // Squeeze channel dimension → [batch, seq_len]
+        let durations_sq = durations
             .squeeze(1)
             .map_err(|e| AcousticError::ModelError {
                 message: format!("Failed to squeeze durations: {e}"),
             })?;
 
-        // For simplicity, use a basic upsampling approach
-        // In a full implementation, this would use more sophisticated alignment algorithms
+        // Extract duration values as Vec<Vec<f32>>: [batch][seq_len]
+        let dur_data: Vec<Vec<f32>> =
+            durations_sq
+                .to_vec2::<f32>()
+                .map_err(|e| AcousticError::ModelError {
+                    message: format!("Failed to extract duration data: {e}"),
+                })?;
 
-        // Calculate total frames needed
-        let total_frames = durations
-            .sum_all()
-            .map_err(|e| AcousticError::ModelError {
-                message: format!("Failed to sum durations: {e}"),
-            })?
-            .to_scalar::<f32>()
-            .map_err(|e| AcousticError::ModelError {
-                message: format!("Failed to convert to scalar: {e}"),
-            })? as usize;
+        // Permute text_encoding to [batch, seq_len, input_dim] for easy per-phoneme access
+        let text_permuted =
+            text_encoding
+                .permute((0, 2, 1))
+                .map_err(|e| AcousticError::ModelError {
+                    message: format!("Failed to permute text encoding: {e}"),
+                })?;
 
-        tracing::debug!("Aligning {} phonemes to {} frames", seq_len, total_frames);
+        // Extract as [batch][seq_len][input_dim]
+        let text_data: Vec<Vec<Vec<f32>>> =
+            text_permuted
+                .to_vec3::<f32>()
+                .map_err(|e| AcousticError::ModelError {
+                    message: format!("Failed to extract text encoding data: {e}"),
+                })?;
 
-        // For now, use simple repetition-based alignment
-        // This is a placeholder - a full implementation would use differentiable upsampling
-        let repeat_factor = total_frames / seq_len.max(1);
-        let aligned = text_encoding.repeat(&[1, 1, repeat_factor]).map_err(|e| {
-            AcousticError::ModelError {
-                message: format!("Failed to align text encoding: {e}"),
+        // Build per-batch expanded vectors and track the maximum total-frame count
+        // so that batches with different sums can be padded to a uniform length.
+        let mut all_batches: Vec<Vec<f32>> = Vec::with_capacity(batch_size);
+        let mut max_total_frames: usize = 0;
+
+        for b in 0..batch_size {
+            let mut expanded: Vec<f32> = Vec::new();
+            for (p, &dur_val) in dur_data[b].iter().enumerate() {
+                // Round to nearest integer; clamp to minimum 1 frame
+                let repeat = (dur_val.round() as usize).max(1);
+                for _ in 0..repeat {
+                    expanded.extend_from_slice(&text_data[b][p]);
+                }
             }
+            let total_frames = expanded.len() / input_dim;
+            if total_frames > max_total_frames {
+                max_total_frames = total_frames;
+            }
+            all_batches.push(expanded);
+        }
+
+        tracing::debug!(
+            "align_text_to_mel: {} phonemes → {} frames (max across batch)",
+            seq_len,
+            max_total_frames
+        );
+
+        // Pad shorter batches with zeros so all share the same time dimension
+        for batch_data in &mut all_batches {
+            let target_len = max_total_frames * input_dim;
+            batch_data.resize(target_len, 0.0_f32);
+        }
+
+        // Flatten to a single Vec and create tensor with shape [batch, max_total_frames, input_dim]
+        let flat: Vec<f32> = all_batches.into_iter().flatten().collect();
+        let result = Tensor::from_vec(
+            flat,
+            (batch_size, max_total_frames, input_dim),
+            text_encoding.device(),
+        )
+        .and_then(|t| t.permute((0, 2, 1))) // → [batch, input_dim, max_total_frames]
+        .map_err(|e| AcousticError::ModelError {
+            message: format!("Failed to create aligned tensor: {e}"),
         })?;
 
-        Ok(aligned)
+        Ok(result)
     }
 }
 
-/// Differentiable upsampling using durations
+/// Duration-based upsampling: expand each phoneme encoding along the time axis.
+///
+/// Each phoneme at position `p` in batch `b` is repeated
+/// `round(durations[b][p]).max(1)` times.  All batches are padded to the same
+/// maximum total-frame count with zeros.
+///
+/// # Arguments
+/// * `text_encoding` - Shape `[batch, channels, seq_len]`
+/// * `durations`     - Shape `[batch, seq_len]` (float frame counts, **not** `[batch,1,seq_len]`)
+/// * `_device`       - Unused; the output device is inherited from `text_encoding`
+///
+/// # Returns
+/// * Expanded tensor with shape `[batch, channels, max_total_frames]`
 pub fn duration_based_upsampling(
     text_encoding: &Tensor,
     durations: &Tensor,
     _device: &Device,
 ) -> Result<Tensor> {
-    let (batch_size, _channels, seq_len) =
+    let (batch_size, channels, seq_len) =
         text_encoding
             .dims3()
             .map_err(|e| AcousticError::ModelError {
                 message: format!("Invalid text encoding shape: {e}"),
             })?;
 
-    // Calculate total output length
-    let _total_frames = durations
-        .sum_all()
-        .map_err(|e| AcousticError::ModelError {
-            message: format!("Failed to sum durations: {e}"),
-        })?
-        .to_scalar::<f32>()
-        .map_err(|e| AcousticError::ModelError {
-            message: format!("Failed to convert to scalar: {e}"),
-        })? as usize;
-
-    // Simple implementation: repeat each phoneme encoding for its duration
-    // In practice, this would use more sophisticated interpolation
-    let mut output_data = Vec::new();
-
-    for batch_idx in 0..batch_size {
-        let mut batch_output = Vec::new();
-
-        for seq_idx in 0..seq_len {
-            let duration = durations
-                .get(batch_idx)?
-                .get(seq_idx)?
-                .to_scalar::<f32>()
+    // Durations must be [batch, seq_len] — squeeze a leading channel dim if present
+    let durations_2d = match durations.dims() {
+        [b, 1, s] if *b == batch_size && *s == seq_len => {
+            durations
+                .squeeze(1)
                 .map_err(|e| AcousticError::ModelError {
-                    message: format!("Failed to get duration scalar: {e}"),
-                })? as usize;
+                    message: format!("Failed to squeeze duration channel dim: {e}"),
+                })?
+        }
+        [b, s] if *b == batch_size && *s == seq_len => durations.clone(),
+        other => {
+            return Err(AcousticError::InputError {
+                message: format!(
+                    "duration_based_upsampling: expected durations shape [{batch_size}, {seq_len}] \
+                     or [{batch_size}, 1, {seq_len}], got {other:?}"
+                ),
+            });
+        }
+    };
 
-            let frame_encoding = text_encoding.get(batch_idx)?.narrow(1, seq_idx, 1)?; // [channels, 1]
+    // Extract duration values: [batch][seq_len]
+    let dur_data: Vec<Vec<f32>> =
+        durations_2d
+            .to_vec2::<f32>()
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to extract duration data: {e}"),
+            })?;
 
-            // Repeat this encoding for 'duration' frames
-            for _ in 0..duration {
-                batch_output.push(frame_encoding.clone());
+    // Permute text_encoding to [batch, seq_len, channels] for slice access
+    let text_permuted =
+        text_encoding
+            .permute((0, 2, 1))
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to permute text encoding: {e}"),
+            })?;
+
+    let text_data: Vec<Vec<Vec<f32>>> =
+        text_permuted
+            .to_vec3::<f32>()
+            .map_err(|e| AcousticError::ModelError {
+                message: format!("Failed to extract text encoding data: {e}"),
+            })?;
+
+    // Build expanded data per batch; track maximum total-frame count for padding
+    let mut all_batches: Vec<Vec<f32>> = Vec::with_capacity(batch_size);
+    let mut max_total_frames: usize = 0;
+
+    for b in 0..batch_size {
+        let mut expanded: Vec<f32> = Vec::new();
+        for (p, &dur_val) in dur_data[b].iter().enumerate() {
+            let repeat = (dur_val.round() as usize).max(1);
+            for _ in 0..repeat {
+                expanded.extend_from_slice(&text_data[b][p]);
             }
         }
-
-        // Concatenate all frames for this batch
-        if !batch_output.is_empty() {
-            let batch_tensor =
-                Tensor::cat(&batch_output.iter().collect::<Vec<_>>(), 1).map_err(|e| {
-                    AcousticError::ModelError {
-                        message: format!("Failed to concatenate frames: {e}"),
-                    }
-                })?;
-            output_data.push(batch_tensor);
+        let total_frames = expanded.len() / channels;
+        if total_frames > max_total_frames {
+            max_total_frames = total_frames;
         }
+        all_batches.push(expanded);
     }
 
-    if output_data.is_empty() {
+    if max_total_frames == 0 {
         return Err(AcousticError::ModelError {
-            message: "No output data generated".to_string(),
+            message: "duration_based_upsampling produced zero output frames".to_string(),
         });
     }
 
-    // Stack all batches
-    let result = Tensor::stack(&output_data, 0).map_err(|e| AcousticError::ModelError {
-        message: format!("Failed to stack batches: {e}"),
+    // Zero-pad shorter batches
+    for batch_data in &mut all_batches {
+        batch_data.resize(max_total_frames * channels, 0.0_f32);
+    }
+
+    let flat: Vec<f32> = all_batches.into_iter().flatten().collect();
+    // Create [batch, max_total_frames, channels] then permute → [batch, channels, max_total_frames]
+    let result = Tensor::from_vec(
+        flat,
+        (batch_size, max_total_frames, channels),
+        text_encoding.device(),
+    )
+    .and_then(|t| t.permute((0, 2, 1)))
+    .map_err(|e| AcousticError::ModelError {
+        message: format!("Failed to create upsampled tensor: {e}"),
     })?;
 
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use candle_core::{DType, Device};
+
+    fn cpu() -> Device {
+        Device::Cpu
+    }
+
+    /// Build a `DurationPredictor` using the default config with CPU device.
+    fn make_predictor() -> DurationPredictor {
+        let config = DurationConfig::default();
+        DurationPredictor::new(config, cpu()).expect("DurationPredictor::new failed")
+    }
+
+    // -------------------------------------------------------------------------
+    // Helper: create a [batch, input_dim, seq_len] text-encoding tensor filled
+    // with sequential values so that phoneme slices are distinguishable.
+    //
+    // Phoneme p in batch b gets value: (b * seq_len + p) as f32
+    // -------------------------------------------------------------------------
+    fn make_text_encoding(batch: usize, dim: usize, seq: usize) -> Tensor {
+        let mut data = vec![0.0_f32; batch * dim * seq];
+        for b in 0..batch {
+            for p in 0..seq {
+                let val = (b * seq + p) as f32;
+                for d in 0..dim {
+                    // layout is [batch, dim, seq] = row-major → index: b*(dim*seq) + d*seq + p
+                    data[b * (dim * seq) + d * seq + p] = val;
+                }
+            }
+        }
+        Tensor::from_vec(data, (batch, dim, seq), &cpu()).expect("make_text_encoding failed")
+    }
+
+    // -------------------------------------------------------------------------
+    // Test 1: basic expansion with mixed durations [1, 1, 2]
+    // text_encoding=[1,4,3], durations=[1,1,2] (shape [1,1,3])
+    // Expected output shape: [1, 4, 4]  (1+1+2 = 4 frames)
+    // -------------------------------------------------------------------------
+    #[test]
+    fn test_align_text_to_mel_basic() {
+        let pred = make_predictor();
+        let text = make_text_encoding(1, 4, 3);
+        // durations [1,1,3]: shape [batch=1, channels=1, seq=3]
+        let dur_data: Vec<f32> = vec![1.0, 1.0, 2.0];
+        let durations =
+            Tensor::from_vec(dur_data, (1usize, 1usize, 3usize), &cpu()).expect("dur tensor");
+
+        let aligned = pred
+            .align_text_to_mel(&text, &durations)
+            .expect("align_text_to_mel failed");
+
+        let dims = aligned.dims();
+        assert_eq!(dims.len(), 3, "output must be 3-D");
+        assert_eq!(dims[0], 1, "batch dim must be 1");
+        assert_eq!(dims[1], 4, "channel dim must equal input_dim=4");
+        assert_eq!(dims[2], 4, "time dim must equal sum(durations)=4");
+    }
+
+    // -------------------------------------------------------------------------
+    // Test 2: all durations = 1 → output time == seq_len (no expansion/collapse)
+    // -------------------------------------------------------------------------
+    #[test]
+    fn test_align_duration_one_each() {
+        let pred = make_predictor();
+        let seq_len = 5_usize;
+        let input_dim = 4_usize;
+        let text = make_text_encoding(1, input_dim, seq_len);
+        let dur_data: Vec<f32> = vec![1.0; seq_len];
+        let durations =
+            Tensor::from_vec(dur_data, (1usize, 1usize, seq_len), &cpu()).expect("dur tensor");
+
+        let aligned = pred
+            .align_text_to_mel(&text, &durations)
+            .expect("align_text_to_mel failed");
+
+        assert_eq!(
+            aligned.dims(),
+            &[1, input_dim, seq_len],
+            "when every duration is 1, output time must equal seq_len"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Test 3: zero duration is clamped to 1 → output must not be shorter than seq_len
+    // -------------------------------------------------------------------------
+    #[test]
+    fn test_align_zero_duration_clamped() {
+        let pred = make_predictor();
+        let seq_len = 3_usize;
+        let input_dim = 4_usize;
+        let text = make_text_encoding(1, input_dim, seq_len);
+        // First phoneme has duration 0 — should be treated as 1
+        let dur_data: Vec<f32> = vec![0.0, 1.0, 1.0];
+        let durations =
+            Tensor::from_vec(dur_data, (1usize, 1usize, seq_len), &cpu()).expect("dur tensor");
+
+        let aligned = pred
+            .align_text_to_mel(&text, &durations)
+            .expect("align_text_to_mel failed");
+
+        let time_dim = aligned.dims()[2];
+        assert!(
+            time_dim >= seq_len,
+            "clamping zero durations means output time ({time_dim}) >= seq_len ({seq_len})"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Test 4: first frame of output equals first phoneme encoding (when dur[0]=1)
+    // -------------------------------------------------------------------------
+    #[test]
+    fn test_align_preserves_content() {
+        let pred = make_predictor();
+        let input_dim = 4_usize;
+        let seq_len = 3_usize;
+        let text = make_text_encoding(1, input_dim, seq_len);
+
+        // dur[0] = 1 so the first output frame must be phoneme 0's encoding
+        let dur_data: Vec<f32> = vec![1.0, 2.0, 1.0];
+        let durations =
+            Tensor::from_vec(dur_data, (1usize, 1usize, seq_len), &cpu()).expect("dur tensor");
+
+        let aligned = pred
+            .align_text_to_mel(&text, &durations)
+            .expect("align_text_to_mel failed");
+
+        // Extract the first time-step across all channels: aligned[:, :, 0]
+        let first_frame = aligned
+            .narrow(2, 0, 1) // [1, input_dim, 1]
+            .expect("narrow failed")
+            .squeeze(2) // [1, input_dim]
+            .expect("squeeze failed")
+            .to_vec2::<f32>()
+            .expect("to_vec2 failed");
+
+        // The expected value for phoneme 0, batch 0 is 0.0 (see make_text_encoding)
+        for &val in &first_frame[0] {
+            assert_eq!(
+                val, 0.0_f32,
+                "first output frame must equal first phoneme encoding (phoneme 0 value = 0.0)"
+            );
+        }
+    }
 }

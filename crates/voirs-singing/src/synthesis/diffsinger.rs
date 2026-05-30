@@ -177,30 +177,67 @@ impl DiffusionState {
         }
     }
 
-    /// Update state for next diffusion step
-    pub fn next_step(&mut self, denoised_prediction: &Array2<f32>) -> Result<()> {
+    /// Advance the diffusion state by one denoising step.
+    ///
+    /// Given the predicted noise ε̂ returned by `predict_noise`, we apply the
+    /// standard DDPM reverse-process update in the "predict x_0" form:
+    ///
+    ///   x̂_0 = (x_t - sqrt(1-ᾱ_t) * ε̂) / sqrt(ᾱ_t)
+    ///   x_{t-1} = sqrt(ᾱ_{t-1}) * x̂_0 + sqrt(1-ᾱ_{t-1}) * ε̂
+    ///
+    /// This is deterministic (no added stochastic noise), which is appropriate
+    /// for inference.  When `step == 0` the update writes x̂_0 directly.
+    pub fn next_step(&mut self, noise_prediction: &Array2<f32>) -> Result<()> {
         if self.step >= self.total_steps {
             return Ok(());
         }
 
-        // Simple DDPM-style update (simplified)
-        let alpha = 1.0 - self.noise_level;
-        let beta = self.noise_level;
+        let t = self.step;
+        let total = self.total_steps;
 
-        // Update noisy spectrogram
+        let alpha_bar_t = compute_alpha_bar(t, total);
+        let sqrt_alpha_bar_t = alpha_bar_t.sqrt().max(1e-6);
+        let sqrt_one_minus_alpha_bar_t = (1.0_f32 - alpha_bar_t).sqrt().max(1e-6);
+
+        // ᾱ_{t-1}: when t == 0 the previous step has ᾱ = 1 (pure signal).
+        let alpha_bar_prev = if t == 0 {
+            1.0_f32
+        } else {
+            compute_alpha_bar(t - 1, total)
+        };
+        let sqrt_alpha_bar_prev = alpha_bar_prev.sqrt();
+        let sqrt_one_minus_alpha_bar_prev = (1.0_f32 - alpha_bar_prev).sqrt();
+
         let (height, width) = self.noisy_spec.dim();
+        let pred_rows = noise_prediction.nrows();
+        let pred_cols = noise_prediction.ncols();
+
         for i in 0..height {
             for j in 0..width {
-                if i < denoised_prediction.nrows() && j < denoised_prediction.ncols() {
-                    // Simplified denoising step
-                    self.noisy_spec[[i, j]] =
-                        alpha * denoised_prediction[[i, j]] + beta * self.noisy_spec[[i, j]];
-                }
+                let x_t = self.noisy_spec[[i, j]];
+                let eps_hat = if i < pred_rows && j < pred_cols {
+                    noise_prediction[[i, j]]
+                } else {
+                    0.0
+                };
+
+                // Estimate clean signal from noisy sample and predicted noise.
+                let x0_hat = (x_t - sqrt_one_minus_alpha_bar_t * eps_hat) / sqrt_alpha_bar_t;
+
+                // Reconstruct x_{t-1} using the "predict x_0" parameterization.
+                self.noisy_spec[[i, j]] =
+                    sqrt_alpha_bar_prev * x0_hat + sqrt_one_minus_alpha_bar_prev * eps_hat;
             }
         }
 
         self.step += 1;
-        self.noise_level *= 0.98; // Reduce noise level
+        // Update noise_level to reflect ᾱ after the step advance.
+        let new_t = self.step;
+        self.noise_level = if new_t < total {
+            1.0 - compute_alpha_bar(new_t, total)
+        } else {
+            0.0
+        };
 
         Ok(())
     }
@@ -255,6 +292,27 @@ impl MusicalConditioning {
         self.tempo = tempo;
         self
     }
+}
+
+/// Compute the cumulative product of (1 - β_t) for t = 0..=step using a linear beta schedule.
+///
+/// The linear schedule interpolates β from `beta_start` (1e-4) to `beta_end` (0.02)
+/// over `total_steps` steps, matching the original DDPM paper.
+///
+/// Returns ᾱ_step = ∏_{s=0}^{step} (1 - β_s)
+fn compute_alpha_bar(step: usize, total_steps: usize) -> f32 {
+    const BETA_START: f32 = 1e-4;
+    const BETA_END: f32 = 0.02;
+
+    // Guard against degenerate schedules
+    let denom = (total_steps.saturating_sub(1).max(1)) as f32;
+
+    (0..=step)
+        .map(|s| {
+            let beta_s = BETA_START + (BETA_END - BETA_START) * (s as f32 / denom);
+            1.0_f32 - beta_s
+        })
+        .product::<f32>()
 }
 
 /// DiffSinger synthesis model
@@ -501,7 +559,22 @@ impl DiffSingerModel {
         Ok(features)
     }
 
-    /// Predict noise for current diffusion step (placeholder neural network)
+    /// Predict noise ε_θ(x_t, t, c) for the current diffusion step.
+    ///
+    /// Without a trained neural network we treat the conditioning features as
+    /// the "target" clean signal x̂_0 and derive the noise estimate analytically
+    /// from the DDPM forward-process equation:
+    ///
+    ///   x_t = sqrt(ᾱ_t) * x_0 + sqrt(1-ᾱ_t) * ε
+    ///
+    /// Rearranging for ε:
+    ///
+    ///   ε_estimate = (x_t - sqrt(ᾱ_t) * x̂_0) / sqrt(1-ᾱ_t)
+    ///
+    /// The conditioning-based target mel x̂_0 is composed from pitch (primary)
+    /// and musical (secondary, scaled 0.5) features.  Any missing conditioning
+    /// channels default to zero, which results in a noise estimate that simply
+    /// drives the noisy spectrogram toward silence — a safe fallback.
     fn predict_noise(
         &self,
         diffusion_state: &DiffusionState,
@@ -509,32 +582,50 @@ impl DiffSingerModel {
         step: usize,
     ) -> Result<Array2<f32>> {
         let (n_mel, n_frames) = diffusion_state.noisy_spec.dim();
-        let mut prediction = Array2::zeros((n_mel, n_frames));
 
-        // Placeholder noise prediction (in practice, this would be a neural network)
-        // Simple denoising based on conditioning
-        let step_factor = 1.0 - (step as f32 / diffusion_state.total_steps as f32);
+        // ── Step 1: build the conditioning-based target mel x̂_0 ──────────────
+        let mut target = Array2::<f32>::zeros((n_mel, n_frames));
 
-        for i in 0..n_mel {
-            for j in 0..n_frames {
-                let current_value = diffusion_state.noisy_spec[[i, j]];
-
-                // Apply conditioning influence
-                let mut conditioning_influence = 0.0;
-                if let Some(pitch_cond) = conditioning.get("pitch") {
-                    if i < pitch_cond.nrows() && j < pitch_cond.ncols() {
-                        conditioning_influence +=
-                            pitch_cond[[i.min(pitch_cond.nrows() - 1), j]] * 0.5;
-                    }
+        // Pitch conditioning is the primary structural guide.
+        if let Some(pitch_cond) = conditioning.get("pitch") {
+            let rows = n_mel.min(pitch_cond.nrows());
+            let cols = n_frames.min(pitch_cond.ncols());
+            for i in 0..rows {
+                for j in 0..cols {
+                    target[[i, j]] += pitch_cond[[i, j]];
                 }
-
-                // Simple denoising prediction
-                prediction[[i, j]] =
-                    current_value * step_factor + conditioning_influence * (1.0 - step_factor);
             }
         }
 
-        Ok(prediction)
+        // Musical conditioning provides harmonic context at half weight.
+        if let Some(musical_cond) = conditioning.get("musical") {
+            const MUSICAL_SCALE: f32 = 0.5;
+            let rows = n_mel.min(musical_cond.nrows());
+            let cols = n_frames.min(musical_cond.ncols());
+            for i in 0..rows {
+                for j in 0..cols {
+                    target[[i, j]] += musical_cond[[i, j]] * MUSICAL_SCALE;
+                }
+            }
+        }
+
+        // ── Step 2: compute ᾱ_t from the linear beta schedule ────────────────
+        let alpha_bar_t = compute_alpha_bar(step, diffusion_state.total_steps);
+        let sqrt_alpha_bar = alpha_bar_t.sqrt();
+        // Clamp denominator away from zero to avoid division-by-zero at t=0.
+        let sqrt_one_minus_alpha_bar = (1.0_f32 - alpha_bar_t).sqrt().max(1e-6);
+
+        // ── Step 3: ε_estimate = (x_t - sqrt(ᾱ_t) * x̂_0) / sqrt(1-ᾱ_t) ────
+        let mut noise_estimate = Array2::<f32>::zeros((n_mel, n_frames));
+        for i in 0..n_mel {
+            for j in 0..n_frames {
+                noise_estimate[[i, j]] = (diffusion_state.noisy_spec[[i, j]]
+                    - sqrt_alpha_bar * target[[i, j]])
+                    / sqrt_one_minus_alpha_bar;
+            }
+        }
+
+        Ok(noise_estimate)
     }
 
     /// Convert mel spectrogram to audio using vocoder
@@ -834,9 +925,133 @@ mod tests {
             _ => panic!("Expected Linear schedule"),
         }
 
+        // cosine_schedule is intentionally unused; keep it to verify the
+        // variant is constructible without warnings.
+        let _ = cosine_schedule;
+
         match custom_schedule {
             NoiseSchedule::Custom(ref values) => assert_eq!(values.len(), 3),
             _ => panic!("Expected Custom schedule"),
         }
+    }
+
+    // ── New DDPM-related tests ─────────────────────────────────────────────
+
+    /// predict_noise must return a tensor with the same (n_mel, n_frames) shape
+    /// as the noisy spectrogram stored in the DiffusionState.
+    #[test]
+    fn test_predict_noise_output_shape() {
+        let model = DiffSingerModel::default();
+        let n_mel = 80;
+        let n_frames = 60;
+
+        let mut state = DiffusionState::new((n_mel, n_frames), 50);
+        state.initialize_noise();
+
+        // Build minimal conditioning maps with different shapes to verify
+        // boundary clamping is handled inside predict_noise.
+        let mut conditioning: HashMap<String, Array2<f32>> = HashMap::new();
+        conditioning.insert("pitch".to_string(), Array2::<f32>::zeros((1, n_frames)));
+        conditioning.insert("musical".to_string(), Array2::<f32>::zeros((8, n_frames)));
+
+        let result = model.predict_noise(&state, &conditioning, 5).unwrap();
+        assert_eq!(result.dim(), (n_mel, n_frames));
+    }
+
+    /// predict_noise must never produce NaN values regardless of the
+    /// conditioning input or the diffusion step.
+    #[test]
+    fn test_predict_noise_no_nan() {
+        let model = DiffSingerModel::default();
+        let n_mel = 40;
+        let n_frames = 30;
+
+        let mut state = DiffusionState::new((n_mel, n_frames), 50);
+        state.initialize_noise();
+
+        let mut conditioning: HashMap<String, Array2<f32>> = HashMap::new();
+        conditioning.insert("pitch".to_string(), Array2::<f32>::ones((n_mel, n_frames)));
+        conditioning.insert(
+            "musical".to_string(),
+            Array2::<f32>::from_elem((n_mel, n_frames), 0.3),
+        );
+
+        // Test across multiple steps, including the boundary step 0.
+        for &step in &[0usize, 1, 25, 49] {
+            let result = model.predict_noise(&state, &conditioning, step).unwrap();
+            for &v in result.iter() {
+                assert!(
+                    v.is_finite(),
+                    "NaN or Inf detected at step {step}: value = {v}"
+                );
+            }
+        }
+    }
+
+    /// Verify the linear beta schedule properties:
+    /// - At step 0 (very first), ᾱ is close to 1 (almost no noise has been added).
+    /// - At step T-1 (last step), ᾱ is close to 0 (nearly all signal is noise).
+    #[test]
+    fn test_alpha_bar_schedule() {
+        let total_steps = 1000_usize;
+
+        let alpha_bar_first = compute_alpha_bar(0, total_steps);
+        // β_0 ≈ 1e-4, so ᾱ_0 = 1 - 1e-4 ≈ 0.9999
+        assert!(
+            alpha_bar_first > 0.99,
+            "ᾱ at step 0 should be close to 1, got {alpha_bar_first}"
+        );
+
+        let alpha_bar_last = compute_alpha_bar(total_steps - 1, total_steps);
+        // After 1000 multiplications by (1-β_t), the product approaches 0.
+        assert!(
+            alpha_bar_last < 0.05,
+            "ᾱ at step T-1 should be close to 0, got {alpha_bar_last}"
+        );
+
+        // Monotonically decreasing property.
+        let alpha_bar_mid = compute_alpha_bar(total_steps / 2, total_steps);
+        assert!(
+            alpha_bar_mid < alpha_bar_first,
+            "ᾱ should decrease: first={alpha_bar_first} mid={alpha_bar_mid}"
+        );
+        assert!(
+            alpha_bar_last < alpha_bar_mid,
+            "ᾱ should decrease: mid={alpha_bar_mid} last={alpha_bar_last}"
+        );
+    }
+
+    /// For two distinct conditioning inputs, predict_noise must return
+    /// different outputs (the function must be sensitive to conditioning).
+    #[test]
+    fn test_predict_noise_not_constant() {
+        let model = DiffSingerModel::default();
+        let n_mel = 20;
+        let n_frames = 15;
+
+        let mut state = DiffusionState::new((n_mel, n_frames), 50);
+        state.initialize_noise();
+
+        // Conditioning set A: pitch all zeros.
+        let mut cond_a: HashMap<String, Array2<f32>> = HashMap::new();
+        cond_a.insert("pitch".to_string(), Array2::<f32>::zeros((n_mel, n_frames)));
+
+        // Conditioning set B: pitch all ones (significantly different).
+        let mut cond_b: HashMap<String, Array2<f32>> = HashMap::new();
+        cond_b.insert("pitch".to_string(), Array2::<f32>::ones((n_mel, n_frames)));
+
+        let result_a = model.predict_noise(&state, &cond_a, 10).unwrap();
+        let result_b = model.predict_noise(&state, &cond_b, 10).unwrap();
+
+        // At least one element must differ between the two predictions.
+        let any_different = result_a
+            .iter()
+            .zip(result_b.iter())
+            .any(|(a, b)| (a - b).abs() > 1e-6);
+
+        assert!(
+            any_different,
+            "predict_noise returned identical outputs for different conditioning inputs"
+        );
     }
 }

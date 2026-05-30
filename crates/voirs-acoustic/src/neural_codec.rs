@@ -283,52 +283,111 @@ impl ResidualVectorQuantizer {
         })
     }
 
-    /// Find nearest codebook entries for input
+    /// Find nearest codebook entries for input using L2 distance.
+    ///
+    /// Uses the L2 identity to avoid materialising a full `(N, C, D)` intermediate tensor.
+    ///
+    /// - `input`: any shape whose total element count is divisible by `embedding_dim` (e.g., `[B, T, D]` or `[N, D]`)
+    /// - `level`: which codebook level to search
+    /// - returns: `N = total_elements / embedding_dim` argmin indices
     fn find_nearest_codes(&self, input: &Tensor, level: usize) -> Result<Vec<usize>> {
-        // Compute distances to all codebook entries
-        // input: [batch, seq_len, dim]
-        // codebook: [codebook_size, dim]
-        // distances: [batch, seq_len, codebook_size]
+        let codebook = &self.codebooks[level]; // [C, D]
 
-        let codebook = &self.codebooks[level];
+        // Flatten all leading dimensions → [N, D]
+        let n = input.elem_count() / self.embedding_dim;
+        let x =
+            input
+                .reshape((n, self.embedding_dim))
+                .map_err(|e| AcousticError::ProcessingError {
+                    message: format!("Failed to reshape input for nearest-code search: {}", e),
+                })?; // [N, D]
 
-        // For simplicity in this implementation, use placeholder
-        // In production, this would use proper distance computation
-        let batch_size = input.dims()[0];
-        let seq_len = if input.dims().len() > 1 {
-            input.dims()[1]
-        } else {
-            1
-        };
+        // ||x||^2  → [N, 1]
+        let x_sq = x
+            .sqr()
+            .map_err(|e| AcousticError::ProcessingError {
+                message: format!("Failed to compute x^2: {}", e),
+            })?
+            .sum_keepdim(1)
+            .map_err(|e| AcousticError::ProcessingError {
+                message: format!("Failed to sum x^2: {}", e),
+            })?; // [N, 1]
 
-        // Placeholder: return random indices
-        let mut indices = Vec::with_capacity(batch_size * seq_len);
-        for _ in 0..batch_size * seq_len {
-            indices.push(fastrand::usize(..self.codebook_size));
-        }
+        // ||c||^2  → [1, C]
+        let c_sq = codebook
+            .sqr()
+            .map_err(|e| AcousticError::ProcessingError {
+                message: format!("Failed to compute codebook^2: {}", e),
+            })?
+            .sum_keepdim(1)
+            .map_err(|e| AcousticError::ProcessingError {
+                message: format!("Failed to sum codebook^2: {}", e),
+            })?
+            .t()
+            .map_err(|e| AcousticError::ProcessingError {
+                message: format!("Failed to transpose codebook norms: {}", e),
+            })?; // [1, C]
 
-        Ok(indices)
-    }
+        // x * c^T  → [N, C]
+        let x_ct = x
+            .matmul(&codebook.t().map_err(|e| AcousticError::ProcessingError {
+                message: format!("Failed to transpose codebook: {}", e),
+            })?)
+            .map_err(|e| AcousticError::ProcessingError {
+                message: format!("Failed to compute x * codebook^T: {}", e),
+            })?; // [N, C]
 
-    /// Quantize indices to continuous values using codebook
-    fn quantize_indices(&self, indices: &[usize], level: usize) -> Result<Tensor> {
-        let codebook = &self.codebooks[level];
+        // dist² = ||x||² - 2·x·c^T + ||c||²   → [N, C]
+        // Note: subtracting 2·x·c^T  is equivalent to affine(-2.0, 0.0) then add norms.
+        let dist = x_sq
+            .broadcast_add(&c_sq)
+            .map_err(|e| AcousticError::ProcessingError {
+                message: format!("Failed to broadcast-add norms: {}", e),
+            })?
+            .sub(
+                &x_ct
+                    .affine(2.0, 0.0)
+                    .map_err(|e| AcousticError::ProcessingError {
+                        message: format!("Failed to scale cross term: {}", e),
+                    })?,
+            )
+            .map_err(|e| AcousticError::ProcessingError {
+                message: format!("Failed to subtract cross term from dist: {}", e),
+            })?; // [N, C]
 
-        // Gather codebook entries based on indices
-        // This is a simplified placeholder implementation
-        let num_indices = indices.len();
-
-        // Create tensor with quantized values
-        let quantized = Tensor::zeros(
-            (num_indices, self.embedding_dim),
-            candle_core::DType::F32,
-            &self.device,
-        )
-        .map_err(|e| AcousticError::ProcessingError {
-            message: format!("Failed to create quantized tensor: {}", e),
+        // Argmin along codebook axis → [N]
+        let indices_tensor = dist.argmin(1).map_err(|e| AcousticError::ProcessingError {
+            message: format!("Failed to compute argmin: {}", e),
         })?;
 
-        Ok(quantized)
+        let raw: Vec<u32> =
+            indices_tensor
+                .to_vec1()
+                .map_err(|e| AcousticError::ProcessingError {
+                    message: format!("Failed to extract argmin indices: {}", e),
+                })?;
+
+        Ok(raw.into_iter().map(|i| i as usize).collect())
+    }
+
+    /// Gather codebook rows corresponding to `indices`.
+    ///
+    /// Returns a tensor of shape `[num_indices, embedding_dim]`.
+    fn quantize_indices(&self, indices: &[usize], level: usize) -> Result<Tensor> {
+        let codebook = &self.codebooks[level]; // [C, D]
+
+        // Build a U32 index tensor from the flat slice.
+        let idx_tensor = Tensor::from_iter(indices.iter().map(|&i| i as u32), &self.device)
+            .map_err(|e| AcousticError::ProcessingError {
+                message: format!("Failed to create index tensor: {}", e),
+            })?; // [N]
+
+        // index_select gathers rows: codebook[[i0, i1, ...]] → [N, D]
+        codebook
+            .index_select(&idx_tensor, 0)
+            .map_err(|e| AcousticError::ProcessingError {
+                message: format!("Failed to gather codebook entries: {}", e),
+            })
     }
 
     /// Compute commitment loss for training
@@ -777,5 +836,135 @@ mod tests {
         assert!(report.contains("SNR: 25.50 dB"));
         assert!(report.contains("PESQ: 4.200"));
         assert!(report.contains("Bitrate: 6.00 kbps"));
+    }
+
+    // ------------------------------------------------------------------
+    // Real nearest-code / quantize-indices tests
+    // ------------------------------------------------------------------
+
+    /// Helper: build an RVQ where the level-0 codebook is replaced by a
+    /// known tensor so we can write deterministic assertions.
+    fn make_rvq_with_known_codebook(
+        codebook_size: usize,
+        embedding_dim: usize,
+        rows: Vec<f32>,
+        device: &Device,
+    ) -> crate::Result<ResidualVectorQuantizer> {
+        let mut rvq = ResidualVectorQuantizer::new(1, codebook_size, embedding_dim, device)?;
+        let cb = Tensor::from_vec(rows, (codebook_size, embedding_dim), device).map_err(|e| {
+            AcousticError::ProcessingError {
+                message: format!("Failed to build test codebook: {}", e),
+            }
+        })?;
+        rvq.codebooks[0] = cb;
+        Ok(rvq)
+    }
+
+    #[test]
+    fn test_rvq_nearest_code_exact_match() {
+        // codebook_size = 4, embedding_dim = 8
+        // Build four orthogonal-ish rows (scaled basis vectors).
+        let embedding_dim = 8usize;
+        let codebook_size = 4usize;
+        let mut rows = vec![0.0f32; codebook_size * embedding_dim];
+        for i in 0..codebook_size {
+            rows[i * embedding_dim + i * 2] = 1.0; // distinct non-overlapping non-zero entries
+        }
+
+        let device = Device::Cpu;
+        let rvq = make_rvq_with_known_codebook(codebook_size, embedding_dim, rows.clone(), &device)
+            .expect("Failed to build RVQ for test");
+
+        // Input = exact copy of codebook row 2, shaped [1, 1, embedding_dim]
+        let row2: Vec<f32> = rows[2 * embedding_dim..(2 + 1) * embedding_dim].to_vec();
+        let input = Tensor::from_vec(row2, (1usize, 1usize, embedding_dim), &device)
+            .expect("Failed to build input tensor");
+
+        let indices = rvq
+            .find_nearest_codes(&input, 0)
+            .expect("find_nearest_codes failed");
+
+        assert_eq!(
+            indices.len(),
+            1,
+            "Should return one index for a [1,1,D] input"
+        );
+        assert_eq!(
+            indices[0], 2,
+            "Exact match for row 2 must map to index 2, got {}",
+            indices[0]
+        );
+    }
+
+    #[test]
+    fn test_rvq_quantize_roundtrip() {
+        let embedding_dim = 8usize;
+        let codebook_size = 4usize;
+        let mut rows = vec![0.0f32; codebook_size * embedding_dim];
+        for i in 0..codebook_size {
+            rows[i * embedding_dim + i * 2] = 1.0;
+        }
+
+        let device = Device::Cpu;
+        let rvq = make_rvq_with_known_codebook(codebook_size, embedding_dim, rows.clone(), &device)
+            .expect("Failed to build RVQ for test");
+
+        // Gather index 2 and verify we get back row 2.
+        let gathered = rvq
+            .quantize_indices(&[2], 0)
+            .expect("quantize_indices failed");
+
+        assert_eq!(
+            gathered.dims(),
+            &[1, embedding_dim],
+            "Gathered tensor should be [1, embedding_dim]"
+        );
+
+        let gathered_data: Vec<f32> = gathered
+            .to_vec2::<f32>()
+            .expect("to_vec2 failed")
+            .into_iter()
+            .flatten()
+            .collect();
+
+        let expected: Vec<f32> = rows[2 * embedding_dim..(2 + 1) * embedding_dim].to_vec();
+        for (got, exp) in gathered_data.iter().zip(expected.iter()) {
+            assert!(
+                (got - exp).abs() < 1e-6,
+                "Mismatch: got {got} expected {exp}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_rvq_commitment_loss_zero_for_codebook_member() {
+        // When input == quantized the commitment loss should be exactly 0.
+        let embedding_dim = 8usize;
+        let codebook_size = 4usize;
+        let mut rows = vec![0.0f32; codebook_size * embedding_dim];
+        for i in 0..codebook_size {
+            rows[i * embedding_dim + i * 2] = 1.0;
+        }
+
+        let device = Device::Cpu;
+        let rvq = make_rvq_with_known_codebook(codebook_size, embedding_dim, rows.clone(), &device)
+            .expect("Failed to build RVQ for test");
+
+        // Build input = codebook row 2, shaped [1, embedding_dim]
+        let row2: Vec<f32> = rows[2 * embedding_dim..(2 + 1) * embedding_dim].to_vec();
+        let input = Tensor::from_vec(row2.clone(), (1usize, embedding_dim), &device)
+            .expect("Failed to build input");
+        let quantized = rvq
+            .quantize_indices(&[2], 0)
+            .expect("quantize_indices failed");
+
+        let loss = rvq
+            .commitment_loss(&input, &quantized, 1.0)
+            .expect("commitment_loss failed");
+
+        assert!(
+            loss.abs() < 1e-6,
+            "Commitment loss should be ~0 when input == quantized entry, got {loss}"
+        );
     }
 }

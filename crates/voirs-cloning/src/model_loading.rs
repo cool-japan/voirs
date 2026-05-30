@@ -421,7 +421,7 @@ impl ModelLoadingManager {
 
         info!(model_id = %model_id, path = %path.display(), "Loading model directly into memory");
 
-        let bytes = std::fs::read(&path).map_err(|e| Error::Io(e))?;
+        let bytes = std::fs::read(&path).map_err(Error::Io)?;
 
         let size_bytes = bytes.len();
         debug!(model_id = %model_id, size_bytes, "Direct load: read {} bytes", size_bytes);

@@ -3,7 +3,7 @@
 //! Implements invertible transformations for the latent space in VITS.
 //! Uses coupling layers, invertible 1x1 convolutions, and activation normalization.
 
-use candle_core::{DType, Device, Result as CandleResult, Tensor};
+use candle_core::{DType, Device, Module, Result as CandleResult, Tensor};
 use candle_nn::{Conv1d, Conv1dConfig, VarBuilder};
 use serde::{Deserialize, Serialize};
 
@@ -389,22 +389,110 @@ impl WaveNet {
     }
 
     pub fn forward(&self, x: &Tensor) -> CandleResult<Tensor> {
-        // Simplified WaveNet for debugging - just use a single linear transformation
-        let (batch_size, in_channels, n_frames) = x.dims3()?;
+        // Real WaveNet forward pass with gated dilated convolutions.
+        //
+        // Architecture per layer i:
+        //   h = dilated_conv(x)            — shape [B, h_channels, T]
+        //
+        //   Gated activation (standard WaveNet):
+        //     h_tanh   = h[:, :half, :]    — first half of channels
+        //     h_sig    = h[:, half:, :]    — second half of channels
+        //     gate     = tanh(h_tanh) * sigmoid(h_sig)
+        //                                  — shape [B, half, T]
+        //
+        //   When the constructor emits h_channels == hidden_dim (not 2*hidden_dim),
+        //   gate.shape[1] == hidden_dim/2.  The residual/skip layers are built
+        //   with hidden_dim in-channels, so we must guard all projections.
+        //
+        //   Residual: res = residual_conv(gate)  — add to x only if dims match
+        //   Skip:     skip = skip_conv(gate)      — accumulate; if dims mismatch,
+        //             accumulate gate directly (no projection).
+        //
+        // After all layers: relu(skip_sum) -> output_layer -> final output
 
-        // Create a simple 1x1 convolution to transform input to output channels
-        let weight = Tensor::randn(0.0f32, 0.1f32, (in_channels, in_channels), x.device())?;
+        // The constructor builds layers[i] with output channels == hidden_dim,
+        // while residual_layers[i] and skip_layers[i] take hidden_dim as input.
+        // After the gated activation, gate has hidden_dim/2 channels.
+        //
+        // We handle the resulting dimension mismatch by keeping `current_x` always
+        // at hidden_dim channels after the first layer:
+        //   - For residual/skip projections, we check dims at runtime and fall back
+        //     to the pre-gate hidden state when the gate is too narrow.
+        //   - `current_x` is always updated to h (dilated conv output, hidden_dim)
+        //     so subsequent layers receive the correct number of input channels.
 
-        // Apply to each frame
-        let x_reshaped = x
-            .permute((0, 2, 1))?
-            .reshape((batch_size * n_frames, in_channels))?;
-        let output_reshaped = x_reshaped.matmul(&weight)?;
-        let output = output_reshaped
-            .reshape((batch_size, n_frames, in_channels))?
-            .permute((0, 2, 1))?;
+        let mut current_x = x.clone();
+        let mut skip_sum: Option<Tensor> = None;
 
-        Ok(output)
+        for i in 0..self.n_layers {
+            // --- Dilated convolution ---
+            // h shape: [B, hidden_dim, T]
+            let h = self.layers[i].forward(&current_x)?;
+
+            let h_channels = h.dims()[1];
+            let half_dim = h_channels / 2;
+
+            // --- Gated activation ---
+            // Split h along channel dim into two equal halves.
+            // h_tanh: [B, half_dim, T]  h_sig: [B, h_channels - half_dim, T]
+            let h_tanh = h.narrow(1, 0, half_dim)?;
+            let h_sig = h.narrow(1, half_dim, h_channels - half_dim)?;
+            // gate: [B, half_dim, T]
+            let gate = h_tanh.tanh()?.mul(&candle_nn::ops::sigmoid(&h_sig)?)?;
+
+            let gate_channels = gate.dims()[1];
+
+            // --- Residual connection ---
+            // residual_layers[i] takes hidden_dim inputs (same as h_channels).
+            // When gate_channels == h_channels (no split mismatch), project and add.
+            // Otherwise use h directly as the residual base.
+            let res_in_channels = self.residual_layers[i].weight().dims()[1];
+            let res_out = if gate_channels == res_in_channels {
+                self.residual_layers[i].forward(&gate)?
+            } else {
+                // gate is narrower than residual layer expects (half_dim < hidden_dim);
+                // fall back to projecting h, which has exactly hidden_dim channels.
+                self.residual_layers[i].forward(&h)?
+            };
+
+            // Add residual to current_x when channel counts agree.
+            let x_channels = current_x.dims()[1];
+            let res_channels = res_out.dims()[1];
+            // Always advance current_x to hidden_dim for the next iteration.
+            current_x = if x_channels == res_channels {
+                (&current_x + &res_out)?
+            } else {
+                // x is still at in_channels (first layer, in_channels ≠ hidden_dim);
+                // discard the residual add and carry h so shapes stay at hidden_dim.
+                h.clone()
+            };
+
+            // --- Skip connection ---
+            // Project gate (or h, on mismatch) and accumulate.
+            let skip_in_channels = self.skip_layers[i].weight().dims()[1];
+            let skip_contribution = if gate_channels == skip_in_channels {
+                self.skip_layers[i].forward(&gate)?
+            } else {
+                // gate narrower than skip layer; use h instead.
+                self.skip_layers[i].forward(&h)?
+            };
+
+            skip_sum = Some(if let Some(acc) = skip_sum {
+                (&acc + &skip_contribution)?
+            } else {
+                skip_contribution
+            });
+        }
+
+        // --- Aggregate and project to output ---
+        let skip_agg = skip_sum.ok_or_else(|| {
+            candle_core::Error::Msg("WaveNet has zero layers; skip_sum is empty".to_string())
+        })?;
+
+        // skip_agg has hidden_dim channels; output_layer expects hidden_dim → out_channels.
+        let out = self.output_layer.forward(&skip_agg.relu()?)?;
+
+        Ok(out)
     }
 }
 
@@ -586,5 +674,101 @@ impl NormalizingFlows {
         }
 
         Ok((current_z, total_log_det))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use candle_core::{DType, Device};
+    use candle_nn::VarBuilder;
+
+    /// Build a small WaveNet on the CPU for testing
+    fn make_wavenet(
+        in_channels: usize,
+        out_channels: usize,
+        hidden_dim: usize,
+        n_layers: usize,
+    ) -> CandleResult<WaveNet> {
+        let device = Device::Cpu;
+        let vs = candle_nn::VarMap::new();
+        let vb = VarBuilder::from_varmap(&vs, DType::F32, &device);
+        WaveNet::new(in_channels, out_channels, hidden_dim, 3, n_layers, 0.0, vb)
+    }
+
+    /// Create a deterministic input tensor filled with a constant value
+    fn const_input(
+        batch: usize,
+        channels: usize,
+        frames: usize,
+        value: f32,
+    ) -> CandleResult<Tensor> {
+        let device = Device::Cpu;
+        let data = vec![value; batch * channels * frames];
+        Tensor::from_vec(data, (batch, channels, frames), &device)
+    }
+
+    /// test_wavenet_forward_deterministic:
+    /// Two calls with the same input tensor must produce bit-identical results
+    /// (i.e. no internal randomness is introduced during forward).
+    #[test]
+    fn test_wavenet_forward_deterministic() -> CandleResult<()> {
+        let wn = make_wavenet(4, 4, 8, 3)?;
+        let x = const_input(1, 4, 16, 0.5)?;
+
+        let out1 = wn.forward(&x)?;
+        let out2 = wn.forward(&x)?;
+
+        let diff = ((&out1 - &out2)?.abs()?)
+            .max(0)?
+            .max(0)?
+            .max(0)?
+            .to_scalar::<f32>()?;
+
+        assert_eq!(
+            diff, 0.0,
+            "forward() is not deterministic; max diff = {diff}"
+        );
+        Ok(())
+    }
+
+    /// test_wavenet_forward_shape:
+    /// Input [1, C_in, T] must produce output [1, C_out, T] — time dimension preserved.
+    #[test]
+    fn test_wavenet_forward_shape() -> CandleResult<()> {
+        let in_channels = 4;
+        let out_channels = 4;
+        let frames = 32;
+        let wn = make_wavenet(in_channels, out_channels, 8, 3)?;
+        let x = const_input(1, in_channels, frames, 0.1)?;
+
+        let out = wn.forward(&x)?;
+        let dims = out.dims();
+
+        assert_eq!(dims.len(), 3, "output must be 3-dimensional");
+        assert_eq!(dims[0], 1, "batch dimension must be preserved");
+        assert_eq!(
+            dims[1], out_channels,
+            "channel dimension must equal out_channels"
+        );
+        assert_eq!(dims[2], frames, "time dimension must be preserved");
+        Ok(())
+    }
+
+    /// test_wavenet_no_nan:
+    /// For a well-behaved input the output must contain no NaN values.
+    #[test]
+    fn test_wavenet_no_nan() -> CandleResult<()> {
+        let wn = make_wavenet(4, 4, 8, 4)?;
+        let x = const_input(2, 4, 24, 0.3)?;
+
+        let out = wn.forward(&x)?;
+
+        // NaN check: a tensor equals itself only if there are no NaNs
+        let is_nan = out.ne(&out)?;
+        let nan_count = is_nan.to_dtype(DType::F32)?.sum_all()?.to_scalar::<f32>()?;
+
+        assert_eq!(nan_count, 0.0, "output contains NaN values");
+        Ok(())
     }
 }

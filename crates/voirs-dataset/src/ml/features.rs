@@ -55,7 +55,18 @@ mod tests {
 
         let audio = AudioData::silence(1.0, 22050, 1);
         let features = learner.extract_audio_features(&audio).await.unwrap();
-        assert_eq!(features.len(), 13); // MFCC default
+        // Real MFCC pipeline returns n_frames * n_mfcc values (not a single-frame approximation)
+        // With 22050 samples, n_fft=1024, hop=256: n_frames = (22050-1024)/256+1 = 83
+        // n_mfcc = 13 (default), so total = 83*13 = 1079 (or similar)
+        let n_mfcc = 13usize;
+        assert!(!features.is_empty(), "MFCC features should not be empty");
+        assert_eq!(
+            features.len() % n_mfcc,
+            0,
+            "MFCC feature vector length ({}) must be a multiple of n_mfcc ({})",
+            features.len(),
+            n_mfcc
+        );
     }
 
     #[tokio::test]

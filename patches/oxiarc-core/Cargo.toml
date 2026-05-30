@@ -1,0 +1,37 @@
+[package]
+name = "oxiarc-core"
+version = "0.2.6"
+edition = "2024"
+rust-version = "1.85"
+authors = ["COOLJAPAN OU (Team KitaSan)"]
+description = "Core components for OxiArc - patched to add cancel/progress modules"
+license = "Apache-2.0"
+repository = "https://github.com/cool-japan/oxiarc"
+
+[features]
+async-io = ["dep:tokio"]
+default = []
+mmap = ["dep:memmap2"]
+serde = ["dep:serde"]
+simd = []
+
+[lib]
+name = "oxiarc_core"
+path = "src/lib.rs"
+
+[dependencies]
+thiserror = "2.0.18"
+
+[dependencies.memmap2]
+version = "0.9"
+optional = true
+
+[dependencies.serde]
+version = "1.0"
+features = ["derive"]
+optional = true
+
+[dependencies.tokio]
+version = "1"
+features = ["io-util", "rt", "macros", "sync"]
+optional = true

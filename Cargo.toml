@@ -251,8 +251,9 @@ tokio-tungstenite = "0.29"
 # GPU operations will panic at runtime with a clear message.
 candle-kernels = { path = "patches/candle-kernels" }
 cudarc = { path = "patches/cudarc" }
-# Patch all oxiarc-* to local builds so registry oxiarc-archive-0.2.8
-# picks up the cancel/progress modules that were absent in oxiarc-core-0.2.6.
+# Patch oxiarc-core 0.2.x: adds cancel/progress modules absent in 0.2.6.
+# scirs2-core 0.4.4 -> oxiarc-zstd 0.2.8 -> oxiarc-core 0.2.6 (missing those modules).
+oxiarc-core = { path = "patches/oxiarc-core" }
 
 [profile.dev]
 opt-level = 1

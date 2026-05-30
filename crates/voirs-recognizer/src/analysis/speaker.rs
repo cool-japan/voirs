@@ -520,52 +520,135 @@ impl SpeakerAnalyzer {
         })
     }
 
-    /// Extract spectral features for emotion analysis
+    /// Extract spectral features for emotion analysis.
+    ///
+    /// Returns centroid, spread (both in Hz), and spectral flux (normalised,
+    /// approximately 0–1).
     async fn extract_spectral_features(
         &self,
         audio: &AudioBuffer,
     ) -> Result<SpectralFeatures, RecognitionError> {
         let samples = audio.samples();
+
+        // The one-sided rfft spectrum has `n_fft/2 + 1` bins; bin `i`
+        // corresponds to frequency  `i * sample_rate / n_fft`.
+        // spectrum.len() == n_fft/2 + 1  →  n_fft = (spectrum.len()-1)*2
         let spectrum = self.compute_spectrum(samples).await?;
+        let n_fft = (spectrum.len() - 1) * 2;
 
-        // Calculate spectral centroid
-        let mut weighted_sum = 0.0;
-        let mut magnitude_sum = 0.0;
+        #[allow(clippy::cast_precision_loss)]
+        let bin_hz = audio.sample_rate() as f32 / n_fft as f32;
 
-        for (i, &magnitude) in spectrum.iter().enumerate() {
+        // Spectral centroid
+        let mut weighted_sum = 0.0_f32;
+        let mut magnitude_sum = 0.0_f32;
+        for (i, &mag) in spectrum.iter().enumerate() {
             #[allow(clippy::cast_precision_loss)]
-            let frequency = i as f32 * audio.sample_rate() as f32 / spectrum.len() as f32;
-            weighted_sum += frequency * magnitude;
-            magnitude_sum += magnitude;
+            let frequency = i as f32 * bin_hz;
+            weighted_sum += frequency * mag;
+            magnitude_sum += mag;
         }
-
         let spectral_centroid = if magnitude_sum > 0.0 {
             weighted_sum / magnitude_sum
         } else {
             0.0
         };
 
-        // Calculate spectral spread
+        // Spectral spread
         let spectral_spread = if magnitude_sum > 0.0 {
-            let mut spread_sum = 0.0;
-            for (i, &magnitude) in spectrum.iter().enumerate() {
+            let mut spread_sum = 0.0_f32;
+            for (i, &mag) in spectrum.iter().enumerate() {
                 #[allow(clippy::cast_precision_loss)]
-                let frequency = i as f32 * audio.sample_rate() as f32 / spectrum.len() as f32;
-                spread_sum += (frequency - spectral_centroid).powi(2) * magnitude;
+                let frequency = i as f32 * bin_hz;
+                spread_sum += (frequency - spectral_centroid).powi(2) * mag;
             }
             (spread_sum / magnitude_sum).sqrt()
         } else {
             0.0
         };
 
-        // Calculate spectral flux (measure of spectral change)
-        let spectral_flux = 0.5; // Placeholder - would need temporal analysis
+        // Real spectral flux via half-wave rectified frame-to-frame difference.
+        //
+        // Frame the signal with hop = self.hop_size, compute per-frame magnitude
+        // spectra, then accumulate the positive differences between consecutive
+        // frames.  Normalise by the mean magnitude so the result lives roughly
+        // in [0, 1].
+        let spectral_flux = self.compute_spectral_flux(samples).await?;
 
         Ok(SpectralFeatures {
             centroid: spectral_centroid,
             spread: spectral_spread,
             flux: spectral_flux,
         })
+    }
+
+    /// Compute half-wave-rectified spectral flux across the signal.
+    ///
+    /// For each pair of consecutive frames `(t-1, t)` the per-bin flux is
+    /// `max(0, |mag_t[i]| - |mag_{t-1}[i]|)`.  The frame-level flux is the
+    /// mean of those per-bin values.  The overall flux is the mean across all
+    /// frames, then normalised by the global mean magnitude so the result is
+    /// roughly in [0, 1].  Returns 0.0 when fewer than two frames are
+    /// available.
+    async fn compute_spectral_flux(&self, samples: &[f32]) -> Result<f32, RecognitionError> {
+        // Collect magnitude spectra for every frame
+        let mut frame_spectra: Vec<Vec<f32>> = Vec::new();
+        let mut pos = 0usize;
+        while pos + self.frame_size <= samples.len() {
+            let frame = &samples[pos..pos + self.frame_size];
+            let mag = self.compute_spectrum(frame).await?;
+            frame_spectra.push(mag);
+            pos += self.hop_size;
+        }
+        // Handle a trailing partial frame so very short signals get at least 1
+        if frame_spectra.is_empty() && !samples.is_empty() {
+            // zero-pad to frame_size and compute once
+            let mag = self.compute_spectrum(samples).await?;
+            frame_spectra.push(mag);
+        }
+
+        if frame_spectra.len() < 2 {
+            return Ok(0.0);
+        }
+
+        let n_bins = frame_spectra[0].len();
+        let n_frames = frame_spectra.len();
+
+        // Accumulate half-wave-rectified inter-frame differences
+        let mut flux_sum = 0.0_f32;
+        for t in 1..n_frames {
+            let prev = &frame_spectra[t - 1];
+            let curr = &frame_spectra[t];
+            let mut frame_flux = 0.0_f32;
+            for i in 0..n_bins {
+                let diff = curr[i] - prev[i];
+                if diff > 0.0 {
+                    frame_flux += diff;
+                }
+            }
+            #[allow(clippy::cast_precision_loss)]
+            {
+                flux_sum += frame_flux / n_bins as f32;
+            }
+        }
+        #[allow(clippy::cast_precision_loss)]
+        let mean_flux = flux_sum / (n_frames - 1) as f32;
+
+        // Normalise by the global mean magnitude so the output is ~[0, 1]
+        #[allow(clippy::cast_precision_loss)]
+        let global_mean_mag: f32 = frame_spectra
+            .iter()
+            .flat_map(|s| s.iter().copied())
+            .sum::<f32>()
+            / (n_frames * n_bins) as f32;
+
+        let normalised_flux = if global_mean_mag > 0.0 {
+            (mean_flux / global_mean_mag).min(1.0)
+        } else {
+            0.0
+        };
+
+        Ok(normalised_flux)
     }
 
     /// Classify primary emotion
@@ -713,25 +796,49 @@ impl SpeakerAnalyzer {
         }
     }
 
-    /// Compute magnitude spectrum
+    /// Compute magnitude spectrum using a windowed FFT.
+    ///
+    /// Applies a Hann window to `samples` (zero-padded to `frame_size` if shorter),
+    /// runs a real-valued FFT, and returns the one-sided magnitude spectrum of
+    /// length `frame_size / 2 + 1`.  Bin `i` corresponds to frequency
+    /// `i * sample_rate / frame_size` Hz.
     async fn compute_spectrum(&self, samples: &[f32]) -> Result<Vec<f32>, RecognitionError> {
-        // Simplified spectrum computation
-        // In a real implementation, use proper FFT
-        let spectrum_size = self.frame_size / 2 + 1;
-        let mut spectrum = vec![0.0; spectrum_size];
+        let n_fft = self.frame_size;
+        let n_out = n_fft / 2 + 1;
 
-        // Simple spectral content simulation
-        for (i, value) in spectrum.iter_mut().enumerate() {
+        // Build Hann-windowed frame (zero-pad when samples is shorter than n_fft)
+        let use_len = samples.len().min(n_fft);
+        let mut windowed: Vec<f64> = Vec::with_capacity(n_fft);
+        for i in 0..use_len {
             #[allow(clippy::cast_precision_loss)]
-            let frequency = i as f32 * self.sample_rate / 2.0 / spectrum_size as f32;
-
-            // Simulate typical speech spectrum shape
-            let speech_like =
-                (-frequency / 1000.0).exp() * samples.iter().map(|x| x.abs()).sum::<f32>();
-            *value = speech_like;
+            let w =
+                0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / (n_fft as f64 - 1.0)).cos());
+            windowed.push(f64::from(samples[i]) * w);
         }
+        // Zero-pad remainder
+        windowed.resize(n_fft, 0.0_f64);
 
-        Ok(spectrum)
+        // Real-FFT: returns n_fft/2 + 1 complex bins
+        let spectrum_complex = scirs2_fft::rfft(&windowed, Some(n_fft)).map_err(|e| {
+            RecognitionError::AudioProcessingError {
+                message: format!("FFT computation failed: {e}"),
+                source: None,
+            }
+        })?;
+
+        debug_assert_eq!(spectrum_complex.len(), n_out);
+
+        let magnitude: Vec<f32> = spectrum_complex
+            .iter()
+            .take(n_out)
+            .map(|c| {
+                #[allow(clippy::cast_precision_loss)]
+                let mag = (c.re * c.re + c.im * c.im).sqrt() as f32;
+                mag
+            })
+            .collect();
+
+        Ok(magnitude)
     }
 
     /// Calculate jitter (pitch period variation)
@@ -1384,6 +1491,7 @@ struct SpectralFeatures {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::f32::consts::PI as PI_F32;
     use voirs_sdk::AudioBuffer;
 
     #[tokio::test]
@@ -1932,5 +2040,139 @@ mod tests {
         assert_eq!(embedding.segment_count, 2);
         assert_eq!(embedding.average_confidence, 0.875); // (0.85 + 0.90) / 2
         assert_eq!(embedding.features, vec![0.5, 0.6, 0.7, 0.8]);
+    }
+
+    // -----------------------------------------------------------------------
+    // DSP unit tests for the real windowed-FFT spectrum and spectral flux
+    // -----------------------------------------------------------------------
+
+    /// A 440 Hz pure sine wave must produce a magnitude spectrum whose peak
+    /// bin is the one closest to 440 Hz.
+    #[tokio::test]
+    async fn test_spectrum_pure_tone() {
+        let analyzer = SpeakerAnalyzer::new().await.unwrap();
+        // Use the default frame_size (1024) at 16 kHz → bin resolution = 16000/1024 ≈ 15.625 Hz
+        let sample_rate = 16_000_u32;
+        let freq_hz = 440.0_f32;
+        let n_fft = analyzer.frame_size; // 1024
+
+        // One full frame of a 440 Hz sine
+        #[allow(clippy::cast_precision_loss)]
+        let samples: Vec<f32> = (0..n_fft)
+            .map(|i| (2.0 * PI_F32 * freq_hz * i as f32 / sample_rate as f32).sin())
+            .collect();
+
+        let spectrum = analyzer.compute_spectrum(&samples).await.unwrap();
+
+        // Expected peak bin: round(440 * n_fft / sample_rate)
+        #[allow(
+            clippy::cast_precision_loss,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss
+        )]
+        let expected_bin = (freq_hz * n_fft as f32 / sample_rate as f32).round() as usize;
+
+        let peak_bin = spectrum
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .map_or(0, |(i, _)| i);
+
+        // Allow ±1 bin tolerance for windowing side-lobes
+        assert!(
+            peak_bin.abs_diff(expected_bin) <= 1,
+            "peak bin {peak_bin} should be within 1 of expected bin {expected_bin} for {freq_hz} Hz"
+        );
+    }
+
+    /// A low-frequency tone must yield a lower spectral centroid than a
+    /// high-frequency tone.
+    #[tokio::test]
+    async fn test_spectral_centroid_ordering() {
+        let analyzer = SpeakerAnalyzer::new().await.unwrap();
+        let sample_rate = 16_000_u32;
+        let n_samples = 16_000usize; // 1 second
+
+        // Build audio buffers for the two tones
+        let make_audio = |freq: f32| -> AudioBuffer {
+            #[allow(clippy::cast_precision_loss)]
+            let samples: Vec<f32> = (0..n_samples)
+                .map(|i| (2.0 * PI_F32 * freq * i as f32 / sample_rate as f32).sin())
+                .collect();
+            AudioBuffer::new(samples, sample_rate, 1)
+        };
+
+        let audio_low = make_audio(200.0);
+        let audio_high = make_audio(3_000.0);
+
+        let features_low = analyzer
+            .extract_spectral_features(&audio_low)
+            .await
+            .unwrap();
+        let features_high = analyzer
+            .extract_spectral_features(&audio_high)
+            .await
+            .unwrap();
+
+        assert!(
+            features_high.centroid > features_low.centroid,
+            "high-freq centroid ({}) should exceed low-freq centroid ({})",
+            features_high.centroid,
+            features_low.centroid
+        );
+    }
+
+    /// A steady 440 Hz tone → near-zero flux; a chirp (100→4000 Hz) → clearly
+    /// non-zero flux that substantially exceeds the steady-tone flux.
+    #[tokio::test]
+    async fn test_spectral_flux_steady_vs_sweep() {
+        let analyzer = SpeakerAnalyzer::new().await.unwrap();
+        let sample_rate = 16_000_u32;
+        // 200 ms of audio at 16 kHz
+        #[allow(clippy::cast_precision_loss, clippy::cast_sign_loss)]
+        let n_samples = (sample_rate as f32 * 0.2) as usize; // 3200 samples
+
+        // Steady 440 Hz sine
+        #[allow(clippy::cast_precision_loss)]
+        let steady: Vec<f32> = (0..n_samples)
+            .map(|i| (2.0 * PI_F32 * 440.0 * i as f32 / sample_rate as f32).sin())
+            .collect();
+        let audio_steady = AudioBuffer::new(steady, sample_rate, 1);
+
+        // Linear chirp 100 → 4000 Hz over 200 ms.
+        // Use the correct integral-of-instantaneous-frequency phase so that
+        // the instantaneous frequency truly sweeps from f_start to f_end.
+        let f_start = 100.0_f32;
+        let f_end = 4_000.0_f32;
+        #[allow(clippy::cast_precision_loss)]
+        let duration = n_samples as f32 / sample_rate as f32; // 0.2 s
+        #[allow(clippy::cast_precision_loss)]
+        let chirp: Vec<f32> = (0..n_samples)
+            .map(|i| {
+                let t = i as f32 / sample_rate as f32;
+                // phase = 2π ∫₀ᵗ f(τ) dτ  where f(τ) = f_start + (f_end-f_start)*τ/T
+                let phase =
+                    2.0 * PI_F32 * (f_start * t + 0.5 * (f_end - f_start) * t * t / duration);
+                phase.sin()
+            })
+            .collect();
+        let audio_chirp = AudioBuffer::new(chirp, sample_rate, 1);
+
+        let features_steady = analyzer
+            .extract_spectral_features(&audio_steady)
+            .await
+            .unwrap();
+        let features_chirp = analyzer
+            .extract_spectral_features(&audio_chirp)
+            .await
+            .unwrap();
+
+        // Chirp flux must be noticeably larger than steady-tone flux
+        assert!(
+            features_chirp.flux > features_steady.flux + 0.01,
+            "chirp flux ({}) should exceed steady flux ({}) by > 0.01",
+            features_chirp.flux,
+            features_steady.flux
+        );
     }
 }

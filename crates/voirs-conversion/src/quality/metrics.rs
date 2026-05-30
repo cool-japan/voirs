@@ -3,6 +3,15 @@
 use crate::{Error, Result};
 use tracing::{debug, info};
 
+/// Default sample rate used when no explicit sample rate is available (Hz).
+const DEFAULT_SAMPLE_RATE: f32 = 22050.0;
+/// Minimum F0 for voiced detection (Hz) — below this is considered unvoiced/bass floor.
+const F0_MIN_HZ: f32 = 80.0;
+/// Maximum F0 for voiced detection (Hz) — above this is considered unvoiced/noise.
+const F0_MAX_HZ: f32 = 800.0;
+/// Minimum normalised autocorrelation value to declare a frame voiced.
+const VOICED_THRESHOLD: f32 = 0.35;
+
 /// Objective quality metrics system for conversion evaluation
 #[derive(Debug, Clone)]
 pub struct QualityMetricsSystem {
@@ -257,20 +266,50 @@ impl QualityMetricsSystem {
     // Implementation of helper methods for feature extraction
 
     fn calculate_power_spectrum(&self, audio: &[f32]) -> Vec<f32> {
-        // Simplified power spectrum calculation
-        let window_size = 512;
-        let mut spectrum = vec![0.0; window_size / 2];
+        // Hann-windowed FFT magnitude spectrum.
+        // n_fft = 512 when enough samples are available; otherwise next power-of-two.
+        // Returns magnitude (not squared) for n_fft/2 + 1 bins.
+        const N_FFT: usize = 512;
+        let empty_len = N_FFT / 2 + 1;
 
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..window_size.min(audio.len()) {
-            let real = audio[i];
-            let bin = i / 2; // Simplified frequency mapping
-            if bin < spectrum.len() {
-                spectrum[bin] += real * real;
-            }
+        if audio.len() < 4 {
+            return vec![0.0_f32; empty_len];
         }
 
-        spectrum
+        let n_fft = if audio.len() >= N_FFT {
+            N_FFT
+        } else {
+            audio.len().next_power_of_two()
+        };
+        let n_out = n_fft / 2 + 1;
+
+        // Build Hann-windowed, zero-padded f64 buffer for rfft.
+        let active = audio.len().min(n_fft);
+        let mut buf: Vec<f64> = vec![0.0_f64; n_fft];
+        for i in 0..active {
+            // Symmetric Hann window: w[i] = 0.5 * (1 - cos(2π·i / (N-1)))
+            let w = 0.5
+                * (1.0
+                    - (2.0 * std::f64::consts::PI * i as f64
+                        / (active.saturating_sub(1).max(1)) as f64)
+                        .cos());
+            buf[i] = audio[i] as f64 * w;
+        }
+
+        // Real FFT via scirs2-fft — returns n_fft/2 + 1 complex bins.
+        match scirs2_fft::rfft(&buf, Some(n_fft)) {
+            Ok(complex_bins) => {
+                let mut magnitudes: Vec<f32> = Vec::with_capacity(n_out);
+                for c in complex_bins.iter().take(n_out) {
+                    magnitudes.push(c.norm() as f32);
+                }
+                // Pad to the canonical empty_len if n_fft < N_FFT so callers
+                // see a consistently-sized spectrum regardless of input length.
+                magnitudes.resize(empty_len, 0.0_f32);
+                magnitudes
+            }
+            Err(_) => vec![0.0_f32; empty_len],
+        }
     }
 
     fn calculate_spectral_centroid(&self, spectrum: &[f32]) -> f32 {
@@ -447,33 +486,61 @@ impl QualityMetricsSystem {
     }
 
     fn estimate_f0_simple(&self, audio: &[f32]) -> f32 {
-        // Very simplified F0 estimation
-        let mut best_lag = 0;
-        let mut best_correlation = -1.0;
+        // Normalized autocorrelation-based F0 estimation.
+        // Lag bounds are derived from the default sample rate so that the
+        // frequency search is always in [F0_MIN_HZ, F0_MAX_HZ].
+        let sr = DEFAULT_SAMPLE_RATE;
+        let min_lag = (sr / F0_MAX_HZ).floor() as usize; // sr/800 ≈ 27 at 22050
+        let max_lag = (sr / F0_MIN_HZ).ceil() as usize; // sr/80  ≈ 276 at 22050
 
-        let min_lag = 20; // Assuming sample rate around 44100, this gives ~440 Hz max
-        let max_lag = 400; // This gives ~110 Hz min
+        let n = audio.len();
+        if n < min_lag * 2 + 1 {
+            return 0.0;
+        }
 
-        for lag in min_lag..max_lag.min(audio.len() / 2) {
-            let mut correlation = 0.0;
-            let mut count = 0;
+        // Mean-centre the window to remove DC offset.
+        let mean = audio.iter().sum::<f32>() / n as f32;
+        let x: Vec<f32> = audio.iter().map(|&s| s - mean).collect();
 
-            for i in 0..audio.len() - lag {
-                correlation += audio[i] * audio[i + lag];
-                count += 1;
-            }
+        // Energy of the entire centred window — used as normalisation anchor.
+        let energy_full: f32 = x.iter().map(|v| v * v).sum();
+        if energy_full < f32::EPSILON {
+            return 0.0; // Silence
+        }
 
-            if count > 0 {
-                correlation /= count as f32;
-                if correlation > best_correlation {
-                    best_correlation = correlation;
-                    best_lag = lag;
-                }
+        let effective_max_lag = max_lag.min(n / 2);
+        if effective_max_lag <= min_lag {
+            return 0.0;
+        }
+
+        let mut best_lag = 0usize;
+        let mut best_r = f32::NEG_INFINITY;
+
+        for tau in min_lag..=effective_max_lag {
+            // Number of overlapping samples for this lag.
+            let overlap = n - tau;
+            // Unnormalised cross-correlation at lag τ.
+            let cross: f32 = (0..overlap).map(|i| x[i] * x[i + tau]).sum();
+            // Energy of the lagged sub-window (denominator normalisation).
+            let energy_lag: f32 = (tau..n).map(|i| x[i] * x[i]).sum();
+            // Energy of the un-lagged sub-window.
+            let energy_base: f32 = (0..overlap).map(|i| x[i] * x[i]).sum();
+
+            let denom = (energy_base * energy_lag).sqrt();
+            let r = if denom > f32::EPSILON {
+                cross / denom
+            } else {
+                0.0
+            };
+
+            if r > best_r {
+                best_r = r;
+                best_lag = tau;
             }
         }
 
-        if best_lag > 0 {
-            44100.0 / best_lag as f32 // Assuming 44.1kHz sample rate
+        if best_r > VOICED_THRESHOLD && best_lag > 0 {
+            sr / best_lag as f32
         } else {
             0.0
         }
@@ -706,5 +773,77 @@ impl QualityMetricsSystem {
 impl Default for QualityMetricsSystem {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_sine(freq_hz: f32, sample_rate: f32, num_samples: usize) -> Vec<f32> {
+        (0..num_samples)
+            .map(|i| (2.0 * std::f32::consts::PI * freq_hz * i as f32 / sample_rate).sin())
+            .collect()
+    }
+
+    // -----------------------------------------------------------------------
+    // Power-spectrum tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_power_spectrum_has_correct_length() {
+        let sys = QualityMetricsSystem::new();
+        // 512 samples → n_fft = 512 → n_out = 512/2 + 1 = 257
+        let audio: Vec<f32> = (0..512).map(|i| (i as f32).sin()).collect();
+        let spec = sys.calculate_power_spectrum(&audio);
+        assert_eq!(spec.len(), 257, "expected 257 bins for 512-sample input");
+    }
+
+    #[test]
+    fn test_power_spectrum_single_tone_peak() {
+        // 440 Hz sine at 22050 Hz sample rate.
+        // Expected peak bin ≈ 440 * 512 / 22050 ≈ 10.2 → bin 10.
+        let sys = QualityMetricsSystem::new();
+        let sr = 22050.0_f32;
+        let audio = make_sine(440.0, sr, 512);
+        let spec = sys.calculate_power_spectrum(&audio);
+
+        let peak_bin = spec
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+
+        // Allow ±2 bins of tolerance for Hann windowing leakage.
+        let expected_bin = (440.0 * 512.0 / sr).round() as usize;
+        assert!(
+            peak_bin.abs_diff(expected_bin) <= 2,
+            "peak bin {peak_bin} is not close to expected bin {expected_bin}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // F0 estimation tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_f0_estimation_voiced() {
+        // 220 Hz sine at 22050 Hz sample rate — well within [F0_MIN_HZ, F0_MAX_HZ].
+        let sys = QualityMetricsSystem::new();
+        let audio = make_sine(220.0, DEFAULT_SAMPLE_RATE, 4096);
+        let f0 = sys.estimate_f0_simple(&audio);
+        assert!(
+            f0 >= 180.0 && f0 <= 260.0,
+            "expected F0 between 180 and 260 Hz, got {f0}"
+        );
+    }
+
+    #[test]
+    fn test_f0_estimation_silence() {
+        let sys = QualityMetricsSystem::new();
+        let silence = vec![0.0_f32; 4096];
+        let f0 = sys.estimate_f0_simple(&silence);
+        assert_eq!(f0, 0.0, "silence should return F0=0.0");
     }
 }

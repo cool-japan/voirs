@@ -9,10 +9,12 @@
 //! - Performance-optimized implementations for live synthesis
 
 use crate::EvaluationError;
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use scirs2_core::Complex;
+use scirs2_fft::{RealFftPlanner, RealToComplex};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
+use std::f32::consts::PI;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
@@ -376,32 +378,29 @@ impl RealTimeQualityMonitor {
             .max(0.001)
     }
 
-    /// Calculate spectral distortion metric
+    /// Calculate spectral distortion metric using real FFT.
+    ///
+    /// Computes the mean absolute deviation of log-magnitudes from the mean
+    /// log-magnitude (i.e., how far the spectrum deviates from a flat/reference
+    /// shape).  Normalized to [0, 1] by clamping at 5.0 nats of deviation.
     fn calculate_spectral_distortion(&self, samples: &[f32]) -> f32 {
-        // Simplified spectral distortion calculation
-        // In a real implementation, you would use proper FFT analysis
         if samples.is_empty() {
-            return 1.0; // Maximum distortion
+            return 1.0;
         }
 
-        // Calculate spectral flatness as a proxy for distortion
-        let mut spectral_peaks = 0;
-        let window_size = (samples.len() / 10).max(1);
-
-        for window_start in (0..samples.len()).step_by(window_size) {
-            let window_end = (window_start + window_size).min(samples.len());
-            let window = &samples[window_start..window_end];
-
-            let max_val = window.iter().fold(0.0f32, |acc, &x| acc.max(x.abs()));
-            let avg_val = window.iter().map(|&x| x.abs()).sum::<f32>() / window.len() as f32;
-
-            if avg_val > 0.0 && max_val / avg_val > 3.0 {
-                spectral_peaks += 1;
-            }
+        let mag = self.compute_fft_spectrum(samples);
+        let positive: Vec<f32> = mag.iter().filter(|&&m| m > f32::EPSILON).copied().collect();
+        if positive.is_empty() {
+            return 1.0;
         }
 
-        // Convert to distortion metric (0.0 = no distortion, 1.0 = high distortion)
-        (spectral_peaks as f32 / 10.0).clamp(0.0, 1.0)
+        let log_mags: Vec<f32> = positive.iter().map(|&m| m.ln()).collect();
+        let mean_log = log_mags.iter().sum::<f32>() / log_mags.len() as f32;
+        let mad =
+            log_mags.iter().map(|&l| (l - mean_log).abs()).sum::<f32>() / log_mags.len() as f32;
+
+        // Normalize: 5.0 nats of deviation maps to 1.0 (fully distorted)
+        (mad / 5.0).clamp(0.0, 1.0)
     }
 
     /// Calculate temporal consistency metric
@@ -536,41 +535,135 @@ impl RealTimeQualityMonitor {
         }
     }
 
-    /// Calculate spectral centroid
-    fn calculate_spectral_centroid(&self, samples: &[f32]) -> f32 {
-        // Simplified spectral centroid calculation
+    /// Compute FFT magnitude spectrum using a Hann window.
+    ///
+    /// Returns a `Vec<f32>` of length `n_fft/2 + 1` containing the magnitude of each
+    /// frequency bin.  `n_fft` is the smallest power of two that is ≥
+    /// `min(samples.len(), 2048)`.  Returns an empty `Vec` when `samples` is empty.
+    fn compute_fft_spectrum(&self, samples: &[f32]) -> Vec<f32> {
         if samples.is_empty() {
-            return 0.0;
+            return Vec::new();
         }
 
-        // In a real implementation, you would use FFT to calculate the true spectral centroid
-        // Here we approximate using zero-crossing rate
-        let zcr = self.calculate_zero_crossing_rate(samples);
-        zcr * 1000.0 // Convert to approximate Hz
+        // Choose n_fft: nearest power-of-two that is >= min(len, 2048)
+        let target = samples.len().min(2048);
+        let n_fft = target.next_power_of_two();
+
+        // Apply Hann window and zero-pad / truncate to n_fft
+        let mut windowed = vec![0.0_f32; n_fft];
+        let window_len = samples.len().min(n_fft);
+        for (i, &s) in samples[..window_len].iter().enumerate() {
+            let w = 0.5 * (1.0 - (2.0 * PI * i as f32 / (window_len - 1).max(1) as f32).cos());
+            windowed[i] = s * w;
+        }
+
+        // Plan and run real FFT
+        let mut planner = RealFftPlanner::<f32>::new();
+        let fft = planner.plan_fft_forward(n_fft);
+        let num_bins = fft.output_len(); // n_fft / 2 + 1
+        let mut spectrum = vec![Complex::new(0.0_f32, 0.0_f32); num_bins];
+
+        if fft.process(&mut windowed, &mut spectrum).is_err() {
+            return Vec::new();
+        }
+
+        spectrum.iter().map(|c| c.norm()).collect()
     }
 
-    /// Calculate spectral rolloff
-    fn calculate_spectral_rolloff(&self, samples: &[f32]) -> f32 {
-        // Simplified spectral rolloff calculation
-        if samples.is_empty() {
+    /// Calculate spectral centroid using real FFT.
+    ///
+    /// Returns the centroid frequency in (approximate) Hz assuming 16 kHz sample rate.
+    /// The bin index is scaled by `8000 / (n_fft/2)` so that the Nyquist bin maps
+    /// to 8000 Hz — a reasonable approximation for 16 kHz speech material without
+    /// requiring a stored sample rate.
+    fn calculate_spectral_centroid(&self, samples: &[f32]) -> f32 {
+        let mag = self.compute_fft_spectrum(samples);
+        if mag.is_empty() {
             return 0.0;
         }
 
-        // Approximate using high-frequency energy distribution
-        let high_freq_energy = self.calculate_high_frequency_energy(samples);
-        high_freq_energy * 8000.0 // Convert to approximate Hz
+        let n_bins = mag.len(); // n_fft/2 + 1
+        let nyquist_hz = 8000.0_f32;
+        let bin_to_hz = nyquist_hz / (n_bins - 1).max(1) as f32;
+
+        let weighted_sum: f32 = mag
+            .iter()
+            .enumerate()
+            .map(|(i, &m)| i as f32 * bin_to_hz * m)
+            .sum();
+        let total_mag: f32 = mag.iter().sum();
+
+        if total_mag > f32::EPSILON {
+            weighted_sum / total_mag
+        } else {
+            0.0
+        }
+    }
+
+    /// Calculate 85% spectral rolloff frequency using real FFT.
+    ///
+    /// Returns the frequency (in approximate Hz, assuming 16 kHz source) below which
+    /// 85% of the total spectral energy is contained.
+    fn calculate_spectral_rolloff(&self, samples: &[f32]) -> f32 {
+        let mag = self.compute_fft_spectrum(samples);
+        if mag.is_empty() {
+            return 0.0;
+        }
+
+        let n_bins = mag.len();
+        let nyquist_hz = 8000.0_f32;
+        let bin_to_hz = nyquist_hz / (n_bins - 1).max(1) as f32;
+
+        // Use squared magnitudes (energy)
+        let energy: Vec<f32> = mag.iter().map(|&m| m * m).collect();
+        let total_energy: f32 = energy.iter().sum();
+
+        if total_energy <= f32::EPSILON {
+            return 0.0;
+        }
+
+        let rolloff_threshold = 0.85 * total_energy;
+        let mut cumulative = 0.0_f32;
+        for (i, &e) in energy.iter().enumerate() {
+            cumulative += e;
+            if cumulative >= rolloff_threshold {
+                return i as f32 * bin_to_hz;
+            }
+        }
+
+        (n_bins - 1) as f32 * bin_to_hz
     }
 
     /// Calculate harmonic distortion
     fn calculate_harmonic_distortion(&self, samples: &[f32]) -> f32 {
-        // Simplified harmonic distortion calculation
+        // Harmonic distortion proxied through spectral distortion
         self.calculate_spectral_distortion(samples)
     }
 
-    /// Calculate frequency flatness
+    /// Calculate frequency flatness (spectral flatness measure) using real FFT.
+    ///
+    /// Computes `geometric_mean(mag) / arithmetic_mean(mag)` over all positive bins.
+    /// Pure tones have flatness ≈ 0; white noise has flatness close to 1.
     fn calculate_frequency_flatness(&self, samples: &[f32]) -> f32 {
-        // Simplified frequency flatness calculation
-        1.0 - self.calculate_spectral_distortion(samples)
+        let mag = self.compute_fft_spectrum(samples);
+        if mag.is_empty() {
+            return 0.0;
+        }
+
+        let positive: Vec<f32> = mag.iter().filter(|&&m| m > f32::EPSILON).copied().collect();
+        if positive.is_empty() {
+            return 0.0;
+        }
+
+        let log_sum: f32 = positive.iter().map(|&m| m.ln()).sum::<f32>();
+        let geometric_mean = (log_sum / positive.len() as f32).exp();
+        let arithmetic_mean = positive.iter().sum::<f32>() / positive.len() as f32;
+
+        if arithmetic_mean > f32::EPSILON {
+            (geometric_mean / arithmetic_mean).clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
     }
 
     /// Calculate zero crossing rate
@@ -1018,7 +1111,7 @@ mod tests {
         };
         let monitor = RealTimeQualityMonitor::new(config);
 
-        let initial_thresholds = monitor.get_adaptive_thresholds().await;
+        let _initial_thresholds = monitor.get_adaptive_thresholds().await;
 
         // Process several chunks to build history
         for i in 0..15 {
@@ -1100,5 +1193,88 @@ mod tests {
 
         let stats_after = monitor.get_processing_stats().await;
         assert_eq!(stats_after.total_samples_processed, 0);
+    }
+
+    // -------------------------------------------------------------------------
+    // Real FFT spectral metric tests
+    // -------------------------------------------------------------------------
+
+    /// Helper: generate a pure sine wave at `freq_hz` for `duration_secs` at `sample_rate`.
+    fn make_tone(freq_hz: f32, sample_rate: u32, num_samples: usize) -> Vec<f32> {
+        (0..num_samples)
+            .map(|i| (2.0 * std::f32::consts::PI * freq_hz * i as f32 / sample_rate as f32).sin())
+            .collect()
+    }
+
+    /// Helper: generate white noise with amplitude 0.5 using fastrand.
+    fn make_white_noise(num_samples: usize) -> Vec<f32> {
+        (0..num_samples)
+            .map(|_| fastrand::f32() * 2.0 - 1.0)
+            .collect()
+    }
+
+    #[test]
+    fn test_spectral_centroid_tone_vs_noise() {
+        let config = RealTimeQualityConfig::default();
+        let monitor = RealTimeQualityMonitor::new(config);
+
+        // 400 Hz tone at 16 kHz, 2048 samples
+        let tone = make_tone(400.0, 16000, 2048);
+        let noise = make_white_noise(2048);
+
+        let centroid_tone = monitor.calculate_spectral_centroid(&tone);
+        let centroid_noise = monitor.calculate_spectral_centroid(&noise);
+
+        // 400 Hz tone centroid must be below 1000 Hz
+        assert!(
+            centroid_tone < 1000.0,
+            "tone centroid {centroid_tone:.1} Hz should be < 1000 Hz"
+        );
+        // White noise centroid should be above 3000 Hz (roughly mid-band)
+        assert!(
+            centroid_noise > 3000.0,
+            "noise centroid {centroid_noise:.1} Hz should be > 3000 Hz"
+        );
+    }
+
+    #[test]
+    fn test_spectral_flatness_tone_low_noise_high() {
+        let config = RealTimeQualityConfig::default();
+        let monitor = RealTimeQualityMonitor::new(config);
+
+        let tone = make_tone(800.0, 16000, 2048);
+        let noise = make_white_noise(2048);
+
+        let flatness_tone = monitor.calculate_frequency_flatness(&tone);
+        let flatness_noise = monitor.calculate_frequency_flatness(&noise);
+
+        // Pure tone: almost all energy in one bin → very low flatness
+        assert!(
+            flatness_tone < 0.1,
+            "tone flatness {flatness_tone:.4} should be < 0.1"
+        );
+        // White noise: energy spread across bins → high flatness
+        assert!(
+            flatness_noise > 0.3,
+            "noise flatness {flatness_noise:.4} should be > 0.3"
+        );
+    }
+
+    #[test]
+    fn test_spectral_rolloff_ordering() {
+        let config = RealTimeQualityConfig::default();
+        let monitor = RealTimeQualityMonitor::new(config);
+
+        // Low-frequency tone → rolloff should be lower than white noise
+        let tone = make_tone(400.0, 16000, 2048);
+        let noise = make_white_noise(2048);
+
+        let rolloff_tone = monitor.calculate_spectral_rolloff(&tone);
+        let rolloff_noise = monitor.calculate_spectral_rolloff(&noise);
+
+        assert!(
+            rolloff_tone < rolloff_noise,
+            "tone rolloff {rolloff_tone:.1} Hz should be < noise rolloff {rolloff_noise:.1} Hz"
+        );
     }
 }

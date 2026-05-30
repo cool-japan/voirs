@@ -1,10 +1,26 @@
 # VoiRS Development Roadmap & TODO
 
 > **Status**: Current Version 0.1.0-rc.1 - **PRODUCTION READY**
-> **Last Updated**: 2026-04-27
+> **Last Updated**: 2026-05-30
 > **Next Milestone**: Version 0.2.0 - Advanced Neural Features & Production Optimization
 
-## Latest Development Session (2026-04-27)
+## Latest Development Session (2026-05-30)
+
+**Build Fix (oxiarc-core patch) + Real DSP Implementations (4 crates):**
+
+- [x] **oxiarc-core build fix**: `scirs2-core 0.4.4` pulled `oxiarc-zstd 0.2.8 → oxiarc-core 0.2.6` which was missing `cancel` and `progress` modules added in 0.3.x. Added `[patch.crates-io] oxiarc-core = { path = "patches/oxiarc-core" }` — a local copy of 0.2.6 with those two modules and `OxiArcError::Cancelled` backported from 0.3.1. Full workspace builds green. *(Answered: can't just pin 0.3.1 directly because scirs2-core 0.4.4 forces the old version transitively.)*
+- [x] **voirs-dataset — real MFCC**: replaced cosine-pattern mock in `processing/features.rs::extract_mfcc` with a proper DCT-II pipeline over the existing FFT-based mel spectrogram. Orthonormal normalization, optional energy coefficient (C0). 4 new tests. 700/700 tests pass.
+- [x] **voirs-dataset — real YIN F0**: replaced `base_f0 + sin(frame_idx)` mock in `extract_fundamental_frequency` with the full YIN algorithm (difference function → CMND → threshold search → parabolic interpolation, 25ms/10ms frames, voiced/unvoiced detection). Fixed `ml/features/audio_features.rs` to delegate to the real functions.
+- [x] **voirs-evaluation — real FFT spectral metrics**: added a private `compute_fft_spectrum` helper (Hann window, power-of-2 FFT, scirs2_fft RealFftPlanner) and replaced zero-crossing-rate proxies in `quality/realtime_monitor.rs` — `calculate_spectral_centroid`, `calculate_spectral_rolloff` (85% cumulative energy), `calculate_frequency_flatness` (geometric/arithmetic mean ratio), and `calculate_spectral_distortion` are now real FFT-based metrics. 3 new tests. 928/928 tests pass.
+- [x] **voirs-evaluation — Criterion parser**: replaced stub in `benchmark_runner.rs` that returned simulated values with a real reader of Criterion's `target/criterion/<name>/new/estimates.json` via serde_json. 3 new tests.
+- [x] **voirs-recognizer — real magnitude spectrum**: replaced fake speech-shaped exponential-decay spectrum in `analysis/speaker.rs::compute_spectrum` with real windowed FFT (`scirs2_fft::rfft`, Hann window). Spectral centroid and spread are now real as a result. 3 new tests.
+- [x] **voirs-recognizer — real spectral flux**: replaced hardcoded `spectral_flux = 0.5` with real frame-to-frame half-wave-rectified spectral flux (framed at `frame_size`/`hop_size`, normalized by mean magnitude).
+- [x] **voirs-acoustic — real RVQ nearest-code search**: replaced `fastrand::usize` random-index stub in `neural_codec.rs::ResidualVectorQuantizer::find_nearest_codes` with proper L2 nearest-neighbor using Candle ops (`||x||² − 2xCᵀ + ||c||²`, broadcast + `argmin`). 3 new tests. 788/788 tests pass.
+- [x] **voirs-acoustic — real RVQ codebook gather**: replaced `Tensor::zeros` stub in `quantize_indices` with real `index_select` gather from the codebook tensor. Commitment-loss round-trip verified correct.
+
+**Test Results**: 700/700 voirs-dataset ✅ | 928/928 voirs-evaluation ✅ | 788/788 voirs-acoustic ✅ | 481/607 voirs-recognizer (1 pre-existing SIMD consistency failure, 125 skipped) ✅
+
+## Previous Development Session (2026-04-27)
 
 **Build Fix, DiffWave Checkpoint Loading, Opus Decode:**
 

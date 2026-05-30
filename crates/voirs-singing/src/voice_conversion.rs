@@ -10,6 +10,7 @@ use crate::techniques::SingingTechnique;
 use crate::types::{SingingRequest, SingingResponse, VoiceCharacteristics, VoiceType};
 use crate::Error;
 use candle_core::Device;
+use scirs2_core::Complex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -449,23 +450,53 @@ impl VoiceConverter {
         target_speaker: &SpeakerEmbedding,
         quality: &ConversionQuality,
     ) -> Result<Vec<f32>, Error> {
-        // Placeholder implementation for neural transfer
-        // In a real implementation, this would use neural networks for voice conversion
+        // Compute the pitch ratio between target and source.
+        // Source F0 is taken from VoiceCharacteristics.f0_mean, clamped away from zero.
+        let source_f0 = source_characteristics.f0_mean.max(80.0);
+        let target_f0 = target_speaker.avg_f0.max(80.0);
+        let pitch_ratio = target_f0 / source_f0;
 
-        let mut converted = source_audio.to_vec();
-
-        // Apply basic voice characteristic mapping
-        let pitch_shift = self.calculate_pitch_shift(
-            source_characteristics,
-            &target_speaker.voice_characteristics,
-        );
-
-        // Apply pitch shifting
-        for sample in &mut converted {
-            *sample *= pitch_shift;
+        let n = source_audio.len();
+        if n == 0 {
+            return Ok(Vec::new());
         }
 
-        Ok(converted)
+        // Spectral pitch-shift via nearest-neighbour resampling in the time domain.
+        //
+        // Strategy: resample the source to a new length proportional to pitch_ratio,
+        // then trim or zero-pad back to the original length.  This is a simple but
+        // artefact-free nearest-neighbour pitch shift (no amplitude hack).
+        //
+        // Relationship: raising pitch ↔ shrinking the waveform length ↔ ratio < 1
+        // We shorten when pitch_ratio > 1, lengthen when < 1.
+        let resampled_len = ((n as f64) / (pitch_ratio as f64)).round().max(1.0) as usize;
+
+        let mut resampled = Vec::with_capacity(resampled_len);
+        for i in 0..resampled_len {
+            // Map output index back to source index using linear interpolation.
+            let src_pos = (i as f64) * (pitch_ratio as f64);
+            let src_idx = src_pos.floor() as usize;
+            let frac = (src_pos - src_pos.floor()) as f32;
+
+            let s0 = source_audio.get(src_idx).copied().unwrap_or(0.0);
+            let s1 = source_audio.get(src_idx + 1).copied().unwrap_or(0.0);
+            resampled.push(s0 + frac * (s1 - s0));
+        }
+
+        // Build final output: same length as input.
+        // Samples beyond resampled_len are zero (silence / tail pad).
+        let mut output = vec![0.0f32; n];
+        let copy_len = resampled_len.min(n);
+        output[..copy_len].copy_from_slice(&resampled[..copy_len]);
+
+        // Blend between original and pitch-shifted signal based on conversion_strength.
+        let blend = quality.conversion_strength.clamp(0.0, 1.0);
+        for (i, out) in output.iter_mut().enumerate() {
+            let orig = source_audio[i];
+            *out = orig * (1.0 - blend) + *out * blend;
+        }
+
+        Ok(output)
     }
 
     /// Performs spectral envelope-based voice conversion.
@@ -495,18 +526,130 @@ impl VoiceConverter {
         target_speaker: &SpeakerEmbedding,
         quality: &ConversionQuality,
     ) -> Result<Vec<f32>, Error> {
-        // Placeholder implementation for spectral conversion
-        // In a real implementation, this would modify spectral envelopes
-
-        let mut converted = source_audio.to_vec();
-
-        // Apply formant shifting based on target speaker
-        let formant_scale = target_speaker.formants.first().unwrap_or(&1000.0) / 1000.0;
-
-        // Simple formant scaling (placeholder)
-        for sample in &mut converted {
-            *sample *= formant_scale;
+        let n = source_audio.len();
+        if n == 0 {
+            return Ok(Vec::new());
         }
+
+        // ── Overlap-add parameters ───────────────────────────────────────────────
+        const N_FFT: usize = 1024;
+        const HOP: usize = 256;
+
+        // Build a Hann analysis window of length N_FFT.
+        let hann: Vec<f64> = (0..N_FFT)
+            .map(|i| {
+                0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / (N_FFT - 1) as f64).cos())
+            })
+            .collect();
+
+        // Normalisation denominator: sum of squared window values per output sample
+        // (constant overlap-add norm for Hann / 4× overlap).
+        let win_norm: f64 = hann.iter().map(|w| w * w).sum::<f64>() / HOP as f64;
+        let win_norm = win_norm.max(1e-12);
+
+        // ── Target spectral envelope from speaker formants ───────────────────────
+        // Build once: Gaussian mixture centred at F1, F2, F3 over N_FFT/2+1 bins.
+        const SIGMA: f64 = 200.0; // Hz
+        const AMP: f64 = 1.5;
+
+        let target_envelope: Vec<f64> = (0..=N_FFT / 2)
+            .map(|bin| {
+                let freq = bin as f64 * sample_rate as f64 / N_FFT as f64;
+                let gaussian_sum: f64 = target_speaker
+                    .formants
+                    .iter()
+                    .map(|&f_hz| {
+                        let d = freq - f_hz as f64;
+                        AMP * (-d * d / (2.0 * SIGMA * SIGMA)).exp()
+                    })
+                    .sum();
+                1.0 + gaussian_sum
+            })
+            .collect();
+
+        // ── Overlap-add output accumulator ───────────────────────────────────────
+        let mut output_acc = vec![0.0f64; n + N_FFT];
+        let mut weight_acc = vec![0.0f64; n + N_FFT];
+
+        let num_frames = (n + HOP - 1) / HOP;
+
+        for frame_idx in 0..num_frames {
+            let start = frame_idx * HOP;
+
+            // Extract and window a frame of N_FFT samples (zero-pad at edges).
+            let frame_complex: Vec<Complex<f64>> = (0..N_FFT)
+                .map(|k| {
+                    let src_idx = start + k;
+                    let sample = if src_idx < n {
+                        source_audio[src_idx] as f64
+                    } else {
+                        0.0
+                    };
+                    Complex::new(sample * hann[k], 0.0)
+                })
+                .collect();
+
+            // Forward FFT.
+            let spectrum = scirs2_fft::fft(&frame_complex, Some(N_FFT))
+                .map_err(|e| Error::Processing(format!("FFT error in spectral_conversion: {e}")))?;
+
+            // ── Compute source spectral envelope via 20-bin moving average ───────
+            let half = N_FFT / 2 + 1;
+            let mag: Vec<f64> = spectrum[..half].iter().map(|c| c.norm()).collect();
+
+            const SMOOTH_BINS: usize = 20;
+            let smooth_half = SMOOTH_BINS / 2;
+            let source_envelope: Vec<f64> = (0..half)
+                .map(|i| {
+                    let lo = i.saturating_sub(smooth_half);
+                    let hi = (i + smooth_half + 1).min(half);
+                    let sum: f64 = mag[lo..hi].iter().sum();
+                    sum / (hi - lo) as f64
+                })
+                .collect();
+
+            // ── Compute transfer function h[bin] = target / max(source, ε) ───────
+            let transfer: Vec<f64> = (0..half)
+                .map(|i| target_envelope[i] / source_envelope[i].max(0.01))
+                .collect();
+
+            // ── Apply transfer to the full symmetric spectrum ────────────────────
+            let mut modified: Vec<Complex<f64>> = spectrum.clone();
+            for i in 0..half {
+                modified[i] =
+                    Complex::new(spectrum[i].re * transfer[i], spectrum[i].im * transfer[i]);
+            }
+            // Mirror conjugate for bins [half .. N_FFT] (Hermitian symmetry).
+            for i in 1..(N_FFT / 2) {
+                let mirror = N_FFT - i;
+                modified[mirror] = Complex::new(modified[i].re, -modified[i].im);
+            }
+
+            // ── Inverse FFT ───────────────────────────────────────────────────────
+            let time_frame = scirs2_fft::ifft(&modified, Some(N_FFT)).map_err(|e| {
+                Error::Processing(format!("IFFT error in spectral_conversion: {e}"))
+            })?;
+
+            // ── Overlap-add accumulation ──────────────────────────────────────────
+            for k in 0..N_FFT {
+                let out_idx = start + k;
+                if out_idx < output_acc.len() {
+                    output_acc[out_idx] += time_frame[k].re * hann[k];
+                    weight_acc[out_idx] += hann[k] * hann[k];
+                }
+            }
+        }
+
+        // ── Normalise and convert back to f32 ────────────────────────────────────
+        let blend = quality.conversion_strength.clamp(0.0, 1.0);
+        let converted: Vec<f32> = (0..n)
+            .map(|i| {
+                let norm_denom = weight_acc[i].max(win_norm * 1e-6);
+                let converted_sample = (output_acc[i] / norm_denom) as f32;
+                // Blend converted ↔ original per conversion_strength.
+                source_audio[i] * (1.0 - blend) + converted_sample * blend
+            })
+            .collect();
 
         Ok(converted)
     }
@@ -857,11 +1000,20 @@ impl VoiceConverter {
         })
     }
 
-    /// Extracts a 512-dimensional neural feature vector from voice samples.
+    /// Extracts a 512-dimensional feature vector from voice samples using
+    /// MFCC-13, delta-MFCC, delta-delta-MFCC, energy envelope statistics,
+    /// ZCR, and F0.
     ///
-    /// Analyzes audio samples to create a speaker-specific embedding vector
-    /// that captures unique vocal characteristics. Currently implements a
-    /// placeholder with basic statistical features.
+    /// Feature layout (512 total):
+    /// - [0..13]   : MFCC-13 from first frame (Hann-windowed, mel-filterbank, DCT-II)
+    /// - [13..26]  : delta-MFCC (difference between frame-b and frame-a)
+    /// - [26..39]  : delta-delta-MFCC (difference between frame-c and frame-b)
+    /// - [39..52]  : per-coefficient mean across the three frames
+    /// - [52..65]  : per-coefficient variance
+    /// - [65..78]  : per-coefficient min
+    /// - [78..91]  : per-coefficient max
+    /// - [91..96]  : energy_mean, energy_std, energy_max, ZCR, normalised F0
+    /// - [96..512] : tiled core-39 features with gentle per-index scaling
     ///
     /// # Arguments
     ///
@@ -875,30 +1027,203 @@ impl VoiceConverter {
     ///
     /// Returns an error if feature extraction fails or samples are invalid.
     fn extract_speaker_features(samples: &[f32]) -> Result<Vec<f32>, Error> {
-        // Placeholder: Create a 512-dimensional feature vector
-        // In reality, this would use neural networks or signal processing
-        let mut features = vec![0.0; 512];
+        const FRAME_SIZE: usize = 2048;
+        const N_MFCC: usize = 13;
+        const N_FILT: usize = 26;
+        const SAMPLE_RATE: f32 = 44100.0;
 
-        // Simple feature extraction based on sample statistics
-        let mean = samples.iter().sum::<f32>() / samples.len() as f32;
-        let variance =
-            samples.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / samples.len() as f32;
+        if samples.is_empty() {
+            return Ok(vec![0.0f32; 512]);
+        }
 
-        features[0] = mean;
-        features[1] = variance;
+        // Compute one MFCC-13 vector from a slice (Hann-windowed, mel-filterbank, DCT-II).
+        let compute_mfcc_frame = |frame: &[f32]| -> [f32; N_MFCC] {
+            let len = frame.len();
+            if len == 0 {
+                return [0.0f32; N_MFCC];
+            }
+            // Hann window
+            let windowed: Vec<f64> = frame
+                .iter()
+                .enumerate()
+                .map(|(i, &s)| {
+                    let w = 0.5
+                        * (1.0
+                            - (2.0 * std::f64::consts::PI * i as f64 / (len - 1).max(1) as f64)
+                                .cos());
+                    s as f64 * w
+                })
+                .collect();
 
-        // Fill remaining features with noise (placeholder)
-        for (i, feature) in features.iter_mut().enumerate().skip(2) {
-            *feature = (i as f32 * 0.001) % 1.0;
+            // Power spectrum via FFT
+            let complex_in: Vec<scirs2_core::Complex<f64>> = windowed
+                .iter()
+                .map(|&x| scirs2_core::Complex::new(x, 0.0))
+                .collect();
+            let fft_out = match scirs2_fft::fft(&complex_in, None) {
+                Ok(v) => v,
+                Err(_) => return [0.0f32; N_MFCC],
+            };
+            let n_bins = len / 2 + 1;
+            let power: Vec<f64> = fft_out[..n_bins]
+                .iter()
+                .map(|c| (c.re * c.re + c.im * c.im).max(1e-30))
+                .collect();
+
+            // Mel filterbank: N_FILT triangular filters in [0, Nyquist]
+            let nyquist = SAMPLE_RATE as f64 / 2.0;
+            let hz_to_mel = |hz: f64| 2595.0 * (1.0 + hz / 700.0).log10();
+            let mel_to_hz = |mel: f64| 700.0 * (10.0_f64.powf(mel / 2595.0) - 1.0);
+            let mel_low = hz_to_mel(0.0);
+            let mel_high = hz_to_mel(nyquist);
+            let mel_pts: Vec<f64> = (0..=N_FILT + 1)
+                .map(|i| mel_low + (mel_high - mel_low) * i as f64 / (N_FILT + 1) as f64)
+                .collect();
+            let hz_pts: Vec<f64> = mel_pts.iter().map(|&m| mel_to_hz(m)).collect();
+            let bin_pts: Vec<usize> = hz_pts
+                .iter()
+                .map(|&hz| ((hz / nyquist) * (n_bins - 1) as f64).round() as usize)
+                .collect();
+
+            let mut filt_energies = [0.0f64; N_FILT];
+            for m in 0..N_FILT {
+                let start = bin_pts[m];
+                let center = bin_pts[m + 1];
+                let end = bin_pts[m + 2];
+                for k in start..center {
+                    if k < power.len() && center > start {
+                        let w = (k - start) as f64 / (center - start) as f64;
+                        filt_energies[m] += power[k] * w;
+                    }
+                }
+                for k in center..end {
+                    if k < power.len() && end > center {
+                        let w = (end - k) as f64 / (end - center) as f64;
+                        filt_energies[m] += power[k] * w;
+                    }
+                }
+                filt_energies[m] = filt_energies[m].max(1e-30).ln();
+            }
+
+            // DCT-II → first N_MFCC coefficients
+            let dct_out = match scirs2_fft::dct(&filt_energies, None, Some("ortho")) {
+                Ok(v) => v,
+                Err(_) => return [0.0f32; N_MFCC],
+            };
+            let mut mfcc = [0.0f32; N_MFCC];
+            for (i, m) in mfcc.iter_mut().enumerate() {
+                *m = dct_out.get(i).copied().unwrap_or(0.0) as f32;
+            }
+            mfcc
+        };
+
+        // Three overlapping frames for delta and delta-delta computation
+        let len = samples.len();
+        let a_start = 0;
+        let a_end = (a_start + FRAME_SIZE).min(len);
+        let b_start = if len >= FRAME_SIZE + 512 { 512 } else { 0 };
+        let b_end = (b_start + FRAME_SIZE).min(len);
+        let c_start = if len >= FRAME_SIZE + 1024 {
+            1024
+        } else {
+            b_start
+        };
+        let c_end = (c_start + FRAME_SIZE).min(len);
+
+        let mfcc_a = compute_mfcc_frame(&samples[a_start..a_end]);
+        let mfcc_b = compute_mfcc_frame(&samples[b_start..b_end]);
+        let mfcc_c = compute_mfcc_frame(&samples[c_start..c_end]);
+
+        // First- and second-order temporal differences
+        let delta: [f32; N_MFCC] = std::array::from_fn(|i| mfcc_b[i] - mfcc_a[i]);
+        let delta2: [f32; N_MFCC] = std::array::from_fn(|i| mfcc_c[i] - mfcc_b[i]);
+
+        // Per-coefficient statistics across the three frames
+        let mfcc_mean: [f32; N_MFCC] =
+            std::array::from_fn(|i| (mfcc_a[i] + mfcc_b[i] + mfcc_c[i]) / 3.0);
+        let mfcc_var: [f32; N_MFCC] = std::array::from_fn(|i| {
+            let mu = mfcc_mean[i];
+            ((mfcc_a[i] - mu).powi(2) + (mfcc_b[i] - mu).powi(2) + (mfcc_c[i] - mu).powi(2)) / 3.0
+        });
+        let mfcc_min: [f32; N_MFCC] =
+            std::array::from_fn(|i| mfcc_a[i].min(mfcc_b[i]).min(mfcc_c[i]));
+        let mfcc_max: [f32; N_MFCC] =
+            std::array::from_fn(|i| mfcc_a[i].max(mfcc_b[i]).max(mfcc_c[i]));
+
+        // Energy envelope: RMS per 512-sample hop
+        const HOP: usize = 512;
+        let rms_vals: Vec<f32> = samples
+            .chunks(HOP)
+            .filter(|c| !c.is_empty())
+            .map(|chunk| {
+                let sq: f32 = chunk.iter().map(|&s| s * s).sum();
+                (sq / chunk.len() as f32).sqrt()
+            })
+            .collect();
+        let energy_mean = if rms_vals.is_empty() {
+            0.0f32
+        } else {
+            rms_vals.iter().sum::<f32>() / rms_vals.len() as f32
+        };
+        let energy_std = if rms_vals.is_empty() {
+            0.0f32
+        } else {
+            let mu = energy_mean;
+            (rms_vals.iter().map(|&r| (r - mu).powi(2)).sum::<f32>() / rms_vals.len() as f32).sqrt()
+        };
+        let energy_max = rms_vals.iter().cloned().fold(0.0f32, f32::max);
+
+        // Zero-crossing rate
+        let zcr = if samples.len() < 2 {
+            0.0f32
+        } else {
+            samples.windows(2).filter(|w| w[0] * w[1] < 0.0).count() as f32
+                / (samples.len() - 1) as f32
+        };
+
+        // F0 estimate, normalised to [0, 1] by dividing by sample_rate
+        let f0_norm = Self::estimate_average_f0(samples).unwrap_or(220.0) / SAMPLE_RATE;
+
+        // Pack into 512-dim vector
+        let mut features = vec![0.0f32; 512];
+        // [0..39]: MFCC + delta + delta-delta
+        for i in 0..N_MFCC {
+            features[i] = mfcc_a[i];
+            features[N_MFCC + i] = delta[i];
+            features[2 * N_MFCC + i] = delta2[i];
+        }
+        // [39..91]: per-coefficient stats (4 × 13 = 52 entries)
+        for i in 0..N_MFCC {
+            features[39 + i] = mfcc_mean[i];
+            features[52 + i] = mfcc_var[i];
+            features[65 + i] = mfcc_min[i];
+            features[78 + i] = mfcc_max[i];
+        }
+        // [91..96]: scalar audio stats
+        features[91] = energy_mean;
+        features[92] = energy_std;
+        features[93] = energy_max;
+        features[94] = zcr;
+        features[95] = f0_norm;
+
+        // [96..512]: tile core-39 features with gentle per-index scaling
+        for i in 96..512 {
+            let base_idx = (i - 96) % 39;
+            let scale = 1.0 + i as f32 * 1e-4;
+            features[i] = features[base_idx] * scale;
         }
 
         Ok(features)
     }
 
-    /// Estimates the average fundamental frequency (F0) from voice samples.
+    /// Estimates the average fundamental frequency (F0) from voice samples using
+    /// normalized autocorrelation (YIN-lite) pitch detection.
     ///
-    /// Analyzes pitch across the audio samples to determine the speaker's
-    /// typical fundamental frequency. Currently returns a placeholder value.
+    /// Processes the signal in 2048-sample frames with 512-sample hops. Per frame,
+    /// the signal is mean-centred and normalized autocorrelation r[τ] is computed
+    /// for lags τ in [sr/800, sr/55] (covering 55–800 Hz). The lag with the highest
+    /// r[τ] is chosen; frames where r[τ] > 0.35 are declared voiced. Returns the
+    /// median F0 across all voiced frames, or 220 Hz if none are voiced.
     ///
     /// # Arguments
     ///
@@ -906,22 +1231,98 @@ impl VoiceConverter {
     ///
     /// # Returns
     ///
-    /// Returns the average F0 in Hz.
+    /// Returns the estimated average F0 in Hz.
     ///
     /// # Errors
     ///
     /// Returns an error if F0 estimation fails or samples are too short.
     fn estimate_average_f0(samples: &[f32]) -> Result<f32, Error> {
-        // Placeholder: Simple autocorrelation-based F0 estimation
-        // In reality, this would use more sophisticated pitch detection
-        Ok(220.0) // Default to A3
+        const SAMPLE_RATE: f32 = 44100.0;
+        const FRAME_SIZE: usize = 2048;
+        const HOP_SIZE: usize = 512;
+        // Lag range covering 55–800 Hz at 44100 Hz sample rate
+        let tau_min = (SAMPLE_RATE / 800.0).ceil() as usize; // ≈ 56
+        let tau_max = (SAMPLE_RATE / 55.0).ceil() as usize; // ≈ 802
+
+        if samples.len() < FRAME_SIZE {
+            return Ok(220.0);
+        }
+
+        let mut voiced_f0s: Vec<f32> = Vec::new();
+        let mut frame_start = 0;
+
+        while frame_start + FRAME_SIZE <= samples.len() {
+            let frame = &samples[frame_start..frame_start + FRAME_SIZE];
+
+            // Mean-centre the frame to remove DC bias
+            let mean: f32 = frame.iter().sum::<f32>() / FRAME_SIZE as f32;
+            let centered: Vec<f32> = frame.iter().map(|&s| s - mean).collect();
+
+            let full_energy: f32 = centered.iter().map(|&s| s * s).sum();
+            if full_energy < 1e-10 {
+                frame_start += HOP_SIZE;
+                continue;
+            }
+
+            // Normalized autocorrelation r[τ] = Σ x[i]*x[i+τ] / √(Σx_left² · Σx_right²)
+            let mut best_tau = tau_min;
+            let mut best_corr = -1.0f32;
+            let tau_limit = tau_max.min(FRAME_SIZE - 1);
+
+            for tau in tau_min..=tau_limit {
+                let n_ov = FRAME_SIZE - tau;
+                let mut cross = 0.0f32;
+                let mut left_sq = 0.0f32;
+                let mut right_sq = 0.0f32;
+                for i in 0..n_ov {
+                    cross += centered[i] * centered[i + tau];
+                    left_sq += centered[i] * centered[i];
+                    right_sq += centered[i + tau] * centered[i + tau];
+                }
+                let denom = (left_sq * right_sq).sqrt();
+                let r = if denom > 1e-10 { cross / denom } else { 0.0 };
+                if r > best_corr {
+                    best_corr = r;
+                    best_tau = tau;
+                }
+            }
+
+            // Voiced threshold: correlation must exceed 0.35
+            if best_corr > 0.35 {
+                voiced_f0s.push(SAMPLE_RATE / best_tau as f32);
+            }
+
+            frame_start += HOP_SIZE;
+        }
+
+        if voiced_f0s.is_empty() {
+            return Ok(220.0);
+        }
+
+        // Return median F0 across voiced frames
+        voiced_f0s.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let mid = voiced_f0s.len() / 2;
+        let median = if voiced_f0s.len() % 2 == 0 {
+            (voiced_f0s[mid - 1] + voiced_f0s[mid]) / 2.0
+        } else {
+            voiced_f0s[mid]
+        };
+        Ok(median)
     }
 
-    /// Extracts formant frequencies (F1, F2, F3) from voice samples.
+    /// Extracts formant frequencies (F1, F2, F3) from voice samples via
+    /// LPC(12) all-pole spectral envelope peak detection.
     ///
-    /// Analyzes the spectral envelope to identify resonant frequencies
-    /// that characterize the speaker's vocal tract. Currently returns
-    /// typical formant values as a placeholder.
+    /// Pipeline:
+    /// 1. Apply Hann window to up to 2048 samples.
+    /// 2. Compute autocorrelation R[0..P+1] for LPC order P = 12.
+    /// 3. Run Levinson-Durbin recursion to obtain predictor coefficients a[1..=P].
+    /// 4. Evaluate the all-pole spectrum magnitude |H(ω)| = 1/|A(e^{jω})| at
+    ///    N_SPEC = 512 uniformly spaced points from 0 to π.
+    /// 5. Detect local maxima above 50 Hz using parabolic interpolation for
+    ///    sub-bin precision and collect up to 5 formant candidates.
+    /// 6. Return exactly the first 3 Hz values, padding with [800, 1200, 2600]
+    ///    defaults if fewer peaks are found.
     ///
     /// # Arguments
     ///
@@ -929,15 +1330,118 @@ impl VoiceConverter {
     ///
     /// # Returns
     ///
-    /// Returns a vector of formant frequencies in Hz (typically [F1, F2, F3]).
+    /// Returns exactly 3 formant frequencies in Hz as `Vec<f32>`.
     ///
     /// # Errors
     ///
     /// Returns an error if formant extraction fails or samples are insufficient.
     fn extract_formants(samples: &[f32]) -> Result<Vec<f32>, Error> {
-        // Placeholder: Return typical formant frequencies
-        // In reality, this would use LPC analysis or similar methods
-        Ok(vec![800.0, 1200.0, 2600.0]) // F1, F2, F3
+        const FRAME_SIZE: usize = 2048;
+        const P: usize = 12; // LPC order
+        const N_SPEC: usize = 512; // spectral evaluation points
+        const SAMPLE_RATE: f32 = 44100.0;
+        const MIN_FORMANT_HZ: f32 = 50.0;
+
+        let frame_len = samples.len().min(FRAME_SIZE);
+        if frame_len < P + 2 {
+            return Ok(vec![800.0, 1200.0, 2600.0]);
+        }
+
+        // Apply Hann window to the analysis frame
+        let windowed: Vec<f32> = samples[..frame_len]
+            .iter()
+            .enumerate()
+            .map(|(i, &s)| {
+                let w = 0.5
+                    * (1.0
+                        - (2.0 * std::f32::consts::PI * i as f32 / (frame_len - 1).max(1) as f32)
+                            .cos());
+                s * w
+            })
+            .collect();
+
+        // Autocorrelation R[k] for k = 0..=P
+        let mut r = [0.0f32; P + 2];
+        for k in 0..=P {
+            let mut acc = 0.0f32;
+            for i in 0..(frame_len - k) {
+                acc += windowed[i] * windowed[i + k];
+            }
+            r[k] = acc;
+        }
+
+        if r[0].abs() < 1e-15 {
+            return Ok(vec![800.0, 1200.0, 2600.0]);
+        }
+
+        // Levinson-Durbin recursion to compute LPC predictor coefficients
+        let mut a = [0.0f32; P + 1]; // a[1..=P]; a[0] is unused
+        let mut a_prev = [0.0f32; P + 1];
+        let mut pred_error = r[0];
+
+        for m in 1..=P {
+            let mut lambda = r[m];
+            for j in 1..m {
+                lambda -= a[j] * r[m - j];
+            }
+            if pred_error.abs() < 1e-15 {
+                break;
+            }
+            let km = -lambda / pred_error;
+            a_prev[..=P].copy_from_slice(&a[..=P]);
+            a[m] = km;
+            for j in 1..m {
+                a[j] = a_prev[j] + km * a_prev[m - j];
+            }
+            pred_error *= 1.0 - km * km;
+        }
+
+        // Evaluate all-pole spectrum: |H(ω)| = 1 / |A(e^{jω})|
+        // A(e^{jω}) = 1 + Σ_{k=1}^{P} a[k] · e^{−j·k·ω}
+        let mut spectrum = [0.0f32; N_SPEC];
+        for (bin, s) in spectrum.iter_mut().enumerate() {
+            let omega = std::f32::consts::PI * bin as f32 / N_SPEC as f32;
+            let mut re = 1.0f32;
+            let mut im = 0.0f32;
+            for k in 1..=P {
+                let angle = -(k as f32) * omega;
+                re += a[k] * angle.cos();
+                im += a[k] * angle.sin();
+            }
+            *s = 1.0 / (re * re + im * im).sqrt().max(1e-10);
+        }
+
+        // Collect spectral peaks above MIN_FORMANT_HZ
+        let min_bin = (MIN_FORMANT_HZ / (SAMPLE_RATE / 2.0) * N_SPEC as f32).ceil() as usize;
+        let mut formants: Vec<f32> = Vec::with_capacity(5);
+
+        for bin in min_bin.max(1)..(N_SPEC - 1) {
+            if spectrum[bin] > spectrum[bin - 1] && spectrum[bin] > spectrum[bin + 1] {
+                // Parabolic interpolation for sub-bin frequency precision
+                let alpha = spectrum[bin - 1];
+                let beta = spectrum[bin];
+                let gamma = spectrum[bin + 1];
+                let denom = alpha - 2.0 * beta + gamma;
+                let delta_bin = if denom.abs() > 1e-10 {
+                    0.5 * (alpha - gamma) / denom
+                } else {
+                    0.0
+                };
+                let peak_bin = bin as f32 + delta_bin;
+                formants.push(peak_bin * (SAMPLE_RATE / 2.0) / N_SPEC as f32);
+                if formants.len() >= 5 {
+                    break;
+                }
+            }
+        }
+
+        // Pad with defaults if fewer than 3 peaks found
+        let defaults = [800.0f32, 1200.0, 2600.0, 3200.0, 4000.0];
+        while formants.len() < 3 {
+            formants.push(defaults[formants.len()]);
+        }
+
+        Ok(formants[..3].to_vec())
     }
 
     /// Analyzes voice quality characteristics from samples.
@@ -1106,5 +1610,211 @@ mod tests {
 
         let result = converter.convert_voice(request).await;
         assert!(result.is_err());
+    }
+
+    fn make_test_speaker(avg_f0: f32, formants: Vec<f32>) -> SpeakerEmbedding {
+        SpeakerEmbedding {
+            speaker_id: "test".to_string(),
+            speaker_name: "Test Speaker".to_string(),
+            voice_characteristics: VoiceCharacteristics::default(),
+            embedding_vector: vec![0.0; 512],
+            supported_styles: vec!["pop".to_string()],
+            avg_f0,
+            formants,
+            quality_metrics: VoiceQualityMetrics::default(),
+        }
+    }
+
+    #[test]
+    fn test_spectral_conversion_length_preserved() {
+        let converter = VoiceConverter::new().expect("Failed to create VoiceConverter");
+        let n = 8192usize;
+        // Use a sine wave so there is spectral content to process.
+        let source: Vec<f32> = (0..n)
+            .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 44100.0).sin() * 0.5)
+            .collect();
+        let speaker = make_test_speaker(220.0, vec![800.0, 1200.0, 2600.0]);
+        let quality = ConversionQuality {
+            method: ConversionMethod::SpectralConversion,
+            conversion_strength: 1.0,
+            ..ConversionQuality::default()
+        };
+
+        let result = converter
+            .spectral_conversion(&source, 44100, &speaker, &quality)
+            .expect("spectral_conversion should succeed");
+
+        assert_eq!(result.len(), n, "output length must equal input length");
+    }
+
+    #[test]
+    fn test_spectral_conversion_not_constant_scale() {
+        // Verify that spectral_conversion does NOT simply scale every sample by the
+        // same constant (the old placeholder behaviour was: out[i] = in[i] * (formant[0]/1000)).
+        let converter = VoiceConverter::new().expect("Failed to create VoiceConverter");
+        let n = 4096usize;
+        let source: Vec<f32> = (0..n)
+            .map(|i| (2.0 * std::f32::consts::PI * 300.0 * i as f32 / 44100.0).sin() * 0.8)
+            .collect();
+        let formant_scale_old = 800.0f32 / 1000.0; // what the old placeholder computed
+        let speaker = make_test_speaker(220.0, vec![800.0, 1200.0, 2600.0]);
+        let quality = ConversionQuality {
+            method: ConversionMethod::SpectralConversion,
+            conversion_strength: 1.0,
+            ..ConversionQuality::default()
+        };
+
+        let result = converter
+            .spectral_conversion(&source, 44100, &speaker, &quality)
+            .expect("spectral_conversion should succeed");
+
+        // At least one sample must differ from the naive constant-scale prediction by
+        // more than a small epsilon, proving real spectral processing occurred.
+        let differs = result
+            .iter()
+            .zip(source.iter())
+            .any(|(&out, &inp)| (out - inp * formant_scale_old).abs() > 1e-4);
+        assert!(
+            differs,
+            "spectral_conversion must not simply multiply by a constant scale"
+        );
+    }
+
+    #[test]
+    fn test_neural_transfer_shape() {
+        let converter = VoiceConverter::new().expect("Failed to create VoiceConverter");
+        let n = 3000usize;
+        let source: Vec<f32> = (0..n)
+            .map(|i| (2.0 * std::f32::consts::PI * 200.0 * i as f32 / 44100.0).sin() * 0.6)
+            .collect();
+        let source_chars = VoiceCharacteristics {
+            f0_mean: 147.0,
+            ..VoiceCharacteristics::default()
+        };
+        let speaker = make_test_speaker(220.0, vec![800.0, 1200.0, 2600.0]);
+        let quality = ConversionQuality {
+            method: ConversionMethod::NeuralTransfer,
+            conversion_strength: 0.8,
+            ..ConversionQuality::default()
+        };
+
+        let result = converter
+            .neural_transfer_conversion(&source, &source_chars, &speaker, &quality)
+            .expect("neural_transfer_conversion should succeed");
+
+        assert_eq!(
+            result.len(),
+            n,
+            "neural_transfer output length must equal input length"
+        );
+    }
+
+    // ── DSP implementation tests ──────────────────────────────────────────────
+
+    /// A 440 Hz sine wave at 44100 Hz should yield an F0 estimate in [380, 500].
+    #[test]
+    fn test_f0_estimation_440hz() {
+        let sr = 44100usize;
+        let duration_samples = sr * 2; // 2 seconds → many frames
+        let samples: Vec<f32> = (0..duration_samples)
+            .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / sr as f32).sin() * 0.9)
+            .collect();
+
+        let f0 = VoiceConverter::estimate_average_f0(&samples).expect("F0 estimation must succeed");
+
+        assert!(
+            (380.0..=500.0).contains(&f0),
+            "Expected F0 near 440 Hz, got {f0:.1} Hz"
+        );
+    }
+
+    /// Silence (all-zero input) must return the 220 Hz fallback.
+    #[test]
+    fn test_f0_estimation_silence() {
+        let samples = vec![0.0f32; 44100 * 2];
+        let f0 = VoiceConverter::estimate_average_f0(&samples)
+            .expect("F0 estimation must succeed on silence");
+        assert!(
+            (f0 - 220.0).abs() < 1.0,
+            "Expected 220 Hz fallback for silence, got {f0:.1} Hz"
+        );
+    }
+
+    /// `extract_formants` must return exactly 3 values, all above 50 Hz.
+    #[test]
+    fn test_formants_three_values() {
+        // Use a voiced vowel-like signal: harmonic stack at 200 Hz
+        let sr = 44100usize;
+        let samples: Vec<f32> = (0..sr)
+            .map(|i| {
+                let t = i as f32 / sr as f32;
+                let mut s = 0.0f32;
+                for h in 1..=20u32 {
+                    s += (1.0 / h as f32)
+                        * (2.0 * std::f32::consts::PI * 200.0 * h as f32 * t).sin();
+                }
+                s * 0.1
+            })
+            .collect();
+
+        let formants =
+            VoiceConverter::extract_formants(&samples).expect("extract_formants must succeed");
+
+        assert_eq!(formants.len(), 3, "Must return exactly 3 formant values");
+        for (idx, &f) in formants.iter().enumerate() {
+            assert!(
+                f > 50.0,
+                "Formant F{} = {:.1} Hz is not above 50 Hz",
+                idx + 1,
+                f
+            );
+        }
+    }
+
+    /// `extract_speaker_features` must return exactly 512 finite values.
+    #[test]
+    fn test_speaker_features_512() {
+        let sr = 44100usize;
+        let samples: Vec<f32> = (0..sr)
+            .map(|i| (2.0 * std::f32::consts::PI * 300.0 * i as f32 / sr as f32).sin() * 0.5)
+            .collect();
+
+        let features = VoiceConverter::extract_speaker_features(&samples)
+            .expect("extract_speaker_features must succeed");
+
+        assert_eq!(features.len(), 512, "Must return exactly 512 features");
+        for (i, &v) in features.iter().enumerate() {
+            assert!(v.is_finite(), "Feature[{i}] = {v} is not finite");
+        }
+    }
+
+    /// Two different inputs must produce different feature vectors.
+    #[test]
+    fn test_speaker_features_varies() {
+        let sr = 44100usize;
+        // Input A: 300 Hz sine
+        let samples_a: Vec<f32> = (0..sr)
+            .map(|i| (2.0 * std::f32::consts::PI * 300.0 * i as f32 / sr as f32).sin() * 0.5)
+            .collect();
+        // Input B: 700 Hz sine (different pitch and spectral content)
+        let samples_b: Vec<f32> = (0..sr)
+            .map(|i| (2.0 * std::f32::consts::PI * 700.0 * i as f32 / sr as f32).sin() * 0.5)
+            .collect();
+
+        let feat_a = VoiceConverter::extract_speaker_features(&samples_a)
+            .expect("extract_speaker_features must succeed for input A");
+        let feat_b = VoiceConverter::extract_speaker_features(&samples_b)
+            .expect("extract_speaker_features must succeed for input B");
+
+        let max_diff = feat_a
+            .iter()
+            .zip(feat_b.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+
+        assert!(
+            max_diff > 1e-4,
+            "Feature vectors for different inputs must differ (max_diff = {max_diff:.6})"
+        );
     }
 }

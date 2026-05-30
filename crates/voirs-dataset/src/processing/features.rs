@@ -451,34 +451,58 @@ fn create_mel_filterbank(
 }
 
 /// Extract MFCC coefficients from audio
+///
+/// Implements the standard MFCC pipeline:
+/// 1. Compute log-mel spectrogram (40 mel bins, n_fft=1024, hop=256)
+/// 2. Apply DCT-II with ortho normalization to each frame
+/// 3. Retain coefficients 1..=n_mfcc (skip DC/C0 unless include_energy)
+/// 4. Optionally prepend log-energy (C0) as the first coefficient
 pub fn extract_mfcc(audio: &AudioData, n_mfcc: usize, include_energy: bool) -> Result<Vec<f32>> {
-    // Simplified MFCC extraction
-    // In a real implementation, this would:
-    // 1. Compute mel spectrogram
-    // 2. Apply DCT to get cepstral coefficients
-    // 3. Optionally include energy coefficient
+    let n_mel_bins = 40usize;
+    let mel_result = extract_mel_spectrogram(audio, n_mel_bins, 1024, 256)?;
+    let (n_frames, _n_mels) = mel_result.shape;
+    // mel_result.values is stored row-major: [frame0_mel0, frame0_mel1, ..., frame1_mel0, ...]
+    // Values are already in log scale (computed as ln(energy + eps) in extract_mel_spectrogram)
 
-    let n_coeffs = if include_energy { n_mfcc + 1 } else { n_mfcc };
+    let n_coeffs_out = if include_energy { n_mfcc + 1 } else { n_mfcc };
 
-    // Mock MFCC computation
-    let mel_result = extract_mel_spectrogram(audio, 26, 1024, 256)?;
-    let (n_frames, _) = mel_result.shape;
+    // Pre-compute the DCT-II orthonormal basis scaling factors:
+    // coeff k=0: sqrt(1/N)
+    // coeff k>0: sqrt(2/N)
+    let n_f = n_mel_bins as f32;
+    let scale_k0 = (1.0 / n_f).sqrt();
+    let scale_k = (2.0 / n_f).sqrt();
+    let pi_over_2n = std::f32::consts::PI / (2.0 * n_f);
 
-    let values: Vec<f32> = (0..n_frames * n_coeffs)
-        .map(|i| {
-            let coeff_idx = i % n_coeffs;
-            let frame_idx = i / n_coeffs;
+    let mut values = Vec::with_capacity(n_frames * n_coeffs_out);
 
-            if coeff_idx == 0 && include_energy {
-                // Energy coefficient (C0)
-                frame_idx as f32 * 0.1
-            } else {
-                // Other MFCC coefficients
-                let normalized_coeff = (coeff_idx as f32) / (n_coeffs as f32);
-                (normalized_coeff * std::f32::consts::PI).cos() * 0.5
-            }
-        })
-        .collect();
+    for frame_idx in 0..n_frames {
+        let frame_start = frame_idx * n_mel_bins;
+        let log_mel = &mel_result.values[frame_start..frame_start + n_mel_bins];
+
+        // DCT-II of the log-mel vector:
+        //   C[k] = scale[k] * Σ_{n=0}^{N-1} log_mel[n] * cos(π*k*(2n+1)/(2N))
+        // C[0] serves as the log-energy (DC component)
+
+        // Compute C[0] = sqrt(1/N) * Σ log_mel[n]  (ortho normalization)
+        let c0: f32 = scale_k0 * log_mel.iter().sum::<f32>();
+
+        if include_energy {
+            values.push(c0);
+        }
+
+        // Compute C[1]..C[n_mfcc]
+        for k in 1..=n_mfcc {
+            let k_f = k as f32;
+            let coeff: f32 = scale_k
+                * log_mel
+                    .iter()
+                    .enumerate()
+                    .map(|(n, &lm)| lm * (k_f * (2 * n + 1) as f32 * pi_over_2n).cos())
+                    .sum::<f32>();
+            values.push(coeff);
+        }
+    }
 
     Ok(values)
 }
@@ -497,15 +521,19 @@ pub fn extract_mfcc_with_config(audio: &AudioData, config: &MfccConfig) -> Resul
     ))
 }
 
-/// Extract fundamental frequency using YIN algorithm (simplified)
+/// Extract fundamental frequency using the YIN algorithm.
+///
+/// YIN is de Cheveigné & Kawahara (2002). Per-frame steps:
+/// 1. Compute the squared-difference function d(τ)
+/// 2. Normalize to the cumulative-mean normalized difference (CMND)
+/// 3. Search for the first τ whose CMND is below threshold and is a local minimum
+/// 4. Apply parabolic interpolation to refine the lag estimate
+/// 5. Convert refined lag to F0 = sample_rate / τ_refined, or 0.0 for unvoiced
 pub fn extract_fundamental_frequency(
     audio: &AudioData,
     f_min: f32,
     f_max: f32,
 ) -> Result<Vec<f32>> {
-    // Simplified F0 extraction
-    // In a real implementation, this would use YIN, autocorrelation, or other F0 algorithms
-
     let sample_rate = audio.sample_rate() as f32;
     let samples = audio.samples();
 
@@ -513,8 +541,8 @@ pub fn extract_fundamental_frequency(
         return Ok(vec![]);
     }
 
-    let frame_length = (0.025 * sample_rate) as usize; // 25ms frames
-    let hop_length = (0.010 * sample_rate) as usize; // 10ms hop
+    let frame_length = (0.025 * sample_rate) as usize; // 25 ms frames
+    let hop_length = (0.010 * sample_rate) as usize; // 10 ms hop
 
     let n_frames = if samples.len() > frame_length {
         (samples.len() - frame_length) / hop_length + 1
@@ -522,30 +550,116 @@ pub fn extract_fundamental_frequency(
         1
     };
 
-    // Mock F0 extraction
-    let f0_values: Vec<f32> = (0..n_frames)
-        .map(|frame_idx| {
-            let start_idx = frame_idx * hop_length;
-            if start_idx + frame_length <= samples.len() {
-                // Simplified F0 estimation based on dominant frequency
-                let frame_energy: f32 = samples[start_idx..start_idx + frame_length]
-                    .iter()
-                    .map(|&x| x * x)
-                    .sum();
+    // τ range: [τ_min, τ_max] corresponding to [f_max, f_min]
+    let tau_min = (sample_rate / f_max).ceil() as usize;
+    let tau_max = ((sample_rate / f_min) as usize).min(frame_length / 2);
+    let yin_threshold = 0.1_f32;
 
-                if frame_energy > 1e-6 {
-                    // Mock F0 based on energy and position
-                    let base_f0 = f_min + (f_max - f_min) * 0.5;
-                    let variation = (frame_idx as f32 * 0.1).sin() * 20.0;
-                    (base_f0 + variation).max(f_min).min(f_max)
+    let mut f0_values = Vec::with_capacity(n_frames);
+
+    for frame_idx in 0..n_frames {
+        let start = frame_idx * hop_length;
+        let end = (start + frame_length).min(samples.len());
+        let frame = &samples[start..end];
+
+        // Half-window size W: integrate over the first half of the frame
+        let half_w = frame.len() / 2;
+        if half_w < 2 || tau_max < tau_min {
+            f0_values.push(0.0);
+            continue;
+        }
+
+        // ---- Step 1: Squared-difference function d(τ) -----------------------
+        // d(τ) = Σ_{j=0}^{W-1} (x[j] - x[j+τ])²
+        // We only need τ = 1..tau_max
+        let effective_tau_max = tau_max.min(half_w);
+        let mut d = vec![0.0_f32; effective_tau_max + 1]; // d[0] unused
+        for tau in 1..=effective_tau_max {
+            let mut acc = 0.0_f32;
+            for j in 0..half_w {
+                let x_j = frame[j];
+                let x_j_tau = if j + tau < frame.len() {
+                    frame[j + tau]
                 } else {
-                    0.0 // Unvoiced
+                    0.0
+                };
+                let diff = x_j - x_j_tau;
+                acc += diff * diff;
+            }
+            d[tau] = acc;
+        }
+
+        // ---- Step 2: Cumulative mean normalized difference (CMND) ------------
+        // cmnd[0] = 1.0 (by definition)
+        // cmnd[τ] = d[τ] / ((1/τ) * Σ_{j=1}^{τ} d[j])
+        let mut cmnd = vec![1.0_f32; effective_tau_max + 1];
+        let mut running_sum = 0.0_f32;
+        for tau in 1..=effective_tau_max {
+            running_sum += d[tau];
+            if running_sum > 0.0 {
+                cmnd[tau] = d[tau] * tau as f32 / running_sum;
+            } else {
+                cmnd[tau] = 1.0;
+            }
+        }
+
+        // ---- Step 3: Threshold search for first local minimum below threshold
+        let tau_lo = tau_min.max(1);
+        let tau_hi = effective_tau_max;
+
+        let mut best_tau: Option<usize> = None;
+        let mut tau_search = tau_lo;
+        while tau_search <= tau_hi {
+            if cmnd[tau_search] < yin_threshold {
+                // Find the absolute minimum in the dip starting here
+                let mut local_min_tau = tau_search;
+                let mut local_min_val = cmnd[tau_search];
+                let mut t = tau_search + 1;
+                while t <= tau_hi && cmnd[t] <= cmnd[t.saturating_sub(1)] {
+                    if cmnd[t] < local_min_val {
+                        local_min_val = cmnd[t];
+                        local_min_tau = t;
+                    }
+                    t += 1;
+                }
+                best_tau = Some(local_min_tau);
+                break;
+            }
+            tau_search += 1;
+        }
+
+        // If no τ found below threshold, fall back to global minimum of cmnd in [tau_lo, tau_hi]
+        let refined_tau = if let Some(tau) = best_tau {
+            // ---- Step 4: Parabolic interpolation around best_tau ---------------
+            if tau > tau_lo && tau < tau_hi {
+                let y0 = cmnd[tau - 1];
+                let y1 = cmnd[tau];
+                let y2 = cmnd[tau + 1];
+                let denom = 2.0 * (2.0 * y1 - y0 - y2);
+                if denom.abs() > 1e-10 {
+                    let shift = (y2 - y0) / denom;
+                    // Clamp shift to ±0.5 samples
+                    tau as f32 + shift.clamp(-0.5, 0.5)
+                } else {
+                    tau as f32
                 }
             } else {
-                0.0
+                tau as f32
             }
-        })
-        .collect();
+        } else {
+            // Unvoiced — return 0.0
+            f0_values.push(0.0);
+            continue;
+        };
+
+        // ---- Step 5: Convert lag to F0 and clamp to [f_min, f_max] -----------
+        let f0 = if refined_tau > 0.0 {
+            (sample_rate / refined_tau).clamp(f_min, f_max)
+        } else {
+            0.0
+        };
+        f0_values.push(f0);
+    }
 
     Ok(f0_values)
 }
@@ -725,5 +839,147 @@ mod tests {
         assert_eq!(time_axis[1], 0.01);
         assert_eq!(time_axis[2], 0.02);
         assert_eq!(time_axis[3], 0.03);
+    }
+
+    // -----------------------------------------------------------------------
+    // New tests for the real MFCC and YIN-based F0 implementations
+    // -----------------------------------------------------------------------
+
+    /// Helper: build a pure sine-wave AudioData at the given frequency.
+    fn make_sine_audio(freq_hz: f32, sample_rate: u32, n_samples: usize) -> AudioData {
+        let samples: Vec<f32> = (0..n_samples)
+            .map(|i| (2.0 * std::f32::consts::PI * freq_hz * i as f32 / sample_rate as f32).sin())
+            .collect();
+        AudioData::new(samples, sample_rate, 1)
+    }
+
+    /// Helper: build a near-silent (scaled) AudioData.
+    fn make_scaled_audio(scale: f32, n_samples: usize, sample_rate: u32) -> AudioData {
+        let samples: Vec<f32> = (0..n_samples)
+            .map(|i| {
+                scale * (2.0 * std::f32::consts::PI * 440.0 * i as f32 / sample_rate as f32).sin()
+            })
+            .collect();
+        AudioData::new(samples, sample_rate, 1)
+    }
+
+    /// test_mfcc_shape: verify output length for both include_energy modes.
+    #[test]
+    fn test_mfcc_shape() {
+        let sample_rate = 16_000u32;
+        let n_samples = 500usize;
+        let n_mfcc = 13usize;
+        let audio = make_sine_audio(440.0, sample_rate, n_samples);
+
+        // Reference mel spectrogram to derive expected frame count
+        let mel = extract_mel_spectrogram(&audio, 40, 1024, 256).unwrap();
+        let n_frames = mel.shape.0;
+
+        // Without energy
+        let mfcc_no_energy = extract_mfcc(&audio, n_mfcc, false).unwrap();
+        assert_eq!(
+            mfcc_no_energy.len(),
+            n_frames * n_mfcc,
+            "without energy: expected {} coefficients, got {}",
+            n_frames * n_mfcc,
+            mfcc_no_energy.len()
+        );
+
+        // With energy
+        let mfcc_with_energy = extract_mfcc(&audio, n_mfcc, true).unwrap();
+        assert_eq!(
+            mfcc_with_energy.len(),
+            n_frames * (n_mfcc + 1),
+            "with energy: expected {} coefficients, got {}",
+            n_frames * (n_mfcc + 1),
+            mfcc_with_energy.len()
+        );
+    }
+
+    /// test_mfcc_energy_ordering: energy coefficient (index 0 per frame in include_energy=true)
+    /// should be larger on average for a loud signal than for a near-silent one.
+    #[test]
+    fn test_mfcc_energy_ordering() {
+        let sample_rate = 16_000u32;
+        let n_samples = 4096usize;
+        let n_mfcc = 13usize;
+
+        let loud_audio = make_scaled_audio(0.9, n_samples, sample_rate);
+        let quiet_audio = make_scaled_audio(1e-4, n_samples, sample_rate);
+
+        let loud_mfcc = extract_mfcc(&loud_audio, n_mfcc, true).unwrap();
+        let quiet_mfcc = extract_mfcc(&quiet_audio, n_mfcc, true).unwrap();
+
+        let n_coeffs = n_mfcc + 1;
+        // Energy is index 0 within each frame
+        let mean_energy = |mfcc: &[f32]| -> f32 {
+            let frames = mfcc.len() / n_coeffs;
+            if frames == 0 {
+                return 0.0;
+            }
+            let sum: f32 = (0..frames).map(|f| mfcc[f * n_coeffs]).sum();
+            sum / frames as f32
+        };
+
+        let loud_mean = mean_energy(&loud_mfcc);
+        let quiet_mean = mean_energy(&quiet_mfcc);
+
+        assert!(
+            loud_mean > quiet_mean,
+            "Loud signal energy ({}) should exceed quiet signal energy ({})",
+            loud_mean,
+            quiet_mean
+        );
+    }
+
+    /// test_f0_sine: a 220 Hz sine wave should yield at least 80% voiced frames
+    /// within ±15 Hz of 220 Hz.
+    #[test]
+    fn test_f0_sine() {
+        let sample_rate = 16_000u32;
+        // 1 second of 220 Hz sine
+        let n_samples = sample_rate as usize;
+        let audio = make_sine_audio(220.0, sample_rate, n_samples);
+
+        let f0_values = extract_fundamental_frequency(&audio, 80.0, 800.0).unwrap();
+
+        assert!(!f0_values.is_empty(), "F0 extraction returned no frames");
+
+        let voiced_total = f0_values.iter().filter(|&&f| f > 0.0).count();
+        let near_220 = f0_values
+            .iter()
+            .filter(|&&f| f > 0.0 && (f - 220.0).abs() <= 15.0)
+            .count();
+
+        assert!(
+            voiced_total > 0,
+            "Expected some voiced frames for a 220 Hz sine wave"
+        );
+
+        let accuracy = near_220 as f32 / voiced_total as f32;
+        assert!(
+            accuracy >= 0.80,
+            "Expected ≥80% of voiced frames within ±15 Hz of 220 Hz, got {:.1}% ({}/{})",
+            accuracy * 100.0,
+            near_220,
+            voiced_total
+        );
+    }
+
+    /// test_f0_silence: all-zeros signal should produce all-zero F0 (unvoiced).
+    #[test]
+    fn test_f0_silence() {
+        let sample_rate = 16_000u32;
+        let audio = AudioData::silence(1.0, sample_rate, 1);
+
+        let f0_values = extract_fundamental_frequency(&audio, 80.0, 800.0).unwrap();
+
+        for (i, &f0) in f0_values.iter().enumerate() {
+            assert_eq!(
+                f0, 0.0,
+                "Frame {} should be unvoiced (0.0) for silent input, got {}",
+                i, f0
+            );
+        }
     }
 }

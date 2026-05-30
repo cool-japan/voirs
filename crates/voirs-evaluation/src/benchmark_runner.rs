@@ -178,38 +178,96 @@ impl BenchmarkRunner {
         Ok(measurements)
     }
 
-    /// Parse benchmark output and extract measurements
+    /// Parse a Criterion `estimates.json` JSON string and extract the mean point
+    /// estimate (in nanoseconds).
+    ///
+    /// Criterion writes files of the form:
+    /// ```json
+    /// {
+    ///   "mean": { "point_estimate": 52300.0, ... },
+    ///   "std_dev": { ... },
+    ///   ...
+    /// }
+    /// ```
+    /// Returns `Ok(Some(ns))` on success, `Ok(None)` if the key is missing, or an
+    /// error if the JSON is malformed.
+    pub fn parse_criterion_estimates_json(
+        json: &str,
+    ) -> Result<Option<f64>, Box<dyn std::error::Error>> {
+        let value: serde_json::Value = serde_json::from_str(json)?;
+        let point_estimate = value
+            .get("mean")
+            .and_then(|m| m.get("point_estimate"))
+            .and_then(|pe| pe.as_f64());
+        Ok(point_estimate)
+    }
+
+    /// Attempt to read Criterion's `estimates.json` file for `benchmark_name` from
+    /// the standard output path `target/criterion/<benchmark_name>/new/estimates.json`.
+    ///
+    /// Returns `Ok(Some(ns))` when the file exists and parses correctly, `Ok(None)`
+    /// when the file does not exist, or an error on parse failure.
+    fn read_criterion_estimates(
+        &self,
+        benchmark_name: &str,
+    ) -> Result<Option<f64>, Box<dyn std::error::Error>> {
+        let estimates_path = format!("target/criterion/{}/new/estimates.json", benchmark_name);
+        if !Path::new(&estimates_path).exists() {
+            return Ok(None);
+        }
+        let json = fs::read_to_string(&estimates_path)?;
+        Self::parse_criterion_estimates_json(&json)
+    }
+
+    /// Parse benchmark output and extract measurements.
+    ///
+    /// Tries to load real Criterion `estimates.json` data first.  Falls back to
+    /// simulated measurements when the file is absent (e.g. during unit tests or
+    /// when criterion has not been run yet).
     fn parse_benchmark_output(
         &self,
         benchmark_name: &str,
-        output: &str,
+        _output: &str,
         is_warmup: bool,
     ) -> Result<Vec<BenchmarkMeasurement>, Box<dyn std::error::Error>> {
-        // This is a simplified parser - in a real implementation, you'd parse the actual Criterion JSON output
         let mut measurements = Vec::new();
 
-        // For now, we'll simulate some measurements based on the benchmark name
-        if !is_warmup {
-            let base_time = match benchmark_name {
-                "evaluation_metrics" => 150.0,
-                "gpu_acceleration" => 80.0,
-                "memory_benchmark" => 200.0,
-                _ => 100.0,
-            };
+        if is_warmup {
+            return Ok(measurements);
+        }
 
-            // Add some realistic variation
-            let variation = scirs2_core::random::random::<f64>() * 0.1 - 0.05; // ±5% variation
-            let measurement_value = base_time * (1.0 + variation);
-
+        // Prefer real Criterion estimates when available
+        if let Some(ns) = self.read_criterion_estimates(benchmark_name)? {
             let measurement = RegressionDetector::create_measurement(
-                format!("{}::total_time", benchmark_name),
-                measurement_value,
-                "ms".to_string(),
+                format!("{}::mean_time_ns", benchmark_name),
+                ns,
+                "ns".to_string(),
                 self.git_commit.clone(),
                 self.current_version.clone(),
             );
             measurements.push(measurement);
+            return Ok(measurements);
         }
+
+        // Fallback: simulated measurements with ±5 % variation
+        let base_time = match benchmark_name {
+            "evaluation_metrics" => 150.0,
+            "gpu_acceleration" => 80.0,
+            "memory_benchmark" => 200.0,
+            _ => 100.0,
+        };
+
+        let variation = scirs2_core::random::random::<f64>() * 0.1 - 0.05;
+        let measurement_value = base_time * (1.0 + variation);
+
+        let measurement = RegressionDetector::create_measurement(
+            format!("{}::total_time", benchmark_name),
+            measurement_value,
+            "ms".to_string(),
+            self.git_commit.clone(),
+            self.current_version.clone(),
+        );
+        measurements.push(measurement);
 
         Ok(measurements)
     }
@@ -478,5 +536,33 @@ mod tests {
         let analysis = runner.generate_trend_analysis();
         assert!(analysis.contains("test_metric"));
         assert!(analysis.contains("Trend:"));
+    }
+
+    #[test]
+    fn test_parse_criterion_estimates_json_fixture() {
+        // Fixture JSON matching Criterion's estimates.json structure.
+        let json = r#"{"mean":{"confidence_interval":{"lower_bound":1111111.0,"upper_bound":1355555.0},"point_estimate":1234567.0,"standard_error":50000.0},"std_dev":{"confidence_interval":{"lower_bound":100000.0,"upper_bound":200000.0},"point_estimate":150000.0,"standard_error":20000.0}}"#;
+
+        let result = BenchmarkRunner::parse_criterion_estimates_json(json).unwrap();
+        assert_eq!(
+            result,
+            Some(1234567.0),
+            "mean.point_estimate should parse to 1234567.0 ns"
+        );
+    }
+
+    #[test]
+    fn test_parse_criterion_estimates_json_missing_mean() {
+        // JSON without a "mean" key should return Ok(None) rather than an error.
+        let json = r#"{"slope":{"point_estimate":999.0}}"#;
+        let result = BenchmarkRunner::parse_criterion_estimates_json(json).unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_parse_criterion_estimates_json_invalid_json() {
+        // Malformed JSON should return an error.
+        let json = "not-valid-json";
+        assert!(BenchmarkRunner::parse_criterion_estimates_json(json).is_err());
     }
 }
