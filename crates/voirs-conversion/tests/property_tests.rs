@@ -195,9 +195,7 @@ proptest! {
     }
 
     /// Property: Transforms should not amplify excessively
-    /// NOTE: Temporarily disabled due to phase vocoder artifacts in edge cases
     #[test]
-    #[ignore]
     fn prop_bounded_amplification(
         audio in prop::collection::vec(-0.5f32..=0.5f32, 1000..2000),
         pitch_factor in pitch_factor_strategy()
@@ -220,9 +218,7 @@ proptest! {
     }
 
     /// Property: Energy preservation in small pitch changes
-    /// NOTE: Temporarily disabled due to phase vocoder energy variations in edge cases
     #[test]
-    #[ignore]
     fn prop_energy_preservation_small_changes(
         audio in prop::collection::vec(-0.5f32..=0.5f32, 1000..2000),
         pitch_factor in (0.9f32..=1.1f32)  // Small pitch changes

@@ -4,10 +4,10 @@
 //! stress and fatigue detection, and mood tracking over time.
 
 use crate::RecognitionError;
-use voirs_sdk::AudioBuffer;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+use voirs_sdk::AudioBuffer;
 
 pub mod detector;
 pub mod features;
@@ -88,12 +88,19 @@ impl EmotionType {
     /// Get emotion category (primary emotions vs derived emotions)
     pub fn category(self) -> EmotionCategory {
         match self {
-            EmotionType::Neutral | EmotionType::Happy | EmotionType::Sad | 
-            EmotionType::Angry | EmotionType::Fear | EmotionType::Surprise | 
-            EmotionType::Disgust => EmotionCategory::Primary,
-            
-            EmotionType::Excited | EmotionType::Calm | EmotionType::Love |
-            EmotionType::Stressed | EmotionType::Fatigued => EmotionCategory::Derived,
+            EmotionType::Neutral
+            | EmotionType::Happy
+            | EmotionType::Sad
+            | EmotionType::Angry
+            | EmotionType::Fear
+            | EmotionType::Surprise
+            | EmotionType::Disgust => EmotionCategory::Primary,
+
+            EmotionType::Excited
+            | EmotionType::Calm
+            | EmotionType::Love
+            | EmotionType::Stressed
+            | EmotionType::Fatigued => EmotionCategory::Derived,
         }
     }
 }
@@ -108,7 +115,7 @@ pub enum EmotionCategory {
 }
 
 /// Sentiment polarity
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SentimentPolarity {
     /// Positive sentiment
     Positive,
@@ -214,26 +221,35 @@ impl Default for EmotionConfig {
 #[async_trait]
 pub trait EmotionRecognizer: Send + Sync {
     /// Detect emotions in audio
-    async fn detect_emotions(&mut self, audio: &AudioBuffer) -> Result<Vec<EmotionDetection>, RecognitionError>;
-    
+    async fn detect_emotions(
+        &mut self,
+        audio: &AudioBuffer,
+    ) -> Result<Vec<EmotionDetection>, RecognitionError>;
+
     /// Analyze sentiment in audio
-    async fn analyze_sentiment(&mut self, audio: &AudioBuffer) -> Result<SentimentAnalysis, RecognitionError>;
-    
+    async fn analyze_sentiment(
+        &mut self,
+        audio: &AudioBuffer,
+    ) -> Result<SentimentAnalysis, RecognitionError>;
+
     /// Perform multi-dimensional emotion analysis
-    async fn analyze_multi_dimensional(&mut self, audio: &AudioBuffer) -> Result<MultiDimensionalEmotion, RecognitionError>;
-    
+    async fn analyze_multi_dimensional(
+        &mut self,
+        audio: &AudioBuffer,
+    ) -> Result<MultiDimensionalEmotion, RecognitionError>;
+
     /// Detect stress level
     async fn detect_stress(&mut self, audio: &AudioBuffer) -> Result<f32, RecognitionError>;
-    
+
     /// Detect fatigue level
     async fn detect_fatigue(&mut self, audio: &AudioBuffer) -> Result<f32, RecognitionError>;
-    
+
     /// Update configuration
     async fn update_config(&mut self, config: EmotionConfig) -> Result<(), RecognitionError>;
-    
+
     /// Get current configuration
     fn get_config(&self) -> &EmotionConfig;
-    
+
     /// Get supported emotions
     fn get_supported_emotions(&self) -> Vec<EmotionType>;
 }

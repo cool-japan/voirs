@@ -58,13 +58,13 @@ impl EmotionTracker {
 
         // Add to history
         self.emotion_history.push_back(emotion.clone());
-        
+
         // Update current state
         self.update_current_state(emotion).await;
-        
+
         // Analyze mood patterns
         self.analyze_mood_patterns().await;
-        
+
         // Clean up old data
         self.cleanup_history();
     }
@@ -83,8 +83,10 @@ impl EmotionTracker {
     /// Get emotion trends over time
     pub fn get_emotion_trends(&self) -> EmotionTrends {
         let window_start = Instant::now() - self.tracking_window;
-        
-        let recent_emotions: Vec<_> = self.emotion_history.iter()
+
+        let recent_emotions: Vec<_> = self
+            .emotion_history
+            .iter()
             .filter(|e| e.timestamp > window_start)
             .collect();
 
@@ -95,7 +97,7 @@ impl EmotionTracker {
         // Calculate emotion distribution
         let mut emotion_counts = HashMap::new();
         let mut confidence_sum = HashMap::new();
-        
+
         for emotion in &recent_emotions {
             *emotion_counts.entry(emotion.emotion).or_insert(0) += 1;
             *confidence_sum.entry(emotion.emotion).or_insert(0.0) += emotion.confidence;
@@ -104,21 +106,23 @@ impl EmotionTracker {
         let mut emotion_distribution = HashMap::new();
         let mut avg_confidence = HashMap::new();
         let total_count = recent_emotions.len() as f32;
-        
+        let unique_emotion_count = emotion_counts.len();
+
         for (emotion_type, count) in emotion_counts {
             emotion_distribution.insert(emotion_type, count as f32 / total_count);
             avg_confidence.insert(emotion_type, confidence_sum[&emotion_type] / count as f32);
         }
 
         // Calculate dominant emotion
-        let dominant_emotion = emotion_distribution.iter()
+        let dominant_emotion = emotion_distribution
+            .iter()
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(emotion, _)| *emotion)
             .unwrap_or(EmotionType::Neutral);
 
         // Calculate emotional stability (variance in emotions)
         let stability = if recent_emotions.len() > 1 {
-            let unique_emotions = emotion_counts.len();
+            let unique_emotions = unique_emotion_count;
             1.0 - (unique_emotions as f32 - 1.0) / (EmotionType::all().len() as f32 - 1.0)
         } else {
             1.0
@@ -146,8 +150,10 @@ impl EmotionTracker {
     /// Get sentiment trends over time
     pub fn get_sentiment_trends(&self) -> SentimentTrends {
         let window_start = Instant::now() - self.tracking_window;
-        
-        let recent_sentiments: Vec<_> = self.sentiment_history.iter()
+
+        let recent_sentiments: Vec<_> = self
+            .sentiment_history
+            .iter()
             .filter(|s| s.timestamp > window_start)
             .collect();
 
@@ -156,15 +162,20 @@ impl EmotionTracker {
         }
 
         // Calculate averages
-        let avg_valence = recent_sentiments.iter().map(|s| s.valence).sum::<f32>() / recent_sentiments.len() as f32;
-        let avg_arousal = recent_sentiments.iter().map(|s| s.arousal).sum::<f32>() / recent_sentiments.len() as f32;
-        let avg_dominance = recent_sentiments.iter().map(|s| s.dominance).sum::<f32>() / recent_sentiments.len() as f32;
+        let avg_valence = recent_sentiments.iter().map(|s| s.valence).sum::<f32>()
+            / recent_sentiments.len() as f32;
+        let avg_arousal = recent_sentiments.iter().map(|s| s.arousal).sum::<f32>()
+            / recent_sentiments.len() as f32;
+        let avg_dominance = recent_sentiments.iter().map(|s| s.dominance).sum::<f32>()
+            / recent_sentiments.len() as f32;
 
         // Calculate variance for stability
-        let valence_variance = recent_sentiments.iter()
+        let valence_variance = recent_sentiments
+            .iter()
             .map(|s| (s.valence - avg_valence).powi(2))
-            .sum::<f32>() / recent_sentiments.len() as f32;
-        
+            .sum::<f32>()
+            / recent_sentiments.len() as f32;
+
         let sentiment_stability = 1.0 - valence_variance.sqrt().min(1.0);
 
         // Determine dominant polarity
@@ -173,7 +184,8 @@ impl EmotionTracker {
             *polarity_counts.entry(sentiment.polarity).or_insert(0) += 1;
         }
 
-        let dominant_polarity = polarity_counts.iter()
+        let dominant_polarity = polarity_counts
+            .iter()
             .max_by_key(|(_, count)| *count)
             .map(|(polarity, _)| *polarity)
             .unwrap_or(SentimentPolarity::Neutral);
@@ -205,7 +217,7 @@ impl EmotionTracker {
         self.current_state.confidence = emotion.confidence;
         self.current_state.intensity = emotion.intensity;
         self.current_state.last_update = emotion.timestamp;
-        
+
         // Update duration in current state
         if let Some(state_start) = self.current_state.state_start {
             self.current_state.duration = emotion.timestamp.duration_since(state_start);
@@ -224,30 +236,37 @@ impl EmotionTracker {
     /// Analyze mood patterns in recent history
     async fn analyze_mood_patterns(&mut self) {
         let window_start = Instant::now() - self.tracking_window;
-        
-        let recent_emotions: Vec<_> = self.emotion_history.iter()
+
+        // Collect as owned clones to release the immutable borrow before calling
+        // &mut self methods below.
+        let recent_emotions: Vec<EmotionDetection> = self
+            .emotion_history
+            .iter()
             .filter(|e| e.timestamp > window_start)
+            .cloned()
             .collect();
 
         if recent_emotions.len() < 3 {
             return; // Need at least 3 samples for pattern analysis
         }
 
+        let refs: Vec<&EmotionDetection> = recent_emotions.iter().collect();
+
         // Look for cyclical patterns
-        self.detect_cyclical_patterns(&recent_emotions);
-        
+        self.detect_cyclical_patterns(&refs);
+
         // Look for escalation patterns
-        self.detect_escalation_patterns(&recent_emotions);
-        
+        self.detect_escalation_patterns(&refs);
+
         // Look for stability patterns
-        self.detect_stability_patterns(&recent_emotions);
+        self.detect_stability_patterns(&refs);
     }
 
     /// Detect cyclical emotion patterns
     fn detect_cyclical_patterns(&mut self, emotions: &[&EmotionDetection]) {
         // Simple pattern detection for demonstration
         // In practice, this would use more sophisticated algorithms
-        
+
         if emotions.len() < 6 {
             return;
         }
@@ -263,15 +282,16 @@ impl EmotionTracker {
                     pattern_type: MoodPatternType::Cyclical,
                     emotions: vec![emotion_a, emotion_b, emotion_c],
                     confidence: 0.7,
-                    duration: emotions[i + 2].timestamp.duration_since(emotions[i].timestamp),
+                    duration: emotions[i + 2]
+                        .timestamp
+                        .duration_since(emotions[i].timestamp),
                     frequency: 1, // Simplified
                 };
 
                 // Only add if not already detected recently
-                if !self.mood_patterns.iter().any(|p| 
-                    p.pattern_type == MoodPatternType::Cyclical && 
-                    p.emotions == pattern.emotions
-                ) {
+                if !self.mood_patterns.iter().any(|p| {
+                    p.pattern_type == MoodPatternType::Cyclical && p.emotions == pattern.emotions
+                }) {
                     self.mood_patterns.push(pattern);
                 }
             }
@@ -298,7 +318,11 @@ impl EmotionTracker {
                 pattern_type: MoodPatternType::Escalation,
                 emotions: emotions.iter().map(|e| e.emotion).collect(),
                 confidence: 0.8,
-                duration: emotions.last().expect("emotions is non-empty (checked above)").timestamp.duration_since(emotions[0].timestamp),
+                duration: emotions
+                    .last()
+                    .expect("emotions is non-empty (checked above)")
+                    .timestamp
+                    .duration_since(emotions[0].timestamp),
                 frequency: 1,
             };
 
@@ -317,14 +341,19 @@ impl EmotionTracker {
         let all_same = emotions.iter().all(|e| e.emotion == first_emotion);
 
         if all_same {
-            let avg_confidence = emotions.iter().map(|e| e.confidence).sum::<f32>() / emotions.len() as f32;
-            
+            let avg_confidence =
+                emotions.iter().map(|e| e.confidence).sum::<f32>() / emotions.len() as f32;
+
             if avg_confidence > 0.7 {
                 let pattern = MoodPattern {
                     pattern_type: MoodPatternType::Stable,
                     emotions: vec![first_emotion],
                     confidence: avg_confidence,
-                    duration: emotions.last().expect("emotions is non-empty (checked above)").timestamp.duration_since(emotions[0].timestamp),
+                    duration: emotions
+                        .last()
+                        .expect("emotions is non-empty (checked above)")
+                        .timestamp
+                        .duration_since(emotions[0].timestamp),
                     frequency: emotions.len(),
                 };
 
@@ -336,7 +365,7 @@ impl EmotionTracker {
     /// Clean up old history entries
     fn cleanup_history(&mut self) {
         let cutoff = Instant::now() - self.tracking_window;
-        
+
         // Remove old emotions
         while let Some(front) = self.emotion_history.front() {
             if front.timestamp < cutoff {
@@ -359,14 +388,15 @@ impl EmotionTracker {
         while self.emotion_history.len() > self.max_history_size {
             self.emotion_history.pop_front();
         }
-        
+
         while self.sentiment_history.len() > self.max_history_size {
             self.sentiment_history.pop_front();
         }
 
         // Clean up old mood patterns
         self.mood_patterns.retain(|pattern| {
-            Instant::now().duration_since(self.current_state.last_update) < Duration::from_secs(3600) // Keep for 1 hour
+            Instant::now().duration_since(self.current_state.last_update)
+                < Duration::from_secs(3600) // Keep for 1 hour
         });
     }
 }
@@ -511,14 +541,17 @@ mod tests {
     #[tokio::test]
     async fn test_emotion_tracker_creation() {
         let tracker = EmotionTracker::new();
-        assert_eq!(tracker.get_current_state().primary_emotion, EmotionType::Neutral);
+        assert_eq!(
+            tracker.get_current_state().primary_emotion,
+            EmotionType::Neutral
+        );
         assert_eq!(tracker.emotion_history.len(), 0);
     }
 
     #[tokio::test]
     async fn test_emotion_update() {
         let mut tracker = EmotionTracker::new();
-        
+
         let emotion = EmotionDetection {
             emotion: EmotionType::Happy,
             confidence: 0.8,
@@ -530,8 +563,11 @@ mod tests {
         };
 
         tracker.update(&emotion).await;
-        
-        assert_eq!(tracker.get_current_state().primary_emotion, EmotionType::Happy);
+
+        assert_eq!(
+            tracker.get_current_state().primary_emotion,
+            EmotionType::Happy
+        );
         assert_eq!(tracker.get_current_state().confidence, 0.8);
         assert_eq!(tracker.emotion_history.len(), 1);
     }
@@ -540,11 +576,15 @@ mod tests {
     async fn test_emotion_trends() {
         let mut tracker = EmotionTracker::new();
         let now = Instant::now();
-        
+
         // Add several emotions
         for i in 0..5 {
             let emotion = EmotionDetection {
-                emotion: if i % 2 == 0 { EmotionType::Happy } else { EmotionType::Sad },
+                emotion: if i % 2 == 0 {
+                    EmotionType::Happy
+                } else {
+                    EmotionType::Sad
+                },
                 confidence: 0.8,
                 intensity: 0.7,
                 timestamp: now + Duration::from_secs(i),
@@ -557,7 +597,9 @@ mod tests {
 
         let trends = tracker.get_emotion_trends();
         assert_eq!(trends.sample_count, 5);
-        assert!(trends.emotion_distribution.contains_key(&EmotionType::Happy));
+        assert!(trends
+            .emotion_distribution
+            .contains_key(&EmotionType::Happy));
         assert!(trends.emotion_distribution.contains_key(&EmotionType::Sad));
     }
 
@@ -565,7 +607,7 @@ mod tests {
     async fn test_transition_tracking() {
         let mut tracker = EmotionTracker::new();
         let now = Instant::now();
-        
+
         // Create emotion sequence: Happy -> Sad -> Happy
         let emotions = vec![
             (EmotionType::Happy, 0),
@@ -604,9 +646,12 @@ mod tests {
         let trends = EmotionTrends::default();
         assert_eq!(trends.dominant_emotion, EmotionType::Neutral);
         assert_eq!(trends.sample_count, 0);
-        
+
         let sentiment_trends = SentimentTrends::default();
-        assert_eq!(sentiment_trends.dominant_polarity, SentimentPolarity::Neutral);
+        assert_eq!(
+            sentiment_trends.dominant_polarity,
+            SentimentPolarity::Neutral
+        );
         assert_eq!(sentiment_trends.sample_count, 0);
     }
 }

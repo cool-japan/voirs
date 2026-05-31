@@ -15,6 +15,7 @@ use crate::RecognitionError;
 use std::sync::Arc;
 
 // Analysis implementations
+pub mod emotion;
 pub mod prosody;
 pub mod quality;
 pub mod speaker;

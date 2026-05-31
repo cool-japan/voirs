@@ -632,6 +632,34 @@ impl OnsetDetector {
     }
 }
 
+/// Module-level autocorrelation F0 detector shared by multiple scorers.
+fn detect_f0_autocorr_frame(frame: &[f32], sample_rate: f32) -> f32 {
+    if frame.len() < 64 {
+        return 0.0;
+    }
+    let min_p = (sample_rate / 800.0) as usize;
+    let max_p = (sample_rate / 80.0) as usize;
+    let (mut best_p, mut best_c) = (0, 0.0_f32);
+    for p in min_p..max_p.min(frame.len() / 2) {
+        let n = (frame.len() - p) as f32;
+        let c: f32 = frame[..frame.len() - p]
+            .iter()
+            .zip(&frame[p..])
+            .map(|(&a, &b)| a * b)
+            .sum::<f32>()
+            / n;
+        if c > best_c {
+            best_c = c;
+            best_p = p;
+        }
+    }
+    if best_c > 0.3 && best_p > 0 {
+        sample_rate / best_p as f32
+    } else {
+        0.0
+    }
+}
+
 /// Enhanced naturalness scoring
 pub struct NaturalnessScorer {
     quality_factors: HashMap<String, f32>,
@@ -849,33 +877,174 @@ impl NaturalnessScorer {
         self.quality_factors.clone()
     }
 
-    // Helper methods (simplified implementations)
-    fn calculate_energy_envelope(&self, _audio: &[f32], _sample_rate: f32) -> Result<Vec<f32>> {
-        Ok(vec![0.8; 100]) // Placeholder
+    // Helper methods
+    fn calculate_energy_envelope(&self, audio: &[f32], sample_rate: f32) -> Result<Vec<f32>> {
+        if audio.is_empty() {
+            return Ok(vec![]);
+        }
+        let frame_size = (sample_rate * 0.020) as usize; // 20ms frames
+        let frame_size = frame_size.max(1);
+        let mut envelope = Vec::new();
+        let mut i = 0;
+        while i + frame_size <= audio.len() {
+            let frame = &audio[i..i + frame_size];
+            let sum_sq: f32 = frame.iter().map(|&x| x * x).sum();
+            let rms = (sum_sq / frame_size as f32).sqrt();
+            envelope.push(rms);
+            i += frame_size;
+        }
+        // Handle any remaining samples as a partial frame
+        if i < audio.len() {
+            let frame = &audio[i..];
+            let sum_sq: f32 = frame.iter().map(|&x| x * x).sum();
+            let rms = (sum_sq / frame.len() as f32).sqrt();
+            envelope.push(rms);
+        }
+        Ok(envelope)
     }
 
-    fn detect_breath_locations(&self, _envelope: &[f32]) -> Result<Vec<usize>> {
-        Ok(vec![10, 30, 60, 90]) // Placeholder
+    fn detect_breath_locations(&self, envelope: &[f32]) -> Result<Vec<usize>> {
+        if envelope.is_empty() {
+            return Ok(vec![]);
+        }
+        let max_energy = envelope.iter().cloned().fold(0.0_f32, f32::max);
+        if max_energy <= 0.0 {
+            return Ok(vec![]);
+        }
+        let threshold = 0.1 * max_energy;
+        let mut locations = Vec::new();
+        for i in 1..envelope.len() {
+            if envelope[i] < threshold && envelope[i - 1] >= threshold {
+                locations.push(i);
+            }
+        }
+        Ok(locations)
     }
 
     fn evaluate_breath_naturalness(&self, _locations: &[usize], _envelope: &[f32]) -> f32 {
         0.85 // Good naturalness baseline
     }
 
-    fn extract_f0_for_vibrato(&self, _audio: &[f32], _sample_rate: f32) -> Result<Vec<f32>> {
-        Ok(vec![440.0; 100]) // Placeholder
+    fn extract_f0_for_vibrato(&self, audio: &[f32], sample_rate: f32) -> Result<Vec<f32>> {
+        if audio.is_empty() {
+            return Ok(vec![]);
+        }
+        let frame_size = ((sample_rate * 0.020) as usize).max(64);
+        let mut f0_contour = Vec::new();
+        let mut i = 0;
+        while i + frame_size <= audio.len() {
+            f0_contour.push(detect_f0_autocorr_frame(
+                &audio[i..i + frame_size],
+                sample_rate,
+            ));
+            i += frame_size;
+        }
+        Ok(f0_contour)
     }
 
-    fn calculate_vibrato_rate(&self, _f0_contour: &[f32], _sample_rate: f32) -> Result<f32> {
-        Ok(5.5) // Natural vibrato rate
+    /// Detrend a voiced F0 slice and return (FFT magnitude spectrum, bin_resolution_hz).
+    /// Returns None if fewer than 8 voiced frames or FFT fails.
+    fn vibrato_spectrum(&self, voiced: &[f32]) -> Result<Option<(Vec<f64>, f64)>> {
+        let n = voiced.len();
+        if n < 8 {
+            return Ok(None);
+        }
+        let n_f64 = n as f64;
+        let sum_x: f64 = (0..n).map(|i| i as f64).sum();
+        let sum_y: f64 = voiced.iter().map(|&v| v as f64).sum();
+        let sum_xx: f64 = (0..n).map(|i| (i as f64).powi(2)).sum();
+        let sum_xy: f64 = voiced
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| i as f64 * v as f64)
+            .sum();
+        let denom = n_f64 * sum_xx - sum_x * sum_x;
+        let (slope, intercept) = if denom.abs() > 1e-12 {
+            let s = (n_f64 * sum_xy - sum_x * sum_y) / denom;
+            (s, (sum_y - s * sum_x) / n_f64)
+        } else {
+            (0.0, sum_y / n_f64)
+        };
+        let detrended: Vec<scirs2_core::Complex<f64>> = voiced
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| {
+                scirs2_core::Complex::new(v as f64 - (slope * i as f64 + intercept), 0.0)
+            })
+            .collect();
+        // Pass Some(n) to avoid zero-padding to next power-of-two, which would
+        // shift bin frequencies and invalidate the bin_resolution calculation.
+        let spectrum = scirs2_fft::fft(&detrended, Some(n))
+            .map_err(|e| Error::Processing(format!("FFT error in vibrato: {e}")))?;
+        let magnitudes: Vec<f64> = spectrum.iter().take(n / 2 + 1).map(|c| c.norm()).collect();
+        // Frame rate: 1 frame per 20ms = 50 Hz; bin k → k * 50 / n Hz
+        let bin_resolution = 50.0_f64 / n as f64;
+        Ok(Some((magnitudes, bin_resolution)))
     }
 
-    fn calculate_vibrato_depth(&self, _f0_contour: &[f32]) -> Result<f32> {
-        Ok(0.05) // Natural vibrato depth (5%)
+    fn calculate_vibrato_rate(&self, f0_contour: &[f32], _sample_rate: f32) -> Result<f32> {
+        let voiced: Vec<f32> = f0_contour.iter().cloned().filter(|&f| f > 50.0).collect();
+        let Some((magnitudes, bin_res)) = self.vibrato_spectrum(&voiced)? else {
+            return Ok(0.0);
+        };
+        let bin_low = (4.0 / bin_res).floor() as usize;
+        let bin_high = ((8.0 / bin_res).ceil() as usize).min(magnitudes.len().saturating_sub(1));
+        if bin_low >= magnitudes.len() || bin_low > bin_high {
+            return Ok(0.0);
+        }
+        let (peak_bin, _) = magnitudes[bin_low..=bin_high]
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(i, v)| (i + bin_low, *v))
+            .unwrap_or((bin_low, 0.0));
+        Ok((peak_bin as f64 * bin_res) as f32)
     }
 
-    fn calculate_vibrato_regularity(&self, _f0_contour: &[f32]) -> Result<f32> {
-        Ok(0.9) // Good regularity
+    fn calculate_vibrato_depth(&self, f0_contour: &[f32]) -> Result<f32> {
+        let voiced: Vec<f32> = f0_contour.iter().cloned().filter(|&f| f > 50.0).collect();
+        if voiced.is_empty() {
+            return Ok(0.0);
+        }
+        let max_f0 = voiced.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let min_f0 = voiced.iter().cloned().fold(f32::INFINITY, f32::min);
+        let mean_f0 = voiced.iter().sum::<f32>() / voiced.len() as f32;
+        if mean_f0 <= 0.0 {
+            return Ok(0.0);
+        }
+        Ok(((max_f0 - min_f0) / mean_f0).clamp(0.0, 0.5))
+    }
+
+    fn calculate_vibrato_regularity(&self, f0_contour: &[f32]) -> Result<f32> {
+        let voiced: Vec<f32> = f0_contour.iter().cloned().filter(|&f| f > 50.0).collect();
+        let Some((magnitudes, bin_res)) = self.vibrato_spectrum(&voiced)? else {
+            return Ok(0.0);
+        };
+        let bin_low = (4.0 / bin_res).floor() as usize;
+        let bin_high = ((8.0 / bin_res).ceil() as usize).min(magnitudes.len().saturating_sub(1));
+        if bin_low >= magnitudes.len() || bin_low > bin_high {
+            return Ok(0.0);
+        }
+        let (peak_bin, peak_mag) = magnitudes[bin_low..=bin_high]
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(i, v)| (i + bin_low, *v))
+            .unwrap_or((bin_low, 0.0));
+        let nb_start = peak_bin.saturating_sub(2);
+        let nb_end = (peak_bin + 2).min(magnitudes.len() - 1);
+        let nb_vals: Vec<f64> = magnitudes[nb_start..=nb_end]
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| i + nb_start != peak_bin)
+            .map(|(_, &v)| v)
+            .collect();
+        let nb_avg = if nb_vals.is_empty() {
+            0.0
+        } else {
+            nb_vals.iter().sum::<f64>() / nb_vals.len() as f64
+        };
+        Ok(((peak_mag / (nb_avg + peak_mag + 1e-10)) as f32).clamp(0.0, 1.0))
     }
 
     fn evaluate_vibrato_rate_naturalness(&self, rate: f32) -> f32 {
@@ -897,12 +1066,83 @@ impl NaturalnessScorer {
         }
     }
 
-    fn extract_formant_frequencies(&self, _audio: &[f32], _sample_rate: f32) -> Result<Vec<f32>> {
-        Ok(vec![800.0, 1200.0, 2800.0]) // Typical formants
+    fn extract_formant_frequencies(&self, audio: &[f32], sample_rate: f32) -> Result<Vec<f32>> {
+        if audio.is_empty() {
+            return Ok(vec![800.0, 1200.0, 2800.0]);
+        }
+        let order = 50_usize.min(2 + (sample_rate as usize / 1000));
+        let n = audio.len();
+        // Autocorrelation r[0..=order]
+        let mut r = vec![0.0_f64; order + 1];
+        for k in 0..=order {
+            r[k] = (0..(n - k))
+                .map(|i| audio[i] as f64 * audio[i + k] as f64)
+                .sum();
+        }
+        if r[0].abs() < 1e-12 {
+            return Ok(vec![800.0, 1200.0, 2800.0]);
+        }
+        // Levinson-Durbin
+        let mut a = vec![0.0_f64; order + 1];
+        let mut a_tmp = vec![0.0_f64; order + 1];
+        let mut err = r[0];
+        for i in 1..=order {
+            let mut lambda: f64 = (1..i).map(|j| a[j] * r[i - j]).sum();
+            lambda = (r[i] - lambda) / err;
+            a_tmp[..=order].clone_from_slice(&a[..=order]);
+            for j in 1..i {
+                a[j] = a_tmp[j] - lambda * a_tmp[i - j];
+            }
+            a[i] = lambda;
+            err *= 1.0 - lambda * lambda;
+            if err <= 0.0 {
+                break;
+            }
+        }
+        // LPC spectral envelope via FFT
+        const FFT_SIZE: usize = 512;
+        let mut lpc_in: Vec<scirs2_core::Complex<f64>> =
+            vec![scirs2_core::Complex::new(0.0, 0.0); FFT_SIZE];
+        lpc_in[0] = scirs2_core::Complex::new(1.0, 0.0);
+        for k in 1..=order.min(FFT_SIZE - 1) {
+            lpc_in[k] = scirs2_core::Complex::new(-a[k], 0.0);
+        }
+        let sp = scirs2_fft::fft(&lpc_in, None)
+            .map_err(|e| Error::Processing(format!("FFT error in LPC: {e}")))?;
+        let env: Vec<f32> = sp
+            .iter()
+            .take(FFT_SIZE / 2)
+            .map(|c| {
+                let m = c.norm() as f32;
+                if m > 1e-10 {
+                    1.0 / m
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+        let bin_hz = sample_rate / FFT_SIZE as f32;
+        let peak_in_band = |lo: f32, hi: f32| -> f32 {
+            let bl = (lo / bin_hz).floor() as usize;
+            let bh = ((hi / bin_hz).ceil() as usize).min(env.len().saturating_sub(1));
+            if bl >= env.len() || bl > bh {
+                return (lo + hi) / 2.0;
+            }
+            env[bl..=bh]
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|(i, _)| (i + bl) as f32 * bin_hz)
+                .unwrap_or((lo + hi) / 2.0)
+        };
+        Ok(vec![
+            peak_in_band(200.0, 1000.0),
+            peak_in_band(800.0, 2500.0),
+            peak_in_band(2000.0, 4000.0),
+        ])
     }
 
     fn get_expected_formants(&self, voice_characteristics: &VoiceCharacteristics) -> Vec<f32> {
-        // Return expected formants based on voice type
         match voice_characteristics.voice_type {
             crate::types::VoiceType::Soprano => vec![900.0, 1400.0, 3200.0],
             crate::types::VoiceType::Alto => vec![800.0, 1200.0, 2800.0],
@@ -914,23 +1154,49 @@ impl NaturalnessScorer {
     }
 
     fn compare_formant_structures(&self, detected: &[f32], expected: &[f32]) -> f32 {
-        let mut accuracy = 0.0;
         let min_len = detected.len().min(expected.len());
-
-        for i in 0..min_len {
-            let deviation = (detected[i] / expected[i] - 1.0).abs();
-            accuracy += 1.0 - deviation.min(1.0);
+        if min_len == 0 {
+            return 0.0;
         }
-
-        if min_len > 0 {
-            accuracy / min_len as f32
-        } else {
-            0.0
-        }
+        let acc: f32 = (0..min_len)
+            .map(|i| 1.0 - (detected[i] / expected[i] - 1.0).abs().min(1.0))
+            .sum();
+        acc / min_len as f32
     }
 
-    fn calculate_average_spectrum(&self, _audio: &[f32], _sample_rate: f32) -> Result<Vec<f32>> {
-        Ok((0..512).map(|_| 0.5).collect()) // Placeholder spectrum
+    fn calculate_average_spectrum(&self, audio: &[f32], _sample_rate: f32) -> Result<Vec<f32>> {
+        const FRAME: usize = 1024;
+        const HOP: usize = 512;
+        const OUT_BINS: usize = 512;
+        if audio.is_empty() {
+            return Ok(vec![0.0; OUT_BINS]);
+        }
+        let hann: Vec<f64> = (0..FRAME)
+            .map(|i| {
+                0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / (FRAME - 1) as f64).cos())
+            })
+            .collect();
+        let mut acc = vec![0.0_f64; OUT_BINS];
+        let mut fc = 0_usize;
+        let mut s = 0;
+        while s + FRAME <= audio.len() {
+            let fw: Vec<f64> = audio[s..s + FRAME]
+                .iter()
+                .enumerate()
+                .map(|(i, &x)| x as f64 * hann[i])
+                .collect();
+            let out = scirs2_fft::rfft(&fw, Some(FRAME))
+                .map_err(|e| Error::Processing(format!("rfft error: {e}")))?;
+            for k in 0..out.len().min(OUT_BINS) {
+                acc[k] += out[k].norm();
+            }
+            fc += 1;
+            s += HOP;
+        }
+        if fc == 0 {
+            return Ok(vec![0.0; OUT_BINS]);
+        }
+        Ok(acc.iter().map(|&v| (v / fc as f64) as f32).collect())
     }
 
     fn evaluate_spectral_balance(&self, _spectrum: &[f32]) -> f32 {
@@ -945,8 +1211,9 @@ impl NaturalnessScorer {
         0.8 // Low noise
     }
 
-    fn calculate_dynamics_envelope(&self, _audio: &[f32], _sample_rate: f32) -> Result<Vec<f32>> {
-        Ok(vec![0.7; 100]) // Placeholder dynamics
+    fn calculate_dynamics_envelope(&self, audio: &[f32], sample_rate: f32) -> Result<Vec<f32>> {
+        // Reuse energy envelope: same RMS framing
+        self.calculate_energy_envelope(audio, sample_rate)
     }
 
     fn evaluate_transition_smoothness(&self, _envelope: &[f32]) -> f32 {
@@ -1728,5 +1995,76 @@ mod tests {
         let result = analyzer.align_onsets(&detected, &target);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_energy_envelope_tracks_amplitude() {
+        let scorer = NaturalnessScorer::new();
+        let sr = 44100.0_f32;
+        let n = 44100_usize;
+        let mut audio = vec![0.0_f32; n];
+        for i in (n / 2)..n {
+            let t = i as f32 / sr;
+            audio[i] = 0.8 * (2.0 * std::f32::consts::PI * 440.0 * t).sin();
+        }
+        let env = scorer.calculate_energy_envelope(&audio, sr).unwrap();
+        assert!(!env.is_empty(), "envelope must be non-empty");
+        let mid = env.len() / 2;
+        let avg_lo: f32 = env[..mid].iter().sum::<f32>() / mid as f32;
+        let avg_hi: f32 = env[mid..].iter().sum::<f32>() / (env.len() - mid) as f32;
+        assert!(avg_hi > avg_lo * 5.0, "avg_hi={avg_hi} avg_lo={avg_lo}");
+    }
+
+    #[test]
+    fn test_vibrato_rate_synthetic() {
+        let scorer = NaturalnessScorer::new();
+        // 100 voiced frames at 50 Hz frame rate with 5.5 Hz vibrato
+        let f0: Vec<f32> = (0..100_usize)
+            .map(|i| 440.0 + 20.0 * (2.0 * std::f32::consts::PI * 5.5 * i as f32 / 50.0).sin())
+            .collect();
+        let rate = scorer.calculate_vibrato_rate(&f0, 44100.0).unwrap();
+        assert!(
+            (rate - 5.5).abs() < 1.5,
+            "vibrato rate {rate} not close to 5.5 Hz"
+        );
+    }
+
+    #[test]
+    fn test_vibrato_depth_flat_tone_near_zero() {
+        let scorer = NaturalnessScorer::new();
+        let depth = scorer.calculate_vibrato_depth(&vec![440.0; 50]).unwrap();
+        assert!(
+            depth < 0.01,
+            "flat tone vibrato depth should be near zero, got {depth}"
+        );
+    }
+
+    #[test]
+    fn test_formants_non_constant() {
+        let scorer = NaturalnessScorer::new();
+        let sr = 16000.0_f32;
+        let n = 4096_usize;
+        let make_tone = |f1: f32, f2: f32| -> Vec<f32> {
+            (0..n)
+                .map(|i| {
+                    let t = i as f32 / sr;
+                    0.6 * (2.0 * std::f32::consts::PI * f1 * t).sin()
+                        + 0.2 * (2.0 * std::f32::consts::PI * f2 * t).sin()
+                })
+                .collect()
+        };
+        let fa = scorer
+            .extract_formant_frequencies(&make_tone(800.0, 2400.0), sr)
+            .unwrap();
+        let fb = scorer
+            .extract_formant_frequencies(&make_tone(300.0, 1800.0), sr)
+            .unwrap();
+        assert_eq!(fa.len(), 3);
+        assert_eq!(fb.len(), 3);
+        let differs = fa.iter().zip(fb.iter()).any(|(a, b)| (a - b).abs() > 50.0);
+        assert!(
+            differs,
+            "different signals should produce different formants; a={fa:?} b={fb:?}"
+        );
     }
 }

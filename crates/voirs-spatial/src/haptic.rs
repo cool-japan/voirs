@@ -7,6 +7,7 @@
 use crate::{types::AudioChannel, Position3D, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::f32::consts::PI;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -1010,14 +1011,16 @@ impl AudioAnalyzer {
     }
 
     fn perform_fft_analysis(&mut self, samples: &[f32]) -> Result<()> {
-        // Copy samples to FFT window (simplified implementation)
+        // Copy samples into the FFT window buffer (zero-pad if shorter)
         let copy_len = samples.len().min(self.fft_window.len());
         self.fft_window[..copy_len].copy_from_slice(&samples[..copy_len]);
-
-        // Perform FFT (simplified - would use proper FFT library)
-        for (i, bin) in self.frequency_bins.iter_mut().enumerate() {
-            *bin = self.fft_window[i * 2].abs(); // Simplified magnitude calculation
+        for s in self.fft_window[copy_len..].iter_mut() {
+            *s = 0.0;
         }
+
+        // Compute real rfft magnitudes and store them in frequency_bins
+        let magnitudes = compute_rfft_bins(&self.fft_window);
+        self.frequency_bins.copy_from_slice(&magnitudes);
 
         Ok(())
     }
@@ -1065,6 +1068,43 @@ impl AudioAnalyzer {
             .sum::<f32>()
             / (end_bin - start_bin) as f32
     }
+}
+
+/// Apply a Hann window to `fft_window`, run a real-valued FFT, and return the
+/// magnitude spectrum as 512 bins covering 0 Hz … Nyquist.
+///
+/// Input MUST be exactly 1024 samples; output is exactly 512 values.
+/// `bins[i]` is the magnitude of the frequency component at index `i` in the
+/// rfft output, which corresponds to `i / 512 * nyquist_hz` Hz.
+pub(crate) fn compute_rfft_bins(fft_window: &[f32]) -> Vec<f32> {
+    const N: usize = 1024;
+    const N_BINS: usize = 512;
+
+    // Apply Hann window in-place on a f64 copy
+    // w[i] = sample * 0.5 * (1 − cos(2π i / (N − 1)))
+    let windowed: Vec<f64> = fft_window
+        .iter()
+        .enumerate()
+        .map(|(i, &s)| {
+            let w = 0.5 * (1.0 - (2.0 * PI as f64 * i as f64 / (N - 1) as f64).cos());
+            s as f64 * w
+        })
+        .collect();
+
+    // rfft of N real samples → N/2 + 1 complex values (bins 0 … 512 inclusive)
+    let spectrum = match scirs2_fft::rfft(&windowed, Some(N)) {
+        Ok(s) => s,
+        // On an unexpected error return zeros rather than propagating through
+        // the DSP hot-path; the caller can inspect frequency_bins being flat.
+        Err(_) => return vec![0.0_f32; N_BINS],
+    };
+
+    // Collect magnitudes for bins 0..N_BINS (drop the Nyquist bin at index 512)
+    spectrum
+        .iter()
+        .take(N_BINS)
+        .map(|c| c.norm() as f32)
+        .collect()
 }
 
 impl BeatDetector {
@@ -1404,5 +1444,103 @@ mod tests {
         assert_eq!(capabilities.max_concurrent_effects, 4);
         assert!(capabilities.spatial_support);
         assert_eq!(capabilities.supported_effects.len(), 2);
+    }
+
+    /// Verify that `compute_rfft_bins` produces exactly 512 magnitude bins.
+    #[test]
+    fn test_compute_rfft_bins_output_length() {
+        let window = vec![0.0_f32; 1024];
+        let bins = compute_rfft_bins(&window);
+        assert_eq!(bins.len(), 512, "rfft should produce exactly 512 bins");
+    }
+
+    /// Silence input → all bins should be (near) zero.
+    #[test]
+    fn test_compute_rfft_bins_silence_is_zero() {
+        let window = vec![0.0_f32; 1024];
+        let bins = compute_rfft_bins(&window);
+        for (i, &b) in bins.iter().enumerate() {
+            assert!(
+                b.abs() < 1e-6,
+                "bin {i} should be zero for silent input, got {b}"
+            );
+        }
+    }
+
+    /// A pure 1 kHz sine wave at a 40 kHz sample rate should concentrate energy
+    /// near bin 512 * 1000 / 20000 = 25.6 ≈ 25 or 26.
+    ///
+    /// The Hann window spreads a single tone over a few adjacent bins (main lobe),
+    /// so we verify the *peak* bin is within [23, 28] and that the total energy
+    /// in that neighbourhood dominates the rest of the spectrum.
+    #[test]
+    fn test_fft_analysis_tone_concentrates_in_band() {
+        // 40 kHz sample rate → Nyquist 20 kHz → bin 25 ≈ 976.5 Hz ≈ 1 kHz
+        // Use 1024 samples (one full FFT window).
+        const SAMPLE_RATE: f32 = 40_000.0;
+        const FREQ_HZ: f32 = 1_000.0;
+        const N: usize = 1024;
+
+        let window: Vec<f32> = (0..N)
+            .map(|i| (2.0 * std::f32::consts::PI * FREQ_HZ * i as f32 / SAMPLE_RATE).sin())
+            .collect();
+
+        let bins = compute_rfft_bins(&window);
+        assert_eq!(bins.len(), 512);
+
+        // Find the peak bin
+        let (peak_bin, &peak_val) = bins
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .expect("bins must be non-empty");
+
+        // Expected peak bin: 512 * 1000 / 20000 = 25.6 → bin 25 or 26
+        assert!(
+            (23..=28).contains(&peak_bin),
+            "peak bin {peak_bin} should be near 25 for a 1 kHz tone at 40 kHz sample rate"
+        );
+
+        // Energy in the main lobe (±3 bins around peak) vs. total energy
+        let lobe_energy: f32 = bins[peak_bin.saturating_sub(3)..=(peak_bin + 3).min(511)]
+            .iter()
+            .map(|v| v * v)
+            .sum();
+        let total_energy: f32 = bins.iter().map(|v| v * v).sum();
+
+        assert!(
+            total_energy > 0.0,
+            "total energy must be positive for a tone signal"
+        );
+        let lobe_fraction = lobe_energy / total_energy;
+        assert!(
+            lobe_fraction > 0.85,
+            "main lobe should hold >85% of total energy, got {:.1}% (peak val = {peak_val:.4})",
+            lobe_fraction * 100.0
+        );
+    }
+
+    /// Verify that `perform_fft_analysis` writes correct magnitudes into
+    /// `AudioAnalyzer::frequency_bins` using the real FFT path.
+    #[test]
+    fn test_perform_fft_analysis_updates_bins() {
+        let mut analyzer = AudioAnalyzer::new();
+
+        // Use a DC offset signal — all energy in bin 0
+        let samples = vec![1.0_f32; 1024];
+        analyzer
+            .perform_fft_analysis(&samples)
+            .expect("perform_fft_analysis should not error");
+
+        // DC bin (index 0) must be non-zero
+        assert!(
+            analyzer.frequency_bins[0] > 0.0,
+            "DC bin should be non-zero for constant signal"
+        );
+        assert_eq!(
+            analyzer.frequency_bins.len(),
+            512,
+            "frequency_bins must have 512 entries"
+        );
     }
 }
