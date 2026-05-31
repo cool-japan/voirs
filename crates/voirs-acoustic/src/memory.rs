@@ -386,11 +386,22 @@ impl MemoryOptimizer {
         Self
     }
 
-    /// Get current memory usage (placeholder implementation for benchmarks)
     pub fn get_current_usage(&self) -> usize {
-        // Placeholder implementation for benchmarking
-        // In a real implementation, this would query system memory usage
-        1024 * 1024 // 1MB as placeholder
+        #[cfg(target_os = "linux")]
+        {
+            if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+                for line in status.lines() {
+                    if line.starts_with("VmRSS:") {
+                        if let Some(kb_str) = line.split_whitespace().nth(1) {
+                            if let Ok(kb) = kb_str.parse::<usize>() {
+                                return kb * 1024;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        64 * 1024 * 1024
     }
 
     /// Calculate optimal chunk size based on available memory
@@ -983,6 +994,26 @@ mod tests {
         assert!(monitor.average_timing("test_operation").is_some());
         assert_eq!(monitor.counter_values().get("test_counter"), Some(&2));
         assert_eq!(monitor.memory_summary().get("test_component"), Some(&1024));
+    }
+
+    #[test]
+    fn test_memory_usage_returns_nonzero() {
+        let optimizer = MemoryOptimizer::new();
+        assert!(optimizer.get_current_usage() > 0);
+    }
+
+    #[test]
+    fn test_memory_usage_reasonable() {
+        let optimizer = MemoryOptimizer::new();
+        let usage = optimizer.get_current_usage();
+        assert!(
+            usage >= (1 << 20),
+            "usage should be at least 1MB, got {usage}"
+        );
+        assert!(
+            usage <= (32usize << 30),
+            "usage should be at most 32GB, got {usage}"
+        );
     }
 
     #[test]

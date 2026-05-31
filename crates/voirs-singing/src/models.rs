@@ -364,9 +364,269 @@ impl TransformerSynthesisModel {
         Ok(improvised_notes)
     }
 
-    fn features_to_notes(&self, _features: &Tensor) -> crate::Result<Vec<NoteEvent>> {
-        // For now, return a placeholder tensor
-        Ok(vec![])
+    fn features_to_notes(&self, features: &Tensor) -> crate::Result<Vec<NoteEvent>> {
+        use crate::types::core_types::{Articulation, Expression};
+
+        let shape = features.shape().dims();
+        if shape.is_empty() || shape[0] == 0 {
+            return Ok(vec![]);
+        }
+
+        let seq_len = shape[0];
+        let feat_dim = if shape.len() > 1 { shape[1] } else { 1 };
+
+        // Flatten all dimensions into a single Vec<f32>
+        let flat: Vec<f32> = features.to_dtype(DType::F32)?.flatten_all()?.to_vec1()?;
+
+        // Note name lookup table (chromatic scale starting at C)
+        let note_names = [
+            "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+        ];
+
+        // Helper closure: safe column access with wraparound when feat_dim < needed columns
+        let get = |base: usize, col: usize| -> f32 {
+            if feat_dim == 0 {
+                0.0_f32
+            } else {
+                flat[base + col % feat_dim]
+            }
+        };
+
+        let mut notes = Vec::with_capacity(seq_len);
+
+        for i in 0..seq_len {
+            let base = i * feat_dim;
+
+            // Column 0: pitch feature → MIDI note in singing range C3(48)–C6(84)
+            // tanh squashes to [-1,1]; scale to 18 semitones each side of A4(69)
+            let pitch_feat = get(base, 0);
+            let midi_note =
+                (pitch_feat.tanh() * 18.0_f32 + 66.0_f32).clamp(48.0_f32, 84.0_f32) as u8;
+
+            // MIDI → frequency (A4 = 440 Hz, MIDI 69)
+            let frequency = 440.0_f32 * 2.0_f32.powf((midi_note as f32 - 69.0_f32) / 12.0_f32);
+
+            // MIDI → note name and octave (MIDI 60 = C4, so octave = midi/12 - 1)
+            let note_idx = (midi_note % 12) as usize;
+            let octave = (midi_note / 12).saturating_sub(1);
+            let note = note_names[note_idx].to_string();
+
+            // Column 1: velocity ∈ [0, 1]
+            let velocity = (get(base, 1).tanh() * 0.5_f32 + 0.5_f32).clamp(0.0_f32, 1.0_f32);
+
+            // Column 2: duration in beats, clamped to [0.1, 2.0]
+            let duration = (get(base, 2).abs() * 0.5_f32 + 0.25_f32).clamp(0.1_f32, 2.0_f32);
+
+            // Column 3: vibrato intensity ∈ [0, 1]
+            let vibrato = (get(base, 3).tanh() * 0.25_f32 + 0.25_f32).clamp(0.0_f32, 1.0_f32);
+
+            // Column 4: breath_before ∈ [0, 1] — louder breath at phrase starts
+            let breath_before = (get(base, 4).tanh() * 0.5_f32 + 0.5_f32).clamp(0.0_f32, 1.0_f32);
+
+            // Articulation: derive from a combination of velocity and duration signals
+            // Higher velocity + shorter duration → Accent; smooth transitions → Legato
+            let art_signal = get(base, 5);
+            let articulation = if art_signal > 0.5_f32 {
+                Articulation::Accent
+            } else if art_signal < -0.5_f32 {
+                Articulation::Staccato
+            } else if i > 0 {
+                Articulation::Legato
+            } else {
+                Articulation::Normal
+            };
+
+            // First note of each improvised phrase is not legato-connected to previous
+            let legato = i > 0 && art_signal >= -0.5_f32;
+
+            notes.push(NoteEvent {
+                note,
+                octave,
+                frequency,
+                duration,
+                velocity,
+                vibrato,
+                lyric: None,
+                phonemes: vec![],
+                expression: Expression::Neutral,
+                timing_offset: 0.0_f32,
+                breath_before,
+                legato,
+                articulation,
+            });
+        }
+
+        Ok(notes)
+    }
+}
+
+#[cfg(test)]
+mod features_to_notes_tests {
+    use super::*;
+    use crate::types::core_types::{Articulation, Expression};
+
+    /// Decode a raw feature tensor into NoteEvents using the same logic as
+    /// `TransformerSynthesisModel::features_to_notes` without requiring a full model
+    /// construction.
+    fn decode_features(features: &Tensor) -> crate::Result<Vec<NoteEvent>> {
+        let note_names = [
+            "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+        ];
+
+        let shape = features.shape().dims();
+        if shape.is_empty() || shape[0] == 0 {
+            return Ok(vec![]);
+        }
+
+        let seq_len = shape[0];
+        let feat_dim = if shape.len() > 1 { shape[1] } else { 1 };
+
+        let flat: Vec<f32> = features.to_dtype(DType::F32)?.flatten_all()?.to_vec1()?;
+
+        let get = |base: usize, col: usize| -> f32 {
+            if feat_dim == 0 {
+                0.0_f32
+            } else {
+                flat[base + col % feat_dim]
+            }
+        };
+
+        let mut notes = Vec::with_capacity(seq_len);
+
+        for i in 0..seq_len {
+            let base = i * feat_dim;
+
+            let pitch_feat = get(base, 0);
+            let midi_note =
+                (pitch_feat.tanh() * 18.0_f32 + 66.0_f32).clamp(48.0_f32, 84.0_f32) as u8;
+            let frequency = 440.0_f32 * 2.0_f32.powf((midi_note as f32 - 69.0_f32) / 12.0_f32);
+            let note_idx = (midi_note % 12) as usize;
+            let octave = (midi_note / 12).saturating_sub(1);
+            let note = note_names[note_idx].to_string();
+
+            let velocity = (get(base, 1).tanh() * 0.5_f32 + 0.5_f32).clamp(0.0_f32, 1.0_f32);
+            let duration = (get(base, 2).abs() * 0.5_f32 + 0.25_f32).clamp(0.1_f32, 2.0_f32);
+            let vibrato = (get(base, 3).tanh() * 0.25_f32 + 0.25_f32).clamp(0.0_f32, 1.0_f32);
+            let breath_before = (get(base, 4).tanh() * 0.5_f32 + 0.5_f32).clamp(0.0_f32, 1.0_f32);
+
+            let art_signal = get(base, 5);
+            let articulation = if art_signal > 0.5_f32 {
+                Articulation::Accent
+            } else if art_signal < -0.5_f32 {
+                Articulation::Staccato
+            } else if i > 0 {
+                Articulation::Legato
+            } else {
+                Articulation::Normal
+            };
+
+            let legato = i > 0 && art_signal >= -0.5_f32;
+
+            notes.push(NoteEvent {
+                note,
+                octave,
+                frequency,
+                duration,
+                velocity,
+                vibrato,
+                lyric: None,
+                phonemes: vec![],
+                expression: Expression::Neutral,
+                timing_offset: 0.0_f32,
+                breath_before,
+                legato,
+                articulation,
+            });
+        }
+
+        Ok(notes)
+    }
+
+    #[test]
+    fn test_features_to_notes_nonempty() {
+        let device = Device::Cpu;
+        // 2 notes × 6 feature columns (pitch, velocity, duration, vibrato, breath, articulation)
+        let features = Tensor::from_vec(
+            vec![
+                0.5_f32, 0.3, 0.4, 0.2, -0.1, 0.6, 0.2, 0.7, -0.3, 0.1, 0.5, -0.8,
+            ],
+            (2, 6),
+            &device,
+        )
+        .unwrap();
+
+        let notes = decode_features(&features).unwrap();
+        assert_eq!(
+            notes.len(),
+            2,
+            "expected 2 note events from 2-row feature tensor"
+        );
+    }
+
+    #[test]
+    fn test_features_to_notes_empty_tensor() {
+        let device = Device::Cpu;
+        let features = Tensor::zeros((0, 6), DType::F32, &device).unwrap();
+        let notes = decode_features(&features).unwrap();
+        assert!(notes.is_empty(), "empty tensor must produce no note events");
+    }
+
+    #[test]
+    fn test_features_to_notes_frequency_range() {
+        let device = Device::Cpu;
+        // pitch feature = 0.0 → tanh(0)=0 → midi = 66.0 → clamp(48,84)=66 → F#4 ≈ 369 Hz
+        let features =
+            Tensor::from_vec(vec![0.0_f32, 0.5, 0.5, 0.0, 0.0, 0.0], (1, 6), &device).unwrap();
+        let notes = decode_features(&features).unwrap();
+        assert_eq!(notes.len(), 1);
+        // Frequency must lie in the MIDI 48-84 range: C3 ≈ 130 Hz, C6 ≈ 1047 Hz
+        let f = notes[0].frequency;
+        assert!(
+            f >= 130.0 && f <= 1050.0,
+            "frequency {f} out of expected singing range"
+        );
+    }
+
+    #[test]
+    fn test_features_to_notes_velocity_clamped() {
+        let device = Device::Cpu;
+        // Extreme pitch feature; velocity column = very large positive → tanh → near 1.0
+        let features =
+            Tensor::from_vec(vec![5.0_f32, 100.0, 0.5, 0.0, 0.0, 0.0], (1, 6), &device).unwrap();
+        let notes = decode_features(&features).unwrap();
+        assert_eq!(notes.len(), 1);
+        let v = notes[0].velocity;
+        assert!((0.0..=1.0).contains(&v), "velocity {v} must be in [0, 1]");
+    }
+
+    #[test]
+    fn test_features_to_notes_first_note_not_legato() {
+        let device = Device::Cpu;
+        // art_signal = 0.0 → neutral; i==0 → legato must be false
+        let features =
+            Tensor::from_vec(vec![0.0_f32, 0.5, 0.5, 0.0, 0.0, 0.0], (1, 6), &device).unwrap();
+        let notes = decode_features(&features).unwrap();
+        assert!(!notes[0].legato, "first note must not be legato");
+    }
+
+    #[test]
+    fn test_features_to_notes_second_note_legato() {
+        let device = Device::Cpu;
+        // Two rows; art_signal = 0.0 for both; second note (i=1, art>=−0.5) → legato = true
+        let features = Tensor::from_vec(
+            vec![
+                0.0_f32, 0.5, 0.5, 0.0, 0.0, 0.0, 0.1, 0.4, 0.6, 0.1, 0.0, 0.0,
+            ],
+            (2, 6),
+            &device,
+        )
+        .unwrap();
+        let notes = decode_features(&features).unwrap();
+        assert_eq!(notes.len(), 2);
+        assert!(
+            notes[1].legato,
+            "second note must be legato when art_signal ≥ -0.5"
+        );
     }
 }
 

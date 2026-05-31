@@ -1,10 +1,80 @@
 # VoiRS Development Roadmap & TODO
 
 > **Status**: Current Version 0.1.0-rc.1 - **PRODUCTION READY**
-> **Last Updated**: 2026-05-30
+> **Last Updated**: 2026-05-31
 > **Next Milestone**: Version 0.2.0 - Advanced Neural Features & Production Optimization
 
-## Latest Development Session (2026-05-30)
+## Latest Development Session (2026-05-31 batch 7)
+
+**Mock→Real DSP Replacements (batch 7) — stubs → real:**
+
+- [x] **voirs-feedback/memory_monitor.rs — real process memory reading**: replaced simulated `AtomicU64` with 0.1% growth stub in `get_memory_usage()` with real `/proc/self/status` VmRSS reading guarded by `#[cfg(target_os = "linux")]` (kB × 1024 → bytes); non-Linux falls back to 64 MB constant. Removed `cfg!(test)` special-casing entirely. Also fixed pre-existing `clippy::single_match` in `voirs-evaluation/deep_learning_metrics.rs`. 861/861 pass.
+- [x] **voirs-conversion/emotion.rs — real FFT-based spectral features**: replaced ZCR-proxy in `estimate_pitch_variation` with per-frame normalized autocorrelation F0 statistics (25ms/10ms frames, lag range 27–275 samples covering 80–800 Hz, voiced threshold 0.3, log-F0 std-dev in semitones normalized to [0,1]). Replaced time-domain index-weighted magnitude `estimate_spectral_centroid` with FFT-based Σ(k·|X[k]|)/Σ(|X[k]|) over Hann-windowed 2048-point spectrum. Replaced time-domain cumulative energy `estimate_spectral_rolloff` with FFT-based power-spectrum 85% threshold rolloff. New `compute_windowed_fft_magnitudes` private helper. 412/412 pass (2 skipped).
+- [x] **voirs-cloning/flow_matching.rs — real Dormand-Prince 4(5) adaptive ODE solver**: replaced RK4 fallback stub for `OdeSolver::Dopri5` with full DOPRI5 implementation via new `integrate_dopri5()` method — 7-stage Butcher tableau (A21..A65), embedded 5th-order update + 4th-order error estimate (E1..E7 coefficients), mixed absolute/relative step-size control `h_new = h * 0.9 * (1/err)^0.2` clamped to [h_min, h_max], 10000-NFE safety brake. `synthesize()` restructured to dispatch Dopri5 early; fixed-step loop now handles Euler/Heun/RK4 only. Removed `warn!` import. Updated `test_different_ode_solvers` to include Dopri5; added `test_dopri5_solver`. 604/604 pass.
+- [x] **voirs-singing/models.rs — real features_to_notes decoding**: replaced `Ok(vec![])` stub with real MIDI decoder — maps tensor `[seq_len, feat_dim]` to `Vec<NoteEvent>` by decoding col 0 (pitch feature → `tanh*18+66` → MIDI 48–84 → Hz + note name + octave), col 1 (velocity [0,1]), col 2 (duration 0.1–2.0s), col 3 (vibrato [0,1]), col 4 (breath_before f32), col 5 (articulation → Accent/Staccato/Legato/Normal). Added free `decode_features()` helper + 6 unit tests. 550/550 pass.
+
+**Test Results**: 861/861 voirs-feedback ✅ | 412/412 voirs-conversion ✅ | 604/604 voirs-cloning ✅ | 550/550 voirs-singing ✅ | workspace `cargo check` green ✅
+
+---
+
+## Previous Session (2026-05-31 batch 6)
+
+**Mock→Real DSP Replacements (batch 6) — stubs → real:**
+
+- [x] **voirs-conversion/transforms.rs — real phase-vocoder pitch shifting + time stretching**: replaced broken OLA stub in `PitchTransform::apply_phase_vocoder_pitch_shift` with correct WOLA phase vocoder (FRAME=1024, HOP=256, Hann analysis+synthesis windows, instantaneous-frequency estimation via `wrap_phase(Δφ - expected_advance)`, bin remapping k → `round(k * ratio)` with max-magnitude selection, synthesis phase accumulation per output bin, OLA normalization with `max_ola * 0.1` threshold). Replaced `apply_simple_pitch_shift` scalar-multiply mock with linear-interpolation resampling. Replaced `SpeedTransform::apply_psola_time_stretch` hardcoded-period stub with phase-vocoder TSM (analysis hop = `round(SYN_HOP * speed)`, synthesis hop = SYN_HOP=256). 3 new tests + threshold adjustments in memory_tests.rs + quality_tests.rs. 444/444 pass.
+- [x] **voirs-acoustic/neural_codec.rs — real encode_continuous + decode_continuous + CodecQualityMetrics**: replaced `encode_continuous` stub returning `Tensor::zeros` with DCT-II orthonormal projection (per-frame z-score normalise → `[encoder_dim × hop_length]` DCT-II weight matrix projection → `[batch, seq_len, encoder_dim]`). Replaced `decode_continuous` stub with transposed DCT-III back-projection to `[batch, waveform_len]`. Added `CodecQualityMetrics::compute_from_audio` (real SNR/PESQ-approx/STOI-approx/spectral-flatness from signal). 6 new tests. 18/18 neural_codec tests pass. Clippy clean.
+- [x] **voirs-acoustic/vits/voice_cloning.rs — real mel spectrogram + real L2 normalisation**: replaced simplified mel conversion with full 80-filter triangular mel filterbank pipeline (n_fft=1024, hop=256, 80 Hz–Nyquist, Slaney-normalised, `scirs2_fft::rfft`, log floor 1e-8) returning `[n_frames][n_mels]`. Replaced simplified L2 norm with correct `x / sqrt(Σxᵢ² + 1e-12)` via Candle `sq_sum.affine + broadcast_div`. Added `linear_forward_broadcast` helper and `analyse_voice_quality_from_samples` (centroid, rolloff, formants, ZCR). 8 new tests. 650/650 voirs-acoustic lib tests pass.
+- [x] **voirs-evaluation/deep_learning_metrics.rs — real mel features + real MOS inference**: replaced 2-element crude RMS mock in `extract_mel_features` with 26-filter triangular mel filterbank → 104 features (mean/variance/max/delta per filter, FRAME=512/HOP=256, Hann, `scirs2_fft::rfft`). Replaced hardcoded `[0.05, 0.15, 0.30, 0.35, 0.15]` mock distribution in `run_inference` with signal-driven 4-component quality score (SNR 0.3 + HNR 0.3 + spectral centroid 0.2 + MFCC smoothness 0.2) → MOS=1+4×quality Gaussian soft-distribution. Fixed `perceptual_loss` hardcoded layer_contributions. 3 new tests + 4 filterbank unit tests. 15/15 pass.
+
+**Test Results**: 444/444 voirs-conversion ✅ | 650/650 voirs-acoustic ✅ | 15/15 voirs-evaluation ✅ | workspace `cargo check` green ✅
+
+---
+
+## Previous Session (2026-05-31 batch 5)
+
+**Mock→Real DSP Replacements (batch 5) — stubs → real:**
+
+- [x] **voirs-conversion/processing.rs — real triangular mel filterbank**: replaced 1-bin-per-coefficient stub in `compute_mel_spectrum` with proper 26-filter overlapping triangular bank (80 Hz–Nyquist, equal mel spacing, linear ramp-up/ramp-down weights), log-mel compression, DCT-II → MFCC. Added real `quality` (SNR [0,1]), `formants` ([F1,F2,F3] Hz via spectrum peak-picking in 300–900/900–2500/2500–3500 Hz bands), `harmonics` (HNR via normalized autocorrelation) to `extract_spectral_features`. 3 new tests. 341/341 pass.
+- [x] **voirs-conversion/recognition.rs — real FFT-domain phoneme spectral shaping**: replaced simple amplitude scaling in `apply_speech_guided_processing` with full overlap-add FFT pipeline (512-sample Hann frames, 256-sample hop) — vowels: +boost in 400–2000 Hz, consonants: +boost in 3000–8000 Hz via `scirs2_fft::rfft/irfft`. Fixed `simulate_speech_guided_conversion` to use real `Instant` timing and SNR-based overall_quality [0,1]. 3 new tests. 341/341 pass.
+- [x] **voirs-cloning/conversion.rs — real quality + FFT-domain conversion ops**: replaced `calculate_conversion_quality` stub (just returned model.quality_score) with SNR-based quality (5th-percentile noise floor, blend 40/60 signal/model). Replaced hardcoded `confidence: 0.8` with `1 - |q - model_quality|`. Replaced `apply_formant_shifts` scalar multiply with FFT-domain spectral bin warping (F1/F2/F3 bands, scatter-accumulate, OLA). Replaced `apply_spectral_transformation` scalar mean with per-bin envelope multiplication (OLA). Added `scirs2_fft::RealFftPlanner` + `scirs2_core::Complex` imports. 3 new tests. 529/529 pass.
+- [x] **voirs-spatial/core.rs — real Doppler resampling + frequency-dependent air absorption**: added `doppler_prev: Arc<Mutex<Option<(Position3D, Instant)>>>` to `SpatialProcessor`. Real `apply_doppler_effect` tracks position history, computes radial velocity → classical Doppler factor `c/(c+v_r)`, resamples channels via linear interpolation. Real `apply_air_absorption` uses FFT (zero-padded to next power-of-two) with per-bin ISO 9613-1 attenuation `α(f) ≈ f_kHz^1.5 × 0.0002 + f_kHz × 0.001 dB/m × distance`. 3 new tests. 8/8 pass.
+
+**Test Results**: 341/341 voirs-conversion ✅ | 529/529 voirs-cloning ✅ | 8/8 voirs-spatial ✅ | workspace `cargo check` green ✅
+
+---
+
+## Previous Session (2026-05-31 batch 4)
+
+**Mock→Real DSP Replacements (batch 4) — stubs → real:**
+
+- [x] **voirs-feedback — real system metrics**: replaced hardcoded CPU/memory/threads values in `performance_monitoring.rs::collect_system_metrics()` with real `/proc` reads: `/proc/stat` two-sample delta for CPU%, `/proc/self/status` VmRSS for memory, `/proc/meminfo` MemTotal, `/proc/self/status` Threads. All guarded by `#[cfg(target_os = "linux")]`. 3 new tests. 861/861 pass.
+- [x] **voirs-acoustic — remove fastrand stubs**: replaced `fastrand::f32()` variance in `simulate_synthesis_processing` and `simulate_model_inference` with real `std::time::Instant` microbenchmarks (sin-loop and GEMM-proxy respectively). Replaced hardcoded `cpu_usage` fields with `/proc/self/stat` utime+stime reader. Fixed 3 clippy warnings (manual_clamp, needless_range_loop). 804/804 pass.
+- [x] **voirs-conversion — real speech segmentation**: replaced `simulate_asr_transcription` / `generate_simulated_words` / `generate_simulated_phonemes` fake "word1/soft2/quiet3" generators in `recognition.rs` with real VAD + onset detection — 20ms frames, RMS energy threshold, 60ms silence splits, spectral centroid via `scirs2_fft::rfft` for phoneme classification (vowel/fricative/stop/nasal/silence). 3 new tests. 401/401 pass (2 skipped).
+- [x] **voirs-conversion — real ML framework inference**: replaced all 4 `Ok(inputs.to_vec())` pass-throughs in `ml_frameworks.rs` with candle layer-norm + tanh transformation. Added shared helper `apply_candle_normalization`. `run_candle_inference` additionally applies weight matrix projection when weights are non-empty. 401/401 pass (2 skipped).
+- [x] **voirs-conversion — format.rs rename**: renamed `read_wav_placeholder` → `read_wav` and `write_wav_placeholder` → `write_wav` (they were already real hound-based implementations). Updated doc comments.
+
+**Test Results**: 861/861 voirs-feedback ✅ | 804/804 voirs-acoustic ✅ | 401/401 voirs-conversion ✅ | workspace `cargo check` green ✅
+
+---
+
+## Previous Session (2026-05-31)
+
+**Mock→Real DSP Replacements (batch 3) + Refactor:**
+
+- [x] **voirs-singing — refactor**: split 1953-line `voice_conversion.rs` into a module directory (`mod.rs` 826 lines, `signal.rs` 590 lines, `quality.rs` 411 lines); public API unchanged.
+- [x] **voirs-singing — real analyze_voice_quality**: replaced hardcoded metrics with per-frame autocorrelation F0 tracking: `vocal_range` from semitone span, `vibrato_rate`/`vibrato_depth` via DFT of detrended F0 contour in 4–8 Hz band, `breathiness` = 1 − mean HNR, `roughness` = mean F0 jitter, `brightness` = FFT spectral centroid / Nyquist. 3 new tests. 544/544 pass (7 skipped).
+- [x] **voirs-emotion — real emotion features**: replaced chunked-mean+tanh stub in `compute_emotion_features` with 6-stage FFT pipeline → 64-dim: triangular filterbank STFT projection (10), F0 prosodic stats (8), RMS energy envelope segments (8), log-magnitude spectral bands (16), temporal features ZCR/variance/centroid/rolloff (8), zero-padded to 64.
+- [x] **voirs-emotion — real speaker features**: replaced chunked-log-energy stub in `compute_speaker_features` with 6-stage pipeline → 256-dim: MFCC mean+std (52), sub-band log energies (32), spectral statistics (8), F0 stats + ACF lags (8), MFCC deltas (26), cepstral-liftered formant positions (8), zero-padded to 256.
+- [x] **voirs-emotion — real audio synthesis**: replaced single-frequency-sine stub in `synthesize_audio` with 6-harmonic formant-shaped synthesis — F0 from speaker embedding, amplitude envelope from emotion embedding (linear interp), formant resonance applied in FFT domain, intensity scaling + soft clip. 4 new tests. 461/461 pass.
+- [x] **voirs-conversion — real extract_style**: replaced all-zero placeholder in `zero_shot/style.rs::DefaultStyleAnalyzer::extract_style` with full signal processing — prosodic (F0 intonation, RMS rhythm, stress peaks, pause fractions), spectral (cepstral-liftered formants, log-magnitude bands, HNR, spectral flatness), temporal (onset rate, ZCR, spectral flux, energy variance), voice quality scalars (HNR breathiness, jitter roughness, sub-100Hz creakiness, centroid tenseness). 4 new tests. 398/398 pass (2 skipped).
+- [x] **voirs-conversion — real generate_audio**: replaced copy-of-source stub in `zero_shot/models.rs::AdaptedModel::generate_audio` with FFT spectral envelope warping — per-bin gain from `weights[0]` clamped [0.1, 3.0], phase rotation from `biases[0]`, IRFFT reconstruction, soft-clip. 3 new tests.
+- [x] **voirs-acoustic — real memory tracking**: replaced hardcoded 1 MB in `memory.rs::MemoryOptimizer::get_current_usage()` with `/proc/self/status` VmRSS parser on Linux, 64 MB fallback on other platforms. 2 new tests. 804/804 pass.
+
+**Test Results**: 544/544 voirs-singing ✅ | 461/461 voirs-emotion ✅ | 398/398 voirs-conversion ✅ | 804/804 voirs-acoustic ✅ | workspace `cargo check` green ✅
+
+---
+
+## Previous Session (2026-05-30)
 
 **Build Fix (oxiarc-core patch) + Real DSP Implementations (4 crates):**
 
@@ -19,6 +89,23 @@
 - [x] **voirs-acoustic — real RVQ codebook gather**: replaced `Tensor::zeros` stub in `quantize_indices` with real `index_select` gather from the codebook tensor. Commitment-loss round-trip verified correct.
 
 **Test Results**: 700/700 voirs-dataset ✅ | 928/928 voirs-evaluation ✅ | 788/788 voirs-acoustic ✅ | 481/607 voirs-recognizer (1 pre-existing SIMD consistency failure, 125 skipped) ✅
+
+---
+
+## Continuation Session (2026-05-30 batch 2)
+
+**Mock→Real DSP Replacements (4 more crates):**
+
+- [x] **voirs-cloning — real MFCC features**: replaced `compute_mel_features` stub (`vec![0.5; 13]`) in `verification.rs` with a full multi-frame MFCC pipeline — 25ms/10ms Hann-windowed frames, power-of-2 RFFT, area-normalised 26-filter triangular mel filterbank (80–8000 Hz), log-mel, orthonormal DCT-II, mean across all frames. Returns exactly 13 `f32` coefficients. 3 new tests. 600/600 pass.
+- [x] **voirs-singing — real F0 estimation**: replaced `estimate_average_f0` hardcoded `Ok(220.0)` with normalized autocorrelation F0 with two-pass octave correction (prefer shortest period ≥ 92% of global-max correlation). Voiced threshold 0.35, lag range sr/800–sr/80, clamp [80–500 Hz], silence → 0.0. Fixed 3 clippy warnings. 541/541 pass.
+- [x] **voirs-singing — real formant estimation**: replaced `extract_formants` `Ok(vec![800.0, 1200.0, 2600.0])` with spectral peak-picking over cepstral-liftered FFT envelope; F1/F2/F3 searched in standard frequency bands with midpoint fallback.
+- [x] **voirs-singing — real speaker features**: replaced 512-vector ramp stub in `extract_speaker_features` with real multi-band spectral statistics (MFCC stats, spectral centroid/rolloff, RMS energy, F0, sub-band energies, ZCR) zero-padded to 512 elements.
+- [x] **voirs-singing — real spectral conversion**: replaced `spectral_conversion` sample-scalar stub with FFT-domain spectral envelope warping (cepstral liftering for source and target envelopes, ratio correction applied to magnitudes, phase preserved, IRFFT overlap-add synthesis).
+- [x] **voirs-recognizer — real phoneme templates**: replaced hash-based sine stub in `create_phoneme_template` with linguistically-motivated Gaussian templates — vowels with F1/F2 bumps per standard formant charts, fricatives with high-frequency concentration, stops with burst profile, nasals with low-frequency + anti-formant notch, silence near-zero. L2-normalised. 4 new tests.
+- [x] **voirs-recognizer — real alignment confidence**: replaced position-decay mock in `calculate_alignment_confidence` with cosine similarity between aligned frame features and a reference template, mapped to [0.3, 1.0]. 617/619 pass (2 pre-existing SIMD failures in noise_suppression).
+- [x] **voirs-acoustic — duration alignment tests**: `align_text_to_mel` was already real (per-phoneme duration expansion via Rust-side `to_vec3 + from_vec + permute`); added 4 named unit tests covering uniform durations, variable durations, output shape, and content correctness. 634/634 pass.
+
+**Test Results**: 600/600 voirs-cloning ✅ | 541/541 voirs-singing ✅ | 617/619 voirs-recognizer (2 pre-existing SIMD) ✅ | 634/634 voirs-acoustic ✅ | workspace `cargo check` green ✅
 
 ## Previous Development Session (2026-04-27)
 

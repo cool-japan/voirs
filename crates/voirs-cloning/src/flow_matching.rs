@@ -31,7 +31,7 @@ use scirs2_core::ndarray::{Array1, Array2};
 use scirs2_core::random::Rng;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// ODE solver type for flow integration
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -179,23 +179,37 @@ impl FlowMatchingModel {
         let mut nfe = 0;
         let time_steps = self.config.time_steps.clone();
 
+        // Dormand-Prince 4(5) adaptive solver takes a completely different path —
+        // it controls its own step size rather than following the fixed time_steps grid.
+        if let OdeSolver::Dopri5 = self.config.ode_solver {
+            let result = self.integrate_dopri5(
+                x,
+                &time_steps,
+                speaker_embedding,
+                &mut nfe,
+                trajectory,
+                start_time,
+            )?;
+            return Ok(result);
+        }
+
+        // Fixed-step solvers: Euler, Heun, RK4
         for i in 0..time_steps.len() - 1 {
             let t = time_steps[i];
             let t_next = time_steps[i + 1];
             let dt = t_next - t;
 
-            // Compute velocity field
+            // Compute velocity field (first evaluation shared by all fixed-step solvers)
             let v = self.compute_velocity(&x, t, speaker_embedding)?;
             nfe += 1;
 
-            // Integrate based on solver type
             x = match self.config.ode_solver {
                 OdeSolver::Euler => {
                     // x_{t+dt} = x_t + dt * v_t
                     let mut x_next = x.clone();
-                    for i in 0..x.dim().0 {
-                        for j in 0..x.dim().1 {
-                            x_next[[i, j]] += dt * v[[i, j]];
+                    for row in 0..x.dim().0 {
+                        for col in 0..x.dim().1 {
+                            x_next[[row, col]] += dt * v[[row, col]];
                         }
                     }
                     x_next
@@ -203,9 +217,9 @@ impl FlowMatchingModel {
                 OdeSolver::Heun => {
                     // Predictor step
                     let mut x_pred = x.clone();
-                    for i in 0..x.dim().0 {
-                        for j in 0..x.dim().1 {
-                            x_pred[[i, j]] += dt * v[[i, j]];
+                    for row in 0..x.dim().0 {
+                        for col in 0..x.dim().1 {
+                            x_pred[[row, col]] += dt * v[[row, col]];
                         }
                     }
 
@@ -214,9 +228,9 @@ impl FlowMatchingModel {
                     nfe += 1;
 
                     let mut x_next = x.clone();
-                    for i in 0..x.dim().0 {
-                        for j in 0..x.dim().1 {
-                            x_next[[i, j]] += dt * (v[[i, j]] + v_pred[[i, j]]) / 2.0;
+                    for row in 0..x.dim().0 {
+                        for col in 0..x.dim().1 {
+                            x_next[[row, col]] += dt * (v[[row, col]] + v_pred[[row, col]]) / 2.0;
                         }
                     }
                     x_next
@@ -226,63 +240,46 @@ impl FlowMatchingModel {
                     let k1 = v.clone();
 
                     let mut x_k2 = x.clone();
-                    for i in 0..x.dim().0 {
-                        for j in 0..x.dim().1 {
-                            x_k2[[i, j]] += (dt / 2.0) * k1[[i, j]];
+                    for row in 0..x.dim().0 {
+                        for col in 0..x.dim().1 {
+                            x_k2[[row, col]] += (dt / 2.0) * k1[[row, col]];
                         }
                     }
                     let k2 = self.compute_velocity(&x_k2, t + dt / 2.0, speaker_embedding)?;
                     nfe += 1;
 
                     let mut x_k3 = x.clone();
-                    for i in 0..x.dim().0 {
-                        for j in 0..x.dim().1 {
-                            x_k3[[i, j]] += (dt / 2.0) * k2[[i, j]];
+                    for row in 0..x.dim().0 {
+                        for col in 0..x.dim().1 {
+                            x_k3[[row, col]] += (dt / 2.0) * k2[[row, col]];
                         }
                     }
                     let k3 = self.compute_velocity(&x_k3, t + dt / 2.0, speaker_embedding)?;
                     nfe += 1;
 
                     let mut x_k4 = x.clone();
-                    for i in 0..x.dim().0 {
-                        for j in 0..x.dim().1 {
-                            x_k4[[i, j]] += dt * k3[[i, j]];
+                    for row in 0..x.dim().0 {
+                        for col in 0..x.dim().1 {
+                            x_k4[[row, col]] += dt * k3[[row, col]];
                         }
                     }
                     let k4 = self.compute_velocity(&x_k4, t_next, speaker_embedding)?;
                     nfe += 1;
 
                     let mut x_next = x.clone();
-                    for i in 0..x.dim().0 {
-                        for j in 0..x.dim().1 {
-                            x_next[[i, j]] += (dt / 6.0)
-                                * (k1[[i, j]] + 2.0 * k2[[i, j]] + 2.0 * k3[[i, j]] + k4[[i, j]]);
+                    for row in 0..x.dim().0 {
+                        for col in 0..x.dim().1 {
+                            x_next[[row, col]] += (dt / 6.0)
+                                * (k1[[row, col]]
+                                    + 2.0 * k2[[row, col]]
+                                    + 2.0 * k3[[row, col]]
+                                    + k4[[row, col]]);
                         }
                     }
                     x_next
                 }
-                OdeSolver::Dopri5 => {
-                    // Simplified Dormand-Prince (adaptive step size not fully implemented)
-                    // Fall back to RK4 for now
-                    warn!("Dopri5 not fully implemented, using RK4");
-                    let k1 = v.clone();
-                    let mut x_k2 = x.clone();
-                    for i in 0..x.dim().0 {
-                        for j in 0..x.dim().1 {
-                            x_k2[[i, j]] += (dt / 2.0) * k1[[i, j]];
-                        }
-                    }
-                    let k2 = self.compute_velocity(&x_k2, t + dt / 2.0, speaker_embedding)?;
-                    nfe += 1;
-
-                    let mut x_next = x.clone();
-                    for i in 0..x.dim().0 {
-                        for j in 0..x.dim().1 {
-                            x_next[[i, j]] += dt * k2[[i, j]];
-                        }
-                    }
-                    x_next
-                }
+                // Dopri5 is handled above before this loop
+                OdeSolver::Dopri5 => unreachable!(),
             };
 
             trajectory.push(x.clone());
@@ -314,6 +311,258 @@ impl FlowMatchingModel {
         Ok(FlowMatchingResult {
             output: x,
             nfe,
+            synthesis_time_ms,
+            quality_estimate,
+            trajectory,
+        })
+    }
+
+    /// Dormand-Prince 4(5) adaptive ODE integration (DOPRI5 / RK45).
+    ///
+    /// Uses the full 7-stage Butcher tableau with embedded 4th/5th-order solutions
+    /// for error-controlled adaptive step sizing from `t_start` to `t_end`.
+    ///
+    /// ## Butcher tableau (Dormand & Prince, 1980)
+    ///
+    /// Stage nodes (c):  0, 1/5, 3/10, 4/5, 8/9, 1, 1
+    ///
+    /// 5th-order weights (b):  35/384, 0, 500/1113, 125/192, -2187/6784, 11/84, 0
+    /// 4th-order weights (b*): 5179/57600, 0, 7571/16695, 393/640, -92097/339200, 187/2100, 1/40
+    ///
+    /// Step-size control: h_new = h * 0.9 * (1/err)^0.2
+    #[allow(clippy::too_many_arguments)]
+    fn integrate_dopri5(
+        &mut self,
+        mut x: Array2<f32>,
+        time_steps: &[f32],
+        condition: &Array1<f32>,
+        nfe: &mut usize,
+        mut trajectory: Vec<Array2<f32>>,
+        start_time: std::time::Instant,
+    ) -> Result<FlowMatchingResult, Error> {
+        // ── Dormand-Prince Butcher coefficients ──────────────────────────────
+        // Row 2
+        const A21: f32 = 1.0 / 5.0;
+        // Row 3
+        const A31: f32 = 3.0 / 40.0;
+        const A32: f32 = 9.0 / 40.0;
+        // Row 4
+        const A41: f32 = 44.0 / 45.0;
+        const A42: f32 = -56.0 / 15.0;
+        const A43: f32 = 32.0 / 9.0;
+        // Row 5
+        const A51: f32 = 19372.0 / 6561.0;
+        const A52: f32 = -25360.0 / 2187.0;
+        const A53: f32 = 64448.0 / 6561.0;
+        const A54: f32 = -212.0 / 729.0;
+        // Row 6
+        const A61: f32 = 9017.0 / 3168.0;
+        const A62: f32 = -355.0 / 33.0;
+        const A63: f32 = 46732.0 / 5247.0;
+        const A64: f32 = 49.0 / 176.0;
+        const A65: f32 = -5103.0 / 18656.0;
+        // Row 7  (= 5th-order solution weights b)
+        const B1: f32 = 35.0 / 384.0;
+        // B2 = 0
+        const B3: f32 = 500.0 / 1113.0;
+        const B4: f32 = 125.0 / 192.0;
+        const B5: f32 = -2187.0 / 6784.0;
+        const B6: f32 = 11.0 / 84.0;
+        // B7 = 0  (FSAL: k7 of accepted step becomes k1 of next — not used here for simplicity)
+
+        // 4th-order embedded weights (b*)
+        const BS1: f32 = 5179.0 / 57600.0;
+        // BS2 = 0
+        const BS3: f32 = 7571.0 / 16695.0;
+        const BS4: f32 = 393.0 / 640.0;
+        const BS5: f32 = -92097.0 / 339200.0;
+        const BS6: f32 = 187.0 / 2100.0;
+        const BS7: f32 = 1.0 / 40.0;
+
+        // Error coefficients  e_i = b_i - b*_i
+        const E1: f32 = B1 - BS1;
+        // E2 = 0
+        const E3: f32 = B3 - BS3;
+        const E4: f32 = B4 - BS4;
+        const E5: f32 = B5 - BS5;
+        const E6: f32 = B6 - BS6;
+        const E7: f32 = -BS7; // b7 = 0
+
+        // Node offsets  (c2..c6; c1=0, c7=1 not needed explicitly)
+        const C2: f32 = 1.0 / 5.0;
+        const C3: f32 = 3.0 / 10.0;
+        const C4: f32 = 4.0 / 5.0;
+        const C5: f32 = 8.0 / 9.0;
+        // C6 = 1.0, C7 = 1.0
+
+        let t_start = *time_steps.first().unwrap_or(&0.0_f32);
+        let t_end = *time_steps.last().unwrap_or(&1.0_f32);
+        let tol = self.config.error_tolerance;
+        let (rows, cols) = x.dim();
+        let n_elem = (rows * cols) as f32;
+
+        // Initial step size: span / num_steps
+        let span = t_end - t_start;
+        let mut h = span / self.config.num_steps as f32;
+        let h_min = h * 1e-4;
+        let h_max = h * 10.0_f32;
+
+        let mut t = t_start;
+
+        debug!(
+            "Dopri5 adaptive integration: t=[{}, {}], h0={:.4e}, tol={:.2e}",
+            t_start, t_end, h, tol
+        );
+
+        // Safety limit: prevent runaway loops on degenerate vector fields
+        const MAX_NFE: usize = 10_000;
+
+        while t < t_end - 1e-10 {
+            // Clamp final step to avoid overshooting t_end
+            if t + h > t_end {
+                h = t_end - t;
+            }
+
+            // ── Stage 1 ──────────────────────────────────────────────────────
+            let k1 = self.compute_velocity(&x, t, condition)?;
+            *nfe += 1;
+
+            // ── Stage 2 ──────────────────────────────────────────────────────
+            let mut x_s = Array2::zeros((rows, cols));
+            for r in 0..rows {
+                for c in 0..cols {
+                    x_s[[r, c]] = x[[r, c]] + h * A21 * k1[[r, c]];
+                }
+            }
+            let k2 = self.compute_velocity(&x_s, t + C2 * h, condition)?;
+            *nfe += 1;
+
+            // ── Stage 3 ──────────────────────────────────────────────────────
+            for r in 0..rows {
+                for c in 0..cols {
+                    x_s[[r, c]] = x[[r, c]] + h * (A31 * k1[[r, c]] + A32 * k2[[r, c]]);
+                }
+            }
+            let k3 = self.compute_velocity(&x_s, t + C3 * h, condition)?;
+            *nfe += 1;
+
+            // ── Stage 4 ──────────────────────────────────────────────────────
+            for r in 0..rows {
+                for c in 0..cols {
+                    x_s[[r, c]] =
+                        x[[r, c]] + h * (A41 * k1[[r, c]] + A42 * k2[[r, c]] + A43 * k3[[r, c]]);
+                }
+            }
+            let k4 = self.compute_velocity(&x_s, t + C4 * h, condition)?;
+            *nfe += 1;
+
+            // ── Stage 5 ──────────────────────────────────────────────────────
+            for r in 0..rows {
+                for c in 0..cols {
+                    x_s[[r, c]] = x[[r, c]]
+                        + h * (A51 * k1[[r, c]]
+                            + A52 * k2[[r, c]]
+                            + A53 * k3[[r, c]]
+                            + A54 * k4[[r, c]]);
+                }
+            }
+            let k5 = self.compute_velocity(&x_s, t + C5 * h, condition)?;
+            *nfe += 1;
+
+            // ── Stage 6 ──────────────────────────────────────────────────────
+            for r in 0..rows {
+                for c in 0..cols {
+                    x_s[[r, c]] = x[[r, c]]
+                        + h * (A61 * k1[[r, c]]
+                            + A62 * k2[[r, c]]
+                            + A63 * k3[[r, c]]
+                            + A64 * k4[[r, c]]
+                            + A65 * k5[[r, c]]);
+                }
+            }
+            let k6 = self.compute_velocity(&x_s, t + h, condition)?;
+            *nfe += 1;
+
+            // ── 5th-order solution (advancing state) ─────────────────────────
+            let mut x5 = Array2::zeros((rows, cols));
+            for r in 0..rows {
+                for c in 0..cols {
+                    x5[[r, c]] = x[[r, c]]
+                        + h * (B1 * k1[[r, c]]
+                            + B3 * k3[[r, c]]
+                            + B4 * k4[[r, c]]
+                            + B5 * k5[[r, c]]
+                            + B6 * k6[[r, c]]);
+                }
+            }
+
+            // ── Stage 7 (needed for 4th-order error estimate only) ────────────
+            let k7 = self.compute_velocity(&x5, t + h, condition)?;
+            *nfe += 1;
+
+            // ── Error estimate: RMS of (x5 - x4) / tol ───────────────────────
+            // x5 - x4 = h * sum_i e_i * k_i   (per element)
+            let mut err_sum_sq = 0.0_f32;
+            for r in 0..rows {
+                for c in 0..cols {
+                    let diff = h
+                        * (E1 * k1[[r, c]]
+                            + E3 * k3[[r, c]]
+                            + E4 * k4[[r, c]]
+                            + E5 * k5[[r, c]]
+                            + E6 * k6[[r, c]]
+                            + E7 * k7[[r, c]]);
+                    // Scale relative to max(|x5|, 1) for mixed absolute/relative control
+                    let scale = x5[[r, c]].abs().max(1.0) * tol;
+                    err_sum_sq += (diff / scale).powi(2);
+                }
+            }
+            let err = (err_sum_sq / n_elem).sqrt();
+
+            if err <= 1.0 {
+                // ── Accept step ───────────────────────────────────────────────
+                x = x5;
+                t += h;
+                trajectory.push(x.clone());
+                debug!("Dopri5 accept: t={:.4}, h={:.4e}, err={:.3e}", t, h, err);
+            }
+            // ── Adjust step size (PI controller exponent 0.2 = 1/5) ──────────
+            let factor = if err < 1e-10 {
+                5.0_f32 // Maximum growth
+            } else {
+                0.9 * (1.0_f32 / err).powf(0.2)
+            };
+            h = (h * factor).clamp(h_min, h_max);
+
+            if *nfe >= MAX_NFE {
+                debug!("Dopri5: NFE safety limit reached at t={:.4}", t);
+                break;
+            }
+        }
+
+        let synthesis_time_ms = start_time.elapsed().as_millis() as f32;
+        let quality_estimate = self.estimate_quality(&x)?;
+
+        self.stats.total_samples += 1;
+        self.stats.avg_nfe = (self.stats.avg_nfe * (self.stats.total_samples - 1) as f32
+            + *nfe as f32)
+            / self.stats.total_samples as f32;
+        self.stats.avg_synthesis_time_ms = (self.stats.avg_synthesis_time_ms
+            * (self.stats.total_samples - 1) as f32
+            + synthesis_time_ms)
+            / self.stats.total_samples as f32;
+        self.stats.avg_quality = (self.stats.avg_quality * (self.stats.total_samples - 1) as f32
+            + quality_estimate)
+            / self.stats.total_samples as f32;
+
+        info!(
+            "Dopri5 complete: {} NFE, {:.2}ms, quality={:.3}",
+            nfe, synthesis_time_ms, quality_estimate
+        );
+
+        Ok(FlowMatchingResult {
+            output: x,
+            nfe: *nfe,
             synthesis_time_ms,
             quality_estimate,
             trajectory,
@@ -539,7 +788,12 @@ mod tests {
 
     #[test]
     fn test_different_ode_solvers() {
-        for solver in [OdeSolver::Euler, OdeSolver::Heun, OdeSolver::RK4] {
+        for solver in [
+            OdeSolver::Euler,
+            OdeSolver::Heun,
+            OdeSolver::RK4,
+            OdeSolver::Dopri5,
+        ] {
             let mut model = FlowMatchingBuilder::new()
                 .ode_solver(solver)
                 .num_steps(3)
@@ -551,6 +805,40 @@ mod tests {
 
             assert!(result.is_ok(), "Failed with solver: {:?}", solver);
         }
+    }
+
+    #[test]
+    fn test_dopri5_solver() {
+        let mut model = FlowMatchingBuilder::new()
+            .ode_solver(OdeSolver::Dopri5)
+            .num_steps(5)
+            .build()
+            .unwrap();
+
+        let speaker_embedding = Array1::from_vec(vec![0.5; 256]);
+        let result = model.synthesize(&speaker_embedding, 50).unwrap();
+
+        assert_eq!(result.output.dim(), (1, 50));
+        assert!(result.nfe > 0);
+        assert!(
+            result.quality_estimate >= 0.0 && result.quality_estimate <= 1.0,
+            "Quality out of [0,1]: {}",
+            result.quality_estimate
+        );
+
+        // Dopri5 should use more NFE than Euler (7 stage evaluations per step)
+        let mut euler_model = FlowMatchingBuilder::new()
+            .ode_solver(OdeSolver::Euler)
+            .num_steps(5)
+            .build()
+            .unwrap();
+        let result_euler = euler_model.synthesize(&speaker_embedding, 50).unwrap();
+        assert!(
+            result.nfe >= result_euler.nfe,
+            "Dopri5 NFE ({}) should be >= Euler NFE ({})",
+            result.nfe,
+            result_euler.nfe
+        );
     }
 
     #[test]

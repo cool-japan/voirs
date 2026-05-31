@@ -39,6 +39,83 @@ use crate::{
 };
 use std::collections::HashMap;
 
+// ---------------------------------------------------------------------------
+// Module-level audio analysis helpers
+// ---------------------------------------------------------------------------
+
+/// Root-mean-square energy of a sample slice.
+fn rms_energy(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    (samples.iter().map(|&s| s * s).sum::<f32>() / samples.len() as f32).sqrt()
+}
+
+/// Zero-crossing rate: fraction of adjacent-sample sign changes.
+fn zero_crossing_rate(samples: &[f32]) -> f32 {
+    if samples.len() < 2 {
+        return 0.0;
+    }
+    let crossings = samples
+        .windows(2)
+        .filter(|w| (w[0] >= 0.0) != (w[1] >= 0.0))
+        .count();
+    crossings as f32 / samples.len() as f32
+}
+
+/// Spectral centroid using a Hann-windowed real DFT via scirs2_fft::rfft.
+fn spectral_centroid_simple(samples: &[f32], sample_rate: f32) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let n = samples.len();
+    // Apply Hann window
+    let windowed: Vec<f64> = samples
+        .iter()
+        .enumerate()
+        .map(|(i, &s)| {
+            let w =
+                (1.0 - (2.0 * std::f64::consts::PI * i as f64 / (n - 1).max(1) as f64).cos()) * 0.5;
+            s as f64 * w
+        })
+        .collect();
+
+    let spectrum = match scirs2_fft::rfft(&windowed, None) {
+        Ok(s) => s,
+        Err(_) => return 0.0,
+    };
+
+    let bin_hz = sample_rate as f64 / n as f64;
+    let mut num = 0.0f64;
+    let mut den = 0.0f64;
+    for (k, c) in spectrum.iter().enumerate() {
+        let mag = (c.re * c.re + c.im * c.im).sqrt();
+        let freq = k as f64 * bin_hz;
+        num += freq * mag;
+        den += mag;
+    }
+    if den < 1e-10 {
+        0.0
+    } else {
+        (num / den) as f32
+    }
+}
+
+/// Classify a speech frame into a broad phoneme category using three acoustic
+/// features: zero-crossing rate (ZCR), RMS energy, and spectral centroid.
+fn classify_phoneme(zcr: f32, energy: f32, centroid: f32) -> &'static str {
+    match (zcr > 0.15, energy > 0.05, centroid > 3000.0) {
+        (true, false, true) => "s", // Fricative: high ZCR, low energy, high centroid
+        (true, true, true) => "sh", // Fricative with energy
+        (false, true, false) => "a", // Vowel: low ZCR, high energy, low centroid
+        (false, true, true) => "e", // Front vowel
+        (true, true, false) => "n", // Nasal: high ZCR, energy, mid centroid
+        (false, false, true) => "t", // Stop burst
+        (false, false, false) => "sil", // Silence
+        _ => "h",                   // Aspirated / other
+    }
+}
+
 /// ASR engine types supported for speech recognition
 #[derive(Debug, Clone, PartialEq)]
 pub enum ASREngine {
@@ -408,54 +485,136 @@ impl RecognitionGuidedConverter {
         })
     }
 
-    /// Generate simulated words from audio characteristics
+    /// Segment audio into voiced word regions using energy-based voice activity
+    /// detection, then classify each region with acoustic features.
     fn generate_simulated_words(&self, audio: &[f32], duration: f32) -> Vec<WordTimestamp> {
-        let mut words = Vec::new();
-        let samples_per_word = 8000; // Approximately 0.5 seconds at 16kHz
+        const SAMPLE_RATE: f32 = 16000.0;
+        const FRAME_LEN: usize = 320; // 20 ms at 16 kHz
+        const VOICED_ENERGY_THRESH: f32 = 0.01;
+        const SILENCE_FRAMES_TO_SPLIT: usize = 3; // 60 ms silence → new word
 
-        for (i, chunk) in audio.chunks(samples_per_word).enumerate() {
-            let start_time = i as f32 * 0.5;
-            let end_time = ((i + 1) as f32 * 0.5).min(duration);
-            let avg_energy = chunk.iter().map(|&s| s.abs()).sum::<f32>() / chunk.len() as f32;
+        if audio.len() < FRAME_LEN {
+            return Vec::new();
+        }
 
-            // Generate word based on energy
-            let word = if avg_energy > 0.1 {
-                format!("word{}", i + 1)
-            } else if avg_energy > 0.05 {
-                format!("soft{}", i + 1)
+        // Per-frame RMS energy
+        let frame_energies: Vec<f32> = audio.chunks(FRAME_LEN).map(rms_energy).collect();
+
+        // Group consecutive voiced frames into word segments
+        let mut words: Vec<WordTimestamp> = Vec::new();
+        let mut seg_start: Option<usize> = None;
+        let mut silence_run = 0usize;
+
+        for (i, &energy) in frame_energies.iter().enumerate() {
+            if energy >= VOICED_ENERGY_THRESH {
+                if seg_start.is_none() {
+                    seg_start = Some(i);
+                }
+                silence_run = 0;
             } else {
-                format!("quiet{}", i + 1)
-            };
+                silence_run += 1;
+                if silence_run >= SILENCE_FRAMES_TO_SPLIT {
+                    if let Some(start) = seg_start.take() {
+                        let end = i.saturating_sub(silence_run - 1);
+                        if end > start {
+                            let start_time = start as f32 * FRAME_LEN as f32 / SAMPLE_RATE;
+                            let end_time =
+                                (end as f32 * FRAME_LEN as f32 / SAMPLE_RATE).min(duration);
+                            let seg_start_sample = (start * FRAME_LEN).min(audio.len());
+                            let seg_end_sample = (end * FRAME_LEN).min(audio.len());
+                            let seg_samples = &audio[seg_start_sample..seg_end_sample];
+                            let avg_e = rms_energy(seg_samples);
+                            let zcr = zero_crossing_rate(seg_samples);
+                            let centroid = spectral_centroid_simple(seg_samples, SAMPLE_RATE);
+                            let phoneme = classify_phoneme(zcr, avg_e, centroid);
+                            let word = format!("{}-{}", phoneme, words.len() + 1);
+                            let confidence = (avg_e * 20.0).clamp(0.4, 1.0);
+                            words.push(WordTimestamp {
+                                word,
+                                start_time,
+                                end_time,
+                                confidence,
+                            });
+                        }
+                    }
+                    silence_run = 0;
+                }
+            }
+        }
 
-            words.push(WordTimestamp {
-                word,
-                start_time,
-                end_time,
-                confidence: (avg_energy * 10.0).clamp(0.5, 1.0),
-            });
+        // Flush final voiced segment
+        if let Some(start) = seg_start {
+            let end = frame_energies.len();
+            let start_time = start as f32 * FRAME_LEN as f32 / SAMPLE_RATE;
+            let end_time = (end as f32 * FRAME_LEN as f32 / SAMPLE_RATE).min(duration);
+            let seg_samples = &audio[(start * FRAME_LEN).min(audio.len())..];
+            if !seg_samples.is_empty() {
+                let avg_e = rms_energy(seg_samples);
+                let zcr = zero_crossing_rate(seg_samples);
+                let centroid = spectral_centroid_simple(seg_samples, SAMPLE_RATE);
+                let phoneme = classify_phoneme(zcr, avg_e, centroid);
+                let word = format!("{}-{}", phoneme, words.len() + 1);
+                let confidence = (avg_e * 20.0).clamp(0.4, 1.0);
+                words.push(WordTimestamp {
+                    word,
+                    start_time,
+                    end_time,
+                    confidence,
+                });
+            }
         }
 
         words
     }
 
-    /// Generate simulated phoneme alignment
+    /// Subdivide each word segment into sub-phoneme units using the word's
+    /// classified base phoneme. Duration is evenly split at ~60 ms per unit with
+    /// alternating phoneme variants to reflect coarticulation.
     fn generate_simulated_phonemes(&self, words: &[WordTimestamp]) -> Vec<PhonemeAlignment> {
+        const PHONEME_DURATION: f32 = 0.06; // ~60 ms per phoneme unit
+        const MAX_PHONEMES_PER_WORD: usize = 8;
+
         let mut phonemes = Vec::new();
 
         for word in words {
-            let word_duration = word.end_time - word.start_time;
-            let phonemes_per_word = 3; // Average
-            let phoneme_duration = word_duration / phonemes_per_word as f32;
+            let word_duration = (word.end_time - word.start_time).max(PHONEME_DURATION);
+            let n_phonemes = ((word_duration / PHONEME_DURATION).round() as usize)
+                .max(1)
+                .min(MAX_PHONEMES_PER_WORD);
+            let phoneme_dur = word_duration / n_phonemes as f32;
 
-            for i in 0..phonemes_per_word {
-                let start_time = word.start_time + i as f32 * phoneme_duration;
-                let end_time = start_time + phoneme_duration;
+            // Derive the base phoneme class from the word label (chars before '-')
+            let base_phoneme = word.word.split('-').next().unwrap_or("a");
 
+            for i in 0..n_phonemes {
+                let start_time = word.start_time + i as f32 * phoneme_dur;
+                let end_time = (start_time + phoneme_dur).min(word.end_time);
+
+                // Cycle through coarticulation variants to avoid identical labels
+                let variant = match i % 3 {
+                    0 => base_phoneme,
+                    1 => {
+                        if base_phoneme == "sil" {
+                            "sil"
+                        } else {
+                            "ə"
+                        }
+                    }
+                    _ => {
+                        if base_phoneme == "sil" {
+                            "sil"
+                        } else {
+                            "ɪ"
+                        }
+                    }
+                };
+
+                let confidence = (word.confidence * (1.0 - i as f32 * 0.03)).max(0.5);
                 phonemes.push(PhonemeAlignment {
-                    phoneme: format!("ph{}", i + 1), // Simplified phoneme
+                    phoneme: variant.to_string(),
                     start_time,
                     end_time,
-                    confidence: word.confidence * 0.9, // Slightly lower than word confidence
+                    confidence,
                 });
             }
         }
@@ -574,11 +733,25 @@ impl RecognitionGuidedConverter {
         transcription: &ASRTranscription,
         params: &SpeechGuidedParams,
     ) -> ConversionResult {
-        use std::time::{Duration, SystemTime};
+        use std::time::SystemTime;
+
+        let _t0 = std::time::Instant::now();
 
         // Simulate the conversion process with speech guidance
         let processed_audio =
             self.apply_speech_guided_processing(&request.source_audio, transcription, params);
+
+        // Compute a rough SNR-based quality metric from the processed audio
+        let signal_rms = (processed_audio.iter().map(|&s| s * s).sum::<f32>()
+            / processed_audio.len().max(1) as f32)
+            .sqrt();
+        let noise_est = processed_audio
+            .iter()
+            .map(|&s| s.abs())
+            .fold(f32::MAX, f32::min)
+            .max(1e-8);
+        let overall_quality = (signal_rms / noise_est).min(100.0).log10() / 2.0;
+        let overall_quality = overall_quality.clamp(0.0, 1.0);
 
         // Create conversion result
         ConversionResult {
@@ -588,11 +761,11 @@ impl RecognitionGuidedConverter {
             quality_metrics: HashMap::from([
                 ("intelligibility".to_string(), transcription.confidence),
                 ("prosody_preservation".to_string(), params.prosody_weight),
-                ("overall_quality".to_string(), 0.85),
+                ("overall_quality".to_string(), overall_quality),
             ]),
             artifacts: None,
             objective_quality: None,
-            processing_time: Duration::from_millis(50), // Simulated processing time
+            processing_time: _t0.elapsed(),
             conversion_type: request.conversion_type.clone(),
             success: true,
             error_message: None,
@@ -600,62 +773,187 @@ impl RecognitionGuidedConverter {
         }
     }
 
-    /// Apply speech-guided processing to audio
+    /// Apply speech-guided processing to audio using FFT-domain per-phoneme spectral shaping.
+    ///
+    /// For each phoneme segment the audio is processed in overlapping frames of 512 samples
+    /// (50 % hop), shaped in the frequency domain according to the phoneme type (vowel vs.
+    /// consonant), and overlap-added back.  A global intelligibility clamp pass is applied
+    /// at the end.
     fn apply_speech_guided_processing(
         &self,
         audio: &[f32],
         transcription: &ASRTranscription,
         params: &SpeechGuidedParams,
     ) -> Vec<f32> {
-        let mut processed = audio.to_vec();
+        use scirs2_core::numeric::Complex64;
 
-        // Apply vowel emphasis
-        if params.vowel_emphasis > 0.0 {
-            for phoneme in &transcription.phoneme_alignment {
-                if self.is_vowel_phoneme(&phoneme.phoneme) {
-                    // Enhance vowel regions
-                    let start_sample = (phoneme.start_time * 16000.0) as usize;
-                    let end_sample = (phoneme.end_time * 16000.0) as usize;
+        const SAMPLE_RATE: f64 = 16000.0;
+        const FRAME_LEN: usize = 512;
+        const HOP: usize = FRAME_LEN / 2;
 
-                    if start_sample < processed.len() && end_sample <= processed.len() {
-                        for sample in &mut processed[start_sample..end_sample] {
-                            *sample *= 1.0 + (params.vowel_emphasis - 1.0) * 0.1;
+        let n_audio = audio.len();
+        // Accumulation buffer for overlap-add, initialised from the source
+        let mut processed: Vec<f32> = audio.to_vec();
+
+        // Per-phoneme spectral shaping
+        for phoneme in &transcription.phoneme_alignment {
+            let start_sample = ((phoneme.start_time * SAMPLE_RATE as f32) as usize).min(n_audio);
+            let end_sample = ((phoneme.end_time * SAMPLE_RATE as f32) as usize).min(n_audio);
+
+            if start_sample >= end_sample {
+                continue;
+            }
+
+            let is_vowel = self.is_vowel_phoneme(&phoneme.phoneme);
+
+            // Determine spectral boost for this phoneme class
+            let (boost_lo_hz, boost_hi_hz, boost_gain) = if is_vowel {
+                (
+                    400.0_f64,
+                    2000.0_f64,
+                    1.0 + params.vowel_emphasis as f64 * 0.4,
+                )
+            } else {
+                (
+                    3000.0_f64,
+                    8000.0_f64,
+                    1.0 + params.consonant_clarity as f64 * 0.3,
+                )
+            };
+
+            let region_len = end_sample - start_sample;
+
+            if region_len < FRAME_LEN {
+                // Single-frame path: FFT on the whole region
+                let frame_f64: Vec<f64> = audio[start_sample..end_sample]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &s)| {
+                        let w = Self::hann_coeff(i, region_len);
+                        s as f64 * w
+                    })
+                    .collect();
+
+                if let Ok(mut spectrum) = scirs2_fft::rfft(&frame_f64, None) {
+                    // Apply frequency-domain boost
+                    let bin_hz = SAMPLE_RATE / region_len as f64;
+                    for (k, c) in spectrum.iter_mut().enumerate() {
+                        let freq = k as f64 * bin_hz;
+                        if freq >= boost_lo_hz && freq <= boost_hi_hz {
+                            c.re *= boost_gain;
+                            c.im *= boost_gain;
+                        }
+                    }
+
+                    if let Ok(time_out) = scirs2_fft::irfft(spectrum.as_slice(), Some(region_len)) {
+                        // Synthesis window + overlap-add
+                        let norm = region_len as f64;
+                        for (i, &s) in time_out.iter().enumerate() {
+                            let w = Self::hann_coeff(i, region_len);
+                            let idx = start_sample + i;
+                            if idx < n_audio {
+                                processed[idx] = (s * w / norm) as f32;
+                            }
                         }
                     }
                 }
-            }
-        }
+            } else {
+                // Overlap-add path over the phoneme region
+                // We accumulate into a local buffer then write back
+                let mut ola_buf = vec![0.0_f64; region_len];
+                let mut norm_buf = vec![0.0_f64; region_len];
 
-        // Apply consonant clarity enhancement
-        if params.consonant_clarity > 0.0 {
-            for phoneme in &transcription.phoneme_alignment {
-                if !self.is_vowel_phoneme(&phoneme.phoneme) {
-                    // Enhance consonant regions
-                    let start_sample = (phoneme.start_time * 16000.0) as usize;
-                    let end_sample = (phoneme.end_time * 16000.0) as usize;
+                let mut frame_start = 0usize;
+                while frame_start < region_len {
+                    let frame_end = (frame_start + FRAME_LEN).min(region_len);
+                    let actual_len = frame_end - frame_start;
 
-                    if start_sample < processed.len() && end_sample <= processed.len() {
-                        for sample in &mut processed[start_sample..end_sample] {
-                            *sample *= 1.0 + (params.consonant_clarity - 1.0) * 0.05;
+                    let frame_f64: Vec<f64> = audio
+                        [start_sample + frame_start..start_sample + frame_end]
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &s)| {
+                            let w = Self::hann_coeff(i, actual_len);
+                            s as f64 * w
+                        })
+                        .collect();
+
+                    let fft_size = if actual_len == FRAME_LEN {
+                        None // use the natural length
+                    } else {
+                        Some(actual_len)
+                    };
+
+                    if let Ok(mut spectrum) = scirs2_fft::rfft(&frame_f64, fft_size) {
+                        let fft_len = fft_size.unwrap_or(actual_len);
+                        let bin_hz = SAMPLE_RATE / fft_len as f64;
+                        for (k, c) in spectrum.iter_mut().enumerate() {
+                            let freq = k as f64 * bin_hz;
+                            if freq >= boost_lo_hz && freq <= boost_hi_hz {
+                                c.re *= boost_gain;
+                                c.im *= boost_gain;
+                            }
+                        }
+
+                        if let Ok(time_out) =
+                            scirs2_fft::irfft(spectrum.as_slice(), Some(actual_len))
+                        {
+                            let norm_scale = actual_len as f64;
+                            for (i, &s) in time_out.iter().enumerate() {
+                                let w = Self::hann_coeff(i, actual_len);
+                                let out_idx = frame_start + i;
+                                if out_idx < region_len {
+                                    ola_buf[out_idx] += s * w / norm_scale;
+                                    norm_buf[out_idx] += w * w;
+                                }
+                            }
                         }
                     }
+
+                    if frame_start + HOP >= region_len {
+                        break;
+                    }
+                    frame_start += HOP;
                 }
+
+                // Write OLA result back to processed buffer
+                for i in 0..region_len {
+                    let norm = if norm_buf[i] > 1e-12 {
+                        norm_buf[i]
+                    } else {
+                        1.0
+                    };
+                    let idx = start_sample + i;
+                    if idx < n_audio {
+                        processed[idx] = (ola_buf[i] / norm) as f32;
+                    }
+                }
+                // suppress unused import warning
+                let _: Option<Complex64> = None;
             }
         }
 
-        // Apply intelligibility boost
+        // Apply intelligibility boost: global clamp pass
         if params.intelligibility_boost > 1.0 {
             let boost_factor = (params.intelligibility_boost - 1.0) * 0.1;
             for sample in &mut processed {
                 if sample.abs() > 0.01 {
-                    // Only boost meaningful signal
                     *sample *= 1.0 + boost_factor;
-                    *sample = sample.clamp(-1.0, 1.0); // Prevent clipping
+                    *sample = sample.clamp(-1.0, 1.0);
                 }
             }
         }
 
         processed
+    }
+
+    /// Hann window coefficient for sample index `i` in a frame of length `n`.
+    #[inline]
+    fn hann_coeff(i: usize, n: usize) -> f64 {
+        if n <= 1 {
+            return 1.0;
+        }
+        0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / (n - 1) as f64).cos())
     }
 
     /// Check if a phoneme is a vowel
@@ -1084,5 +1382,150 @@ mod tests {
 
         converter.clear_cache();
         assert_eq!(converter.cache_size(), 0);
+    }
+
+    // -----------------------------------------------------------------
+    // FFT-domain spectral shaping + real-timing + quality tests
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_spectral_shaping_output_length() {
+        // sine wave → output same length as input
+        let sr = 16000_u32;
+        let samples: Vec<f32> = (0..sr)
+            .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / sr as f32).sin())
+            .collect();
+        let asr_config = ASRConfig::default();
+        let converter = RecognitionGuidedConverter::new(asr_config).unwrap();
+        // Use empty transcription — should be a no-op through phoneme loop
+        let transcription = ASRTranscription {
+            confidence: 0.9,
+            text: "".to_string(),
+            word_timestamps: vec![],
+            phoneme_alignment: vec![],
+            audio_duration: 1.0,
+        };
+        let params = SpeechGuidedParams::default();
+        let out = converter.apply_speech_guided_processing(&samples, &transcription, &params);
+        assert_eq!(out.len(), samples.len());
+    }
+
+    #[test]
+    fn test_real_timing_not_fixed() {
+        // processing_time must not be exactly 50 ms
+        let asr_config = ASRConfig::default();
+        let converter = RecognitionGuidedConverter::new(asr_config).unwrap();
+        let audio = vec![0.0f32; 1600];
+        let transcription = ASRTranscription {
+            confidence: 0.9,
+            text: "".to_string(),
+            word_timestamps: vec![],
+            phoneme_alignment: vec![],
+            audio_duration: 0.1,
+        };
+        let params = SpeechGuidedParams::default();
+        let request = ConversionRequest::new(
+            "test".to_string(),
+            audio,
+            16000,
+            ConversionType::SpeakerConversion,
+            ConversionTarget::new(VoiceCharacteristics::new()),
+        );
+        let result = converter.simulate_speech_guided_conversion(&request, &transcription, &params);
+        assert_ne!(result.processing_time, std::time::Duration::from_millis(50));
+    }
+
+    #[test]
+    fn test_overall_quality_in_range() {
+        let asr_config = ASRConfig::default();
+        let converter = RecognitionGuidedConverter::new(asr_config).unwrap();
+        let sr = 16000_u32;
+        let audio: Vec<f32> = (0..sr)
+            .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / sr as f32).sin() * 0.5)
+            .collect();
+        let transcription = ASRTranscription {
+            confidence: 0.9,
+            text: "test".to_string(),
+            word_timestamps: vec![],
+            phoneme_alignment: vec![],
+            audio_duration: 1.0,
+        };
+        let params = SpeechGuidedParams::default();
+        let request = ConversionRequest::new(
+            "test".to_string(),
+            audio,
+            16000,
+            ConversionType::SpeakerConversion,
+            ConversionTarget::new(VoiceCharacteristics::new()),
+        );
+        let result = converter.simulate_speech_guided_conversion(&request, &transcription, &params);
+        let q = result.quality_metrics["overall_quality"];
+        assert!(q >= 0.0 && q <= 1.0, "quality {q} out of [0,1]");
+    }
+
+    // -----------------------------------------------------------------
+    // Real audio-analysis tests
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_generate_words_silence_returns_empty() {
+        // Pure silence must yield no voiced segments
+        let converter = RecognitionGuidedConverter::new(ASRConfig::default()).unwrap();
+        let silence = vec![0.0f32; 16000];
+        let words = converter.generate_simulated_words(&silence, 1.0);
+        assert!(
+            words.is_empty(),
+            "Expected no words for silence, got {}",
+            words.len()
+        );
+    }
+
+    #[test]
+    fn test_generate_words_tone_detected() {
+        let converter = RecognitionGuidedConverter::new(ASRConfig::default()).unwrap();
+        // 440 Hz sine at 16 kHz, 0.5 s — must produce at least one voiced segment
+        let samples: Vec<f32> = (0..8000)
+            .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 16000.0).sin() * 0.5)
+            .collect();
+        let words = converter.generate_simulated_words(&samples, 0.5);
+        assert!(
+            !words.is_empty(),
+            "Expected voiced segments for a 440 Hz tone"
+        );
+        for w in &words {
+            assert!(
+                w.start_time < w.end_time,
+                "start_time must precede end_time"
+            );
+            assert!(
+                (0.4..=1.0).contains(&w.confidence),
+                "confidence out of range: {}",
+                w.confidence
+            );
+        }
+    }
+
+    #[test]
+    fn test_phoneme_alignment_covers_word_span() {
+        let converter = RecognitionGuidedConverter::new(ASRConfig::default()).unwrap();
+        let words = vec![WordTimestamp {
+            word: "a-1".to_string(),
+            start_time: 0.0,
+            end_time: 0.3,
+            confidence: 0.8,
+        }];
+        let phonemes = converter.generate_simulated_phonemes(&words);
+        assert!(!phonemes.is_empty(), "Expected at least one phoneme unit");
+        let span_start = phonemes.first().unwrap().start_time;
+        let span_end = phonemes.last().unwrap().end_time;
+        assert!(
+            (span_start - 0.0).abs() < 0.01,
+            "Phoneme span must start at word start"
+        );
+        assert!(
+            (span_end - 0.3).abs() < 0.1,
+            "Phoneme span must end near word end, got {}",
+            span_end
+        );
     }
 }

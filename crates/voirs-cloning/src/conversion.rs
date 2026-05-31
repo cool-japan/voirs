@@ -2,6 +2,8 @@
 
 use crate::embedding::SpeakerEmbedding;
 use crate::{types::VoiceSample, Error, Result};
+use scirs2_core::Complex;
+use scirs2_fft::RealFftPlanner;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, RwLock};
@@ -305,11 +307,15 @@ impl VoiceConverter {
         // Update statistics
         self.update_statistics(latency_ms, model.quality_score)?;
 
+        // Calculate confidence before moving converted_audio into the result struct
+        let actual_quality = self.calculate_conversion_quality(&converted_audio, &model)?;
+        let confidence = (1.0 - (actual_quality - model.quality_score).abs()).clamp(0.5, 0.99);
+
         Ok(ConversionResult {
             audio_data: converted_audio,
             latency_ms,
             quality_score: model.quality_score,
-            confidence: 0.8, // Simplified confidence calculation
+            confidence,
             metadata: HashMap::new(),
         })
     }
@@ -627,33 +633,163 @@ impl VoiceConverter {
         Ok(())
     }
 
-    /// Apply formant shifts to audio
+    /// Apply formant shifts to audio using FFT-domain spectral warping
     fn apply_formant_shifts(
         &self,
         audio: &mut [f32],
-        _shifts: &[f32],
-        _sample_rate: u32,
+        shifts: &[f32],
+        sample_rate: u32,
     ) -> Result<()> {
-        // Simplified formant shifting (spectral shaping)
-        // In a real implementation, this would involve spectral processing
-        let shift_factor = 1.0 + 0.1 * (_shifts.first().unwrap_or(&1.0) - 1.0);
+        if audio.len() < 4 || shifts.is_empty() {
+            return Ok(());
+        }
+        // Process in 1024-sample overlapping frames with 512-sample hop (overlap-add)
+        const FRAME: usize = 1024;
+        const HOP: usize = 512;
+        let n_bins = FRAME / 2 + 1;
+        let nyquist = sample_rate as f32 / 2.0;
 
-        for sample in audio.iter_mut() {
-            *sample *= shift_factor;
+        // Shift factor: use first 3 shifts for F1/F2/F3, default 1.0
+        let f1_shift = shifts.first().copied().unwrap_or(1.0).clamp(0.8, 1.25);
+        let f2_shift = shifts.get(1).copied().unwrap_or(1.0).clamp(0.8, 1.25);
+        let f3_shift = shifts.get(2).copied().unwrap_or(1.0).clamp(0.8, 1.25);
+
+        // Frequency band boundaries (Hz)
+        let f1_lo = 300.0_f32;
+        let f1_hi = 900.0_f32;
+        let f2_lo = 900.0_f32;
+        let f2_hi = 2500.0_f32;
+        let f3_lo = 2500.0_f32;
+        let f3_hi = 3500.0_f32;
+
+        let mut output = vec![0.0f32; audio.len()];
+        let mut norm = vec![0.0f32; audio.len()];
+
+        let mut planner = RealFftPlanner::<f32>::new();
+        let fwd = planner.plan_fft_forward(FRAME);
+        let inv = planner.plan_fft_inverse(FRAME);
+
+        let window: Vec<f32> = (0..FRAME)
+            .map(|i| 0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / (FRAME - 1) as f32).cos())
+            .collect();
+
+        let mut start = 0usize;
+        while start + FRAME <= audio.len() {
+            // Hann-windowed input frame
+            let frame: Vec<f32> = audio[start..start + FRAME]
+                .iter()
+                .zip(&window)
+                .map(|(&s, &w)| s * w)
+                .collect();
+            let mut spectrum = vec![Complex::new(0.0f32, 0.0f32); n_bins];
+            fwd.process(&frame, &mut spectrum)
+                .map_err(|e| Error::Processing(e.to_string()))?;
+
+            // Spectral warping: shift each bin toward the warped frequency
+            let mut warped = vec![Complex::new(0.0f32, 0.0f32); n_bins];
+            for (k, &c) in spectrum.iter().enumerate() {
+                let freq = k as f32 * nyquist / (n_bins - 1) as f32;
+                // Determine which warp factor applies
+                let shift = if freq >= f1_lo && freq < f1_hi {
+                    f1_shift
+                } else if freq >= f2_lo && freq < f2_hi {
+                    f2_shift
+                } else if freq >= f3_lo && freq < f3_hi {
+                    f3_shift
+                } else {
+                    1.0
+                };
+                // Target bin for this source bin
+                let target_bin = ((k as f32 / shift).round() as usize).min(n_bins - 1);
+                warped[target_bin].re += c.re;
+                warped[target_bin].im += c.im;
+            }
+
+            let mut out_frame = vec![0.0f32; FRAME];
+            inv.process(&warped, &mut out_frame)
+                .map_err(|e| Error::Processing(e.to_string()))?;
+            // Normalize IFFT and apply synthesis window
+            let scale = 1.0 / FRAME as f32;
+            for (j, (&w, &s)) in window.iter().zip(out_frame.iter()).enumerate() {
+                if start + j < output.len() {
+                    output[start + j] += s * w * scale;
+                    norm[start + j] += w * w;
+                }
+            }
+            start += HOP;
         }
 
+        // OLA normalization and write back
+        for (i, s) in audio.iter_mut().enumerate() {
+            if norm[i] > 1e-8 {
+                *s = output[i] / norm[i];
+            }
+        }
         Ok(())
     }
 
-    /// Apply spectral envelope transformation
+    /// Apply spectral envelope transformation using per-bin FFT multiplication with overlap-add
     fn apply_spectral_transformation(&self, audio: &mut [f32], envelope: &[f32]) -> Result<()> {
-        // Simplified spectral envelope application
-        let envelope_factor = envelope.iter().sum::<f32>() / envelope.len() as f32;
-
-        for sample in audio.iter_mut() {
-            *sample *= envelope_factor.clamp(0.1, 2.0);
+        if audio.len() < 4 || envelope.is_empty() {
+            return Ok(());
         }
+        const FRAME: usize = 1024;
+        const HOP: usize = 512;
+        let n_bins = FRAME / 2 + 1;
 
+        // Interpolate envelope to n_bins length
+        let env_bins: Vec<f32> = (0..n_bins)
+            .map(|k| {
+                let t = k as f32 * (envelope.len() - 1) as f32 / (n_bins - 1) as f32;
+                let lo = t as usize;
+                let hi = (lo + 1).min(envelope.len() - 1);
+                let f = t - lo as f32;
+                (envelope[lo] * (1.0 - f) + envelope[hi] * f).clamp(0.1, 3.0)
+            })
+            .collect();
+
+        let mut output = vec![0.0f32; audio.len()];
+        let mut norm = vec![0.0f32; audio.len()];
+        let mut planner = RealFftPlanner::<f32>::new();
+        let fwd = planner.plan_fft_forward(FRAME);
+        let inv = planner.plan_fft_inverse(FRAME);
+        let window: Vec<f32> = (0..FRAME)
+            .map(|i| 0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / (FRAME - 1) as f32).cos())
+            .collect();
+
+        let mut start = 0usize;
+        while start + FRAME <= audio.len() {
+            let frame: Vec<f32> = audio[start..start + FRAME]
+                .iter()
+                .zip(&window)
+                .map(|(&s, &w)| s * w)
+                .collect();
+            let mut spectrum = vec![Complex::new(0.0f32, 0.0f32); n_bins];
+            fwd.process(&frame, &mut spectrum)
+                .map_err(|e| Error::Processing(e.to_string()))?;
+
+            for (c, &g) in spectrum.iter_mut().zip(&env_bins) {
+                c.re *= g;
+                c.im *= g;
+            }
+
+            let mut out_frame = vec![0.0f32; FRAME];
+            inv.process(&spectrum, &mut out_frame)
+                .map_err(|e| Error::Processing(e.to_string()))?;
+            let scale = 1.0 / FRAME as f32;
+            for (j, (&w, &s)) in window.iter().zip(out_frame.iter()).enumerate() {
+                if start + j < output.len() {
+                    output[start + j] += s * w * scale;
+                    norm[start + j] += w * w;
+                }
+            }
+            start += HOP;
+        }
+        for (i, s) in audio.iter_mut().enumerate() {
+            if norm[i] > 1e-8 {
+                *s = output[i] / norm[i];
+            }
+        }
         Ok(())
     }
 
@@ -737,10 +873,22 @@ impl VoiceConverter {
         }
     }
 
-    /// Calculate conversion quality
-    fn calculate_conversion_quality(&self, _audio: &[f32], model: &ConversionModel) -> Result<f32> {
-        // Simplified quality calculation
-        Ok(model.quality_score)
+    /// Calculate conversion quality using SNR-based signal analysis
+    fn calculate_conversion_quality(&self, audio: &[f32], model: &ConversionModel) -> Result<f32> {
+        if audio.is_empty() {
+            return Ok(model.quality_score);
+        }
+        // Signal energy
+        let rms = (audio.iter().map(|&s| s * s).sum::<f32>() / audio.len() as f32).sqrt();
+        // Noise floor estimate: 5th-percentile absolute value
+        let mut abs_vals: Vec<f32> = audio.iter().map(|s| s.abs()).collect();
+        abs_vals.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let noise_floor = abs_vals[abs_vals.len() / 20].max(1e-8); // 5th percentile
+                                                                   // SNR in dB, mapped to [0,1]
+        let snr_db = 20.0 * (rms / noise_floor).log10();
+        let quality = (snr_db / 40.0).clamp(0.1, 1.0); // 40 dB → 1.0
+                                                       // Blend with model's expected quality (weight 0.4 signal, 0.6 model)
+        Ok(0.4 * quality + 0.6 * model.quality_score)
     }
 
     /// Estimate conversion quality for speaker pair
@@ -964,5 +1112,59 @@ mod tests {
         // Test time compression (faster)
         let compressed = converter.apply_temporal_scaling(&audio, 2.0).unwrap();
         assert!(compressed.len() < audio.len());
+    }
+
+    #[test]
+    fn test_conversion_quality_from_signal() {
+        // A sine wave should yield a quality score > hardcoded 0.0
+        let config = ConversionConfig::default();
+        let vc = VoiceConverter::new(config);
+        let sr = 16000_u32;
+        let audio: Vec<f32> = (0..sr)
+            .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / sr as f32).sin() * 0.5)
+            .collect();
+        let model = ConversionModel {
+            source_embedding: SpeakerEmbedding::new(vec![0.5; 64]),
+            target_embedding: SpeakerEmbedding::new(vec![0.6; 64]),
+            conversion_params: ConversionParameters {
+                f0_scale: 1.0,
+                formant_shifts: vec![1.0, 1.0, 1.0],
+                spectral_envelope: vec![1.0; 64],
+                voice_quality: 0.0,
+                temporal_scale: 1.0,
+                prosody_params: ProsodyParameters::default(),
+            },
+            quality_score: 0.7,
+            created_at: Instant::now(),
+            last_used: Instant::now(),
+        };
+        let q = vc.calculate_conversion_quality(&audio, &model).unwrap();
+        assert!(q > 0.1 && q <= 1.0, "quality {q} out of range");
+    }
+
+    #[test]
+    fn test_formant_shift_preserves_length() {
+        let config = ConversionConfig::default();
+        let vc = VoiceConverter::new(config);
+        let sr = 16000_u32;
+        let mut audio: Vec<f32> = (0..sr)
+            .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / sr as f32).sin() * 0.5)
+            .collect();
+        let len_before = audio.len();
+        vc.apply_formant_shifts(&mut audio, &[1.1, 1.05, 0.95], sr)
+            .unwrap();
+        assert_eq!(audio.len(), len_before);
+    }
+
+    #[test]
+    fn test_spectral_transform_preserves_length() {
+        let config = ConversionConfig::default();
+        let vc = VoiceConverter::new(config);
+        let mut audio: Vec<f32> = (0..8192).map(|i| (i as f32 * 0.001).sin()).collect();
+        let envelope = vec![1.2f32; 64];
+        let len_before = audio.len();
+        vc.apply_spectral_transformation(&mut audio, &envelope)
+            .unwrap();
+        assert_eq!(audio.len(), len_before);
     }
 }

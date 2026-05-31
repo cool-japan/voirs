@@ -641,23 +641,147 @@ impl PerformanceMonitor {
 
     /// Collect current system metrics
     async fn collect_system_metrics(&self) -> Result<()> {
-        // Note: In a real implementation, we would use the `sysinfo` crate or similar
-        // For now, we'll use placeholder values
+        // CPU usage via /proc/stat delta on Linux; fallback elsewhere
+        let cpu_percent = Self::read_cpu_usage_percent().await;
 
-        // CPU usage
-        self.record_gauge("system_cpu_usage_percent", 45.0, vec![])
-            .await?;
+        // Process RSS memory via /proc/self/status on Linux
+        let memory_usage_mb = Self::read_process_memory_mb();
 
-        // Memory usage
-        self.record_gauge("system_memory_usage_mb", 2048.0, vec![])
-            .await?;
-        self.record_gauge("system_memory_total_mb", 16384.0, vec![])
-            .await?;
+        // Total system memory via /proc/meminfo on Linux
+        let memory_total_mb = Self::read_total_memory_mb();
 
-        // Process info
-        self.record_gauge("process_threads", 12.0, vec![]).await?;
+        // Thread count via /proc/self/status on Linux
+        let thread_count = Self::read_thread_count();
+
+        self.record_gauge("system_cpu_usage_percent", cpu_percent, vec![])
+            .await?;
+        self.record_gauge("system_memory_usage_mb", memory_usage_mb, vec![])
+            .await?;
+        self.record_gauge("system_memory_total_mb", memory_total_mb, vec![])
+            .await?;
+        self.record_gauge("process_threads", thread_count, vec![])
+            .await?;
 
         Ok(())
+    }
+
+    /// Parse a value from proc-style file content.
+    ///
+    /// Finds the first line that starts with `prefix`, splits on whitespace,
+    /// and returns the second token parsed as `u64`.
+    fn parse_proc_value(content: &str, prefix: &str) -> Option<u64> {
+        content
+            .lines()
+            .find(|line| line.starts_with(prefix))
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|token| token.parse::<u64>().ok())
+    }
+
+    /// Read CPU usage percentage by sampling /proc/stat twice with a 50 ms gap.
+    ///
+    /// On non-Linux platforms returns a static fallback of `50.0`.
+    async fn read_cpu_usage_percent() -> f64 {
+        #[cfg(target_os = "linux")]
+        {
+            fn read_idle_and_total() -> Option<(u64, u64)> {
+                let content = std::fs::read_to_string("/proc/stat").ok()?;
+                let cpu_line = content.lines().find(|l| l.starts_with("cpu "))?;
+                let fields: Vec<u64> = cpu_line
+                    .split_whitespace()
+                    .skip(1)
+                    .filter_map(|t| t.parse::<u64>().ok())
+                    .collect();
+                if fields.len() < 4 {
+                    return None;
+                }
+                // fields: user nice system idle [iowait irq softirq ...]
+                let idle = fields[3];
+                let total: u64 = fields.iter().sum();
+                Some((idle, total))
+            }
+
+            let before = read_idle_and_total();
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            let after = read_idle_and_total();
+
+            match (before, after) {
+                (Some((idle0, total0)), Some((idle1, total1))) => {
+                    let total_delta = total1.saturating_sub(total0) as f64;
+                    let idle_delta = idle1.saturating_sub(idle0) as f64;
+                    if total_delta <= 0.0 {
+                        return 50.0;
+                    }
+                    let used = (1.0 - idle_delta / total_delta) * 100.0;
+                    used.clamp(0.0, 100.0)
+                }
+                _ => 50.0,
+            }
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            50.0
+        }
+    }
+
+    /// Read current process RSS from /proc/self/status (Linux only).
+    ///
+    /// Returns the value in MiB. Fallback: `256.0`.
+    fn read_process_memory_mb() -> f64 {
+        #[cfg(target_os = "linux")]
+        {
+            if let Ok(content) = std::fs::read_to_string("/proc/self/status") {
+                if let Some(kb) = Self::parse_proc_value(&content, "VmRSS:") {
+                    return kb as f64 / 1024.0;
+                }
+            }
+            256.0
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            256.0
+        }
+    }
+
+    /// Read total system memory from /proc/meminfo (Linux only).
+    ///
+    /// Returns the value in MiB. Fallback: `8192.0`.
+    fn read_total_memory_mb() -> f64 {
+        #[cfg(target_os = "linux")]
+        {
+            if let Ok(content) = std::fs::read_to_string("/proc/meminfo") {
+                if let Some(kb) = Self::parse_proc_value(&content, "MemTotal:") {
+                    return kb as f64 / 1024.0;
+                }
+            }
+            8192.0
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            8192.0
+        }
+    }
+
+    /// Read the thread count for the current process from /proc/self/status (Linux only).
+    ///
+    /// Fallback: `4.0`.
+    fn read_thread_count() -> f64 {
+        #[cfg(target_os = "linux")]
+        {
+            if let Ok(content) = std::fs::read_to_string("/proc/self/status") {
+                if let Some(threads) = Self::parse_proc_value(&content, "Threads:") {
+                    return threads as f64;
+                }
+            }
+            4.0
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            4.0
+        }
     }
 }
 
@@ -827,5 +951,48 @@ mod tests {
 
         let removed = monitor.cleanup_old_data().await.unwrap();
         assert!(removed > 0);
+    }
+
+    #[test]
+    fn test_parse_proc_value_cpu() {
+        // Simulate a /proc/stat-style "cpu " line
+        let mock_stat = "cpu  1234 56 789 4321 0 0 0 0 0 0\ncpu0 617 28 394 2160 0 0 0 0 0 0\n";
+
+        // The "cpu " prefix (with trailing space) should match the aggregate line
+        let result = PerformanceMonitor::parse_proc_value(mock_stat, "cpu ");
+        // nth(1) after split_whitespace skips "cpu" and returns the first field: 1234
+        assert_eq!(result, Some(1234));
+
+        // A prefix that does not exist should return None
+        let missing = PerformanceMonitor::parse_proc_value(mock_stat, "nonexistent:");
+        assert_eq!(missing, None);
+    }
+
+    #[test]
+    fn test_parse_proc_value_memory() {
+        // Simulate relevant lines from /proc/self/status
+        let mock_status = "Name:\tmyprocess\nVmRSS:\t131072 kB\nThreads:\t8\n";
+
+        // VmRSS in kB
+        let kb = PerformanceMonitor::parse_proc_value(mock_status, "VmRSS:");
+        assert_eq!(kb, Some(131_072));
+
+        // kB → MB conversion matches spec
+        let mb = kb.unwrap() as f64 / 1024.0;
+        assert!((mb - 128.0).abs() < f64::EPSILON);
+
+        // Thread count
+        let threads = PerformanceMonitor::parse_proc_value(mock_status, "Threads:");
+        assert_eq!(threads, Some(8));
+    }
+
+    #[tokio::test]
+    async fn test_system_metrics_no_crash() {
+        let monitor = PerformanceMonitor::new();
+        let result = monitor.collect_system_metrics().await;
+        assert!(
+            result.is_ok(),
+            "collect_system_metrics returned an error: {result:?}"
+        );
     }
 }

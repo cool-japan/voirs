@@ -157,6 +157,7 @@ pub mod utils;
 pub mod vocal_effects;
 pub mod voice;
 pub mod voice_blending;
+/// Multi-speaker voice conversion with spectral, neural, and hybrid methods
 pub mod voice_conversion;
 /// WebAssembly bindings for browser-based singing synthesis
 #[cfg(feature = "wasm-support")]

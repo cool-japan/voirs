@@ -768,4 +768,170 @@ mod tests {
             );
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Test 5: uniform durations of 2 → output shape [1, 4, 6]
+    // text_encoding [1, 4, 3] + all-2 durations → 3 phonemes × 2 frames = 6 frames
+    // -------------------------------------------------------------------------
+    #[test]
+    fn test_align_uniform_durations() {
+        let pred = make_predictor();
+        let batch = 1_usize;
+        let channels = 4_usize;
+        let seq_len = 3_usize;
+        let text = make_text_encoding(batch, channels, seq_len);
+
+        // All durations = 2 → 3 phonemes each repeated twice → 6 mel frames
+        let dur_data: Vec<f32> = vec![2.0, 2.0, 2.0];
+        let durations =
+            Tensor::from_vec(dur_data, (batch, 1usize, seq_len), &cpu()).expect("dur tensor");
+
+        let aligned = pred
+            .align_text_to_mel(&text, &durations)
+            .expect("align_text_to_mel failed");
+
+        assert_eq!(
+            aligned.dims(),
+            &[1, 4, 6],
+            "uniform durations=2 over 3 phonemes must yield [1, 4, 6] output"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Test 6: variable durations [1, 2, 3] → sum = 6 frames output
+    // -------------------------------------------------------------------------
+    #[test]
+    fn test_align_variable_durations() {
+        let pred = make_predictor();
+        let batch = 1_usize;
+        let channels = 4_usize;
+        let seq_len = 3_usize;
+        let text = make_text_encoding(batch, channels, seq_len);
+
+        // Durations [1, 2, 3] → total = 6 frames
+        let dur_data: Vec<f32> = vec![1.0, 2.0, 3.0];
+        let expected_total: usize = 6; // 1 + 2 + 3
+        let durations =
+            Tensor::from_vec(dur_data, (batch, 1usize, seq_len), &cpu()).expect("dur tensor");
+
+        let aligned = pred
+            .align_text_to_mel(&text, &durations)
+            .expect("align_text_to_mel failed");
+
+        assert_eq!(
+            aligned.dims(),
+            &[1, channels, expected_total],
+            "variable durations [1,2,3] must yield time-dim = 6"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Test 7: output time-dim equals sum of (rounded) durations
+    // -------------------------------------------------------------------------
+    #[test]
+    fn test_align_shape() {
+        let pred = make_predictor();
+        let batch = 2_usize;
+        let channels = 8_usize;
+        let seq_len = 5_usize;
+        let text = make_text_encoding(batch, channels, seq_len);
+
+        // Durations: each batch item has the same durations [1, 3, 2, 4, 2] → sum = 12
+        let dur_data: Vec<f32> = vec![
+            1.0, 3.0, 2.0, 4.0, 2.0, // batch 0
+            1.0, 3.0, 2.0, 4.0, 2.0, // batch 1
+        ];
+        let expected_total: usize = 12; // 1+3+2+4+2
+        let durations =
+            Tensor::from_vec(dur_data, (batch, 1usize, seq_len), &cpu()).expect("dur tensor");
+
+        let aligned = pred
+            .align_text_to_mel(&text, &durations)
+            .expect("align_text_to_mel failed");
+
+        assert_eq!(
+            aligned.dims()[0],
+            batch,
+            "batch dimension must be preserved"
+        );
+        assert_eq!(
+            aligned.dims()[1],
+            channels,
+            "channel dimension must be preserved"
+        );
+        assert_eq!(
+            aligned.dims()[2],
+            expected_total,
+            "time-dim must equal sum of durations"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Test 8: content verification — specific frames map to the correct phoneme
+    // durations [2, 1, 3] for a [1, 4, 3] encoding:
+    //   frames 0-1  → phoneme 0 (value 0.0)
+    //   frame  2    → phoneme 1 (value 1.0)
+    //   frames 3-5  → phoneme 2 (value 2.0)
+    // -------------------------------------------------------------------------
+    #[test]
+    fn test_align_content() {
+        let pred = make_predictor();
+        let channels = 4_usize;
+        let seq_len = 3_usize;
+        // make_text_encoding: phoneme p in batch 0 gets constant value p as f32
+        let text = make_text_encoding(1, channels, seq_len);
+
+        let dur_data: Vec<f32> = vec![2.0, 1.0, 3.0]; // frames: 0-1 → ph0, 2 → ph1, 3-5 → ph2
+        let durations =
+            Tensor::from_vec(dur_data, (1usize, 1usize, seq_len), &cpu()).expect("dur tensor");
+
+        let aligned = pred
+            .align_text_to_mel(&text, &durations)
+            .expect("align_text_to_mel failed");
+
+        // Helper: extract all channel values at a specific time-frame
+        let frame_values = |frame_idx: usize| -> Vec<f32> {
+            aligned
+                .narrow(2, frame_idx, 1)
+                .expect("narrow time failed")
+                .squeeze(2)
+                .expect("squeeze failed")
+                .to_vec2::<f32>()
+                .expect("to_vec2 failed")
+                .remove(0)
+        };
+
+        // Phoneme 0: frames 0 and 1 must all equal 0.0
+        for frame_idx in 0..2 {
+            let vals = frame_values(frame_idx);
+            for (ch, &v) in vals.iter().enumerate() {
+                assert_eq!(
+                    v, 0.0_f32,
+                    "frame {frame_idx} channel {ch}: expected phoneme-0 value 0.0, got {v}"
+                );
+            }
+        }
+
+        // Phoneme 1: frame 2 must all equal 1.0
+        {
+            let vals = frame_values(2);
+            for (ch, &v) in vals.iter().enumerate() {
+                assert_eq!(
+                    v, 1.0_f32,
+                    "frame 2 channel {ch}: expected phoneme-1 value 1.0, got {v}"
+                );
+            }
+        }
+
+        // Phoneme 2: frames 3, 4, 5 must all equal 2.0
+        for frame_idx in 3..6 {
+            let vals = frame_values(frame_idx);
+            for (ch, &v) in vals.iter().enumerate() {
+                assert_eq!(
+                    v, 2.0_f32,
+                    "frame {frame_idx} channel {ch}: expected phoneme-2 value 2.0, got {v}"
+                );
+            }
+        }
+    }
 }

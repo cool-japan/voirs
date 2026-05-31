@@ -7,6 +7,8 @@ use crate::position::{Listener, SoundSource};
 use crate::room::RoomSimulator;
 use crate::types::{BinauraAudio, Position3D, SpatialEffect, SpatialRequest, SpatialResult};
 use scirs2_core::ndarray::{Array1, Array2};
+use scirs2_core::Complex;
+use scirs2_fft::{ComplexToReal, RealFftPlanner, RealToComplex};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -28,6 +30,8 @@ pub struct SpatialProcessor {
     processing_state: ProcessingState,
     /// Memory manager for optimization
     memory_manager: Arc<MemoryManager>,
+    /// Previous source position and timestamp for Doppler velocity estimation
+    doppler_prev: Arc<std::sync::Mutex<Option<(crate::types::Position3D, std::time::Instant)>>>,
 }
 
 /// Builder for SpatialProcessor
@@ -114,6 +118,7 @@ impl SpatialProcessor {
             listener: Arc::new(RwLock::new(Listener::default())),
             processing_state,
             memory_manager,
+            doppler_prev: Arc::new(std::sync::Mutex::new(None)),
         })
     }
 
@@ -296,19 +301,72 @@ impl SpatialProcessor {
             .await
     }
 
-    /// Apply Doppler effect
+    /// Apply Doppler effect based on radial velocity of the source relative to the listener.
+    ///
+    /// Uses position history stored in `doppler_prev` to estimate instantaneous radial velocity,
+    /// then resamples the audio channels by the classical Doppler factor
+    /// `f_obs / f_src = c / (c + v_r)` via linear interpolation.
     async fn apply_doppler_effect(
         &self,
         left_channel: &mut Array1<f32>,
         right_channel: &mut Array1<f32>,
-        _source_position: &Position3D,
+        source_position: &Position3D,
     ) -> crate::Result<()> {
-        // Simplified Doppler effect implementation
-        // In a real implementation, this would require velocity tracking
-        let doppler_factor = 1.0; // Placeholder
+        const SPEED_OF_SOUND: f32 = 343.0; // m/s at 20 °C
 
-        *left_channel *= doppler_factor;
-        *right_channel *= doppler_factor;
+        let listener = self.listener.read().await;
+        let listener_pos = listener.position();
+        drop(listener);
+
+        // Compute Doppler factor from position history
+        let doppler_factor = {
+            let mut prev = self.doppler_prev.lock().unwrap();
+            let now = std::time::Instant::now();
+            let factor = if let Some((prev_pos, prev_time)) = *prev {
+                let dt = now.duration_since(prev_time).as_secs_f32();
+                if dt > 1e-6 {
+                    let prev_dist = prev_pos.distance_to(&listener_pos);
+                    let curr_dist = source_position.distance_to(&listener_pos);
+                    let radial_vel = (curr_dist - prev_dist) / dt; // positive → moving away
+                    (SPEED_OF_SOUND / (SPEED_OF_SOUND + radial_vel)).clamp(0.5, 2.0)
+                } else {
+                    1.0
+                }
+            } else {
+                1.0
+            };
+            *prev = Some((*source_position, now));
+            factor
+        };
+
+        if (doppler_factor - 1.0).abs() < 1e-4 {
+            return Ok(()); // No perceptible Doppler shift
+        }
+
+        // Resample each channel by doppler_factor using linear interpolation.
+        // output[i] reads the source at fractional position i * doppler_factor.
+        let resample = |channel: &Array1<f32>| -> Array1<f32> {
+            let n = channel.len();
+            if n == 0 {
+                return Array1::zeros(0);
+            }
+            let src = channel.as_slice().unwrap();
+            let out: Vec<f32> = (0..n)
+                .map(|i| {
+                    let src_pos = i as f32 * doppler_factor;
+                    let lo = src_pos as usize;
+                    let hi = (lo + 1).min(n - 1);
+                    let frac = src_pos - lo as f32;
+                    let lo_val = if lo < n { src[lo] } else { 0.0 };
+                    let hi_val = if hi < n { src[hi] } else { 0.0 };
+                    lo_val * (1.0 - frac) + hi_val * frac
+                })
+                .collect();
+            Array1::from_vec(out)
+        };
+
+        *left_channel = resample(left_channel);
+        *right_channel = resample(right_channel);
 
         Ok(())
     }
@@ -331,7 +389,12 @@ impl SpatialProcessor {
         1.0 / distance.max(1.0)
     }
 
-    /// Apply air absorption
+    /// Apply frequency-dependent air absorption in the FFT domain.
+    ///
+    /// Implements a simplified ISO 9613-1 attenuation model:
+    ///   α(f) ≈ (f_kHz)^1.5 × 0.0002 + f_kHz × 0.001  dB/m
+    /// at 20 °C / 70 % relative humidity.  Each FFT bin is attenuated by
+    ///   `exp(-ln(10)/20 × α_dB_per_m × distance)`.
     fn apply_air_absorption(
         &self,
         left_channel: &mut Array1<f32>,
@@ -341,13 +404,66 @@ impl SpatialProcessor {
         if !self.config.enable_air_absorption {
             return;
         }
+        if distance < 0.1 {
+            return;
+        }
 
-        // Simplified air absorption model
-        // Higher frequencies are absorbed more
-        let absorption_factor = (-0.01 * distance).exp();
+        let n = left_channel.len();
+        if n < 4 {
+            return;
+        }
 
-        *left_channel *= absorption_factor;
-        *right_channel *= absorption_factor;
+        let fft_len = n.next_power_of_two();
+        let sample_rate = self.config.sample_rate as f32;
+        let nyquist = sample_rate / 2.0;
+        let n_bins = fft_len / 2 + 1;
+
+        // Build a per-bin attenuation table once for both channels.
+        let attenuations: Vec<f32> = (0..n_bins)
+            .map(|k| {
+                let freq_hz = k as f32 * nyquist / (n_bins - 1).max(1) as f32;
+                let freq_khz = (freq_hz / 1000.0).max(0.1);
+                // ISO 9613-1 simplified dB/m at 20 °C, 70 % RH
+                let alpha_db_per_m = freq_khz.powf(1.5) * 0.0002 + freq_khz * 0.001;
+                // -ln(10)/20 ≈ -0.1151
+                (-0.1151 * alpha_db_per_m * distance).exp()
+            })
+            .collect();
+
+        let apply_absorption = |channel: &mut Array1<f32>| {
+            let mut planner = RealFftPlanner::<f32>::new();
+            let fwd = planner.plan_fft_forward(fft_len);
+            let inv = planner.plan_fft_inverse(fft_len);
+
+            // Zero-pad input to fft_len
+            let mut input: Vec<f32> = channel.to_vec();
+            input.resize(fft_len, 0.0);
+
+            let mut spectrum = vec![Complex::new(0.0f32, 0.0f32); n_bins];
+            if fwd.process(&input, &mut spectrum).is_err() {
+                return;
+            }
+
+            // Apply per-bin frequency-dependent attenuation
+            for (c, &att) in spectrum.iter_mut().zip(attenuations.iter()) {
+                c.re *= att;
+                c.im *= att;
+            }
+
+            let mut output = vec![0.0f32; fft_len];
+            if inv.process(&spectrum, &mut output).is_err() {
+                return;
+            }
+
+            // The inverse FFT from scirs2_fft already normalises by 1/N internally;
+            // write back only the original n samples.
+            for (s, &v) in channel.iter_mut().zip(output.iter()) {
+                *s = v;
+            }
+        };
+
+        apply_absorption(left_channel);
+        apply_absorption(right_channel);
     }
 
     /// Get memory manager for advanced memory operations
@@ -506,6 +622,7 @@ mod tests {
                 total_processing_time: Duration::ZERO,
             },
             memory_manager: Arc::new(MemoryManager::new(MemoryConfig::default())),
+            doppler_prev: Arc::new(std::sync::Mutex::new(None)),
         };
 
         // Test distance attenuation
@@ -535,6 +652,7 @@ mod tests {
                 total_processing_time: Duration::ZERO,
             },
             memory_manager: Arc::new(MemoryManager::new(MemoryConfig::default())),
+            doppler_prev: Arc::new(std::sync::Mutex::new(None)),
         };
 
         let source_pos = Position3D::new(5.0, 0.0, 0.0);
@@ -550,5 +668,78 @@ mod tests {
         assert_eq!(relative_pos.x, 5.0);
         assert_eq!(relative_pos.y, 0.0);
         assert_eq!(relative_pos.z, 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_doppler_no_crash_static_source() {
+        // With a static source the first call stores position; no resampling occurs (factor == 1.0).
+        let config = SpatialConfig::default();
+        let mut processor = SpatialProcessor::new(config).await.unwrap();
+        let n = 1024usize;
+        let mut left =
+            Array1::from_vec((0..n).map(|i| (i as f32 * 0.01).sin()).collect::<Vec<_>>());
+        let mut right = left.clone();
+        let pos = Position3D::new(5.0, 0.0, 0.0);
+        processor
+            .apply_doppler_effect(&mut left, &mut right, &pos)
+            .await
+            .unwrap();
+        assert_eq!(left.len(), n);
+    }
+
+    #[tokio::test]
+    async fn test_air_absorption_attenuates_high_freq() {
+        // A signal at 8 kHz should be attenuated more at 100 m than at 1 m.
+        let config = SpatialConfig::default();
+        let processor = SpatialProcessor::new(config).await.unwrap();
+        let n = 2048usize;
+        let sr = 48_000.0f32;
+        let signal: Vec<f32> = (0..n)
+            .map(|i| (2.0 * std::f32::consts::PI * 8_000.0 * i as f32 / sr).sin())
+            .collect();
+
+        let mut left_near = Array1::from_vec(signal.clone());
+        let mut right_near = Array1::from_vec(signal.clone());
+        processor.apply_air_absorption(&mut left_near, &mut right_near, 1.0);
+
+        let mut left_far = Array1::from_vec(signal.clone());
+        let mut right_far = Array1::from_vec(signal.clone());
+        processor.apply_air_absorption(&mut left_far, &mut right_far, 100.0);
+
+        let rms = |ch: &Array1<f32>| -> f32 {
+            (ch.iter().map(|&s| s * s).sum::<f32>() / ch.len() as f32).sqrt()
+        };
+        assert!(
+            rms(&left_far) < rms(&left_near),
+            "Far distance should attenuate more than near distance"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_doppler_moving_source() {
+        // Two calls with the source moving toward the listener → non-trivial Doppler resampling.
+        let config = SpatialConfig::default();
+        let mut processor = SpatialProcessor::new(config).await.unwrap();
+        let n = 1024usize;
+        let mut left = Array1::from_vec(vec![0.5f32; n]);
+        let mut right = left.clone();
+        // First call establishes the previous-position baseline.
+        let pos1 = Position3D::new(10.0, 0.0, 0.0);
+        processor
+            .apply_doppler_effect(&mut left, &mut right, &pos1)
+            .await
+            .unwrap();
+        // Wait a small but measurable interval so dt > 1 µs.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        // Source moved toward the listener (x=0); radial_vel < 0 → factor > 1.
+        let pos2 = Position3D::new(5.0, 0.0, 0.0);
+        let mut left2 = Array1::from_vec(vec![0.5f32; n]);
+        let mut right2 = left2.clone();
+        processor
+            .apply_doppler_effect(&mut left2, &mut right2, &pos2)
+            .await
+            .unwrap();
+        // Output length must always match the input length regardless of Doppler factor.
+        assert_eq!(left2.len(), n);
     }
 }

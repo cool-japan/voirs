@@ -664,7 +664,7 @@ pub enum FormatQuality {
     Highest,
 }
 
-/// Audio format reader (placeholder for future implementation)
+/// Audio format reader — WAV audio I/O using hound.
 pub struct AudioReader;
 
 impl AudioReader {
@@ -679,7 +679,7 @@ impl AudioReader {
 
         match format_type {
             AudioFormatType::Wav | AudioFormatType::Wav24 | AudioFormatType::Wav32f => {
-                Self::read_wav_placeholder(path)
+                Self::read_wav(path)
             }
             AudioFormatType::Flac => Err(Error::audio(
                 "flac: decoder not available (claxon not in dependencies)".to_string(),
@@ -700,7 +700,7 @@ impl AudioReader {
     }
 
     /// Read WAV file using hound
-    fn read_wav_placeholder<P: AsRef<Path>>(path: P) -> Result<AudioData> {
+    fn read_wav<P: AsRef<Path>>(path: P) -> Result<AudioData> {
         let mut reader = hound::WavReader::open(path.as_ref())
             .map_err(|e| Error::audio(format!("Failed to open WAV file: {e}")))?;
 
@@ -791,7 +791,7 @@ impl AudioReader {
     }
 }
 
-/// Audio format writer (placeholder for future implementation)
+/// Audio format writer — WAV audio I/O using hound.
 pub struct AudioWriter;
 
 impl AudioWriter {
@@ -807,7 +807,7 @@ impl AudioWriter {
 
         match format_type {
             AudioFormatType::Wav | AudioFormatType::Wav24 | AudioFormatType::Wav32f => {
-                Self::write_wav_placeholder(audio, path)
+                Self::write_wav(audio, path)
             }
             _ => Err(Error::audio(format!(
                 "Writing format {format_type:?} not yet implemented - requires additional dependencies"
@@ -815,7 +815,7 @@ impl AudioWriter {
         }
     }
 
-    fn write_wav_placeholder<P: AsRef<Path>>(audio: &AudioData, path: P) -> Result<()> {
+    fn write_wav<P: AsRef<Path>>(audio: &AudioData, path: P) -> Result<()> {
         let bits_per_sample = audio.format.bits_per_sample.unwrap_or(16);
         let (sample_format, bits) = match audio.format.format_type {
             AudioFormatType::Wav32f => (hound::SampleFormat::Float, 32u16),

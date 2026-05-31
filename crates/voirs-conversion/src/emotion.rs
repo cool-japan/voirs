@@ -317,51 +317,155 @@ impl EmotionConversionAdapter {
     }
 
     fn estimate_pitch_variation(&self, audio: &[f32]) -> Result<f32> {
-        // Simple pitch variation estimation using zero-crossing rate
-        let mut zero_crossings = 0;
-        for i in 1..audio.len() {
-            if (audio[i] >= 0.0) != (audio[i - 1] >= 0.0) {
-                zero_crossings += 1;
+        // Real autocorrelation-based F0 estimation.
+        // Parameters assume a 22050 Hz sample rate.
+        const SAMPLE_RATE: f64 = 22050.0;
+        const FRAME_LEN: usize = 551; // ~25 ms at 22050 Hz
+        const HOP_LEN: usize = 220; // ~10 ms at 22050 Hz
+        const LAG_MIN: usize = 27; // corresponds to ~800 Hz upper bound (sr/800 rounds to 27)
+        const LAG_MAX: usize = 275; // corresponds to ~80 Hz lower bound
+        const VOICED_THRESHOLD: f64 = 0.3;
+
+        if audio.len() < FRAME_LEN {
+            return Ok(0.0);
+        }
+
+        let mut voiced_log_f0: Vec<f64> = Vec::new();
+        let n_frames = (audio.len() - FRAME_LEN) / HOP_LEN + 1;
+
+        for frame_idx in 0..n_frames {
+            let start = frame_idx * HOP_LEN;
+            let frame = &audio[start..start + FRAME_LEN];
+
+            // r[0] = sum of x[n]^2 (zero-lag autocorrelation)
+            let r0: f64 = frame.iter().map(|&x| (x as f64) * (x as f64)).sum();
+            if r0 < 1e-10 {
+                continue; // Silent frame — skip
+            }
+
+            // Find lag with maximum normalized autocorrelation in [LAG_MIN, LAG_MAX]
+            let lag_upper = LAG_MAX.min(FRAME_LEN - 1);
+            let mut best_lag = LAG_MIN;
+            let mut best_corr = f64::NEG_INFINITY;
+
+            for lag in LAG_MIN..=lag_upper {
+                let mut r_lag: f64 = 0.0;
+                for n in 0..(FRAME_LEN - lag) {
+                    r_lag += (frame[n] as f64) * (frame[n + lag] as f64);
+                }
+                let norm_corr = r_lag / r0;
+                if norm_corr > best_corr {
+                    best_corr = norm_corr;
+                    best_lag = lag;
+                }
+            }
+
+            if best_corr > VOICED_THRESHOLD {
+                let f0 = SAMPLE_RATE / best_lag as f64;
+                // Store log-F0 in semitones: 12 * log2(f0)
+                if f0 > 0.0 {
+                    voiced_log_f0.push(12.0 * f0.log2());
+                }
             }
         }
 
-        let zcr = zero_crossings as f32 / audio.len() as f32;
-        Ok(zcr.clamp(0.0, 1.0))
+        if voiced_log_f0.is_empty() {
+            return Ok(0.0);
+        }
+
+        // Compute standard deviation of log-F0 (in semitones)
+        let n = voiced_log_f0.len() as f64;
+        let mean = voiced_log_f0.iter().sum::<f64>() / n;
+        let variance = voiced_log_f0
+            .iter()
+            .map(|&v| (v - mean).powi(2))
+            .sum::<f64>()
+            / n;
+        let std_dev = variance.sqrt();
+
+        // Normalize: divide by 12 to map semitone std_dev → [0, 1] range
+        Ok((std_dev / 12.0).clamp(0.0, 1.0) as f32)
+    }
+
+    /// Build a Hann-windowed, zero-padded FFT magnitude spectrum from the
+    /// centre of `audio` (up to 2048 samples, padded to 2048).
+    ///
+    /// Returns `(magnitudes, n_bins)` where `n_bins = N_FFT / 2 + 1`.
+    fn compute_windowed_fft_magnitudes(audio: &[f32]) -> Result<(Vec<f64>, usize)> {
+        const N_FFT: usize = 2048;
+        let n_bins = N_FFT / 2 + 1;
+
+        // Take up to N_FFT samples from the middle of the signal
+        let (start, frame_len) = if audio.len() >= N_FFT {
+            let mid = audio.len() / 2;
+            let half = N_FFT / 2;
+            (mid.saturating_sub(half), N_FFT)
+        } else {
+            (0, audio.len())
+        };
+        let frame = &audio[start..start + frame_len];
+
+        // Apply Hann window and zero-pad to N_FFT
+        let mut windowed = vec![0.0f64; N_FFT];
+        for (i, &s) in frame.iter().enumerate() {
+            let w = 0.5
+                * (1.0
+                    - (2.0 * std::f64::consts::PI * i as f64
+                        / (frame_len.saturating_sub(1)).max(1) as f64)
+                        .cos());
+            windowed[i] = s as f64 * w;
+        }
+
+        let spectrum = scirs2_fft::rfft(&windowed, Some(N_FFT))
+            .map_err(|e| Error::processing(format!("FFT computation failed: {e}")))?;
+
+        let magnitudes: Vec<f64> = spectrum.iter().map(|c| c.norm()).collect();
+        Ok((magnitudes, n_bins))
     }
 
     fn estimate_spectral_centroid(&self, audio: &[f32]) -> Result<f32> {
-        // Simplified spectral centroid estimation
-        let mut weighted_sum = 0.0;
-        let mut magnitude_sum = 0.0;
-
-        for (i, &sample) in audio.iter().enumerate() {
-            let magnitude = sample.abs();
-            weighted_sum += i as f32 * magnitude;
-            magnitude_sum += magnitude;
-        }
-
-        if magnitude_sum > 0.0 {
-            Ok((weighted_sum / magnitude_sum) / audio.len() as f32)
-        } else {
-            Ok(0.5) // Default to middle frequency
-        }
-    }
-
-    fn estimate_spectral_rolloff(&self, audio: &[f32]) -> Result<f32> {
-        // Simplified spectral rolloff estimation (85% of energy)
-        let mut cumulative_energy = 0.0;
-        let total_energy: f32 = audio.iter().map(|&x| x * x).sum();
-
-        if total_energy == 0.0 {
+        if audio.is_empty() {
             return Ok(0.5);
         }
 
-        let target_energy = total_energy * 0.85;
+        let (magnitudes, n_bins) = Self::compute_windowed_fft_magnitudes(audio)?;
 
-        for (i, &sample) in audio.iter().enumerate() {
-            cumulative_energy += sample * sample;
-            if cumulative_energy >= target_energy {
-                return Ok(i as f32 / audio.len() as f32);
+        let mut weighted_sum = 0.0f64;
+        let mut magnitude_sum = 0.0f64;
+        for (k, &mag) in magnitudes.iter().enumerate() {
+            weighted_sum += k as f64 * mag;
+            magnitude_sum += mag;
+        }
+
+        if magnitude_sum < 1e-10 {
+            return Ok(0.5); // Default to mid-frequency
+        }
+
+        // Normalise bin index centroid to [0, 1]
+        let centroid = (weighted_sum / magnitude_sum) / (n_bins as f64 - 1.0).max(1.0);
+        Ok(centroid.clamp(0.0, 1.0) as f32)
+    }
+
+    fn estimate_spectral_rolloff(&self, audio: &[f32]) -> Result<f32> {
+        if audio.is_empty() {
+            return Ok(0.5);
+        }
+
+        let (magnitudes, n_bins) = Self::compute_windowed_fft_magnitudes(audio)?;
+
+        // Power spectrum
+        let power: Vec<f64> = magnitudes.iter().map(|&m| m * m).collect();
+        let total_power: f64 = power.iter().sum();
+        if total_power < 1e-10 {
+            return Ok(0.5);
+        }
+
+        let threshold = 0.85 * total_power;
+        let mut cumulative = 0.0f64;
+        for (k, &p) in power.iter().enumerate() {
+            cumulative += p;
+            if cumulative >= threshold {
+                return Ok((k as f64 / (n_bins as f64 - 1.0).max(1.0)).clamp(0.0, 1.0) as f32);
             }
         }
 

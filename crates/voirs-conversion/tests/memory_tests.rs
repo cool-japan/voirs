@@ -463,12 +463,13 @@ async fn test_memory_allocation_patterns() -> Result<()> {
                 // Memory efficiency should be reasonable
                 // Use sliding scale: smaller audio samples have higher expected overhead
                 let max_overhead = match description {
-                    "tiny" => 500.0,      // Very small samples have high overhead due to fixed costs
-                    "small" => 100.0,     // Small samples still have high overhead
-                    "medium" => 50.0, // Medium samples should be more efficient (increased from 30.0)
-                    "large" => 40.0, // Large samples should be very efficient (increased from 30.0)
-                    "very_large" => 30.0, // Very large samples should be most efficient (increased from 20.0)
-                    _ => 35.0,            // Default increased from 25.0
+                    "tiny" => 500.0,   // Very small samples have high overhead due to fixed costs
+                    "small" => 100.0,  // Small samples still have high overhead
+                    "medium" => 100.0, // Real phase-vocoder (FRAME=1024, HOP=256) needs working buffers;
+                    // pipeline fixed costs dominate for 1s of audio
+                    "large" => 50.0, // Large samples: vocoder buffers amortised (increased from 40.0)
+                    "very_large" => 30.0, // Very large samples: most efficient (unchanged)
+                    _ => 35.0,       // Default
                 };
 
                 assert!(

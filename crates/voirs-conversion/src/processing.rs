@@ -420,15 +420,144 @@ impl FeatureExtractor {
         let prosodic = self.extract_prosodic_features(&processed_audio)?;
         let speaker_embedding = None; // Would require neural network
 
+        let quality = self.compute_quality_features(&processed_audio)?;
+        let formants = self.compute_formant_features(&processed_audio)?;
+        let harmonics = self.compute_harmonic_features(&processed_audio)?;
+
         Ok(AudioFeatures {
             spectral,
             temporal,
             prosodic,
             speaker_embedding,
-            quality: Vec::new(),   // Placeholder for quality features
-            formants: Vec::new(),  // Placeholder for formant features
-            harmonics: Vec::new(), // Placeholder for harmonic features
+            quality,
+            formants,
+            harmonics,
         })
+    }
+
+    /// Compute a representative Hann-windowed FFT frame from audio.
+    /// Returns the magnitude spectrum of the first full window.
+    fn compute_representative_spectrum(&self, audio: &[f32]) -> Result<Vec<f32>> {
+        const WINDOW_SIZE: usize = 1024;
+        if audio.len() < WINDOW_SIZE {
+            // Pad with zeros for short audio
+            let mut padded = audio.to_vec();
+            padded.resize(WINDOW_SIZE, 0.0);
+            let windowed: Vec<f32> = padded
+                .iter()
+                .enumerate()
+                .map(|(i, &x)| {
+                    let hann = 0.5
+                        - 0.5
+                            * (2.0 * std::f32::consts::PI * i as f32 / (WINDOW_SIZE - 1) as f32)
+                                .cos();
+                    x * hann
+                })
+                .collect();
+            return self.compute_fft(&windowed);
+        }
+        let window = &audio[..WINDOW_SIZE];
+        let windowed: Vec<f32> = window
+            .iter()
+            .enumerate()
+            .map(|(i, &x)| {
+                let hann = 0.5
+                    - 0.5
+                        * (2.0 * std::f32::consts::PI * i as f32 / (WINDOW_SIZE - 1) as f32).cos();
+                x * hann
+            })
+            .collect();
+        self.compute_fft(&windowed)
+    }
+
+    /// Compute SNR-based voice quality estimate as a 1-element Vec in [0, 1].
+    fn compute_quality_features(&self, audio: &[f32]) -> Result<Vec<f32>> {
+        if audio.is_empty() {
+            return Ok(vec![0.0]);
+        }
+        let rms = (audio.iter().map(|x| x * x).sum::<f32>() / audio.len() as f32).sqrt();
+        let spectrum = self.compute_representative_spectrum(audio)?;
+
+        // Noise floor: median of bottom 20% of spectrum magnitudes
+        let bottom_count = ((spectrum.len() as f32 * 0.2) as usize).max(1);
+        let mut sorted_mags: Vec<f32> = spectrum[..bottom_count].to_vec();
+        sorted_mags.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let noise_floor = sorted_mags[sorted_mags.len() / 2];
+
+        let snr_db = 20.0 * (rms / (noise_floor + 1e-8)).log10();
+        let snr_normalized = snr_db.clamp(0.0, 60.0) / 60.0;
+
+        Ok(vec![snr_normalized])
+    }
+
+    /// Find peak-energy spectrum bin in a frequency band [low_hz, high_hz].
+    /// Returns frequency in Hz of the peak bin.
+    fn peak_freq_in_band(&self, spectrum: &[f32], low_hz: f32, high_hz: f32) -> f32 {
+        let sr = self.sample_rate as f32;
+        let n = spectrum.len() as f32;
+        let low_bin = ((low_hz * n * 2.0 / sr) as usize).min(spectrum.len().saturating_sub(1));
+        let high_bin = ((high_hz * n * 2.0 / sr) as usize).min(spectrum.len().saturating_sub(1));
+
+        let mut peak_mag = 0.0_f32;
+        let mut peak_bin = low_bin;
+
+        for k in low_bin..=high_bin {
+            if spectrum[k] > peak_mag {
+                peak_mag = spectrum[k];
+                peak_bin = k;
+            }
+        }
+
+        peak_bin as f32 * sr / (2.0 * spectrum.len() as f32)
+    }
+
+    /// Compute formant frequencies [F1_hz, F2_hz, F3_hz] via spectral peak-picking.
+    fn compute_formant_features(&self, audio: &[f32]) -> Result<Vec<f32>> {
+        let spectrum = self.compute_representative_spectrum(audio)?;
+
+        let f1 = self.peak_freq_in_band(&spectrum, 300.0, 900.0);
+        let f2 = self.peak_freq_in_band(&spectrum, 900.0, 2500.0);
+        let f3 = self.peak_freq_in_band(&spectrum, 2500.0, 3500.0);
+
+        Ok(vec![f1, f2, f3])
+    }
+
+    /// Compute HNR-proxy via autocorrelation of the first frame.
+    /// Returns a 1-element Vec with the normalized peak correlation in [0, 1).
+    fn compute_harmonic_features(&self, audio: &[f32]) -> Result<Vec<f32>> {
+        let sr = self.sample_rate as usize;
+        let frame_len = (sr / 20).min(audio.len()); // 50 ms frame max
+        if frame_len == 0 {
+            return Ok(vec![0.0]);
+        }
+        let frame = &audio[..frame_len];
+
+        let zero_lag: f32 = frame.iter().map(|x| x * x).sum();
+        if zero_lag < 1e-12 {
+            return Ok(vec![0.0]);
+        }
+
+        let lag_min = sr / 500; // min period ~ 500 Hz
+        let lag_max = (sr / 50).min(frame_len / 2); // max period ~ 50 Hz
+
+        if lag_min >= lag_max {
+            return Ok(vec![0.0]);
+        }
+
+        let mut peak_corr = 0.0_f32;
+        for lag in lag_min..lag_max {
+            let corr: f32 = frame[..frame_len - lag]
+                .iter()
+                .zip(frame[lag..].iter())
+                .map(|(a, b)| a * b)
+                .sum();
+            if corr > peak_corr {
+                peak_corr = corr;
+            }
+        }
+
+        let hnr = (peak_corr / zero_lag).clamp(0.0, 0.999);
+        Ok(vec![hnr])
     }
 
     /// Extract spectral features
@@ -637,28 +766,68 @@ impl FeatureExtractor {
     }
 
     fn compute_mel_spectrum(&self, spectrum: &[f32], num_coeffs: usize) -> Vec<f32> {
-        // Simplified mel-scale computation
-        let mut mel_spectrum = vec![0.0; num_coeffs];
-        let mel_low = self.hz_to_mel(0.0);
-        let mel_high = self.hz_to_mel(self.sample_rate as f32 / 2.0);
+        // Real triangular mel filterbank MFCC pipeline (26 filters).
+        const NUM_FILTERS: usize = 26;
+        let f_low: f32 = 80.0;
+        let f_high: f32 = self.sample_rate as f32 / 2.0;
 
-        for (i, mel_value) in mel_spectrum.iter_mut().enumerate().take(num_coeffs) {
-            let mel_center = mel_low + (mel_high - mel_low) * i as f32 / (num_coeffs - 1) as f32;
-            let hz_center = self.mel_to_hz(mel_center);
-            let bin_center = hz_center * spectrum.len() as f32 * 2.0 / self.sample_rate as f32;
+        let mel_low = self.hz_to_mel(f_low);
+        let mel_high = self.hz_to_mel(f_high);
 
-            let start_bin = (bin_center - 1.0).max(0.0) as usize;
-            let end_bin = ((bin_center + 1.0) as usize).min(spectrum.len() - 1);
+        // Compute NUM_FILTERS + 2 center frequencies evenly spaced in mel domain.
+        // Index 0 and NUM_FILTERS+1 are the outer edges; 1..=NUM_FILTERS are filter centers.
+        let mut hz_centers = vec![0.0_f32; NUM_FILTERS + 2];
+        for (i, center) in hz_centers.iter_mut().enumerate() {
+            let mel_val = mel_low + i as f32 * (mel_high - mel_low) / (NUM_FILTERS + 1) as f32;
+            *center = self.mel_to_hz(mel_val);
+        }
 
-            for j in start_bin..=end_bin {
-                if j < spectrum.len() {
-                    *mel_value += spectrum[j];
-                }
+        // Accumulate triangular filter energies.
+        let mut filter_energies = vec![0.0_f32; NUM_FILTERS];
+        let sr = self.sample_rate as f32;
+        let num_bins = spectrum.len();
+
+        for (k, &mag) in spectrum.iter().enumerate() {
+            let freq_k = k as f32 * sr / (2.0 * num_bins as f32);
+
+            // Filter i (1-indexed) uses hz_centers[i-1], hz_centers[i], hz_centers[i+1].
+            for i in 1..=NUM_FILTERS {
+                let left = hz_centers[i - 1];
+                let center = hz_centers[i];
+                let right = hz_centers[i + 1];
+
+                let weight = if (left..=center).contains(&freq_k) {
+                    let denom = center - left;
+                    if denom > 0.0 {
+                        (freq_k - left) / denom
+                    } else {
+                        0.0
+                    }
+                } else if (center..=right).contains(&freq_k) {
+                    let denom = right - center;
+                    if denom > 0.0 {
+                        (right - freq_k) / denom
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                };
+
+                filter_energies[i - 1] += weight * mag;
             }
         }
 
-        // Apply DCT for MFCC
-        self.apply_dct(&mel_spectrum)
+        // Apply log compression.
+        let log_energies: Vec<f32> = filter_energies.iter().map(|&e| (e + 1e-8).ln()).collect();
+
+        // Apply DCT-II and return first num_coeffs coefficients.
+        let dct_out = self.apply_dct(&log_energies);
+        let take = num_coeffs.min(dct_out.len());
+        let mut out = dct_out[..take].to_vec();
+        // Pad with zeros if num_coeffs > NUM_FILTERS
+        out.resize(num_coeffs, 0.0);
+        out
     }
 
     fn hz_to_mel(&self, hz: f32) -> f32 {
@@ -933,5 +1102,71 @@ impl SignalProcessor {
                 }
             })
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests_mel {
+    use super::*;
+
+    fn make_extractor() -> FeatureExtractor {
+        FeatureExtractor::new(22050)
+    }
+
+    /// Generate a pure sine wave at `freq_hz` Hz with `sample_rate` and `num_samples` samples.
+    fn sine_wave(freq_hz: f32, sample_rate: u32, num_samples: usize) -> Vec<f32> {
+        (0..num_samples)
+            .map(|i| (2.0 * std::f32::consts::PI * freq_hz * i as f32 / sample_rate as f32).sin())
+            .collect()
+    }
+
+    #[test]
+    fn test_mel_spectrum_shape() {
+        let extractor = make_extractor();
+        // Use a simple flat spectrum as input.
+        let spectrum = vec![1.0_f32; 513]; // 1024-point FFT → 513 bins
+        for num_coeffs in [1_usize, 13, 26, 30] {
+            let result = extractor.compute_mel_spectrum(&spectrum, num_coeffs);
+            assert_eq!(
+                result.len(),
+                num_coeffs,
+                "Expected output length {num_coeffs}, got {}",
+                result.len()
+            );
+        }
+    }
+
+    #[test]
+    fn test_formant_extraction_sine() {
+        // A 1 kHz sine wave should place most energy in the F2 band (900–2500 Hz).
+        let extractor = make_extractor();
+        let audio = sine_wave(1000.0, extractor.sample_rate, 4096);
+        let spectrum = extractor.compute_representative_spectrum(&audio).unwrap();
+
+        // The F2 band (900–2500 Hz) peak should be near 1000 Hz.
+        let f2 = extractor.peak_freq_in_band(&spectrum, 900.0, 2500.0);
+        assert!(
+            (f2 - 1000.0).abs() < 100.0,
+            "Expected F2 near 1000 Hz, got {f2:.1} Hz"
+        );
+
+        // The formant extraction convenience method should return a 3-element Vec.
+        let formants = extractor.compute_formant_features(&audio).unwrap();
+        assert_eq!(formants.len(), 3, "Expected 3 formants");
+    }
+
+    #[test]
+    fn test_quality_snr_positive() {
+        // A loud sine wave should have strictly positive normalized SNR.
+        let extractor = make_extractor();
+        let audio = sine_wave(440.0, extractor.sample_rate, 4096);
+        let quality = extractor.compute_quality_features(&audio).unwrap();
+        assert_eq!(quality.len(), 1, "Expected 1-element quality Vec");
+        let snr = quality[0];
+        assert!(
+            snr > 0.0,
+            "Expected positive SNR for a pure sine wave, got {snr}"
+        );
+        assert!(snr <= 1.0, "SNR should be normalised to [0,1], got {snr}");
     }
 }

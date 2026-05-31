@@ -672,91 +672,184 @@ impl SpeakerVerifier {
     }
 
     fn compute_mel_features(&self, audio: &[f32], sample_rate: u32) -> Result<Vec<f32>> {
-        // Real MFCC implementation: FFT → mel filterbank → log → DCT-II → 13 coefficients
-        const N_FFT: usize = 512;
-        const N_MEL: usize = 26;
+        // Full MFCC pipeline:
+        //   frame audio → Hann window → FFT → magnitude spectrum
+        //   → area-normalised triangular mel filterbank (26 filters, 80 Hz–Nyquist)
+        //   → log → orthonormal DCT-II → keep first 13 coefficients
+        //   → average over all frames → return Vec<f32> of length 13
         const N_MFCC: usize = 13;
+        const N_MEL: usize = 26;
         const F_MIN_HZ: f64 = 80.0;
 
+        // Return zero vector for degenerate input rather than erroring.
         if audio.is_empty() {
-            return Ok(vec![0.0; N_MFCC]);
+            return Ok(vec![0.0_f32; N_MFCC]);
         }
 
-        let f_max_hz = sample_rate as f64 / 2.0;
+        let sr = sample_rate as f64;
 
-        // --- 1. Power spectrum (one-sided, length N_FFT/2+1) ---
-        let n_out = N_FFT / 2 + 1;
-        let power = self.compute_power_spectrum(audio, N_FFT);
+        // --- Frame parameters (standard speech processing defaults) ---
+        // 25 ms frames, 10 ms hop, rounded to nearest sample
+        let frame_len = ((sr * 0.025).round() as usize).max(2);
+        let hop_len = ((sr * 0.010).round() as usize).max(1);
 
-        // --- 2. Mel filterbank (N_MEL triangular filters) ---
-        // hz_to_mel / mel_to_hz using standard formula
-        let hz_to_mel = |hz: f64| -> f64 { 2595.0 * (1.0 + hz / 700.0).log10() };
-        let mel_to_hz = |mel: f64| -> f64 { 700.0 * (10.0_f64.powf(mel / 2595.0) - 1.0) };
+        // N_FFT = next power-of-two >= frame_len so zero-padding is correct
+        let n_fft = frame_len.next_power_of_two();
+        let n_out = n_fft / 2 + 1; // one-sided spectrum bins
 
-        let mel_min = hz_to_mel(F_MIN_HZ);
-        let mel_max = hz_to_mel(f_max_hz);
-
-        // N_MEL + 2 evenly-spaced mel points (include lower and upper edges)
-        let n_points = N_MEL + 2;
-        let mel_points: Vec<f64> = (0..n_points)
-            .map(|i| mel_min + (mel_max - mel_min) * i as f64 / (n_points - 1) as f64)
-            .collect();
-
-        // Convert mel points to FFT bin indices
-        let bin_indices: Vec<f64> = mel_points
-            .iter()
-            .map(|&m| {
-                let hz = mel_to_hz(m);
-                hz * (N_FFT as f64) / (sample_rate as f64)
+        // --- Pre-compute Hann window ---
+        // w[n] = 0.5 * (1 - cos(2π n / (N-1))), length = frame_len
+        let hann: Vec<f64> = (0..frame_len)
+            .map(|n| {
+                0.5 * (1.0 - (2.0 * std::f64::consts::PI * n as f64 / (frame_len - 1) as f64).cos())
             })
             .collect();
 
-        // Apply filterbank → mel energies
-        let mut mel_energies = vec![0.0_f32; N_MEL];
-        for m in 0..N_MEL {
-            let f_left = bin_indices[m];
-            let f_center = bin_indices[m + 1];
-            let f_right = bin_indices[m + 2];
+        // --- Pre-compute area-normalised triangular mel filterbank ---
+        //
+        // Following Slaney (1993 / Auditory Toolbox):
+        //   area = 2 / (f_right - f_left)     (area normalisation)
+        //   rising  slope:  area * (k - f_left)  / (f_center - f_left)
+        //   falling slope:  area * (f_right - k) / (f_right - f_center)
+        let hz_to_mel = |hz: f64| 2595.0 * (1.0 + hz / 700.0).log10();
+        let mel_to_hz = |mel: f64| 700.0 * (10.0_f64.powf(mel / 2595.0) - 1.0);
 
+        let nyquist = sr / 2.0;
+        let f_max_hz = nyquist.min(8000.0); // cap at 8 kHz as specified
+        let mel_min = hz_to_mel(F_MIN_HZ);
+        let mel_max = hz_to_mel(f_max_hz);
+
+        // N_MEL + 2 equally-spaced mel-axis points (edges + centres)
+        let n_mel_pts = N_MEL + 2;
+        let mel_pts: Vec<f64> = (0..n_mel_pts)
+            .map(|i| mel_min + (mel_max - mel_min) * i as f64 / (n_mel_pts - 1) as f64)
+            .collect();
+
+        // Convert mel points to FFT bin indices (real-valued, not rounded)
+        let bin_f: Vec<f64> = mel_pts
+            .iter()
+            .map(|&m| mel_to_hz(m) / sr * n_fft as f64)
+            .collect();
+
+        // Build filterbank weights: filter_weights[m][k]  (N_MEL × n_out)
+        // Pre-allocate as flat array for cache locality.
+        let mut filter_weights = vec![0.0_f64; N_MEL * n_out];
+        for m in 0..N_MEL {
+            let f_left = bin_f[m];
+            let f_center = bin_f[m + 1];
+            let f_right = bin_f[m + 2];
+            let bw = f_right - f_left;
+            // area normalisation: peak of triangle = 2 / bw
+            let area_norm = if bw > 1e-12 { 2.0 / bw } else { 1.0 };
             for k in 0..n_out {
-                let k_f = k as f64;
-                let weight = if k_f >= f_left && k_f <= f_center {
-                    if (f_center - f_left).abs() < 1e-12 {
-                        1.0
+                let kf = k as f64;
+                let w = if kf >= f_left && kf <= f_center {
+                    let rise = f_center - f_left;
+                    if rise > 1e-12 {
+                        area_norm * (kf - f_left) / rise
                     } else {
-                        (k_f - f_left) / (f_center - f_left)
+                        area_norm
                     }
-                } else if k_f > f_center && k_f <= f_right {
-                    if (f_right - f_center).abs() < 1e-12 {
-                        1.0
+                } else if kf > f_center && kf <= f_right {
+                    let fall = f_right - f_center;
+                    if fall > 1e-12 {
+                        area_norm * (f_right - kf) / fall
                     } else {
-                        (f_right - k_f) / (f_right - f_center)
+                        area_norm
                     }
                 } else {
                     0.0
                 };
-                mel_energies[m] += power[k] * weight as f32;
+                filter_weights[m * n_out + k] = w;
             }
         }
 
-        // --- 3. Log scale ---
-        let log_mel: Vec<f64> = mel_energies
-            .iter()
-            .map(|&e| ((e as f64) + 1e-10_f64).ln())
+        // --- Pre-compute DCT-II orthonormal basis coefficients ---
+        // For coefficient k (0-indexed, k = 0..N_MFCC):
+        //   k = 0:  sqrt(1 / N_MEL)
+        //   k > 0:  sqrt(2 / N_MEL) * cos(π k (2n + 1) / (2 N_MEL))
+        //
+        // We keep coefficients k = 0..N_MFCC but return all N_MFCC of them.
+        // (Dropping k=0 is optional; the task says return 13 coefficients from the
+        // DCT; using k=1..=13 is common, but we follow the orthonormal definition
+        // and return k=0..12 so the length is always exactly 13.)
+        let dct_basis: Vec<f64> = (0..N_MFCC)
+            .flat_map(|k| {
+                let norm = if k == 0 {
+                    (1.0_f64 / N_MEL as f64).sqrt()
+                } else {
+                    (2.0_f64 / N_MEL as f64).sqrt()
+                };
+                (0..N_MEL).map(move |n| {
+                    norm * (std::f64::consts::PI * k as f64 * (2 * n + 1) as f64
+                        / (2 * N_MEL) as f64)
+                        .cos()
+                })
+            })
             .collect();
 
-        // --- 4. DCT-II to obtain MFCCs, skip k=0 (DC), take k=1..=N_MFCC ---
-        let mut mfcc = vec![0.0_f32; N_MFCC];
-        for (idx, coeff) in mfcc.iter_mut().enumerate() {
-            let k = idx + 1; // skip DC (k=0)
-            let mut sum = 0.0_f64;
-            for (n, &lm) in log_mel.iter().enumerate() {
-                sum += lm
-                    * (std::f64::consts::PI * k as f64 * (2 * n + 1) as f64 / (2 * N_MEL) as f64)
-                        .cos();
+        // --- Frame the audio and accumulate MFCC sums ---
+        let mut mfcc_sum = vec![0.0_f64; N_MFCC];
+        let mut n_frames: usize = 0;
+
+        // Slide the window; skip frames shorter than half of frame_len at end
+        let mut frame_buf = vec![0.0_f64; n_fft];
+        let mut start = 0_usize;
+        while start + frame_len / 2 <= audio.len() {
+            let end = (start + frame_len).min(audio.len());
+            let actual_len = end - start;
+
+            // Apply Hann window and zero-pad to n_fft
+            for i in 0..n_fft {
+                frame_buf[i] = if i < actual_len {
+                    audio[start + i] as f64 * hann[i]
+                } else {
+                    0.0
+                };
             }
-            *coeff = sum as f32;
+
+            // RFFT → magnitude power spectrum (one-sided)
+            let spectrum = scirs2_fft::rfft(&frame_buf, Some(n_fft))
+                .map_err(|e| Error::Processing(format!("FFT failed: {e}")))?;
+
+            // Power spectrum: |X[k]|²
+            let power: Vec<f64> = spectrum
+                .iter()
+                .take(n_out)
+                .map(|c| c.re * c.re + c.im * c.im)
+                .collect();
+
+            // Apply mel filterbank
+            let mut mel_energy = [0.0_f64; N_MEL];
+            for m in 0..N_MEL {
+                let row_offset = m * n_out;
+                let mut acc = 0.0_f64;
+                for k in 0..n_out {
+                    acc += power[k] * filter_weights[row_offset + k];
+                }
+                mel_energy[m] = acc;
+            }
+
+            // Log mel energies (floor at 1e-10 to avoid -inf)
+            let log_mel: [f64; N_MEL] = std::array::from_fn(|m| (mel_energy[m] + 1e-10_f64).ln());
+
+            // Orthonormal DCT-II: accumulate into mfcc_sum
+            for k in 0..N_MFCC {
+                let row_offset = k * N_MEL;
+                let mut acc = 0.0_f64;
+                for n in 0..N_MEL {
+                    acc += dct_basis[row_offset + n] * log_mel[n];
+                }
+                mfcc_sum[k] += acc;
+            }
+
+            n_frames += 1;
+            start += hop_len;
         }
+
+        // Average over frames (guard against zero-frame edge case)
+        let n_frames_f = if n_frames == 0 { 1 } else { n_frames } as f64;
+        let mfcc: Vec<f32> = mfcc_sum.iter().map(|&s| (s / n_frames_f) as f32).collect();
 
         Ok(mfcc)
     }
@@ -1685,6 +1778,111 @@ mod tests {
             features.len() >= 17,
             "extract_acoustic_features must return at least 17 values (4 basic + 13 MFCC), got {}",
             features.len()
+        );
+    }
+
+    // --- Required MFCC unit tests ---
+
+    /// 440 Hz sine at 22050 Hz sample rate must return exactly 13 coefficients.
+    #[test]
+    fn test_mel_features_shape() {
+        let config = VerificationConfig::default();
+        let verifier = SpeakerVerifier::new(config).unwrap();
+
+        let sample_rate = 22050_u32;
+        // ~0.5 seconds of pure 440 Hz tone
+        let n_samples = sample_rate as usize / 2;
+        let audio: Vec<f32> = (0..n_samples)
+            .map(|i| {
+                let t = i as f32 / sample_rate as f32;
+                (2.0 * std::f32::consts::PI * 440.0 * t).sin() * 0.7
+            })
+            .collect();
+
+        let coeffs = verifier
+            .compute_mel_features(&audio, sample_rate)
+            .expect("compute_mel_features must not error on valid input");
+
+        assert_eq!(
+            coeffs.len(),
+            13,
+            "Expected exactly 13 MFCC coefficients, got {}",
+            coeffs.len()
+        );
+    }
+
+    /// All-zero input (silence) must return 13 finite coefficients without panicking.
+    #[test]
+    fn test_mel_features_silence() {
+        let config = VerificationConfig::default();
+        let verifier = SpeakerVerifier::new(config).unwrap();
+
+        let sample_rate = 16000_u32;
+        // One second of complete silence
+        let audio = vec![0.0_f32; sample_rate as usize];
+
+        let coeffs = verifier
+            .compute_mel_features(&audio, sample_rate)
+            .expect("compute_mel_features must not error on silence");
+
+        assert_eq!(
+            coeffs.len(),
+            13,
+            "Expected exactly 13 MFCC coefficients for silence, got {}",
+            coeffs.len()
+        );
+        for (i, &c) in coeffs.iter().enumerate() {
+            assert!(
+                c.is_finite(),
+                "MFCC coefficient[{i}] is not finite for silence input: {c}"
+            );
+        }
+    }
+
+    /// Two spectrally distinct tones must produce different MFCC vectors.
+    #[test]
+    fn test_mel_features_different() {
+        let config = VerificationConfig::default();
+        let verifier = SpeakerVerifier::new(config).unwrap();
+
+        let sample_rate = 16000_u32;
+        let n_samples = sample_rate as usize / 2; // 0.5 s
+
+        // Low-frequency tone (200 Hz)
+        let low_tone: Vec<f32> = (0..n_samples)
+            .map(|i| {
+                let t = i as f32 / sample_rate as f32;
+                (2.0 * std::f32::consts::PI * 200.0 * t).sin() * 0.8
+            })
+            .collect();
+
+        // High-frequency tone (3500 Hz)
+        let high_tone: Vec<f32> = (0..n_samples)
+            .map(|i| {
+                let t = i as f32 / sample_rate as f32;
+                (2.0 * std::f32::consts::PI * 3500.0 * t).sin() * 0.8
+            })
+            .collect();
+
+        let mfcc_low = verifier
+            .compute_mel_features(&low_tone, sample_rate)
+            .expect("compute_mel_features must not error on low tone");
+        let mfcc_high = verifier
+            .compute_mel_features(&high_tone, sample_rate)
+            .expect("compute_mel_features must not error on high tone");
+
+        assert_eq!(mfcc_low.len(), 13);
+        assert_eq!(mfcc_high.len(), 13);
+
+        // The two vectors must be meaningfully different (L1 distance > small threshold)
+        let l1: f32 = mfcc_low
+            .iter()
+            .zip(mfcc_high.iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum();
+        assert!(
+            l1 > 0.1,
+            "MFCC vectors for 200 Hz and 3500 Hz tones must differ; L1 distance = {l1}"
         );
     }
 }

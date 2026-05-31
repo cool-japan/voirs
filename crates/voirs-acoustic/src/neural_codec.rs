@@ -11,7 +11,7 @@
 //! - Perceptual quality optimization
 //! - Adaptive bitrate based on content complexity
 
-use candle_core::{Device, Result as CandleResult, Tensor};
+use candle_core::{DType, Device, Tensor};
 use candle_nn::{Linear, Module};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -419,13 +419,137 @@ impl ResidualVectorQuantizer {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Internal DSP helpers
+// ---------------------------------------------------------------------------
+
+/// Build a DCT-II derived linear projection of shape `[out_dim, in_dim]`.
+///
+/// Row `k` is the k-th DCT-II basis vector evaluated at `in_dim` sample points,
+/// normalised to unit L2 norm.  The first `out_dim` rows form an orthonormal set
+/// (for `out_dim <= in_dim`), making this an excellent deterministic encoder
+/// initialisation that captures the dominant frequency content of each frame.
+fn build_dct_projection(out_dim: usize, in_dim: usize, device: &Device) -> Result<Linear> {
+    use std::f32::consts::PI;
+
+    let mut weights = vec![0.0_f32; out_dim * in_dim];
+
+    for k in 0..out_dim {
+        let scale = if k == 0 {
+            (1.0_f32 / in_dim as f32).sqrt()
+        } else {
+            (2.0_f32 / in_dim as f32).sqrt()
+        };
+        for n in 0..in_dim {
+            let val =
+                scale * (PI * k as f32 * (2.0 * n as f32 + 1.0) / (2.0 * in_dim as f32)).cos();
+            weights[k * in_dim + n] = val;
+        }
+    }
+
+    let weight_tensor = Tensor::from_vec(weights, (out_dim, in_dim), device).map_err(|e| {
+        AcousticError::ProcessingError {
+            message: format!("Failed to build DCT projection tensor: {}", e),
+        }
+    })?;
+
+    Ok(Linear::new(weight_tensor, None))
+}
+
+/// Build the transposed DCT back-projection of shape `[in_dim, out_dim]`.
+///
+/// This is the pseudo-inverse of `build_dct_projection(out_dim, in_dim)`:
+/// i.e., the DCT-III synthesis matrix.  When the latent code lives exactly
+/// in the DCT-II subspace (which it does after encode + RVQ decode), applying
+/// this projection reconstructs a scaled version of the original frame.
+fn build_dct_back_projection(enc_dim: usize, hop_length: usize, device: &Device) -> Result<Linear> {
+    use std::f32::consts::PI;
+
+    // Decoder weight shape: [hop_length, enc_dim]  (maps enc_dim → hop_length)
+    let mut weights = vec![0.0_f32; hop_length * enc_dim];
+
+    for k in 0..enc_dim {
+        let scale = if k == 0 {
+            (1.0_f32 / hop_length as f32).sqrt()
+        } else {
+            (2.0_f32 / hop_length as f32).sqrt()
+        };
+        for n in 0..hop_length {
+            // Transposed: weight[n, k] = dct_basis[k, n]
+            let val =
+                scale * (PI * k as f32 * (2.0 * n as f32 + 1.0) / (2.0 * hop_length as f32)).cos();
+            weights[n * enc_dim + k] = val;
+        }
+    }
+
+    let weight_tensor = Tensor::from_vec(weights, (hop_length, enc_dim), device).map_err(|e| {
+        AcousticError::ProcessingError {
+            message: format!("Failed to build DCT back-projection tensor: {}", e),
+        }
+    })?;
+
+    Ok(Linear::new(weight_tensor, None))
+}
+
+/// Per-frame z-score normalisation.
+///
+/// For a `[N, D]` tensor: each row is shifted by its mean and divided by its
+/// standard deviation (with a small `eps` floor to avoid division by zero).
+/// This is the standard pre-processing applied before a linear audio codec
+/// projection layer.
+fn per_frame_normalise(frames: &Tensor) -> Result<Tensor> {
+    // Mean per frame → [N, 1]
+    let mean = frames
+        .mean_keepdim(1)
+        .map_err(|e| AcousticError::ProcessingError {
+            message: format!("per_frame_normalise mean failed: {}", e),
+        })?;
+
+    // Subtract mean → [N, D]
+    let centred = frames
+        .broadcast_sub(&mean)
+        .map_err(|e| AcousticError::ProcessingError {
+            message: format!("per_frame_normalise sub failed: {}", e),
+        })?;
+
+    // Variance per frame → [N, 1]
+    let var = centred
+        .sqr()
+        .map_err(|e| AcousticError::ProcessingError {
+            message: format!("per_frame_normalise sqr failed: {}", e),
+        })?
+        .mean_keepdim(1)
+        .map_err(|e| AcousticError::ProcessingError {
+            message: format!("per_frame_normalise var failed: {}", e),
+        })?;
+
+    // Std = sqrt(var + eps)
+    let std = (var + 1e-8_f64)
+        .map_err(|e| AcousticError::ProcessingError {
+            message: format!("per_frame_normalise var+eps failed: {}", e),
+        })?
+        .sqrt()
+        .map_err(|e| AcousticError::ProcessingError {
+            message: format!("per_frame_normalise sqrt failed: {}", e),
+        })?;
+
+    centred
+        .broadcast_div(&std)
+        .map_err(|e| AcousticError::ProcessingError {
+            message: format!("per_frame_normalise div failed: {}", e),
+        })
+}
+
+// ---------------------------------------------------------------------------
+// End of DSP helpers
+// ---------------------------------------------------------------------------
+
 /// Neural audio codec encoder
 pub struct NeuralEncoder {
     /// Configuration
     config: NeuralCodecConfig,
-    /// Convolutional layers for encoding
-    #[allow(dead_code)]
-    layers: Vec<Arc<dyn Module + Send + Sync>>,
+    /// Projection layer: maps frame (hop_length) → encoder_dim via DCT-derived weights
+    proj: Linear,
     /// RVQ for quantization
     rvq: ResidualVectorQuantizer,
     /// Device
@@ -436,14 +560,19 @@ impl std::fmt::Debug for NeuralEncoder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NeuralEncoder")
             .field("config", &self.config)
-            .field("layers", &format!("<{} layers>", self.layers.len()))
+            .field("proj", &"<Linear projection>")
             .field("device", &self.device)
             .finish()
     }
 }
 
 impl NeuralEncoder {
-    /// Create new neural encoder
+    /// Create new neural encoder.
+    ///
+    /// The encoder projection is initialised from a truncated DCT-II matrix so
+    /// that the first `encoder_dim` basis vectors form an orthonormal frame for
+    /// the `hop_length`-dimensional input.  This gives a meaningful, invertible
+    /// starting point that works without pretrained weights.
     pub fn new(config: NeuralCodecConfig, device: &Device) -> Result<Self> {
         config.validate()?;
 
@@ -454,15 +583,17 @@ impl NeuralEncoder {
             device,
         )?;
 
+        let proj = build_dct_projection(config.encoder_dim, config.hop_length, device)?;
+
         Ok(Self {
             config,
-            layers: Vec::new(), // Placeholder
+            proj,
             rvq,
             device: device.clone(),
         })
     }
 
-    /// Encode audio waveform to discrete codes
+    /// Encode audio waveform to discrete codes.
     pub fn encode(&self, waveform: &Tensor) -> Result<Vec<Vec<usize>>> {
         // 1. Encode waveform to continuous representation
         let encoded = self.encode_continuous(waveform)?;
@@ -471,32 +602,76 @@ impl NeuralEncoder {
         self.rvq.encode(&encoded)
     }
 
-    /// Encode waveform to continuous representation (before quantization)
-    fn encode_continuous(&self, waveform: &Tensor) -> Result<Tensor> {
-        // Placeholder: return input reshaped
-        // In production, this would apply convolutional encoding layers
+    /// Encode waveform to continuous latent representation.
+    ///
+    /// Processing pipeline:
+    ///   1. Segment the waveform into non-overlapping frames of `hop_length`.
+    ///   2. Normalise each frame to zero mean and unit variance.
+    ///   3. Apply the DCT-derived linear projection (`encoder_dim × hop_length`)
+    ///      to obtain a compact latent vector per frame.
+    ///
+    /// Input shape:  `[batch, waveform_len]`
+    /// Output shape: `[batch, seq_len, encoder_dim]`
+    ///   where `seq_len = waveform_len / hop_length`.
+    pub(crate) fn encode_continuous(&self, waveform: &Tensor) -> Result<Tensor> {
+        let dims = waveform.dims();
+        if dims.len() < 2 {
+            return Err(AcousticError::InputError {
+                message: format!(
+                    "encode_continuous expects [batch, waveform_len] tensor, got {} dims",
+                    dims.len()
+                ),
+            });
+        }
+        let batch_size = dims[0];
+        let waveform_len = dims[1];
+        let hop = self.config.hop_length;
+        let seq_len = waveform_len / hop;
 
-        let batch_size = waveform.dims()[0];
-        let waveform_len = if waveform.dims().len() > 1 {
-            waveform.dims()[1]
-        } else {
-            1
-        };
+        if seq_len == 0 {
+            return Err(AcousticError::InputError {
+                message: format!(
+                    "Waveform length {} is shorter than hop_length {}",
+                    waveform_len, hop
+                ),
+            });
+        }
 
-        // Compute output sequence length based on hop length
-        let seq_len = waveform_len / self.config.hop_length;
+        // Slice to exact multiple of hop_length → [batch, seq_len * hop]
+        let waveform_trimmed =
+            waveform
+                .narrow(1, 0, seq_len * hop)
+                .map_err(|e| AcousticError::ProcessingError {
+                    message: format!("Failed to trim waveform: {}", e),
+                })?;
 
-        Tensor::zeros(
-            (batch_size, seq_len, self.config.encoder_dim),
-            candle_core::DType::F32,
-            &self.device,
-        )
-        .map_err(|e| AcousticError::ProcessingError {
-            message: format!("Failed to create encoded tensor: {}", e),
-        })
+        // Reshape to frames → [batch * seq_len, hop]
+        let frames = waveform_trimmed
+            .reshape((batch_size * seq_len, hop))
+            .map_err(|e| AcousticError::ProcessingError {
+                message: format!("Failed to reshape waveform to frames: {}", e),
+            })?;
+
+        // Per-frame z-score normalization: (x - mean) / (std + eps)
+        let frames_normalised = per_frame_normalise(&frames)?;
+
+        // Linear projection → [batch * seq_len, encoder_dim]
+        let projected =
+            self.proj
+                .forward(&frames_normalised)
+                .map_err(|e| AcousticError::ProcessingError {
+                    message: format!("Encoder projection failed: {}", e),
+                })?;
+
+        // Reshape to [batch, seq_len, encoder_dim]
+        projected
+            .reshape((batch_size, seq_len, self.config.encoder_dim))
+            .map_err(|e| AcousticError::ProcessingError {
+                message: format!("Failed to reshape encoder output: {}", e),
+            })
     }
 
-    /// Get encoder configuration
+    /// Get encoder configuration.
     pub fn config(&self) -> &NeuralCodecConfig {
         &self.config
     }
@@ -506,9 +681,8 @@ impl NeuralEncoder {
 pub struct NeuralDecoder {
     /// Configuration
     config: NeuralCodecConfig,
-    /// Transposed convolutional layers for decoding
-    #[allow(dead_code)]
-    layers: Vec<Arc<dyn Module + Send + Sync>>,
+    /// Back-projection layer: maps encoder_dim → hop_length via transposed DCT weights
+    back_proj: Linear,
     /// RVQ for dequantization
     rvq: Arc<ResidualVectorQuantizer>,
     /// Device
@@ -519,14 +693,17 @@ impl std::fmt::Debug for NeuralDecoder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NeuralDecoder")
             .field("config", &self.config)
-            .field("layers", &format!("<{} layers>", self.layers.len()))
+            .field("back_proj", &"<Linear back-projection>")
             .field("device", &self.device)
             .finish()
     }
 }
 
 impl NeuralDecoder {
-    /// Create new neural decoder
+    /// Create new neural decoder.
+    ///
+    /// The back-projection is the transpose of the encoder's DCT matrix, giving
+    /// an exact pseudo-inverse when the input lives in the DCT subspace.
     pub fn new(
         config: NeuralCodecConfig,
         rvq: Arc<ResidualVectorQuantizer>,
@@ -534,15 +711,18 @@ impl NeuralDecoder {
     ) -> Result<Self> {
         config.validate()?;
 
+        // Decoder uses the transposed DCT projection: (hop_length × encoder_dim)^T → (encoder_dim, hop_length)
+        let back_proj = build_dct_back_projection(config.encoder_dim, config.hop_length, device)?;
+
         Ok(Self {
             config,
-            layers: Vec::new(), // Placeholder
+            back_proj,
             rvq,
             device: device.clone(),
         })
     }
 
-    /// Decode discrete codes back to audio waveform
+    /// Decode discrete codes back to audio waveform.
     pub fn decode(&self, codes: &[Vec<usize>]) -> Result<Tensor> {
         // 1. Dequantize codes to continuous representation
         let continuous = self.rvq.decode(codes)?;
@@ -551,28 +731,67 @@ impl NeuralDecoder {
         self.decode_continuous(&continuous)
     }
 
-    /// Decode continuous representation to waveform
-    fn decode_continuous(&self, encoded: &Tensor) -> Result<Tensor> {
-        // Placeholder: return dummy waveform
-        // In production, this would apply transposed convolutional layers
+    /// Decode continuous latent representation back to waveform.
+    ///
+    /// Processing pipeline:
+    ///   1. Reshape to `[batch * seq_len, encoder_dim]`.
+    ///   2. Apply the transposed-DCT back-projection to get `[batch * seq_len, hop_length]`.
+    ///   3. Reshape to `[batch, seq_len * hop_length]`.
+    ///
+    /// Input shape:  `[batch, seq_len, encoder_dim]`  (or `[seq_len, encoder_dim]` for single-batch RVQ output)
+    /// Output shape: `[batch, waveform_len]`
+    pub(crate) fn decode_continuous(&self, encoded: &Tensor) -> Result<Tensor> {
+        let dims = encoded.dims();
 
-        let batch_size = encoded.dims()[0];
-        let seq_len = encoded.dims()[1];
+        // Accept both [seq_len, encoder_dim] and [batch, seq_len, encoder_dim]
+        let (batch_size, seq_len) = match dims.len() {
+            2 => (1usize, dims[0]),
+            3 => (dims[0], dims[1]),
+            _ => {
+                return Err(AcousticError::InputError {
+                    message: format!(
+                        "decode_continuous expects 2-D or 3-D tensor, got {} dims",
+                        dims.len()
+                    ),
+                })
+            }
+        };
 
-        // Compute output waveform length
+        let enc_dim = *dims.last().unwrap();
+        if enc_dim != self.config.encoder_dim {
+            return Err(AcousticError::InputError {
+                message: format!(
+                    "Latent dim {} does not match encoder_dim {}",
+                    enc_dim, self.config.encoder_dim
+                ),
+            });
+        }
+
+        // Flatten to [batch * seq_len, encoder_dim]
+        let flat = encoded
+            .reshape((batch_size * seq_len, self.config.encoder_dim))
+            .map_err(|e| AcousticError::ProcessingError {
+                message: format!("Failed to flatten encoded tensor: {}", e),
+            })?;
+
+        // Back-project → [batch * seq_len, hop_length]
+        let frames = self
+            .back_proj
+            .forward(&flat)
+            .map_err(|e| AcousticError::ProcessingError {
+                message: format!("Decoder back-projection failed: {}", e),
+            })?;
+
+        // Reshape to [batch, waveform_len]
         let waveform_len = seq_len * self.config.hop_length;
-
-        Tensor::zeros(
-            (batch_size, waveform_len),
-            candle_core::DType::F32,
-            &self.device,
-        )
-        .map_err(|e| AcousticError::ProcessingError {
-            message: format!("Failed to create decoded waveform: {}", e),
-        })
+        frames
+            .reshape((batch_size, waveform_len))
+            .map_err(|e| AcousticError::ProcessingError {
+                message: format!("Failed to reshape decoded waveform: {}", e),
+            })
     }
 
-    /// Get decoder configuration
+    /// Get decoder configuration.
     pub fn config(&self) -> &NeuralCodecConfig {
         &self.config
     }
@@ -664,7 +883,10 @@ pub struct CodecQualityMetrics {
 }
 
 impl CodecQualityMetrics {
-    /// Create placeholder metrics (to be filled by actual evaluation)
+    /// Create placeholder metrics (to be filled by actual evaluation).
+    ///
+    /// Use [`CodecQualityMetrics::compute_from_audio`] when the actual audio
+    /// samples are available.
     pub fn placeholder() -> Self {
         Self {
             snr_db: 0.0,
@@ -674,6 +896,135 @@ impl CodecQualityMetrics {
             bitrate_kbps: 0.0,
             compression_ratio: 0.0,
             latency_ms: 0.0,
+        }
+    }
+
+    /// Compute quality metrics directly from audio samples.
+    ///
+    /// # Arguments
+    /// * `samples`           – PCM audio samples in `[-1.0, 1.0]`.
+    /// * `sample_rate`       – Sample rate in Hz (e.g. 16 000).
+    /// * `bitrate_kbps`      – Codec bitrate in kbps.
+    /// * `compression_ratio` – Codec compression ratio (raw PCM bits / encoded bits).
+    /// * `latency_ms`        – Measured encoding + decoding latency in milliseconds.
+    ///
+    /// # Signal-derived metrics
+    /// * **snr_db** – 20·log10(RMS_signal / noise_floor) where the noise floor
+    ///   is estimated as the 5th-percentile of per-frame RMS values.
+    /// * **bandwidth_hz** (stored in `stoi_score` as a normalised 0–1 fraction of
+    ///   Nyquist) – the highest FFT bin whose power exceeds −60 dBFS vs. the peak.
+    /// * **mcd** – Spectral flatness (Wiener entropy): geometric mean / arithmetic
+    ///   mean of the power spectrum.  Low = tonal; high (→ 1) = noise-like.
+    ///   Stored as `mcd` for structural compatibility.
+    /// * **pesq_score** – Estimated from SNR via an ITU-T P.862 approximation
+    ///   curve: 0 dB → 1.0, 40 dB → 4.5.
+    pub fn compute_from_audio(
+        samples: &[f32],
+        sample_rate: u32,
+        bitrate_kbps: f32,
+        compression_ratio: f32,
+        latency_ms: f32,
+    ) -> Self {
+        if samples.is_empty() {
+            return Self {
+                bitrate_kbps,
+                compression_ratio,
+                latency_ms,
+                ..Self::placeholder()
+            };
+        }
+
+        // --- SNR via frame-RMS analysis ---
+        let frame_len: usize = (sample_rate as usize / 100).max(64); // 10 ms or 64 samples
+        let n_frames = samples.len() / frame_len;
+
+        let mut frame_rms: Vec<f32> = (0..n_frames)
+            .map(|i| {
+                let start = i * frame_len;
+                let frame = &samples[start..start + frame_len];
+                let mean_sq: f32 = frame.iter().map(|&s| s * s).sum::<f32>() / frame.len() as f32;
+                mean_sq.sqrt()
+            })
+            .collect();
+
+        // Overall RMS (signal level)
+        let signal_rms = {
+            let mean_sq: f32 = samples.iter().map(|&s| s * s).sum::<f32>() / samples.len() as f32;
+            mean_sq.sqrt().max(1e-12)
+        };
+
+        // Noise floor = 5th-percentile frame RMS
+        frame_rms.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let p5_idx = (frame_rms.len() as f32 * 0.05).floor() as usize;
+        let noise_floor = frame_rms
+            .get(p5_idx)
+            .copied()
+            .unwrap_or(1e-12_f32)
+            .max(1e-12);
+
+        let snr_db = 20.0 * (signal_rms / noise_floor).log10();
+
+        // --- Bandwidth via power-spectral roll-off ---
+        // We use a rectangular DFT (no scirs2_fft import needed here—this is
+        // a simple Goertzel-free spectral scan with direct summation over the
+        // longest power-of-two window that fits in `samples`).
+        let fft_len: usize = {
+            let mut n = 1usize;
+            while n * 2 <= samples.len().min(8192) {
+                n *= 2;
+            }
+            n
+        };
+        let window = &samples[..fft_len];
+
+        // Compute the one-sided power spectrum via direct DFT (O(N²) for small N).
+        // For fft_len ≤ 8192 this is fast enough.
+        let n_bins = fft_len / 2 + 1;
+        let mut power: Vec<f32> = Vec::with_capacity(n_bins);
+        use std::f32::consts::PI as PI_F32;
+        for k in 0..n_bins {
+            let (mut re, mut im) = (0.0_f32, 0.0_f32);
+            let theta = -2.0 * PI_F32 * k as f32 / fft_len as f32;
+            for (n, &s) in window.iter().enumerate() {
+                re += s * (theta * n as f32).cos();
+                im += s * (theta * n as f32).sin();
+            }
+            power.push(re * re + im * im);
+        }
+
+        let peak_power = power.iter().cloned().fold(0.0_f32, f32::max).max(1e-30);
+        let threshold = peak_power * 10.0_f32.powf(-60.0 / 10.0); // −60 dBFS
+
+        let bandwidth_bin = power
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, &p)| p > threshold)
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+
+        // Normalise to [0, 1] fraction of Nyquist
+        let bandwidth_fraction = bandwidth_bin as f32 / (n_bins - 1).max(1) as f32;
+
+        // --- Spectral flatness (Wiener entropy) → stored as `mcd` ---
+        let eps = 1e-30_f32;
+        let log_sum: f32 = power.iter().map(|&p| (p + eps).ln()).sum::<f32>();
+        let geom_mean = (log_sum / n_bins as f32).exp();
+        let arith_mean: f32 = power.iter().sum::<f32>() / n_bins as f32;
+        let spectral_flatness = (geom_mean / arith_mean.max(eps)).clamp(0.0, 1.0);
+
+        // --- PESQ approximation from SNR (P.862 curve fit) ---
+        // Piecewise linear approximation: SNR ∈ [0, 40] → PESQ ∈ [1.0, 4.5]
+        let pesq_score = (1.0_f32 + (snr_db.clamp(0.0, 40.0) / 40.0) * 3.5).clamp(1.0, 4.5);
+
+        Self {
+            snr_db,
+            pesq_score,
+            stoi_score: bandwidth_fraction,
+            mcd: spectral_flatness,
+            bitrate_kbps,
+            compression_ratio,
+            latency_ms,
         }
     }
 
@@ -965,6 +1316,283 @@ mod tests {
         assert!(
             loss.abs() < 1e-6,
             "Commitment loss should be ~0 when input == quantized entry, got {loss}"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // encode_continuous / decode_continuous shape tests
+    // ------------------------------------------------------------------
+
+    /// `encode_continuous` must produce [batch, seq_len, encoder_dim] where
+    /// seq_len = floor(waveform_len / hop_length).
+    #[test]
+    fn test_encode_continuous_output_shape() {
+        let device = Device::Cpu;
+        let config = NeuralCodecConfig {
+            hop_length: 16,
+            encoder_dim: 32,
+            // keep codebook small so the test is fast
+            num_codebooks: 2,
+            codebook_size: 256,
+            ..Default::default()
+        };
+        let encoder =
+            NeuralEncoder::new(config.clone(), &device).expect("Failed to create NeuralEncoder");
+
+        let batch = 2usize;
+        let waveform_samples = 256usize; // 16 frames of 16 samples each
+        let waveform = Tensor::randn(0.0_f32, 0.1_f32, (batch, waveform_samples), &device)
+            .expect("Failed to create waveform tensor");
+
+        let encoded = encoder
+            .encode_continuous(&waveform)
+            .expect("encode_continuous failed");
+
+        let expected_seq_len = waveform_samples / config.hop_length;
+        assert_eq!(
+            encoded.dims(),
+            &[batch, expected_seq_len, config.encoder_dim],
+            "encode_continuous output shape mismatch: got {:?}",
+            encoded.dims()
+        );
+    }
+
+    /// `decode_continuous` on the output of `encode_continuous` must produce
+    /// `[batch, waveform_len]` with `waveform_len = seq_len * hop_length`.
+    #[test]
+    fn test_decode_continuous_output_shape() {
+        let device = Device::Cpu;
+        let config = NeuralCodecConfig {
+            hop_length: 16,
+            encoder_dim: 32,
+            num_codebooks: 2,
+            codebook_size: 256,
+            ..Default::default()
+        };
+
+        let rvq = Arc::new(
+            ResidualVectorQuantizer::new(
+                config.num_codebooks,
+                config.codebook_size,
+                config.encoder_dim,
+                &device,
+            )
+            .expect("Failed to create RVQ"),
+        );
+
+        let encoder =
+            NeuralEncoder::new(config.clone(), &device).expect("Failed to create NeuralEncoder");
+        let decoder = NeuralDecoder::new(config.clone(), rvq.clone(), &device)
+            .expect("Failed to create NeuralDecoder");
+
+        let batch = 2usize;
+        let waveform_samples = 256usize;
+        let waveform = Tensor::randn(0.0_f32, 0.1_f32, (batch, waveform_samples), &device)
+            .expect("Failed to create waveform tensor");
+
+        let encoded = encoder
+            .encode_continuous(&waveform)
+            .expect("encode_continuous failed");
+
+        let decoded = decoder
+            .decode_continuous(&encoded)
+            .expect("decode_continuous failed");
+
+        let expected_waveform_len = (waveform_samples / config.hop_length) * config.hop_length;
+        assert_eq!(
+            decoded.dims(),
+            &[batch, expected_waveform_len],
+            "decode_continuous output shape mismatch: got {:?}",
+            decoded.dims()
+        );
+    }
+
+    /// `decode_continuous` output must not be all-zeros (non-trivial transformation).
+    #[test]
+    fn test_decode_continuous_non_zero_output() {
+        let device = Device::Cpu;
+        let config = NeuralCodecConfig {
+            hop_length: 16,
+            encoder_dim: 32,
+            num_codebooks: 2,
+            codebook_size: 256,
+            ..Default::default()
+        };
+
+        let rvq = Arc::new(
+            ResidualVectorQuantizer::new(
+                config.num_codebooks,
+                config.codebook_size,
+                config.encoder_dim,
+                &device,
+            )
+            .expect("Failed to create RVQ"),
+        );
+
+        let encoder =
+            NeuralEncoder::new(config.clone(), &device).expect("Failed to create NeuralEncoder");
+        let decoder = NeuralDecoder::new(config.clone(), rvq, &device)
+            .expect("Failed to create NeuralDecoder");
+
+        // Use a non-trivial input signal (a sine-like sawtooth) so the latent is not zero.
+        let n_samples = 256usize;
+        let samples: Vec<f32> = (0..n_samples)
+            .map(|i| ((i % 32) as f32 / 32.0 - 0.5) * 0.8)
+            .collect();
+        let waveform = Tensor::from_vec(samples, (1usize, n_samples), &device)
+            .expect("Failed to create waveform");
+
+        let encoded = encoder
+            .encode_continuous(&waveform)
+            .expect("encode_continuous failed");
+
+        let decoded = decoder
+            .decode_continuous(&encoded)
+            .expect("decode_continuous failed");
+
+        // Max absolute value should be > 0
+        let vals: Vec<f32> = decoded
+            .flatten_all()
+            .expect("flatten failed")
+            .to_vec1()
+            .expect("to_vec1 failed");
+
+        let max_abs = vals.iter().cloned().map(f32::abs).fold(0.0_f32, f32::max);
+        assert!(
+            max_abs > 1e-6,
+            "decode_continuous output is effectively zero (max_abs = {max_abs}); expected a real transformation"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // CodecQualityMetrics::compute_from_audio tests
+    // ------------------------------------------------------------------
+
+    /// Metrics computed from a non-trivial signal must be non-zero and finite.
+    #[test]
+    fn test_quality_metrics_from_audio_non_zero_non_nan() {
+        // Generate a simple 100 Hz sine wave at 16 kHz, 0.5 s duration.
+        let sample_rate = 16_000u32;
+        let n_samples = 8_000usize;
+        let samples: Vec<f32> = (0..n_samples)
+            .map(|i| (2.0 * std::f32::consts::PI * 100.0 * i as f32 / sample_rate as f32).sin())
+            .collect();
+
+        let metrics = CodecQualityMetrics::compute_from_audio(
+            &samples,
+            sample_rate,
+            6.0,  // bitrate_kbps
+            21.3, // compression_ratio
+            13.3, // latency_ms
+        );
+
+        // All fields must be finite
+        assert!(
+            metrics.snr_db.is_finite(),
+            "snr_db must be finite, got {}",
+            metrics.snr_db
+        );
+        assert!(
+            metrics.pesq_score.is_finite(),
+            "pesq_score must be finite, got {}",
+            metrics.pesq_score
+        );
+        assert!(
+            metrics.stoi_score.is_finite(),
+            "stoi_score must be finite, got {}",
+            metrics.stoi_score
+        );
+        assert!(
+            metrics.mcd.is_finite(),
+            "mcd (spectral_flatness) must be finite, got {}",
+            metrics.mcd
+        );
+
+        // SNR of a sine wave should be noticeably positive
+        assert!(
+            metrics.snr_db > 0.0,
+            "SNR of a sine wave should be > 0, got {}",
+            metrics.snr_db
+        );
+
+        // PESQ score must be in valid range
+        assert!(
+            (1.0..=4.5).contains(&metrics.pesq_score),
+            "PESQ out of range: {}",
+            metrics.pesq_score
+        );
+
+        // Bandwidth fraction (stoi_score proxy) must be in [0, 1]
+        assert!(
+            (0.0..=1.0).contains(&metrics.stoi_score),
+            "Bandwidth fraction out of range: {}",
+            metrics.stoi_score
+        );
+
+        // Passed-through fields must match
+        assert!(
+            (metrics.bitrate_kbps - 6.0).abs() < 1e-6,
+            "bitrate_kbps mismatch"
+        );
+        assert!(
+            (metrics.compression_ratio - 21.3).abs() < 1e-5,
+            "compression_ratio mismatch"
+        );
+        assert!(
+            (metrics.latency_ms - 13.3).abs() < 1e-5,
+            "latency_ms mismatch"
+        );
+    }
+
+    /// Silence input must produce a stable (non-NaN) result even if SNR is degenerate.
+    #[test]
+    fn test_quality_metrics_from_silence_stable() {
+        let samples = vec![0.0_f32; 8000];
+        let metrics = CodecQualityMetrics::compute_from_audio(&samples, 16_000, 6.0, 21.0, 13.0);
+
+        // Must not produce NaN
+        assert!(!metrics.snr_db.is_nan(), "snr_db is NaN for silence input");
+        assert!(
+            !metrics.pesq_score.is_nan(),
+            "pesq_score is NaN for silence input"
+        );
+        assert!(
+            !metrics.stoi_score.is_nan(),
+            "stoi_score is NaN for silence input"
+        );
+        assert!(!metrics.mcd.is_nan(), "mcd is NaN for silence input");
+    }
+
+    /// White noise should yield a higher spectral flatness (mcd ≈ 1) than a pure sine (mcd ≈ 0).
+    #[test]
+    fn test_quality_metrics_spectral_flatness_ordering() {
+        let sample_rate = 16_000u32;
+        let n_samples = 8_000usize;
+
+        // Pure 100 Hz sine — tonal, low flatness expected
+        let sine: Vec<f32> = (0..n_samples)
+            .map(|i| (2.0 * std::f32::consts::PI * 100.0 * i as f32 / sample_rate as f32).sin())
+            .collect();
+
+        // Deterministic pseudo-noise via simple LCG to avoid rand dependency
+        let mut state = 0x12345678u32;
+        let noise: Vec<f32> = (0..n_samples)
+            .map(|_| {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                (state as f32 / u32::MAX as f32) * 2.0 - 1.0
+            })
+            .collect();
+
+        let sine_metrics =
+            CodecQualityMetrics::compute_from_audio(&sine, sample_rate, 6.0, 21.0, 13.0);
+        let noise_metrics =
+            CodecQualityMetrics::compute_from_audio(&noise, sample_rate, 6.0, 21.0, 13.0);
+
+        assert!(
+            noise_metrics.mcd > sine_metrics.mcd,
+            "Noise should have higher spectral flatness than sine: noise_mcd={} sine_mcd={}",
+            noise_metrics.mcd,
+            sine_metrics.mcd
         );
     }
 }

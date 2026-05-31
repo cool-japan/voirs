@@ -198,29 +198,9 @@ impl MemoryMonitor {
         }
     }
 
-    /// Get memory usage in bytes
+    /// Get memory usage in bytes (RSS)
     fn get_memory_usage() -> u64 {
-        // In a real implementation, this would use platform-specific APIs
-        // For now, we simulate memory usage
-        // On Linux: /proc/self/status or /proc/self/statm
-        // On Windows: GetProcessMemoryInfo
-        // On macOS: task_info with TASK_BASIC_INFO
-
-        // For tests, return a simple static value to avoid race conditions
-        if cfg!(test) {
-            1024 * 1024 // Simple 1MB for tests
-        } else {
-            // Simulate memory usage that might grow over time
-            use std::sync::atomic::{AtomicU64, Ordering};
-            static SIMULATED_MEMORY: AtomicU64 = AtomicU64::new(1024 * 1024); // Start with 1MB
-
-            let current = SIMULATED_MEMORY.load(Ordering::Relaxed);
-            // Simulate small memory growth over time
-            let growth = (current as f64 * 0.001) as u64; // 0.1% growth
-            SIMULATED_MEMORY.store(current + growth, Ordering::Relaxed);
-
-            current
-        }
+        get_memory_usage()
     }
 
     /// Detect memory leaks based on samples
@@ -562,6 +542,29 @@ impl Drop for MemoryMonitor {
             self.stop_monitoring();
         }
     }
+}
+
+/// Read process RSS from `/proc/self/status` on Linux (returns bytes).
+#[cfg(target_os = "linux")]
+fn get_memory_usage() -> u64 {
+    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+        for line in status.lines() {
+            if line.starts_with("VmRSS:") {
+                if let Some(kb_str) = line.split_whitespace().nth(1) {
+                    if let Ok(kb) = kb_str.parse::<u64>() {
+                        return kb * 1024;
+                    }
+                }
+            }
+        }
+    }
+    64 * 1024 * 1024 // 64 MB fallback
+}
+
+/// Fallback for non-Linux platforms — returns a fixed 64 MB estimate.
+#[cfg(not(target_os = "linux"))]
+fn get_memory_usage() -> u64 {
+    64 * 1024 * 1024 // 64 MB fallback
 }
 
 #[cfg(test)]

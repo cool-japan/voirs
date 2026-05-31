@@ -445,217 +445,526 @@ impl Transform for VoiceMorpher {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_pitch_transform() {
-        let transform = PitchTransform::new(2.0);
-        let input = vec![0.1, 0.2, 0.3];
-        let output = transform.apply(&input).unwrap();
+    /// Generate a synthetic sine-wave signal of the given length and frequency.
+    fn sine_wave(len: usize, freq_bin_frac: f32) -> Vec<f32> {
+        (0..len)
+            .map(|i| (2.0 * PI * freq_bin_frac * i as f32).sin())
+            .collect()
+    }
 
+    /// Compute RMS energy of a slice.
+    fn rms(samples: &[f32]) -> f32 {
+        if samples.is_empty() {
+            return 0.0;
+        }
+        (samples.iter().map(|x| x * x).sum::<f32>() / samples.len() as f32).sqrt()
+    }
+
+    // ── WOLA round-trip: unmodified spectrum OLA should preserve signal ───────
+    #[test]
+    fn test_wola_roundtrip() {
+        use scirs2_fft::RealFftPlanner;
+        const FRAME: usize = 1024;
+        const HOP: usize = 256;
+        let n = 4096_usize;
+        let mut planner = RealFftPlanner::<f32>::new();
+        let fwd = planner.plan_fft_forward(FRAME);
+        let inv = planner.plan_fft_inverse(FRAME);
+        let win = hann_window(FRAME);
+        let num_bins = FRAME / 2 + 1;
+
+        let input: Vec<f32> = (0..n).map(|i| (2.0 * PI * 0.05 * i as f32).sin()).collect();
+        let out_len = n;
+        let mut output = vec![0.0_f32; out_len + FRAME];
+        let mut ola_sum = vec![0.0_f32; out_len + FRAME];
+        let mut padded = input.clone();
+        padded.resize(n + FRAME, 0.0);
+
+        let mut pos = 0_usize;
+        while pos + FRAME <= padded.len() {
+            let frame: Vec<f32> = padded[pos..pos + FRAME]
+                .iter()
+                .zip(win.iter())
+                .map(|(&s, &w)| s * w)
+                .collect();
+            let mut spectrum = vec![Complex::new(0.0_f32, 0.0_f32); num_bins];
+            fwd.process(&frame, &mut spectrum).unwrap();
+            let mut time_out = vec![0.0_f32; FRAME];
+            inv.process(&spectrum, &mut time_out).unwrap();
+            for (i, (&s, &w)) in time_out.iter().zip(win.iter()).enumerate() {
+                let idx = pos + i;
+                if idx < output.len() {
+                    output[idx] += s * w;
+                    ola_sum[idx] += w * w;
+                }
+            }
+            pos += HOP;
+        }
+        let eps = 1e-8_f32;
+        for (s, &n_v) in output.iter_mut().zip(ola_sum.iter()) {
+            if n_v > eps {
+                *s /= n_v;
+            }
+        }
+        output.truncate(out_len);
+        let rms_in: f32 = (input.iter().map(|x| x * x).sum::<f32>() / n as f32).sqrt();
+        let rms_out: f32 = (output.iter().map(|x| x * x).sum::<f32>() / n as f32).sqrt();
+        eprintln!("WOLA round-trip (no pitch): rms_in={rms_in:.6}, rms_out={rms_out:.6}");
+        assert!(
+            (rms_in - rms_out).abs() / rms_in < 0.05,
+            "WOLA round-trip should preserve RMS: in={rms_in:.6} out={rms_out:.6}"
+        );
+    }
+
+    // ── Phase-vocoder pitch-shift: output length equals input length ─────────
+    #[test]
+    fn test_pitch_transform_output_length_equals_input() {
+        let transform = PitchTransform::new(1.5);
+        let input = sine_wave(4096, 0.05);
+        let output = transform.apply(&input).unwrap();
+        assert_eq!(
+            output.len(),
+            input.len(),
+            "pitch-shifted output must have same length as input"
+        );
+    }
+
+    // ── Identity ratio (1.0) must round-trip the signal ──────────────────────
+    #[test]
+    fn test_pitch_transform_identity_passthrough() {
+        let transform = PitchTransform::new(1.0);
+        let input = sine_wave(2048, 0.04);
+        let output = transform.apply(&input).unwrap();
         assert_eq!(output.len(), input.len());
-        assert_eq!(output[0], 0.2);
-        assert_eq!(output[1], 0.4);
+        // Identity fast-path: output should be bit-identical to input
+        for (a, b) in input.iter().zip(output.iter()) {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "identity pitch shift should return input unchanged, diff={:.6e}",
+                (a - b).abs()
+            );
+        }
     }
 
+    // ── RMS energy should be roughly preserved after pitch shifting ───────────
     #[test]
-    fn test_speed_transform() {
-        let transform = SpeedTransform::new(2.0);
-        let input = vec![0.1, 0.2, 0.3, 0.4];
+    fn test_pitch_transform_rms_preserved() {
+        let transform = PitchTransform::new(1.5);
+        let input = sine_wave(8192, 0.03);
         let output = transform.apply(&input).unwrap();
-
-        assert_eq!(output.len(), 2); // Half length due to 2x speed
+        let rms_in = rms(&input);
+        let rms_out = rms(&output);
+        // Allow 10× tolerance: phase-vocoder redistributes energy but shouldn't blow up
+        assert!(
+            rms_out > rms_in * 0.1 && rms_out < rms_in * 10.0,
+            "RMS energy after pitch shift should remain in reasonable range: in={rms_in:.4}, out={rms_out:.4}"
+        );
     }
 
+    // ── Short-audio fallback must not panic and must return same length ───────
+    #[test]
+    fn test_pitch_transform_short_audio() {
+        let transform = PitchTransform::new(2.0);
+        let input = vec![0.1_f32, 0.2, -0.1, 0.0, 0.3];
+        let output = transform.apply(&input).unwrap();
+        assert_eq!(output.len(), input.len());
+    }
+
+    // ── Speed transform: output length matches expected stretched length ──────
+    #[test]
+    fn test_speed_transform_output_length() {
+        let speed = 2.0_f32;
+        let transform = SpeedTransform::new(speed);
+        let input = sine_wave(4096, 0.05);
+        let expected_len = (input.len() as f32 / speed) as usize;
+        let output = transform.apply(&input).unwrap();
+        // Allow ±hop_size tolerance due to block-boundary handling
+        let hop = 256_usize;
+        assert!(
+            output.len().abs_diff(expected_len) <= hop,
+            "speed={speed}: expected len≈{expected_len}, got {}",
+            output.len()
+        );
+    }
+
+    // ── Speed identity: 1.0× should return input unchanged ───────────────────
+    #[test]
+    fn test_speed_transform_identity() {
+        let transform = SpeedTransform::new(1.0);
+        let input = sine_wave(2048, 0.04);
+        let output = transform.apply(&input).unwrap();
+        assert_eq!(output.len(), input.len());
+        for (a, b) in input.iter().zip(output.iter()) {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "identity speed transform should return input unchanged"
+            );
+        }
+    }
+
+    // ── Age transform: output length must equal input length ─────────────────
     #[test]
     fn test_age_transform() {
         let transform = AgeTransform::new(30.0, 60.0);
-        let input = vec![0.1, 0.2, 0.3];
+        let input = vec![0.1_f32, 0.2, 0.3];
         let output = transform.apply(&input).unwrap();
-
         assert_eq!(output.len(), input.len());
     }
 
+    // ── Gender transform: output length must equal input length ──────────────
     #[test]
     fn test_gender_transform() {
-        let transform = GenderTransform::new(1.0); // Female
-        let input = vec![0.1, 0.2, 0.3];
+        let transform = GenderTransform::new(1.0);
+        let input = vec![0.1_f32, 0.2, 0.3];
         let output = transform.apply(&input).unwrap();
-
         assert_eq!(output.len(), input.len());
-        assert!(output[0] > input[0]); // Should be scaled up
     }
 
+    // ── Voice morpher linear blend ────────────────────────────────────────────
     #[test]
     fn test_voice_morpher() {
         let morpher = VoiceMorpher::new(
             vec!["voice1".to_string(), "voice2".to_string()],
             vec![0.5, 0.5],
         );
-
-        let inputs = vec![vec![0.1, 0.2], vec![0.3, 0.4]];
-
+        let inputs = vec![vec![0.1_f32, 0.2], vec![0.3_f32, 0.4]];
         let output = morpher.morph(&inputs).unwrap();
         assert_eq!(output.len(), 2);
-        assert_eq!(output[0], 0.2); // (0.1 * 0.5) + (0.3 * 0.5)
-        assert_eq!(output[1], 0.3); // (0.2 * 0.5) + (0.4 * 0.5)
+        assert!((output[0] - 0.2).abs() < 1e-6); // (0.1*0.5 + 0.3*0.5)
+        assert!((output[1] - 0.3).abs() < 1e-6); // (0.2*0.5 + 0.4*0.5)
     }
 }
 
-// Implementation methods for transforms
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase-vocoder implementation helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Wrap a phase value into (-π, π].
+#[inline]
+fn wrap_phase(p: f32) -> f32 {
+    // Use a branch-free symmetric modulo: p - 2π·round(p/(2π))
+    p - (2.0 * PI) * (p / (2.0 * PI)).round()
+}
+
+/// Build a periodic Hann window of length `n`.
+/// Periodic Hann (a.k.a. DFT-even) satisfies the COLA constraint at hop = n/4.
+fn hann_window(n: usize) -> Vec<f32> {
+    (0..n)
+        .map(|i| 0.5 - 0.5 * (2.0 * PI * i as f32 / n as f32).cos())
+        .collect()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PitchTransform implementation
+// ─────────────────────────────────────────────────────────────────────────────
 
 impl PitchTransform {
-    /// Apply phase vocoder pitch shifting with formant preservation
+    /// Real phase-vocoder pitch shifter.
+    ///
+    /// Algorithm (75 % overlap, periodic Hann windows):
+    ///
+    /// 1. For each analysis frame at position `pos`:
+    ///    - Hann-window the frame.
+    ///    - Forward RFFT → complex spectrum of length N/2+1.
+    ///    - For each bin k, estimate the instantaneous frequency:
+    ///      `expected_advance = 2π·k·hop / N`,
+    ///      `phase_deviation = wrap(phase[k] - last_phase[k] - expected_advance)`,
+    ///      `inst_freq_bin = k + phase_deviation·N / (2π·hop)`.
+    ///    - Map to output bin k' = round(k * pitch_ratio).
+    ///    - Accumulate synthesised phase:
+    ///      `synth_phase[k'] += inst_freq_bin * pitch_ratio * 2π·hop / N`.
+    ///    - Write magnitude from bin k into output bin k' with phase synth_phase[k'].
+    /// 2. IRFFT → time-domain frame.
+    /// 3. Multiply by synthesis Hann window, overlap-add into output.
+    /// 4. Normalise by the squared-window OLA sum.
     fn apply_phase_vocoder_pitch_shift(&self, input: &[f32]) -> Result<Vec<f32>> {
-        let window_size = 1024;
-        let hop_size = window_size / 4;
-        let overlap = window_size - hop_size;
+        const FRAME: usize = 1024;
+        const HOP: usize = 256; // 75 % overlap
 
-        if input.len() < window_size {
-            // For short audio, use simple pitch scaling
+        if input.len() < FRAME {
             return self.apply_simple_pitch_shift(input);
         }
 
+        let ratio = self.pitch_factor;
+        let num_bins = FRAME / 2 + 1;
+
         let mut planner = RealFftPlanner::<f32>::new();
-        let fft = planner.plan_fft_forward(window_size);
-        let ifft = planner.plan_fft_inverse(window_size);
+        let fwd = planner.plan_fft_forward(FRAME);
+        let inv = planner.plan_fft_inverse(FRAME);
 
-        let mut output = Vec::new();
-        let mut phase_accum = vec![0.0; window_size / 2 + 1];
-        let mut last_phase = vec![0.0; window_size / 2 + 1];
+        let win = hann_window(FRAME);
 
-        // Process overlapping windows
-        for window_start in (0..input.len().saturating_sub(window_size)).step_by(hop_size) {
-            let window_end = (window_start + window_size).min(input.len());
-            let mut window = vec![0.0; window_size];
+        // Phase state
+        let mut last_phase: Vec<f32> = vec![0.0; num_bins];
+        let mut synth_phase: Vec<f32> = vec![0.0; num_bins];
 
-            // Copy window with Hann windowing
-            for (i, &sample) in input[window_start..window_end].iter().enumerate() {
-                let hann = 0.5 - 0.5 * (2.0 * PI * i as f32 / (window_size - 1) as f32).cos();
-                window[i] = sample * hann;
+        // Output accumulator (pre-allocated to input length + one extra frame)
+        let out_len = input.len();
+        let mut output = vec![0.0_f32; out_len + FRAME];
+        let mut ola_sum = vec![0.0_f32; out_len + FRAME];
+
+        // Pad input so the last frame is fully covered
+        let mut padded = input.to_vec();
+        padded.resize(input.len() + FRAME, 0.0);
+
+        // Pre-allocate per-frame working buffers to avoid heap churn
+        let mut frame = vec![0.0_f32; FRAME];
+        let mut spectrum = vec![Complex::new(0.0_f32, 0.0_f32); num_bins];
+        let mut out_spectrum = vec![Complex::new(0.0_f32, 0.0_f32); num_bins];
+        let mut out_mag_best = vec![0.0_f32; num_bins];
+        let mut time_out = vec![0.0_f32; FRAME];
+
+        let mut ana_pos = 0_usize;
+        let mut syn_pos = 0_usize;
+
+        while ana_pos + FRAME <= padded.len() {
+            // ── Analysis: Hann-window + FFT ──────────────────────────────
+            for (f, (&s, &w)) in frame
+                .iter_mut()
+                .zip(padded[ana_pos..ana_pos + FRAME].iter().zip(win.iter()))
+            {
+                *f = s * w;
             }
 
-            // Forward FFT
-            let mut spectrum = vec![Complex::new(0.0, 0.0); window_size / 2 + 1];
-            fft.process(&window, &mut spectrum)
+            fwd.process(&frame, &mut spectrum)
                 .map_err(|e| Error::processing(e.to_string()))?;
 
-            // Phase vocoder processing
-            let mut modified_spectrum = vec![Complex::new(0.0, 0.0); window_size / 2 + 1];
+            // ── Phase-vocoder: build pitch-shifted output spectrum ────────
+            //
+            // Each source bin k maps to output bin k' = round(k * ratio).
+            // We track which output bins have been written so that each output
+            // bin takes the maximum-magnitude source that maps to it, preventing
+            // energy build-up from additive accumulation of many source bins.
+            out_spectrum.fill(Complex::new(0.0, 0.0));
+            out_mag_best.fill(0.0);
 
-            for (k, &bin) in spectrum.iter().enumerate() {
-                let magnitude = bin.norm();
-                let phase = bin.arg();
+            for k in 0..num_bins {
+                let mag = spectrum[k].norm();
+                let phase = spectrum[k].arg();
 
-                // Calculate expected phase advance
-                let expected_phase_advance =
-                    2.0 * PI * k as f32 * hop_size as f32 / window_size as f32;
-                let phase_diff = phase - last_phase[k] - expected_phase_advance;
-
-                // Wrap phase difference to [-π, π]
-                let wrapped_phase_diff = ((phase_diff + PI) % (2.0 * PI)) - PI;
-
-                // Calculate instantaneous frequency
-                let inst_freq = (k as f32 + wrapped_phase_diff / (2.0 * PI)) * self.pitch_factor;
-
-                // Update phase accumulator
-                phase_accum[k] += inst_freq * 2.0 * PI * hop_size as f32 / window_size as f32;
-
-                // Create modified spectrum
-                let new_k = (inst_freq.round() as usize).min(spectrum.len() - 1);
-                if new_k < modified_spectrum.len() {
-                    // Ensure DC and Nyquist components are real-valued
-                    if new_k == 0 || new_k == modified_spectrum.len() - 1 {
-                        // DC and Nyquist components must be purely real
-                        modified_spectrum[new_k] = Complex::new(magnitude, 0.0);
-                    } else {
-                        modified_spectrum[new_k] = Complex::new(
-                            magnitude * phase_accum[k].cos(),
-                            magnitude * phase_accum[k].sin(),
-                        );
-                    }
-                }
+                // Instantaneous frequency (in fractional bins)
+                let expected = 2.0 * PI * k as f32 * HOP as f32 / FRAME as f32;
+                let deviation = wrap_phase(phase - last_phase[k] - expected);
+                let inst_bin = k as f32 + deviation * FRAME as f32 / (2.0 * PI * HOP as f32);
 
                 last_phase[k] = phase;
+
+                // Target output bin
+                let k_out_f = inst_bin * ratio;
+                let k_out = k_out_f.round() as isize;
+                if k_out < 0 || k_out as usize >= num_bins {
+                    continue;
+                }
+                let k_out = k_out as usize;
+
+                // Advance synthesis phase by the pitch-scaled instantaneous frequency
+                synth_phase[k_out] += inst_bin * ratio * 2.0 * PI * HOP as f32 / FRAME as f32;
+
+                // Only update output bin if this source has a larger magnitude
+                // (max-magnitude selection prevents energy accumulation)
+                if mag > out_mag_best[k_out] {
+                    out_mag_best[k_out] = mag;
+                    let new_re = mag * synth_phase[k_out].cos();
+                    let new_im = if k_out == 0 || k_out == num_bins - 1 {
+                        0.0 // DC and Nyquist must be purely real
+                    } else {
+                        mag * synth_phase[k_out].sin()
+                    };
+                    out_spectrum[k_out] = Complex::new(new_re, new_im);
+                }
             }
 
-            // Inverse FFT
-            let mut time_domain = vec![0.0; window_size];
-            ifft.process(&modified_spectrum, &mut time_domain)
+            // ── Synthesis: IFFT + synthesis window ───────────────────────
+            inv.process(&out_spectrum, &mut time_out)
                 .map_err(|e| Error::processing(e.to_string()))?;
 
-            // Apply window and overlap-add
-            for (i, &sample) in time_domain.iter().enumerate() {
-                let hann = 0.5 - 0.5 * (2.0 * PI * i as f32 / (window_size - 1) as f32).cos();
-                let windowed_sample = sample * hann;
-
-                let output_idx = window_start + i;
-                if output_idx >= output.len() {
-                    output.resize(output_idx + 1, 0.0);
+            // Overlap-add with synthesis Hann window
+            for (i, (&s, &w)) in time_out.iter().zip(win.iter()).enumerate() {
+                let idx = syn_pos + i;
+                if idx < output.len() {
+                    output[idx] += s * w;
+                    ola_sum[idx] += w * w;
                 }
-                output[output_idx] += windowed_sample;
+            }
+
+            ana_pos += HOP;
+            syn_pos += HOP;
+        }
+
+        // ── Normalise by OLA window sum ───────────────────────────────────
+        // Use a threshold of 10 % of the peak COLA sum (≈ 0.15 for 75 % Hann overlap)
+        // to avoid amplifying edge samples where fewer than 4 frames overlap.
+        let max_ola = ola_sum.iter().cloned().fold(0.0_f32, f32::max);
+        let ola_threshold = (max_ola * 0.1).max(1e-8_f32);
+
+        for (s, &n) in output.iter_mut().zip(ola_sum.iter()) {
+            if n > ola_threshold {
+                *s /= n;
+            } else {
+                *s = 0.0; // Silence edge samples with insufficient overlap
             }
         }
 
+        output.truncate(out_len);
         Ok(output)
     }
 
-    /// Apply simple pitch shifting using time-domain scaling
+    /// Short-audio fallback: nearest-neighbour resample then trim/pad to input length.
+    ///
+    /// This correctly changes the pitch (by resampling faster/slower) while
+    /// keeping the output length identical to the input, using linear interpolation.
     fn apply_simple_pitch_shift(&self, input: &[f32]) -> Result<Vec<f32>> {
-        if self.pitch_factor == 1.0 {
+        if (self.pitch_factor - 1.0).abs() < f32::EPSILON {
             return Ok(input.to_vec());
         }
 
-        // For simple pitch shift, maintain same length but apply frequency scaling
-        // This is a simplified version - real pitch shifting would use PSOLA or phase vocoder
-        let mut output = Vec::with_capacity(input.len());
+        // Resampling: reading input at rate `pitch_factor` faster produces
+        // a higher-pitched signal when played back at the original rate.
+        let in_len = input.len();
+        let mut output = Vec::with_capacity(in_len);
 
-        for &sample in input {
-            // Simple approach: scale amplitude based on pitch factor for testing
-            let scaled_sample = sample * self.pitch_factor;
-            output.push(scaled_sample);
+        for i in 0..in_len {
+            let src = i as f32 * self.pitch_factor;
+            let idx = src as usize;
+            if idx + 1 < in_len {
+                let frac = src - idx as f32;
+                output.push(input[idx] * (1.0 - frac) + input[idx + 1] * frac);
+            } else if idx < in_len {
+                output.push(input[idx]);
+            } else {
+                output.push(0.0);
+            }
         }
 
         Ok(output)
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SpeedTransform implementation
+// ─────────────────────────────────────────────────────────────────────────────
+
 impl SpeedTransform {
-    /// Apply PSOLA-based time stretching with pitch preservation
+    /// Phase-vocoder time-stretching (pitch-preserving TSM).
+    ///
+    /// Unlike pitch-shifting, the analysis and synthesis hop sizes differ:
+    ///   analysis_hop  = round(HOP * speed_factor)   (read faster/slower)
+    ///   synthesis_hop = HOP                          (write at constant rate)
+    ///
+    /// This produces an output whose duration is input_len / speed_factor
+    /// without altering pitch.
     fn apply_psola_time_stretch(&self, input: &[f32]) -> Result<Vec<f32>> {
-        // Simplified PSOLA implementation
-        // In a full implementation, this would involve pitch period detection
-        // and pitch-synchronous windowing
+        const FRAME: usize = 1024;
+        const SYN_HOP: usize = 256;
 
-        let pitch_period = 100; // Estimated pitch period in samples
-        let output_len = (input.len() as f32 / self.speed_factor) as usize;
-        let mut output = vec![0.0; output_len];
+        if input.len() < FRAME {
+            return self.apply_linear_interpolation(input);
+        }
 
-        let mut input_pos = 0;
-        let mut output_pos = 0;
+        let speed = self.speed_factor;
+        // Analysis hop: advancing faster through the signal speeds it up
+        let ana_hop = ((SYN_HOP as f32 * speed).round() as usize).max(1);
+        let num_bins = FRAME / 2 + 1;
 
-        while input_pos + pitch_period < input.len() && output_pos + pitch_period < output.len() {
-            // Extract pitch period
-            let period_start = input_pos;
-            let period_end = (input_pos + pitch_period).min(input.len());
+        let mut planner = RealFftPlanner::<f32>::new();
+        let fwd = planner.plan_fft_forward(FRAME);
+        let inv = planner.plan_fft_inverse(FRAME);
 
-            // Apply Hann window to the period
-            for i in 0..(period_end - period_start) {
-                let hann = 0.5 - 0.5 * (2.0 * PI * i as f32 / pitch_period as f32).cos();
-                let sample = input[period_start + i] * hann;
+        let win = hann_window(FRAME);
 
-                if output_pos + i < output.len() {
-                    output[output_pos + i] += sample;
+        let mut last_phase: Vec<f32> = vec![0.0; num_bins];
+        let mut synth_phase: Vec<f32> = vec![0.0; num_bins];
+
+        let out_len = (input.len() as f32 / speed) as usize + FRAME;
+        let mut output = vec![0.0_f32; out_len];
+        let mut ola_sum = vec![0.0_f32; out_len];
+
+        let mut padded = input.to_vec();
+        padded.resize(input.len() + FRAME, 0.0);
+
+        // Pre-allocate per-frame working buffers
+        let mut frame = vec![0.0_f32; FRAME];
+        let mut spectrum = vec![Complex::new(0.0_f32, 0.0_f32); num_bins];
+        let mut out_spectrum = vec![Complex::new(0.0_f32, 0.0_f32); num_bins];
+        let mut time_out = vec![0.0_f32; FRAME];
+
+        let mut ana_pos = 0_usize;
+        let mut syn_pos = 0_usize;
+
+        while ana_pos + FRAME <= padded.len() {
+            // ── Analysis window ───────────────────────────────────────────
+            for (f, (&s, &w)) in frame
+                .iter_mut()
+                .zip(padded[ana_pos..ana_pos + FRAME].iter().zip(win.iter()))
+            {
+                *f = s * w;
+            }
+
+            fwd.process(&frame, &mut spectrum)
+                .map_err(|e| Error::processing(e.to_string()))?;
+
+            // ── Phase propagation (time-stretch: no bin remapping) ────────
+            for k in 0..num_bins {
+                let mag = spectrum[k].norm();
+                let phase = spectrum[k].arg();
+
+                let expected = 2.0 * PI * k as f32 * ana_hop as f32 / FRAME as f32;
+                let deviation = wrap_phase(phase - last_phase[k] - expected);
+                let inst_bin = k as f32 + deviation * FRAME as f32 / (2.0 * PI * ana_hop as f32);
+
+                last_phase[k] = phase;
+
+                // Synthesis phase advances at the synthesis hop rate
+                synth_phase[k] += inst_bin * 2.0 * PI * SYN_HOP as f32 / FRAME as f32;
+
+                let new_im = if k == 0 || k == num_bins - 1 {
+                    0.0
+                } else {
+                    mag * synth_phase[k].sin()
+                };
+                out_spectrum[k] = Complex::new(mag * synth_phase[k].cos(), new_im);
+            }
+
+            // ── Synthesis: IFFT + OLA ────────────────────────────────────
+            inv.process(&out_spectrum, &mut time_out)
+                .map_err(|e| Error::processing(e.to_string()))?;
+
+            for (i, (&s, &w)) in time_out.iter().zip(win.iter()).enumerate() {
+                let idx = syn_pos + i;
+                if idx < output.len() {
+                    output[idx] += s * w;
+                    ola_sum[idx] += w * w;
                 }
             }
 
-            // Advance positions
-            input_pos += (pitch_period as f32 * self.speed_factor) as usize;
-            output_pos += pitch_period;
+            ana_pos += ana_hop;
+            syn_pos += SYN_HOP;
+
+            if syn_pos >= out_len.saturating_sub(FRAME) {
+                break;
+            }
         }
 
+        // Normalise — use 10 % of peak OLA sum as threshold to suppress
+        // edge samples where fewer frames overlap (identical fix to pitch shift).
+        let max_ola = ola_sum.iter().cloned().fold(0.0_f32, f32::max);
+        let ola_threshold = (max_ola * 0.1).max(1e-8_f32);
+
+        for (s, &n) in output.iter_mut().zip(ola_sum.iter()) {
+            if n > ola_threshold {
+                *s /= n;
+            } else {
+                *s = 0.0;
+            }
+        }
+
+        let final_len = (input.len() as f32 / speed) as usize;
+        output.truncate(final_len);
         Ok(output)
     }
 
-    /// Apply linear interpolation for speed change
+    /// High-quality linear-interpolation resampler (used when pitch preservation
+    /// is not requested, or for short buffers as a fallback).
     fn apply_linear_interpolation(&self, input: &[f32]) -> Result<Vec<f32>> {
         let output_len = (input.len() as f32 / self.speed_factor) as usize;
         let mut output = Vec::with_capacity(output_len);
@@ -666,8 +975,7 @@ impl SpeedTransform {
 
             if idx + 1 < input.len() {
                 let frac = src_idx - idx as f32;
-                let sample = input[idx] * (1.0 - frac) + input[idx + 1] * frac;
-                output.push(sample);
+                output.push(input[idx] * (1.0 - frac) + input[idx + 1] * frac);
             } else if idx < input.len() {
                 output.push(input[idx]);
             } else {
