@@ -253,7 +253,7 @@ candle-kernels = { path = "patches/candle-kernels" }
 cudarc = { path = "patches/cudarc" }
 # Patch oxiarc-core 0.2.x: adds cancel/progress modules absent in 0.2.6.
 # scirs2-core 0.4.4 -> oxiarc-zstd 0.2.8 -> oxiarc-core 0.2.6 (missing those modules).
-oxiarc-core = { path = "patches/oxiarc-core" }
+oxiarc-core = "0.3.2"
 
 [profile.dev]
 opt-level = 1
