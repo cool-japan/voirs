@@ -45,13 +45,13 @@ uuid = { workspace = true }
 # Math and random
 fastrand = { workspace = true }
 
-# Cryptography and security
-ring = "0.17"
+# Cryptography and security (pure Rust)
 ed25519-dalek = "2.2"
 x25519-dalek = "2.0"
-aes-gcm = "0.10"
-sha2 = "0.10"
-base64 = "0.22"
+hmac = "0.12"
+aes-gcm = { workspace = true }
+sha2 = { workspace = true }
+base64 = { workspace = true }
 
 # ONNX Runtime (optional)
 oxionnx = { workspace = true, optional = true }

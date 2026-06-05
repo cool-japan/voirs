@@ -50,8 +50,8 @@ futures-util.workspace = true
 # HTTP client for microservices
 reqwest = { workspace = true, optional = true }
 
-# Email support for alerts
-lettre = "0.11"
+# Email support for alerts (rustls instead of native-tls — COOLJAPAN Pure Rust Policy)
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "pool", "hostname", "builder", "rustls-tls"] }
 
 # GraphQL support
 async-graphql = { version = "7.2", optional = true }

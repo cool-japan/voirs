@@ -39,10 +39,6 @@ serde_json.workspace = true
 serde_yaml.workspace = true
 chrono.workspace = true
 
-# OpenSSL vendored for cross-compilation (transitively needed by hf-hub/ort via native-tls)
-# Activated only via `vendored-openssl` feature for cross-compiled targets (e.g. aarch64)
-openssl = { workspace = true, optional = true, features = ["vendored"] }
-
 # Error handling
 anyhow.workspace = true
 thiserror.workspace = true
@@ -163,9 +159,6 @@ windows-platform = ["dep:windows", "dep:winapi"]
 macos-platform = ["dep:core-foundation", "dep:cpal", "dep:objc", "dep:objc-foundation"]
 linux-platform = ["dep:procfs", "dep:alsa", "dep:pulse", "dep:dbus"]
 platform-integration = ["windows-platform", "macos-platform", "linux-platform"]
-
-# Build OpenSSL from source for cross-compilation (aarch64 Linux)
-vendored-openssl = ["dep:openssl"]
 
 [lints]
 workspace = true

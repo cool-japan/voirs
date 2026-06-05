@@ -34,10 +34,10 @@ hound.workspace = true
 dasp.workspace = true
 
 # Audio format support
-symphonia = { version = "0.5", features = ["all"] }
+symphonia = { workspace = true, features = ["all"] }
 # Note: mp3-decoder is included in symphonia features
-ogg = "0.9"
-lewton = "0.10"
+ogg.workspace = true
+lewton.workspace = true
 
 # Math and statistics
 ordered-float.workspace = true
@@ -60,9 +60,9 @@ once_cell.workspace = true
 parking_lot.workspace = true
 chrono.workspace = true
 oxiarc-deflate.workspace = true
-uuid = { version = "1.22", features = ["v4", "serde"] }
-base64 = "0.22"
-md5 = "0.8"
+uuid.workspace = true
+base64.workspace = true
+md5.workspace = true
 
 # Machine learning
 candle-core.workspace = true
@@ -78,8 +78,8 @@ regex.workspace = true
 # Web and networking
 # Enable necessary warp features after upgrade (websocket and server)
 warp = { version = "0.4", features = ["websocket", "server"] }
-futures-util = "0.3"
-tokio-tungstenite = "0.29"
+futures-util.workspace = true
+tokio-tungstenite.workspace = true
 
 # Performance
 crossbeam-utils.workspace = true
@@ -92,13 +92,13 @@ pyo3 = { workspace = true, features = ["abi3-py38"], optional = true }
 numpy = { workspace = true, optional = true }
 
 # CLI dependencies
-clap = { version = "4.6", features = ["derive"] }
+clap.workspace = true
 
 # Audio metrics
 # Note: In a real implementation, you might add specialized audio quality libraries
 
 [dev-dependencies]
-tokio-test = "0.4"
+tokio-test.workspace = true
 tempfile.workspace = true
 criterion.workspace = true
 tracing-subscriber.workspace = true

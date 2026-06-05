@@ -16,7 +16,7 @@ use aes_gcm::{
 };
 use base64::{engine::general_purpose, Engine as _};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
-use ring::{digest, hmac, rand::SystemRandom};
+use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -24,6 +24,9 @@ use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
+
+/// HMAC-SHA256 type alias (pure-Rust replacement for `ring::hmac::HMAC_SHA256`).
+type HmacSha256 = Hmac<Sha256>;
 
 /// Cryptographic configuration for consent verification
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,7 +75,6 @@ pub struct CryptoConsentVerifier {
     config: CryptoConfig,
     signing_keys: Arc<RwLock<HashMap<String, SigningKey>>>,
     verification_keys: Arc<RwLock<HashMap<String, VerifyingKey>>>,
-    rng: SystemRandom,
 }
 
 impl CryptoConsentVerifier {
@@ -82,7 +84,6 @@ impl CryptoConsentVerifier {
             config,
             signing_keys: Arc::new(RwLock::new(HashMap::new())),
             verification_keys: Arc::new(RwLock::new(HashMap::new())),
-            rng: SystemRandom::new(),
         }
     }
 
@@ -139,11 +140,13 @@ impl CryptoConsentVerifier {
             .as_ref()
             .ok_or_else(|| Error::Verification("HMAC key not configured".to_string()))?;
 
-        let key = hmac::Key::new(hmac::HMAC_SHA256, hmac_key);
-        let signature = hmac::sign(&key, serialized.as_bytes());
+        let mut mac = <HmacSha256 as Mac>::new_from_slice(hmac_key)
+            .map_err(|e| Error::Verification(format!("Invalid HMAC key: {}", e)))?;
+        mac.update(serialized.as_bytes());
+        let signature = mac.finalize().into_bytes();
 
         // Encode as base64
-        let proof = general_purpose::STANDARD.encode(signature.as_ref());
+        let proof = general_purpose::STANDARD.encode(signature.as_slice());
 
         debug!(
             "Created cryptographic proof for consent: {}",
@@ -177,9 +180,12 @@ impl CryptoConsentVerifier {
             .as_ref()
             .ok_or_else(|| Error::Verification("HMAC key not configured".to_string()))?;
 
-        let key = hmac::Key::new(hmac::HMAC_SHA256, hmac_key);
+        let mut mac = <HmacSha256 as Mac>::new_from_slice(hmac_key)
+            .map_err(|e| Error::Verification(format!("Invalid HMAC key: {}", e)))?;
+        mac.update(serialized.as_bytes());
 
-        match hmac::verify(&key, serialized.as_bytes(), &signature_bytes) {
+        // Constant-time verification (equivalent to `ring::hmac::verify`).
+        match mac.verify_slice(&signature_bytes) {
             Ok(()) => {
                 debug!(
                     "Cryptographic proof verified for consent: {}",

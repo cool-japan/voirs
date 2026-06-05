@@ -780,3 +780,46 @@ For detailed development history, see git commit log and release notes.
 ### Build status
 
 `cargo check --workspace` green. `cargo clippy -p voirs-vocoder -p voirs-evaluation -p voirs-conversion --all-targets -- -D warnings` clean. voirs-vocoder 874/874 (2 skip = pre-existing ALSA hardware only). voirs-evaluation 922/922. voirs-conversion 387/387.
+
+---
+
+## Pure Rust Migration (COOLJAPAN Policy)
+
+- [x] **(MED — transitive C dependency) Eliminate `openssl`/`native-tls` (C OpenSSL) by moving the TLS stack fully to rustls.** **✅ DONE (2026-06-05)**: set `hf-hub` to `default-features = false, features = ["tokio", "ureq", "rustls-tls"]`; removed the workspace `openssl = "0.10"` dep and the voirs-ffi `vendored-openssl` feature (+ its optional `openssl` dep). Also caught a previously-masked second native-tls source — `lettre 0.11` (voirs-feedback alerts) defaulted to `native-tls`; switched it to `default-features = false, features = ["smtp-transport", "pool", "hostname", "builder", "rustls-tls"]`. Result: `cargo tree -i openssl-sys` / `-i native-tls` now report "did not match any packages" (both fully removed across `--target all`); TLS backend is rustls 0.23 + ring 0.17. Side note: also fixed a pre-existing build blocker — the invalid same-source `[patch.crates-io] oxiarc-core = "0.3.2"` line was removed (oxiarc-core 0.3.2 resolves natively from crates.io), and a `numrs2 = { path = "../numrs" }` patch was added because workspace requires numrs2 0.4.0 which is not yet published.
+  - **Declaration**: workspace `Cargo.toml:86` (`openssl = "0.10"`, comment notes it is transitive via hf-hub/native-tls). There are **ZERO** direct `openssl::` source call sites — `openssl` is pulled purely transitively as a TLS backend (openssl-sys → openssl-src, i.e. vendored C OpenSSL).
+  - **Root cause**: `hf-hub 0.5` default features pull `native-tls` → openssl. hf-hub is used by voirs-acoustic / voirs-sdk / voirs-cli / voirs-recognizer / voirs-vocoder (`hf-hub.workspace = true`, plus `features = ["tokio"]` in voirs-acoustic). **Fix**: set hf-hub to `default-features = false` and enable its **rustls** feature (hf-hub exposes a `rustls-tls` vs `native-tls` choice).
+  - **Stray reqwest edge**: `reqwest` is **ALREADY** rustls in the workspace (`Cargo.toml:157`, `default-features = false, features = ["json", "form", "rustls", "stream"]`, currently pinned to `0.13`), but the lock still contains a `reqwest 0.12.28` that drags `native-tls` + `hyper-tls`. Trace confirms this stray 0.12 edge is pulled by **hf-hub 0.5.0 itself** (`Cargo.lock` hf-hub package block lists both `native-tls` and `reqwest 0.12.28`), so disabling hf-hub default features should drop both the native-tls edge and the duplicate reqwest 0.12 in one move; re-verify after the change and pin to rustls if any other transitive consumer remains.
+  - **Cleanup** once the native-tls edge is gone: drop the `openssl` `[workspace.dependencies]` entry (`Cargo.toml:86`) and the `vendored-openssl` feature (`crates/voirs-ffi/Cargo.toml:168`, `vendored-openssl = ["dep:openssl"]`, with the optional `openssl` dep at `:44`) — note this feature is **NOT** in voirs-ffi `default` (`:146 = ["memory-detection", "dep:futures", "dep:futures-util"]`) anyway.
+  - This is **Cargo.toml feature surgery ONLY — no Rust source changes** (0 call sites).
+  - **Acceptance**: `cargo tree -i openssl-sys` empty; `cargo build` green; HuggingFace model-download + any HTTPS paths still work; default build is C-free on the TLS axis.
+
+### Policy-Check Findings — Pure Rust / COOLJAPAN default-build audit (2026-06-05)
+
+`/policy-check` found the default `cargo build` still links C/C++/asm (Tier A). The narrow openssl→rustls migration is DONE (`openssl-sys`/`openssl-src`/`native-tls` gone), BUT:
+
+**⚠️ Correction to the migration record:** removing vendored OpenSSL did NOT make TLS pure-Rust. `reqwest 0.12.28` (pulled by `hf-hub`'s async API) selects rustls's **`aws-lc-rs`** provider → **`aws-lc-sys` (C/asm)** is in the default closure, plus **`ring` (C/asm)**. So the crypto layer is rustls-with-C-providers, not pure-Rust.
+
+#### P0 — Tier A C/FFI in the DEFAULT closure (feature-gate out of default, or migrate to oxi*)
+- [ ] **Audio C codecs** — `opus`(libopus→audiopus_sys), `flac-bound`(libFLAC→flac-sys), `mp3lame-encoder`(LAME→mp3lame-sys), `minimp3`(→minimp3-sys). Non-optional at voirs-vocoder/Cargo.toml:38-40, voirs-dataset:37-40, voirs-sdk:69-75. Make optional + cfg-gate code; default decode via pure-Rust symphonia/claxon; MP3/Opus/FLAC **encode** becomes opt-in. → `oxiaudio-*`.
+- [ ] **libsqlite3-sys (C SQLite)** — via `sqlx[sqlite]` + `sea-orm[sqlx-sqlite]` (voirs-feedback/Cargo.toml:91-92), turned ON by `default=[…"sqlx"…]` (:104). Drop `sqlx`/`privacy` from default (persistence/privacy opt-in), or migrate to `oxisql-*` (sqlite-compat is Alpha).
+- [ ] **aws-lc-sys (AWS-LC C/asm)** — rustls default provider via reqwest 0.12.28 / hf-hub (possibly also sqlx/sea-orm). Hard: hf-hub does not expose a ring variant. Options: pin reqwest provider to ring, move hf-hub HTTP to ureq-only/oxihttp, or accept (still better than vendored OpenSSL). → `oxitls-*` when production-ready.
+- [ ] **ring (C/asm)** non-optional DIRECT dep — voirs-cloning/Cargo.toml:49 (used in src/consent_crypto.rs, src/privacy_protection.rs). Replace with pure-Rust RustCrypto (sha2 + hmac) + `scirs2_core::random`. **[IN PROGRESS]**
+- [ ] **zstd-sys (C, COOLJAPAN-banned)** — transitive via `parquet 58` (voirs-dataset) + `wasmtime` cache (voirs-cli). Disable parquet's `zstd` feature + wasmtime `cache` feature (loses zstd-parquet read + wasm module cache). parquet/wasmtime hardcode the `zstd` crate, so no clean oxiarc-zstd swap.
+
+#### P1 — Workspace hygiene (inline deps that exist in workspace → `.workspace = true`)
+- [ ] voirs-evaluation/Cargo.toml: symphonia (**0.5↔0.5.5 mismatch**), ogg, lewton, uuid, base64, md5, futures-util, tokio-tungstenite, clap, tokio-test (:37-101). **[IN PROGRESS]**
+- [ ] voirs-cloning/Cargo.toml:52-54: aes-gcm, sha2, base64 → workspace. **[IN PROGRESS]**
+- [ ] voirs-conversion / voirs-spatial: wasm-bindgen/web-sys/js-sys inline → `{ workspace = true, optional = true }`.
+- [ ] examples/Cargo.toml: thiserror/num_cpus/md5/regex → workspace; internal voirs-* **0.1.0-beta.1 → 0.1.0-rc.1** (:162-166).
+
+#### P2 — Refactor (>2000 lines) & temp-path hygiene
+- [ ] splitrs: voirs-singing/src/precision_quality.rs (2070, production); examples cloud_deployment(2895)/educational_tools(2643)/ai_integration(2282).
+- [ ] Production-src `/tmp` hardcodes → `std::env::temp_dir()`: voirs-singing/src/backends/onnx.rs:848-849; voirs-dataset/src/integration/cloud.rs:846,902,1157,1242; voirs-cli commands accuracy/performance/server; voirs-g2p/src/backends/neural/mod.rs:36; voirs-recognizer/src/integration/config.rs:307-308.
+
+#### PASS / clean
+openssl-sys/openssl-src/native-tls removed; no banned *direct* foundation crates (oxiarc/oxicode/oxifft used); no `default-features ignored` warnings; **0** hardcoded `/kitasan/` or `/notebooks/` paths.
+
+#### Informational
+~6,644 `unwrap()` + ~2,030 `expect()` under src/ (includes in-file `#[cfg(test)]` — true production count lower); 1 `#[allow(non_snake_case)]` (voirs-sdk/src/pipeline/synthesis.rs:1007); Tier B consolidation: symphonia/hound/claxon/lewton/dasp→oxiaudio, cpal→oxisound, rustls/reqwest→oxitls/oxihttp, sqlx/sea-orm→oxisql, parquet/arrow→oxistore.
+
+- [x] **(LOW — third-party version skew) Unblock `--all-features` by pinning `openvr_sys` to 2.1.3.** **✅ DONE (2026-06-05)**: openvr 0.8.1 (pulled only by voirs-spatial's optional non-default `steamvr` feature, a policy-compliant feature-gated C dep for VR hardware) declares `openvr_sys = "^2.1.3"` but cargo resolved 2.1.4, whose patch renamed `Prop_PreviousUniverseId_Uint64` → `Prop_PreviousUniverseId_Uint64_deprecated` in its vendored OpenVR header, breaking openvr's `src/property.rs` (`E0425`). Added durable pin in `crates/voirs-spatial/Cargo.toml` — `openvr_sys = { version = "=2.1.3", optional = true }` (direct-optional, constraint-only) and `steamvr = ["openvr", "dep:openvr_sys"]`; needed because Cargo.lock is gitignored. Result: `cargo check --all-features` now finishes EXIT=0 (was failing). Independent of the rustls/TLS work above — Cargo.toml-only, no `.rs` changes.
