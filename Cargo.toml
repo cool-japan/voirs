@@ -57,7 +57,7 @@ scirs2-core = { version = "0.5.0", features = ["array", "random", "simd", "paral
 scirs2-fft = { version = "0.5.0", features = ["oxifft"] }
 
 # NumRS2 - NumPy-like numerical computing (for numpy .npz file support)
-numrs2 = "0.3.2"
+numrs2 = "0.4.0"
 
 # Internal VoiRS crates
 voirs-g2p = { version = "0.1.0-rc.1", path = "crates/voirs-g2p" }
@@ -160,10 +160,10 @@ axum = { version = "0.8", features = ["json", "query", "ws"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace", "compression-br", "compression-gzip", "limit", "request-id"] }
 hyper = { version = "1.8", features = ["full"] }
-oxiarc-deflate = "0.3.1"
-oxiarc-zstd = "0.3.1"
-oxiarc-archive = "0.3.1"
-oxiarc-bzip2 = "0.3.1"
+oxiarc-deflate = "0.3.2"
+oxiarc-zstd = "0.3.2"
+oxiarc-archive = "0.3.2"
+oxiarc-bzip2 = "0.3.2"
 csv = "1.4"
 walkdir = "2.5"
 glob = "0.3"
