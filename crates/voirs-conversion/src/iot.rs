@@ -901,6 +901,21 @@ impl IoTVoiceConverter {
     }
 }
 
+/// Install the pure-Rust rustls [`CryptoProvider`](rustls::crypto::CryptoProvider)
+/// as the process-wide default.
+///
+/// `reqwest` is built with `rustls-no-provider`, so a default crypto provider must be
+/// installed before any TLS handshake. `Once`-guarded; safe to call repeatedly.
+#[cfg(feature = "iot")]
+fn ensure_crypto_provider() {
+    use std::sync::Once;
+    static INSTALL_PROVIDER: Once = Once::new();
+    INSTALL_PROVIDER.call_once(|| {
+        let provider = (*oxitls_adapter_rustls_rustcrypto::pure_provider()).clone();
+        let _ = rustls::crypto::CryptoProvider::install_default(provider);
+    });
+}
+
 /// Cloud client for fallback processing
 pub struct CloudClient {
     endpoint: Option<String>,
@@ -909,6 +924,9 @@ pub struct CloudClient {
 
 impl CloudClient {
     async fn new(endpoint: Option<String>) -> Result<Self> {
+        // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+        // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+        ensure_crypto_provider();
         Ok(Self {
             endpoint,
             client: reqwest::Client::new(),

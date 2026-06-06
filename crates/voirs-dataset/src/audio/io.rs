@@ -93,6 +93,12 @@ pub fn load_flac<P: AsRef<Path>>(path: P) -> Result<AudioData> {
 }
 
 /// Load MP3 file
+///
+/// MP3 decoding relies on the `minimp3` C library, which is gated behind the
+/// non-default `ffi-codecs` feature (COOLJAPAN Pure-Rust policy). Without that
+/// feature there is no pure-Rust MP3 decoder available in this crate, so this
+/// function returns a clear error directing the caller to enable `ffi-codecs`.
+#[cfg(feature = "ffi-codecs")]
 pub fn load_mp3<P: AsRef<Path>>(path: P) -> Result<AudioData> {
     let mut file = File::open(path)?;
     let mut buffer = Vec::new();
@@ -143,6 +149,17 @@ pub fn load_mp3<P: AsRef<Path>>(path: P) -> Result<AudioData> {
     audio.add_metadata("format".to_string(), "mp3".to_string());
 
     Ok(audio)
+}
+
+/// Load MP3 file (Pure-Rust build: `ffi-codecs` feature disabled).
+///
+/// MP3 decoding requires the C-based `minimp3` decoder, which is only compiled
+/// when the `ffi-codecs` feature is enabled. Returns a clear error otherwise.
+#[cfg(not(feature = "ffi-codecs"))]
+pub fn load_mp3<P: AsRef<Path>>(_path: P) -> Result<AudioData> {
+    Err(DatasetError::FormatError(
+        "MP3 decoding requires the 'ffi-codecs' feature".to_string(),
+    ))
 }
 
 /// Load OGG Vorbis file
@@ -911,6 +928,7 @@ impl AudioMetadataExtractor {
         Ok(metadata)
     }
 
+    #[cfg(feature = "ffi-codecs")]
     fn extract_mp3_metadata<P: AsRef<Path>>(path: P) -> Result<HashMap<String, String>> {
         let mut file = File::open(path)?;
         let mut buffer = Vec::new();
@@ -928,6 +946,17 @@ impl AudioMetadataExtractor {
         }
 
         Ok(metadata)
+    }
+
+    /// Extract MP3 metadata (Pure-Rust build: `ffi-codecs` feature disabled).
+    ///
+    /// Frame-level MP3 metadata extraction requires the C-based `minimp3`
+    /// decoder, only compiled with the `ffi-codecs` feature.
+    #[cfg(not(feature = "ffi-codecs"))]
+    fn extract_mp3_metadata<P: AsRef<Path>>(_path: P) -> Result<HashMap<String, String>> {
+        Err(DatasetError::FormatError(
+            "MP3 metadata extraction requires the 'ffi-codecs' feature".to_string(),
+        ))
     }
 
     fn extract_ogg_metadata<P: AsRef<Path>>(path: P) -> Result<HashMap<String, String>> {

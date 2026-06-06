@@ -645,6 +645,9 @@ impl QualityMonitor {
                 }]
             });
 
+            // Ensure the pure-Rust rustls CryptoProvider is installed before any TLS
+            // handshake (reqwest is built with `rustls-no-provider`).
+            voirs_sdk::ensure_crypto_provider();
             let client = reqwest::Client::new();
             match client.post(&webhook_url).json(&payload).send().await {
                 Ok(response) => {

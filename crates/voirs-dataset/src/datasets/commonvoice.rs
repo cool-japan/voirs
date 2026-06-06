@@ -473,6 +473,12 @@ impl CommonVoiceDataset {
     }
 
     /// Load MP3 audio file
+    ///
+    /// CommonVoice ships MP3 clips, decoded here via the C-based `minimp3`
+    /// library. That decoder is only compiled with the non-default
+    /// `ffi-codecs` feature (COOLJAPAN Pure-Rust policy); without it this
+    /// returns a clear error directing the caller to enable the feature.
+    #[cfg(feature = "ffi-codecs")]
     fn load_mp3_audio(&self, entry: &CommonVoiceEntry) -> Result<AudioData> {
         let file_data = std::fs::read(&entry.audio_path).map_err(|e| {
             DatasetError::IoError(std::io::Error::new(
@@ -514,6 +520,18 @@ impl CommonVoiceDataset {
         }
 
         Ok(AudioData::new(all_samples, sample_rate, channels))
+    }
+
+    /// Load MP3 audio file (Pure-Rust build: `ffi-codecs` feature disabled).
+    ///
+    /// CommonVoice MP3 clips require the C-based `minimp3` decoder, only
+    /// compiled with the `ffi-codecs` feature.
+    #[cfg(not(feature = "ffi-codecs"))]
+    fn load_mp3_audio(&self, entry: &CommonVoiceEntry) -> Result<AudioData> {
+        Err(DatasetError::AudioError(format!(
+            "MP3 decoding requires the 'ffi-codecs' feature (file: {:?})",
+            entry.audio_path
+        )))
     }
 
     /// Get or create speaker info for a client ID

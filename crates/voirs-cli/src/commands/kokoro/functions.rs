@@ -1237,6 +1237,9 @@ async fn execute_download(
         ("af.bin",
         "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main/voices/af.bin",),
     ];
+    // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+    // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+    voirs_acoustic::hub::ensure_crypto_provider();
     let client = reqwest::Client::builder()
         .user_agent("voirs-cli")
         .build()

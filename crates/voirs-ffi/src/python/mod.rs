@@ -102,6 +102,10 @@ use pyo3::prelude::*;
 #[cfg(feature = "python")]
 #[pymodule]
 fn voirs(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+    // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+    voirs_acoustic::hub::ensure_crypto_provider();
+
     // Core classes
     m.add_class::<VoirsPipeline>()?;
     m.add_class::<PyAudioBuffer>()?;

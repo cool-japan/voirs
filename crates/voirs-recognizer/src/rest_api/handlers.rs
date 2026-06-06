@@ -1398,6 +1398,10 @@ async fn fetch_audio_from_url(
         return Err("Only HTTP and HTTPS URLs are allowed".into());
     }
 
+    // Ensure the pure-Rust rustls CryptoProvider is installed before any TLS
+    // handshake (reqwest is built with `rustls-no-provider`).
+    voirs_sdk::ensure_crypto_provider();
+
     // Create HTTP client with reasonable timeouts
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))

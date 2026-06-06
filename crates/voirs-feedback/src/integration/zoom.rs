@@ -462,6 +462,10 @@ impl ZoomClient {
         client_secret: impl Into<String>,
         account_id: impl Into<String>,
     ) -> Self {
+        // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+        // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+        #[cfg(feature = "microservices")]
+        voirs_sdk::ensure_crypto_provider();
         Self {
             config: ZoomClientConfig::new(
                 client_id.into(),
@@ -477,6 +481,10 @@ impl ZoomClient {
     /// Create a mock client for testing
     #[must_use]
     pub fn mock() -> Self {
+        // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+        // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+        #[cfg(feature = "microservices")]
+        voirs_sdk::ensure_crypto_provider();
         Self {
             config: ZoomClientConfig::mock(),
             token: Arc::new(RwLock::new(None)),
@@ -912,17 +920,20 @@ impl ZoomClient {
         timestamp: &str,
         signature: &str,
     ) -> Result<(), ZoomError> {
-        use ring::hmac;
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
 
         if self.config.mock_mode {
             return Ok(());
         }
 
         let message = format!("v0:{timestamp}:{payload}");
-        let key = hmac::Key::new(hmac::HMAC_SHA256, self.config.client_secret.as_bytes());
-        let expected_signature = hmac::sign(&key, message.as_bytes());
+        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(self.config.client_secret.as_bytes())
+            .map_err(|_| ZoomError::WebhookVerificationFailed)?;
+        mac.update(message.as_bytes());
+        let expected_signature = mac.finalize().into_bytes();
 
-        let expected_hex = hex::encode(expected_signature.as_ref());
+        let expected_hex = hex::encode(expected_signature);
         let expected = format!("v0={expected_hex}");
 
         if expected == signature {

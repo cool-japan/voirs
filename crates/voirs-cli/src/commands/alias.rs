@@ -157,12 +157,6 @@ impl AliasManager {
     }
 }
 
-impl Default for AliasManager {
-    fn default() -> Self {
-        Self::new().expect("Failed to create alias manager")
-    }
-}
-
 /// Check if a name is a built-in command
 fn is_builtin_command(name: &str) -> bool {
     matches!(

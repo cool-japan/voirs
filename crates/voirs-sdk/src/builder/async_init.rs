@@ -792,6 +792,10 @@ impl VoirsPipelineBuilder {
 
         debug!("Download URL: {}", file_url);
 
+        // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+        // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+        crate::ensure_crypto_provider();
+
         // Create HTTP client with timeout and retry configuration
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(300)) // 5 minute timeout
@@ -1073,6 +1077,10 @@ impl VoirsPipelineBuilder {
     pub(crate) async fn is_voice_available_remotely(&self, voice_id: &str) -> bool {
         debug!("Checking remote availability for voice '{}'", voice_id);
 
+        // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+        // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+        crate::ensure_crypto_provider();
+
         // Create HTTP client for quick availability check
         let client = match reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
@@ -1124,6 +1132,10 @@ impl VoirsPipelineBuilder {
             "Checking availability of all files for voice '{}'",
             voice_id
         );
+
+        // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+        // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+        crate::ensure_crypto_provider();
 
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))

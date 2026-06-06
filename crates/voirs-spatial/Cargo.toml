@@ -61,9 +61,9 @@ openvr = { version = "0.8", optional = true }
 # openvr 0.8.1 (it targets openvr_sys 2.1.3). Constraint-only dep (not referenced in code);
 # activated together with `openvr` via the `steamvr` feature.
 openvr_sys = { version = "=2.1.3", optional = true }
-wasm-bindgen = { version = "0.2", optional = true }
-web-sys = { version = "0.3", optional = true }
-js-sys = { version = "0.3", optional = true }
+wasm-bindgen = { workspace = true, optional = true }
+web-sys = { workspace = true, optional = true }
+js-sys = { workspace = true, optional = true }
 
 # Platform-specific dependencies
 [target.'cfg(target_os = "windows")'.dependencies]

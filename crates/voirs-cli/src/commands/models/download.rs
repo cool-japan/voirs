@@ -4,13 +4,9 @@ use crate::commands::models::safetensors_support::{
     check_production_requirements, SafeTensorsLoader,
 };
 use crate::GlobalOptions;
-use hf_hub::{api::sync::Api, Repo, RepoType};
 use indicatif::{ProgressBar, ProgressStyle};
-use reqwest::Client;
 use sha2::{Digest, Sha256};
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use tokio::io::AsyncWriteExt;
 use voirs_sdk::config::AppConfig;
 use voirs_sdk::Result;
 
@@ -82,12 +78,8 @@ async fn download_model_from_repository(
     let model_dir = models_dir.join(model_id);
     std::fs::create_dir_all(&model_dir)?;
 
-    // Initialize HuggingFace Hub API
-    let api = Api::new()?;
-    let repo = api.repo(Repo::new(model_id.to_string(), RepoType::Model));
-
-    // Get model metadata first
-    let metadata = get_model_metadata(&repo, model_id).await?;
+    // Get model metadata first (uses the in-house pure-Rust HuggingFace downloader)
+    let mut metadata = get_model_metadata(model_id).await?;
 
     if !global.quiet {
         println!("Model: {}", metadata.name);
@@ -96,8 +88,10 @@ async fn download_model_from_repository(
         println!();
     }
 
-    // Download all model files with progress tracking
-    download_model_files(&repo, &metadata, &model_dir, global).await?;
+    // Download all model files with progress tracking. The real on-disk size of each
+    // successfully downloaded file is written back into `metadata` so that later
+    // verification compares like-for-like.
+    download_model_files(model_id, &mut metadata, &model_dir, global).await?;
 
     // Verify downloads
     verify_downloaded_files(&metadata, &model_dir, global).await?;
@@ -128,16 +122,27 @@ struct ModelFile {
     sha256: Option<String>,
 }
 
-/// Get model metadata from HuggingFace Hub
-async fn get_model_metadata(
-    repo: &hf_hub::api::sync::ApiRepo,
-    model_id: &str,
-) -> Result<ModelMetadata> {
-    // Try to get actual file information from HuggingFace Hub
-    let mut files = Vec::new();
+/// Estimate a file's size in bytes from its name (used when the Hub does not
+/// report an exact size up-front).
+fn estimate_file_size(filename: &str) -> u64 {
+    match filename {
+        "pytorch_model.bin" | "model.safetensors" => 100 * 1024 * 1024, // 100MB
+        "config.json" => 2048,
+        "tokenizer.json" => 5 * 1024 * 1024, // 5MB
+        "vocab.txt" => 1024 * 1024,          // 1MB
+        _ => 1024,
+    }
+}
 
-    // Standard model files to look for
-    let standard_files = vec![
+/// Get model metadata from HuggingFace Hub.
+///
+/// Uses the in-house pure-Rust downloader: first attempts to list the repository's
+/// files via the Hub model-info API, intersecting with the set of standard model
+/// files we know how to consume; if listing fails (e.g. offline or a private repo
+/// without a listing), falls back to a conservative default set.
+async fn get_model_metadata(model_id: &str) -> Result<ModelMetadata> {
+    // Standard model files to look for.
+    let standard_files = [
         "config.json",
         "pytorch_model.bin",
         "model.safetensors",
@@ -147,37 +152,22 @@ async fn get_model_metadata(
         "tokenizer_config.json",
     ];
 
-    for filename in standard_files {
-        match repo.get(filename) {
-            Ok(path_buf) => {
-                // File exists, try to get its size
-                let size_bytes = if let Ok(metadata) = std::fs::metadata(&path_buf) {
-                    metadata.len()
-                } else {
-                    // Estimate based on file type
-                    match filename {
-                        "pytorch_model.bin" | "model.safetensors" => 100 * 1024 * 1024, // 100MB
-                        "config.json" => 2048,
-                        "tokenizer.json" => 5 * 1024 * 1024, // 5MB
-                        "vocab.txt" => 1024 * 1024,          // 1MB
-                        _ => 1024,
-                    }
-                };
+    let mut files = Vec::new();
 
+    // Ask the Hub which files actually exist, then keep only the standard ones.
+    if let Ok(remote_files) = voirs_acoustic::hub::list_files(model_id, None).await {
+        for filename in standard_files {
+            if remote_files.iter().any(|f| f == filename) {
                 files.push(ModelFile {
                     name: filename.to_string(),
-                    size_bytes,
+                    size_bytes: estimate_file_size(filename),
                     sha256: None, // HF API would provide this
                 });
-            }
-            Err(_) => {
-                // File doesn't exist in this model, skip it
-                continue;
             }
         }
     }
 
-    // If no files found, fall back to default set
+    // If listing failed or yielded nothing usable, fall back to a default set.
     if files.is_empty() {
         files = vec![
             ModelFile {
@@ -203,10 +193,19 @@ async fn get_model_metadata(
     })
 }
 
-/// Download model files with progress tracking
+/// Download model files with progress tracking.
+///
+/// Downloads each file from the HuggingFace repository `model_id` using the in-house
+/// pure-Rust downloader ([`voirs_acoustic::hub::download_file`]) and copies it into
+/// `model_dir`. The real on-disk size of each successfully copied file is written
+/// back into `metadata.files[i].size_bytes` (the pre-download estimate is replaced)
+/// so that [`verify_downloaded_files`] compares actual sizes.
+///
+/// If any file fails to download or copy, an error is returned and NO placeholder
+/// files are created (regression guard for issue #3).
 async fn download_model_files(
-    repo: &hf_hub::api::sync::ApiRepo,
-    metadata: &ModelMetadata,
+    model_id: &str,
+    metadata: &mut ModelMetadata,
     model_dir: &Path,
     global: &GlobalOptions,
 ) -> Result<()> {
@@ -226,24 +225,29 @@ async fn download_model_files(
         None
     };
 
+    let model_name = metadata.name.clone();
     let mut failed_files: Vec<String> = Vec::new();
 
-    for file in metadata.files.iter() {
+    for file in metadata.files.iter_mut() {
         if let Some(pb) = &progress_bar {
             pb.set_message(format!("Downloading {}", file.name));
         }
 
         let file_path = model_dir.join(&file.name);
 
-        // Try to download the actual file from HuggingFace Hub
-        match repo.get(&file.name) {
-            Ok(downloaded_path) => {
-                // File successfully downloaded by hf-hub, copy it to our location
-                if let Err(e) = std::fs::copy(&downloaded_path, &file_path) {
+        // Download the actual file from the HuggingFace Hub via the in-house
+        // pure-Rust downloader, then copy it into the model directory.
+        match voirs_acoustic::hub::download_file(model_id, &file.name, None).await {
+            Ok(downloaded_path) => match std::fs::copy(&downloaded_path, &file_path) {
+                Ok(copied_bytes) => {
+                    // Replace the size estimate with the real downloaded size.
+                    file.size_bytes = copied_bytes;
+                }
+                Err(e) => {
                     tracing::error!("Failed to copy {}: {}", file.name, e);
                     failed_files.push(format!("{}: copy failed: {}", file.name, e));
                 }
-            }
+            },
             Err(e) => {
                 // Download failed — propagate the error; do NOT create placeholder files
                 // as that masks real failures and causes false "success" reports.
@@ -266,7 +270,7 @@ async fn download_model_files(
         }
         return Err(voirs_sdk::VoirsError::config_error(format!(
             "Model download failed for '{}'. {} file(s) could not be downloaded:\n{}",
-            metadata.name,
+            model_name,
             failed_files.len(),
             failed_files
                 .iter()
@@ -385,25 +389,21 @@ async fn verify_model_installation(
         ("model.onnx", "ONNX"),
     ];
 
-    let mut found_model_file = None;
-    let mut model_format = None;
+    let mut found_model = None;
 
     for (filename, format_name) in &model_files {
         let file_path = model_dir.join(filename);
         if file_path.exists() {
-            found_model_file = Some(file_path);
-            model_format = Some(format_name);
+            found_model = Some((file_path, format_name));
             break;
         }
     }
 
-    let model_path = found_model_file.ok_or_else(|| {
+    let (model_path, format) = found_model.ok_or_else(|| {
         voirs_sdk::VoirsError::model_error(
             "Model verification failed: no model file found (expected .safetensors, .bin, .pt, or .onnx)"
         )
     })?;
-
-    let format = model_format.expect("model_format should be set when model file is found");
 
     if !global.quiet {
         println!("Found model format: {}", format);
@@ -648,18 +648,16 @@ mod tests {
     /// (no HF repo) and expects download_model_files to return Err.
     #[tokio::test]
     async fn test_failed_download_returns_error_not_placeholder() {
-        let temp_dir = std::env::temp_dir().join("voirs_test_failed_download");
+        let temp_dir =
+            std::env::temp_dir().join(format!("voirs_test_failed_download_{}", std::process::id()));
         std::fs::create_dir_all(&temp_dir).unwrap();
 
-        // Use a model path that definitely does not exist in any local HF cache.
-        // The hf_hub API will fail to resolve it, which should now produce Err.
-        let api = hf_hub::api::sync::Api::new().unwrap();
-        let repo = api.repo(hf_hub::Repo::new(
-            "this-org-definitely-does-not-exist/no-such-model-xxxxxxx".to_string(),
-            hf_hub::RepoType::Model,
-        ));
+        // Use a repository id that definitely does not exist. The in-house downloader
+        // will fail to resolve it (HTTP 404 when online, or a transport error when
+        // offline), which must produce Err — never a placeholder file.
+        let model_id = "this-org-definitely-does-not-exist/no-such-model-xxxxxxx";
 
-        let metadata = ModelMetadata {
+        let mut metadata = ModelMetadata {
             name: "no-such-model-xxxxxxx".to_string(),
             description: "nonexistent".to_string(),
             total_size_mb: 50.0,
@@ -687,7 +685,7 @@ mod tests {
             threads: None,
         };
 
-        let result = download_model_files(&repo, &metadata, &temp_dir, &global).await;
+        let result = download_model_files(model_id, &mut metadata, &temp_dir, &global).await;
         assert!(
             result.is_err(),
             "download_model_files must return Err when the HF repo does not exist (regression for issue #3); \

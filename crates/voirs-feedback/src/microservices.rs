@@ -480,6 +480,10 @@ pub struct ServiceCommunicationManager {
 impl ServiceCommunicationManager {
     /// Create a new service communication manager
     pub fn new(service_discovery: Arc<dyn ServiceDiscovery>) -> Self {
+        // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+        // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+        voirs_sdk::ensure_crypto_provider();
+
         let (tx, _) = broadcast::channel(1000); // Buffer up to 1000 messages
 
         Self {

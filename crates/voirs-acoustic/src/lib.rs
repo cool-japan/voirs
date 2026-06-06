@@ -543,6 +543,7 @@ pub mod error;
 pub mod fastspeech;
 pub mod fastspeech2_trainer;
 pub mod fusion;
+pub mod hub;
 pub mod mel;
 pub mod memory;
 pub mod metrics;

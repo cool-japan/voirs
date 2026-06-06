@@ -94,10 +94,13 @@ serde_yaml.workspace = true
 base64.workspace = true
 
 # Model management
-hf-hub.workspace = true
 reqwest.workspace = true
 sha2.workspace = true
 futures-util.workspace = true
+
+# Pure-Rust TLS provider (rustls + RustCrypto) — installed as process default in main()
+oxitls-adapter-rustls-rustcrypto.workspace = true
+rustls.workspace = true
 safetensors.workspace = true
 tract-onnx.workspace = true
 tract-core.workspace = true

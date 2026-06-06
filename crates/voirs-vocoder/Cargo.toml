@@ -23,7 +23,6 @@ candle-core = { workspace = true, optional = true }
 candle-nn = { workspace = true, optional = true }
 oxionnx = { workspace = true, optional = true }
 safetensors.workspace = true
-hf-hub.workspace = true
 
 # SciRS2 - Optimized DSP and signal processing
 scirs2-core.workspace = true
@@ -35,9 +34,11 @@ half.workspace = true
 # Audio
 hound.workspace = true
 symphonia.workspace = true
-opus.workspace = true
-flac-bound.workspace = true
-mp3lame-encoder.workspace = true
+# C-FFI audio encoders (libopus / libFLAC / LAME) — gated behind the
+# default-OFF `ffi-codecs` feature to keep the default build Pure Rust.
+opus = { workspace = true, optional = true }
+flac-bound = { workspace = true, optional = true }
+mp3lame-encoder = { workspace = true, optional = true }
 mp4.workspace = true
 
 # Serialization
@@ -87,6 +88,10 @@ criterion.workspace = true
 [features]
 default = ["candle"]
 candle = ["dep:candle-core", "dep:candle-nn"]
+# C-FFI audio encoders (libopus, libFLAC, LAME). OFF by default so the
+# default build stays Pure Rust (COOLJAPAN Pure-Rust policy). Enables
+# MP3 / Opus encoding of vocoder output.
+ffi-codecs = ["dep:opus", "dep:flac-bound", "dep:mp3lame-encoder"]
 onnx = ["dep:oxionnx"]
 gpu = ["metal", "oxionnx?/gpu"]  # On macOS, use Metal; on Linux/Windows would use cuda
 cuda = ["candle-core?/cuda", "oxionnx?/gpu"]

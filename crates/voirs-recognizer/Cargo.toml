@@ -63,7 +63,6 @@ candle-nn.workspace = true
 candle-transformers.workspace = true
 oxionnx = { workspace = true, optional = true }
 safetensors.workspace = true
-hf-hub.workspace = true
 
 # Text processing
 unicode-normalization.workspace = true
@@ -73,7 +72,9 @@ regex.workspace = true
 # Audio format support
 claxon.workspace = true
 lewton.workspace = true
-minimp3.workspace = true
+# minimp3 is a C-FFI MP3 decoder (via minimp3-sys); gated behind the default-OFF
+# `ffi-codecs` feature to keep the default build Pure Rust (COOLJAPAN policy).
+minimp3 = { workspace = true, optional = true }
 symphonia.workspace = true
 
 # Performance
@@ -136,6 +137,9 @@ rest-api = ["axum", "tower", "tower-http", "hyper", "tokio-tungstenite", "base64
 all-models = ["whisper", "whisper-pure", "deepspeech", "wav2vec2", "transformer", "conformer", "forced-align", "mfa"]
 onnx = ["dep:oxionnx"]
 gpu = ["oxionnx?/gpu"]
+# C-FFI audio codecs (minimp3 MP3 decoder). Default-OFF to keep the default build
+# Pure Rust (COOLJAPAN policy). Enable to decode MP3 input via Mp3Loader.
+ffi-codecs = ["dep:minimp3"]
 
 # Windows-specific dependencies
 [target.'cfg(windows)'.dependencies]

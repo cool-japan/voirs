@@ -220,6 +220,10 @@ impl SlackBot {
     /// Create a new Slack bot
     #[must_use]
     pub fn new(config: BotConfig) -> Self {
+        // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+        // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+        #[cfg(feature = "microservices")]
+        voirs_sdk::ensure_crypto_provider();
         Self {
             config,
             #[cfg(feature = "microservices")]
@@ -399,6 +403,10 @@ impl DiscordBot {
     /// Create a new Discord bot
     #[must_use]
     pub fn new(config: BotConfig) -> Self {
+        // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+        // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+        #[cfg(feature = "microservices")]
+        voirs_sdk::ensure_crypto_provider();
         Self {
             config,
             #[cfg(feature = "microservices")]

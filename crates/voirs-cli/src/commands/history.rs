@@ -202,12 +202,6 @@ impl HistoryManager {
     }
 }
 
-impl Default for HistoryManager {
-    fn default() -> Self {
-        Self::new().expect("Failed to create history manager")
-    }
-}
-
 /// Command usage statistics
 #[derive(Debug, Default)]
 pub struct CommandStatistics {

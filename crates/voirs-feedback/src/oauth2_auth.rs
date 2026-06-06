@@ -306,6 +306,10 @@ pub struct OAuth2Manager {
 impl OAuth2Manager {
     /// Create new OAuth 2.0 manager
     pub fn new(config: OAuth2Config) -> OAuth2Result<Self> {
+        // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+        // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+        voirs_sdk::ensure_crypto_provider();
+
         let jwt_secret = config.jwt_secret.as_bytes();
         let jwt_encoding_key = EncodingKey::from_secret(jwt_secret);
         let jwt_decoding_key = DecodingKey::from_secret(jwt_secret);

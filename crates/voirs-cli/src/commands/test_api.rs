@@ -282,6 +282,10 @@ pub struct ApiTester {
 impl ApiTester {
     /// Create a new API tester
     pub fn new(config: ApiTestConfig) -> Result<Self> {
+        // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+        // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+        voirs_acoustic::hub::ensure_crypto_provider();
+
         let client = Client::builder()
             .timeout(Duration::from_secs(config.timeout_secs))
             .build()

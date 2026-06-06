@@ -236,6 +236,10 @@ impl LjSpeechDataset {
         // Create download directory if it doesn't exist
         fs::create_dir_all(download_path).await?;
 
+        // Ensure the pure-Rust rustls CryptoProvider is installed before the TLS
+        // handshake (reqwest is built with `rustls-no-provider`).
+        crate::tls::ensure_crypto_provider();
+
         // Download archive
         let response = reqwest::get(LJSPEECH_URL)
             .await

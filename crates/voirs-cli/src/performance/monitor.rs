@@ -894,6 +894,9 @@ impl AlertManager {
         alert: &PerformanceAlert,
         config: &WebhookConfig,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+        // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+        voirs_acoustic::hub::ensure_crypto_provider();
         let client = reqwest::Client::new();
         let payload = serde_json::to_value(alert)?;
 

@@ -61,7 +61,10 @@ oxiarc-deflate = { workspace = true }
 hound = { workspace = true }
 
 # HTTP client for IoT cloud connectivity
-reqwest = { workspace = true, features = ["json", "rustls"], optional = true }
+reqwest = { workspace = true, features = ["json", "rustls-no-provider"], optional = true }
+# Pure-Rust TLS provider (rustls + RustCrypto) — installed before IoT TLS handshakes
+oxitls-adapter-rustls-rustcrypto = { workspace = true, optional = true }
+rustls = { workspace = true, optional = true }
 
 # VoiRS dependencies
 voirs-acoustic = { workspace = true, optional = true }
@@ -70,11 +73,11 @@ voirs-emotion = { workspace = true, optional = true }
 voirs-spatial = { workspace = true, optional = true }
 
 # WebAssembly dependencies
-wasm-bindgen = { version = "0.2.114", optional = true }
-wasm-bindgen-futures = { version = "0.4.64", optional = true }
+wasm-bindgen = { workspace = true, optional = true }
+wasm-bindgen-futures = { workspace = true, optional = true }
 serde-wasm-bindgen = { version = "0.6", optional = true }
-js-sys = { version = "0.3.91", optional = true }
-web-sys = { version = "0.3.91", optional = true, features = [
+js-sys = { workspace = true, optional = true }
+web-sys = { workspace = true, optional = true, features = [
     "console",
     "AudioContext",
     "AudioContextState",
@@ -118,7 +121,7 @@ onnx = ["dep:oxionnx"]
 metal = ["dep:metal-rs"]
 streaming = ["real-time"]
 wasm = ["wasm-bindgen", "wasm-bindgen-futures", "serde-wasm-bindgen", "js-sys", "web-sys", "getrandom", "getrandom_v2"]
-iot = ["reqwest"]
+iot = ["reqwest", "dep:oxitls-adapter-rustls-rustcrypto", "dep:rustls"]
 all-integrations = ["acoustic-integration", "cloning-integration", "emotion-integration", "spatial-integration"]
 
 

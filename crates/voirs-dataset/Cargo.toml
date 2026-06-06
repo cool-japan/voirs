@@ -29,15 +29,20 @@ oxifft.workspace = true
 reqwest.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+# Pure-Rust TLS provider (rustls + RustCrypto) — installed before any TLS handshake
+oxitls-adapter-rustls-rustcrypto.workspace = true
+rustls.workspace = true
 
 # Audio processing
 hound.workspace = true
 dasp.workspace = true
 claxon.workspace = true
-flac-bound.workspace = true
 lewton.workspace = true
-minimp3.workspace = true
-mp3lame-encoder.workspace = true
+# C-FFI codecs (libFLAC / minimp3 / LAME) — gated behind the non-default
+# `ffi-codecs` feature to keep the default build Pure Rust (COOLJAPAN policy).
+flac-bound = { workspace = true, optional = true }
+minimp3 = { workspace = true, optional = true }
+mp3lame-encoder = { workspace = true, optional = true }
 
 # Compression and archives
 oxiarc-deflate.workspace = true
@@ -117,5 +122,10 @@ harness = false
 
 [features]
 default = []
+# Enables C-FFI audio codecs: libFLAC (flac-bound), minimp3 (MP3 decode),
+# and LAME (mp3lame-encoder, MP3 encode). OFF by default to keep the
+# default build Pure Rust. Without this feature, MP3 decode/encode via
+# these libraries returns a clear "requires 'ffi-codecs'" error.
+ffi-codecs = ["dep:flac-bound", "dep:minimp3", "dep:mp3lame-encoder"]
 [lints]
 workspace = true

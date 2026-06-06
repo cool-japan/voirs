@@ -447,8 +447,8 @@ This dataset was exported using the VoiRS dataset utilities.
             ));
         }
 
-        // Try to use actual FLAC encoding with flac-bound crate
-        // Fall back to high-quality WAV if FLAC encoding fails
+        // Try to use actual FLAC encoding (via the io module's encoder).
+        // Fall back to high-quality WAV if FLAC encoding fails.
         match self.try_save_actual_flac(audio, path).await {
             Ok(()) => Ok(()),
             Err(_) => {
@@ -504,6 +504,12 @@ This dataset was exported using the VoiRS dataset utilities.
     }
 
     /// Save audio file as MP3 format
+    ///
+    /// MP3 encoding uses the C-based LAME library (`mp3lame-encoder`), gated
+    /// behind the non-default `ffi-codecs` feature (COOLJAPAN Pure-Rust
+    /// policy). There is no pure-Rust MP3 encoder; without the feature this
+    /// returns a clear error directing the caller to enable `ffi-codecs`.
+    #[cfg(feature = "ffi-codecs")]
     async fn save_mp3_file(&self, audio: &crate::AudioData, path: &Path) -> Result<()> {
         use mp3lame_encoder::{Builder, FlushNoGap, InterleavedPcm};
 
@@ -579,6 +585,18 @@ This dataset was exported using the VoiRS dataset utilities.
 
         fs::write(path, mp3_buffer).await?;
         Ok(())
+    }
+
+    /// Save audio file as MP3 (Pure-Rust build: `ffi-codecs` feature disabled).
+    ///
+    /// MP3 encoding requires the C-based LAME library (`mp3lame-encoder`), only
+    /// compiled with the `ffi-codecs` feature. There is no pure-Rust MP3
+    /// encoder, so this returns a clear error when the feature is disabled.
+    #[cfg(not(feature = "ffi-codecs"))]
+    async fn save_mp3_file(&self, _audio: &crate::AudioData, _path: &Path) -> Result<()> {
+        Err(crate::DatasetError::FormatError(
+            "MP3 encoding requires the 'ffi-codecs' feature".to_string(),
+        ))
     }
 
     /// Convert audio to FLAC format

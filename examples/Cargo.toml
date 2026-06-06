@@ -157,13 +157,13 @@ name = "kokoro_espeak_auto_demo"
 path = "kokoro_espeak_auto_demo.rs"
 
 [dependencies]
-voirs-integration-tests = { version = "0.1.0-beta.1", path = "../crates/voirs-integration-tests" }
-voirs-g2p = { version = "0.1.0-beta.1", path = "../crates/voirs-g2p" }
-voirs-acoustic = { version = "0.1.0-beta.1", path = "../crates/voirs-acoustic", features = ["onnx"] }
-voirs-vocoder = { version = "0.1.0-beta.1", path = "../crates/voirs-vocoder" }
-voirs-sdk = { version = "0.1.0-beta.1", path = "../crates/voirs-sdk", features = ["emotion", "cloning", "conversion", "singing", "spatial"] }
-voirs-recognizer = { version = "0.1.0-beta.1", path = "../crates/voirs-recognizer", features = ["whisper-pure"] }
-voirs-evaluation = { version = "0.1.0-beta.1", path = "../crates/voirs-evaluation" }
+voirs-integration-tests = { version = "0.1.0-rc.1", path = "../crates/voirs-integration-tests" }
+voirs-g2p = { workspace = true }
+voirs-acoustic = { workspace = true, features = ["onnx"] }
+voirs-vocoder = { workspace = true }
+voirs-sdk = { workspace = true, features = ["emotion", "cloning", "conversion", "singing", "spatial"] }
+voirs-recognizer = { workspace = true, features = ["whisper-pure"] }
+voirs-evaluation = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
 anyhow = { workspace = true }
@@ -178,10 +178,10 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 scirs2-core = { workspace = true }  # For random number generation (replaced rand)
 fastrand = { workspace = true }     # For simple random simulation in examples
-thiserror = "2.0"
-num_cpus = "1.17"
-md5 = "0.8"
-regex = "1.12"
+thiserror = { workspace = true }
+num_cpus = { workspace = true }
+md5 = { workspace = true }
+regex = { workspace = true }
 crossbeam = "0.8"
 
 [features]

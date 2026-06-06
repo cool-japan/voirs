@@ -298,6 +298,17 @@ pub use pipeline::VoirsPipeline;
 pub use traits::{AcousticModel, G2p, Vocoder};
 pub use types::*;
 
+/// Install the pure-Rust rustls [`CryptoProvider`](rustls::crypto::CryptoProvider)
+/// as the process-wide default.
+///
+/// VoiRS builds `reqwest` with the `rustls-no-provider` feature so that no `ring` or
+/// `aws-lc-rs` C/assembly crypto is compiled into the default build. As a result, a
+/// default rustls crypto provider must be installed before the first TLS handshake.
+/// This is a re-export of [`voirs_acoustic::hub::ensure_crypto_provider`]; it is
+/// `Once`-guarded and safe to call repeatedly. Call it as early as possible in
+/// binaries and FFI entry points.
+pub use voirs_acoustic::hub::ensure_crypto_provider;
+
 // Advanced voice features re-exports
 #[cfg(feature = "cloning")]
 pub use cloning::{CloningConfig, VoiceCloner};

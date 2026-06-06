@@ -50,8 +50,10 @@ tracing-subscriber.workspace = true
 hound.workspace = true
 toml.workspace = true
 fastrand.workspace = true
-hf-hub.workspace = true
 reqwest.workspace = true
+# Pure-Rust TLS provider (rustls + RustCrypto) — re-exported install helper
+oxitls-adapter-rustls-rustcrypto.workspace = true
+rustls.workspace = true
 regex.workspace = true
 glob.workspace = true
 memmap2.workspace = true
@@ -66,13 +68,14 @@ parking_lot.workspace = true
 
 # Audio codec dependencies
 claxon.workspace = true
-flac-bound.workspace = true
 symphonia.workspace = true
-opus.workspace = true
 lewton.workspace = true
 ogg.workspace = true
-minimp3.workspace = true
-mp3lame-encoder.workspace = true
+# C-FFI codecs (gated behind default-OFF `ffi-codecs` feature to keep default build Pure Rust)
+opus = { workspace = true, optional = true }
+flac-bound = { workspace = true, optional = true }
+minimp3 = { workspace = true, optional = true }
+mp3lame-encoder = { workspace = true, optional = true }
 
 # Web Integration dependencies
 wasm-bindgen = { workspace = true, optional = true }
@@ -110,6 +113,17 @@ criterion.workspace = true
 
 [features]
 default = []
+# C-FFI audio codecs (libopus, libFLAC, minimp3, LAME). Default-OFF to keep the
+# default build Pure Rust. Propagates to voirs-vocoder and voirs-dataset, which
+# also gate their C-FFI codec code behind their own `ffi-codecs` feature.
+ffi-codecs = [
+    "dep:opus",
+    "dep:flac-bound",
+    "dep:minimp3",
+    "dep:mp3lame-encoder",
+    "voirs-vocoder/ffi-codecs",
+    "voirs-dataset/ffi-codecs",
+]
 gpu = ["oxionnx?/gpu", "voirs-acoustic/gpu", "voirs-vocoder/gpu", "voirs-g2p/gpu", "voirs-cloning?/gpu", "voirs-conversion?/gpu", "voirs-emotion?/gpu", "voirs-spatial?/gpu"]
 onnx = ["dep:oxionnx", "voirs-acoustic/onnx", "voirs-vocoder/onnx", "voirs-g2p/onnx", "voirs-cloning?/onnx", "voirs-conversion?/onnx", "voirs-emotion?/onnx", "voirs-spatial?/onnx"]
 wasm = ["wasm-bindgen", "wasm-bindgen-futures", "web-sys", "js-sys", "console_error_panic_hook", "wasm-logger"]

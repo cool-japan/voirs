@@ -214,19 +214,12 @@ impl AcousticModelLoader {
 
     /// Download model from HuggingFace Hub
     async fn download_from_hub(&self, repo_id: &str, _cache_dir: &Path) -> Result<String> {
-        use hf_hub::api::tokio::Api;
-
-        let api = Api::new().map_err(|e| AcousticError::ModelError {
-            message: format!("Failed to create HF API: {e}"),
-        })?;
-
-        let repo = api.model(repo_id.to_string());
-
-        // Try to find model file (prefer safetensors, then pytorch)
-        let model_files = vec!["model.safetensors", "pytorch_model.bin", "model.bin"];
+        // Try to find a model file (prefer safetensors, then pytorch), using the
+        // in-house pure-Rust HuggingFace downloader (`crate::hub`).
+        let model_files = ["model.safetensors", "pytorch_model.bin", "model.bin"];
 
         for file_name in model_files {
-            match repo.get(file_name).await {
+            match crate::hub::download_file(repo_id, file_name, None).await {
                 Ok(path) => {
                     tracing::info!("Downloaded {} from HuggingFace Hub: {}", file_name, repo_id);
                     return Ok(path.to_string_lossy().to_string());
@@ -261,6 +254,10 @@ impl AcousticModelLoader {
 
         // Download file
         tracing::info!("Downloading model from: {}", url);
+
+        // Ensure the pure-Rust rustls CryptoProvider is installed before any TLS
+        // handshake (reqwest is built with `rustls-no-provider`).
+        crate::hub::ensure_crypto_provider();
 
         let response = reqwest::get(url)
             .await

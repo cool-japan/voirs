@@ -238,6 +238,10 @@ impl FlacLoader {
 
 /// MP3 file loader using minimp3 crate
 pub struct Mp3Loader {
+    // `config` is only consumed by the `ffi-codecs` decoding path; when that feature
+    // is disabled the stub `load_from_bytes` ignores it, so allow dead_code there to
+    // keep the struct (and thus the public API) stable without a warning.
+    #[cfg_attr(not(feature = "ffi-codecs"), allow(dead_code))]
     config: AudioLoadConfig,
 }
 
@@ -258,6 +262,13 @@ impl Mp3Loader {
     }
 
     /// load from bytes
+    ///
+    /// MP3 decoding relies on the `minimp3` C library (via `minimp3-sys`) and is
+    /// therefore gated behind the default-OFF `ffi-codecs` feature to keep the
+    /// default build Pure Rust (COOLJAPAN policy). When the feature is disabled
+    /// this entry point remains available but returns a clear error (see the
+    /// `#[cfg(not(feature = "ffi-codecs"))]` stub below).
+    #[cfg(feature = "ffi-codecs")]
     pub fn load_from_bytes(&self, data: &[u8]) -> Result<AudioBuffer, RecognitionError> {
         let mut decoder = minimp3::Decoder::new(data);
 
@@ -294,6 +305,23 @@ impl Mp3Loader {
         self.process_samples(all_samples, sample_rate, channels)
     }
 
+    /// load from bytes (stub when the `ffi-codecs` feature is disabled).
+    ///
+    /// MP3 decoding requires the `minimp3` C library and is only available with
+    /// the `ffi-codecs` feature enabled. This stub keeps the public API stable and
+    /// returns a descriptive error so callers get a clear message instead of a
+    /// missing dependency.
+    #[cfg(not(feature = "ffi-codecs"))]
+    pub fn load_from_bytes(&self, _data: &[u8]) -> Result<AudioBuffer, RecognitionError> {
+        Err(RecognitionError::FeatureNotSupported {
+            feature: "MP3 decoding requires the 'ffi-codecs' feature (minimp3 C library)"
+                .to_string(),
+        })
+    }
+
+    // Only reachable from the `ffi-codecs` MP3 decoding path above; gated to avoid
+    // a dead-code warning when the feature is disabled.
+    #[cfg(feature = "ffi-codecs")]
     fn process_samples(
         &self,
         samples: Vec<f32>,

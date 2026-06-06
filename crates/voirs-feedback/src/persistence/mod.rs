@@ -17,6 +17,7 @@ pub mod backends;
 pub mod cache;
 pub mod encryption;
 pub mod migrations;
+#[cfg(feature = "persistence")]
 pub mod query_optimizer;
 pub mod scaling;
 pub mod sharding;

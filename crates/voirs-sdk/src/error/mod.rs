@@ -401,10 +401,10 @@ impl From<toml::ser::Error> for VoirsError {
     }
 }
 
-impl From<hf_hub::api::sync::ApiError> for VoirsError {
-    fn from(err: hf_hub::api::sync::ApiError) -> Self {
+impl From<voirs_acoustic::hub::HubError> for VoirsError {
+    fn from(err: voirs_acoustic::hub::HubError) -> Self {
         Self::NetworkError {
-            message: format!("HuggingFace Hub API error: {err}"),
+            message: format!("HuggingFace Hub error: {err}"),
             retry_count: 0,
             max_retries: 3,
             source: Some(Box::new(err)),

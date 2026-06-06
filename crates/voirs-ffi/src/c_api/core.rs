@@ -28,6 +28,9 @@ pub static DESTROYED_PIPELINES: Lazy<Mutex<HashSet<u32>>> =
 /// Check `voirs_get_last_error()` for error details.
 #[no_mangle]
 pub extern "C" fn voirs_create_pipeline() -> c_uint {
+    // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+    // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+    voirs_acoustic::hub::ensure_crypto_provider();
     match create_pipeline_impl() {
         Ok(id) => id,
         Err(code) => {
@@ -46,6 +49,9 @@ pub extern "C" fn voirs_create_pipeline() -> c_uint {
 /// Check `voirs_get_last_error()` for error details.
 #[no_mangle]
 pub extern "C" fn voirs_create_pipeline_with_config(config_json: *const c_char) -> c_uint {
+    // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+    // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+    voirs_acoustic::hub::ensure_crypto_provider();
     match create_pipeline_with_config_impl(config_json) {
         Ok(id) => id,
         Err(code) => {

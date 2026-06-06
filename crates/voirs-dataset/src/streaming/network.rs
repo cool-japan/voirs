@@ -552,6 +552,10 @@ impl NetworkStreamingDataset {
 
     /// Create HTTP client with appropriate configuration
     fn create_http_client(config: &NetworkStreamingConfig) -> Result<Client> {
+        // Ensure the pure-Rust rustls CryptoProvider is installed before any TLS
+        // handshake (reqwest is built with `rustls-no-provider`).
+        crate::tls::ensure_crypto_provider();
+
         let mut client_builder = Client::builder()
             .timeout(config.request_timeout)
             .pool_idle_timeout(config.connection_pool.idle_timeout)

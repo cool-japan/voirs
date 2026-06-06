@@ -2,8 +2,6 @@
 
 use crate::model_types::{ModelInfo, ModelType};
 use crate::GlobalOptions;
-use hf_hub::{api::sync::Api, Repo, RepoType};
-use reqwest::Client;
 use serde_json::Value;
 use std::collections::HashMap;
 use voirs_sdk::config::AppConfig;

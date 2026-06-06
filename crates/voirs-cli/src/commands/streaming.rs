@@ -128,7 +128,14 @@ pub async fn run_streaming_synthesis(
         // Spawn audio playback in a dedicated thread since cpal::Stream is not Send
         Some(std::thread::spawn(move || {
             // Create runtime for async operations within the audio thread (for channel recv)
-            let rt = tokio::runtime::Runtime::new().expect("Failed to create audio runtime");
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt,
+                Err(e) => {
+                    tracing::error!("Failed to create audio runtime: {}", e);
+                    eprintln!("❌ Failed to initialize audio playback runtime: {}", e);
+                    return;
+                }
+            };
 
             rt.block_on(async {
                 // Create and start audio stream

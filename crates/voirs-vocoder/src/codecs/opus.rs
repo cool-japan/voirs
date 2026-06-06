@@ -1,14 +1,23 @@
 //! Opus encoding implementation.
+//!
+//! Opus encoding relies on the `libopus` C library (via the `opus` crate) and is
+//! therefore gated behind the default-OFF `ffi-codecs` feature to keep the default
+//! build Pure Rust. When the feature is disabled the public entry points remain
+//! available but return a clear error instructing the caller to enable `ffi-codecs`.
 
 use crate::{AudioBuffer, Result, VocoderError};
+#[cfg(feature = "ffi-codecs")]
 use opus::{Application, Channels, Encoder};
+#[cfg(feature = "ffi-codecs")]
 use std::fs::File;
+#[cfg(feature = "ffi-codecs")]
 use std::io::Write;
 use std::path::Path;
 
 use super::CodecConfig;
 
 /// Encode audio buffer to Opus file
+#[cfg(feature = "ffi-codecs")]
 pub fn encode_opus<P: AsRef<Path>>(
     audio: &AudioBuffer,
     path: P,
@@ -26,6 +35,7 @@ pub fn encode_opus<P: AsRef<Path>>(
 }
 
 /// Encode audio buffer to Opus bytes
+#[cfg(feature = "ffi-codecs")]
 pub fn encode_opus_bytes(audio: &AudioBuffer, config: &CodecConfig) -> Result<Vec<u8>> {
     // Validate sample rate (Opus supports 8, 12, 16, 24, 48 kHz)
     let opus_sample_rate = match config.sample_rate {
@@ -116,6 +126,7 @@ pub fn encode_opus_bytes(audio: &AudioBuffer, config: &CodecConfig) -> Result<Ve
 }
 
 /// Simple linear interpolation resampling
+#[cfg(feature = "ffi-codecs")]
 fn resample_audio(samples: &[f32], from_rate: u32, to_rate: u32) -> Result<Vec<f32>> {
     if from_rate == to_rate {
         return Ok(samples.to_vec());
@@ -143,6 +154,7 @@ fn resample_audio(samples: &[f32], from_rate: u32, to_rate: u32) -> Result<Vec<f
 }
 
 /// Convert f32 samples to i16 PCM
+#[cfg(feature = "ffi-codecs")]
 fn convert_to_pcm_i16(samples: &[f32]) -> Vec<i16> {
     samples
         .iter()
@@ -150,7 +162,35 @@ fn convert_to_pcm_i16(samples: &[f32]) -> Vec<i16> {
         .collect()
 }
 
-#[cfg(test)]
+/// Encode audio buffer to Opus file (stub when the `ffi-codecs` feature is disabled).
+///
+/// Opus encoding requires the `libopus` C library and is only available with the
+/// `ffi-codecs` feature enabled. This stub keeps the public API stable and returns a
+/// descriptive error so callers get a clear message instead of a missing symbol.
+#[cfg(not(feature = "ffi-codecs"))]
+pub fn encode_opus<P: AsRef<Path>>(
+    _audio: &AudioBuffer,
+    _path: P,
+    _config: &CodecConfig,
+) -> Result<()> {
+    Err(VocoderError::ConfigError(
+        "Opus encoding requires the 'ffi-codecs' feature (libopus C library)".to_string(),
+    ))
+}
+
+/// Encode audio buffer to Opus bytes (stub when the `ffi-codecs` feature is disabled).
+///
+/// Opus encoding requires the `libopus` C library and is only available with the
+/// `ffi-codecs` feature enabled. This stub keeps the public API stable and returns a
+/// descriptive error so callers get a clear message instead of a missing symbol.
+#[cfg(not(feature = "ffi-codecs"))]
+pub fn encode_opus_bytes(_audio: &AudioBuffer, _config: &CodecConfig) -> Result<Vec<u8>> {
+    Err(VocoderError::ConfigError(
+        "Opus encoding requires the 'ffi-codecs' feature (libopus C library)".to_string(),
+    ))
+}
+
+#[cfg(all(test, feature = "ffi-codecs"))]
 mod tests {
     use super::*;
     use std::fs;

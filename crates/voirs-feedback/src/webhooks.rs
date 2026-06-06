@@ -254,6 +254,10 @@ impl WebhookManager {
     /// Create a new webhook manager
     #[must_use]
     pub fn new() -> Self {
+        // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+        // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+        #[cfg(feature = "microservices")]
+        voirs_sdk::ensure_crypto_provider();
         Self {
             webhooks: Arc::new(RwLock::new(HashMap::new())),
             delivery_records: Arc::new(RwLock::new(HashMap::new())),

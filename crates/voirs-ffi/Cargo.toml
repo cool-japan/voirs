@@ -25,6 +25,10 @@ voirs-acoustic.workspace = true
 voirs-vocoder.workspace = true
 voirs-recognizer = { workspace = true, optional = true }
 
+# Pure-Rust TLS provider (rustls + RustCrypto) — installed at FFI init
+oxitls-adapter-rustls-rustcrypto.workspace = true
+rustls.workspace = true
+
 # FFI utilities
 libc.workspace = true
 

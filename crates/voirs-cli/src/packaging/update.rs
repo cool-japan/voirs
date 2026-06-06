@@ -95,6 +95,10 @@ impl UpdateManager {
             UpdateState::default()
         };
 
+        // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+        // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+        voirs_acoustic::hub::ensure_crypto_provider();
+
         let client = Client::builder()
             .user_agent(format!("voirs-cli/{}", env!("CARGO_PKG_VERSION")))
             .build()?;

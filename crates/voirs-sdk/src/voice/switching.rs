@@ -353,6 +353,10 @@ impl DefaultVoiceManager {
     async fn download_file(&self, url: &str, local_path: &std::path::Path) -> Result<()> {
         tracing::debug!("Downloading {} to {}", url, local_path.display());
 
+        // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+        // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+        crate::ensure_crypto_provider();
+
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(300)) // 5 minute timeout
             .build()

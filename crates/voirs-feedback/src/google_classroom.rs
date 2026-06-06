@@ -271,6 +271,10 @@ impl ClassroomClient {
     /// Create a new Google Classroom client
     #[must_use]
     pub fn new(config: ClassroomConfig) -> Self {
+        // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+        // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+        #[cfg(feature = "microservices")]
+        voirs_sdk::ensure_crypto_provider();
         Self {
             config,
             #[cfg(feature = "microservices")]

@@ -143,14 +143,11 @@ pub struct EncryptionService {
 impl EncryptionService {
     /// Create a new encryption service with a generated key
     pub fn new() -> PersistenceResult<Self> {
-        use ring::rand::{SecureRandom, SystemRandom};
+        use aes_gcm::aead::rand_core::RngCore;
+        use aes_gcm::aead::OsRng;
 
-        let rng = SystemRandom::new();
         let mut key = [0u8; 32];
-        rng.fill(&mut key)
-            .map_err(|e| PersistenceError::EncryptionError {
-                message: format!("Failed to generate encryption key: {e:?}"),
-            })?;
+        OsRng.fill_bytes(&mut key);
 
         Ok(Self { key })
     }

@@ -320,6 +320,10 @@ async fn download_model_file(
 ) -> Result<()> {
     use std::time::Duration;
 
+    // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+    // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+    voirs_acoustic::hub::ensure_crypto_provider();
+
     // Create HTTP client with timeout
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(

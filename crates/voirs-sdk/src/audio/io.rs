@@ -137,6 +137,11 @@ impl AudioBuffer {
     }
 
     /// Save audio as Opus file
+    ///
+    /// Opus encoding relies on the `libopus` C library (via the `opus` crate) and is
+    /// therefore gated behind the default-OFF `ffi-codecs` feature to keep the default
+    /// build Pure Rust.
+    #[cfg(feature = "ffi-codecs")]
     pub fn save_opus(&self, path: impl AsRef<Path>) -> Result<()> {
         use opus::{Application, Channels, Encoder};
         use std::fs::File;
@@ -194,6 +199,18 @@ impl AudioBuffer {
             .map_err(|e| VoirsError::audio_error(format!("Failed to write Opus data: {e}")))?;
 
         Ok(())
+    }
+
+    /// Save audio as Opus file (stub when the `ffi-codecs` feature is disabled).
+    ///
+    /// Opus encoding requires the `libopus` C library and is only available with the
+    /// `ffi-codecs` feature enabled. This stub keeps the public API stable and returns a
+    /// descriptive error so callers get a clear message instead of a missing symbol.
+    #[cfg(not(feature = "ffi-codecs"))]
+    pub fn save_opus(&self, _path: impl AsRef<Path>) -> Result<()> {
+        Err(VoirsError::audio_error(
+            "Opus codec requires the 'ffi-codecs' feature (libopus C library)",
+        ))
     }
 
     /// Play audio through system speakers
@@ -579,6 +596,11 @@ impl AudioBuffer {
     }
 
     /// Convert to Opus bytes
+    ///
+    /// Opus encoding relies on the `libopus` C library (via the `opus` crate) and is
+    /// therefore gated behind the default-OFF `ffi-codecs` feature to keep the default
+    /// build Pure Rust.
+    #[cfg(feature = "ffi-codecs")]
     pub fn to_opus_bytes(&self) -> Result<Vec<u8>> {
         use opus::{Application, Channels, Encoder};
 
@@ -628,6 +650,18 @@ impl AudioBuffer {
         }
 
         Ok(encoded_data)
+    }
+
+    /// Convert to Opus bytes (stub when the `ffi-codecs` feature is disabled).
+    ///
+    /// Opus encoding requires the `libopus` C library and is only available with the
+    /// `ffi-codecs` feature enabled. This stub keeps the public API stable and returns a
+    /// descriptive error so callers get a clear message instead of a missing symbol.
+    #[cfg(not(feature = "ffi-codecs"))]
+    pub fn to_opus_bytes(&self) -> Result<Vec<u8>> {
+        Err(VoirsError::audio_error(
+            "Opus codec requires the 'ffi-codecs' feature (libopus C library)",
+        ))
     }
 
     /// Load audio from WAV file
@@ -749,6 +783,11 @@ impl AudioBuffer {
     }
 
     /// Load audio from MP3 file
+    ///
+    /// MP3 decoding relies on the `minimp3` C library (via the `minimp3` crate) and is
+    /// therefore gated behind the default-OFF `ffi-codecs` feature to keep the default
+    /// build Pure Rust.
+    #[cfg(feature = "ffi-codecs")]
     pub fn load_mp3(path: impl AsRef<Path>) -> Result<AudioBuffer> {
         use minimp3::{Decoder, Frame};
         use std::fs::File;
@@ -801,6 +840,18 @@ impl AudioBuffer {
         Ok(AudioBuffer::new(samples, sample_rate, channels))
     }
 
+    /// Load audio from MP3 file (stub when the `ffi-codecs` feature is disabled).
+    ///
+    /// MP3 decoding requires the `minimp3` C library and is only available with the
+    /// `ffi-codecs` feature enabled. This stub keeps the public API stable and returns a
+    /// descriptive error so callers get a clear message instead of a missing symbol.
+    #[cfg(not(feature = "ffi-codecs"))]
+    pub fn load_mp3(_path: impl AsRef<Path>) -> Result<AudioBuffer> {
+        Err(VoirsError::audio_error(
+            "MP3 codec requires the 'ffi-codecs' feature (minimp3 C library)",
+        ))
+    }
+
     /// Load audio from OGG file
     pub fn load_ogg(path: impl AsRef<Path>) -> Result<AudioBuffer> {
         use lewton::inside_ogg::OggStreamReader;
@@ -842,6 +893,11 @@ impl AudioBuffer {
     /// count and the original input sample rate stored by the encoder.  Opus always outputs
     /// PCM at 48 000 Hz internally; we advertise the original sample rate so callers can
     /// resample if needed, but the raw PCM is at 48 kHz.
+    ///
+    /// Opus decoding relies on the `libopus` C library (via the `opus` crate) and is
+    /// therefore gated behind the default-OFF `ffi-codecs` feature to keep the default
+    /// build Pure Rust.
+    #[cfg(feature = "ffi-codecs")]
     pub fn load_opus(path: impl AsRef<Path>) -> Result<AudioBuffer> {
         use ogg::reading::PacketReader;
         use opus::{Channels, Decoder};
@@ -925,6 +981,18 @@ impl AudioBuffer {
         Ok(AudioBuffer::new(samples, sample_rate, n_channels))
     }
 
+    /// Load audio from an Ogg Opus file (stub when the `ffi-codecs` feature is disabled).
+    ///
+    /// Opus decoding requires the `libopus` C library and is only available with the
+    /// `ffi-codecs` feature enabled. This stub keeps the public API stable and returns a
+    /// descriptive error so callers get a clear message instead of a missing symbol.
+    #[cfg(not(feature = "ffi-codecs"))]
+    pub fn load_opus(_path: impl AsRef<Path>) -> Result<AudioBuffer> {
+        Err(VoirsError::audio_error(
+            "Opus codec requires the 'ffi-codecs' feature (libopus C library)",
+        ))
+    }
+
     /// Get audio information without loading samples
     pub fn get_info(path: impl AsRef<Path>) -> Result<AudioInfo> {
         let path = path.as_ref();
@@ -993,6 +1061,11 @@ impl AudioBuffer {
     }
 
     /// Get MP3 file information
+    ///
+    /// MP3 decoding relies on the `minimp3` C library (via the `minimp3` crate) and is
+    /// therefore gated behind the default-OFF `ffi-codecs` feature to keep the default
+    /// build Pure Rust.
+    #[cfg(feature = "ffi-codecs")]
     #[allow(unused_assignments)] // False positive: variables are used after assignment in match block
     pub fn get_mp3_info(path: impl AsRef<Path>) -> Result<AudioInfo> {
         use minimp3::{Decoder, Frame};
@@ -1052,6 +1125,18 @@ impl AudioBuffer {
             sample_count,
             format: AudioFormat::Mp3,
         })
+    }
+
+    /// Get MP3 file information (stub when the `ffi-codecs` feature is disabled).
+    ///
+    /// MP3 decoding requires the `minimp3` C library and is only available with the
+    /// `ffi-codecs` feature enabled. This stub keeps the public API stable and returns a
+    /// descriptive error so callers get a clear message instead of a missing symbol.
+    #[cfg(not(feature = "ffi-codecs"))]
+    pub fn get_mp3_info(_path: impl AsRef<Path>) -> Result<AudioInfo> {
+        Err(VoirsError::audio_error(
+            "MP3 codec requires the 'ffi-codecs' feature (minimp3 C library)",
+        ))
     }
 
     /// Get OGG file information

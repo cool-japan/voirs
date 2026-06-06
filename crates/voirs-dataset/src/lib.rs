@@ -599,6 +599,26 @@ pub mod validation;
 // Re-export split types for convenience
 pub use splits::{DatasetSplit, DatasetSplits, SplitConfig, SplitStatistics, SplitStrategy};
 
+/// Pure-Rust TLS crypto provider installation.
+pub mod tls {
+    use std::sync::Once;
+
+    static INSTALL_PROVIDER: Once = Once::new();
+
+    /// Install the pure-Rust rustls [`CryptoProvider`](rustls::crypto::CryptoProvider)
+    /// as the process-wide default.
+    ///
+    /// `reqwest` is built with `rustls-no-provider`, so a default crypto provider must
+    /// be installed before any TLS handshake. This is `Once`-guarded and therefore
+    /// safe (and cheap) to call from every network entry point.
+    pub fn ensure_crypto_provider() {
+        INSTALL_PROVIDER.call_once(|| {
+            let provider = (*oxitls_adapter_rustls_rustcrypto::pure_provider()).clone();
+            let _ = rustls::crypto::CryptoProvider::install_default(provider);
+        });
+    }
+}
+
 /// Speaker information structure
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SpeakerInfo {

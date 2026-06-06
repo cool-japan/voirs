@@ -73,6 +73,10 @@ pub mod napi_bindings {
         /// Create a new VoiRS pipeline
         #[napi(constructor)]
         pub fn new(options: Option<PipelineOptions>) -> Self {
+            // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+            // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+            voirs_acoustic::hub::ensure_crypto_provider();
+
             let rt = Runtime::new().expect("Failed to create runtime");
 
             let mut builder = SdkPipeline::builder();
