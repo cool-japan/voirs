@@ -39,7 +39,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.1.0-rc.1"
+version = "0.1.0"
 edition = "2021"
 authors = ["Tetsuya Kitahata <tetsuya@cool-japan.co.jp>"]
 license = "Apache-2.0"
@@ -60,21 +60,21 @@ scirs2-fft = { version = "0.5.0", features = ["oxifft"] }
 numrs2 = "0.4.0"
 
 # Internal VoiRS crates
-voirs-g2p = { version = "0.1.0-rc.1", path = "crates/voirs-g2p" }
-voirs-acoustic = { version = "0.1.0-rc.1", path = "crates/voirs-acoustic" }
-voirs-vocoder = { version = "0.1.0-rc.1", path = "crates/voirs-vocoder" }
-voirs-dataset = { version = "0.1.0-rc.1", path = "crates/voirs-dataset" }
-voirs-sdk = { version = "0.1.0-rc.1", path = "crates/voirs-sdk" }
-voirs-cli = { version = "0.1.0-rc.1", path = "crates/voirs-cli" }
-voirs-ffi = { version = "0.1.0-rc.1", path = "crates/voirs-ffi" }
-voirs-recognizer = { version = "0.1.0-rc.1", path = "crates/voirs-recognizer" }
-voirs-evaluation = { version = "0.1.0-rc.1", path = "crates/voirs-evaluation" }
-voirs-feedback = { version = "0.1.0-rc.1", path = "crates/voirs-feedback" }
-voirs-emotion = { version = "0.1.0-rc.1", path = "crates/voirs-emotion" }
-voirs-cloning = { version = "0.1.0-rc.1", path = "crates/voirs-cloning" }
-voirs-conversion = { version = "0.1.0-rc.1", path = "crates/voirs-conversion" }
-voirs-singing = { version = "0.1.0-rc.1", path = "crates/voirs-singing" }
-voirs-spatial = { version = "0.1.0-rc.1", path = "crates/voirs-spatial" }
+voirs-g2p = { version = "0.1.0", path = "crates/voirs-g2p" }
+voirs-acoustic = { version = "0.1.0", path = "crates/voirs-acoustic" }
+voirs-vocoder = { version = "0.1.0", path = "crates/voirs-vocoder" }
+voirs-dataset = { version = "0.1.0", path = "crates/voirs-dataset" }
+voirs-sdk = { version = "0.1.0", path = "crates/voirs-sdk" }
+voirs-cli = { version = "0.1.0", path = "crates/voirs-cli" }
+voirs-ffi = { version = "0.1.0", path = "crates/voirs-ffi" }
+voirs-recognizer = { version = "0.1.0", path = "crates/voirs-recognizer" }
+voirs-evaluation = { version = "0.1.0", path = "crates/voirs-evaluation" }
+voirs-feedback = { version = "0.1.0", path = "crates/voirs-feedback" }
+voirs-emotion = { version = "0.1.0", path = "crates/voirs-emotion" }
+voirs-cloning = { version = "0.1.0", path = "crates/voirs-cloning" }
+voirs-conversion = { version = "0.1.0", path = "crates/voirs-conversion" }
+voirs-singing = { version = "0.1.0", path = "crates/voirs-singing" }
+voirs-spatial = { version = "0.1.0", path = "crates/voirs-spatial" }
 
 # Core tensor/ML libraries
 candle-core = "0.9.2"

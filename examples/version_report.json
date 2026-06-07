@@ -1,6 +1,6 @@
 {
   "timestamp": "2025-10-04 08:30:00",
-  "workspace_version": "0.1.0-alpha.2",
+  "workspace_version": "0.1.0",
   "total_crates": 17,
   "workspace_members": 16,
   "examples": 1,
@@ -21,7 +21,7 @@
     }
   },
   "recommendations": [
-    "Tag release 0.1.0-alpha.2 and publish crates",
+    "Tag release 0.1.0 and publish crates",
     "Monitor SCIRS2 Beta 4 blockers after release"
   ]
 }

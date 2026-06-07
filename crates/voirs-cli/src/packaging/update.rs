@@ -663,6 +663,12 @@ mod tests {
 
     #[test]
     fn test_version_comparison() {
+        // `Client::new()` panics when no rustls CryptoProvider is installed
+        // (reqwest is built with `rustls-no-provider`). `UpdateManager::new`
+        // installs it, but this test constructs the struct directly, so install
+        // it here too. Once-guarded; safe to repeat.
+        voirs_acoustic::hub::ensure_crypto_provider();
+
         let state = UpdateState::default();
         let manager = UpdateManager {
             config: UpdateConfig::default(),

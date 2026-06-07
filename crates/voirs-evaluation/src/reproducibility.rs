@@ -564,7 +564,7 @@ impl ReproducibilityManager {
             "voirs-sdk".to_string(),
             env!("CARGO_PKG_VERSION").to_string(),
         );
-        deps.insert("scirs2-core".to_string(), "0.1.0-rc.1".to_string());
+        deps.insert("scirs2-core".to_string(), "0.1.0".to_string());
         deps
     }
 

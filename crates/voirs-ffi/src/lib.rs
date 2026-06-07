@@ -562,19 +562,23 @@ pub unsafe extern "C" fn voirs_free_audio_buffer(buffer: *mut VoirsAudioBuffer) 
 /// Convert error code to string description
 #[no_mangle]
 pub extern "C" fn voirs_error_message(code: VoirsErrorCode) -> *const c_char {
-    let message = match code {
-        VoirsErrorCode::Success => "Success",
-        VoirsErrorCode::InvalidParameter => "Invalid parameter",
-        VoirsErrorCode::InitializationFailed => "Initialization failed",
-        VoirsErrorCode::SynthesisFailed => "Synthesis failed",
-        VoirsErrorCode::VoiceNotFound => "Voice not found",
-        VoirsErrorCode::IoError => "I/O error",
-        VoirsErrorCode::OutOfMemory => "Out of memory",
-        VoirsErrorCode::OperationCancelled => "Operation cancelled",
-        VoirsErrorCode::InternalError => "Internal error",
+    // Return pointers to null-terminated C string literals. A plain Rust `&str`
+    // literal is NOT null-terminated, so handing its `.as_ptr()` to `CStr::from_ptr`
+    // (as C/Python/Node callers do) reads past the end into adjacent memory — UB
+    // that surfaces as nondeterministic garbage or panics under the full test suite.
+    let message: &CStr = match code {
+        VoirsErrorCode::Success => c"Success",
+        VoirsErrorCode::InvalidParameter => c"Invalid parameter",
+        VoirsErrorCode::InitializationFailed => c"Initialization failed",
+        VoirsErrorCode::SynthesisFailed => c"Synthesis failed",
+        VoirsErrorCode::VoiceNotFound => c"Voice not found",
+        VoirsErrorCode::IoError => c"I/O error",
+        VoirsErrorCode::OutOfMemory => c"Out of memory",
+        VoirsErrorCode::OperationCancelled => c"Operation cancelled",
+        VoirsErrorCode::InternalError => c"Internal error",
     };
 
-    message.as_ptr() as *const c_char
+    message.as_ptr()
 }
 
 /// Get the last error message for the current thread

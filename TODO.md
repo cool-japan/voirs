@@ -1,7 +1,7 @@
 # VoiRS Development Roadmap & TODO
 
-> **Status**: Current Version 0.1.0-rc.1 - **PRODUCTION READY**
-> **Last Updated**: 2026-05-31
+> **Status**: Current Version 0.1.0 - **PRODUCTION READY**
+> **Last Updated**: 2026-06-07
 > **Next Milestone**: Version 0.2.0 - Advanced Neural Features & Production Optimization
 
 ## Latest Development Session (2026-05-31 batch 8)
@@ -556,7 +556,7 @@ VoiRS has achieved production readiness with comprehensive neural speech synthes
 
 ### Recent Achievements (2025-07-21)
 
-#### Version 0.1.0-alpha.1 - Production Ready Release
+#### Version 0.1.0 - First Release
 - ✅ **Core Pipeline**: Complete G2P → Acoustic → Vocoder pipeline with VITS + HiFi-GAN
 - ✅ **Advanced Features**: Emotion control, voice cloning, singing synthesis, spatial audio
 - ✅ **Quality Assurance**: 90%+ test coverage, comprehensive property-based testing
@@ -810,7 +810,7 @@ For detailed development history, see git commit log and release notes.
 - [ ] voirs-evaluation/Cargo.toml: symphonia (**0.5↔0.5.5 mismatch**), ogg, lewton, uuid, base64, md5, futures-util, tokio-tungstenite, clap, tokio-test (:37-101). **[IN PROGRESS]**
 - [ ] voirs-cloning/Cargo.toml:52-54: aes-gcm, sha2, base64 → workspace. **[IN PROGRESS]**
 - [ ] voirs-conversion / voirs-spatial: wasm-bindgen/web-sys/js-sys inline → `{ workspace = true, optional = true }`.
-- [ ] examples/Cargo.toml: thiserror/num_cpus/md5/regex → workspace; internal voirs-* **0.1.0-beta.1 → 0.1.0-rc.1** (:162-166).
+- [ ] examples/Cargo.toml: thiserror/num_cpus/md5/regex → workspace; internal voirs-* deps pinned at **0.1.0** (:162-166).
 
 #### P2 — Refactor (>2000 lines) & temp-path hygiene
 - [ ] splitrs: voirs-singing/src/precision_quality.rs (2070, production); examples cloud_deployment(2895)/educational_tools(2643)/ai_integration(2282).

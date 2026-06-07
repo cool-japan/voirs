@@ -8,7 +8,7 @@
 
 VoiRS is a cutting-edge Text-to-Speech (TTS) framework that unifies high-performance crates from the cool-japan ecosystem (SciRS2, NumRS2, PandRS, TrustformeRS) into a cohesive neural speech synthesis solution.
 
-> **🚀 Beta Release (0.1.0-beta.1 — 2026-02-26)**: Core TTS functionality is working and production-ready. Enhanced CUDA GPU acceleration, SciRS2-Core integration with improved SIMD optimizations, comprehensive code quality improvements, and API stabilization for the beta milestone!
+> **🚀 First Release (0.1.0 — 2026-06-07)**: VoiRS's initial public release. Core TTS pipeline is working and production-ready, with CUDA/Metal GPU acceleration, SciRS2-Core integration (SIMD/parallel abstractions), comprehensive code-quality compliance, and a stabilized public API.
 
 ## 🎯 Key Features
 
@@ -22,13 +22,13 @@ VoiRS is a cutting-edge Text-to-Speech (TTS) framework that unifies high-perform
 - **Multilingual** — 20+ languages with pluggable G2P backends
 - **SafeTensors Checkpoints** — Production-ready model persistence (370 parameters, 1.5M trainable values)
 
-## 🔥 Beta Release Status
+## 🔥 Release Status
 
 ### ✅ What's Ready Now
 - **Core TTS Pipeline**: Complete text-to-speech synthesis with VITS + HiFi-GAN
 - **DiffWave Training**: 🆕 Full vocoder training pipeline with real parameter saving and gradient-based learning
 - **Pure Rust**: Memory-safe implementation with no Python dependencies
-- **SCIRS2 Integration**: Phase 1 migration complete—core DSP now uses SCIRS2 Beta 3 abstractions
+- **SCIRS2 Integration**: Phase 1 migration complete—core DSP now uses SciRS2-Core abstractions
 - **CLI Tool**: Command-line interface for synthesis and training
 - **Streaming Synthesis**: Real-time audio generation
 - **Basic SSML**: Essential speech markup support
@@ -43,8 +43,8 @@ VoiRS is a cutting-edge Text-to-Speech (TTS) framework that unifies high-perform
 - **FFI Bindings**: C/Python/Node.js integration improvements
 - **Advanced Evaluation**: Comprehensive quality metrics expansion
 
-### ⚠️ Beta Limitations
-- APIs are stabilizing but may still change before 1.0
+### ⚠️ Current Limitations
+- APIs may still evolve across future 0.x releases
 - Limited pre-trained model selection
 - Documentation still being expanded
 - Some advanced features are experimental
@@ -334,42 +334,27 @@ cargo run --example kokoro_espeak_auto_demo --features onnx --release
 
 ## 🗺️ Roadmap
 
-### Q1 2026 — Beta 0.1.0-beta.1 ✅
-- [x] API stabilization and beta milestone preparation
-- [x] SciRS2-Core 0.2.0 integration with improved SIMD and parallel operations
-- [x] Workspace metadata consistency and crates.io publishing readiness
-- [x] Dependency modernization (reqwest 0.13, bytes security fix)
-- [x] Comprehensive build and metadata validation
-
-### Q1 2026 — Alpha 0.1.0-alpha.3 ✅
-- [x] Enhanced CUDA GPU acceleration across pipeline
-- [x] SciRS2-Core 0.1.3 integration with improved SIMD
-- [x] Comprehensive code refactoring (2000-line policy compliance)
-- [x] No-unwrap policy enforcement across codebase
-- [x] Performance optimizations for real-time synthesis
-
-### Q4 2025 — Alpha 0.1.0-alpha.2 ✅
-- [x] Project structure and workspace
-- [x] Core G2P, Acoustic, and Vocoder implementations
-- [x] English VITS + HiFi-GAN pipeline
-- [x] CLI tool and basic examples
-- [x] WebAssembly demo
+### 0.1.0 — First Release (2026-06-07) ✅
+- [x] Complete G2P → Acoustic → Vocoder pipeline
+- [x] English VITS + HiFi-GAN synthesis
+- [x] DiffWave training pipeline with real parameter saving and gradient-based learning
+- [x] SafeTensors checkpoints for production-ready model persistence (370 params)
+- [x] CLI tool and examples
 - [x] Streaming synthesis
-- [x] **DiffWave Training Pipeline** 🆕 — Complete vocoder training with real parameter saving
-- [x] **SafeTensors Checkpoints** 🆕 — Production-ready model persistence (370 params)
-- [x] **Gradient-based Learning** 🆕 — Full backward pass with optimizer integration
-- [ ] Multilingual G2P support (10+ languages)
-- [ ] GPU acceleration (CUDA/Metal) — Partially implemented (Metal ready)
-- [ ] C/Python FFI bindings
-- [ ] Performance optimizations
-- [ ] Production-ready stability
-- [ ] Complete model zoo
-- [ ] TrustformeRS integration
-- [ ] Comprehensive documentation
+- [x] WebAssembly demo
+- [x] SciRS2-Core integration (SIMD and parallel abstractions)
+- [x] GPU acceleration (CUDA/Metal)
+- [x] No-unwrap policy enforcement and 2000-line file-size policy compliance
+- [x] Project structure and Cargo workspace
+- [x] Workspace metadata consistency and crates.io publishing readiness
+
+### Towards 0.2.0 — Future Work
+- [ ] Multilingual G2P expansion (10+ languages)
+- [ ] Complete production model zoo
+- [ ] Enhanced SSML and prosody control
+- [ ] FFI binding improvements (C/Python/Node.js)
+- [ ] Performance optimization
 - [ ] Long-term support
-- [ ] Voice cloning and adaptation
-- [ ] Advanced prosody control
-- [ ] Singing synthesis support
 
 ## 🤝 Contributing
 

@@ -407,7 +407,7 @@ impl ItuTComplianceValidator {
 
         Ok(ComplianceCertificationReport {
             generated_at: Utc::now(),
-            implementation_version: "0.1.0-alpha.3".to_string(),
+            implementation_version: "0.1.0".to_string(),
             voirs_version: env!("CARGO_PKG_VERSION").to_string(),
             results,
             overall_compliant,

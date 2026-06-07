@@ -657,7 +657,15 @@ impl DiffWaveVocoder {
     fn map_weight_name(&self, external_name: &str) -> Option<String> {
         // Common DiffWave/U-Net weight name mappings
         match external_name {
-            // Time embedding mappings
+            // Already-internal time-embedding names pass through unchanged. The
+            // U-Net registers its parameters under the `time_embed` prefix
+            // (see unet.rs `vb.pp("time_embed")`), and `"time_embed".contains("time_emb")`
+            // is true — so without this guard the rule below would mangle
+            // `time_embed.linear1.weight` into the non-existent
+            // `time_embeded.linear1.weight`, making VarMap round-trips and checkpoint
+            // reloads fail nondeterministically (depends on HashMap iteration order).
+            name if name.contains("time_embed") => Some(name.to_string()),
+            // External checkpoint time-embedding names → internal form
             name if name.contains("time_emb") => Some(name.replace("time_emb", "time_embed")),
             // Convolution layer mappings
             name if name.contains("conv") => Some(name.to_string()),
@@ -1138,38 +1146,44 @@ mod tests {
             return;
         }
 
-        // Build a synthetic weight map: use the first registered name with the same shape.
-        let mut synthetic_weights: std::collections::HashMap<String, candle_core::Tensor> =
-            std::collections::HashMap::new();
-        let first_name = existing_names[0].clone();
-        let shape = {
+        // Exercise EVERY registered internal name (not just one at a random HashMap
+        // position): each must round-trip through map_weight_name and load cleanly.
+        // This deterministically covers the `time_embed.*` names that a non-idempotent
+        // mapping would otherwise corrupt.
+        for name in &existing_names {
+            let shape = {
+                let guard = vocoder._varmap.data().lock().expect("VarMap lock");
+                guard[name].shape().clone()
+            };
+            let dims: Vec<usize> = shape.dims().to_vec();
+            let n: usize = dims.iter().product();
+            let tensor = candle_core::Tensor::zeros(
+                dims,
+                candle_core::DType::F32,
+                &candle_core::Device::Cpu,
+            )
+            .expect("tensor creation must succeed");
+
+            // Use the internal name directly so map_weight_name passes it through.
+            let mut synthetic_weights: std::collections::HashMap<String, candle_core::Tensor> =
+                std::collections::HashMap::new();
+            synthetic_weights.insert(name.clone(), tensor);
+
+            let result = vocoder.load_weights_into_varmap(synthetic_weights);
+            assert!(
+                result.is_ok(),
+                "load_weights_into_varmap should succeed for internal name '{name}': {result:?}"
+            );
+
+            // Verify the loaded value can be read back and has the right element count.
             let guard = vocoder._varmap.data().lock().expect("VarMap lock");
-            guard[&first_name].shape().clone()
-        };
-        let dims: Vec<usize> = shape.dims().to_vec();
-        let n: usize = dims.iter().product();
-        let tensor =
-            candle_core::Tensor::zeros(dims, candle_core::DType::F32, &candle_core::Device::Cpu)
-                .expect("tensor creation must succeed");
-        // Use the internal name directly so map_weight_name passes it through.
-        synthetic_weights.insert(first_name.clone(), tensor);
-
-        let result = vocoder.load_weights_into_varmap(synthetic_weights);
-        assert!(
-            result.is_ok(),
-            "load_weights_into_varmap should succeed when given a correctly-shaped weight: {result:?}"
-        );
-
-        // Verify the loaded value can be read back and has the right number of elements.
-        let guard = vocoder._varmap.data().lock().expect("VarMap lock");
-        let var = guard
-            .get(&first_name)
-            .expect("weight should still be in map");
-        let elem_count: usize = var.shape().dims().iter().product();
-        assert_eq!(
-            elem_count, n,
-            "loaded weight should retain its original shape"
-        );
+            let var = guard.get(name).expect("weight should still be in map");
+            let elem_count: usize = var.shape().dims().iter().product();
+            assert_eq!(
+                elem_count, n,
+                "loaded weight '{name}' should retain its original shape"
+            );
+        }
     }
 
     #[test]

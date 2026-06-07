@@ -157,7 +157,7 @@ name = "kokoro_espeak_auto_demo"
 path = "kokoro_espeak_auto_demo.rs"
 
 [dependencies]
-voirs-integration-tests = { version = "0.1.0-rc.1", path = "../crates/voirs-integration-tests" }
+voirs-integration-tests = { version = "0.1.0", path = "../crates/voirs-integration-tests" }
 voirs-g2p = { workspace = true }
 voirs-acoustic = { workspace = true, features = ["onnx"] }
 voirs-vocoder = { workspace = true }

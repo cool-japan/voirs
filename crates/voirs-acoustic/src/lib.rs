@@ -518,7 +518,7 @@ pub use streaming::{
 pub use traits::{AcousticModel, AcousticModelFeature, AcousticModelMetadata};
 pub use vits::{TextEncoder, TextEncoderConfig, VitsConfig, VitsModel, VitsStreamingState};
 
-// Advanced modules (0.1.0-alpha.3 additions)
+// Advanced modules
 pub mod acoustic_utils;
 pub mod latency_optimizer;
 pub mod neural_codec;

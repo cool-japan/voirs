@@ -135,7 +135,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! voirs-spatial = { version = "0.1.0-alpha.2", features = ["steamvr", "webxr"] }
+//! voirs-spatial = { version = "0.1.0", features = ["steamvr", "webxr"] }
 //! ```
 //!
 //! Available features:

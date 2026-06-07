@@ -322,7 +322,7 @@ impl WasmSingingEngine {
     /// Returns the current version of the VoiRS singing WASM module.
     ///
     /// # Returns
-    /// Version string from package metadata (e.g., "0.1.0-alpha.2")
+    /// Version string from package metadata (e.g., "0.1.0")
     #[wasm_bindgen(js_name = "getVersion")]
     pub fn get_version() -> String {
         env!("CARGO_PKG_VERSION").to_string()

@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "voirs"
-version = "0.1.0rc1"
+version = "0.1.0"
 description = "Python bindings for VoiRS speech synthesis library"
 authors = [
     {name = "COOLJAPAN OU (Team Kitasan)", email = "contact@cooljapan.tech"}
