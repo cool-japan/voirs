@@ -1,6 +1,6 @@
 # Advanced Features Guide
 
-This guide demonstrates how to use the advanced features added to voirs-acoustic in version 0.1.0-alpha.3.
+This guide demonstrates how to use the advanced features added to voirs-acoustic in version 0.1.0.
 
 ## Quick Start
 

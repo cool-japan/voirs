@@ -137,7 +137,7 @@ Text Input → Preprocessing → Language Detection → Backend Selection → Ph
    - **Yod-coalescence**: American English (/tj/ → /tʃ/, /dj/ → /dʒ/) 🆕
    - Context-aware coarticulation effects
 
-   🆕 = New dialect-specific processes added in v0.1.0-alpha.3
+   🆕 = New dialect-specific processes added in v0.1.0
 
 ## Advanced Phonological Processing Examples
 

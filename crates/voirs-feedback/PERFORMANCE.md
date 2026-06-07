@@ -244,7 +244,7 @@ Enable only the features you need:
 
 ```toml
 [dependencies]
-voirs-feedback = { version = "0.1.0-alpha.2", features = [
+voirs-feedback = { version = "0.1.0", features = [
     "realtime",
     "adaptive",
     "progress-tracking"

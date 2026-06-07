@@ -662,5 +662,5 @@ VoiRS Spatial integrates seamlessly with:
 
 ---
 
-**Version:** 0.1.0-alpha.2
+**Version:** 0.1.0
 **Last Updated:** 2025-12-09

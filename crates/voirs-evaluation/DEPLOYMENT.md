@@ -54,8 +54,8 @@ The fastest way to get started is using Helm:
 
 ```bash
 # Build and push Docker image (or use pre-built image)
-docker build -t voirs/evaluation:v0.1.0-alpha.3 .
-docker push voirs/evaluation:v0.1.0-alpha.3
+docker build -t voirs/evaluation:v0.1.0 .
+docker push voirs/evaluation:v0.1.0
 
 # Install with Helm
 helm install voirs-evaluation ./helm/voirs-evaluation

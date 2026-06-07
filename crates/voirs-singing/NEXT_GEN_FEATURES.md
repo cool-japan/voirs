@@ -246,7 +246,7 @@ let job_id = cloud_manager.submit_job(create_request(melody), 10).await?;
 ### Prerequisites
 ```toml
 [dependencies]
-voirs-singing = { version = "0.1.0-alpha.2", features = ["all-features"] }
+voirs-singing = { version = "0.1.0", features = ["all-features"] }
 tokio = { version = "1.47", features = ["full"] }
 ```
 

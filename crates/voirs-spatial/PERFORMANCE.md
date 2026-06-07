@@ -1,6 +1,6 @@
 # VoiRS Spatial Audio - Performance Guide
 
-**Version:** 0.1.0-alpha.2
+**Version:** 0.1.0
 **Last Updated:** 2025-11-28
 
 ## Overview
@@ -168,7 +168,7 @@ Enable GPU processing for maximum performance:
 
 ```toml
 [dependencies]
-voirs-spatial = { version = "0.1.0-alpha.2", features = ["gpu"] }
+voirs-spatial = { version = "0.1.0", features = ["gpu"] }
 ```
 
 **GPU Performance** (when available):
@@ -429,4 +429,4 @@ For questions or performance reports, please file an issue at: https://github.co
 
 *Last benchmark run: 2025-11-28*
 *Platform: macOS Darwin 24.6.0*
-*Crate version: 0.1.0-alpha.2*
+*Crate version: 0.1.0*

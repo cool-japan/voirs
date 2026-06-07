@@ -103,7 +103,7 @@ This document summarizes the comprehensive Kubernetes deployment infrastructure 
 #### Chart.yaml
 - **Metadata**:
   - Version: 0.1.0
-  - App version: 0.1.0-alpha.3
+  - App version: 0.1.0
   - Kubernetes requirement: 1.19+
   - Maintainer information
   - Keywords and annotations

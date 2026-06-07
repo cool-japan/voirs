@@ -1,7 +1,7 @@
 # VoiRS FFI Status Report
 
 **Date**: 2025-11-29
-**Version**: 0.1.0-alpha.2
+**Version**: 0.1.0
 **Status**: ✅ **PRODUCTION READY** (with minor performance optimization opportunities)
 
 ## Executive Summary

@@ -50,7 +50,7 @@ VoiRS Spatial provides enterprise-grade spatial audio capabilities with HRTF-bas
 
 ```toml
 [dependencies]
-voirs-spatial = "0.1.0-alpha.2"
+voirs-spatial = "0.1.0"
 ```
 
 ### Basic Usage

@@ -1,6 +1,6 @@
 # VoiRS SDK - Final Compliance and Quality Report
 **Date**: 2025-12-30
-**Crate**: voirs-sdk v0.1.0-alpha.2
+**Crate**: voirs-sdk v0.1.0
 
 ## ✅ Test Results
 
@@ -211,7 +211,7 @@ The voirs-sdk crate has achieved **exceptional quality standards** with:
 
 ---
 *Generated: 2025-12-30*
-*Crate: voirs-sdk v0.1.0-alpha.2*
+*Crate: voirs-sdk v0.1.0*
 *Tests: 638 passing | Warnings: 0 | Quality: Exceptional*
 
 ---

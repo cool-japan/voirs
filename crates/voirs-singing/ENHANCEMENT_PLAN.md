@@ -1,8 +1,8 @@
 # VoiRS Singing Enhancement Plan v4.0.0
 
 **Date**: 2025-12-06
-**Current Version**: 0.1.0-alpha.2 (3.0.0 feature completion)
-**Proposed Version**: 0.1.0-alpha.3 (4.0.0 feature target)
+**Current Version**: 0.1.0 (3.0.0 feature completion)
+**Proposed Version**: 0.1.0 (4.0.0 feature target)
 
 ## Executive Summary
 
@@ -412,7 +412,7 @@ impl SynthesisEngine {
 3. **Benchmarking**: Establish baseline metrics for comparison
 4. **Iterative Development**: Implement, test, measure, refine
 5. **Documentation**: Update docs with new features and examples
-6. **Release Planning**: Prepare for 0.1.0-alpha.3 release
+6. **Release Planning**: Prepare for 0.1.0 release
 
 ---
 

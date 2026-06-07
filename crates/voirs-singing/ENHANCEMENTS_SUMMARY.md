@@ -336,14 +336,14 @@ generator.apply_vibrato_simd(
 ## 📈 Project Status Update
 
 ### Before Enhancement
-- **Version**: 0.1.0-alpha.2 (3.0.0 features complete)
+- **Version**: 0.1.0 (3.0.0 features complete)
 - **Tests**: 352 passing
 - **Modules**: 101 source files
 - **Lines of Code**: 37,475
 - **Performance**: 0.25x RTF (real-time factor)
 
 ### After Enhancement (Current)
-- **Version**: 0.1.0-alpha.2 (3.0.0 + 4.0.0 Phase 1)
+- **Version**: 0.1.0 (3.0.0 + 4.0.0 Phase 1)
 - **Tests**: 359 passing (+7 new tests)
 - **Modules**: 102 source files (+1 new module)
 - **Lines of Code**: 36,532 (-943 from refactoring, +567 from new module)
@@ -387,7 +387,7 @@ generator.apply_vibrato_simd(
 
 **Development Session**: 2025-12-06
 **Development Framework**: VoiRS (cool-japan)
-**SIMD Abstractions**: SciRS2-Core v0.1.0-rc.2
+**SIMD Abstractions**: SciRS2-Core v0.1.0
 **Testing Framework**: nextest, proptest, criterion
 
 **Key Technologies**:

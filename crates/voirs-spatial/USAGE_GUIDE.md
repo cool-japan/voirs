@@ -23,10 +23,10 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-voirs-spatial = "0.1.0-alpha.2"
+voirs-spatial = "0.1.0"
 
 # Optional platform features
-voirs-spatial = { version = "0.1.0-alpha.2", features = ["steamvr", "webxr"] }
+voirs-spatial = { version = "0.1.0", features = ["steamvr", "webxr"] }
 ```
 
 ### Basic Usage
@@ -521,7 +521,7 @@ BinauralConfig {
 
 ```toml
 [dependencies]
-voirs-spatial = { version = "0.1.0-alpha.2", features = ["steamvr"] }
+voirs-spatial = { version = "0.1.0", features = ["steamvr"] }
 ```
 
 ```rust
@@ -552,7 +552,7 @@ let tracking_data = platform.get_tracking_data()?;
 
 ```toml
 [target.'cfg(target_os = "ios")'.dependencies]
-voirs-spatial = { version = "0.1.0-alpha.2", features = ["arkit"] }
+voirs-spatial = { version = "0.1.0", features = ["arkit"] }
 ```
 
 ```rust
@@ -572,7 +572,7 @@ let config = optimizer.get_optimized_config(
 
 ```toml
 [target.'cfg(target_os = "android")'.dependencies]
-voirs-spatial = { version = "0.1.0-alpha.2", features = ["arcore"] }
+voirs-spatial = { version = "0.1.0", features = ["arcore"] }
 ```
 
 ```rust
@@ -586,7 +586,7 @@ let config = optimizer.optimize_for_device()?;
 
 ```toml
 [dependencies]
-voirs-spatial = { version = "0.1.0-alpha.2", features = ["webxr"] }
+voirs-spatial = { version = "0.1.0", features = ["webxr"] }
 ```
 
 ```rust
@@ -686,6 +686,6 @@ println!("{}", report);
 
 ---
 
-**Version:** 0.1.0-alpha.2
+**Version:** 0.1.0
 **Last Updated:** 2025-12-09
 **License:** Apache-2.0

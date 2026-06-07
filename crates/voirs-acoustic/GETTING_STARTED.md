@@ -21,8 +21,8 @@ Add voirs-acoustic to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-voirs-acoustic = "0.1.0-alpha.2"
-voirs-g2p = "0.1.0-alpha.2"
+voirs-acoustic = "0.1.0"
+voirs-g2p = "0.1.0"
 tokio = { version = "1.47", features = ["full"] }
 ```
 
@@ -265,9 +265,9 @@ let cache = SynthesisCache::new(cache_config);
 ```toml
 # Enable GPU support in Cargo.toml
 [dependencies]
-voirs-acoustic = { version = "0.1.0-alpha.2", features = ["gpu", "metal"] } # macOS
+voirs-acoustic = { version = "0.1.0", features = ["gpu", "metal"] } # macOS
 # Or for CUDA:
-# voirs-acoustic = { version = "0.1.0-alpha.2", features = ["gpu", "cuda"] }
+# voirs-acoustic = { version = "0.1.0", features = ["gpu", "cuda"] }
 ```
 
 ```rust
