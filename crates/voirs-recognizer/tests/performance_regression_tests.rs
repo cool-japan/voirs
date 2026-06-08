@@ -229,10 +229,10 @@ impl RegressionTester {
 
         // Add model-type-dependent base memory so assertions about ordering are reliable.
         let model_base_memory_bytes: u64 = match config.model_type.as_str() {
-            "small" => 100_000_000,  // ~100 MB
-            "base"  => 300_000_000,  // ~300 MB
-            "large" => 900_000_000,  // ~900 MB
-            _       => 300_000_000,
+            "small" => 100_000_000, // ~100 MB
+            "base" => 300_000_000,  // ~300 MB
+            "large" => 900_000_000, // ~900 MB
+            _ => 300_000_000,
         };
 
         BenchmarkResult {
