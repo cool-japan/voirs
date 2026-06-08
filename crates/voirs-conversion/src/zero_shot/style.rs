@@ -295,7 +295,11 @@ fn compute_voiced_f0_per_frame(
             let acorr = autocorr_normalized(frame);
             let best = (tau_min..tau_max.min(acorr.len()))
                 .filter(|&tau| acorr[tau] > voiced_threshold)
-                .max_by(|&a, &b| acorr[a].partial_cmp(&acorr[b]).unwrap_or(std::cmp::Ordering::Equal));
+                .max_by(|&a, &b| {
+                    acorr[a]
+                        .partial_cmp(&acorr[b])
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
             best.map(|tau| sample_rate / tau as f32)
         })
         .collect()

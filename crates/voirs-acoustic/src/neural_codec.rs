@@ -757,7 +757,9 @@ impl NeuralDecoder {
             }
         };
 
-        let enc_dim = *dims.last().expect("dims verified to be 2-D or 3-D so last() is always Some");
+        let enc_dim = *dims
+            .last()
+            .expect("dims verified to be 2-D or 3-D so last() is always Some");
         if enc_dim != self.config.encoder_dim {
             return Err(AcousticError::InputError {
                 message: format!(

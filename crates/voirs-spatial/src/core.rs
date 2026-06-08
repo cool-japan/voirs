@@ -320,7 +320,10 @@ impl SpatialProcessor {
 
         // Compute Doppler factor from position history
         let doppler_factor = {
-            let mut prev = self.doppler_prev.lock().expect("doppler_prev lock should not be poisoned");
+            let mut prev = self
+                .doppler_prev
+                .lock()
+                .expect("doppler_prev lock should not be poisoned");
             let now = std::time::Instant::now();
             let factor = if let Some((prev_pos, prev_time)) = *prev {
                 let dt = now.duration_since(prev_time).as_secs_f32();
@@ -350,7 +353,9 @@ impl SpatialProcessor {
             if n == 0 {
                 return Array1::zeros(0);
             }
-            let src = channel.as_slice().expect("Array1 should be contiguous in memory");
+            let src = channel
+                .as_slice()
+                .expect("Array1 should be contiguous in memory");
             let out: Vec<f32> = (0..n)
                 .map(|i| {
                     let src_pos = i as f32 * doppler_factor;
