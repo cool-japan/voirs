@@ -175,12 +175,12 @@ impl SpecAugment {
             return spectrogram.clone();
         }
 
-        // Choose mask width
-        let mask_width = rng.random_range(0..=self.config.freq_mask_width.min(num_freq_bins));
-
-        if mask_width == 0 || mask_width >= num_freq_bins {
+        // Choose mask width: ensure non-zero when masking is configured
+        let max_width = self.config.freq_mask_width.min(num_freq_bins);
+        if max_width == 0 {
             return spectrogram.clone();
         }
+        let mask_width = rng.random_range(1..=max_width);
 
         // Choose start position
         let start = rng.random_range(0..=(num_freq_bins - mask_width));

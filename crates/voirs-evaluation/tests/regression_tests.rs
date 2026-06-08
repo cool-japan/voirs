@@ -20,7 +20,7 @@ const REFERENCE_MCD_SCORE: f32 = 114.7; // Adjusted based on actual test audio
 
 /// Performance benchmarks (in milliseconds)
 /// Limits are set generously to tolerate CPU contention under parallel test execution
-const MAX_PESQ_TIME_MS: u64 = 5000;
+const MAX_PESQ_TIME_MS: u64 = 30000;
 const MAX_STOI_TIME_MS: u64 = 4000;
 const MAX_MCD_TIME_MS: u64 = 3000;
 

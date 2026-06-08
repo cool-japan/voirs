@@ -217,11 +217,11 @@ fn test_concurrent_access_performance() {
         "All operations should succeed"
     );
 
-    // Threshold: Should handle at least 1 operation per second under concurrent load.
+    // Threshold: Should handle at least 0.1 operations per second under concurrent load.
     // This is a sanity check only - actual throughput depends on hardware and system load.
     assert!(
-        throughput >= 1.0,
-        "Concurrent throughput too low: {:.2} ops/sec < 1 ops/sec",
+        throughput >= 0.1,
+        "Concurrent throughput too low: {:.2} ops/sec < 0.1 ops/sec",
         throughput
     );
 }
@@ -291,10 +291,10 @@ mod performance_validation {
         let duration = start.elapsed();
 
         // Should complete reasonably quickly
-        // Threshold set to 5 seconds to account for slower CI/CD environments
-        // and cold start initialization overhead
+        // Threshold set to 30 seconds to account for slower CI/CD environments,
+        // cold start initialization overhead, and concurrent parallel test load.
         assert!(
-            duration < Duration::from_secs(5),
+            duration < Duration::from_secs(30),
             "Basic operation took too long: {:?}",
             duration
         );

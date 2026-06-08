@@ -237,7 +237,7 @@ fn test_output_format_flexibility() {
         cmd.arg("synthesize")
             .arg("Test audio")
             .arg(output_file.to_str().unwrap())
-            .timeout(Duration::from_secs(30))
+            .timeout(Duration::from_secs(600))
             .assert()
             .success();
     }

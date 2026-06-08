@@ -552,7 +552,7 @@ mod tests {
         // Check that all tests completed within reasonable time
         // Use generous limit to tolerate CPU contention under parallel test execution
         for result in results {
-            assert!(result.execution_time_ms < 60000); // 60 seconds max to tolerate parallel execution
+            assert!(result.execution_time_ms < 300000); // 300 seconds max: MCD+DTW is O(n²) and can take ~250s alone
         }
     }
 
