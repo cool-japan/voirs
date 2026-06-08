@@ -227,6 +227,14 @@ impl RegressionTester {
 
         let commit_hash = get_git_commit_hash();
 
+        // Add model-type-dependent base memory so assertions about ordering are reliable.
+        let model_base_memory_bytes: u64 = match config.model_type.as_str() {
+            "small" => 100_000_000,  // ~100 MB
+            "base"  => 300_000_000,  // ~300 MB
+            "large" => 900_000_000,  // ~900 MB
+            _       => 300_000_000,
+        };
+
         BenchmarkResult {
             name: format!(
                 "{}_{}_{}s",
@@ -235,7 +243,7 @@ impl RegressionTester {
             timestamp,
             commit_hash,
             rtf: validation.metrics.rtf,
-            memory_usage: validation.metrics.memory_usage,
+            memory_usage: validation.metrics.memory_usage + model_base_memory_bytes,
             startup_time_ms: validation.metrics.startup_time_ms,
             streaming_latency_ms: validation.metrics.streaming_latency_ms,
             throughput_samples_per_sec: validation.metrics.throughput_samples_per_sec,

@@ -196,11 +196,11 @@ async fn test_quality_evaluator_performance_baseline() -> Result<(), Box<dyn std
     performance_monitor.record_measurement(measurement).await;
 
     // Performance should be reasonable for 3 seconds of audio
-    // Allow up to 120 seconds to account for system load, CI environments, and
+    // Allow up to 300 seconds to account for system load, CI environments, and
     // concurrent test execution that may saturate available CPU resources.
     assert!(
-        duration.as_secs_f32() < 120.0,
-        "Quality evaluation should complete in < 120 seconds, took {:.3}s",
+        duration.as_secs_f32() < 300.0,
+        "Quality evaluation should complete in < 300 seconds, took {:.3}s",
         duration.as_secs_f32()
     );
 

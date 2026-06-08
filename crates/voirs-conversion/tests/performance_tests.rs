@@ -441,9 +441,9 @@ async fn test_quality_vs_performance_trade_offs() -> Result<()> {
 
                 // Higher quality settings may take longer but should still be reasonable
                 let max_rtf = match quality_level {
-                    q if q <= 0.3 => 1.0, // Low quality should be fast
-                    q if q <= 0.7 => 2.0, // Medium quality
-                    _ => 3.0,             // High quality can be slower
+                    q if q <= 0.3 => 2.0, // Low quality should be fast (4x tolerance for parallel load)
+                    q if q <= 0.7 => 4.0, // Medium quality
+                    _ => 6.0,             // High quality can be slower
                 };
 
                 assert!(

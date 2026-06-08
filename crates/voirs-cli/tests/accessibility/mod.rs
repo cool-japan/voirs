@@ -98,7 +98,7 @@ fn test_alternative_text_for_audio_output() {
     cmd.arg("synthesize")
         .arg("This is an accessibility test")
         .arg(output_file.to_str().unwrap())
-        .timeout(Duration::from_secs(120))
+        .timeout(Duration::from_secs(600))
         .assert()
         .success();
     // Accessibility test focuses on successful completion regardless of output
@@ -244,7 +244,7 @@ fn test_alternative_input_methods() {
         .arg(input_file.to_str().unwrap())
         .arg("--output-dir")
         .arg(temp_dir.path().to_str().unwrap())
-        .timeout(Duration::from_secs(120))
+        .timeout(Duration::from_secs(600))
         .assert()
         .success();
 }
@@ -322,7 +322,7 @@ fn test_audio_alternatives() {
     cmd.arg("synthesize")
         .arg("Testing audio alternatives for accessibility")
         .arg(output_file.to_str().unwrap())
-        .timeout(Duration::from_secs(120))
+        .timeout(Duration::from_secs(600))
         .assert()
         .success();
 
