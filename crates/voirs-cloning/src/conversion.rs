@@ -882,7 +882,7 @@ impl VoiceConverter {
         let rms = (audio.iter().map(|&s| s * s).sum::<f32>() / audio.len() as f32).sqrt();
         // Noise floor estimate: 5th-percentile absolute value
         let mut abs_vals: Vec<f32> = audio.iter().map(|s| s.abs()).collect();
-        abs_vals.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        abs_vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let noise_floor = abs_vals[abs_vals.len() / 20].max(1e-8); // 5th percentile
                                                                    // SNR in dB, mapped to [0,1]
         let snr_db = 20.0 * (rms / noise_floor).log10();

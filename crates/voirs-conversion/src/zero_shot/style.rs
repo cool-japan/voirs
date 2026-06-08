@@ -295,7 +295,7 @@ fn compute_voiced_f0_per_frame(
             let acorr = autocorr_normalized(frame);
             let best = (tau_min..tau_max.min(acorr.len()))
                 .filter(|&tau| acorr[tau] > voiced_threshold)
-                .max_by(|&a, &b| acorr[a].partial_cmp(&acorr[b]).unwrap());
+                .max_by(|&a, &b| acorr[a].partial_cmp(&acorr[b]).unwrap_or(std::cmp::Ordering::Equal));
             best.map(|tau| sample_rate / tau as f32)
         })
         .collect()
@@ -439,7 +439,7 @@ fn formant_characteristics(
                 peaks.push((b, envelope[b]));
             }
         }
-        peaks.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        peaks.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         peaks.truncate(5);
         peaks.sort_by_key(|p| p.0);
 
