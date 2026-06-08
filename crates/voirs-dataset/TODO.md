@@ -2,7 +2,7 @@
 
 > **Last Updated**: 2025-12-05 (scirs2-fft API Migration & Augmentation Module Completion)
 > **Priority**: High Priority Component
-> **Target**: Q3 2025 MVP - **FULLY COMPLETED** ✅
+> **Released**: 0.1.0 — First Public Release
 
 ## 🚀 **LATEST SESSION ACHIEVEMENTS (2025-12-05) - SCIRS2-FFT MIGRATION & AUGMENTATION ENHANCEMENT** ✅
 

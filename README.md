@@ -8,7 +8,29 @@
 
 VoiRS is a cutting-edge Text-to-Speech (TTS) framework that unifies high-performance crates from the cool-japan ecosystem (SciRS2, NumRS2, PandRS, TrustformeRS) into a cohesive neural speech synthesis solution.
 
-> **🚀 First Release (0.1.0 — 2026-06-07)**: VoiRS's initial public release. Core TTS pipeline is working and production-ready, with CUDA/Metal GPU acceleration, SciRS2-Core integration (SIMD/parallel abstractions), comprehensive code-quality compliance, and a stabilized public API.
+> **🚀 First Release (0.1.0 — 2026-06-08)**: VoiRS's initial public release. Core TTS pipeline is working and production-ready, with CUDA/Metal GPU acceleration, SciRS2-Core integration (SIMD/parallel abstractions), comprehensive code-quality compliance, and a stabilized public API.
+
+## 📊 Status
+
+| Crate | Description | Tests | Status |
+|-------|-------------|-------|--------|
+| voirs-g2p | Grapheme-to-Phoneme | ✓ | Alpha |
+| voirs-acoustic | Neural acoustic models | 650 passing | Alpha |
+| voirs-vocoder | Neural vocoders + training | 879 passing | Alpha |
+| voirs-dataset | Dataset utilities | ✓ | Alpha |
+| voirs-emotion | Emotion control | ✓ | Alpha |
+| voirs-singing | Singing synthesis | 554 passing | Alpha |
+| voirs-cloning | Voice cloning | 604 passing | Alpha |
+| voirs-spatial | 3D spatial audio | 429 passing | Alpha |
+| voirs-conversion | Voice conversion | 414 passing | Alpha |
+| voirs-sdk | Unified high-level API | ✓ | Alpha |
+| voirs-cli | CLI tool | ✓ | Alpha |
+| voirs-ffi | C/Python/Node.js bindings | ✓ | Alpha |
+| voirs-recognizer | Speech recognition | 637 passing | Alpha |
+| voirs-evaluation | Quality metrics | ✓ | Alpha |
+| voirs-feedback | Feedback systems | 861 passing | Alpha |
+
+**Total: 9746 tests passing, 25 skipped** (full `--all-features` suite, clean build 2026-06-08)
 
 ## 🎯 Key Features
 
@@ -334,7 +356,7 @@ cargo run --example kokoro_espeak_auto_demo --features onnx --release
 
 ## 🗺️ Roadmap
 
-### 0.1.0 — First Release (2026-06-07) ✅
+### 0.1.0 — First Release (2026-06-08) ✅
 - [x] Complete G2P → Acoustic → Vocoder pipeline
 - [x] English VITS + HiFi-GAN synthesis
 - [x] DiffWave training pipeline with real parameter saving and gradient-based learning

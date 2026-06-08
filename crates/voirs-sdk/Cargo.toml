@@ -71,9 +71,11 @@ claxon.workspace = true
 symphonia.workspace = true
 lewton.workspace = true
 ogg.workspace = true
-# C-FFI codecs (gated behind default-OFF `ffi-codecs` feature to keep default build Pure Rust)
+# Optional codecs (libopus/minimp3/LAME are C-FFI; FLAC is Pure-Rust via OxiAudio) — gated behind default-OFF `ffi-codecs` feature
 opus = { workspace = true, optional = true }
-flac-bound = { workspace = true, optional = true }
+# Pure-Rust FLAC encoding (OxiAudio, FLAC via flacenc) — replaces C-FFI flac-bound.
+oxiaudio-core = { workspace = true, optional = true }
+oxiaudio-encode = { workspace = true, optional = true }
 minimp3 = { workspace = true, optional = true }
 mp3lame-encoder = { workspace = true, optional = true }
 
@@ -113,12 +115,14 @@ criterion.workspace = true
 
 [features]
 default = []
-# C-FFI audio codecs (libopus, libFLAC, minimp3, LAME). Default-OFF to keep the
-# default build Pure Rust. Propagates to voirs-vocoder and voirs-dataset, which
-# also gate their C-FFI codec code behind their own `ffi-codecs` feature.
+# Optional audio codecs: Opus (libopus), minimp3, LAME (all C-FFI) plus Pure-Rust
+# FLAC (OxiAudio). Default-OFF to keep the default build Pure Rust. Propagates to
+# voirs-vocoder and voirs-dataset, which gate their codec code behind their own
+# `ffi-codecs` feature.
 ffi-codecs = [
     "dep:opus",
-    "dep:flac-bound",
+    "dep:oxiaudio-core",
+    "dep:oxiaudio-encode",
     "dep:minimp3",
     "dep:mp3lame-encoder",
     "voirs-vocoder/ffi-codecs",

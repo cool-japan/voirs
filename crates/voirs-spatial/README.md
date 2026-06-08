@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/voirs-spatial.svg)](https://crates.io/crates/voirs-spatial)
 [![Documentation](https://docs.rs/voirs-spatial/badge.svg)](https://docs.rs/voirs-spatial)
 [![License](https://img.shields.io/crates/l/voirs-spatial.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-340%20passing-brightgreen.svg)](https://github.com/cool-japan/voirs)
+[![Tests](https://img.shields.io/badge/tests-429%20passing-brightgreen.svg)](https://github.com/cool-japan/voirs)
 
 **Production-ready 3D spatial audio processing for VR/AR, gaming, and immersive applications.**
 

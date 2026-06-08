@@ -376,7 +376,7 @@ create_env_template() {
 # Copy this file to .env and customize the values
 
 # Application Configuration
-VERSION=0.1.0-alpha.2
+VERSION=0.1.0
 RUST_LOG=info
 
 # Service Ports

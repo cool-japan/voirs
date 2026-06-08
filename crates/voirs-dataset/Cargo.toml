@@ -38,9 +38,11 @@ hound.workspace = true
 dasp.workspace = true
 claxon.workspace = true
 lewton.workspace = true
-# C-FFI codecs (libFLAC / minimp3 / LAME) — gated behind the non-default
-# `ffi-codecs` feature to keep the default build Pure Rust (COOLJAPAN policy).
-flac-bound = { workspace = true, optional = true }
+# Optional codecs (minimp3 / LAME are C-FFI; FLAC is Pure-Rust via OxiAudio) —
+# gated behind the non-default `ffi-codecs` feature (COOLJAPAN policy).
+# Pure-Rust FLAC encoding (OxiAudio, FLAC via flacenc) — replaces C-FFI flac-bound.
+oxiaudio-core = { workspace = true, optional = true }
+oxiaudio-encode = { workspace = true, optional = true }
 minimp3 = { workspace = true, optional = true }
 mp3lame-encoder = { workspace = true, optional = true }
 
@@ -122,10 +124,11 @@ harness = false
 
 [features]
 default = []
-# Enables C-FFI audio codecs: libFLAC (flac-bound), minimp3 (MP3 decode),
-# and LAME (mp3lame-encoder, MP3 encode). OFF by default to keep the
-# default build Pure Rust. Without this feature, MP3 decode/encode via
-# these libraries returns a clear "requires 'ffi-codecs'" error.
-ffi-codecs = ["dep:flac-bound", "dep:minimp3", "dep:mp3lame-encoder"]
+# Enables optional audio codecs: Pure-Rust FLAC encode (OxiAudio, via flacenc),
+# minimp3 (C-FFI MP3 decode), and LAME (C-FFI MP3 encode). OFF by default to keep
+# the default build Pure Rust. Without this feature, MP3 decode/encode via these
+# libraries returns a clear "requires 'ffi-codecs'" error, and FLAC encode falls
+# back to WAV.
+ffi-codecs = ["dep:oxiaudio-core", "dep:oxiaudio-encode", "dep:minimp3", "dep:mp3lame-encoder"]
 [lints]
 workspace = true

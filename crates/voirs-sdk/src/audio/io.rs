@@ -73,11 +73,25 @@ impl AudioBuffer {
         }
     }
 
-    /// Save audio as FLAC file
+    /// Save audio as FLAC file.
+    ///
+    /// With the `ffi-codecs` feature enabled, this writes a true compressed FLAC
+    /// stream via the Pure-Rust [`oxiaudio-encode`] encoder. Without the feature,
+    /// it falls back to writing a WAV file at the same path stem.
+    #[cfg(feature = "ffi-codecs")]
     pub fn save_flac(&self, path: impl AsRef<Path>) -> Result<()> {
-        // FLAC encoding is complex with current available crates
-        // For now, use WAV fallback with a note about FLAC support
-        tracing::warn!("FLAC encoding temporarily using WAV fallback - proper FLAC encoding support coming soon");
+        let bytes = self.to_flac_bytes()?;
+        std::fs::write(path.as_ref(), &bytes)
+            .map_err(|e| VoirsError::audio_error(format!("Failed to write FLAC file: {e}")))
+    }
+
+    /// Save audio as FLAC file (Pure-Rust default build: `ffi-codecs` disabled).
+    ///
+    /// FLAC encoding requires the `ffi-codecs` feature; without it the audio is
+    /// saved as WAV (at the same path stem) and a warning is logged.
+    #[cfg(not(feature = "ffi-codecs"))]
+    pub fn save_flac(&self, path: impl AsRef<Path>) -> Result<()> {
+        tracing::warn!("FLAC encoding requires the 'ffi-codecs' feature; saving as WAV instead");
         self.save_wav(path.as_ref().with_extension("wav"))
     }
 
@@ -533,11 +547,42 @@ impl AudioBuffer {
         Ok(cursor.into_inner())
     }
 
-    /// Convert to FLAC bytes
+    /// Convert to FLAC bytes using the Pure-Rust OxiAudio encoder.
+    ///
+    /// Requires the `ffi-codecs` feature. The `f32` samples are encoded to a
+    /// 24-bit FLAC stream at the default compression level.
+    #[cfg(feature = "ffi-codecs")]
     pub fn to_flac_bytes(&self) -> Result<Vec<u8>> {
-        // FLAC encoding is complex with current available crates
-        // For now, use WAV fallback with a note about FLAC support
-        tracing::warn!("FLAC encoding temporarily using WAV fallback - proper FLAC encoding support coming soon");
+        use oxiaudio_core::{
+            AudioBuffer as OxiAudioBuffer, AudioEncoder, ChannelLayout, SampleFormat,
+        };
+        use oxiaudio_encode::FlacEncoder;
+
+        let oxi_buffer = OxiAudioBuffer::<f32> {
+            samples: self.samples.clone(),
+            sample_rate: self.sample_rate,
+            channels: ChannelLayout::from(self.channels as u16),
+            format: SampleFormat::F32,
+        };
+
+        let mut encoder = FlacEncoder::default().with_bits_per_sample(24);
+        let mut cursor = std::io::Cursor::new(Vec::new());
+        encoder
+            .encode(&oxi_buffer, &mut cursor)
+            .map_err(|e| VoirsError::audio_error(format!("FLAC encoding failed: {e}")))?;
+
+        Ok(cursor.into_inner())
+    }
+
+    /// Convert to FLAC bytes (Pure-Rust default build: `ffi-codecs` disabled).
+    ///
+    /// FLAC encoding requires the `ffi-codecs` feature; without it WAV bytes are
+    /// returned and a warning is logged.
+    #[cfg(not(feature = "ffi-codecs"))]
+    pub fn to_flac_bytes(&self) -> Result<Vec<u8>> {
+        tracing::warn!(
+            "FLAC encoding requires the 'ffi-codecs' feature; returning WAV bytes instead"
+        );
         self.to_wav_bytes()
     }
 

@@ -194,7 +194,7 @@ fn create_essential_faqs() -> Vec<FAQEntry> {
             code_example: Some(r#"
 // Add to Cargo.toml:
 // [dependencies]
-// voirs = "0.1.0-alpha.2"
+// voirs = "0.1.0"
 
 use voirs::prelude::*;
 
@@ -809,7 +809,7 @@ echo "4. Install with verbose output: cargo install voirs -v"
 
 # Cargo.toml example for manual setup
 [dependencies]
-voirs = { version = "0.1.0-alpha.2", features = ["full"] }
+voirs = { version = "0.1.0", features = ["full"] }
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 

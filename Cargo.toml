@@ -90,7 +90,10 @@ hound = "3.5.1"
 cpal = "0.17.3"
 dasp = "0.11"
 claxon = "0.4"  # FLAC decoding
-flac-bound = "0.5"  # FLAC encoding/decoding
+# Pure-Rust FLAC encoding (COOLJAPAN OxiAudio: FLAC via flacenc). Replaces the
+# C-FFI `flac-bound` (libFLAC). Used (optionally) under the `ffi-codecs` feature.
+oxiaudio-core = "0.1"    # OxiAudio core types (AudioBuffer, ChannelLayout, SampleFormat)
+oxiaudio-encode = "0.1"  # OxiAudio Pure-Rust encoders (FLAC via flacenc)
 symphonia = "0.5.5"  # Comprehensive audio codec support
 opus = "0.3"  # Opus audio codec
 lewton = "0.10"  # OGG Vorbis decoding

@@ -176,7 +176,7 @@ impl OnnxSession {
         &self.config
     }
 
-    /// Get a clone of the inner Arc<RwLock<Session>> for sharing.
+    /// Get a clone of the inner `Arc<RwLock<Session>>` for sharing.
     pub fn inner(&self) -> Arc<RwLock<Session>> {
         Arc::clone(&self.session)
     }

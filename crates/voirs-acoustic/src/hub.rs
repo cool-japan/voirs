@@ -2,14 +2,14 @@
 //!
 //! This module replaces the external `hf-hub` crate with a small, dependency-light
 //! downloader built directly on [`reqwest`] (configured for `rustls-no-provider`).
-//! It installs a pure-Rust [`rustls`] [`CryptoProvider`] backed by RustCrypto as the
+//! It installs a pure-Rust [`rustls`] [`rustls::crypto::CryptoProvider`] backed by RustCrypto as the
 //! process-wide default, so that no `ring` or `aws-lc-rs`/`aws-lc-sys` C/assembly
 //! crypto is compiled into the default build.
 //!
 //! # Crypto provider
 //!
 //! Because the workspace builds `reqwest` with the `rustls-no-provider` feature, the
-//! process **must** install a default [`CryptoProvider`] before any TLS handshake.
+//! process **must** install a default [`rustls::crypto::CryptoProvider`] before any TLS handshake.
 //! [`ensure_crypto_provider`] does this exactly once via [`std::sync::Once`]; every
 //! public entry point in this module calls it first. Binaries and FFI entry points
 //! should also call it as early as possible (see `voirs_sdk::ensure_crypto_provider`).
@@ -75,7 +75,7 @@ const DEFAULT_REVISION: &str = "main";
 
 static INSTALL_PROVIDER: Once = Once::new();
 
-/// Install the pure-Rust [`rustls`] [`CryptoProvider`] as the process default.
+/// Install the pure-Rust [`rustls`] [`rustls::crypto::CryptoProvider`] as the process default.
 ///
 /// This is guarded by [`std::sync::Once`], so it is safe (and cheap) to call from
 /// many places — only the first call performs the installation. The provider is the

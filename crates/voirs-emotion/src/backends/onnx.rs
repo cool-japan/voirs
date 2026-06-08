@@ -231,7 +231,7 @@ impl OnnxEmotionClassifier {
     /// Classify emotion from raw audio samples.
     ///
     /// This method computes a simplified mel spectrogram from the audio samples
-    /// before running classification. For production use, prefer [`classify`] with
+    /// before running classification. For production use, prefer [`OnnxEmotionClassifier::classify`] with
     /// a properly computed mel spectrogram.
     ///
     /// # Arguments

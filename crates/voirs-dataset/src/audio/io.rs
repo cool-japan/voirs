@@ -282,58 +282,50 @@ pub fn save_wav<P: AsRef<Path>>(audio: &AudioData, path: P) -> Result<()> {
 }
 
 /// Save audio to FLAC file
+#[cfg(feature = "ffi-codecs")]
 pub fn save_flac<P: AsRef<Path>>(audio: &AudioData, path: P) -> Result<()> {
-    // For reliable FLAC encoding, use external FFmpeg command
-    let temp_wav = tempfile::NamedTempFile::with_suffix(".wav")?;
-    save_wav(audio, temp_wav.path())?;
+    use oxiaudio_core::{AudioBuffer as OxiAudioBuffer, ChannelLayout, SampleFormat};
+    use oxiaudio_encode::FlacEncoder;
 
-    // Check if ffmpeg is available
-    let ffmpeg_available = std::process::Command::new("ffmpeg")
-        .arg("-version")
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false);
+    // Encode a true compressed FLAC stream with the Pure-Rust OxiAudio encoder
+    // (FLAC via flacenc), at maximum compression and 24-bit depth.
+    let oxi_buffer = OxiAudioBuffer::<f32> {
+        samples: audio.samples().to_vec(),
+        sample_rate: audio.sample_rate(),
+        channels: ChannelLayout::from(audio.channels() as u16),
+        format: SampleFormat::F32,
+    };
 
-    if ffmpeg_available {
-        let output = std::process::Command::new("ffmpeg")
-            .arg("-i")
-            .arg(temp_wav.path())
-            .arg("-c:a")
-            .arg("flac")
-            .arg("-compression_level")
-            .arg("8")
-            .arg("-y") // Overwrite output files
-            .arg(path.as_ref())
-            .output()?;
+    let mut encoder = FlacEncoder::new(8).with_bits_per_sample(24);
+    encoder
+        .encode_to_file(&oxi_buffer, path.as_ref())
+        .map_err(|e| crate::DatasetError::AudioError(format!("FLAC encoding failed: {e}")))?;
 
-        if output.status.success() {
-            tracing::info!(
-                "Successfully encoded FLAC file: {} using FFmpeg ({} channels, {} Hz, {:.2}s)",
-                path.as_ref().display(),
-                audio.channels(),
-                audio.sample_rate(),
-                audio.duration()
-            );
-        } else {
-            let error_msg = String::from_utf8_lossy(&output.stderr);
-            return Err(crate::DatasetError::AudioError(format!(
-                "FFmpeg FLAC encoding failed: {error_msg}"
-            )));
-        }
-    } else {
-        // Fallback: save as WAV with instructions
-        let wav_path = path.as_ref().with_extension("wav");
-        save_wav(audio, &wav_path)?;
+    tracing::info!(
+        "Successfully encoded FLAC file: {} using OxiAudio ({} channels, {} Hz, {:.2}s)",
+        path.as_ref().display(),
+        audio.channels(),
+        audio.sample_rate(),
+        audio.duration()
+    );
 
-        tracing::warn!(
-            "FFmpeg not available for FLAC encoding. Audio saved as WAV: {}. \
-            To convert to FLAC, install FFmpeg and run: \
-            ffmpeg -i {} -c:a flac -compression_level 8 {}",
-            wav_path.display(),
-            wav_path.display(),
-            path.as_ref().display()
-        );
-    }
+    Ok(())
+}
+
+/// Save audio to FLAC file (Pure-Rust default build: `ffi-codecs` disabled).
+///
+/// FLAC encoding requires the `ffi-codecs` feature (Pure-Rust OxiAudio encoder);
+/// without it the audio is saved as WAV at the same path stem and a warning is
+/// logged.
+#[cfg(not(feature = "ffi-codecs"))]
+pub fn save_flac<P: AsRef<Path>>(audio: &AudioData, path: P) -> Result<()> {
+    let wav_path = path.as_ref().with_extension("wav");
+    save_wav(audio, &wav_path)?;
+
+    tracing::warn!(
+        "FLAC encoding requires the 'ffi-codecs' feature. Audio saved as WAV: {}",
+        wav_path.display()
+    );
 
     Ok(())
 }
