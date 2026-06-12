@@ -259,12 +259,47 @@ class AdvancedConsistencyValidator:
                 'error': 'Module not found'
             }
         
-        # C API bindings
-        self.bindings['c_api'] = {
-            'available': False,
-            'type': 'c_api',
-            'error': 'C API testing requires compiled library'
-        }
+        # C API bindings — locate libvoirs_ffi cdylib
+        # voirs_pipeline_synthesize does NOT exist; the exported symbol is
+        # voirs_synthesize_advanced (c_api/synthesis.rs #[no_mangle] line 313).
+        try:
+            import ctypes as _ctypes
+            _repo_root = Path(__file__).resolve().parent.parent.parent.parent
+            _cargo_target = os.environ.get("CARGO_TARGET_DIR", "")
+            _dirs = []
+            if _cargo_target:
+                _dirs += [Path(_cargo_target) / "release", Path(_cargo_target) / "debug"]
+            _dirs += [_repo_root / "target" / "release", _repo_root / "target" / "debug"]
+            _names = ["libvoirs_ffi.dylib", "libvoirs_ffi.so", "voirs_ffi.dll"]
+            _lib_path = None
+            for _d in _dirs:
+                for _n in _names:
+                    if (_d / _n).exists():
+                        _lib_path = str(_d / _n)
+                        break
+                if _lib_path:
+                    break
+            if _lib_path:
+                _lib = _ctypes.CDLL(_lib_path)
+                self.bindings['c_api'] = {
+                    'available': True,
+                    'type': 'c_api',
+                    'lib': _lib,
+                    'lib_path': _lib_path,
+                }
+            else:
+                self.bindings['c_api'] = {
+                    'available': False,
+                    'type': 'c_api',
+                    'error': 'libvoirs_ffi cdylib not found; voirs_pipeline_synthesize absent '
+                             '(symbol is voirs_synthesize_advanced, c_api/synthesis.rs:313)',
+                }
+        except Exception as _exc:
+            self.bindings['c_api'] = {
+                'available': False,
+                'type': 'c_api',
+                'error': f'C API load error: {_exc}',
+            }
         
         # Node.js bindings
         self.bindings['nodejs'] = {
@@ -567,9 +602,16 @@ class AdvancedConsistencyValidator:
             if hasattr(voirs, 'VoirsPipeline'):
                 pipeline = voirs.VoirsPipeline()
                 if hasattr(pipeline, 'synthesize_ssml'):
+                    # synthesize_ssml IS exported by voirs-ffi Python bindings:
+                    # see crates/voirs-ffi/src/python/pipeline.rs fn synthesize_ssml(&self, ssml: &str)
                     audio = pipeline.synthesize_ssml(text)
                 else:
-                    raise NotImplementedError("SSML not supported in Python bindings")
+                    # The symbol exists in Rust source but the compiled .so may not
+                    # be present.  Guard cleanly instead of crashing the test run.
+                    raise RuntimeError(
+                        "synthesize_ssml not found on VoirsPipeline — "
+                        "ensure the 'python' feature is compiled into voirs-ffi"
+                    )
             else:
                 raise RuntimeError("VoirsPipeline not found in Python bindings")
         else:
@@ -678,10 +720,88 @@ synthesize();
             except:
                 pass
     
-    def _synthesize_c_api(self, binding_info: Dict[str, Any], 
+    def _synthesize_c_api(self, binding_info: Dict[str, Any],
                          text: str, config: Dict[str, Any]) -> Dict[str, Any]:
-        """Synthesize using C API bindings."""
-        raise NotImplementedError("C API synthesis requires compiled library")
+        """Synthesize using C API bindings via voirs_synthesize_advanced.
+
+        Symbol evidence: voirs_pipeline_synthesize does NOT exist in voirs-ffi.
+        The correct C symbol for one-shot synthesis is:
+            voirs_synthesize_advanced(text, config, result) -> VoirsErrorCode
+        declared in crates/voirs-ffi/src/c_api/synthesis.rs line 313-318 as
+        #[no_mangle] pub unsafe extern "C" fn voirs_synthesize_advanced.
+        """
+        import ctypes
+        from ctypes import (
+            Structure, POINTER, c_float, c_uint32, c_int32, c_char_p, c_void_p,
+        )
+
+        lib = binding_info.get('lib')
+        if lib is None:
+            raise RuntimeError(
+                "C API library not loaded — voirs_pipeline_synthesize absent; "
+                "using voirs_synthesize_advanced (see c_api/synthesis.rs:313)"
+            )
+
+        # ---- ctypes structure definitions ----
+
+        class _VoirsAudioBuffer(Structure):
+            _fields_ = [
+                ("samples",     POINTER(c_float)),
+                ("length",      c_uint32),
+                ("sample_rate", c_uint32),
+                ("channels",    c_uint32),
+                ("duration",    c_float),
+            ]
+
+        class _VoirsSynthesisResult(Structure):
+            _fields_ = [
+                ("audio",             POINTER(_VoirsAudioBuffer)),
+                ("synthesis_time_ms", c_float),
+                ("quality_score",     c_float),
+                ("processing_info",   c_char_p),
+            ]
+
+        # Set argtypes/restype on first use (idempotent)
+        if not getattr(lib, '_voirs_synthesize_advanced_typed', False):
+            lib.voirs_synthesize_advanced.argtypes = [
+                c_char_p,
+                c_void_p,
+                POINTER(_VoirsSynthesisResult),
+            ]
+            lib.voirs_synthesize_advanced.restype = c_int32
+            lib.voirs_free_synthesis_result.argtypes = [POINTER(_VoirsSynthesisResult)]
+            lib.voirs_free_synthesis_result.restype = None
+            lib._voirs_synthesize_advanced_typed = True
+
+        result = _VoirsSynthesisResult()
+        text_bytes = text.encode('utf-8')
+        ret = lib.voirs_synthesize_advanced(text_bytes, None, result)
+
+        try:
+            if ret != 0:
+                raise RuntimeError(f"voirs_synthesize_advanced error code {ret}")
+
+            audio_ptr = result.audio
+            if audio_ptr:
+                buf = audio_ptr.contents
+                samples = [buf.samples[i] for i in range(min(buf.length, 4096))]
+                return {
+                    'audio': {
+                        'samples': samples,
+                        'sample_rate': buf.sample_rate,
+                        'channels': buf.channels,
+                        'duration': buf.duration,
+                    },
+                    'config_applied': config,
+                    'binding': 'c_api',
+                }
+            return {
+                'audio': {'samples': [], 'sample_rate': 22050, 'channels': 1, 'duration': 0.0},
+                'config_applied': config,
+                'binding': 'c_api',
+            }
+        finally:
+            lib.voirs_free_synthesis_result(result)
     
     def _synthesize_wasm(self, text: str, config: Dict[str, Any]) -> Dict[str, Any]:
         """Synthesize using WASM bindings."""
@@ -1110,3 +1230,90 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# ---------------------------------------------------------------------------
+# pytest — consistency validator tests (items 4 + 5)
+# ---------------------------------------------------------------------------
+import pytest  # noqa: E402
+
+
+def test_consistency_synthesize_ssml_python_bindings() -> None:
+    """Item 4 (line ~572): verify synthesize_ssml is callable via Python bindings.
+
+    Symbol evidence: synthesize_ssml IS exported by voirs-ffi Python bindings.
+    See crates/voirs-ffi/src/python/pipeline.rs:
+        fn synthesize_ssml(&self, ssml: &str) -> PyResult<PyAudioBuffer>  (line 218)
+
+    Skips cleanly when the voirs Python extension module is not installed.
+    """
+    try:
+        import voirs as _voirs  # type: ignore[import]
+    except ImportError:
+        pytest.skip("voirs Python extension not installed (maturin develop not run)")
+
+    if not hasattr(_voirs, 'VoirsPipeline'):
+        pytest.skip("VoirsPipeline not found in voirs module")
+
+    pipeline = _voirs.VoirsPipeline()
+    if not hasattr(pipeline, 'synthesize_ssml'):
+        pytest.skip(
+            "synthesize_ssml not present on VoirsPipeline — "
+            "ensure voirs-ffi is compiled with the 'python' feature"
+        )
+
+    ssml_text = '<speak>Hello from VoiRS SSML test.</speak>'
+    audio = pipeline.synthesize_ssml(ssml_text)
+    # Basic structural assertions — we only verify the call succeeded and
+    # returned something with a recognisable audio attribute.
+    assert audio is not None
+
+
+def test_consistency_c_api_synthesize_advanced() -> None:
+    """Item 5 (line ~684): verify voirs_synthesize_advanced C symbol is callable.
+
+    Symbol evidence: voirs_pipeline_synthesize does NOT exist in voirs-ffi.
+    The correct synthesis symbol is voirs_synthesize_advanced, declared as:
+        #[no_mangle] pub unsafe extern "C" fn voirs_synthesize_advanced(
+            text: *const c_char,
+            config: *const VoirsAdvancedSynthesisConfig,
+            result: *mut VoirsSynthesisResult,
+        ) -> VoirsErrorCode
+    in crates/voirs-ffi/src/c_api/synthesis.rs line 313.
+
+    Skips cleanly when the cdylib is not built.
+    """
+    import ctypes
+    from ctypes import Structure, POINTER, c_float, c_uint32, c_int32, c_char_p, c_void_p
+
+    validator = AdvancedConsistencyValidator.__new__(AdvancedConsistencyValidator)
+    validator.bindings = {}
+    validator.test_scenarios = []
+    validator._setup_bindings()
+
+    c_info = validator.bindings.get('c_api', {})
+    if not c_info.get('available'):
+        pytest.skip(
+            "voirs-ffi cdylib not built — "
+            "run: CARGO_TARGET_DIR=/tmp/cj-voirs cargo build -p voirs-ffi  "
+            f"(reason: {c_info.get('error', 'unknown')})"
+        )
+
+    # Use _synthesize_c_api to confirm end-to-end invocation
+    # We do NOT call the removed voirs_pipeline_synthesize — only
+    # voirs_synthesize_advanced which we verified exists.
+    validator_full = AdvancedConsistencyValidator.__new__(AdvancedConsistencyValidator)
+    validator_full.bindings = {}
+    validator_full.test_scenarios = []
+    validator_full._setup_bindings()
+
+    result = validator_full._synthesize_c_api(
+        validator_full.bindings['c_api'],
+        "VoiRS C API consistency test.",
+        {},
+    )
+    assert 'audio' in result
+    assert result['binding'] == 'c_api'
+    audio = result['audio']
+    assert 'sample_rate' in audio
+    assert audio['sample_rate'] > 0

@@ -4,6 +4,11 @@
 > **Last Updated**: 2026-06-08
 > **Next Milestone**: Version 0.2.0 - Advanced Neural Features & Production Optimization
 
+## Stubs to implement (added 2026-06-12 by /cooljapan-stub-check)
+
+- [ ] `voirs-emotion`: `crates/voirs-emotion/src/debug.rs:155` — replace placeholder `EmotionParameters::neutral()` with real debug parameters derived from context
+  - Priority: P2 | Scope: trivial | Hint: none
+
 ## Latest Development Session (2026-05-31 batch 8)
 
 **Mock→Real DSP Replacements + Policy Compliance (batch 8):**

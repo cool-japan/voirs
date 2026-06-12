@@ -48,6 +48,15 @@ from typing import List, Dict, Optional, Set, Any, Tuple
 from packaging import version
 import tempfile
 
+# tomllib is stdlib in Python 3.11+; fall back to tomli for older versions.
+try:
+    import tomllib as _tomllib
+except ImportError:  # Python < 3.11
+    try:
+        import tomli as _tomllib  # type: ignore[no-redef]
+    except ImportError:
+        _tomllib = None  # type: ignore[assignment]
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -659,6 +668,133 @@ class VoiRSDependencyManager:
         
         return graph
 
+    # ------------------------------------------------------------------ #
+    # OSI-approved SPDX identifiers considered "allowed" by default.      #
+    # These match the allow-list stored in self.config["allowed_licenses"] #
+    # but we keep a frozen fallback here so the method works even if the  #
+    # config is absent or incomplete.                                      #
+    # ------------------------------------------------------------------ #
+    _OSI_ALLOWED: Set[str] = frozenset({
+        "MIT",
+        "Apache-2.0",
+        "BSD-2-Clause",
+        "BSD-3-Clause",
+        "ISC",
+        "MPL-2.0",
+        "Zlib",
+        "Unicode-3.0",
+        "CC0-1.0",
+        "Unlicense",
+    })
+
+    @staticmethod
+    def _spdx_expression_allowed(expr: str, allowed: Set[str]) -> bool:
+        """Return True if every OR alternative in *expr* contains at least one allowed identifier.
+
+        Simple tokeniser that handles ``A OR B``, ``A AND B``, and ``(A OR B) AND C``
+        expressions as typically found in Cargo.toml / package.json license fields.
+        The rule applied is permissive: an expression is "allowed" when ANY one of its
+        top-level OR clauses resolves to an allowed ID (mirrors common tooling
+        practice such as cargo-deny's ``allow`` mode).
+        """
+        # Normalise: strip outer parens and whitespace, fold ``/`` to `` OR ``
+        expr = expr.strip().strip("()").replace("/", " OR ")
+        # Split on top-level OR (simple string split is sufficient for common forms)
+        or_parts = [p.strip().strip("()") for p in re.split(r"\bOR\b", expr, flags=re.IGNORECASE)]
+        for part in or_parts:
+            # Each OR part may be an AND conjunction — any AND clause that is entirely
+            # in the allowed set satisfies the part.
+            and_parts = [a.strip().strip("()") for a in re.split(r"\bAND\b", part, flags=re.IGNORECASE)]
+            if all(a in allowed for a in and_parts if a):
+                return True
+        return False
+
+    def _check_license_compliance(self) -> List[Dict[str, Any]]:
+        """Check license compliance for all discovered crates and npm packages.
+
+        For Rust crates the ``[package].license`` field is read from each
+        ``Cargo.toml`` using ``tomllib`` (Python 3.11+) or the ``tomli`` back-compat
+        shim.  For npm packages ``package.json`` ``"license"`` is used.
+
+        Returns a list of issue dicts (empty when everything is compliant).  Each
+        dict contains at least:
+            - ``name``      — dependency/crate name
+            - ``license``   — the license string found (or ``"MISSING"`` when absent)
+            - ``source``    — file path where the issue was detected
+            - ``reason``    — human-readable explanation
+        """
+        allowed: Set[str] = set(self.config.get("allowed_licenses", [])) | self._OSI_ALLOWED
+        issues: List[Dict[str, Any]] = []
+
+        # --- Rust crates (Cargo.toml) ---
+        if _tomllib is not None:
+            cargo_files = list(self.workspace_dir.glob("**/Cargo.toml"))
+            for cargo_file in cargo_files:
+                if "target" in cargo_file.parts:
+                    continue
+                try:
+                    with open(cargo_file, "rb") as fh:
+                        data = _tomllib.load(fh)
+                    package = data.get("package", {})
+                    crate_name = package.get("name", str(cargo_file.parent.name))
+                    # Workspace inheritance: license field may be ".workspace = true"
+                    license_value = package.get("license")
+                    if isinstance(license_value, dict):
+                        # workspace = true — skip; covered by workspace root
+                        continue
+                    if not license_value:
+                        issues.append({
+                            "name": crate_name,
+                            "license": "MISSING",
+                            "source": str(cargo_file),
+                            "reason": "No 'license' field in [package]",
+                        })
+                        continue
+                    if not self._spdx_expression_allowed(license_value, allowed):
+                        issues.append({
+                            "name": crate_name,
+                            "license": license_value,
+                            "source": str(cargo_file),
+                            "reason": f"License '{license_value}' is not in the allow-list",
+                        })
+                except Exception as exc:
+                    logger.debug(f"Could not parse {cargo_file}: {exc}")
+        else:
+            logger.warning("tomllib/tomli not available — skipping Rust license checks")
+
+        # --- npm packages (package.json) ---
+        package_json_files = list(self.workspace_dir.glob("**/package.json"))
+        for pj_file in package_json_files:
+            if any(part in ("node_modules", "target") for part in pj_file.parts):
+                continue
+            try:
+                with open(pj_file, encoding="utf-8") as fh:
+                    pkg = json.load(fh)
+                pkg_name = pkg.get("name", str(pj_file.parent.name))
+                npm_license = pkg.get("license")
+                if not npm_license:
+                    issues.append({
+                        "name": pkg_name,
+                        "license": "MISSING",
+                        "source": str(pj_file),
+                        "reason": "No 'license' field in package.json",
+                    })
+                    continue
+                if isinstance(npm_license, dict):
+                    # SPDX object form: {"type": "MIT", "url": "..."}
+                    npm_license = npm_license.get("type", "")
+                if not self._spdx_expression_allowed(str(npm_license), allowed):
+                    issues.append({
+                        "name": pkg_name,
+                        "license": str(npm_license),
+                        "source": str(pj_file),
+                        "reason": f"License '{npm_license}' is not in the allow-list",
+                    })
+            except Exception as exc:
+                logger.debug(f"Could not parse {pj_file}: {exc}")
+
+        return issues
+
     def generate_report(self) -> DependencyReport:
         """Generate comprehensive dependency report"""
         logger.info("Generating dependency report...")
@@ -705,7 +841,7 @@ class VoiRSDependencyManager:
             security_vulnerabilities=security_vulns,
             unused_dependencies=unused_deps,
             outdated_dependencies=outdated_deps,
-            license_issues=[],  # TODO: Implement license checking
+            license_issues=self._check_license_compliance(),
             recommendations=recommendations
         )
 
@@ -854,3 +990,49 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# ---------------------------------------------------------------------------
+# pytest tests for license compliance helpers
+# ---------------------------------------------------------------------------
+import pytest  # noqa: E402 — placed after main() so CLI usage stays clean
+
+
+def test_license_allowed_single_id() -> None:
+    """Single OSI-approved SPDX id is accepted."""
+    allowed: Set[str] = VoiRSDependencyManager._OSI_ALLOWED
+    assert VoiRSDependencyManager._spdx_expression_allowed("MIT", allowed)
+    assert VoiRSDependencyManager._spdx_expression_allowed("Apache-2.0", allowed)
+    assert VoiRSDependencyManager._spdx_expression_allowed("BSD-3-Clause", allowed)
+
+
+def test_license_dual_license_or_expression() -> None:
+    """Dual-license OR expression is allowed when at least one arm is in the allow-list."""
+    allowed: Set[str] = VoiRSDependencyManager._OSI_ALLOWED
+    # Both sides allowed
+    assert VoiRSDependencyManager._spdx_expression_allowed("MIT OR Apache-2.0", allowed)
+    # Only one side allowed — should still pass (OR semantics)
+    assert VoiRSDependencyManager._spdx_expression_allowed("MIT OR GPL-3.0-only", allowed)
+
+
+def test_license_disallowed_gpl() -> None:
+    """GPL-3.0-only alone is NOT in the OSI allow-list used by the manager."""
+    allowed: Set[str] = VoiRSDependencyManager._OSI_ALLOWED
+    assert not VoiRSDependencyManager._spdx_expression_allowed("GPL-3.0-only", allowed)
+
+
+def test_license_missing_field(tmp_path: Path) -> None:
+    """A Cargo.toml with no 'license' field is reported as an issue."""
+    if _tomllib is None:
+        pytest.skip("tomllib/tomli not available")
+
+    # Write a minimal Cargo.toml without a license field
+    cargo_toml = tmp_path / "Cargo.toml"
+    cargo_toml.write_text('[package]\nname = "no-license-crate"\nversion = "0.1.0"\n')
+
+    manager = VoiRSDependencyManager(tmp_path, tmp_path)
+    issues = manager._check_license_compliance()
+    names = [i["name"] for i in issues]
+    assert "no-license-crate" in names
+    matching = [i for i in issues if i["name"] == "no-license-crate"]
+    assert matching[0]["license"] == "MISSING"

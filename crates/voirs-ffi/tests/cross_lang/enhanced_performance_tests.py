@@ -147,46 +147,126 @@ class EnhancedPerformanceTester:
                 'error': 'voirs module not found'
             }
         
-        # C API bindings (via ctypes)
+        # C API bindings (via ctypes) — targets libvoirs_ffi cdylib
         try:
             import ctypes
-            from ctypes import POINTER, c_char_p, c_void_p, c_uint32, c_float, c_size_t
-            
-            # Try to find the library
-            lib_paths = [
-                "target/debug/libvoirs.so",
-                "target/debug/libvoirs.dylib",
-                "target/debug/voirs.dll",
-                "../target/debug/libvoirs.so",
-                "../target/debug/libvoirs.dylib",
-                "../../target/debug/libvoirs.so",
-                "../../target/debug/libvoirs.dylib",
+            from ctypes import (
+                POINTER, c_char_p, c_void_p, c_uint32, c_int32, c_float,
+                c_size_t, Structure,
+            )
+
+            # Resolve repo root (three levels up from this file's directory)
+            _repo_root = Path(__file__).resolve().parent.parent.parent.parent
+
+            # Candidate directories: CARGO_TARGET_DIR env > standard build outputs
+            _cargo_target = os.environ.get("CARGO_TARGET_DIR", "")
+            _candidate_dirs = []
+            if _cargo_target:
+                _candidate_dirs += [
+                    Path(_cargo_target) / "release",
+                    Path(_cargo_target) / "debug",
+                ]
+            _candidate_dirs += [
+                _repo_root / "target" / "release",
+                _repo_root / "target" / "debug",
             ]
-            
+
+            _lib_names = [
+                "libvoirs_ffi.dylib",  # macOS
+                "libvoirs_ffi.so",     # Linux
+                "voirs_ffi.dll",       # Windows
+            ]
+
             lib_path = None
-            for path in lib_paths:
-                if os.path.exists(path):
-                    lib_path = path
+            for _dir in _candidate_dirs:
+                for _name in _lib_names:
+                    _candidate = _dir / _name
+                    if _candidate.exists():
+                        lib_path = str(_candidate)
+                        break
+                if lib_path:
                     break
-            
+
             if lib_path:
                 lib = ctypes.CDLL(lib_path)
+
+                # ---- ctypes structures matching the Rust repr(C) layout ----
+
+                class _VoirsAudioBuffer(Structure):
+                    """Maps to VoirsAudioBuffer in voirs-ffi/src/lib.rs."""
+                    _fields_ = [
+                        ("samples",     POINTER(c_float)),
+                        ("length",      c_uint32),
+                        ("sample_rate", c_uint32),
+                        ("channels",    c_uint32),
+                        ("duration",    c_float),
+                    ]
+
+                class _VoirsSynthesisConfig(Structure):
+                    """Maps to VoirsSynthesisConfig (base config, 7 fields)."""
+                    _fields_ = [
+                        ("speaking_rate",       c_float),
+                        ("pitch_shift",         c_float),
+                        ("volume_gain",         c_float),
+                        ("enable_enhancement",  c_int32),
+                        ("output_format",       c_int32),   # VoirsAudioFormat enum
+                        ("sample_rate",         c_uint32),
+                        ("quality",             c_int32),   # VoirsQualityLevel enum
+                    ]
+
+                class _VoirsSynthesisResult(Structure):
+                    """Maps to VoirsSynthesisResult in c_api/synthesis.rs."""
+                    _fields_ = [
+                        ("audio",               POINTER(_VoirsAudioBuffer)),
+                        ("synthesis_time_ms",   c_float),
+                        ("quality_score",       c_float),
+                        ("processing_info",     c_char_p),
+                    ]
+
+                # ---- function signatures ----
+                # voirs_create_pipeline() -> c_uint (pipeline ID; 0 = placeholder)
+                lib.voirs_create_pipeline.argtypes = []
+                lib.voirs_create_pipeline.restype = c_uint32
+
+                # voirs_destroy_pipeline(id) -> c_int
+                lib.voirs_destroy_pipeline.argtypes = [c_uint32]
+                lib.voirs_destroy_pipeline.restype = c_int32
+
+                # voirs_synthesize_advanced(text, config, result) -> VoirsErrorCode (u32)
+                lib.voirs_synthesize_advanced.argtypes = [
+                    c_char_p,
+                    c_void_p,   # nullable *const VoirsAdvancedSynthesisConfig
+                    POINTER(_VoirsSynthesisResult),
+                ]
+                lib.voirs_synthesize_advanced.restype = c_int32
+
+                # voirs_free_synthesis_result(result)
+                lib.voirs_free_synthesis_result.argtypes = [POINTER(_VoirsSynthesisResult)]
+                lib.voirs_free_synthesis_result.restype = None
+
+                # voirs_free_audio_buffer(buffer)
+                lib.voirs_free_audio_buffer.argtypes = [POINTER(_VoirsAudioBuffer)]
+                lib.voirs_free_audio_buffer.restype = None
+
                 self.available_bindings['c_api'] = {
                     'lib': lib,
                     'lib_path': lib_path,
-                    'available': True
+                    'available': True,
+                    # Expose ctypes types for use in synthesis helpers
+                    '_VoirsAudioBuffer': _VoirsAudioBuffer,
+                    '_VoirsSynthesisResult': _VoirsSynthesisResult,
                 }
             else:
                 self.available_bindings['c_api'] = {
                     'lib': None,
                     'available': False,
-                    'error': 'Library not found'
+                    'error': 'libvoirs_ffi cdylib not found in standard build paths',
                 }
         except Exception as e:
             self.available_bindings['c_api'] = {
                 'lib': None,
                 'available': False,
-                'error': str(e)
+                'error': str(e),
             }
     
     def run_comprehensive_benchmarks(self) -> Dict[str, Any]:
@@ -658,30 +738,61 @@ class EnhancedPerformanceTester:
             pipeline = binding_info['module'].VoirsPipeline()
             return pipeline.synthesize(text)
         elif binding_name == 'c_api':
-            # Simplified C API usage
+            # Perform synthesis via voirs_synthesize_advanced (pass NULL config for defaults)
             lib = binding_info['lib']
-            # This would need proper C API implementation
-            raise NotImplementedError("C API synthesis not implemented in this benchmark")
+            VoirsSynthesisResult = binding_info['_VoirsSynthesisResult']
+            result = VoirsSynthesisResult()
+            text_bytes = text.encode('utf-8')
+            ret = lib.voirs_synthesize_advanced(text_bytes, None, result)
+            try:
+                if ret != 0:
+                    raise RuntimeError(f"voirs_synthesize_advanced returned error code {ret}")
+                # Extract lightweight metadata (avoid iterating full sample array in benchmarks)
+                audio_ptr = result.audio
+                if audio_ptr:
+                    summary = {
+                        'sample_rate': audio_ptr.contents.sample_rate,
+                        'channels': audio_ptr.contents.channels,
+                        'length': audio_ptr.contents.length,
+                        'duration': audio_ptr.contents.duration,
+                    }
+                else:
+                    summary = {}
+                return summary
+            finally:
+                lib.voirs_free_synthesis_result(result)
         else:
             raise ValueError(f"Unknown binding: {binding_name}")
     
     def _create_pipeline(self, binding_name: str, binding_info: Dict):
-        """Create a pipeline for a specific binding."""
+        """Create a pipeline for a specific binding.
+
+        For C API returns the binding_info dict itself (carries lib +
+        ctypes classes); for Python returns a VoirsPipeline instance.
+        """
         if binding_name == 'python':
             return binding_info['module'].VoirsPipeline()
         elif binding_name == 'c_api':
-            # Return C API pipeline handle
-            return binding_info['lib']
+            # The C API is stateless from Python's perspective: all calls go
+            # through voirs_synthesize_advanced which manages its own pipeline
+            # internally.  Return the binding_info dict so _synthesize_with_pipeline
+            # has access to the ctypes structures.
+            return binding_info
         else:
             return None
     
     def _synthesize_with_pipeline(self, binding_name: str, pipeline, text: str):
-        """Synthesize with an existing pipeline."""
+        """Synthesize with an existing pipeline (for memory/concurrent benchmarks).
+
+        For the C API *pipeline* is the binding_info dict returned by
+        ``_create_pipeline`` so that ``_VoirsSynthesisResult`` and ``lib`` are
+        accessible without re-importing ctypes classes.
+        """
         if binding_name == 'python':
             return pipeline.synthesize(text)
         elif binding_name == 'c_api':
-            # C API synthesis with existing pipeline
-            raise NotImplementedError("C API pipeline synthesis not implemented")
+            # pipeline is binding_info (see _create_pipeline)
+            return self._synthesize_with_binding('c_api', pipeline, text)
         else:
             raise ValueError(f"Unknown binding: {binding_name}")
     
@@ -842,3 +953,95 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# ---------------------------------------------------------------------------
+# pytest — C-API synthesis benchmarks
+# ---------------------------------------------------------------------------
+import pytest  # noqa: E402
+import ctypes  # noqa: E402
+from ctypes import POINTER as _POINTER, c_float as _c_float  # noqa: E402
+
+
+def _load_voirs_ffi_lib() -> Optional[Any]:
+    """Locate and load libvoirs_ffi.  Returns (lib, binding_info) or None."""
+    tester = EnhancedPerformanceTester.__new__(EnhancedPerformanceTester)
+    tester.config = BenchmarkConfig()
+    tester.results = {}
+    tester.available_bindings = {}
+    tester._setup_bindings()
+    info = tester.available_bindings.get('c_api', {})
+    if info.get('available'):
+        return tester, info
+    return None, None
+
+
+def test_capi_synthesize_plain() -> None:
+    """Benchmark: plain synthesis via voirs_synthesize_advanced (N=20 iterations).
+
+    Tests that the C API can be called repeatedly and returns plausible
+    audio metadata.  Skips cleanly when the cdylib is not built.
+    """
+    tester, binding_info = _load_voirs_ffi_lib()
+    if tester is None:
+        pytest.skip("voirs-ffi cdylib not built — run: CARGO_TARGET_DIR=/tmp/cj-voirs cargo build -p voirs-ffi")
+
+    N = 20
+    TEXT = "Hello from VoiRS C API benchmark."
+    wall_times: List[float] = []
+
+    for _ in range(N):
+        t0 = time.perf_counter()
+        result = tester._synthesize_with_binding('c_api', binding_info, TEXT)
+        wall_times.append(time.perf_counter() - t0)
+
+    assert len(wall_times) == N, "Expected all iterations to complete"
+
+    mean_ms = statistics.mean(wall_times) * 1000.0
+    p50_ms = statistics.median(wall_times) * 1000.0
+    p95_ms = sorted(wall_times)[int(0.95 * N) - 1] * 1000.0
+
+    print(
+        f"\n[test_capi_synthesize_plain] N={N}  "
+        f"mean={mean_ms:.1f}ms  p50={p50_ms:.1f}ms  p95={p95_ms:.1f}ms"
+    )
+
+    # Structural assertions
+    assert mean_ms >= 0.0
+    assert p50_ms >= 0.0
+
+
+def test_capi_pipeline_synthesize() -> None:
+    """Benchmark: pipeline-level synthesis via _create_pipeline + _synthesize_with_pipeline.
+
+    Mirrors the memory/concurrent benchmark helpers so they exercise the
+    same code path as the full benchmark suite.  Skips if cdylib absent.
+    """
+    tester, binding_info = _load_voirs_ffi_lib()
+    if tester is None:
+        pytest.skip("voirs-ffi cdylib not built — run: CARGO_TARGET_DIR=/tmp/cj-voirs cargo build -p voirs-ffi")
+
+    N = 10
+    TEXT = "Pipeline benchmark via C API."
+    wall_times: List[float] = []
+
+    pipeline = tester._create_pipeline('c_api', binding_info)
+
+    for _ in range(N):
+        t0 = time.perf_counter()
+        tester._synthesize_with_pipeline('c_api', pipeline, TEXT)
+        wall_times.append(time.perf_counter() - t0)
+
+    tester._cleanup_pipeline('c_api', pipeline)
+
+    assert len(wall_times) == N
+
+    mean_ms = statistics.mean(wall_times) * 1000.0
+    p50_ms = statistics.median(wall_times) * 1000.0
+
+    print(
+        f"\n[test_capi_pipeline_synthesize] N={N}  "
+        f"mean={mean_ms:.1f}ms  p50={p50_ms:.1f}ms"
+    )
+
+    assert mean_ms >= 0.0
