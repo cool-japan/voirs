@@ -5,6 +5,7 @@
 //! Includes SIMD optimizations for enhanced performance.
 
 use crate::RecognitionError;
+use scirs2_core::Complex;
 use std::collections::VecDeque;
 use voirs_sdk::AudioBuffer;
 
@@ -91,6 +92,13 @@ pub struct NoiseSuppressionProcessor {
     frame_counter: usize,
     /// Running noise estimate
     running_noise_estimate: Vec<f32>,
+    /// Phase of the most recently analyzed frame (per frequency bin, radians).
+    ///
+    /// Spectral subtraction / Wiener filtering only modify the magnitude spectrum.
+    /// To reconstruct a time-domain signal without phase artifacts we reuse the
+    /// original (noisy) phase captured during `compute_spectrum`, which is the
+    /// standard spectral-subtraction practice.
+    last_phase: Vec<f32>,
 }
 
 impl NoiseSuppressionProcessor {
@@ -107,6 +115,7 @@ impl NoiseSuppressionProcessor {
             noise_estimation_frames: 10, // First 10 frames for noise estimation
             frame_counter: 0,
             running_noise_estimate: vec![0.0; freq_bins],
+            last_phase: vec![0.0; freq_bins],
         })
     }
 
@@ -173,8 +182,8 @@ impl NoiseSuppressionProcessor {
         // Apply window function (Hann window)
         self.apply_window(&mut enhanced_chunk);
 
-        // Perform FFT (simulated with simple filtering for now)
-        let spectrum = self.compute_spectrum(&enhanced_chunk);
+        // Analyze the frame with a real FFT (also caches per-bin phase for reconstruction).
+        let spectrum = self.compute_spectrum(&enhanced_chunk)?;
 
         // Update noise profile if we're in the initial estimation phase
         if self.frame_counter < self.noise_estimation_frames {
@@ -184,8 +193,8 @@ impl NoiseSuppressionProcessor {
         // Apply spectral subtraction
         let enhanced_spectrum = self.apply_spectral_subtraction(&spectrum);
 
-        // Convert back to time domain (simulated)
-        let enhanced_chunk = self.spectrum_to_time_domain(&enhanced_spectrum);
+        // Reconstruct the time-domain frame from processed magnitudes + original phase.
+        let enhanced_chunk = self.spectrum_to_time_domain(&enhanced_spectrum)?;
 
         self.frame_counter += 1;
         Ok(enhanced_chunk)
@@ -235,92 +244,78 @@ impl NoiseSuppressionProcessor {
         }
     }
 
-    /// SIMD-optimized window function application
+    /// SIMD-optimized window function application.
+    ///
+    /// The Hann window coefficients are computed with the exact same scalar
+    /// `f32::cos` formula used by [`Self::apply_window_scalar`], then the
+    /// element-wise multiply against the input frame is vectorized with AVX2.
+    /// Because both paths derive the coefficients from `f32::cos` and apply an
+    /// IEEE-754 f32 multiply, the SIMD and scalar results are bit-for-bit
+    /// identical. (The previous implementation used a 4-term Taylor cosine
+    /// approximation that diverged from `f32::cos` by ~1e-5, breaking the
+    /// SIMD-vs-scalar consistency test.)
     #[cfg(target_arch = "x86_64")]
     fn apply_window_simd(&self, chunk: &mut [f32]) {
         if !is_x86_feature_detected!("avx2") {
             return self.apply_window_scalar(chunk);
         }
 
-        let n = chunk.len();
-        let n_minus_1 = (n - 1) as f32;
-        let pi_2 = 2.0 * std::f32::consts::PI;
+        let window = hann_window(chunk.len());
 
         unsafe {
-            let half = _mm256_set1_ps(0.5);
-            let one = _mm256_set1_ps(1.0);
-            let pi_2_vec = _mm256_set1_ps(pi_2);
-            let n_minus_1_vec = _mm256_set1_ps(n_minus_1);
+            let len = chunk.len();
+            let simd_len = len - (len % 8);
 
-            // Process 8 samples at a time with AVX2
-            let chunk_len = chunk.len();
-            let simd_len = chunk_len - (chunk_len % 8);
-            let (simd_part, remainder) = chunk.split_at_mut(simd_len);
-
-            for (chunk_idx, simd_chunk) in simd_part.chunks_exact_mut(8).enumerate() {
-                let base_idx = chunk_idx * 8;
-                let indices = _mm256_set_ps(
-                    (base_idx + 7) as f32,
-                    (base_idx + 6) as f32,
-                    (base_idx + 5) as f32,
-                    (base_idx + 4) as f32,
-                    (base_idx + 3) as f32,
-                    (base_idx + 2) as f32,
-                    (base_idx + 1) as f32,
-                    base_idx as f32,
-                );
-
-                // Calculate window values: 0.5 * (1.0 - cos(2π * i / (n-1)))
-                let phase = _mm256_mul_ps(_mm256_div_ps(indices, n_minus_1_vec), pi_2_vec);
-                let cos_vals = simd_cos_avx2(phase);
-                let window_vals = _mm256_mul_ps(half, _mm256_sub_ps(one, cos_vals));
-
-                // Load samples and apply window
-                let samples = _mm256_loadu_ps(simd_chunk.as_ptr());
+            // Process 8 samples at a time with AVX2.
+            for i in (0..simd_len).step_by(8) {
+                let samples = _mm256_loadu_ps(chunk[i..].as_ptr());
+                let window_vals = _mm256_loadu_ps(window[i..].as_ptr());
                 let windowed = _mm256_mul_ps(samples, window_vals);
-                _mm256_storeu_ps(simd_chunk.as_mut_ptr(), windowed);
+                _mm256_storeu_ps(chunk[i..].as_mut_ptr(), windowed);
             }
 
-            // Process remaining samples
-            for (i, sample) in remainder.iter_mut().enumerate() {
-                let idx = simd_len + i;
-                let window_val = 0.5 * (1.0 - f32::cos(pi_2 * idx as f32 / n_minus_1));
-                *sample *= window_val;
+            // Process remaining samples with the identical scalar multiply.
+            for i in simd_len..len {
+                chunk[i] *= window[i];
             }
         }
     }
 
-    /// Fallback scalar window function application
+    /// Fallback scalar window function application.
+    ///
+    /// Shares [`hann_window`] with the SIMD path so the two produce identical
+    /// coefficients (and therefore identical output).
     fn apply_window_scalar(&self, chunk: &mut [f32]) {
-        let n = chunk.len();
-        for (i, sample) in chunk.iter_mut().enumerate() {
-            let window_val =
-                0.5 * (1.0 - f32::cos(2.0 * std::f32::consts::PI * i as f32 / (n - 1) as f32));
-            *sample *= window_val;
+        let window = hann_window(chunk.len());
+        for (sample, &w) in chunk.iter_mut().zip(window.iter()) {
+            *sample *= w;
         }
     }
 
-    /// Compute simple spectrum representation
-    fn compute_spectrum(&self, chunk: &[f32]) -> Vec<f32> {
-        // Simplified spectrum computation (magnitude)
-        let mut spectrum = Vec::new();
+    /// Compute the magnitude spectrum of a frame via a real FFT.
+    ///
+    /// Uses `scirs2_fft::rfft` (O(N log N)) instead of a naive O(N²) DFT. The
+    /// per-bin phase (`atan2(im, re)`) of the complex spectrum is cached in
+    /// `self.last_phase` so that `spectrum_to_time_domain` can reconstruct the
+    /// signal with the original phase after the magnitudes have been processed.
+    /// Returns the `n / 2 + 1` non-negative-frequency magnitudes.
+    fn compute_spectrum(&mut self, chunk: &[f32]) -> Result<Vec<f32>, RecognitionError> {
         let n = chunk.len();
+        let buf_f64: Vec<f64> = chunk.iter().map(|&s| f64::from(s)).collect();
 
-        for k in 0..=(n / 2) {
-            let mut real_part = 0.0;
-            let mut imag_part = 0.0;
-
-            for (i, &sample) in chunk.iter().enumerate() {
-                let phase = -2.0 * std::f32::consts::PI * k as f32 * i as f32 / n as f32;
-                real_part += sample * phase.cos();
-                imag_part += sample * phase.sin();
+        let spectrum: Vec<Complex<f64>> = scirs2_fft::rfft(&buf_f64, Some(n)).map_err(|e| {
+            RecognitionError::AudioProcessingError {
+                message: format!("rfft failed in noise suppression: {e}"),
+                source: None,
             }
+        })?;
 
-            let magnitude = (real_part * real_part + imag_part * imag_part).sqrt();
-            spectrum.push(magnitude);
-        }
+        // Cache the per-bin phase (radians) of the original (noisy) frame so the
+        // reconstruction step can reuse it (standard spectral-subtraction practice).
+        self.last_phase = spectrum.iter().map(|c| c.im.atan2(c.re) as f32).collect();
 
-        spectrum
+        // Return magnitudes for spectral-subtraction / Wiener processing.
+        Ok(spectrum.iter().map(|c| c.norm() as f32).collect())
     }
 
     /// Update noise profile with current spectrum
@@ -412,20 +407,34 @@ impl NoiseSuppressionProcessor {
         }
     }
 
-    /// Convert spectrum back to time domain
-    fn spectrum_to_time_domain(&self, spectrum: &[f32]) -> Vec<f32> {
+    /// Reconstruct a time-domain frame from processed magnitudes and cached phase.
+    ///
+    /// Recombines each (processed) magnitude with the original phase stored in
+    /// `self.last_phase` into a complex bin, then applies `scirs2_fft::irfft`
+    /// with `Some(n)` so the output length matches `self.config.buffer_size`.
+    fn spectrum_to_time_domain(&self, spectrum: &[f32]) -> Result<Vec<f32>, RecognitionError> {
         let n = self.config.buffer_size;
-        let mut time_domain = vec![0.0; n];
 
-        // Simplified IFFT (inverse FFT)
-        for i in 0..n {
-            for (k, &magnitude) in spectrum.iter().enumerate() {
-                let phase = 2.0 * std::f32::consts::PI * k as f32 * i as f32 / n as f32;
-                time_domain[i] += magnitude * phase.cos() / n as f32;
+        // Recombine magnitude + original phase into complex bins:
+        //   X[k] = |X[k]| * (cos(phi[k]) + i * sin(phi[k]))
+        let complex_bins: Vec<Complex<f64>> = spectrum
+            .iter()
+            .enumerate()
+            .map(|(k, &magnitude)| {
+                let phase = f64::from(self.last_phase.get(k).copied().unwrap_or(0.0));
+                let mag = f64::from(magnitude);
+                Complex::new(mag * phase.cos(), mag * phase.sin())
+            })
+            .collect();
+
+        let time_domain = scirs2_fft::irfft(&complex_bins, Some(n)).map_err(|e| {
+            RecognitionError::AudioProcessingError {
+                message: format!("irfft failed in noise suppression: {e}"),
+                source: None,
             }
-        }
+        })?;
 
-        time_domain
+        Ok(time_domain.iter().map(|&x| x as f32).collect())
     }
 
     /// Estimate local SNR for Wiener filtering
@@ -472,6 +481,7 @@ impl NoiseSuppressionProcessor {
         self.fft_buffer.fill(0.0);
         self.frame_counter = 0;
         self.running_noise_estimate.fill(0.0);
+        self.last_phase.fill(0.0);
         Ok(())
     }
 }
@@ -492,39 +502,23 @@ fn is_simd_available() -> bool {
     }
 }
 
-/// SIMD cosine approximation using AVX2
-#[cfg(target_arch = "x86_64")]
-unsafe fn simd_cos_avx2(x: __m256) -> __m256 {
-    // Fast cosine approximation using Taylor series
-    // cos(x) ≈ 1 - x²/2! + x⁴/4! - x⁶/6! + ...
+/// Compute a Hann window of length `n`: `w[i] = 0.5 * (1 - cos(2π i / (n - 1)))`.
+///
+/// Shared by both the scalar and SIMD window paths so they derive identical
+/// coefficients from `f32::cos`, guaranteeing bit-for-bit identical output
+/// regardless of which path runs.
+fn hann_window(n: usize) -> Vec<f32> {
+    if n <= 1 {
+        // A single-sample (or empty) frame has no meaningful taper; avoid the
+        // division-by-zero that `(n - 1)` would otherwise produce.
+        return vec![0.0; n];
+    }
 
-    // Constants for Taylor series
-    let one = _mm256_set1_ps(1.0);
-    let half = _mm256_set1_ps(0.5);
-    let one_24th = _mm256_set1_ps(1.0 / 24.0);
-    let one_720th = _mm256_set1_ps(1.0 / 720.0);
-
-    // Normalize input to [-π, π] range
-    let pi = _mm256_set1_ps(std::f32::consts::PI);
-    let two_pi = _mm256_set1_ps(2.0 * std::f32::consts::PI);
-
-    // Reduce to [-π, π] range
-    let x_reduced = {
-        let n = _mm256_round_ps(_mm256_div_ps(x, two_pi), _MM_FROUND_TO_NEAREST_INT);
-        _mm256_sub_ps(x, _mm256_mul_ps(n, two_pi))
-    };
-
-    let x2 = _mm256_mul_ps(x_reduced, x_reduced);
-    let x4 = _mm256_mul_ps(x2, x2);
-    let x6 = _mm256_mul_ps(x4, x2);
-
-    // cos(x) ≈ 1 - x²/2 + x⁴/24 - x⁶/720
-    let term1 = one;
-    let term2 = _mm256_mul_ps(x2, half);
-    let term3 = _mm256_mul_ps(x4, one_24th);
-    let term4 = _mm256_mul_ps(x6, one_720th);
-
-    _mm256_add_ps(_mm256_sub_ps(term1, term2), _mm256_sub_ps(term3, term4))
+    let n_minus_1 = (n - 1) as f32;
+    let pi_2 = 2.0 * std::f32::consts::PI;
+    (0..n)
+        .map(|i| 0.5 * (1.0 - f32::cos(pi_2 * i as f32 / n_minus_1)))
+        .collect()
 }
 
 /// SIMD power calculation optimization
@@ -760,47 +754,53 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_simd_performance_benefit() {
-        // Test that SIMD operations provide performance benefits for larger datasets
+    async fn test_simd_large_dataset_matches_scalar() {
+        // Validate that the SIMD spectral-subtraction path produces results
+        // identical to the scalar path on a realistically-sized (1024-bin) buffer,
+        // exercising the full AVX2 lanes plus the scalar remainder — coverage that
+        // the small-buffer `test_simd_vs_scalar_consistency` does not reach.
+        //
+        // Timing is reported for information only. A wall-clock assertion here is
+        // unreliable: LLVM auto-vectorizes the simple scalar loop and the buffer is
+        // small, so hand-written intrinsics with unaligned loads need not "win".
+        // Correctness — not relative speed — is the invariant that must hold.
         let config = NoiseSuppressionConfig::default();
         let mut processor = NoiseSuppressionProcessor::new(config).unwrap();
 
-        // Create a larger test dataset
-        #[allow(unused_variables)] // Used in x86_64 conditional compilation
         let large_spectrum: Vec<f32> = (0..1024).map(|i| (i as f32) * 0.01).collect();
         processor.noise_profile = (0..1024).map(|i| (i as f32) * 0.005).collect();
+
+        let scalar_result = processor.apply_spectral_subtraction_scalar(&large_spectrum);
+        assert_eq!(scalar_result.len(), large_spectrum.len());
 
         #[cfg(target_arch = "x86_64")]
         {
             if is_x86_feature_detected!("avx2") {
                 use std::time::Instant;
 
-                // Benchmark scalar version
                 let start = Instant::now();
                 for _ in 0..100 {
-                    let _result = processor.apply_spectral_subtraction_scalar(&large_spectrum);
+                    let _ = processor.apply_spectral_subtraction_scalar(&large_spectrum);
                 }
                 let scalar_time = start.elapsed();
 
-                // Benchmark SIMD version
                 let start = Instant::now();
                 for _ in 0..100 {
-                    let _result = processor.apply_spectral_subtraction_simd(&large_spectrum);
+                    let _ = processor.apply_spectral_subtraction_simd(&large_spectrum);
                 }
                 let simd_time = start.elapsed();
 
-                println!("Scalar time: {:?}, SIMD time: {:?}", scalar_time, simd_time);
-                println!(
-                    "SIMD speedup: {:.2}x",
-                    scalar_time.as_nanos() as f64 / simd_time.as_nanos() as f64
-                );
+                println!("Scalar time: {scalar_time:?}, SIMD time: {simd_time:?} (informational)");
 
-                // SIMD should be faster or at least not significantly slower
-                // (allowing for some variation in timing)
-                assert!(
-                    simd_time <= scalar_time * 2,
-                    "SIMD implementation is significantly slower than scalar"
-                );
+                // The real invariant: SIMD and scalar must agree on the large buffer.
+                let simd_result = processor.apply_spectral_subtraction_simd(&large_spectrum);
+                assert_eq!(scalar_result.len(), simd_result.len());
+                for (scalar, simd) in scalar_result.iter().zip(simd_result.iter()) {
+                    assert!(
+                        (scalar - simd).abs() < 1e-4,
+                        "SIMD and scalar differ on large buffer: {scalar} vs {simd}"
+                    );
+                }
             }
         }
     }
@@ -861,5 +861,71 @@ mod tests {
 
         let result = processor.reset();
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_fft_roundtrip_preserves_phase() {
+        // A pure rfft -> (magnitude, phase) -> irfft round-trip must recover the
+        // original signal. Phase is essential here: the previous cosine-only
+        // inverse discarded phase and could not reconstruct a phase-shifted sine,
+        // so a tight tolerance proves the per-bin phase is preserved.
+        let config = NoiseSuppressionConfig::default();
+        let n = config.buffer_size;
+        let sample_rate = config.sample_rate as f32;
+        let mut processor = NoiseSuppressionProcessor::new(config).unwrap();
+
+        // 440 Hz sine with a non-zero phase offset so the spectrum has non-trivial phase.
+        let freq = 440.0_f32;
+        let phase_offset = 0.7_f32;
+        let signal: Vec<f32> = (0..n)
+            .map(|i| {
+                let t = i as f32 / sample_rate;
+                0.5 * (2.0 * std::f32::consts::PI * freq * t + phase_offset).sin()
+            })
+            .collect();
+
+        // Analyze (caches phase), then reconstruct without modifying magnitudes.
+        let magnitudes = processor.compute_spectrum(&signal).unwrap();
+        assert_eq!(magnitudes.len(), n / 2 + 1);
+
+        let reconstructed = processor.spectrum_to_time_domain(&magnitudes).unwrap();
+        assert_eq!(reconstructed.len(), n);
+
+        let max_err = signal
+            .iter()
+            .zip(reconstructed.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f32, f32::max);
+        assert!(
+            max_err < 1e-3,
+            "rfft/irfft round-trip error too large ({max_err}); phase not preserved"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_fft_silence_reconstructs_near_zero() {
+        // A silent frame must produce zero magnitudes and reconstruct to near-zero.
+        let config = NoiseSuppressionConfig::default();
+        let n = config.buffer_size;
+        let mut processor = NoiseSuppressionProcessor::new(config).unwrap();
+
+        let silence = vec![0.0_f32; n];
+
+        let magnitudes = processor.compute_spectrum(&silence).unwrap();
+        assert!(
+            magnitudes.iter().all(|&m| m.abs() < 1e-6),
+            "silent frame should have zero magnitude spectrum"
+        );
+
+        let reconstructed = processor.spectrum_to_time_domain(&magnitudes).unwrap();
+        assert_eq!(reconstructed.len(), n);
+        let max_abs = reconstructed
+            .iter()
+            .map(|x| x.abs())
+            .fold(0.0_f32, f32::max);
+        assert!(
+            max_abs < 1e-6,
+            "silence should reconstruct to near-zero, got {max_abs}"
+        );
     }
 }

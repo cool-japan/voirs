@@ -636,11 +636,100 @@ impl AudioQualityMetrics {
         }
     }
 
-    /// Calculate total harmonic distortion
-    fn calculate_thd(_audio: &Array1<f32>, _sample_rate: u32) -> f32 {
-        // Simplified THD calculation
-        // In practice, this would require FFT analysis of harmonics
-        0.1 // 0.1% THD placeholder
+    /// Calculate total harmonic distortion (THD) as a percentage.
+    ///
+    /// The signal is Hann-windowed and transformed with a real FFT
+    /// (`scirs2_fft::rfft`). The fundamental is taken to be the highest-power
+    /// bin at or above `MIN_FUNDAMENTAL_HZ` (DC and sub-audible rumble are
+    /// excluded). THD is then the ratio of the RMS of the harmonic content
+    /// (`2·f0`, `3·f0`, … up to Nyquist) to the RMS of the fundamental:
+    ///
+    /// ```text
+    /// THD = sqrt(Σ_{n≥2} P(n·f0)) / sqrt(P(f0))
+    /// ```
+    ///
+    /// expressed as a percentage (to match `thd_percent`). A small
+    /// `±HARMONIC_BIN_RADIUS` window is summed around every harmonic to absorb
+    /// the spectral leakage introduced by the Hann window.
+    fn calculate_thd(audio: &Array1<f32>, sample_rate: u32) -> f32 {
+        /// Lowest frequency (Hz) accepted as a fundamental; excludes DC/rumble.
+        const MIN_FUNDAMENTAL_HZ: f64 = 20.0;
+        /// Half-width (in bins) of the leakage window summed around a harmonic.
+        const HARMONIC_BIN_RADIUS: usize = 2;
+
+        let n = audio.len();
+        if n < 4 || sample_rate == 0 {
+            return 0.0;
+        }
+
+        // Hann-window the samples in f64 to reduce spectral leakage.
+        let denom = (n - 1) as f64;
+        let windowed: Vec<f64> = audio
+            .iter()
+            .enumerate()
+            .map(|(i, &sample)| {
+                let hann = 0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / denom).cos());
+                f64::from(sample) * hann
+            })
+            .collect();
+
+        // Real FFT → n/2 + 1 complex bins. On error fall back to "no distortion".
+        let spectrum = match scirs2_fft::rfft(&windowed, Some(n)) {
+            Ok(spectrum) => spectrum,
+            Err(_) => return 0.0,
+        };
+        if spectrum.len() < 3 {
+            return 0.0;
+        }
+        let nyquist_bin = spectrum.len() - 1;
+
+        // Per-bin power |X[k]|².
+        let power: Vec<f64> = spectrum.iter().map(|c| c.norm_sqr()).collect();
+
+        // Locate the fundamental: highest-power bin at or above the minimum
+        // audible frequency (bin 0 / DC and sub-audible rumble are never picked).
+        let min_bin = ((MIN_FUNDAMENTAL_HZ * n as f64) / f64::from(sample_rate)).floor() as usize;
+        let search_start = min_bin.max(1);
+        if search_start > nyquist_bin {
+            return 0.0;
+        }
+        let mut fundamental_bin = search_start;
+        let mut fundamental_peak = 0.0_f64;
+        for (k, &p) in power.iter().enumerate().skip(search_start) {
+            if p > fundamental_peak {
+                fundamental_peak = p;
+                fundamental_bin = k;
+            }
+        }
+        if fundamental_peak <= 0.0 {
+            return 0.0;
+        }
+
+        // Clamp the leakage half-width so neighbouring harmonic windows never
+        // overlap (this requires radius < fundamental_bin / 2).
+        let radius = HARMONIC_BIN_RADIUS.min(fundamental_bin.saturating_sub(1) / 2);
+        let power_around = |center: usize| -> f64 {
+            let lo = center.saturating_sub(radius);
+            let hi = (center + radius).min(nyquist_bin);
+            power[lo..=hi].iter().sum()
+        };
+
+        let fundamental_power = power_around(fundamental_bin);
+        if fundamental_power <= 0.0 {
+            return 0.0;
+        }
+
+        // Sum power at integer harmonics 2·f0, 3·f0, … up to Nyquist.
+        let mut harmonic_power = 0.0_f64;
+        let mut harmonic = 2usize;
+        while harmonic * fundamental_bin <= nyquist_bin {
+            harmonic_power += power_around(harmonic * fundamental_bin);
+            harmonic += 1;
+        }
+
+        // THD = sqrt(Σ harmonic power) / sqrt(fundamental power), as a percentage.
+        let thd_ratio = (harmonic_power / fundamental_power).sqrt();
+        (thd_ratio * 100.0) as f32
     }
 
     /// Calculate dynamic range
@@ -775,5 +864,67 @@ mod tests {
 
         assert!(metrics.snr_db > 0.0);
         assert!(metrics.dynamic_range_db > 0.0);
+        // A near-pure tone should report low distortion (non-negative percent).
+        assert!(metrics.thd_percent >= 0.0);
+        assert!(metrics.thd_percent < 5.0);
+    }
+
+    /// Build a test signal as a sum of sine partials at integer multiples of
+    /// `f0`: `amplitudes[h]` is the amplitude of the `(h + 1)`-th partial
+    /// (`amplitudes[0]` = fundamental, `amplitudes[1]` = 2nd harmonic, …).
+    ///
+    /// With `f0 = 1000`, `sample_rate = 48000`, `len = 4800` the fundamental and
+    /// its harmonics land exactly on FFT bins (100, 200, 300, …), giving an
+    /// (almost) exact THD readout for verification.
+    fn harmonic_signal(amplitudes: &[f32], f0: f32, sample_rate: u32, len: usize) -> Array1<f32> {
+        let fs = sample_rate as f32;
+        Array1::from_iter((0..len).map(|i| {
+            let t = i as f32 / fs;
+            amplitudes
+                .iter()
+                .enumerate()
+                .map(|(h, &amp)| amp * (2.0 * PI * f0 * (h as f32 + 1.0) * t).sin())
+                .sum::<f32>()
+        }))
+    }
+
+    #[test]
+    fn test_thd_pure_sine_is_near_zero() {
+        // Single bin-aligned partial (bin 100) → no harmonic energy → THD ≈ 0%.
+        let signal = harmonic_signal(&[1.0], 1000.0, 48000, 4800);
+        let thd = AudioQualityMetrics::calculate_thd(&signal, 48000);
+        assert!(thd >= 0.0, "THD must be non-negative, got {thd}");
+        assert!(thd < 0.5, "pure sine THD should be ~0%, got {thd}%");
+    }
+
+    #[test]
+    fn test_thd_with_known_harmonics() {
+        // Fundamental + 2nd (0.1) + 3rd (0.05) harmonic, all bin-aligned.
+        // THD = sqrt(0.1² + 0.05²) / 1.0 = 11.1803…%.
+        let signal = harmonic_signal(&[1.0, 0.1, 0.05], 1000.0, 48000, 4800);
+        let thd = AudioQualityMetrics::calculate_thd(&signal, 48000);
+        let expected = (0.1_f32.powi(2) + 0.05_f32.powi(2)).sqrt() * 100.0;
+        assert!(
+            (thd - expected).abs() < 0.5,
+            "expected THD ~{expected}%, got {thd}%"
+        );
+    }
+
+    #[test]
+    fn test_thd_louder_fundamental_lowers_thd() {
+        // Same absolute harmonics, but a louder fundamental → lower THD ratio.
+        let quiet = harmonic_signal(&[1.0, 0.1, 0.05], 1000.0, 48000, 4800);
+        let loud = harmonic_signal(&[2.0, 0.1, 0.05], 1000.0, 48000, 4800);
+        let thd_quiet = AudioQualityMetrics::calculate_thd(&quiet, 48000);
+        let thd_loud = AudioQualityMetrics::calculate_thd(&loud, 48000);
+        assert!(
+            thd_loud < thd_quiet,
+            "louder fundamental should lower THD: loud={thd_loud}% quiet={thd_quiet}%"
+        );
+        // Doubling the fundamental amplitude halves the distortion ratio.
+        assert!(
+            (thd_loud - thd_quiet / 2.0).abs() < 0.5,
+            "loud THD ({thd_loud}%) should be ~half of quiet THD ({thd_quiet}%)"
+        );
     }
 }

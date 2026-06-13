@@ -32,6 +32,7 @@ pub mod spectral_analysis;
 pub mod stoi;
 pub mod transfer_learning_evaluation;
 pub mod universal_phoneme_mapping;
+pub mod voice_quality_dsp;
 pub mod vuv;
 
 pub use evaluator::QualityEvaluator;

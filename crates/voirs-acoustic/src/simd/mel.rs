@@ -6,6 +6,7 @@
 
 use super::{simd, SIMD_WIDTH_F32};
 use crate::{AcousticError, Result};
+use scirs2_fft::rfft;
 use std::f32::consts::PI;
 
 /// SIMD-accelerated mel spectrogram computer
@@ -400,31 +401,33 @@ impl SimdMelComputer {
         window
     }
 
+    /// Compute the one-sided spectrum of a (windowed) frame via `scirs2_fft`.
+    ///
+    /// Returns interleaved real/imaginary pairs for the first `n / 2 + 1`
+    /// frequency bins (`[re_0, im_0, re_1, im_1, ...]`), exactly matching the
+    /// layout and scaling of the direct forward DFT this method replaces
+    /// (`X[k] = Σ_j x[j] · e^{-2πi·k·j/n}`). The real-input FFT shares the same
+    /// sign convention as the previous hand-rolled DFT, so callers that read
+    /// magnitudes/phases from these bins are unaffected — only the cost drops
+    /// from `O(n²)` to `O(n log n)`.
     fn compute_dft_simd(&self, signal: &[f32]) -> Result<Vec<f32>> {
-        // Simplified DFT implementation with SIMD optimizations
-        // In production, this would use a proper SIMD FFT library
         let n = signal.len();
         let n_freq_bins = n / 2 + 1;
-        let mut result = vec![0.0f32; n_freq_bins * 2]; // Real and imaginary parts
+        let mut result = vec![0.0f32; n_freq_bins * 2]; // Interleaved real/imaginary parts
 
-        for k in 0..n_freq_bins {
-            let mut real_sum = 0.0f32;
-            let mut imag_sum = 0.0f32;
+        // Preserve the original behaviour for an empty frame (all-zero spectrum).
+        if n == 0 {
+            return Ok(result);
+        }
 
-            // Process in SIMD-friendly chunks
-            for chunk_start in (0..n).step_by(SIMD_WIDTH_F32) {
-                let chunk_end = (chunk_start + SIMD_WIDTH_F32).min(n);
+        // Real-input FFT: returns exactly the `n / 2 + 1` one-sided complex bins.
+        let spectrum = rfft(signal, Some(n)).map_err(|e| AcousticError::ModelError {
+            message: format!("SciRS2 rFFT failed: {e:?}"),
+        })?;
 
-                #[allow(clippy::needless_range_loop)]
-                for j in chunk_start..chunk_end {
-                    let angle = -2.0 * PI * k as f32 * j as f32 / n as f32;
-                    real_sum += signal[j] * angle.cos();
-                    imag_sum += signal[j] * angle.sin();
-                }
-            }
-
-            result[k * 2] = real_sum;
-            result[k * 2 + 1] = imag_sum;
+        for (k, bin) in spectrum.iter().take(n_freq_bins).enumerate() {
+            result[k * 2] = bin.re as f32;
+            result[k * 2 + 1] = bin.im as f32;
         }
 
         Ok(result)
@@ -557,5 +560,62 @@ mod tests {
         // Check window properties
         assert!(hann_window[0] < 0.1); // Should be near zero at edges
         assert!(hann_window[512] > 0.9); // Should be near one at center
+    }
+
+    #[test]
+    fn test_compute_dft_matches_reference() {
+        let computer = SimdMelComputer::new(22050, 80, 1024, 256, 0.0, 8000.0).unwrap();
+
+        // Hand-computed forward DFT of [1, 2, 3, 4]:
+        //   X[0] = 10 + 0i, X[1] = -2 + 2i, X[2] = -2 + 0i
+        // The one-sided output keeps bins 0..=n/2 in interleaved [re, im] form.
+        let signal = [1.0f32, 2.0, 3.0, 4.0];
+        let out = computer.compute_dft_simd(&signal).unwrap();
+
+        // n = 4 -> n_freq_bins = 3 -> 6 interleaved values.
+        assert_eq!(out.len(), 6);
+
+        let expected = [10.0, 0.0, -2.0, 2.0, -2.0, 0.0];
+        for (i, &e) in expected.iter().enumerate() {
+            assert!(
+                (out[i] - e).abs() < 1e-3,
+                "index {i}: expected {e}, got {}",
+                out[i]
+            );
+        }
+    }
+
+    #[test]
+    fn test_compute_dft_cosine_peak() {
+        let computer = SimdMelComputer::new(22050, 80, 1024, 256, 0.0, 8000.0).unwrap();
+
+        // A unit-amplitude cosine at integer bin `k` must concentrate all of its
+        // one-sided energy at bin `k` with magnitude n/2, leaving the rest ~0.
+        let n = 64usize;
+        let k = 4usize;
+        let signal: Vec<f32> = (0..n)
+            .map(|j| (2.0 * PI * k as f32 * j as f32 / n as f32).cos())
+            .collect();
+
+        let out = computer.compute_dft_simd(&signal).unwrap();
+        let n_freq_bins = n / 2 + 1;
+        assert_eq!(out.len(), n_freq_bins * 2);
+
+        let mag = |bin: usize| -> f32 {
+            (out[bin * 2] * out[bin * 2] + out[bin * 2 + 1] * out[bin * 2 + 1]).sqrt()
+        };
+
+        let expected_peak = n as f32 / 2.0;
+        assert!(
+            mag(k) > 0.9 * expected_peak,
+            "expected peak ~{expected_peak} at bin {k}, got {}",
+            mag(k)
+        );
+
+        for bin in 0..n_freq_bins {
+            if bin != k {
+                assert!(mag(bin) < 1e-2, "bin {bin} should be ~0, got {}", mag(bin));
+            }
+        }
     }
 }

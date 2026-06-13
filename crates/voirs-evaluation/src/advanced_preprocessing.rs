@@ -638,14 +638,89 @@ impl AdvancedPreprocessor {
         abs_samples.get(index).copied().unwrap_or(0.0)
     }
 
-    /// Estimate THD+N (simplified)
+    /// Estimate Total Harmonic Distortion + Noise (THD+N) via FFT.
+    ///
+    /// The signal is Hann-windowed and transformed with `scirs2_fft::rfft` to
+    /// obtain a power spectrum. The fundamental is located as the highest-power
+    /// bin above DC, and THD+N is reported as the RMS of everything except the
+    /// fundamental relative to the fundamental:
+    ///
+    /// ```text
+    /// THD+N = sqrt( (total_power - fundamental_power) / fundamental_power )
+    /// ```
+    ///
+    /// A small `±THD_N_LEAKAGE_BINS` window around the peak is treated as the
+    /// fundamental to absorb spectral leakage from the analysis window, so the
+    /// residual captures harmonic distortion *and* broadband noise. The result
+    /// is a ratio in `[0, 1]` (clamped), where `0` denotes a perfectly clean
+    /// tone.
     fn estimate_thd_n(samples: &[f32]) -> f32 {
-        // Simplified THD+N estimation
-        // In practice, this would use proper FFT and harmonic analysis
-        let rms = Self::calculate_rms(samples);
-        let noise_estimate = Self::estimate_noise_level(samples, 1.0);
+        // A meaningful spectrum needs a reasonable number of samples.
+        if samples.len() < 16 {
+            return 0.0;
+        }
 
-        (noise_estimate / rms.max(1e-10)).min(1.0)
+        // Largest power of two not exceeding the signal length, capped for cost.
+        let mut n = 1usize;
+        while n * 2 <= samples.len() && n * 2 <= 8192 {
+            n *= 2;
+        }
+        if n < 16 {
+            return 0.0;
+        }
+
+        // Center the analysis window on the signal and apply a Hann window.
+        let start = (samples.len() - n) / 2;
+        let denom = (n as f64 - 1.0).max(1.0);
+        let buffer: Vec<f64> = samples[start..start + n]
+            .iter()
+            .enumerate()
+            .map(|(i, &s)| {
+                let window = 0.5 - 0.5 * (2.0 * std::f64::consts::PI * i as f64 / denom).cos();
+                s as f64 * window
+            })
+            .collect();
+
+        let spectrum = match scirs2_fft::rfft(&buffer, Some(n)) {
+            Ok(spectrum) => spectrum,
+            Err(_) => return 0.0,
+        };
+
+        // Power per bin (|X(k)|²). DC (bin 0) is excluded from every sum because
+        // it carries any residual offset rather than tonal or noise content.
+        let power: Vec<f64> = spectrum.iter().map(|c| c.re * c.re + c.im * c.im).collect();
+        if power.len() < 2 {
+            return 0.0;
+        }
+
+        // Fundamental = highest-power bin above DC.
+        let mut fundamental_bin = 1usize;
+        let mut max_power = power[1];
+        for (k, &p) in power.iter().enumerate().skip(2) {
+            if p > max_power {
+                max_power = p;
+                fundamental_bin = k;
+            }
+        }
+
+        // Total power excluding DC.
+        let total_power: f64 = power[1..].iter().sum();
+
+        // Fundamental power: a few bins either side of the peak capture the
+        // window's main lobe so that leakage is not mistaken for distortion.
+        const THD_N_LEAKAGE_BINS: usize = 2;
+        let lo = fundamental_bin.saturating_sub(THD_N_LEAKAGE_BINS).max(1);
+        let hi = (fundamental_bin + THD_N_LEAKAGE_BINS).min(power.len() - 1);
+        let fundamental_power: f64 = power[lo..=hi].iter().sum();
+        if fundamental_power <= 1e-20 {
+            return 0.0;
+        }
+
+        // Everything that is not the fundamental: harmonics + broadband noise.
+        let residual_power = (total_power - fundamental_power).max(0.0);
+        let thd_n = (residual_power / fundamental_power).sqrt();
+
+        (thd_n as f32).min(1.0)
     }
 
     /// Calculate overall quality score
@@ -935,6 +1010,74 @@ mod tests {
         let zero_samples = vec![0.0; 100];
         let zero_rms = AdvancedPreprocessor::calculate_rms(&zero_samples);
         assert_eq!(zero_rms, 0.0);
+    }
+
+    /// Generate an on-bin sine of `cycles` complete periods over `n` samples,
+    /// so that a Hann-windowed FFT places its energy on a single bin.
+    fn on_bin_sine(n: usize, cycles: f32) -> Vec<f32> {
+        (0..n)
+            .map(|i| (2.0 * PI * cycles * i as f32 / n as f32).sin())
+            .collect()
+    }
+
+    #[test]
+    fn test_estimate_thd_n_pure_sine_is_small() {
+        let samples = on_bin_sine(4096, 100.0);
+        let thd_n = AdvancedPreprocessor::estimate_thd_n(&samples);
+        assert!(thd_n >= 0.0);
+        assert!(
+            thd_n < 0.05,
+            "pure sine THD+N should be near zero, got {thd_n}"
+        );
+    }
+
+    #[test]
+    fn test_estimate_thd_n_harmonic_increases() {
+        let n = 4096usize;
+        let cycles = 100.0f32;
+        let clean = on_bin_sine(n, cycles);
+        // Fundamental plus a strong 3rd harmonic at half the amplitude.
+        let distorted: Vec<f32> = (0..n)
+            .map(|i| {
+                let phase = 2.0 * PI * cycles * i as f32 / n as f32;
+                phase.sin() + 0.5 * (3.0 * phase).sin()
+            })
+            .collect();
+
+        let clean_thd_n = AdvancedPreprocessor::estimate_thd_n(&clean);
+        let distorted_thd_n = AdvancedPreprocessor::estimate_thd_n(&distorted);
+
+        // Amplitude ratio 0.5 ⇒ power ratio 0.25 ⇒ THD+N ≈ 0.5.
+        assert!(
+            distorted_thd_n > clean_thd_n + 0.2,
+            "3rd-harmonic distortion should clearly raise THD+N: clean={clean_thd_n}, distorted={distorted_thd_n}"
+        );
+        assert!(
+            distorted_thd_n > 0.3,
+            "expected THD+N near 0.5 for a half-amplitude 3rd harmonic, got {distorted_thd_n}"
+        );
+    }
+
+    #[test]
+    fn test_estimate_thd_n_noise_increases() {
+        let n = 4096usize;
+        let cycles = 100.0f32;
+        let clean = on_bin_sine(n, cycles);
+        let noisy: Vec<f32> = (0..n)
+            .map(|i| {
+                let signal = (2.0 * PI * cycles * i as f32 / n as f32).sin();
+                let noise = (scirs2_core::random::random::<f32>() - 0.5) * 0.3;
+                signal + noise
+            })
+            .collect();
+
+        let clean_thd_n = AdvancedPreprocessor::estimate_thd_n(&clean);
+        let noisy_thd_n = AdvancedPreprocessor::estimate_thd_n(&noisy);
+
+        assert!(
+            noisy_thd_n > clean_thd_n,
+            "white noise should raise THD+N above the clean tone: clean={clean_thd_n}, noisy={noisy_thd_n}"
+        );
     }
 
     #[test]

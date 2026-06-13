@@ -2,12 +2,14 @@
 
 pub mod ai_personalization;
 pub mod database;
+mod fractional_delay;
 
 use crate::types::Position3D;
 pub use database::{
     DatabaseConfig, DatabaseStatistics, HrtfDatabaseManager, HrtfMeasurement as DbHrtfMeasurement,
     HrtfPosition, InterpolationMethod as DbInterpolationMethod, PersonalizedHrtf, StorageFormat,
 };
+use fractional_delay::apply_fractional_delay;
 use scirs2_core::ndarray::Array1;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -823,40 +825,67 @@ impl HrtfProcessor {
         right_hrir: &mut Array1<f32>,
         distance: f32,
     ) -> crate::Result<()> {
-        // Calculate frequency-dependent absorption coefficients
-        // Based on ISO 9613-1 standard for atmospheric absorption
-
-        let temp_celsius = self.config.temperature;
-        let relative_humidity = self.config.humidity;
-
-        // Convert to Kelvin and calculate atmospheric parameters
-        let temp_kelvin = temp_celsius + 273.15;
-        let temp_ratio = temp_kelvin / 293.15; // Reference temperature 20°C
-
-        // Calculate oxygen and nitrogen absorption
-        let h_rel = relative_humidity * (101.325 * temp_ratio.powf(-5.0241));
-
-        // Simplified high-frequency attenuation for air absorption
-        // In practice, this would be applied in frequency domain
-        let distance_factor = (-distance / 100.0).exp(); // Simple exponential decay
-        let temp_factor = temp_ratio.powf(-0.1);
-        let humidity_factor = 1.0 - relative_humidity * 0.1;
-
-        let absorption_factor = distance_factor * temp_factor * humidity_factor;
-
-        // Apply frequency-dependent attenuation (simplified)
-        // Higher frequencies are attenuated more
-        for i in 0..left_hrir.len() {
-            let freq_weight = if i as f32 / left_hrir.len() as f32 > 0.5 {
-                // Attenuate high frequencies more
-                absorption_factor.powf(1.0 + i as f32 / left_hrir.len() as f32)
-            } else {
-                absorption_factor
-            };
-
-            left_hrir[i] *= freq_weight;
-            right_hrir[i] *= freq_weight;
+        // Frequency-dependent atmospheric absorption, applied in the FFT domain.
+        //
+        // Each HRIR is transformed with `rfft`, every bin is attenuated by
+        //   exp(-ln(10)/20 · α(f) · distance)
+        // where the (simplified ISO 9613-1) absorption coefficient rises with
+        // frequency so that highs are damped far more than lows:
+        //   α(f_kHz) ≈ 0.0002 · f_kHz^1.5 + 0.001 · f_kHz   dB/m
+        // (the same model as `core::SpatialProcessor::apply_air_absorption`).
+        // The result is transformed back with `irfft`.
+        if distance < 0.1 {
+            return Ok(());
         }
+
+        let n = left_hrir.len();
+        if n < 4 {
+            return Ok(());
+        }
+
+        // Scale the absorption by atmospheric conditions relative to the
+        // 20 °C / ~70 % RH reference: drier and cooler air absorbs highs more.
+        let temp_kelvin = self.config.temperature + 273.15;
+        let temp_ratio = temp_kelvin / 293.15;
+        let humidity_scale = (1.5 - self.config.humidity).clamp(0.5, 2.0);
+        let atmospheric_scale = humidity_scale * temp_ratio.powf(-0.3);
+
+        let fft_len = n.next_power_of_two();
+        let sample_rate = self.config.sample_rate as f32;
+        let n_bins = fft_len / 2 + 1;
+
+        // Per-bin attenuation table, shared by both ears.
+        let attenuations: Vec<f64> = (0..n_bins)
+            .map(|k| {
+                let freq_hz = k as f32 * sample_rate / fft_len as f32;
+                let freq_khz = (freq_hz / 1000.0).max(0.1);
+                let alpha_db_per_m =
+                    (freq_khz.powf(1.5) * 0.0002 + freq_khz * 0.001) * atmospheric_scale;
+                f64::from((-0.1151 * alpha_db_per_m * distance).exp())
+            })
+            .collect();
+
+        let apply = |hrir: &mut Array1<f32>| -> crate::Result<()> {
+            let signal: Vec<f64> = hrir.iter().map(|&x| x as f64).collect();
+            let mut spectrum = scirs2_fft::rfft(&signal, Some(fft_len))
+                .map_err(|e| crate::Error::LegacyProcessing(format!("FFT error: {e}")))?;
+
+            for (bin, &att) in spectrum.iter_mut().zip(attenuations.iter()) {
+                bin.re *= att;
+                bin.im *= att;
+            }
+
+            let time = scirs2_fft::irfft(&spectrum, Some(fft_len))
+                .map_err(|e| crate::Error::LegacyProcessing(format!("IFFT error: {e}")))?;
+
+            for (sample, &value) in hrir.iter_mut().zip(time.iter()) {
+                *sample = value as f32;
+            }
+            Ok(())
+        };
+
+        apply(left_hrir)?;
+        apply(right_hrir)?;
 
         Ok(())
     }
@@ -876,45 +905,35 @@ impl HrtfProcessor {
             self.config.head_circumference.unwrap_or(57.0) / (2.0 * std::f32::consts::PI);
         let sound_speed = 343.0; // m/s at 20°C
 
-        // Enhanced ITD calculation for near field
+        // Enhanced ITD calculation for near field. The result is kept as a
+        // *fractional* number of samples so the sub-sample component of the
+        // delay (perceptually important for binaural localisation) is preserved
+        // rather than being truncated to the nearest whole sample.
         let itd_samples = if distance < head_radius * 2.0 {
             // Use enhanced ITD model for very close sources
             let enhanced_itd =
                 (head_radius * azimuth_rad.sin() * (1.0 + azimuth_rad.cos())) / sound_speed;
-            (enhanced_itd * self.config.sample_rate as f32) as usize
+            enhanced_itd * self.config.sample_rate as f32
         } else {
-            0
+            0.0
         };
 
-        // Apply fractional delay if needed (simplified integer delay for now)
-        if itd_samples > 0 && azimuth_rad.abs() > 0.1 {
-            let delay_samples = itd_samples.min(left_hrir.len() / 4);
+        // Apply a true (sub-sample accurate) fractional delay to the further ear.
+        if itd_samples > 0.0 && azimuth_rad.abs() > 0.1 {
+            // Clamp so the delay never consumes more than a quarter of the HRIR.
+            let max_delay = (left_hrir.len() / 4) as f32;
+            let delay_samples = itd_samples.min(max_delay);
 
             if azimuth_rad > 0.0 {
-                // Source on the right, delay left ear
-                self.apply_delay(left_hrir, delay_samples);
+                // Source on the right, delay (the further) left ear
+                apply_fractional_delay(left_hrir, delay_samples);
             } else {
-                // Source on the left, delay right ear
-                self.apply_delay(right_hrir, delay_samples);
+                // Source on the left, delay (the further) right ear
+                apply_fractional_delay(right_hrir, delay_samples);
             }
         }
 
         Ok(())
-    }
-
-    /// Apply delay to HRIR
-    fn apply_delay(&self, hrir: &mut Array1<f32>, delay_samples: usize) {
-        if delay_samples == 0 || delay_samples >= hrir.len() {
-            return;
-        }
-
-        // Shift samples to apply delay
-        let original = hrir.clone();
-        hrir.fill(0.0);
-
-        for i in 0..(hrir.len() - delay_samples) {
-            hrir[i + delay_samples] = original[i];
-        }
     }
 }
 
@@ -1849,5 +1868,48 @@ mod tests {
         let right_energy: f32 = right_output.iter().map(|x| x * x).sum();
         assert!(left_energy > 0.0);
         assert!(right_energy > 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_air_absorption_attenuates_high_frequencies_more() {
+        let processor = HrtfProcessor::new(None).await.unwrap();
+        let sample_rate = processor.config.sample_rate as f32;
+        let n = 512_usize;
+        let distance = 50.0_f32; // metres -> measurable absorption
+
+        let make_tone = |freq_hz: f32| -> Array1<f32> {
+            let samples: Vec<f32> = (0..n)
+                .map(|i| (2.0 * std::f32::consts::PI * freq_hz * i as f32 / sample_rate).sin())
+                .collect();
+            Array1::from_vec(samples)
+        };
+        let energy = |sig: &Array1<f32>| -> f32 { sig.iter().map(|x| x * x).sum() };
+
+        // Low-frequency tone retention.
+        let mut low_l = make_tone(200.0);
+        let mut low_r = low_l.clone();
+        let low_before = energy(&low_l);
+        processor
+            .apply_air_absorption(&mut low_l, &mut low_r, distance)
+            .unwrap();
+        let low_ratio = energy(&low_l) / low_before;
+
+        // High-frequency tone retention.
+        let mut high_l = make_tone(8000.0);
+        let mut high_r = high_l.clone();
+        let high_before = energy(&high_l);
+        processor
+            .apply_air_absorption(&mut high_l, &mut high_r, distance)
+            .unwrap();
+        let high_ratio = energy(&high_l) / high_before;
+
+        assert!(
+            high_ratio < low_ratio,
+            "high-frequency retention {high_ratio} should be below low-frequency {low_ratio}"
+        );
+        assert!(
+            low_ratio > 0.5,
+            "low frequencies should be largely preserved, got {low_ratio}"
+        );
     }
 }

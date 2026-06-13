@@ -13,7 +13,7 @@ use super::types_4::{ExpressionFeatures, PrecisionQualityAnalyzer, TimingAnalyze
 use super::types_5::{ExpressionModel, OnsetDetector};
 
 /// Module-level autocorrelation F0 detector shared by multiple scorers.
-pub(super) fn detect_f0_autocorr_frame(frame: &[f32], sample_rate: f32) -> f32 {
+pub(crate) fn detect_f0_autocorr_frame(frame: &[f32], sample_rate: f32) -> f32 {
     if frame.len() < 64 {
         return 0.0;
     }

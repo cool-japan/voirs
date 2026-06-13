@@ -228,25 +228,187 @@ impl PerceptualEvaluator {
 
     // Private helper methods
 
+    /// Estimate a PESQ-like MOS-LQO score from a reference / degraded pair.
+    ///
+    /// This is **not** a bit-exact ITU-T P.862 implementation (that standard is
+    /// large and licensed); it is a defensible perceptual approximation built
+    /// around the same core idea as PESQ: a per-frame, per-critical-band
+    /// comparison of the reference and degraded loudness spectra.
+    ///
+    /// Pipeline:
+    /// 1. Level-align the degraded signal to the reference RMS (PESQ normalizes
+    ///    to a fixed listening level, so the score is largely gain-invariant).
+    /// 2. Compute a frame-wise Bark-band log-spectral disturbance
+    ///    ([`Self::compute_bark_log_spectral_disturbance`]): an
+    ///    articulation-weighted mean of `|ΔdB|` per critical band, aggregated
+    ///    across frames with an `L2` (frame-RMS) norm so the worst frames
+    ///    dominate.
+    /// 3. Map the disturbance (dB) through a monotonic sigmoid to a MOS-LQO in
+    ///    `[1.0, 4.5]`.
+    /// 4. Lightly modulate the score with the waveform (temporal) correlation
+    ///    and the loudness match, which catch gross misalignment / dropouts that
+    ///    a magnitude-only spectral measure cannot see.
     fn compute_simplified_pesq(&self, degraded: &[f32], reference: &[f32]) -> Result<f32> {
-        // Simplified PESQ-like computation
         let min_len = degraded.len().min(reference.len());
+        if min_len == 0 {
+            return Ok(1.0);
+        }
         let degraded = &degraded[..min_len];
         let reference = &reference[..min_len];
 
-        // Compute spectral similarity
-        let spectral_sim = self.compute_spectral_similarity(degraded, reference)?;
+        // (1) Level alignment: scale the degraded signal so its overall RMS
+        // matches the reference, making the spectral comparison gain-invariant.
+        let ref_rms = self.compute_rms(reference);
+        let deg_rms = self.compute_rms(degraded);
+        let aligned: Vec<f32> = if deg_rms > 1e-8 {
+            let gain = ref_rms / deg_rms;
+            degraded.iter().map(|&x| x * gain).collect()
+        } else {
+            degraded.to_vec()
+        };
 
-        // Compute temporal similarity
+        // (2)+(3) Core perceptual term: Bark-band log-spectral disturbance
+        // mapped to a MOS-LQO-like value.
+        let disturbance = self.compute_bark_log_spectral_disturbance(reference, &aligned)?;
+        const D_HALF: f32 = 6.0; // dB of disturbance at which the term halves
+        const SLOPE: f32 = 1.6;
+        let mos_spectral = 1.0 + 3.5 / (1.0 + (disturbance / D_HALF).powf(SLOPE));
+
+        // (4) Secondary cues: temporal correlation and loudness match. Both lie
+        // in [0, 1] and together scale the head-room above the 1.0 floor by
+        // 0.7..=1.0, so a spectrally-plausible but time-warped or wrongly-loud
+        // signal is still penalized.
         let temporal_sim = self.compute_temporal_similarity(degraded, reference)?;
-
-        // Compute loudness similarity
         let loudness_sim = self.compute_loudness_similarity(degraded, reference)?;
+        let modulation = 0.7 + 0.2 * temporal_sim + 0.1 * loudness_sim;
 
-        // Combine similarities into PESQ-like score
-        let pesq = 1.0 + 3.5 * (spectral_sim * 0.5 + temporal_sim * 0.3 + loudness_sim * 0.2);
-
+        let pesq = 1.0 + (mos_spectral - 1.0) * modulation;
         Ok(pesq)
+    }
+
+    /// Frame-wise Bark-band log-spectral disturbance between a reference and a
+    /// degraded signal, in decibels (`0.0` for identical inputs).
+    ///
+    /// For each overlapping, Hann-windowed frame the magnitude spectrum is
+    /// obtained with [`scirs2_fft::rfft`], its power is integrated into Bark
+    /// critical bands (Traunmüller's Hz→Bark map), converted to dB, and the
+    /// absolute reference/degraded dB difference per band is combined with an
+    /// articulation-index-inspired log-normal frequency weighting centered near
+    /// 1.8 kHz. Frame disturbances are aggregated with an `L2` norm so that
+    /// loud, badly-distorted frames dominate the result.
+    fn compute_bark_log_spectral_disturbance(
+        &self,
+        reference: &[f32],
+        degraded: &[f32],
+    ) -> Result<f32> {
+        const N_FFT: usize = 512;
+        const HOP: usize = 256;
+        const POWER_FLOOR: f64 = 1e-7;
+
+        let len = reference.len().min(degraded.len());
+        if len == 0 {
+            return Ok(0.0);
+        }
+
+        let nyquist = self.sample_rate as f32 / 2.0;
+        let n_bark = (hz_to_bark(nyquist as f64).ceil() as usize).max(1);
+
+        // Articulation-style log-normal weight per Bark band (center 1.8 kHz).
+        let band_weights: Vec<f32> = (0..n_bark)
+            .map(|b| {
+                let center_hz = bark_to_hz(b as f64 + 0.5).max(1.0);
+                let z = (center_hz.ln() - 1800.0_f64.ln()) / 1.2;
+                (-0.5 * z * z).exp() as f32
+            })
+            .collect();
+        let weight_sum: f32 = band_weights.iter().sum::<f32>().max(f32::EPSILON);
+
+        // Periodic Hann window for the analysis frames.
+        let window: Vec<f64> = (0..N_FFT)
+            .map(|i| {
+                let phase = 2.0 * std::f64::consts::PI * i as f64 / N_FFT as f64;
+                0.5 * (1.0 - phase.cos())
+            })
+            .collect();
+
+        let n_frames = if len >= N_FFT {
+            (len - N_FFT) / HOP + 1
+        } else {
+            1
+        };
+        let n_freqs = N_FFT / 2 + 1;
+
+        let mut frame_disturbances: Vec<f32> = Vec::with_capacity(n_frames);
+        let mut ref_buf = vec![0.0_f64; N_FFT];
+        let mut deg_buf = vec![0.0_f64; N_FFT];
+
+        for frame_idx in 0..n_frames {
+            let start = frame_idx * HOP;
+
+            // Window the frame (zero-padding past the end of the signal).
+            for (i, ((rb, db), &win)) in ref_buf
+                .iter_mut()
+                .zip(deg_buf.iter_mut())
+                .zip(window.iter())
+                .enumerate()
+            {
+                let idx = start + i;
+                let (r, d) = if idx < len {
+                    (reference[idx] as f64, degraded[idx] as f64)
+                } else {
+                    (0.0, 0.0)
+                };
+                *rb = r * win;
+                *db = d * win;
+            }
+
+            let ref_spec = scirs2_fft::rfft(&ref_buf, Some(N_FFT)).map_err(|e| {
+                AcousticError::ProcessingError {
+                    message: format!("rfft failed on reference frame {frame_idx}: {e:?}"),
+                }
+            })?;
+            let deg_spec = scirs2_fft::rfft(&deg_buf, Some(N_FFT)).map_err(|e| {
+                AcousticError::ProcessingError {
+                    message: format!("rfft failed on degraded frame {frame_idx}: {e:?}"),
+                }
+            })?;
+
+            // Integrate per-bin power into Bark critical bands.
+            let mut ref_bands = vec![0.0_f64; n_bark];
+            let mut deg_bands = vec![0.0_f64; n_bark];
+            for (k, (rc, dc)) in ref_spec
+                .iter()
+                .zip(deg_spec.iter())
+                .enumerate()
+                .take(n_freqs)
+            {
+                let f_hz = k as f64 * self.sample_rate as f64 / N_FFT as f64;
+                let band = (hz_to_bark(f_hz).floor().max(0.0) as usize).min(n_bark - 1);
+                ref_bands[band] += rc.re * rc.re + rc.im * rc.im;
+                deg_bands[band] += dc.re * dc.re + dc.im * dc.im;
+            }
+
+            // Weighted mean |ΔdB| across critical bands.
+            let mut weighted = 0.0f32;
+            for ((&rp, &dp), &w) in ref_bands
+                .iter()
+                .zip(deg_bands.iter())
+                .zip(band_weights.iter())
+            {
+                let l_ref = 10.0 * (rp + POWER_FLOOR).log10();
+                let l_deg = 10.0 * (dp + POWER_FLOOR).log10();
+                weighted += w * (l_ref - l_deg).abs() as f32;
+            }
+            frame_disturbances.push(weighted / weight_sum);
+        }
+
+        if frame_disturbances.is_empty() {
+            return Ok(0.0);
+        }
+
+        // L2 (frame-RMS) aggregation emphasizes the worst frames.
+        let sum_sq: f32 = frame_disturbances.iter().map(|&d| d * d).sum();
+        Ok((sum_sq / frame_disturbances.len() as f32).sqrt())
     }
 
     fn compute_stoi_core(&self, degraded: &[f32], reference: &[f32]) -> Result<f32> {
@@ -290,27 +452,91 @@ impl PerceptualEvaluator {
         Ok(band_outputs)
     }
 
+    /// Apply a 2nd-order (biquad) band-pass filter to `signal`.
+    ///
+    /// # Filter design
+    ///
+    /// The coefficients are derived with the RBJ *Audio-EQ-Cookbook* band-pass
+    /// formulas (the **constant 0 dB peak gain** variant). The band is given by
+    /// its lower and upper -3 dB cutoff frequencies; from those we recover:
+    ///
+    /// * center frequency `f0 = sqrt(low * high)` — the geometric mean is the
+    ///   natural center of a constant-`Q` band-pass: the point of unity gain and
+    ///   the axis of symmetry of the magnitude response on a log-frequency axis;
+    /// * bandwidth `bw = high - low` (Hz), giving the quality factor
+    ///   `Q = f0 / bw`.
+    ///
+    /// The cookbook coefficients (before normalization by `a0`) are
+    ///
+    /// ```text
+    /// w0    = 2*pi*f0 / sample_rate
+    /// alpha = sin(w0) / (2*Q)
+    /// b0 =  alpha       b1 = 0            b2 = -alpha
+    /// a0 =  1 + alpha   a1 = -2*cos(w0)   a2 =  1 - alpha
+    /// ```
+    ///
+    /// They are normalized by `a0` and the difference equation is evaluated with
+    /// a **direct-form-II transposed** structure, which has good round-off
+    /// behavior for audio-rate IIR filtering. The resulting response has exactly
+    /// unity gain at `f0`, zero gain at DC and Nyquist, and a 6 dB/octave
+    /// roll-off on either side of the pass-band.
     fn apply_bandpass_filter(
         &self,
         signal: &[f32],
         low_freq: f32,
         high_freq: f32,
     ) -> Result<Vec<f32>> {
-        // Simplified bandpass filter implementation
+        let n = signal.len();
+        if n == 0 {
+            return Ok(Vec::new());
+        }
+
         let nyquist = self.sample_rate as f32 / 2.0;
-        let low_norm = low_freq / nyquist;
-        let high_norm = high_freq / nyquist;
+        let low = low_freq.clamp(0.0, nyquist);
+        let high = high_freq.clamp(0.0, nyquist);
 
-        let mut filtered = signal.to_vec();
+        // Degenerate band (empty or inverted): nothing can pass through it.
+        if high <= low {
+            return Ok(vec![0.0; n]);
+        }
 
-        // Apply simple IIR bandpass filter (simplified)
-        if filtered.len() > 2 {
-            let a = 0.9; // Filter coefficient
-            let b = (1.0 - a) * (high_norm + low_norm) / 2.0;
+        let bandwidth = high - low;
+        // Geometric mean for the center; fall back to the arithmetic mean only
+        // when the lower edge collapses to DC (where the geometric mean is 0).
+        let f_center = if low > 0.0 {
+            (low * high).sqrt()
+        } else {
+            0.5 * (low + high)
+        };
 
-            for i in 1..filtered.len() {
-                filtered[i] = a * filtered[i - 1] + b * signal[i];
-            }
+        // A center at DC or Nyquist has no valid band-pass; emit a silent band
+        // rather than producing NaNs from the coefficient formulas.
+        if f_center <= 0.0 || f_center >= nyquist {
+            return Ok(vec![0.0; n]);
+        }
+
+        // RBJ Audio-EQ-Cookbook band-pass (constant 0 dB peak gain).
+        let w0 = 2.0 * PI * f_center / self.sample_rate as f32;
+        let q = f_center / bandwidth;
+        let (sin_w0, cos_w0) = w0.sin_cos();
+        let alpha = sin_w0 / (2.0 * q);
+
+        let a0 = 1.0 + alpha;
+        let b0 = alpha / a0;
+        // b1 is exactly 0 for the band-pass and is omitted from the recurrence.
+        let b2 = -alpha / a0;
+        let a1 = (-2.0 * cos_w0) / a0;
+        let a2 = (1.0 - alpha) / a0;
+
+        // Direct-form-II transposed evaluation of the biquad.
+        let mut filtered = Vec::with_capacity(n);
+        let mut s1 = 0.0f32;
+        let mut s2 = 0.0f32;
+        for &x in signal {
+            let y = b0 * x + s1;
+            s1 = s2 - a1 * y; // the (b1 * x) term is zero for a band-pass
+            s2 = b2 * x - a2 * y;
+            filtered.push(y);
         }
 
         Ok(filtered)
@@ -446,16 +672,6 @@ impl PerceptualEvaluator {
         }
 
         Ok(bark_spectrum)
-    }
-
-    fn compute_spectral_similarity(&self, signal1: &[f32], signal2: &[f32]) -> Result<f32> {
-        let spec1 = self.compute_magnitude_spectrum(signal1)?;
-        let spec2 = self.compute_magnitude_spectrum(signal2)?;
-
-        let min_len = spec1.len().min(spec2.len());
-        let similarity = self.compute_correlation(&spec1[..min_len], &spec2[..min_len]);
-
-        Ok(similarity.abs())
     }
 
     fn compute_temporal_similarity(&self, signal1: &[f32], signal2: &[f32]) -> Result<f32> {
@@ -611,6 +827,28 @@ impl PerceptualEvaluator {
     }
 }
 
+/// Convert a frequency in Hz to the Bark scale using Traunmüller's (1990)
+/// analytic approximation with the standard low/high-frequency corrections.
+fn hz_to_bark(f_hz: f64) -> f64 {
+    let f = f_hz.max(0.0);
+    let mut z = 26.81 * f / (1960.0 + f) - 0.53;
+    if z < 2.0 {
+        z += 0.15 * (2.0 - z);
+    } else if z > 20.1 {
+        z += 0.22 * (z - 20.1);
+    }
+    z
+}
+
+/// Approximate inverse of [`hz_to_bark`] (ignoring the small edge corrections),
+/// giving the center frequency in Hz of a Bark value. Used only for the
+/// frequency-importance weighting, where the correction terms are negligible.
+fn bark_to_hz(bark: f64) -> f64 {
+    let z = bark + 0.53;
+    let denom = (26.81 - z).max(1e-6);
+    1960.0 * z / denom
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -713,5 +951,79 @@ mod tests {
         assert!(evaluator.compute_stoi(&empty_audio, &audio).is_err());
         assert!(evaluator.compute_si_sdr(&empty_audio, &audio).is_err());
         assert!(evaluator.compute_intrinsic_quality(&empty_audio).is_err());
+    }
+
+    #[test]
+    fn test_bandpass_passes_center_frequency() {
+        let evaluator = PerceptualEvaluator::with_sample_rate(16000);
+        let sr = 16000.0_f32;
+        let low = 900.0_f32;
+        let high = 1100.0_f32;
+        // The RBJ band-pass peaks at the geometric mean of the band edges.
+        let f_center = (low * high).sqrt();
+
+        let signal = create_test_audio(8000, f_center, sr);
+        let filtered = evaluator
+            .apply_bandpass_filter(&signal, low, high)
+            .expect("bandpass filter should succeed");
+
+        // Compare steady-state RMS (skip the IIR start-up transient).
+        let skip = 2000;
+        let in_rms = evaluator.compute_rms(&signal[skip..]);
+        let out_rms = evaluator.compute_rms(&filtered[skip..]);
+        let ratio = out_rms / in_rms;
+        assert!(
+            ratio > 0.9 && ratio < 1.1,
+            "center-frequency gain should be ~1.0 (got {ratio})"
+        );
+    }
+
+    #[test]
+    fn test_bandpass_attenuates_octave_outside_band() {
+        let evaluator = PerceptualEvaluator::with_sample_rate(16000);
+        let sr = 16000.0_f32;
+        let low = 900.0_f32;
+        let high = 1100.0_f32;
+        let f_center = (low * high).sqrt();
+
+        // One octave above and below the center are well outside the band.
+        for tone in [f_center * 2.0, f_center / 2.0] {
+            let signal = create_test_audio(8000, tone, sr);
+            let filtered = evaluator
+                .apply_bandpass_filter(&signal, low, high)
+                .expect("bandpass filter should succeed");
+
+            let skip = 2000;
+            let in_rms = evaluator.compute_rms(&signal[skip..]);
+            let out_rms = evaluator.compute_rms(&filtered[skip..]);
+            assert!(
+                out_rms < 0.35 * in_rms,
+                "tone an octave outside the band should be strongly attenuated \
+                 (tone {tone} Hz, out/in = {})",
+                out_rms / in_rms
+            );
+        }
+    }
+
+    #[test]
+    fn test_bandpass_attenuates_dc() {
+        let evaluator = PerceptualEvaluator::with_sample_rate(16000);
+        let low = 900.0_f32;
+        let high = 1100.0_f32;
+
+        // A flat/DC signal: a band-pass has zero gain at DC.
+        let signal = vec![0.5_f32; 8000];
+        let filtered = evaluator
+            .apply_bandpass_filter(&signal, low, high)
+            .expect("bandpass filter should succeed");
+
+        let skip = 2000;
+        let in_rms = evaluator.compute_rms(&signal[skip..]);
+        let out_rms = evaluator.compute_rms(&filtered[skip..]);
+        assert!(
+            out_rms < 0.02 * in_rms,
+            "DC should be strongly attenuated by the band-pass (out/in = {})",
+            out_rms / in_rms
+        );
     }
 }

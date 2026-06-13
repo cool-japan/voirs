@@ -741,7 +741,7 @@ impl WebSocketSessionManager {
             -80.0
         };
 
-        // Calculate spectral features (simplified)
+        // Calculate FFT-based spectral features.
         let spectral_centroid =
             calculate_spectral_centroid(audio_data, config.audio_format.sample_rate);
         let spectral_rolloff =
@@ -1086,48 +1086,13 @@ async fn handle_websocket_message(
 // Helper functions for audio analysis
 
 fn calculate_spectral_centroid(audio_data: &[f32], sample_rate: u32) -> f32 {
-    // Simplified spectral centroid calculation
-    if audio_data.is_empty() {
-        return 0.0;
-    }
-
-    // This would typically use FFT, but for simplicity we'll estimate
-    let mut weighted_sum = 0.0;
-    let mut magnitude_sum = 0.0;
-
-    for (i, &sample) in audio_data.iter().enumerate() {
-        let frequency = (i as f32 * sample_rate as f32) / (2.0 * audio_data.len() as f32);
-        let magnitude = sample.abs();
-        weighted_sum += frequency * magnitude;
-        magnitude_sum += magnitude;
-    }
-
-    if magnitude_sum > 0.0 {
-        weighted_sum / magnitude_sum
-    } else {
-        0.0
-    }
+    // FFT magnitude-weighted spectral centroid: Σ(f_k·|X_k|) / Σ|X_k| (Hz).
+    crate::audio_dsp::spectral_centroid_hz(audio_data, sample_rate)
 }
 
 fn calculate_spectral_rolloff(audio_data: &[f32], sample_rate: u32) -> f32 {
-    // Simplified spectral rolloff calculation
-    if audio_data.is_empty() {
-        return 0.0;
-    }
-
-    let energy_threshold = 0.85; // 85% energy threshold
-    let total_energy: f32 = audio_data.iter().map(|x| x * x).sum();
-    let threshold_energy = total_energy * energy_threshold;
-
-    let mut cumulative_energy = 0.0;
-    for (i, &sample) in audio_data.iter().enumerate() {
-        cumulative_energy += sample * sample;
-        if cumulative_energy >= threshold_energy {
-            return (i as f32 * sample_rate as f32) / (2.0 * audio_data.len() as f32);
-        }
-    }
-
-    sample_rate as f32 / 2.0 // Nyquist frequency
+    // Real FFT-based 85%-cumulative-energy rolloff frequency (Hz).
+    crate::audio_dsp::spectral_rolloff_hz(audio_data, sample_rate, 0.85)
 }
 
 fn calculate_spectral_flatness(audio_data: &[f32]) -> f64 {

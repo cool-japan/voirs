@@ -150,9 +150,13 @@ impl EmotionDebugger {
 
         debug!("Capturing emotion state for debugging");
 
-        // Get current emotion parameters
-        // Note: This is a placeholder - the actual method might be different
-        let emotion_params = EmotionParameters::neutral(); // placeholder
+        // Get the processor's live emotion state and derive the effective
+        // parameters from it. Using the interpolated parameters ensures that
+        // in-progress transitions are reflected accurately in the snapshot,
+        // rather than capturing only the transition's starting point.
+        let emotion_state = processor.get_current_state().await;
+        let is_transitioning = emotion_state.is_transitioning();
+        let emotion_params = emotion_state.get_interpolated();
         let dominant_emotion = emotion_params
             .emotion_vector
             .dominant_emotion()
@@ -169,16 +173,18 @@ impl EmotionDebugger {
                 processing_time_us: start_time.elapsed().as_micros() as u64,
                 memory_usage_bytes: self.estimate_memory_usage(),
                 cpu_usage_percent: self.estimate_cpu_usage(),
-                active_interpolations: 0, // Placeholder - would need processor access
+                active_interpolations: usize::from(is_transitioning),
             })
         } else {
             None
         };
 
-        // Create metadata
+        // Create metadata, recording the caller-supplied context and the
+        // transition status derived from the live processor state.
         let mut metadata = HashMap::new();
         metadata.insert("context".to_string(), context.unwrap_or("none").to_string());
         metadata.insert("capture_method".to_string(), "manual".to_string());
+        metadata.insert("transitioning".to_string(), is_transitioning.to_string());
 
         // Create snapshot
         let snapshot = EmotionStateSnapshot {
@@ -606,6 +612,54 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(debugger.captured_states_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_capture_state_reflects_processor_emotion() {
+        use crate::config::EmotionConfig;
+        use crate::types::EmotionIntensity;
+
+        // Use immediate transitions so the emotion is applied to the current
+        // state right away (rather than starting a gradual transition).
+        let config = EmotionConfig::builder()
+            .transition_smoothing(1.0)
+            .build()
+            .unwrap();
+        let processor = crate::core::EmotionProcessor::with_config(config).unwrap();
+
+        // Set a clearly non-neutral emotion on the processor.
+        processor
+            .set_emotion(Emotion::Happy, Some(0.9))
+            .await
+            .unwrap();
+
+        let mut debugger = EmotionDebugger::default();
+        debugger
+            .capture_state(&processor, Some("unit-test-context"))
+            .await
+            .unwrap();
+
+        assert_eq!(debugger.captured_states_count(), 1);
+        let snapshot = &debugger.captured_states[0];
+
+        // The snapshot must reflect the real processor emotion, not the old
+        // `EmotionParameters::neutral()` placeholder.
+        assert_eq!(snapshot.dominant_emotion.0, "happy");
+        assert_ne!(snapshot.dominant_emotion.0, "neutral");
+        assert!(snapshot.dominant_emotion.1 > 0.0);
+
+        // The derived parameters must carry the same dominant emotion.
+        let dominant = snapshot
+            .emotion_parameters
+            .emotion_vector
+            .dominant_emotion();
+        assert_eq!(dominant, Some((Emotion::Happy, EmotionIntensity::new(0.9))));
+
+        // The `context` argument must be recorded in the snapshot metadata.
+        assert_eq!(
+            snapshot.metadata.get("context").map(String::as_str),
+            Some("unit-test-context")
+        );
     }
 
     #[tokio::test]

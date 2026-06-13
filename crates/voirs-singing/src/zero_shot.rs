@@ -6,10 +6,12 @@
 use crate::ai::StyleEmbedding;
 use crate::core::SingingEngine;
 use crate::models::{ModelType, SingingModel, SingingModelBuilder};
+use crate::precision_quality::functions::detect_f0_autocorr_frame;
 use crate::types::{SingingRequest, SingingResponse, VoiceCharacteristics, VoiceType};
 use crate::voice_conversion::{SpeakerEmbedding, VoiceQualityMetrics};
 use crate::Error;
 use candle_core::{Device, Tensor};
+use scirs2_core::Complex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -603,51 +605,626 @@ impl ZeroShotSynthesizer {
         })
     }
 
-    /// Extract voice embedding from audio samples
+    /// Extract a 512-dimensional voice embedding from audio samples.
+    ///
+    /// Computes per-frame MFCCs (Hann window, FFT, mel filterbank, log, DCT-II) across
+    /// all frames of all samples, aggregates their mean, standard deviation and mean
+    /// delta, tiles the aggregate into a 512-dimensional vector and L2-normalizes it.
+    /// The result is fully deterministic for a given input.
     fn extract_voice_embedding(samples: &[AudioSample]) -> Result<Vec<f32>, Error> {
-        // Placeholder implementation - in reality, this would use a neural encoder
-        let mut embedding = vec![0.0; 512];
-
-        // Simple feature extraction based on audio characteristics
-        for (i, sample) in samples.iter().enumerate().take(10) {
-            let energy =
-                sample.audio.iter().map(|x| x * x).sum::<f32>() / sample.audio.len() as f32;
-            let zero_crossings = sample
-                .audio
-                .windows(2)
-                .filter(|w| w[0] * w[1] < 0.0)
-                .count() as f32;
-
-            embedding[i * 2] = energy;
-            embedding[i * 2 + 1] = zero_crossings / sample.audio.len() as f32;
-        }
-
-        Ok(embedding)
+        Ok(voice_embedding_from_samples(samples))
     }
 
-    /// Analyze vocal range from audio samples
+    /// Analyze the vocal range from audio samples using autocorrelation F0 detection.
+    ///
+    /// Estimates per-frame F0 over voiced frames, converts to MIDI notes, derives the
+    /// comfortable range from robust percentiles, the optimal range from the densest
+    /// contiguous region, and register breaks from histogram valleys.
     fn analyze_vocal_range(samples: &[AudioSample]) -> Result<VocalRange, Error> {
-        // Placeholder implementation - in reality, this would use pitch detection
-        Ok(VocalRange {
-            lowest_note: 48,               // C3
-            highest_note: 84,              // C6
-            optimal_start: 60,             // C4
-            optimal_end: 72,               // C5
-            register_breaks: vec![60, 67], // C4, G4
-        })
+        Ok(vocal_range_from_samples(samples))
     }
 
-    /// Calculate voice quality metrics
+    /// Calculate voice quality metrics from audio samples using real DSP.
+    ///
+    /// Derives vibrato rate/depth from the FFT of the detrended voiced-F0 contour,
+    /// breathiness from the harmonic-to-noise ratio, roughness from F0 jitter,
+    /// brightness from the spectral centroid, and vocal range from the analyzed span.
     fn calculate_voice_quality(samples: &[AudioSample]) -> Result<VoiceQualityMetrics, Error> {
-        // Placeholder implementation
-        Ok(VoiceQualityMetrics {
-            vocal_range: 24.0,
-            vibrato_rate: 5.0,
-            vibrato_depth: 20.0,
-            breathiness: 0.3,
-            roughness: 0.2,
-            brightness: 0.7,
+        Ok(voice_quality_from_samples(samples))
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Voice-analysis DSP helpers
+//
+// These free functions implement the real signal processing used by
+// `ZeroShotSynthesizer`. They reuse the crate-wide autocorrelation F0 detector
+// (`detect_f0_autocorr_frame`) and the SciRS2 FFT/DCT primitives.
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Number of MFCC coefficients retained per frame.
+const MFCC_COEFFS: usize = 13;
+/// Number of triangular mel filterbank channels.
+const MEL_FILTERS: usize = 26;
+/// Analysis frame length (samples) for spectral features (MFCC, centroid).
+const SPEC_FRAME_LEN: usize = 1024;
+/// Hop length (samples) for spectral features.
+const SPEC_HOP: usize = 256;
+/// Analysis frame length (samples) for autocorrelation F0 estimation.
+const F0_FRAME_LEN: usize = 2048;
+/// Hop length (samples) for autocorrelation F0 estimation.
+const F0_HOP: usize = 512;
+/// Dimensionality of the voice embedding vector.
+const EMBEDDING_DIM: usize = 512;
+
+/// Peak-normalize a frame so its maximum absolute value is 1.0.
+///
+/// This makes the amplitude-dependent raw autocorrelation threshold inside
+/// [`detect_f0_autocorr_frame`] robust to the input gain.
+fn peak_normalize(frame: &[f32]) -> Vec<f32> {
+    let peak = frame.iter().fold(0.0f32, |m, &x| m.max(x.abs()));
+    if peak > 1e-9 {
+        frame.iter().map(|&x| x / peak).collect()
+    } else {
+        frame.to_vec()
+    }
+}
+
+/// Normalized autocorrelation coefficient of a frame at a given lag, in `[0, 1]`.
+///
+/// Used as a harmonic-to-noise ratio (HNR) proxy at the detected pitch period.
+fn normalized_autocorr_at_lag(frame: &[f32], lag: usize) -> f32 {
+    if lag == 0 || lag >= frame.len() {
+        return 0.0;
+    }
+    let mean = frame.iter().sum::<f32>() / frame.len() as f32;
+    let n_ov = frame.len() - lag;
+    let mut cross = 0.0f32;
+    let mut left_sq = 0.0f32;
+    let mut right_sq = 0.0f32;
+    for i in 0..n_ov {
+        let a = frame[i] - mean;
+        let b = frame[i + lag] - mean;
+        cross += a * b;
+        left_sq += a * a;
+        right_sq += b * b;
+    }
+    let denom = (left_sq * right_sq).sqrt();
+    if denom > 1e-12 {
+        (cross / denom).clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
+/// Analyze a single frame, returning `(f0_hz, hnr)` if the frame is voiced.
+///
+/// [`detect_f0_autocorr_frame`] supplies the coarse integer-lag pitch and the
+/// voicing decision. Because it maximizes a *raw* autocorrelation it can lock
+/// onto an integer multiple of the true period (an octave-down error) that
+/// varies with frame phase; this is corrected by preferring a sub-period whose
+/// *normalized* autocorrelation is comparable. The result is then refined to
+/// sub-sample precision by parabolic interpolation, removing the pitch jitter
+/// that would otherwise masquerade as vibrato on steady tones.
+fn analyze_voiced_frame(frame: &[f32], sample_rate: u32) -> Option<(f32, f32)> {
+    let normalized = peak_normalize(frame);
+    let coarse_f0 = detect_f0_autocorr_frame(&normalized, sample_rate as f32);
+    if coarse_f0 <= 0.0 {
+        return None;
+    }
+    let mut period = (sample_rate as f32 / coarse_f0).round() as usize;
+    let min_lag = ((sample_rate as f32 / 800.0) as usize).max(2);
+
+    // Octave-error correction: prefer the fundamental when a sub-period (a higher
+    // F0) correlates comparably. Larger divisors (higher F0) are tried first.
+    let base_r = normalized_autocorr_at_lag(&normalized, period);
+    for div in [4usize, 3, 2] {
+        let candidate = period / div;
+        if candidate >= min_lag
+            && normalized_autocorr_at_lag(&normalized, candidate) >= 0.85 * base_r.max(1e-6)
+        {
+            period = candidate;
+            break;
+        }
+    }
+
+    let hnr = normalized_autocorr_at_lag(&normalized, period);
+
+    // Sub-sample refinement via parabolic interpolation of the normalized peak.
+    let refined_period = if period >= 2 && period + 1 < normalized.len() {
+        let r_minus = normalized_autocorr_at_lag(&normalized, period - 1);
+        let r_zero = normalized_autocorr_at_lag(&normalized, period);
+        let r_plus = normalized_autocorr_at_lag(&normalized, period + 1);
+        let denom = r_minus - 2.0 * r_zero + r_plus;
+        let delta = if denom < -1e-6 {
+            (0.5 * (r_minus - r_plus) / denom).clamp(-0.5, 0.5)
+        } else {
+            0.0
+        };
+        period as f32 + delta
+    } else {
+        period as f32
+    };
+
+    Some((sample_rate as f32 / refined_period, hnr))
+}
+
+/// Compute `(f0_hz, hnr)` pairs for all voiced frames of an audio buffer.
+fn voiced_frames(audio: &[f32], sample_rate: u32) -> Vec<(f32, f32)> {
+    let mut out = Vec::new();
+    if audio.len() < F0_FRAME_LEN {
+        if audio.len() >= 64 {
+            if let Some(v) = analyze_voiced_frame(audio, sample_rate) {
+                out.push(v);
+            }
+        }
+        return out;
+    }
+    let mut pos = 0;
+    while pos + F0_FRAME_LEN <= audio.len() {
+        if let Some(v) = analyze_voiced_frame(&audio[pos..pos + F0_FRAME_LEN], sample_rate) {
+            out.push(v);
+        }
+        pos += F0_HOP;
+    }
+    out
+}
+
+/// Compute mel-frequency cepstral coefficients for a single frame.
+///
+/// Mirrors the established crate MFCC pipeline: Hann window, FFT power spectrum,
+/// triangular mel filterbank, log compression and an orthonormal DCT-II.
+fn mfcc_frame(frame: &[f32], sample_rate: u32) -> [f32; MFCC_COEFFS] {
+    let len = frame.len();
+    if len < 2 {
+        return [0.0f32; MFCC_COEFFS];
+    }
+
+    let windowed: Vec<f64> = frame
+        .iter()
+        .enumerate()
+        .map(|(i, &s)| {
+            let w = 0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / (len - 1) as f64).cos());
+            s as f64 * w
         })
+        .collect();
+
+    let complex_in: Vec<Complex<f64>> = windowed.iter().map(|&x| Complex::new(x, 0.0)).collect();
+    let fft_out = match scirs2_fft::fft(&complex_in, None) {
+        Ok(v) => v,
+        Err(_) => return [0.0f32; MFCC_COEFFS],
+    };
+
+    let n_bins = len / 2 + 1;
+    let power: Vec<f64> = fft_out[..n_bins]
+        .iter()
+        .map(|c| (c.re * c.re + c.im * c.im).max(1e-30))
+        .collect();
+
+    let nyquist = sample_rate as f64 / 2.0;
+    let hz_to_mel = |hz: f64| 2595.0 * (1.0 + hz / 700.0).log10();
+    let mel_to_hz = |mel: f64| 700.0 * (10.0_f64.powf(mel / 2595.0) - 1.0);
+    let mel_low = hz_to_mel(0.0);
+    let mel_high = hz_to_mel(nyquist);
+    let mel_pts: Vec<f64> = (0..=MEL_FILTERS + 1)
+        .map(|i| mel_low + (mel_high - mel_low) * i as f64 / (MEL_FILTERS + 1) as f64)
+        .collect();
+    let hz_pts: Vec<f64> = mel_pts.iter().map(|&m| mel_to_hz(m)).collect();
+    let bin_pts: Vec<usize> = hz_pts
+        .iter()
+        .map(|&hz| ((hz / nyquist) * (n_bins - 1) as f64).round() as usize)
+        .collect();
+
+    let mut filt = [0.0f64; MEL_FILTERS];
+    for m in 0..MEL_FILTERS {
+        let start = bin_pts[m];
+        let center = bin_pts[m + 1];
+        let end = bin_pts[m + 2];
+        for k in start..center {
+            if k < power.len() && center > start {
+                filt[m] += power[k] * (k - start) as f64 / (center - start) as f64;
+            }
+        }
+        for k in center..end {
+            if k < power.len() && end > center {
+                filt[m] += power[k] * (end - k) as f64 / (end - center) as f64;
+            }
+        }
+        filt[m] = filt[m].max(1e-30).ln();
+    }
+
+    let dct_out = match scirs2_fft::dct(&filt, None, Some("ortho")) {
+        Ok(v) => v,
+        Err(_) => return [0.0f32; MFCC_COEFFS],
+    };
+    let mut mfcc = [0.0f32; MFCC_COEFFS];
+    for (i, m) in mfcc.iter_mut().enumerate() {
+        *m = dct_out.get(i).copied().unwrap_or(0.0) as f32;
+    }
+    mfcc
+}
+
+/// Build a deterministic 512-dimensional voice embedding from audio samples.
+fn voice_embedding_from_samples(samples: &[AudioSample]) -> Vec<f32> {
+    let mut frames: Vec<[f32; MFCC_COEFFS]> = Vec::new();
+    for sample in samples {
+        let audio = &sample.audio;
+        if audio.len() < SPEC_FRAME_LEN {
+            if !audio.is_empty() {
+                let mut padded = audio.clone();
+                padded.resize(SPEC_FRAME_LEN, 0.0);
+                frames.push(mfcc_frame(&padded, sample.sample_rate));
+            }
+            continue;
+        }
+        let mut pos = 0;
+        while pos + SPEC_FRAME_LEN <= audio.len() {
+            frames.push(mfcc_frame(
+                &audio[pos..pos + SPEC_FRAME_LEN],
+                sample.sample_rate,
+            ));
+            pos += SPEC_HOP;
+        }
+    }
+
+    if frames.is_empty() {
+        return vec![0.0f32; EMBEDDING_DIM];
+    }
+
+    let frame_count = frames.len() as f32;
+
+    let mut mean = [0.0f32; MFCC_COEFFS];
+    for f in &frames {
+        for (acc, &v) in mean.iter_mut().zip(f.iter()) {
+            *acc += v;
+        }
+    }
+    for acc in mean.iter_mut() {
+        *acc /= frame_count;
+    }
+
+    let mut var = [0.0f32; MFCC_COEFFS];
+    for f in &frames {
+        for ((acc, &v), &mu) in var.iter_mut().zip(f.iter()).zip(mean.iter()) {
+            let d = v - mu;
+            *acc += d * d;
+        }
+    }
+    let std_dev: [f32; MFCC_COEFFS] = std::array::from_fn(|i| (var[i] / frame_count).sqrt());
+
+    let mut delta = [0.0f32; MFCC_COEFFS];
+    if frames.len() >= 2 {
+        for pair in frames.windows(2) {
+            for ((acc, &next), &prev) in delta.iter_mut().zip(pair[1].iter()).zip(pair[0].iter()) {
+                *acc += next - prev;
+            }
+        }
+        let delta_count = (frames.len() - 1) as f32;
+        for acc in delta.iter_mut() {
+            *acc /= delta_count;
+        }
+    }
+
+    let mut base = Vec::with_capacity(3 * MFCC_COEFFS);
+    base.extend_from_slice(&mean);
+    base.extend_from_slice(&std_dev);
+    base.extend_from_slice(&delta);
+
+    let mut embedding = vec![0.0f32; EMBEDDING_DIM];
+    for (i, e) in embedding.iter_mut().enumerate() {
+        *e = base[i % base.len()];
+    }
+
+    let norm = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm > 1e-12 {
+        for e in embedding.iter_mut() {
+            *e /= norm;
+        }
+    }
+    embedding
+}
+
+/// Convert a fundamental frequency in Hz to the nearest MIDI note number.
+fn hz_to_midi(f0: f32) -> Option<u8> {
+    if f0 <= 0.0 {
+        return None;
+    }
+    let midi = (69.0 + 12.0 * (f0 / 440.0).log2()).round();
+    if midi.is_finite() && (0.0..=127.0).contains(&midi) {
+        Some(midi as u8)
+    } else {
+        None
+    }
+}
+
+/// Return the value at the given percentile (0–100) of a sorted slice.
+fn percentile(sorted: &[u8], pct: f32) -> u8 {
+    if sorted.is_empty() {
+        return 0;
+    }
+    let idx = ((pct / 100.0) * (sorted.len() - 1) as f32).round() as usize;
+    sorted[idx.min(sorted.len() - 1)]
+}
+
+/// Detect register-break MIDI notes as histogram valleys between populated regions.
+fn detect_register_breaks(hist: &[u32; 128], lowest: u8, highest: u8, mode_count: u32) -> Vec<u8> {
+    let mut breaks = Vec::new();
+    if highest <= lowest + 2 {
+        return breaks;
+    }
+    let valley_thr = ((mode_count as f32) * 0.35) as u32;
+    for n in (lowest + 1)..highest {
+        let c = hist[n as usize];
+        let prev = hist[(n - 1) as usize];
+        let next = hist[(n + 1) as usize];
+        let is_valley = c <= prev && c <= next && c < valley_thr && (prev > 0 || next > 0);
+        let spaced = breaks.last().is_none_or(|&b: &u8| n > b + 1);
+        if is_valley && spaced {
+            breaks.push(n);
+            if breaks.len() >= 3 {
+                break;
+            }
+        }
+    }
+    breaks
+}
+
+/// Default vocal range used when too few voiced frames are available.
+fn default_vocal_range() -> VocalRange {
+    VocalRange {
+        lowest_note: 48,
+        highest_note: 84,
+        optimal_start: 60,
+        optimal_end: 72,
+        register_breaks: vec![60, 67],
+    }
+}
+
+/// Analyze vocal range from audio samples via autocorrelation F0 detection.
+fn vocal_range_from_samples(samples: &[AudioSample]) -> VocalRange {
+    let mut midi_notes: Vec<u8> = Vec::new();
+    for sample in samples {
+        for (f0, _) in voiced_frames(&sample.audio, sample.sample_rate) {
+            if let Some(m) = hz_to_midi(f0) {
+                midi_notes.push(m);
+            }
+        }
+    }
+
+    if midi_notes.len() < 8 {
+        return default_vocal_range();
+    }
+
+    let mut sorted = midi_notes.clone();
+    sorted.sort_unstable();
+    let lowest = percentile(&sorted, 5.0);
+    let highest = percentile(&sorted, 95.0).max(lowest);
+    let lowest = lowest.min(highest);
+
+    let mut hist = [0u32; 128];
+    for &m in &midi_notes {
+        hist[m as usize] += 1;
+    }
+
+    let mode = (lowest..=highest)
+        .max_by_key(|&n| hist[n as usize])
+        .unwrap_or(lowest);
+    let mode_count = hist[mode as usize].max(1);
+
+    // Densest contiguous region: expand from the mode while bins stay populated.
+    let thr = ((mode_count as f32) * 0.25).ceil() as u32;
+    let mut start = mode;
+    while start > lowest && hist[(start - 1) as usize] >= thr {
+        start -= 1;
+    }
+    let mut end = mode;
+    while end < highest && hist[(end + 1) as usize] >= thr {
+        end += 1;
+    }
+
+    let register_breaks = detect_register_breaks(&hist, lowest, highest, mode_count);
+    let register_breaks = if register_breaks.is_empty() {
+        vec![(lowest as u16 + (highest as u16 - lowest as u16) / 2) as u8]
+    } else {
+        register_breaks
+    };
+
+    VocalRange {
+        lowest_note: lowest,
+        highest_note: highest,
+        optimal_start: start,
+        optimal_end: end.max(start),
+        register_breaks,
+    }
+}
+
+/// FFT-based spectral centroid (Hz) of a single Hann-windowed frame.
+///
+/// Uses the real FFT ([`scirs2_fft::rfft`]), which returns the `len / 2 + 1`
+/// non-redundant bins directly.
+fn frame_spectral_centroid(frame: &[f32], sample_rate: u32) -> Option<f32> {
+    let len = frame.len();
+    if len < 2 {
+        return None;
+    }
+    let windowed: Vec<f32> = frame
+        .iter()
+        .enumerate()
+        .map(|(i, &s)| {
+            let w = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (len - 1) as f32).cos());
+            s * w
+        })
+        .collect();
+    let spectrum = scirs2_fft::rfft(&windowed, None).ok()?;
+    let mut weighted = 0.0f64;
+    let mut magnitude = 0.0f64;
+    for (k, c) in spectrum.iter().enumerate() {
+        let freq = k as f64 * sample_rate as f64 / len as f64;
+        let mag = (c.re * c.re + c.im * c.im).sqrt();
+        weighted += freq * mag;
+        magnitude += mag;
+    }
+    if magnitude > 1e-12 {
+        Some((weighted / magnitude) as f32)
+    } else {
+        None
+    }
+}
+
+/// Mean normalized spectral centroid (centroid / Nyquist) across all frames.
+fn mean_brightness(samples: &[AudioSample]) -> f32 {
+    let mut sum = 0.0f32;
+    let mut count = 0usize;
+    for sample in samples {
+        let audio = &sample.audio;
+        if audio.len() < SPEC_FRAME_LEN {
+            continue;
+        }
+        let nyquist = sample.sample_rate as f32 / 2.0;
+        let mut pos = 0;
+        while pos + SPEC_FRAME_LEN <= audio.len() {
+            if let Some(centroid) =
+                frame_spectral_centroid(&audio[pos..pos + SPEC_FRAME_LEN], sample.sample_rate)
+            {
+                sum += (centroid / nyquist).clamp(0.0, 1.0);
+                count += 1;
+            }
+            pos += SPEC_HOP;
+        }
+    }
+    if count > 0 {
+        (sum / count as f32).clamp(0.0, 1.0)
+    } else {
+        0.5
+    }
+}
+
+/// Map a mean fundamental frequency (Hz) onto the conventional vocal type.
+///
+/// Thresholds follow the standard vocal-fundamental ranges (see
+/// [`VoiceAdaptationEngine::estimate_voice_type`] for the table).
+fn classify_voice_by_f0(mean_f0: f32) -> VoiceType {
+    if mean_f0 < 130.0 {
+        VoiceType::Bass
+    } else if mean_f0 < 165.0 {
+        VoiceType::Baritone
+    } else if mean_f0 < 220.0 {
+        VoiceType::Tenor
+    } else if mean_f0 < 260.0 {
+        VoiceType::Alto
+    } else if mean_f0 < 350.0 {
+        VoiceType::MezzoSoprano
+    } else {
+        VoiceType::Soprano
+    }
+}
+
+/// Estimate `(vibrato_rate_hz, vibrato_depth_cents)` from a voiced-F0 contour.
+///
+/// The contour is linearly detrended, transformed via FFT, and the spectral peak
+/// within the 4–8 Hz vibrato band selects the rate; its magnitude yields the depth.
+fn estimate_vibrato(f0s: &[f32], frame_rate: f32) -> (f32, f32) {
+    let n = f0s.len();
+    if n < 10 || frame_rate <= 0.0 {
+        return (5.0, 0.0);
+    }
+    let mean_f0 = f0s.iter().sum::<f32>() / n as f32;
+
+    // Least-squares linear detrend.
+    let x_mean = (n - 1) as f32 / 2.0;
+    let mut num = 0.0f32;
+    let mut den = 0.0f32;
+    for (i, &f) in f0s.iter().enumerate() {
+        let xi = i as f32 - x_mean;
+        num += xi * (f - mean_f0);
+        den += xi * xi;
+    }
+    let slope = if den > 1e-12 { num / den } else { 0.0 };
+    let intercept = mean_f0 - slope * x_mean;
+
+    let detrended: Vec<Complex<f64>> = f0s
+        .iter()
+        .enumerate()
+        .map(|(i, &f)| Complex::new((f - (slope * i as f32 + intercept)) as f64, 0.0))
+        .collect();
+    let spectrum = match scirs2_fft::fft(&detrended, Some(n)) {
+        Ok(v) => v,
+        Err(_) => return (5.0, 0.0),
+    };
+
+    let half = n / 2;
+    let k_lo = ((4.0 * n as f32 / frame_rate).floor() as usize).max(1);
+    let k_hi = ((8.0 * n as f32 / frame_rate).ceil() as usize).min(half);
+    if k_lo > k_hi {
+        return (5.0, 0.0);
+    }
+
+    let mut peak_mag = 0.0f64;
+    let mut peak_k = k_lo;
+    for k in k_lo..=k_hi {
+        let mag = spectrum[k].norm();
+        if mag > peak_mag {
+            peak_mag = mag;
+            peak_k = k;
+        }
+    }
+
+    let rate = (peak_k as f32 * frame_rate / n as f32).clamp(4.0, 8.0);
+    let peak_amp = (peak_mag / (n as f64 / 2.0).max(1.0)) as f32;
+    let depth = if mean_f0 > 1.0 {
+        (1200.0 * ((mean_f0 + peak_amp) / mean_f0).log2()).clamp(0.0, 200.0)
+    } else {
+        0.0
+    };
+    (rate, depth)
+}
+
+/// Calculate voice quality metrics from audio samples using real DSP.
+fn voice_quality_from_samples(samples: &[AudioSample]) -> VoiceQualityMetrics {
+    let sample_rate = samples.first().map(|s| s.sample_rate).unwrap_or(22050);
+
+    let mut f0s: Vec<f32> = Vec::new();
+    let mut hnrs: Vec<f32> = Vec::new();
+    for sample in samples {
+        for (f0, hnr) in voiced_frames(&sample.audio, sample.sample_rate) {
+            f0s.push(f0);
+            hnrs.push(hnr);
+        }
+    }
+
+    if f0s.is_empty() {
+        return VoiceQualityMetrics::default();
+    }
+
+    let range = vocal_range_from_samples(samples);
+    let vocal_range = (range.highest_note as f32 - range.lowest_note as f32).max(0.0);
+
+    let frame_rate = sample_rate as f32 / F0_HOP as f32;
+    let (vibrato_rate, vibrato_depth) = estimate_vibrato(&f0s, frame_rate);
+
+    let mean_hnr = hnrs.iter().sum::<f32>() / hnrs.len() as f32;
+    let breathiness = (1.0 - mean_hnr).clamp(0.0, 1.0);
+
+    let roughness = if f0s.len() < 2 {
+        0.0
+    } else {
+        let jitter = f0s
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs() / w[0].max(1.0))
+            .sum::<f32>()
+            / (f0s.len() - 1) as f32;
+        jitter.clamp(0.0, 1.0)
+    };
+
+    let brightness = mean_brightness(samples);
+
+    VoiceQualityMetrics {
+        vocal_range,
+        vibrato_rate,
+        vibrato_depth,
+        breathiness,
+        roughness,
+        brightness,
     }
 }
 
@@ -687,17 +1264,17 @@ impl VoiceAdaptationEngine {
         samples: &[AudioSample],
         config: &ZeroShotConfig,
     ) -> Result<VoiceCharacteristics, Error> {
-        // Extract features from audio samples
+        // Extract a speaker-feature vector (used by the vibrato estimator).
         let features = self.speaker_encoder.extract_features(samples)?;
 
-        // Adapt voice characteristics based on features
+        // Adapt voice characteristics based on real acoustic analysis.
         let mut adapted_voice = VoiceCharacteristics::default();
 
-        // Estimate voice type from features
-        adapted_voice.voice_type = self.estimate_voice_type(&features)?;
+        // Classify voice type from the measured F0 / spectral content.
+        adapted_voice.voice_type = self.estimate_voice_type(samples)?;
 
-        // Adapt other characteristics
-        adapted_voice.range = self.estimate_pitch_range(&features)?;
+        // Adapt other characteristics.
+        adapted_voice.range = self.estimate_pitch_range(samples)?;
         adapted_voice.vibrato_frequency = self.estimate_vibrato_rate(&features)?;
 
         Ok(adapted_voice)
@@ -802,32 +1379,79 @@ impl VoiceAdaptationEngine {
         Ok(interpolated)
     }
 
-    /// Estimate voice type from features
-    fn estimate_voice_type(&self, features: &[f32]) -> Result<VoiceType, Error> {
-        // Placeholder implementation - in reality, this would use ML classification
-        let avg_feature = features.iter().sum::<f32>() / features.len() as f32;
+    /// Classify the voice type from real acoustic measurements.
+    ///
+    /// The decision is driven primarily by the mean fundamental frequency over
+    /// all voiced frames (autocorrelation F0 via [`voiced_frames`]), mapped onto
+    /// the conventional vocal-fundamental ranges:
+    ///
+    /// | mean F0 (Hz) | voice type   |
+    /// |--------------|--------------|
+    /// | `< 130`      | Bass         |
+    /// | `130 – 165`  | Baritone     |
+    /// | `165 – 220`  | Tenor        |
+    /// | `220 – 260`  | Alto         |
+    /// | `260 – 350`  | MezzoSoprano |
+    /// | `>= 350`     | Soprano      |
+    ///
+    /// When no voiced frames are found (silent or noise-only input) the mean
+    /// normalized spectral centroid (brightness, via [`mean_brightness`]) is
+    /// mapped onto a pseudo mean-F0 as a fallback, so a bright spectrum yields a
+    /// high voice and a dark spectrum a low voice.
+    fn estimate_voice_type(&self, samples: &[AudioSample]) -> Result<VoiceType, Error> {
+        let mut f0_sum = 0.0f32;
+        let mut f0_count = 0usize;
+        for sample in samples {
+            for (f0, _) in voiced_frames(&sample.audio, sample.sample_rate) {
+                f0_sum += f0;
+                f0_count += 1;
+            }
+        }
 
-        let voice_type = if avg_feature < 0.2 {
-            VoiceType::Bass
-        } else if avg_feature < 0.4 {
-            VoiceType::Baritone
-        } else if avg_feature < 0.6 {
-            VoiceType::Tenor
-        } else if avg_feature < 0.8 {
-            VoiceType::Alto
+        let voice_type = if f0_count > 0 {
+            classify_voice_by_f0(f0_sum / f0_count as f32)
         } else {
-            VoiceType::Soprano
+            // Brightness fallback: map normalized centroid [0, 1] -> pseudo F0.
+            classify_voice_by_f0(90.0 + mean_brightness(samples) * 360.0)
         };
-
         Ok(voice_type)
     }
 
-    /// Estimate pitch range from features
-    fn estimate_pitch_range(&self, features: &[f32]) -> Result<(f32, f32), Error> {
-        // Placeholder implementation
-        let base_freq = features.iter().map(|x| x.abs()).fold(0.0, f32::max) * 200.0 + 200.0;
-        let range_width = features.iter().sum::<f32>().abs() * 100.0 + 100.0;
-        Ok((base_freq, base_freq + range_width))
+    /// Estimate the pitch range (Hz) from real F0 analysis.
+    ///
+    /// Runs the autocorrelation F0 detector over every frame of every sample
+    /// ([`voiced_frames`]) and returns the robust `(low, high)` bounds as the
+    /// 5th and 95th percentiles of the voiced-F0 distribution. Percentiles reject
+    /// octave-jump and noise outliers that raw min/max would capture. Falls back
+    /// to a default mid-voice range when no voiced frames are detected.
+    fn estimate_pitch_range(&self, samples: &[AudioSample]) -> Result<(f32, f32), Error> {
+        let mut f0s: Vec<f32> = Vec::new();
+        for sample in samples {
+            for (f0, _) in voiced_frames(&sample.audio, sample.sample_rate) {
+                if f0 > 0.0 {
+                    f0s.push(f0);
+                }
+            }
+        }
+
+        if f0s.is_empty() {
+            // Default comfortable mid-voice range (C3 – C5).
+            return Ok((130.81, 523.25));
+        }
+
+        f0s.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let pct = |p: f32| -> f32 {
+            let idx = ((p / 100.0) * (f0s.len() - 1) as f32).round() as usize;
+            f0s[idx.min(f0s.len() - 1)]
+        };
+        let low = pct(5.0);
+        let high = pct(95.0);
+        if high > low {
+            Ok((low, high))
+        } else {
+            // Degenerate (near-constant F0): widen slightly around the value.
+            Ok((low * 0.97, high * 1.03))
+        }
     }
 
     /// Estimate vibrato rate from features
@@ -917,28 +1541,40 @@ impl SpeakerEncoder {
         Ok(features)
     }
 
-    /// Calculate spectral centroid
+    /// Calculate the magnitude-weighted spectral centroid (in Hz).
+    ///
+    /// Splits the signal into Hann-windowed frames, transforms each with the real
+    /// FFT ([`scirs2_fft::rfft`], via [`frame_spectral_centroid`]) and averages the
+    /// per-frame centroids. Returns `0.0` for silent or sub-frame-length input.
     fn calculate_spectral_centroid(&self, audio: &[f32], sample_rate: u32) -> Result<f32, Error> {
-        // Simplified spectral centroid calculation
-        // In reality, this would use FFT and proper spectral analysis
-
-        let window_size = 1024.min(audio.len());
-        let mut centroid_sum = 0.0;
-        let mut magnitude_sum = 0.0;
-
-        for (i, &sample) in audio.iter().take(window_size).enumerate() {
-            let frequency = i as f32 * sample_rate as f32 / window_size as f32;
-            let magnitude = sample.abs();
-
-            centroid_sum += frequency * magnitude;
-            magnitude_sum += magnitude;
+        if audio.is_empty() || sample_rate == 0 {
+            return Ok(0.0);
         }
 
-        if magnitude_sum > 0.0 {
-            Ok(centroid_sum / magnitude_sum)
-        } else {
-            Ok(0.0)
+        let frame_len = SPEC_FRAME_LEN.min(audio.len());
+        if frame_len < 4 {
+            return Ok(0.0);
         }
+
+        let mut centroid_sum = 0.0f64;
+        let mut frame_count = 0usize;
+        let mut pos = 0;
+        while pos + frame_len <= audio.len() {
+            if let Some(c) = frame_spectral_centroid(&audio[pos..pos + frame_len], sample_rate) {
+                centroid_sum += c as f64;
+                frame_count += 1;
+            }
+            // For inputs shorter than a full hop, analyze the single frame only.
+            if frame_len == audio.len() {
+                break;
+            }
+            pos += SPEC_HOP;
+        }
+
+        if frame_count == 0 {
+            return Ok(0.0);
+        }
+        Ok((centroid_sum / frame_count as f64) as f32)
     }
 }
 
@@ -1096,5 +1732,218 @@ mod tests {
         assert_eq!(range.highest_note - range.lowest_note, 36); // 3 octaves
         assert!(range.optimal_start >= range.lowest_note);
         assert!(range.optimal_end <= range.highest_note);
+    }
+
+    /// Generate an exponential frequency sweep (linear in MIDI) from `f0` to `f1`.
+    fn make_exp_sweep(f0: f32, f1: f32, sample_rate: u32, secs: f32, amp: f32) -> Vec<f32> {
+        let n = (sample_rate as f32 * secs) as usize;
+        let log_ratio = (f1 / f0).ln();
+        let mut phase = 0.0f32;
+        let mut out = Vec::with_capacity(n);
+        for i in 0..n {
+            let t = i as f32 / n as f32;
+            let f = f0 * (log_ratio * t).exp();
+            phase += 2.0 * std::f32::consts::PI * f / sample_rate as f32;
+            out.push(amp * phase.sin());
+        }
+        out
+    }
+
+    /// Generate a tone whose F0 is sinusoidally modulated at `vib_hz`.
+    fn make_vibrato_tone(
+        center: f32,
+        vib_hz: f32,
+        depth: f32,
+        sample_rate: u32,
+        secs: f32,
+        amp: f32,
+    ) -> Vec<f32> {
+        let n = (sample_rate as f32 * secs) as usize;
+        let mut phase = 0.0f32;
+        let mut out = Vec::with_capacity(n);
+        for i in 0..n {
+            let t = i as f32 / sample_rate as f32;
+            let f = center * (1.0 + depth * (2.0 * std::f32::consts::PI * vib_hz * t).sin());
+            phase += 2.0 * std::f32::consts::PI * f / sample_rate as f32;
+            out.push(amp * phase.sin());
+        }
+        out
+    }
+
+    /// Generate a steady tone summing the given partials.
+    fn make_tone(freqs: &[f32], sample_rate: u32, secs: f32, amp: f32) -> Vec<f32> {
+        let n = (sample_rate as f32 * secs) as usize;
+        (0..n)
+            .map(|i| {
+                let t = i as f32 / sample_rate as f32;
+                amp * freqs
+                    .iter()
+                    .map(|&f| (2.0 * std::f32::consts::PI * f * t).sin())
+                    .sum::<f32>()
+                    / freqs.len() as f32
+            })
+            .collect()
+    }
+
+    fn sample_from(audio: Vec<f32>, sample_rate: u32) -> AudioSample {
+        let duration = audio.len() as f32 / sample_rate as f32;
+        AudioSample {
+            audio,
+            sample_rate,
+            duration,
+            transcription: None,
+            phonemes: None,
+            quality_score: 1.0,
+        }
+    }
+
+    #[test]
+    fn test_analyze_vocal_range_glissando() {
+        let sample_rate = 44100;
+        // Exponential sweep C3 (130.81 Hz, MIDI 48) -> C5 (523.25 Hz, MIDI 72).
+        let audio = make_exp_sweep(130.81, 523.25, sample_rate, 3.0, 0.8);
+        let samples = vec![sample_from(audio, sample_rate)];
+
+        let range = vocal_range_from_samples(&samples);
+        assert!(
+            range.lowest_note < range.highest_note,
+            "lowest {} highest {}",
+            range.lowest_note,
+            range.highest_note
+        );
+        assert!(
+            range.highest_note - range.lowest_note >= 12,
+            "span too small: {}..{}",
+            range.lowest_note,
+            range.highest_note
+        );
+        assert!(
+            (44..=56).contains(&range.lowest_note),
+            "lowest_note {}",
+            range.lowest_note
+        );
+        assert!(
+            (66..=78).contains(&range.highest_note),
+            "highest_note {}",
+            range.highest_note
+        );
+        assert!(range.optimal_start >= range.lowest_note);
+        assert!(range.optimal_end <= range.highest_note);
+    }
+
+    #[test]
+    fn test_vibrato_rate_detection() {
+        let sample_rate = 44100;
+        let audio = make_vibrato_tone(220.0, 5.5, 0.04, sample_rate, 3.0, 0.8);
+        let samples = vec![sample_from(audio, sample_rate)];
+
+        let metrics = voice_quality_from_samples(&samples);
+        assert!(
+            (metrics.vibrato_rate - 5.5).abs() < 0.7,
+            "vibrato_rate {}",
+            metrics.vibrato_rate
+        );
+        assert!(
+            metrics.vibrato_depth > 5.0,
+            "expected audible vibrato depth, got {}",
+            metrics.vibrato_depth
+        );
+    }
+
+    #[test]
+    fn test_voice_embedding_unit_norm_deterministic() {
+        let sample_rate = 44100;
+        let audio = make_tone(&[220.0, 440.0, 660.0], sample_rate, 1.0, 0.8);
+        let samples = vec![sample_from(audio, sample_rate)];
+
+        let first = voice_embedding_from_samples(&samples);
+        let second = voice_embedding_from_samples(&samples);
+
+        assert_eq!(first.len(), 512);
+        assert_eq!(first, second, "embedding must be deterministic");
+
+        let norm = first.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!((norm - 1.0).abs() < 1e-4, "embedding norm {}", norm);
+    }
+
+    #[test]
+    fn test_flat_tone_small_vibrato_depth() {
+        let sample_rate = 44100;
+        // 220.5 Hz has an exact 200-sample period at 44100 Hz -> stable F0 estimate.
+        let audio = make_tone(&[220.5], sample_rate, 2.0, 0.8);
+        let samples = vec![sample_from(audio, sample_rate)];
+
+        let metrics = voice_quality_from_samples(&samples);
+        assert!(
+            metrics.vibrato_depth < 20.0,
+            "flat tone vibrato_depth {}",
+            metrics.vibrato_depth
+        );
+    }
+
+    #[test]
+    fn test_spectral_centroid_high_vs_low_tone() {
+        let sample_rate = 44100;
+        let encoder = SpeakerEncoder::new(64).unwrap();
+        let low = make_tone(&[200.0], sample_rate, 1.0, 0.8);
+        let high = make_tone(&[5000.0], sample_rate, 1.0, 0.8);
+
+        let c_low = encoder
+            .calculate_spectral_centroid(&low, sample_rate)
+            .unwrap();
+        let c_high = encoder
+            .calculate_spectral_centroid(&high, sample_rate)
+            .unwrap();
+
+        assert!(
+            c_high > c_low * 2.0,
+            "high-tone centroid {} should greatly exceed low-tone centroid {}",
+            c_high,
+            c_low
+        );
+        assert!(c_low < 1000.0, "low-tone centroid too high: {}", c_low);
+        assert!(c_high > 3000.0, "high-tone centroid too low: {}", c_high);
+    }
+
+    #[test]
+    fn test_estimate_pitch_range_glissando() {
+        let sample_rate = 44100;
+        let engine = VoiceAdaptationEngine::new(Device::Cpu).unwrap();
+        // Exponential sweep A3 (220 Hz) -> A5 (880 Hz).
+        let audio = make_exp_sweep(220.0, 880.0, sample_rate, 3.0, 0.8);
+        let samples = vec![sample_from(audio, sample_rate)];
+
+        let (low, high) = engine.estimate_pitch_range(&samples).unwrap();
+        assert!(high > low, "range {}..{}", low, high);
+        assert!(high - low > 300.0, "range too narrow: {}..{}", low, high);
+        assert!((180.0..=340.0).contains(&low), "low {}", low);
+        assert!((700.0..=920.0).contains(&high), "high {}", high);
+    }
+
+    #[test]
+    fn test_estimate_voice_type_low_vs_high() {
+        let sample_rate = 44100;
+        let engine = VoiceAdaptationEngine::new(Device::Cpu).unwrap();
+
+        // ~98 Hz (G2) -> low voice; ~440 Hz (A4) -> high voice.
+        let low_audio = make_tone(&[98.0], sample_rate, 1.5, 0.8);
+        let high_audio = make_tone(&[440.0], sample_rate, 1.5, 0.8);
+        let low_voice = engine
+            .estimate_voice_type(&[sample_from(low_audio, sample_rate)])
+            .unwrap();
+        let high_voice = engine
+            .estimate_voice_type(&[sample_from(high_audio, sample_rate)])
+            .unwrap();
+
+        assert!(
+            matches!(low_voice, VoiceType::Bass | VoiceType::Baritone),
+            "expected low voice, got {:?}",
+            low_voice
+        );
+        assert!(
+            matches!(high_voice, VoiceType::Soprano | VoiceType::MezzoSoprano),
+            "expected high voice, got {:?}",
+            high_voice
+        );
     }
 }

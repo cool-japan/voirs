@@ -1,17 +1,22 @@
 //! Room acoustics simulation and reverberation processing
 
 pub mod adaptive_acoustics;
+mod reverb;
 pub mod simulation;
 
 use crate::types::Position3D;
-use scirs2_core::ndarray::{Array1, Array2};
+pub use reverb::{
+    AllPassFilter, DelayLine, EarlyReflectionProcessor, FeedbackDelayNetwork, LateReverbProcessor,
+    ReverbProcessor,
+};
+use scirs2_core::ndarray::Array1;
 use serde::{Deserialize, Serialize};
 pub use simulation::{
     AcousticResponse, AdvancedRoomSimulator, DiffractionProcessor, DynamicEnvironmentManager,
     FrequencyDependentProperty, Material as SimMaterial, MaterialDatabase, RayTracingEngine,
     RoomGeometry, RoomSimulationConfig,
 };
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 /// Room acoustics simulator
 #[derive(Debug, Clone)]
@@ -101,59 +106,6 @@ pub struct RoomImpulseResponse {
     pub sample_rate: u32,
 }
 
-/// Early reflection processor
-#[derive(Debug, Clone)]
-pub struct EarlyReflectionProcessor {
-    /// Reflection paths
-    #[allow(dead_code)]
-    reflection_paths: Vec<ReflectionPath>,
-    /// Maximum reflection order
-    #[allow(dead_code)]
-    max_order: usize,
-    /// Speed of sound
-    #[allow(dead_code)]
-    speed_of_sound: f32,
-    /// Sample rate
-    sample_rate: f32,
-}
-
-/// Late reverberation processor
-#[derive(Debug, Clone)]
-pub struct LateReverbProcessor {
-    /// Feedback delay networks
-    #[allow(dead_code)]
-    feedback_networks: Vec<FeedbackDelayNetwork>,
-    /// Diffusion all-pass filters
-    #[allow(dead_code)]
-    diffusion_filters: Vec<AllPassFilter>,
-    /// Reverb time
-    reverb_time: f32,
-    /// Diffusion amount
-    #[allow(dead_code)]
-    diffusion: f32,
-}
-
-/// Combined reverberation processor
-#[derive(Debug, Clone)]
-pub struct ReverbProcessor {
-    /// Early reflections
-    #[allow(dead_code)]
-    early_processor: EarlyReflectionProcessor,
-    /// Late reverb
-    #[allow(dead_code)]
-    late_processor: LateReverbProcessor,
-    /// Crossover frequency between early and late
-    #[allow(dead_code)]
-    crossover_frequency: f32,
-    /// Mix levels
-    #[allow(dead_code)]
-    dry_level: f32,
-    #[allow(dead_code)]
-    early_level: f32,
-    #[allow(dead_code)]
-    late_level: f32,
-}
-
 /// Reflection path in the room
 #[derive(Debug, Clone)]
 pub struct ReflectionPath {
@@ -180,48 +132,6 @@ pub struct SurfaceReflection {
     pub material: Material,
     /// Incident angle
     pub incident_angle: f32,
-}
-
-/// Feedback delay network for late reverberation
-#[derive(Debug, Clone)]
-pub struct FeedbackDelayNetwork {
-    /// Delay lines
-    #[allow(dead_code)]
-    delay_lines: Vec<DelayLine>,
-    /// Feedback matrix
-    #[allow(dead_code)]
-    feedback_matrix: Array2<f32>,
-    /// Input gains
-    #[allow(dead_code)]
-    input_gains: Array1<f32>,
-    /// Output gains
-    #[allow(dead_code)]
-    output_gains: Array1<f32>,
-}
-
-/// All-pass filter for diffusion
-#[derive(Debug, Clone)]
-pub struct AllPassFilter {
-    /// Delay line
-    #[allow(dead_code)]
-    delay_line: DelayLine,
-    /// Feedback coefficient
-    #[allow(dead_code)]
-    feedback: f32,
-    /// Feed-forward coefficient
-    #[allow(dead_code)]
-    feedforward: f32,
-}
-
-/// Delay line with interpolation
-#[derive(Debug, Clone)]
-pub struct DelayLine {
-    /// Buffer
-    buffer: VecDeque<f32>,
-    /// Delay in samples
-    delay_samples: f32,
-    /// Maximum delay
-    max_delay: usize,
 }
 
 /// Wall structure for ray tracing
@@ -269,7 +179,7 @@ impl RoomSimulator {
 
     /// Process audio with room reverb
     pub async fn process_reverb(
-        &self,
+        &mut self,
         left_channel: &mut Array1<f32>,
         right_channel: &mut Array1<f32>,
         source_position: &Position3D,
@@ -917,158 +827,6 @@ impl Default for WallMaterials {
     }
 }
 
-impl EarlyReflectionProcessor {
-    /// Create new early reflection processor
-    pub fn new(_config: &RoomConfig) -> crate::Result<Self> {
-        Ok(Self {
-            reflection_paths: Vec::new(),
-            max_order: 3,
-            speed_of_sound: 343.0,
-            sample_rate: 44100.0,
-        })
-    }
-
-    /// Process early reflections
-    pub async fn process(
-        &self,
-        left_channel: &mut Array1<f32>,
-        right_channel: &mut Array1<f32>,
-        _source_position: &Position3D,
-    ) -> crate::Result<()> {
-        // Simplified early reflection processing
-        // Apply a simple delay and attenuation
-        let delay_samples = (0.02 * self.sample_rate) as usize; // 20ms delay
-        let attenuation = 0.3;
-
-        if delay_samples < left_channel.len() {
-            for i in delay_samples..left_channel.len() {
-                left_channel[i] += left_channel[i - delay_samples] * attenuation;
-                right_channel[i] += right_channel[i - delay_samples] * attenuation;
-            }
-        }
-
-        Ok(())
-    }
-}
-
-impl LateReverbProcessor {
-    /// Create new late reverb processor
-    pub fn new(config: &RoomConfig) -> crate::Result<Self> {
-        let feedback_networks = vec![FeedbackDelayNetwork::new(&[0.03, 0.032, 0.034, 0.036])?];
-
-        let diffusion_filters = vec![
-            AllPassFilter::new(0.005, 0.7)?,
-            AllPassFilter::new(0.012, 0.5)?,
-        ];
-
-        Ok(Self {
-            feedback_networks,
-            diffusion_filters,
-            reverb_time: config.reverb_time,
-            diffusion: 0.7,
-        })
-    }
-
-    /// Process late reverberation
-    pub async fn process(
-        &self,
-        left_channel: &mut Array1<f32>,
-        right_channel: &mut Array1<f32>,
-    ) -> crate::Result<()> {
-        // Simplified late reverb processing
-        // Apply exponential decay
-        let decay_rate = (-60.0 / (self.reverb_time * 44100.0)).exp();
-
-        for i in 1..left_channel.len() {
-            left_channel[i] += left_channel[i - 1] * decay_rate * 0.1;
-            right_channel[i] += right_channel[i - 1] * decay_rate * 0.1;
-        }
-
-        Ok(())
-    }
-}
-
-impl ReverbProcessor {
-    /// Create new reverb processor
-    pub fn new(config: &RoomConfig) -> crate::Result<Self> {
-        Ok(Self {
-            early_processor: EarlyReflectionProcessor::new(config)?,
-            late_processor: LateReverbProcessor::new(config)?,
-            crossover_frequency: 500.0,
-            dry_level: 0.7,
-            early_level: 0.3,
-            late_level: 0.4,
-        })
-    }
-}
-
-impl FeedbackDelayNetwork {
-    /// Create new feedback delay network
-    pub fn new(delays: &[f32]) -> crate::Result<Self> {
-        let mut delay_lines = Vec::new();
-        for &delay in delays {
-            delay_lines.push(DelayLine::new(delay, 44100.0)?);
-        }
-
-        let size = delays.len();
-        let feedback_matrix = Array2::eye(size) * 0.7; // Simplified feedback matrix
-        let input_gains = Array1::ones(size);
-        let output_gains = Array1::ones(size);
-
-        Ok(Self {
-            delay_lines,
-            feedback_matrix,
-            input_gains,
-            output_gains,
-        })
-    }
-}
-
-impl AllPassFilter {
-    /// Create new all-pass filter
-    pub fn new(delay: f32, feedback: f32) -> crate::Result<Self> {
-        Ok(Self {
-            delay_line: DelayLine::new(delay, 44100.0)?,
-            feedback,
-            feedforward: -feedback,
-        })
-    }
-}
-
-impl DelayLine {
-    /// Create new delay line
-    pub fn new(delay_time: f32, sample_rate: f32) -> crate::Result<Self> {
-        let delay_samples = delay_time * sample_rate;
-        let max_delay = delay_samples.ceil() as usize + 1;
-        let buffer = VecDeque::with_capacity(max_delay);
-
-        Ok(Self {
-            buffer,
-            delay_samples,
-            max_delay,
-        })
-    }
-
-    /// Process sample through delay line
-    pub fn process(&mut self, input: f32) -> f32 {
-        // Add input to buffer
-        self.buffer.push_back(input);
-
-        // Remove old samples if buffer is too large
-        while self.buffer.len() > self.max_delay {
-            self.buffer.pop_front();
-        }
-
-        // Get delayed output (simplified - no interpolation)
-        let delay_index = self.delay_samples as usize;
-        if self.buffer.len() > delay_index {
-            self.buffer[self.buffer.len() - 1 - delay_index]
-        } else {
-            0.0
-        }
-    }
-}
-
 /// Multi-room environment system
 pub struct MultiRoomEnvironment {
     /// Individual rooms in the environment
@@ -1258,14 +1016,15 @@ impl MultiRoomEnvironment {
         let mut right_output = Array1::zeros(input_audio.len());
 
         if source_room_id == listener_room_id {
-            // Same room - use standard room acoustics
-            let room = self.rooms.get(source_room_id).ok_or_else(|| {
+            // Same room - use standard room acoustics. The reverb processors carry
+            // delay-line state, so a mutable borrow of the simulator is required.
+            let room = self.rooms.get_mut(source_room_id).ok_or_else(|| {
                 crate::Error::LegacyRoom(format!("Room '{source_room_id}' not found"))
             })?;
 
             // Process with room acoustics
-            self.apply_room_acoustics(
-                &room.simulator,
+            Self::apply_room_acoustics(
+                &mut room.simulator,
                 input_audio,
                 &mut left_output,
                 &mut right_output,
@@ -1300,8 +1059,7 @@ impl MultiRoomEnvironment {
 
     /// Apply room acoustics to audio
     async fn apply_room_acoustics(
-        &self,
-        room_simulator: &RoomSimulator,
+        room_simulator: &mut RoomSimulator,
         input: &Array1<f32>,
         left_output: &mut Array1<f32>,
         right_output: &mut Array1<f32>,

@@ -579,7 +579,6 @@ impl BinauralRenderer {
         state: &mut SourceConvolutionState,
     ) -> crate::Result<(Vec<f32>, Vec<f32>)> {
         let buffer_size = input.len();
-        let hrir_length = self.config.hrir_length;
 
         // Apply crossfading if in progress
         let (effective_hrir_left, effective_hrir_right) = if state.crossfade_progress < 1.0 {
@@ -598,41 +597,46 @@ impl BinauralRenderer {
             )
         };
 
-        // Perform convolution (simplified direct convolution for now)
-        // In production, this would use FFT for efficiency
-        let mut left_output = vec![0.0; buffer_size];
-        let mut right_output = vec![0.0; buffer_size];
+        // FFT-based overlap-add convolution.
+        //
+        // The full linear convolution of the current block with each HRIR is
+        // computed in the frequency domain (`rfft`/`irfft`), giving a result of
+        // length `buffer_size + hrir_length - 1`.  The first `buffer_size`
+        // samples form this block's output; the remaining `hrir_length - 1`
+        // samples are the tail that is carried over (added into the head of the
+        // next block) — this is the textbook overlap-add method and replaces the
+        // previous O(N·M) time-domain loop.
+        let left_hrir = effective_hrir_left.to_vec();
+        let right_hrir = effective_hrir_right.to_vec();
+        let mut left_full = fft_linear_convolve(input, &left_hrir)?;
+        let mut right_full = fft_linear_convolve(input, &right_hrir)?;
 
-        // Direct convolution with overlap-add
-        for n in 0..buffer_size {
-            for k in 0..hrir_length.min(n + 1) {
-                if n >= k {
-                    left_output[n] += input[n - k] * effective_hrir_left[k];
-                    right_output[n] += input[n - k] * effective_hrir_right[k];
-                }
-            }
-        }
+        // Add the tail carried over from the previous block into the head.
+        left_full
+            .iter_mut()
+            .zip(state.left_overlap.iter())
+            .for_each(|(v, &o)| *v += o);
+        right_full
+            .iter_mut()
+            .zip(state.right_overlap.iter())
+            .for_each(|(v, &o)| *v += o);
 
-        // Add overlap from previous block
-        for i in 0..(hrir_length - 1).min(buffer_size) {
-            left_output[i] += state.left_overlap[i];
-            right_output[i] += state.right_overlap[i];
-        }
+        // Current block output is the first `buffer_size` samples.
+        let left_output: Vec<f32> = left_full.iter().take(buffer_size).copied().collect();
+        let right_output: Vec<f32> = right_full.iter().take(buffer_size).copied().collect();
 
-        // Compute new overlap for next block
-        state.left_overlap.fill(0.0);
-        state.right_overlap.fill(0.0);
-
-        for n in 0..(hrir_length - 1) {
-            for k in (buffer_size)..(buffer_size + hrir_length).min(buffer_size + n + 1) {
-                if k >= buffer_size && k - buffer_size < hrir_length && n < hrir_length - 1 {
-                    state.left_overlap[n] += input.get(k - buffer_size).unwrap_or(&0.0)
-                        * effective_hrir_left.get(k - buffer_size).unwrap_or(&0.0);
-                    state.right_overlap[n] += input.get(k - buffer_size).unwrap_or(&0.0)
-                        * effective_hrir_right.get(k - buffer_size).unwrap_or(&0.0);
-                }
-            }
-        }
+        // Save the convolution tail (samples beyond the current block) so it can
+        // be overlapped onto the next block.
+        state
+            .left_overlap
+            .iter_mut()
+            .zip(left_full.iter().skip(buffer_size))
+            .for_each(|(o, &v)| *o = v);
+        state
+            .right_overlap
+            .iter_mut()
+            .zip(right_full.iter().skip(buffer_size))
+            .for_each(|(o, &v)| *o = v);
 
         Ok((left_output, right_output))
     }
@@ -649,6 +653,48 @@ impl BinauralRenderer {
     pub async fn get_metrics(&self) -> BinauralMetrics {
         self.metrics.read().await.clone()
     }
+}
+
+/// FFT-based linear convolution of a real `input` signal with a real impulse
+/// response `hrir`.
+///
+/// Returns the full linear convolution, of length `input.len() + hrir.len() - 1`,
+/// computed via the real FFT (`rfft` → spectral product → `irfft`). The transform
+/// size is rounded up to the next power of two so the circular convolution of the
+/// zero-padded operands equals their linear convolution. This is the building block
+/// of the overlap-add binaural renderer and replaces the previous O(N·M)
+/// time-domain implementation with an O(L·log L) one.
+fn fft_linear_convolve(input: &[f32], hrir: &[f32]) -> crate::Result<Vec<f32>> {
+    let n = input.len();
+    let m = hrir.len();
+    if n == 0 || m == 0 {
+        return Ok(vec![0.0; (n + m).saturating_sub(1)]);
+    }
+
+    let conv_len = n + m - 1;
+    let fft_len = conv_len.next_power_of_two();
+
+    let input_f64: Vec<f64> = input.iter().map(|&x| x as f64).collect();
+    let hrir_f64: Vec<f64> = hrir.iter().map(|&x| x as f64).collect();
+
+    // Forward transforms (each yields `fft_len / 2 + 1` complex bins).
+    let input_spectrum = scirs2_fft::rfft(&input_f64, Some(fft_len))
+        .map_err(|e| crate::Error::LegacyProcessing(format!("FFT error: {e}")))?;
+    let hrir_spectrum = scirs2_fft::rfft(&hrir_f64, Some(fft_len))
+        .map_err(|e| crate::Error::LegacyProcessing(format!("FFT error: {e}")))?;
+
+    // Per-bin spectral product (convolution theorem).
+    let product: Vec<_> = input_spectrum
+        .iter()
+        .zip(hrir_spectrum.iter())
+        .map(|(a, b)| a * b)
+        .collect();
+
+    // Inverse transform; `irfft` already applies the 1/N normalisation.
+    let time = scirs2_fft::irfft(&product, Some(fft_len))
+        .map_err(|e| crate::Error::LegacyProcessing(format!("IFFT error: {e}")))?;
+
+    Ok(time.into_iter().take(conv_len).map(|x| x as f32).collect())
 }
 
 impl Default for BinauralConfig {
@@ -829,5 +875,50 @@ mod tests {
         let audio_data = vec![0.1, 0.2, 0.3, 0.4, 0.5];
         let result = renderer.feed_source_audio("audio_source", audio_data).await;
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_fft_convolution_unit_impulse() {
+        // Convolving with the unit impulse [1.0] must return the signal unchanged
+        // (output length N + 1 - 1 = N).
+        let signal = [0.5_f32, -0.25, 0.75, 1.0, -0.5, 0.2, 0.9];
+        let impulse = [1.0_f32];
+
+        let out = fft_linear_convolve(&signal, &impulse).expect("convolution should succeed");
+
+        assert_eq!(out.len(), signal.len());
+        for (got, expected) in out.iter().zip(signal.iter()) {
+            assert!(
+                (got - expected).abs() < 1e-5,
+                "unit-impulse convolution changed the signal: got {got}, expected {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_fft_convolution_matches_direct() {
+        // The FFT convolution must agree with a brute-force time-domain
+        // convolution on a small known example.
+        let signal = [1.0_f32, 2.0, 3.0, 4.0, -1.0];
+        let kernel = [0.5_f32, -1.0, 0.25];
+
+        let n = signal.len();
+        let m = kernel.len();
+        let mut direct = vec![0.0_f32; n + m - 1];
+        for (i, &s) in signal.iter().enumerate() {
+            for (j, &k) in kernel.iter().enumerate() {
+                direct[i + j] += s * k;
+            }
+        }
+
+        let fft = fft_linear_convolve(&signal, &kernel).expect("convolution should succeed");
+
+        assert_eq!(fft.len(), direct.len());
+        for (a, b) in fft.iter().zip(direct.iter()) {
+            assert!(
+                (a - b).abs() < 1e-4,
+                "FFT convolution diverged from direct: fft {a} vs direct {b}"
+            );
+        }
     }
 }

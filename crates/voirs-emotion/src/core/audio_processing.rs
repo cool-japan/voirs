@@ -4,10 +4,24 @@ use crate::{
     types::{EmotionDimensions, EmotionParameters, EmotionState},
     Error, Result,
 };
+use scirs2_core::Complex;
+use scirs2_fft::RealFftPlanner;
 use std::collections::HashMap;
+use std::f32::consts::PI;
 
 use super::cache::BufferPool;
 use super::simd;
+
+/// Analysis/synthesis frame size for the phase-vocoder pitch shifter.
+///
+/// A power of two keeps the underlying real FFT efficient.
+const PITCH_SHIFT_FRAME: usize = 1024;
+
+/// Hop size for the phase-vocoder pitch shifter (75% overlap).
+///
+/// `FRAME / 4` satisfies the constant-overlap-add (COLA) constraint for the
+/// periodic Hann window, enabling artifact-free overlap-add reconstruction.
+const PITCH_SHIFT_HOP: usize = PITCH_SHIFT_FRAME / 4;
 
 /// Apply voice quality effects like breathiness and roughness
 pub(super) fn apply_voice_quality_effects(
@@ -36,7 +50,28 @@ pub(super) fn apply_voice_quality_effects(
     Ok(())
 }
 
-/// Apply simplified pitch shift effect (optimized to reduce allocations)
+/// Apply a duration-preserving pitch shift effect.
+///
+/// Unlike naive sample-rate conversion (reading the input at `i / shift`), which
+/// changes *both* pitch and duration — the "chipmunk" effect — and aliases, this
+/// uses a **phase vocoder**: the signal is analysed with overlapping
+/// Hann-windowed STFT frames, each bin's instantaneous frequency is estimated
+/// from the frame-to-frame phase advance and remapped by the pitch ratio, and the
+/// result is reconstructed by overlap-add. Output length therefore always equals
+/// input length. Buffers shorter than a single analysis frame fall back to a
+/// length-preserving interpolating resampler (see
+/// [`pitch_shift_resample_fallback`]).
+///
+/// `pitch_shift` is a pitch ratio (`> 1.0` raises pitch) and `strength` scales how
+/// much of the requested shift is applied, via
+/// `effective_shift = 1 + (pitch_shift - 1) * strength`. The shifted signal is
+/// mixed back into `audio` with a short dry/wet crossfade at the edges, which both
+/// avoids boundary clicks and masks the vocoder's overlap-add ramp at the
+/// first/last frames.
+///
+/// To keep the real-time path allocation-light, the full-length shifted buffer is
+/// borrowed from `buffer_pool`; only the inherent per-call FFT scratch is freshly
+/// allocated.
 pub(super) fn apply_pitch_shift_effect_optimized(
     audio: &mut [f32],
     pitch_shift: f32,
@@ -50,45 +85,213 @@ pub(super) fn apply_pitch_shift_effect_optimized(
 
     let effective_shift = 1.0 + (pitch_shift - 1.0) * strength;
 
-    // Simple pitch shift using interpolation with buffer pool
-    if (effective_shift - 1.0).abs() > 0.01 {
-        let mut shifted_audio = buffer_pool.get_buffer(audio.len());
+    // Negligible shift: leave the signal untouched (exact identity).
+    if (effective_shift - 1.0).abs() <= 0.01 {
+        return Ok(());
+    }
 
-        // Use SIMD-friendly loop if possible
-        if use_simd && audio.len() >= 16 {
-            simd::apply_pitch_shift_simd(audio, &mut shifted_audio, effective_shift);
+    let audio_len = audio.len();
+    let mut shifted_audio = buffer_pool.get_buffer(audio_len);
+
+    // Render a pitch-shifted, duration-preserving copy into `shifted_audio`.
+    if audio_len >= PITCH_SHIFT_FRAME {
+        pitch_shift_phase_vocoder(audio, &mut shifted_audio, effective_shift, use_simd)?;
+    } else {
+        pitch_shift_resample_fallback(audio, &mut shifted_audio, effective_shift);
+    }
+
+    // Mix back, crossfading toward the dry signal at the edges to avoid clicks.
+    let fade_samples = PITCH_SHIFT_HOP.min(audio_len / 4).max(1);
+    for (i, sample) in audio.iter_mut().enumerate() {
+        let wet = if i < fade_samples {
+            i as f32 / fade_samples as f32
+        } else if i >= audio_len - fade_samples {
+            (audio_len - i) as f32 / fade_samples as f32
         } else {
-            #[allow(clippy::needless_range_loop)]
-            for i in 0..audio.len() {
-                let source_idx = (i as f32 / effective_shift) as usize;
-                if source_idx < audio.len() {
-                    shifted_audio[i] = audio[source_idx];
-                }
+            1.0
+        };
+
+        *sample = *sample * (1.0 - wet) + shifted_audio[i] * wet;
+    }
+
+    // Return buffer to pool
+    buffer_pool.return_buffer(shifted_audio);
+
+    Ok(())
+}
+
+/// Phase-vocoder pitch shift (duration-preserving).
+///
+/// Writes a pitch-scaled rendering of `input` into `output`; `output.len()` must
+/// equal `input.len()` and `ratio > 1.0` raises the pitch.
+///
+/// Algorithm (75% overlap, periodic Hann analysis + synthesis windows):
+///
+/// 1. For each analysis frame: Hann-window it and take the forward real FFT.
+/// 2. For each bin `k`, estimate the instantaneous frequency (in fractional bins)
+///    from the phase deviation relative to the expected hop advance.
+/// 3. Map source bin `k` to output bin `round(inst_bin * ratio)`, keeping the
+///    maximum-magnitude source per output bin (prevents energy build-up when
+///    several source bins collapse onto one output bin).
+/// 4. Accumulate the pitch-scaled synthesis phase, build the output spectrum, take
+///    the inverse real FFT, apply the synthesis window, and overlap-add.
+/// 5. Normalise by the squared-window OLA sum, silencing the lightly-overlapped
+///    edge samples.
+fn pitch_shift_phase_vocoder(
+    input: &[f32],
+    output: &mut [f32],
+    ratio: f32,
+    use_simd: bool,
+) -> Result<()> {
+    const FRAME: usize = PITCH_SHIFT_FRAME;
+    const HOP: usize = PITCH_SHIFT_HOP;
+    let num_bins = FRAME / 2 + 1;
+    let out_len = output.len();
+
+    let mut planner = RealFftPlanner::<f32>::new();
+    let fwd = planner.plan_fft_forward(FRAME);
+    let inv = planner.plan_fft_inverse(FRAME);
+
+    let win = hann_window(FRAME);
+
+    // Per-bin phase state across frames.
+    let mut last_phase = vec![0.0_f32; num_bins];
+    let mut synth_phase = vec![0.0_f32; num_bins];
+
+    // Output / overlap-add accumulators with one frame of headroom.
+    let mut acc = vec![0.0_f32; out_len + FRAME];
+    let mut ola_sum = vec![0.0_f32; out_len + FRAME];
+
+    // Zero-pad the tail so the final frame is fully covered.
+    let mut padded = input.to_vec();
+    padded.resize(input.len() + FRAME, 0.0);
+
+    // Reusable per-frame working buffers.
+    let mut frame = vec![0.0_f32; FRAME];
+    let mut spectrum = vec![Complex::new(0.0_f32, 0.0_f32); num_bins];
+    let mut out_spectrum = vec![Complex::new(0.0_f32, 0.0_f32); num_bins];
+    let mut out_mag_best = vec![0.0_f32; num_bins];
+    let mut time_out = vec![0.0_f32; FRAME];
+
+    let mut pos = 0_usize;
+    while pos + FRAME <= padded.len() {
+        // ── Analysis: Hann-window the frame ──────────────────────────────
+        let segment = &padded[pos..pos + FRAME];
+        if use_simd && FRAME >= 16 {
+            simd::apply_window_multiply_simd(&mut frame, segment, &win);
+        } else {
+            for (f, (&s, &w)) in frame.iter_mut().zip(segment.iter().zip(win.iter())) {
+                *f = s * w;
             }
         }
 
-        // Copy back with fade to avoid clicks (optimized)
-        let audio_len = audio.len();
-        let fade_samples = 64.min(audio_len / 4);
+        fwd.process(&frame, &mut spectrum)
+            .map_err(|e| Error::Processing(e.to_string()))?;
 
-        for (i, sample) in audio.iter_mut().enumerate() {
-            let fade_factor = if i < fade_samples {
-                i as f32 / fade_samples as f32
-            } else if i >= audio_len - fade_samples {
-                (audio_len - i) as f32 / fade_samples as f32
-            } else {
-                1.0
-            };
+        // ── Build the pitch-shifted output spectrum ──────────────────────
+        out_spectrum.fill(Complex::new(0.0, 0.0));
+        out_mag_best.fill(0.0);
 
-            *sample = *sample * (1.0 - fade_factor * strength)
-                + shifted_audio[i] * fade_factor * strength;
+        for k in 0..num_bins {
+            let mag = spectrum[k].norm();
+            let phase = spectrum[k].arg();
+
+            // Instantaneous frequency, expressed in fractional bins.
+            let expected = 2.0 * PI * k as f32 * HOP as f32 / FRAME as f32;
+            let deviation = wrap_phase(phase - last_phase[k] - expected);
+            let inst_bin = k as f32 + deviation * FRAME as f32 / (2.0 * PI * HOP as f32);
+            last_phase[k] = phase;
+
+            // Target output bin.
+            let k_out = (inst_bin * ratio).round() as isize;
+            if k_out < 0 || k_out as usize >= num_bins {
+                continue;
+            }
+            let k_out = k_out as usize;
+
+            // Advance the synthesis phase by the pitch-scaled instantaneous freq.
+            synth_phase[k_out] += inst_bin * ratio * 2.0 * PI * HOP as f32 / FRAME as f32;
+
+            // Keep the strongest source bin that maps to this output bin.
+            if mag > out_mag_best[k_out] {
+                out_mag_best[k_out] = mag;
+                let re = mag * synth_phase[k_out].cos();
+                let im = if k_out == 0 || k_out == num_bins - 1 {
+                    0.0 // DC and Nyquist must be purely real.
+                } else {
+                    mag * synth_phase[k_out].sin()
+                };
+                out_spectrum[k_out] = Complex::new(re, im);
+            }
         }
 
-        // Return buffer to pool
-        buffer_pool.return_buffer(shifted_audio);
+        // ── Synthesis: inverse FFT + synthesis window, overlap-add ───────
+        inv.process(&out_spectrum, &mut time_out)
+            .map_err(|e| Error::Processing(e.to_string()))?;
+
+        for (i, (&s, &w)) in time_out.iter().zip(win.iter()).enumerate() {
+            let idx = pos + i;
+            if idx < acc.len() {
+                acc[idx] += s * w;
+                ola_sum[idx] += w * w;
+            }
+        }
+
+        pos += HOP;
+    }
+
+    // ── Normalise by the OLA window-energy sum ────────────────────────────
+    // Silence samples whose overlap is below 10% of the peak (the first/last
+    // partially-covered frames) to avoid amplifying lightly-overlapped edges.
+    let max_ola = ola_sum.iter().copied().fold(0.0_f32, f32::max);
+    let threshold = (max_ola * 0.1).max(1e-8);
+    for (dst, (&a, &n)) in output.iter_mut().zip(acc.iter().zip(ola_sum.iter())) {
+        *dst = if n > threshold { a / n } else { 0.0 };
     }
 
     Ok(())
+}
+
+/// Length-preserving interpolating resampler for buffers too short for the phase
+/// vocoder (`< PITCH_SHIFT_FRAME` samples).
+///
+/// Reads the input at `ratio` samples per output sample using linear
+/// interpolation, which raises pitch for `ratio > 1.0`. The output is the same
+/// length as the input, with the tail beyond the input zero-filled. For sub-frame
+/// buffers (under ~23 ms at 44.1 kHz) the phase vocoder cannot resolve frequency
+/// reliably, so this bounded-bandwidth fallback is used; it preserves length but
+/// not content duration, which is acceptable at these very short lengths.
+fn pitch_shift_resample_fallback(input: &[f32], output: &mut [f32], ratio: f32) {
+    let in_len = input.len();
+    for (i, dst) in output.iter_mut().enumerate() {
+        let src = i as f32 * ratio;
+        let idx = src as usize;
+        *dst = if idx + 1 < in_len {
+            let frac = src - idx as f32;
+            input[idx] * (1.0 - frac) + input[idx + 1] * frac
+        } else if idx < in_len {
+            input[idx]
+        } else {
+            0.0
+        };
+    }
+}
+
+/// Periodic (DFT-even) Hann window of length `n`.
+///
+/// Satisfies the COLA constraint at a hop of `n / 4`, enabling artifact-free
+/// overlap-add reconstruction in the phase vocoder.
+fn hann_window(n: usize) -> Vec<f32> {
+    (0..n)
+        .map(|i| 0.5 - 0.5 * (2.0 * PI * i as f32 / n as f32).cos())
+        .collect()
+}
+
+/// Wrap a phase value into the interval `(-π, π]`.
+#[inline]
+fn wrap_phase(p: f32) -> f32 {
+    // Branch-free symmetric modulo: p - 2π·round(p / 2π).
+    p - (2.0 * PI) * (p / (2.0 * PI)).round()
 }
 
 /// Apply tempo effect by resampling (optimized with buffer pool)
@@ -418,4 +621,102 @@ pub(super) fn validate_emotion_parameters(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Generate a pure sine wave with exactly `cycles` periods over `n` samples,
+    /// so its energy lands on FFT bin `cycles` for an `n`-point transform.
+    fn sine(n: usize, cycles: f32) -> Vec<f32> {
+        (0..n)
+            .map(|i| (2.0 * PI * cycles * i as f32 / n as f32).sin())
+            .collect()
+    }
+
+    /// Detect the dominant (highest-magnitude) FFT bin of `signal`, ignoring DC.
+    fn dominant_bin(signal: &[f32]) -> usize {
+        let n = signal.len();
+        let mut planner = RealFftPlanner::<f32>::new();
+        let fwd = planner.plan_fft_forward(n);
+        let mut spectrum = vec![Complex::new(0.0_f32, 0.0); n / 2 + 1];
+        fwd.process(signal, &mut spectrum)
+            .expect("forward FFT for fundamental detection should succeed");
+
+        let mut best_bin = 1_usize;
+        let mut best_mag = 0.0_f32;
+        for (k, c) in spectrum.iter().enumerate().skip(1) {
+            let mag = c.norm();
+            if mag > best_mag {
+                best_mag = mag;
+                best_bin = k;
+            }
+        }
+        best_bin
+    }
+
+    /// The shift must preserve length exactly and never produce NaN/inf.
+    #[test]
+    fn test_pitch_shift_preserves_length_and_finite() {
+        let pool = BufferPool::new(4);
+        let mut audio = sine(4096, 120.0);
+        let original_len = audio.len();
+
+        apply_pitch_shift_effect_optimized(&mut audio, 1.5, 1.0, &pool, true)
+            .expect("pitch shift should succeed");
+
+        assert_eq!(
+            audio.len(),
+            original_len,
+            "phase-vocoder output length must equal input length"
+        );
+        assert!(
+            audio.iter().all(|s| s.is_finite()),
+            "all output samples must be finite"
+        );
+    }
+
+    /// Shifting up by an octave (2x) must move the detected fundamental ~1 octave
+    /// while keeping output length equal to input length.
+    #[test]
+    fn test_pitch_shift_octave_up_doubles_fundamental() {
+        let pool = BufferPool::new(4);
+        let n = 8192;
+        let mut audio = sine(n, 100.0); // fundamental at FFT bin 100
+        let in_bin = dominant_bin(&audio);
+
+        apply_pitch_shift_effect_optimized(&mut audio, 2.0, 1.0, &pool, true)
+            .expect("pitch shift should succeed");
+
+        assert_eq!(audio.len(), n, "output length must equal input length");
+
+        let out_bin = dominant_bin(&audio);
+        let measured_ratio = out_bin as f32 / in_bin as f32;
+        assert!(
+            (1.7..=2.3).contains(&measured_ratio),
+            "shifting up an octave (2x) should ~double the fundamental: \
+             in_bin={in_bin}, out_bin={out_bin}, ratio={measured_ratio:.3}"
+        );
+    }
+
+    /// A ratio of 1.0 leaves the signal untouched (exact identity).
+    #[test]
+    fn test_pitch_shift_identity_is_passthrough() {
+        let pool = BufferPool::new(4);
+        let original = sine(2048, 64.0);
+        let mut audio = original.clone();
+
+        apply_pitch_shift_effect_optimized(&mut audio, 1.0, 1.0, &pool, false)
+            .expect("identity pitch shift should succeed");
+
+        assert_eq!(audio.len(), original.len());
+        for (a, b) in original.iter().zip(audio.iter()) {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "ratio 1.0 must be identity, diff={:.3e}",
+                (a - b).abs()
+            );
+        }
+    }
 }

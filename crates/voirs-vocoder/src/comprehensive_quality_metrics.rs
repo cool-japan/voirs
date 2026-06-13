@@ -8,6 +8,7 @@
 //! - Overall perceptual quality assessment
 
 use crate::{AudioBuffer, Result, VocoderFeature};
+use scirs2_core::Complex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Instant;
@@ -558,11 +559,20 @@ impl ComprehensiveQualityAssessor {
         }
     }
 
-    // Simplified technical metric calculations
+    // Technical metric calculations.
+
+    /// Signal-to-noise ratio in dB.
+    ///
+    /// With a reference signal this is the standard error-to-signal SNR
+    /// (`10·log10(Σref² / Σ(audio-ref)²)`). Without a reference it is a blind
+    /// estimate: the mean short-frame power compared against the noise-floor
+    /// power, taken as a low percentile of the per-frame powers.
     fn calculate_snr(&self, audio: &AudioBuffer, reference: Option<&AudioBuffer>) -> f32 {
-        // Simplified SNR calculation
+        if audio.samples.is_empty() {
+            return 0.0;
+        }
         match reference {
-            Some(ref_audio) => {
+            Some(ref_audio) if !ref_audio.samples.is_empty() => {
                 let signal_power = ref_audio.samples.iter().map(|x| x * x).sum::<f32>();
                 let noise_power = audio
                     .samples
@@ -577,26 +587,125 @@ impl ComprehensiveQualityAssessor {
                     60.0 // Very high SNR
                 }
             }
-            None => {
-                // Estimate SNR from signal characteristics
-                let rms = (audio.samples.iter().map(|x| x * x).sum::<f32>()
-                    / audio.samples.len() as f32)
-                    .sqrt();
-                (rms * 100.0).clamp(10.0, 60.0)
+            _ => {
+                // Blind SNR: mean frame power vs. noise-floor (10th percentile).
+                let frame = (audio.sample_rate() as usize / 50).max(64); // ~20 ms
+                let mut powers: Vec<f32> = audio
+                    .samples
+                    .chunks(frame)
+                    .filter(|c| c.len() == frame)
+                    .map(|c| c.iter().map(|&x| x * x).sum::<f32>() / frame as f32)
+                    .collect();
+
+                if powers.len() < 2 {
+                    let p = audio.samples.iter().map(|&x| x * x).sum::<f32>()
+                        / audio.samples.len() as f32;
+                    return if p > 0.0 { 40.0 } else { 0.0 };
+                }
+
+                powers.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                let noise_floor = powers[powers.len() / 10];
+                let signal = powers.iter().sum::<f32>() / powers.len() as f32;
+                let floor = noise_floor.max(signal * 1e-9).max(f32::MIN_POSITIVE);
+                (10.0 * (signal / floor).log10()).clamp(0.0, 90.0)
             }
         }
     }
 
+    /// Total harmonic distortion (0.0-1.0).
+    ///
+    /// Computes the FFT of a Hann-windowed segment, locates the fundamental as
+    /// the strongest non-DC bin, then forms `THD = sqrt(Σ harmonic energy) /
+    /// sqrt(fundamental energy)` from the energy at integer multiples of the
+    /// fundamental bin (each measured over a ±2-bin window to absorb leakage).
     fn calculate_thd(&self, audio: &AudioBuffer) -> f32 {
-        // Simplified THD calculation
-        let rms =
-            (audio.samples.iter().map(|x| x * x).sum::<f32>() / audio.samples.len() as f32).sqrt();
-        (rms * 0.02).clamp(0.001, 0.1) // Estimated THD
+        if audio.samples.len() < 64 {
+            return 0.0;
+        }
+        let signal = to_mono_f64(audio);
+
+        // FFT size: largest power of two ≤ signal length, capped to [1024, 8192].
+        let mut fft_size = 1024;
+        while fft_size * 2 <= signal.len() && fft_size < 8192 {
+            fft_size *= 2;
+        }
+
+        let windowed: Vec<f64> = (0..fft_size)
+            .map(|i| signal[i] * hann(i, fft_size))
+            .collect();
+        let spec = match scirs2_fft::rfft(&windowed, None) {
+            Ok(s) => s,
+            Err(_) => return 0.0,
+        };
+        let mag: Vec<f64> = spec.iter().map(|c| c.norm()).collect();
+        let n_bins = mag.len();
+        if n_bins < 4 {
+            return 0.0;
+        }
+
+        // Fundamental = strongest bin above the DC / very-low-frequency region.
+        let search_start = 2usize;
+        let mut fund_bin = search_start;
+        let mut fund_mag = 0.0_f64;
+        for (i, &m) in mag.iter().enumerate().skip(search_start) {
+            if m > fund_mag {
+                fund_mag = m;
+                fund_bin = i;
+            }
+        }
+        if fund_mag <= 0.0 {
+            return 0.0;
+        }
+
+        // Energy within a ±2-bin window around a partial (captures leakage).
+        let band_energy = |center: usize| -> f64 {
+            let lo = center.saturating_sub(2);
+            let hi = (center + 2).min(n_bins - 1);
+            (lo..=hi).map(|b| mag[b] * mag[b]).sum::<f64>()
+        };
+
+        let fundamental_energy = band_energy(fund_bin);
+        if fundamental_energy <= 0.0 {
+            return 0.0;
+        }
+
+        let mut harmonic_energy = 0.0_f64;
+        let mut h = 2usize;
+        while fund_bin * h < n_bins - 1 {
+            harmonic_energy += band_energy(fund_bin * h);
+            h += 1;
+        }
+
+        ((harmonic_energy / fundamental_energy).sqrt()).clamp(0.0, 1.0) as f32
     }
 
-    fn calculate_frequency_flatness(&self, _audio: &AudioBuffer) -> f32 {
-        // Simplified frequency flatness (would require FFT analysis)
-        0.85
+    /// Spectral flatness (Wiener entropy) of the power spectrum, in `[0, 1]`.
+    ///
+    /// Defined as `geometric_mean(power) / arithmetic_mean(power)` over the
+    /// Welch-averaged power spectrum (DC bin excluded). Broadband / noise-like
+    /// signals approach 1.0; tonal signals approach 0.0.
+    fn calculate_frequency_flatness(&self, audio: &AudioBuffer) -> f32 {
+        if audio.samples.is_empty() {
+            return 0.0;
+        }
+        let signal = to_mono_f64(audio);
+        let fft_size = 1024;
+        let power = averaged_power_spectrum(&signal, fft_size, fft_size / 2);
+
+        let bins = &power[1..]; // skip DC
+        if bins.is_empty() {
+            return 0.0;
+        }
+        let arith = bins.iter().sum::<f64>() / bins.len() as f64;
+        if arith <= 0.0 {
+            return 0.0;
+        }
+        // Floor each bin relative to the mean to avoid log(0); a tone's empty
+        // bins then drive the geometric mean toward zero (low flatness).
+        let floor = arith * 1e-10;
+        let log_sum: f64 = bins.iter().map(|&p| p.max(floor).ln()).sum::<f64>();
+        let geo = (log_sum / bins.len() as f64).exp();
+        (geo / arith).clamp(0.0, 1.0) as f32
     }
 
     fn calculate_dynamic_range(&self, audio: &AudioBuffer) -> f32 {
@@ -616,14 +725,94 @@ impl ComprehensiveQualityAssessor {
         }
     }
 
-    fn calculate_spectral_stability(&self, _audio: &AudioBuffer) -> f32 {
-        // Simplified spectral stability (would require spectral analysis)
-        0.9
+    /// Frame-to-frame spectral stability in `[0, 1]`.
+    ///
+    /// Computes the normalised spectral flux between consecutive STFT magnitude
+    /// spectra, `flux_t = Σ|m_t − m_{t-1}| / Σ(m_t + m_{t-1}) ∈ [0, 1]`, and
+    /// reports `1 − mean(flux_t)`. A stationary signal (steady tone) yields a
+    /// stability near 1.0; a rapidly changing / noisy signal yields a lower value.
+    fn calculate_spectral_stability(&self, audio: &AudioBuffer) -> f32 {
+        if audio.samples.is_empty() {
+            return 1.0;
+        }
+        let signal = to_mono_f64(audio);
+        let frames = stft_frames(&signal, 1024, 512);
+        if frames.len() < 2 {
+            return 1.0; // not enough frames to observe any variation
+        }
+
+        let mut flux_sum = 0.0_f64;
+        let mut count = 0_usize;
+        for w in frames.windows(2) {
+            let (prev, cur) = (&w[0], &w[1]);
+            let mut diff = 0.0_f64;
+            let mut denom = 0.0_f64;
+            for (a, b) in cur.iter().zip(prev.iter()) {
+                let (ma, mb) = (a.norm(), b.norm());
+                diff += (ma - mb).abs();
+                denom += ma + mb;
+            }
+            if denom > 0.0 {
+                flux_sum += diff / denom;
+                count += 1;
+            }
+        }
+        if count == 0 {
+            return 1.0;
+        }
+        (1.0 - flux_sum / count as f64).clamp(0.0, 1.0) as f32
     }
 
-    fn calculate_phase_coherence(&self, _audio: &AudioBuffer) -> f32 {
-        // Simplified phase coherence (would require complex analysis)
-        0.85
+    /// Phase coherence in `[0, 1]`.
+    ///
+    /// Defined as the magnitude-weighted mean resultant length of the per-bin
+    /// inter-frame phase increments. For every bin we accumulate the unit
+    /// phasor `exp(i·Δφ)` of the phase advance between consecutive STFT frames,
+    /// weighted by the bin magnitude. A bin whose phase advances by a consistent
+    /// amount each hop (a stable sinusoid) gives a resultant length `R_k → 1`;
+    /// random phases give `R_k → 0`. The reported value is `Σ(w_k·R_k) / Σ w_k`.
+    fn calculate_phase_coherence(&self, audio: &AudioBuffer) -> f32 {
+        if audio.samples.is_empty() {
+            return 1.0;
+        }
+        let signal = to_mono_f64(audio);
+        let frames = stft_frames(&signal, 1024, 512);
+        if frames.len() < 2 {
+            return 1.0;
+        }
+
+        let n_bins = frames[0].len();
+        let mut sum_re = vec![0.0_f64; n_bins];
+        let mut sum_im = vec![0.0_f64; n_bins];
+        let mut sum_w = vec![0.0_f64; n_bins];
+
+        for w in frames.windows(2) {
+            let (prev, cur) = (&w[0], &w[1]);
+            for (k, (a, b)) in cur.iter().zip(prev.iter()).enumerate() {
+                let weight = (a.norm() * b.norm()).sqrt();
+                if weight <= 0.0 {
+                    continue;
+                }
+                let dphi = a.arg() - b.arg();
+                sum_re[k] += weight * dphi.cos();
+                sum_im[k] += weight * dphi.sin();
+                sum_w[k] += weight;
+            }
+        }
+
+        let mut weighted_r = 0.0_f64;
+        let mut total_w = 0.0_f64;
+        for ((&re, &im), &w) in sum_re.iter().zip(sum_im.iter()).zip(sum_w.iter()) {
+            if w > 0.0 {
+                let r = (re * re + im * im).sqrt() / w;
+                weighted_r += w * r;
+                total_w += w;
+            }
+        }
+        if total_w <= 0.0 {
+            return 1.0;
+        }
+        (weighted_r / total_w).clamp(0.0, 1.0) as f32
     }
 
     fn technical_to_mos(&self, snr: f32, thd: f32) -> f32 {
@@ -1009,5 +1198,247 @@ impl FeatureQualityCalculator for BaseVocodingQualityCalculator {
 
     fn update_config(&mut self, config: &QualityAssessmentConfig) {
         self.config = config.clone();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DSP helpers shared by the FFT-based technical metrics.
+// ---------------------------------------------------------------------------
+
+/// Downmix an (interleaved) audio buffer to a mono `f64` signal.
+fn to_mono_f64(audio: &AudioBuffer) -> Vec<f64> {
+    let ch = audio.channels().max(1) as usize;
+    if ch <= 1 {
+        return audio.samples.iter().map(|&s| s as f64).collect();
+    }
+    audio
+        .samples
+        .chunks(ch)
+        .map(|frame| frame.iter().map(|&s| s as f64).sum::<f64>() / ch as f64)
+        .collect()
+}
+
+/// Hann window weight at position `i` of a window of length `len`.
+fn hann(i: usize, len: usize) -> f64 {
+    if len <= 1 {
+        return 1.0;
+    }
+    0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / (len - 1) as f64).cos())
+}
+
+/// Welch-averaged power spectrum: the mean periodogram over Hann-windowed,
+/// `hop`-spaced frames. Returns one power value per real-FFT bin.
+fn averaged_power_spectrum(signal: &[f64], fft_size: usize, hop: usize) -> Vec<f64> {
+    let mut acc = vec![0.0_f64; fft_size / 2 + 1];
+    let mut frames = 0_usize;
+
+    if signal.len() >= fft_size {
+        let mut start = 0;
+        while start + fft_size <= signal.len() {
+            let windowed: Vec<f64> = (0..fft_size)
+                .map(|i| signal[start + i] * hann(i, fft_size))
+                .collect();
+            if let Ok(spec) = scirs2_fft::rfft(&windowed, None) {
+                for (a, c) in acc.iter_mut().zip(spec.iter()) {
+                    *a += c.norm_sqr();
+                }
+                frames += 1;
+            }
+            start += hop.max(1);
+        }
+    }
+
+    if frames == 0 {
+        // Signal shorter than one frame: zero-pad a single frame.
+        let mut buf = vec![0.0_f64; fft_size];
+        let copy = fft_size.min(signal.len());
+        for (i, b) in buf.iter_mut().enumerate().take(copy) {
+            *b = signal[i] * hann(i, fft_size);
+        }
+        if let Ok(spec) = scirs2_fft::rfft(&buf, None) {
+            for (a, c) in acc.iter_mut().zip(spec.iter()) {
+                *a = c.norm_sqr();
+            }
+            frames = 1;
+        }
+    }
+
+    if frames > 1 {
+        let inv = 1.0 / frames as f64;
+        for a in acc.iter_mut() {
+            *a *= inv;
+        }
+    }
+    acc
+}
+
+/// Per-frame complex STFT (Hann window, `hop` spacing). Each inner vector holds
+/// the `fft_size/2 + 1` complex bins of one frame.
+fn stft_frames(signal: &[f64], fft_size: usize, hop: usize) -> Vec<Vec<Complex<f64>>> {
+    let mut frames: Vec<Vec<Complex<f64>>> = Vec::new();
+    if signal.len() < fft_size {
+        return frames;
+    }
+    let mut start = 0;
+    while start + fft_size <= signal.len() {
+        let windowed: Vec<f64> = (0..fft_size)
+            .map(|i| signal[start + i] * hann(i, fft_size))
+            .collect();
+        if let Ok(spec) = scirs2_fft::rfft(&windowed, None) {
+            frames.push(spec);
+        }
+        start += hop.max(1);
+    }
+    frames
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assessor() -> ComprehensiveQualityAssessor {
+        ComprehensiveQualityAssessor::new(QualityAssessmentConfig::default())
+    }
+
+    fn sine(freq: f32, secs: f32, sr: u32, amp: f32) -> AudioBuffer {
+        let n = (secs * sr as f32) as usize;
+        let s: Vec<f32> = (0..n)
+            .map(|i| amp * (2.0 * std::f32::consts::PI * freq * i as f32 / sr as f32).sin())
+            .collect();
+        AudioBuffer::new(s, sr, 1)
+    }
+
+    /// Deterministic white-ish noise via a linear congruential generator. Using
+    /// a self-contained LCG avoids any external RNG dependency (SciRS2 policy).
+    fn white_noise(n: usize, sr: u32, amp: f32) -> AudioBuffer {
+        let mut state: u64 = 0x2545_F491_4F6C_DD1D;
+        let s: Vec<f32> = (0..n)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                let u = (state >> 33) as f32 / (1u64 << 31) as f32; // [0, 1)
+                (u * 2.0 - 1.0) * amp
+            })
+            .collect();
+        AudioBuffer::new(s, sr, 1)
+    }
+
+    #[test]
+    fn test_frequency_flatness_noise_high_tone_low() {
+        let a = assessor();
+        let noise = white_noise(48_000, 48_000, 0.5);
+        let tone = sine(1000.0, 1.0, 48_000, 0.5);
+
+        let noise_flat = a.calculate_frequency_flatness(&noise);
+        let tone_flat = a.calculate_frequency_flatness(&tone);
+
+        assert!(
+            noise_flat > 0.4,
+            "white-noise flatness should be high, got {noise_flat:.4}"
+        );
+        assert!(
+            tone_flat < 0.1,
+            "pure-tone flatness should be low, got {tone_flat:.4}"
+        );
+        assert!(noise_flat > tone_flat);
+    }
+
+    #[test]
+    fn test_thd_pure_sine_low_clipped_high() {
+        let a = assessor();
+        let pure = sine(1000.0, 1.0, 48_000, 0.9);
+
+        // Hard-clip the same sine to inject harmonics.
+        let mut clipped_samples = pure.samples().to_vec();
+        for s in clipped_samples.iter_mut() {
+            *s = s.clamp(-0.4, 0.4);
+        }
+        let clipped = AudioBuffer::new(clipped_samples, 48_000, 1);
+
+        let thd_pure = a.calculate_thd(&pure);
+        let thd_clipped = a.calculate_thd(&clipped);
+
+        assert!(
+            thd_pure < 0.05,
+            "pure-sine THD should be ~0, got {thd_pure:.4}"
+        );
+        assert!(
+            thd_clipped > 0.1,
+            "clipped-sine THD should be high, got {thd_clipped:.4}"
+        );
+        assert!(thd_clipped > thd_pure);
+    }
+
+    #[test]
+    fn test_spectral_stability_steady_vs_noise() {
+        let a = assessor();
+        let steady = sine(440.0, 1.0, 48_000, 0.5);
+        let noise = white_noise(48_000, 48_000, 0.5);
+
+        let steady_stab = a.calculate_spectral_stability(&steady);
+        let noise_stab = a.calculate_spectral_stability(&noise);
+
+        assert!(
+            steady_stab > 0.7,
+            "steady tone should be stable, got {steady_stab:.4}"
+        );
+        assert!(
+            steady_stab > noise_stab,
+            "steady ({steady_stab:.4}) should exceed noise ({noise_stab:.4})"
+        );
+    }
+
+    #[test]
+    fn test_phase_coherence_tone_vs_noise() {
+        let a = assessor();
+        let tone = sine(440.0, 1.0, 48_000, 0.5);
+        let noise = white_noise(48_000, 48_000, 0.5);
+
+        let tone_coh = a.calculate_phase_coherence(&tone);
+        let noise_coh = a.calculate_phase_coherence(&noise);
+
+        assert!(
+            tone_coh > 0.7,
+            "steady tone should be phase-coherent, got {tone_coh:.4}"
+        );
+        assert!(
+            tone_coh > noise_coh,
+            "tone ({tone_coh:.4}) should exceed noise ({noise_coh:.4})"
+        );
+    }
+
+    #[test]
+    fn test_blind_snr_clean_vs_noisy() {
+        let a = assessor();
+        let sr = 48_000_u32;
+
+        // Loud tone for the first half, silence for the second half.
+        let half = sr as usize / 2;
+        let mut clean: Vec<f32> = (0..half)
+            .map(|i| 0.5 * (2.0 * std::f32::consts::PI * 1000.0 * i as f32 / sr as f32).sin())
+            .collect();
+        clean.resize(sr as usize, 0.0);
+
+        // Same signal plus a small noise floor everywhere.
+        let noise = white_noise(sr as usize, sr, 0.05);
+        let noisy: Vec<f32> = clean
+            .iter()
+            .zip(noise.samples().iter())
+            .map(|(c, n)| c + n)
+            .collect();
+
+        let clean_snr = a.calculate_snr(&AudioBuffer::new(clean, sr, 1), None);
+        let noisy_snr = a.calculate_snr(&AudioBuffer::new(noisy, sr, 1), None);
+
+        assert!(clean_snr.is_finite() && noisy_snr.is_finite());
+        assert!(
+            noisy_snr > 0.0,
+            "noisy SNR should be positive, got {noisy_snr:.2}"
+        );
+        assert!(
+            clean_snr > noisy_snr,
+            "clean SNR ({clean_snr:.2}) should exceed noisy SNR ({noisy_snr:.2})"
+        );
     }
 }

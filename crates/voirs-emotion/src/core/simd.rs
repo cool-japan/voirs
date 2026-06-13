@@ -31,38 +31,29 @@ pub(super) fn apply_energy_scaling_simd(audio: &mut [f32], factor: f32) {
     }
 }
 
-/// SIMD-optimized pitch shift using wide crate
+/// SIMD-accelerated element-wise window multiply: `dst[i] = src[i] * win[i]`.
+///
+/// This backs the per-frame analysis/synthesis windowing of the phase-vocoder
+/// pitch shifter (`audio_processing::pitch_shift_phase_vocoder`), which is the
+/// hottest per-sample loop in that transform. All three slices are processed up
+/// to their shortest common length.
 #[inline]
-pub(super) fn apply_pitch_shift_simd(input: &[f32], output: &mut [f32], shift: f32) {
-    let chunks = output.len() / 8;
-    let remainder = output.len() % 8;
+pub(super) fn apply_window_multiply_simd(dst: &mut [f32], src: &[f32], win: &[f32]) {
+    let len = dst.len().min(src.len()).min(win.len());
+    let chunks = len / 8;
 
     // Process 8 samples at a time using SIMD
     for i in 0..chunks {
         let start_idx = i * 8;
-        let mut samples = [0.0f32; 8];
-
-        // Calculate source indices for 8 output samples
-        #[allow(clippy::needless_range_loop)]
-        for j in 0..8 {
-            let output_idx = start_idx + j;
-            let source_idx = (output_idx as f32 / shift) as usize;
-            if source_idx < input.len() {
-                samples[j] = input[source_idx];
-            }
-        }
-
-        // Store to output
-        output[start_idx..start_idx + 8].copy_from_slice(&samples);
+        let samples = f32x8::from(&src[start_idx..start_idx + 8]);
+        let window = f32x8::from(&win[start_idx..start_idx + 8]);
+        let product: [f32; 8] = (samples * window).into();
+        dst[start_idx..start_idx + 8].copy_from_slice(&product);
     }
 
     // Process remaining samples scalar
-    #[allow(clippy::needless_range_loop)]
-    for i in chunks * 8..output.len() {
-        let source_idx = (i as f32 / shift) as usize;
-        if source_idx < input.len() {
-            output[i] = input[source_idx];
-        }
+    for i in chunks * 8..len {
+        dst[i] = src[i] * win[i];
     }
 }
 

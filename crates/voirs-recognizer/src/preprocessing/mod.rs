@@ -568,13 +568,22 @@ impl AudioPreprocessor {
             let left_vec = _mm256_loadu_ps(left.as_ptr().add(i));
             let right_vec = _mm256_loadu_ps(right.as_ptr().add(i));
 
-            // Interleave using unpack operations
-            let low_interleaved = _mm256_unpacklo_ps(left_vec, right_vec);
-            let high_interleaved = _mm256_unpackhi_ps(left_vec, right_vec);
+            // `_mm256_unpack{lo,hi}_ps` interleave *within each 128-bit lane*, so on
+            // their own they would emit the samples out of order:
+            //   lo = [L0 R0 L1 R1 | L4 R4 L5 R5]
+            //   hi = [L2 R2 L3 R3 | L6 R6 L7 R7]
+            let lo = _mm256_unpacklo_ps(left_vec, right_vec);
+            let hi = _mm256_unpackhi_ps(left_vec, right_vec);
+
+            // Re-stitch the 128-bit lanes so the 16 outputs are fully contiguous:
+            //   out_lo = [lo.lane0, hi.lane0] = [L0 R0 L1 R1 L2 R2 L3 R3]
+            //   out_hi = [lo.lane1, hi.lane1] = [L4 R4 L5 R5 L6 R6 L7 R7]
+            let out_lo = _mm256_permute2f128_ps(lo, hi, 0x20);
+            let out_hi = _mm256_permute2f128_ps(lo, hi, 0x31);
 
             // Store interleaved results
-            _mm256_storeu_ps(output.as_mut_ptr().add(i * 2), low_interleaved);
-            _mm256_storeu_ps(output.as_mut_ptr().add(i * 2 + 8), high_interleaved);
+            _mm256_storeu_ps(output.as_mut_ptr().add(i * 2), out_lo);
+            _mm256_storeu_ps(output.as_mut_ptr().add(i * 2 + 8), out_hi);
         }
 
         // Handle remaining samples

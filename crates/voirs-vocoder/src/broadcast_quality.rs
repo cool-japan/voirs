@@ -626,7 +626,6 @@ impl DynamicsProcessor {
 
 /// Spectral enhancer for broadcast clarity
 pub struct SpectralEnhancer {
-    #[allow(dead_code)]
     sample_rate: f32,
     presence_boost: f32, // 3-5 kHz boost for speech clarity
     air_band_boost: f32, // 10-15 kHz boost for "air"
@@ -641,28 +640,112 @@ impl SpectralEnhancer {
         }
     }
 
+    /// Apply the two-band broadcast clarity enhancement to `audio`.
+    ///
+    /// Unlike the previous time-domain sample-differencing approximation (which
+    /// only crudely correlated with frequency), the enhancement is now performed
+    /// entirely in the frequency domain for precise control over *which*
+    /// frequencies are boosted: the signal is transformed with a real FFT, every
+    /// bin is scaled by a zero-phase target magnitude curve, and the result is
+    /// transformed back with the inverse real FFT.
+    ///
+    /// The target magnitude curve (see [`Self::target_gain`]) is the product of
+    /// two classic broadcast EQ shapes derived from the documented bands:
+    /// * a **presence peaking bell** centred on the speech-clarity band
+    ///   (3-5 kHz), reaching `self.presence_boost` dB at its centre, and
+    /// * an **"air" high-shelf** that rises smoothly across 10-15 kHz to
+    ///   `self.air_band_boost` dB and holds that gain up to Nyquist.
+    ///
+    /// Because the curve is purely real (zero phase), a flat 0 dB setting (both
+    /// boosts zero) is a mathematical identity: under the FFT's backward
+    /// normalisation `irfft(rfft(x)) == x`, so the output equals the input. The
+    /// output always preserves the input length and is finite for finite input.
+    ///
+    /// Note: the single-shot FFT applies the EQ as a circular convolution, so the
+    /// smooth (hence short) equivalent impulse response can wrap a negligible
+    /// amount of energy between the buffer edges; for the gentle gains used here
+    /// this is inaudible. Block-based callers would use overlap-add instead.
     pub fn process(&mut self, audio: &[f32]) -> Result<Vec<f32>, BroadcastError> {
-        // Simplified spectral enhancement using a basic filter approach
-        // In a real implementation, this would use FFT for more precise frequency control
-
-        let mut enhanced = Vec::with_capacity(audio.len());
-        let mut prev_sample = 0.0f32;
-
-        for &sample in audio {
-            // High-pass filtering for presence boost (simplified)
-            let high_freq = sample - prev_sample * 0.95;
-            let presence_gain = 10.0_f32.powf(self.presence_boost / 20.0) - 1.0;
-            let presence_enhanced = sample + high_freq * (presence_gain * 0.1);
-
-            // Add gentle high-frequency enhancement using air_band_boost
-            let air_gain = 10.0_f32.powf(self.air_band_boost / 20.0) - 1.0;
-            let air_enhanced = presence_enhanced + (sample - prev_sample) * (air_gain * 0.05);
-
-            enhanced.push(air_enhanced);
-            prev_sample = sample;
+        if audio.is_empty() {
+            return Ok(Vec::new());
         }
 
-        Ok(enhanced)
+        let n = audio.len();
+
+        // Forward real FFT -> half-spectrum X[k], k = 0..=n/2.
+        let mut spectrum = scirs2_fft::rfft(audio, None)
+            .map_err(|e| BroadcastError::ProcessingError(format!("forward FFT failed: {e}")))?;
+
+        // Scale each bin by the zero-phase target magnitude curve.
+        let hz_per_bin = self.sample_rate / n as f32;
+        for (bin_index, bin) in spectrum.iter_mut().enumerate() {
+            let freq_hz = bin_index as f32 * hz_per_bin;
+            *bin *= self.target_gain(freq_hz) as f64;
+        }
+
+        // Inverse real FFT -> length-preserving real signal.
+        let time_domain = scirs2_fft::irfft(&spectrum, Some(n))
+            .map_err(|e| BroadcastError::ProcessingError(format!("inverse FFT failed: {e}")))?;
+
+        Ok(time_domain
+            .into_iter()
+            .map(|sample| sample as f32)
+            .collect())
+    }
+
+    /// Linear magnitude gain applied at `freq_hz` by the enhancement curve.
+    ///
+    /// Combines the presence peaking bell and the "air" high-shelf: their dB
+    /// gains add, then convert to a linear amplitude factor. Returns exactly
+    /// `1.0` (unity) wherever both boosts are zero, which makes the overall
+    /// [`Self::process`] a true identity in that case.
+    fn target_gain(&self, freq_hz: f32) -> f32 {
+        // Band edges taken from the field documentation above.
+        const PRESENCE_LO_HZ: f32 = 3_000.0; // speech-clarity band, lower edge
+        const PRESENCE_HI_HZ: f32 = 5_000.0; // speech-clarity band, upper edge
+        const AIR_LO_HZ: f32 = 10_000.0; // "air" shelf transition start
+        const AIR_HI_HZ: f32 = 15_000.0; // "air" shelf transition end
+
+        // --- Presence: peaking bell, Gaussian in log-frequency ---
+        // Centre at the geometric mean of the band; the half-bandwidth (centre
+        // -> band edge, in octaves) sets the bell width so the boost stays
+        // concentrated inside 3-5 kHz and decays smoothly outside it. (At
+        // freq = 0 the log is undefined, so the DC bin is left untouched.)
+        let presence_db = if freq_hz > 0.0 {
+            let centre_hz = (PRESENCE_LO_HZ * PRESENCE_HI_HZ).sqrt();
+            let half_bw_oct = (PRESENCE_HI_HZ / centre_hz).log2();
+            // sigma so the bell sits at half its peak (in dB) at the band edges.
+            let sigma_oct = half_bw_oct / (2.0_f32 * std::f32::consts::LN_2).sqrt();
+            let dist_oct = (freq_hz / centre_hz).log2();
+            self.presence_boost * (-0.5 * (dist_oct / sigma_oct).powi(2)).exp()
+        } else {
+            0.0
+        };
+
+        // --- Air: high-shelf with a smoothstep transition in log-frequency ---
+        // Clamp the transition band below Nyquist so the shelf stays well defined
+        // at lower sample rates.
+        let nyquist_hz = 0.5 * self.sample_rate;
+        let air_lo = AIR_LO_HZ.min(0.80 * nyquist_hz);
+        let air_hi = AIR_HI_HZ.min(0.98 * nyquist_hz);
+        let air_db = if air_hi <= air_lo {
+            // Degenerate band (very low sample rate): hard step at air_lo.
+            if freq_hz >= air_lo {
+                self.air_band_boost
+            } else {
+                0.0
+            }
+        } else if freq_hz <= air_lo {
+            0.0
+        } else if freq_hz >= air_hi {
+            self.air_band_boost
+        } else {
+            let t = (freq_hz / air_lo).log2() / (air_hi / air_lo).log2();
+            let smooth = t * t * (3.0 - 2.0 * t); // Hermite smoothstep
+            self.air_band_boost * smooth
+        };
+
+        10.0_f32.powf((presence_db + air_db) / 20.0)
     }
 
     pub fn analyze_spectral_balance(&self, audio: &[f32]) -> SpectralBalance {
@@ -1221,5 +1304,118 @@ mod tests {
             true_peak_db >= sample_peak_db,
             "true peak {true_peak_db:.3} dBTP should be >= sample peak {sample_peak_db:.3} dBTP"
         );
+    }
+
+    // ------- Spectral enhancer (FFT-domain EQ) tests -------
+
+    /// Sum of squared FFT magnitudes for bins whose centre frequency falls in
+    /// the half-open band `[lo_hz, hi_hz)`.
+    fn band_energy(signal: &[f32], sample_rate: f32, lo_hz: f32, hi_hz: f32) -> f64 {
+        let spectrum = scirs2_fft::rfft(signal, None).expect("rfft of test signal");
+        let hz_per_bin = sample_rate / signal.len() as f32;
+        spectrum
+            .iter()
+            .enumerate()
+            .filter(|(k, _)| (lo_hz..hi_hz).contains(&(*k as f32 * hz_per_bin)))
+            .map(|(_, c)| c.norm_sqr())
+            .sum()
+    }
+
+    /// A positive "air" high-shelf boost must raise high-frequency energy
+    /// relative to low-frequency energy (verified via FFT band energies).
+    #[test]
+    fn test_spectral_enhancer_boost_raises_high_frequency_energy() {
+        let sample_rate = 48_000.0f32;
+        let n = 8_192usize; // power of two -> clean band integration
+
+        // Broadband two-tone: a low tone (untouched) and a high tone (boosted).
+        let signal: Vec<f32> = (0..n)
+            .map(|i| {
+                let t = i as f32 / sample_rate;
+                0.3 * (2.0 * std::f32::consts::PI * 305.0 * t).sin()
+                    + 0.3 * (2.0 * std::f32::consts::PI * 16_000.0 * t).sin()
+            })
+            .collect();
+
+        let mut enhancer = SpectralEnhancer::new(sample_rate);
+        enhancer.presence_boost = 0.0; // isolate the air shelf
+        enhancer.air_band_boost = 6.0; // strong, unambiguous boost
+
+        let processed = enhancer.process(&signal).expect("process must succeed");
+
+        let low_before = band_energy(&signal, sample_rate, 100.0, 2_000.0);
+        let high_before = band_energy(&signal, sample_rate, 9_000.0, 20_000.0);
+        let low_after = band_energy(&processed, sample_rate, 100.0, 2_000.0);
+        let high_after = band_energy(&processed, sample_rate, 9_000.0, 20_000.0);
+
+        let ratio_before = high_before / low_before;
+        let ratio_after = high_after / low_after;
+
+        assert!(
+            ratio_after > ratio_before * 1.5,
+            "high/low energy ratio should rise: before {ratio_before:.4}, after {ratio_after:.4}"
+        );
+    }
+
+    /// With both boosts at 0 dB the enhancer is a frequency-domain identity:
+    /// the output must match the input sample-for-sample (FFT round-trip error).
+    #[test]
+    fn test_spectral_enhancer_flat_setting_is_identity() {
+        let sample_rate = 48_000.0f32;
+        let n = 4_096usize;
+
+        let signal: Vec<f32> = (0..n)
+            .map(|i| {
+                let t = i as f32 / sample_rate;
+                0.5 * (2.0 * std::f32::consts::PI * 440.0 * t).sin()
+                    + 0.2 * (2.0 * std::f32::consts::PI * 3_500.0 * t).sin()
+            })
+            .collect();
+
+        let mut enhancer = SpectralEnhancer::new(sample_rate);
+        enhancer.presence_boost = 0.0;
+        enhancer.air_band_boost = 0.0;
+
+        let processed = enhancer.process(&signal).expect("process must succeed");
+
+        assert_eq!(processed.len(), signal.len());
+        let max_abs_diff = signal
+            .iter()
+            .zip(processed.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(
+            max_abs_diff < 1e-4,
+            "flat (0 dB) EQ must be near-identity, max abs diff = {max_abs_diff:e}"
+        );
+    }
+
+    /// The output must be finite, same length as the input, and the enhancer
+    /// must gracefully handle empty input (covers the default boost settings).
+    #[test]
+    fn test_spectral_enhancer_output_is_finite_and_length_preserved() {
+        let sample_rate = 44_100.0f32;
+        let n = 2_000usize; // arbitrary (non-power-of-two) length
+
+        let signal: Vec<f32> = (0..n)
+            .map(|i| {
+                let t = i as f32 / sample_rate;
+                0.4 * (2.0 * std::f32::consts::PI * 1_000.0 * t).sin()
+            })
+            .collect();
+
+        // Default settings (presence_boost = 2.0 dB, air_band_boost = 1.5 dB).
+        let mut enhancer = SpectralEnhancer::new(sample_rate);
+        let processed = enhancer.process(&signal).expect("process must succeed");
+
+        assert_eq!(processed.len(), signal.len());
+        assert!(
+            processed.iter().all(|s| s.is_finite()),
+            "all output samples must be finite"
+        );
+
+        // Empty input -> empty output, no panic.
+        let empty = enhancer.process(&[]).expect("empty input must succeed");
+        assert!(empty.is_empty());
     }
 }

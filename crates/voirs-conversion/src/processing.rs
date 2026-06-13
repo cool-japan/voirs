@@ -854,31 +854,70 @@ impl FeatureExtractor {
         output
     }
 
+    /// Compute the mean half-wave-rectified L2 spectral flux of an audio signal.
+    ///
+    /// The signal is divided into overlapping 1024-sample Hann-windowed frames
+    /// (256-sample hop) whose magnitude spectra are computed with
+    /// `scirs2_fft` (via [`Self::compute_fft`]). For each pair of consecutive
+    /// frames the half-wave-rectified L2 spectral flux is computed:
+    ///
+    /// ```text
+    /// flux_t = sqrt( Σ_k max(|X_t[k]| − |X_{t-1}[k]|, 0)² )
+    /// ```
+    ///
+    /// Each frame's flux is normalized by the mean magnitude of that frame so
+    /// the measure is invariant to overall signal level. The mean flux across
+    /// all consecutive frame pairs is returned. A steady tone yields a value
+    /// near zero, whereas signals with abrupt spectral changes yield larger
+    /// values.
     fn compute_spectral_flux(&self, audio: &[f32]) -> Result<f32> {
-        // Simplified spectral flux computation
-        let window_size = 1024;
-        let hop_size = 512;
+        const WINDOW_SIZE: usize = 1024;
+        const HOP_SIZE: usize = 256;
 
-        if audio.len() < window_size * 2 {
+        if audio.len() < WINDOW_SIZE * 2 {
             return Ok(0.0);
         }
 
+        // Precompute the Hann window once for all frames.
+        let hann: Vec<f32> = (0..WINDOW_SIZE)
+            .map(|i| {
+                0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / (WINDOW_SIZE - 1) as f32).cos()
+            })
+            .collect();
+
+        let mut prev_spectrum: Option<Vec<f32>> = None;
         let mut flux_values = Vec::new();
 
-        for i in (hop_size..audio.len() - window_size).step_by(hop_size) {
-            let window1 = &audio[i - hop_size..i - hop_size + window_size];
-            let window2 = &audio[i..i + window_size];
-
-            let spectrum1 = self.compute_fft(window1)?;
-            let spectrum2 = self.compute_fft(window2)?;
-
-            let flux: f32 = spectrum1
+        let mut start = 0;
+        while start + WINDOW_SIZE <= audio.len() {
+            let windowed: Vec<f32> = audio[start..start + WINDOW_SIZE]
                 .iter()
-                .zip(spectrum2.iter())
-                .map(|(s1, s2)| (s2 - s1).max(0.0))
-                .sum();
+                .zip(hann.iter())
+                .map(|(&x, &w)| x * w)
+                .collect();
+            let spectrum = self.compute_fft(&windowed)?;
 
-            flux_values.push(flux);
+            if let Some(prev) = &prev_spectrum {
+                // Half-wave-rectified L2 spectral flux: only spectral increases
+                // contribute, emphasising note/phone onsets.
+                let sum_sq: f32 = spectrum
+                    .iter()
+                    .zip(prev.iter())
+                    .map(|(&cur, &old)| {
+                        let diff = (cur - old).max(0.0);
+                        diff * diff
+                    })
+                    .sum();
+                let flux = sum_sq.sqrt();
+
+                // Normalize by the mean magnitude of the current frame so the
+                // measure does not scale with signal loudness.
+                let mean_mag = self.mean(&spectrum).max(1e-8);
+                flux_values.push(flux / mean_mag);
+            }
+
+            prev_spectrum = Some(spectrum);
+            start += HOP_SIZE;
         }
 
         Ok(self.mean(&flux_values))
@@ -900,29 +939,123 @@ impl FeatureExtractor {
         Ok(f0_values)
     }
 
+    /// Estimate the fundamental frequency (F0) of a frame using normalized
+    /// autocorrelation with voicing detection, octave-error guarding and
+    /// parabolic peak interpolation.
+    ///
+    /// Algorithm:
+    /// 1. The frame is mean-removed (DC offset is irrelevant to pitch).
+    /// 2. The normalized autocorrelation
+    ///    `r(τ) = Σ x[i]·x[i+τ] / sqrt(Σ x[i]² · Σ x[i+τ]²)` is evaluated for
+    ///    every lag `τ` in the range corresponding to 80–500 Hz. The
+    ///    normalization keeps `r(τ)` in `[-1, 1]`, where it doubles as a
+    ///    voicing-strength measure.
+    /// 3. **Voicing decision**: if the global maximum correlation is below
+    ///    [`VOICING_THRESHOLD`], the frame is treated as unvoiced and `0.0`
+    ///    is returned (also covers silence and white noise).
+    /// 4. **Octave-error guarding**: a sub-multiple of the best lag may be the
+    ///    true (shortest) period. The shortest sub-multiple period whose
+    ///    correlation is still at least [`OCTAVE_FACTOR`] × the global maximum
+    ///    is preferred, avoiding sub-harmonic ("too low") octave errors.
+    /// 5. **Parabolic interpolation** around the chosen lag yields sub-sample
+    ///    period accuracy.
+    ///
+    /// Returns the estimated F0 in Hz, or `0.0` for unvoiced / too-short frames.
     fn estimate_f0_autocorrelation(&self, frame: &[f32]) -> f32 {
-        let min_period = self.sample_rate / 500; // 500 Hz max
-        let max_period = self.sample_rate / 50; // 50 Hz min
+        /// Minimum normalized autocorrelation for a frame to be voiced.
+        const VOICING_THRESHOLD: f32 = 0.3;
+        /// Octave-guard factor: prefer the shortest sub-multiple period whose
+        /// correlation is at least this fraction of the global maximum.
+        const OCTAVE_FACTOR: f32 = 0.9;
+        /// Highest fundamental frequency considered (Hz).
+        const MAX_F0_HZ: f32 = 500.0;
+        /// Lowest fundamental frequency considered (Hz).
+        const MIN_F0_HZ: f32 = 80.0;
 
-        let mut max_correlation = 0.0;
-        let mut best_period = min_period;
+        let sr = self.sample_rate as f32;
+        if sr <= 0.0 {
+            return 0.0;
+        }
 
-        for period in min_period..max_period.min(frame.len() as u32 / 2) {
-            let mut correlation = 0.0;
-            let period_samples = period as usize;
+        let min_lag = (sr / MAX_F0_HZ).floor() as usize;
+        let max_lag_raw = (sr / MIN_F0_HZ).ceil() as usize;
+        let n = frame.len();
+        if min_lag < 1 || n <= 2 * min_lag {
+            return 0.0;
+        }
+        let max_lag = max_lag_raw.min(n - 1);
+        if max_lag <= min_lag {
+            return 0.0;
+        }
 
-            for i in 0..(frame.len() - period_samples) {
-                correlation += frame[i] * frame[i + period_samples];
+        // Mean removal: pitch periodicity is independent of any DC component.
+        let mean = frame.iter().sum::<f32>() / n as f32;
+        let centered: Vec<f32> = frame.iter().map(|&x| x - mean).collect();
+
+        // Reject silent frames before the (more expensive) lag search.
+        let energy: f32 = centered.iter().map(|&x| x * x).sum();
+        if energy < 1e-10 {
+            return 0.0;
+        }
+
+        // Normalized autocorrelation over the candidate lag range.
+        let mut correlations = vec![0.0f32; max_lag + 1];
+        let mut global_best_corr = -1.0f32;
+        let mut global_best_lag = min_lag;
+        for lag in min_lag..=max_lag {
+            let mut cross = 0.0f32;
+            let mut left_sq = 0.0f32;
+            let mut right_sq = 0.0f32;
+            for i in 0..(n - lag) {
+                let a = centered[i];
+                let b = centered[i + lag];
+                cross += a * b;
+                left_sq += a * a;
+                right_sq += b * b;
             }
-
-            if correlation > max_correlation {
-                max_correlation = correlation;
-                best_period = period;
+            let denom = (left_sq * right_sq).sqrt();
+            let r = if denom > 1e-10 { cross / denom } else { 0.0 };
+            correlations[lag] = r;
+            if r > global_best_corr {
+                global_best_corr = r;
+                global_best_lag = lag;
             }
         }
 
-        if max_correlation > 0.0 {
-            self.sample_rate as f32 / best_period as f32
+        // Voicing decision.
+        if global_best_corr < VOICING_THRESHOLD {
+            return 0.0;
+        }
+
+        // Octave-error guarding: prefer the shortest sub-multiple period that
+        // is still strongly periodic.
+        let octave_threshold = global_best_corr * OCTAVE_FACTOR;
+        let mut best_lag = global_best_lag;
+        for divisor in 2..=4 {
+            let candidate = global_best_lag / divisor;
+            if candidate >= min_lag && correlations[candidate] >= octave_threshold {
+                best_lag = candidate;
+            }
+        }
+
+        // Parabolic interpolation around the chosen lag for sub-sample accuracy.
+        let refined_lag = if best_lag > min_lag && best_lag < max_lag {
+            let alpha = correlations[best_lag - 1];
+            let beta = correlations[best_lag];
+            let gamma = correlations[best_lag + 1];
+            let denom = alpha - 2.0 * beta + gamma;
+            if denom.abs() > 1e-10 {
+                let offset = (0.5 * (alpha - gamma) / denom).clamp(-1.0, 1.0);
+                best_lag as f32 + offset
+            } else {
+                best_lag as f32
+            }
+        } else {
+            best_lag as f32
+        };
+
+        if refined_lag > 0.0 {
+            (sr / refined_lag).clamp(MIN_F0_HZ, MAX_F0_HZ)
         } else {
             0.0
         }
@@ -940,25 +1073,88 @@ impl FeatureExtractor {
         intensity_values
     }
 
+    /// Estimate the speaking rate of an audio signal in syllables per second.
+    ///
+    /// Syllables are marked acoustically by energy onsets (the vowel nucleus
+    /// rising after a consonant). The estimator follows the standard
+    /// onset-detection pipeline:
+    /// 1. Compute a short-time energy envelope over ~10 ms frames and apply log
+    ///    compression so soft and loud syllables contribute comparably.
+    /// 2. Derive an onset-detection function as the half-wave-rectified first
+    ///    difference of the log-energy envelope; it peaks at sudden energy
+    ///    increases (syllable onsets) and is zero during steady or decaying
+    ///    regions.
+    /// 3. Pick onsets as local maxima of the onset function that exceed an
+    ///    adaptive threshold (`mean + 0.5·std` of the onset function), while
+    ///    enforcing a minimum inter-onset interval of ~120 ms so that the rise
+    ///    of a single syllable is not counted more than once.
+    /// 4. Divide the onset count by the signal duration in seconds.
+    ///
+    /// Returns syllables per second (`0.0` for empty or very short input).
     fn estimate_speaking_rate(&self, audio: &[f32]) -> Result<f32> {
-        // Simple syllable counting based on energy peaks
-        let intensity = self.compute_intensity_contour(audio);
-        let threshold = self.mean(&intensity) * 1.2;
+        /// Minimum inter-onset interval in seconds (~max 8 syllables/sec).
+        const MIN_INTER_ONSET_SEC: f32 = 0.120;
 
-        let mut peak_count = 0;
-        let mut in_peak = false;
+        let sr = self.sample_rate as f32;
+        if audio.is_empty() || sr <= 0.0 {
+            return Ok(0.0);
+        }
 
-        for &value in &intensity {
-            if value > threshold && !in_peak {
-                peak_count += 1;
-                in_peak = true;
-            } else if value <= threshold {
-                in_peak = false;
+        // ~10 ms analysis frames for the energy envelope.
+        let frame_size = (self.sample_rate as usize / 100).max(1);
+        let num_frames = audio.len() / frame_size;
+        if num_frames < 2 {
+            return Ok(0.0);
+        }
+
+        // Log-compressed short-time energy envelope.
+        let mut energy_env = Vec::with_capacity(num_frames);
+        for f in 0..num_frames {
+            let start = f * frame_size;
+            let frame = &audio[start..start + frame_size];
+            let energy = frame.iter().map(|&x| x * x).sum::<f32>() / frame_size as f32;
+            energy_env.push((energy + 1e-10).ln());
+        }
+
+        // Onset-detection function: half-wave-rectified first difference.
+        let mut onset_env = Vec::with_capacity(num_frames);
+        onset_env.push(0.0);
+        for i in 1..energy_env.len() {
+            onset_env.push((energy_env[i] - energy_env[i - 1]).max(0.0));
+        }
+
+        // Adaptive threshold derived from the onset function statistics.
+        let threshold = self.mean(&onset_env) + 0.5 * self.std(&onset_env);
+
+        // Minimum inter-onset interval expressed in frames.
+        let frame_period = frame_size as f32 / sr; // seconds per frame
+        let min_gap_frames = ((MIN_INTER_ONSET_SEC / frame_period).round() as usize).max(1);
+
+        // Peak picking with a refractory period.
+        let mut onset_count = 0usize;
+        let mut last_onset: Option<usize> = None;
+        for i in 1..onset_env.len().saturating_sub(1) {
+            let is_peak = onset_env[i] > threshold
+                && onset_env[i] >= onset_env[i - 1]
+                && onset_env[i] > onset_env[i + 1];
+            if is_peak {
+                let far_enough = match last_onset {
+                    Some(prev) => i - prev >= min_gap_frames,
+                    None => true,
+                };
+                if far_enough {
+                    onset_count += 1;
+                    last_onset = Some(i);
+                }
             }
         }
 
-        let duration_seconds = audio.len() as f32 / self.sample_rate as f32;
-        Ok(peak_count as f32 / duration_seconds * 60.0) // Peaks per minute
+        let duration_seconds = audio.len() as f32 / sr;
+        if duration_seconds > 0.0 {
+            Ok(onset_count as f32 / duration_seconds)
+        } else {
+            Ok(0.0)
+        }
     }
 
     fn mean(&self, values: &[f32]) -> f32 {
@@ -1168,5 +1364,109 @@ mod tests_mel {
             "Expected positive SNR for a pure sine wave, got {snr}"
         );
         assert!(snr <= 1.0, "SNR should be normalised to [0,1], got {snr}");
+    }
+
+    /// Deterministic pseudo-random noise in [-1, 1) via a 32-bit xorshift PRNG.
+    /// Kept deterministic (seeded) so the voicing test never flakes.
+    fn white_noise(num_samples: usize, seed: u32) -> Vec<f32> {
+        let mut state = seed | 1; // avoid the zero fixed point
+        (0..num_samples)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                (state as f32 / u32::MAX as f32) * 2.0 - 1.0
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_f0_autocorrelation_sine_200hz() {
+        let extractor = make_extractor();
+        // 200 Hz sine; the period is ~110.25 samples at 22050 Hz.
+        let audio = sine_wave(200.0, extractor.sample_rate, 2048);
+        let f0 = extractor.estimate_f0_autocorrelation(&audio);
+        assert!(
+            (f0 - 200.0).abs() < 5.0,
+            "Expected F0 near 200 Hz, got {f0:.2} Hz"
+        );
+    }
+
+    #[test]
+    fn test_f0_autocorrelation_unvoiced() {
+        let extractor = make_extractor();
+
+        // Silence carries no periodicity and must be unvoiced.
+        let silence = vec![0.0_f32; 2048];
+        let f0_silence = extractor.estimate_f0_autocorrelation(&silence);
+        assert!(
+            f0_silence.abs() < 1e-6,
+            "Silence must be unvoiced (0.0), got {f0_silence:.2} Hz"
+        );
+
+        // White noise has no strong periodicity and must be unvoiced.
+        let noise = white_noise(2048, 0x1234_5678);
+        let f0_noise = extractor.estimate_f0_autocorrelation(&noise);
+        assert!(
+            f0_noise.abs() < 1e-6,
+            "White noise must be unvoiced (0.0), got {f0_noise:.2} Hz"
+        );
+    }
+
+    #[test]
+    fn test_spectral_flux_steady_vs_changing() {
+        let extractor = make_extractor();
+
+        // Steady tone: consecutive frames are near-identical → low flux.
+        let steady = sine_wave(440.0, extractor.sample_rate, 8192);
+        let flux_steady = extractor.compute_spectral_flux(&steady).unwrap();
+
+        // Signal that abruptly switches spectral content every 1024 samples.
+        let sr = extractor.sample_rate as f32;
+        let changing: Vec<f32> = (0..8192)
+            .map(|i| {
+                let freq = if (i / 1024) % 2 == 0 { 300.0 } else { 3000.0 };
+                (2.0 * std::f32::consts::PI * freq * i as f32 / sr).sin()
+            })
+            .collect();
+        let flux_changing = extractor.compute_spectral_flux(&changing).unwrap();
+
+        assert!(
+            flux_changing > flux_steady,
+            "Flux of abruptly-changing signal ({flux_changing:.4}) should exceed steady tone ({flux_steady:.4})"
+        );
+    }
+
+    #[test]
+    fn test_speaking_rate_evenly_spaced_bursts() {
+        let extractor = make_extractor();
+        let sr = extractor.sample_rate as f32;
+
+        // Build N evenly-spaced energy bursts. Each segment is `spacing_sec`
+        // long: silence followed by a short tone, giving one clean onset per
+        // segment, so the expected rate is num_bursts / total_duration.
+        let num_bursts = 8usize;
+        let spacing_sec = 0.3_f32;
+        let segment_len = (spacing_sec * sr) as usize;
+        let tone_len = (0.08 * sr) as usize; // 80 ms tone at the end of a segment
+
+        let mut audio: Vec<f32> = Vec::with_capacity(num_bursts * segment_len);
+        for _ in 0..num_bursts {
+            let silence_len = segment_len - tone_len;
+            let new_len = audio.len() + silence_len;
+            audio.resize(new_len, 0.0);
+            for i in 0..tone_len {
+                audio.push(0.8 * (2.0 * std::f32::consts::PI * 200.0 * i as f32 / sr).sin());
+            }
+        }
+
+        let rate = extractor.estimate_speaking_rate(&audio).unwrap();
+        let total_sec = audio.len() as f32 / sr;
+        let expected = num_bursts as f32 / total_sec; // ≈ 1 / spacing_sec ≈ 3.33
+
+        assert!(
+            (rate - expected).abs() < 0.8,
+            "Expected speaking rate ~{expected:.2} syll/s, got {rate:.2} syll/s"
+        );
     }
 }

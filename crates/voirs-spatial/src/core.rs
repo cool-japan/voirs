@@ -295,7 +295,7 @@ impl SpatialProcessor {
         right_channel: &mut Array1<f32>,
         source_position: &Position3D,
     ) -> crate::Result<()> {
-        let room_simulator = self.room_simulator.read().await;
+        let mut room_simulator = self.room_simulator.write().await;
         room_simulator
             .process_reverb(left_channel, right_channel, source_position)
             .await

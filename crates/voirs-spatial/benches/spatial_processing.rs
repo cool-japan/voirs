@@ -55,7 +55,7 @@ fn bench_room_simulation(c: &mut Criterion) {
             |b, &size| {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 b.to_async(&rt).iter(|| async {
-                    let room = RoomSimulator::new((10.0, 8.0, 3.0), 0.5).unwrap();
+                    let mut room = RoomSimulator::new((10.0, 8.0, 3.0), 0.5).unwrap();
                     let mut left_channel =
                         Array1::from_vec((0..size).map(|i| (i as f32).sin()).collect());
                     let mut right_channel =

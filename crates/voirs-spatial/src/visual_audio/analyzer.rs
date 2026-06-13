@@ -322,18 +322,30 @@ impl FftAnalyzer {
     }
 
     fn analyze(&mut self, samples: &[f32]) -> Result<()> {
-        // Simplified FFT implementation (would use proper FFT library)
-        let copy_len = samples.len().min(self.window_size);
+        let n = self.window_size;
 
-        // Store previous frame
+        // Store previous frame (used by spectral-flux based onset detection).
         self.previous_frame.copy_from_slice(&self.frequency_bins);
 
-        // Calculate magnitude spectrum (simplified)
-        for (i, bin) in self.frequency_bins.iter_mut().enumerate() {
-            if i * 2 < copy_len {
-                let new_value = samples[i * 2].abs();
-                *bin = self.smoothing_factor * (*bin) + (1.0 - self.smoothing_factor) * new_value;
-            }
+        // Real-FFT magnitude spectrum with a Hann window.
+        //
+        // The samples are windowed to reduce spectral leakage, transformed with
+        // `rfft` (yielding `n / 2 + 1` complex bins), and the per-bin magnitude
+        // `|X[k]|` is smoothed into the `n / 2` frequency-bin buffer (the Nyquist
+        // bin is dropped to match the downstream bin count).
+        let denom = n.saturating_sub(1).max(1) as f64;
+        let mut windowed = vec![0.0_f64; n];
+        for (i, (slot, &sample)) in windowed.iter_mut().zip(samples.iter()).enumerate() {
+            let hann = 0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / denom).cos());
+            *slot = sample as f64 * hann;
+        }
+
+        let spectrum = scirs2_fft::rfft(&windowed, Some(n))
+            .map_err(|e| crate::Error::LegacyProcessing(format!("FFT error: {e}")))?;
+
+        for (bin, value) in self.frequency_bins.iter_mut().zip(spectrum.iter()) {
+            let magnitude = value.norm() as f32;
+            *bin = self.smoothing_factor * (*bin) + (1.0 - self.smoothing_factor) * magnitude;
         }
 
         Ok(())
@@ -491,5 +503,68 @@ impl AmplitudeTracker {
                 sample_rate: 44100.0,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_magnitude_spectrum_peaks_at_tone_frequency() {
+        let window_size = 1024;
+        let mut analyzer = FftAnalyzer::new(window_size);
+
+        // Pure sinusoid completing exactly `k0` cycles across the window, so its
+        // energy lands on bin `k0` of the FFT.
+        let k0 = 32_usize;
+        let samples: Vec<f32> = (0..window_size)
+            .map(|i| (2.0 * std::f32::consts::PI * k0 as f32 * i as f32 / window_size as f32).sin())
+            .collect();
+
+        analyzer.analyze(&samples).expect("analysis should succeed");
+
+        // The dominant bin must be at (or immediately adjacent to) k0; Hann
+        // windowing spreads a little energy into neighbouring bins.
+        let (peak_bin, _) = analyzer
+            .frequency_bins
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(b.1))
+            .expect("frequency bins must be non-empty");
+
+        assert!(
+            (peak_bin as i64 - k0 as i64).abs() <= 1,
+            "spectral peak at bin {peak_bin}, expected ~{k0}"
+        );
+    }
+
+    #[test]
+    fn test_magnitude_spectrum_distinguishes_low_and_high_tones() {
+        let window_size = 1024;
+
+        let analyze_tone = |k0: usize| -> Vec<f32> {
+            let mut analyzer = FftAnalyzer::new(window_size);
+            let samples: Vec<f32> = (0..window_size)
+                .map(|i| {
+                    (2.0 * std::f32::consts::PI * k0 as f32 * i as f32 / window_size as f32).sin()
+                })
+                .collect();
+            analyzer.analyze(&samples).expect("analysis should succeed");
+            analyzer.frequency_bins.clone()
+        };
+
+        let low = analyze_tone(16);
+        let high = analyze_tone(200);
+
+        let argmax = |bins: &[f32]| -> usize {
+            bins.iter()
+                .enumerate()
+                .max_by(|a, b| a.1.total_cmp(b.1))
+                .map(|(i, _)| i)
+                .unwrap_or(0)
+        };
+
+        assert!(argmax(&low) < argmax(&high));
     }
 }

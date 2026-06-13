@@ -8,7 +8,8 @@ use crate::{AcousticError, MelSpectrogram, Result};
 use std::f32::consts::PI;
 
 // SciRS2 imports for optimized DSP operations
-use scirs2_fft::rfft;
+use scirs2_core::Complex;
+use scirs2_fft::{fft, rfft};
 
 /// Mel spectrogram computation engine
 pub struct MelComputer {
@@ -196,28 +197,37 @@ impl MelComputer {
         Ok(stft_result)
     }
 
-    /// Simple FFT implementation (placeholder - in production use a proper FFT library)
+    /// Full complex FFT backed by the SciRS2 functional API.
+    ///
+    /// Returns the complete `n`-length complex spectrum (where `n ==
+    /// signal.len()`), matching the shape of the naive DFT it replaces. This
+    /// uses [`scirs2_fft::fft`] (the full complex transform) rather than
+    /// `rfft`, so the entire spectrum — not just the `n / 2 + 1` positive
+    /// frequencies — is returned, keeping callers that slice the first
+    /// `n / 2 + 1` bins unaffected.
     fn simple_fft(&self, signal: &[f32]) -> Result<Vec<Complex32>> {
         let n = signal.len();
         if n == 0 {
             return Ok(vec![]);
         }
 
-        // This is a simplified DFT implementation for demonstration
-        // In production, use a proper FFT library like rustfft
-        let mut result = vec![Complex32::new(0.0, 0.0); n];
+        // Cast the real input signal to complex (imaginary part = 0).
+        let input: Vec<Complex<f64>> = signal
+            .iter()
+            .map(|&sample| Complex::new(f64::from(sample), 0.0))
+            .collect();
 
-        #[allow(clippy::needless_range_loop)]
-        for k in 0..n {
-            let mut sum = Complex32::new(0.0, 0.0);
-            #[allow(clippy::needless_range_loop)]
-            for j in 0..n {
-                let angle = -2.0 * PI * (k * j) as f32 / n as f32;
-                let complex_exp = Complex32::new(angle.cos(), angle.sin());
-                sum = sum + Complex32::new(signal[j], 0.0) * complex_exp;
-            }
-            result[k] = sum;
-        }
+        // Pass `Some(n)` so the output length stays exactly `n`, preserving the
+        // ordering and shape of the previous direct DFT implementation.
+        let spectrum = fft(&input, Some(n)).map_err(|e| AcousticError::ModelError {
+            message: format!("SciRS2 FFT failed: {e:?}"),
+        })?;
+
+        // Map the f64 spectrum back to the local Complex32 representation.
+        let result: Vec<Complex32> = spectrum
+            .iter()
+            .map(|c| Complex32::new(c.re as f32, c.im as f32))
+            .collect();
 
         Ok(result)
     }
@@ -949,6 +959,110 @@ mod tests {
                     mel_opt[mel_idx][frame_idx]
                 );
             }
+        }
+    }
+
+    #[test]
+    fn test_simple_fft_cosine_energy_concentration() {
+        let params = MelParams::standard_22khz();
+        let computer = MelComputer::new(params).unwrap();
+
+        // Pure cosine at integer bin `k`: its FFT energy must concentrate at
+        // bins `k` and its mirror `n - k`, with all other bins near zero.
+        let n = 64usize;
+        let k = 4usize;
+        let signal: Vec<f32> = (0..n)
+            .map(|j| (2.0 * PI * k as f32 * j as f32 / n as f32).cos())
+            .collect();
+
+        let spectrum = computer.simple_fft(&signal).unwrap();
+
+        // Output must be the full n-length spectrum.
+        assert_eq!(spectrum.len(), n);
+
+        // A unit-amplitude cosine of length n peaks at magnitude n / 2.
+        let expected_peak = n as f32 / 2.0;
+        assert!(
+            spectrum[k].norm() > 0.9 * expected_peak,
+            "expected peak ~{expected_peak} at bin {k}, got {}",
+            spectrum[k].norm()
+        );
+        assert!(
+            spectrum[n - k].norm() > 0.9 * expected_peak,
+            "expected mirror peak ~{expected_peak} at bin {}, got {}",
+            n - k,
+            spectrum[n - k].norm()
+        );
+
+        // Every other bin should be effectively zero.
+        for (i, c) in spectrum.iter().enumerate() {
+            if i != k && i != n - k {
+                assert!(c.norm() < 1e-2, "bin {i} should be ~0, got {}", c.norm());
+            }
+        }
+    }
+
+    #[test]
+    fn test_simple_fft_matches_hand_computed_dft() {
+        let params = MelParams::standard_22khz();
+        let computer = MelComputer::new(params).unwrap();
+
+        // DFT of [1, 2, 3, 4] computed by hand:
+        //   X[0] = 10 + 0i, X[1] = -2 + 2i, X[2] = -2 + 0i, X[3] = -2 - 2i
+        let signal = vec![1.0_f32, 2.0, 3.0, 4.0];
+        let spectrum = computer.simple_fft(&signal).unwrap();
+
+        let expected = [(10.0, 0.0), (-2.0, 2.0), (-2.0, 0.0), (-2.0, -2.0)];
+        assert_eq!(spectrum.len(), expected.len());
+        for (i, (re, im)) in expected.iter().enumerate() {
+            assert!(
+                (spectrum[i].re - re).abs() < 1e-4,
+                "bin {i} re: expected {re}, got {}",
+                spectrum[i].re
+            );
+            assert!(
+                (spectrum[i].im - im).abs() < 1e-4,
+                "bin {i} im: expected {im}, got {}",
+                spectrum[i].im
+            );
+        }
+    }
+
+    #[test]
+    fn test_simple_fft_matches_optimized_fft() {
+        let params = MelParams::standard_22khz();
+        let computer = MelComputer::new(params).unwrap();
+
+        // Use a frame whose length equals the configured FFT size so that the
+        // full FFT (simple_fft) and the rfft path (optimized_fft) operate on
+        // identical data; their first n/2+1 bins must then agree.
+        let n = computer.fft_size;
+        let signal: Vec<f32> = (0..n)
+            .map(|i| {
+                let t = i as f32;
+                0.5 * (0.05 * t).sin() + 0.3 * (0.013 * t).cos()
+            })
+            .collect();
+
+        let full = computer.simple_fft(&signal).unwrap();
+        let half = computer.optimized_fft(&signal).unwrap();
+
+        assert_eq!(full.len(), n);
+        assert_eq!(half.len(), n / 2 + 1);
+
+        for (i, expected) in half.iter().enumerate() {
+            assert!(
+                (full[i].re - expected.re).abs() < 1e-2,
+                "bin {i} re mismatch: {} vs {}",
+                full[i].re,
+                expected.re
+            );
+            assert!(
+                (full[i].im - expected.im).abs() < 1e-2,
+                "bin {i} im mismatch: {} vs {}",
+                full[i].im,
+                expected.im
+            );
         }
     }
 }

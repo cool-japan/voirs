@@ -14,6 +14,10 @@ use crate::perceptual::{CulturalProfile, DemographicProfile};
 use crate::quality::universal_phoneme_mapping::{
     PhonemeConverageAnalysis, UniversalPhonemeMapper, UniversalPhonemeMappingConfig,
 };
+use crate::quality::voice_quality_dsp::{
+    compute_formant_bandwidths, compute_formant_clarity, compute_jitter_shimmer,
+    compute_spectral_tilt, estimate_pitch_period, hnr_from_correlation, VOICING_THRESHOLD,
+};
 use crate::traits::{EvaluationResult, QualityScore};
 use crate::EvaluationError;
 use async_trait::async_trait;
@@ -590,11 +594,12 @@ impl CrossLanguageIntelligibilityEvaluator {
         &self,
         audio: &AudioBuffer,
     ) -> EvaluationResult<AcousticAnalysisResult> {
-        // Simplified acoustic analysis
         let samples = audio.samples();
+        let sample_rate = audio.sample_rate();
 
-        // Calculate basic voice quality metrics
-        let voice_quality_metrics = self.calculate_voice_quality_metrics(samples);
+        // Calculate voice quality metrics (jitter, shimmer, HNR, spectral tilt,
+        // formant bandwidths) directly from the signal.
+        let voice_quality_metrics = self.calculate_voice_quality_metrics(samples, sample_rate);
 
         // Calculate prosodic features
         let prosodic_features = self.calculate_prosodic_features(samples);
@@ -602,32 +607,63 @@ impl CrossLanguageIntelligibilityEvaluator {
         // Calculate signal-to-noise ratio
         let signal_to_noise_ratio = self.calculate_snr(samples);
 
+        // Formant clarity derived from the prominence of the LPC spectral-envelope
+        // peaks (how sharply F1/F2/F3 stand above the surrounding valleys).
+        let formant_clarity = compute_formant_clarity(samples, sample_rate);
+
         Ok(AcousticAnalysisResult {
-            formant_clarity: 0.8,                 // Placeholder
-            spectral_envelope_similarity: 0.75,   // Placeholder
-            temporal_envelope_preservation: 0.85, // Placeholder
+            formant_clarity,
+            // requires reference signal: spectral-envelope *similarity* needs a target spectrum
+            spectral_envelope_similarity: 0.75,
+            // requires reference signal: envelope *preservation* needs a reference envelope
+            temporal_envelope_preservation: 0.85,
             voice_quality_metrics,
             prosodic_features,
             signal_to_noise_ratio,
         })
     }
 
-    /// Calculate voice quality metrics
-    fn calculate_voice_quality_metrics(&self, samples: &[f32]) -> VoiceQualityMetrics {
-        // Simplified voice quality calculation
-        let rms = (samples.iter().map(|&x| x * x).sum::<f32>() / samples.len() as f32).sqrt();
-        let peak = samples.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
+    /// Calculate voice quality metrics from the raw signal.
+    ///
+    /// All metrics are computed with real DSP (see [`crate::quality::voice_quality_dsp`]):
+    /// - **jitter**: period-to-period F0 variation from autocorrelation-guided
+    ///   pitch marks (`mean(|Tᵢ₊₁ − Tᵢ|) / mean(T)`),
+    /// - **shimmer**: cycle-to-cycle peak-amplitude variation
+    ///   (`mean(|Aᵢ₊₁ − Aᵢ|) / mean(A)`),
+    /// - **harmonic_to_noise_ratio**: from the normalized autocorrelation at the
+    ///   pitch period (`10·log10(r / (1 − r))`),
+    /// - **spectral_tilt**: slope (dB/octave) of a least-squares fit of the
+    ///   log-magnitude spectrum versus log-frequency,
+    /// - **formant_bandwidth**: −3 dB widths of the first three LPC
+    ///   spectral-envelope peaks.
+    ///
+    /// Unvoiced or too-short signals yield jitter/shimmer of `0.0`.
+    fn calculate_voice_quality_metrics(
+        &self,
+        samples: &[f32],
+        sample_rate: u32,
+    ) -> VoiceQualityMetrics {
+        // Pitch is estimated once and shared by the jitter/shimmer and HNR paths.
+        let pitch = estimate_pitch_period(samples, sample_rate);
+
+        let (jitter, shimmer) = match pitch {
+            Some((period, correlation)) if correlation >= VOICING_THRESHOLD => {
+                compute_jitter_shimmer(samples, period)
+            }
+            _ => (0.0, 0.0),
+        };
+
+        let harmonic_to_noise_ratio = match pitch {
+            Some((_, correlation)) => hnr_from_correlation(correlation),
+            None => 0.0,
+        };
 
         VoiceQualityMetrics {
-            jitter: 0.02,  // Placeholder
-            shimmer: 0.03, // Placeholder
-            harmonic_to_noise_ratio: if rms > 0.0 {
-                20.0 * (peak / rms).log10()
-            } else {
-                0.0
-            },
-            spectral_tilt: -6.0,                       // Placeholder
-            formant_bandwidth: vec![50.0, 70.0, 90.0], // Placeholder
+            jitter,
+            shimmer,
+            harmonic_to_noise_ratio,
+            spectral_tilt: compute_spectral_tilt(samples, sample_rate),
+            formant_bandwidth: compute_formant_bandwidths(samples, sample_rate),
         }
     }
 

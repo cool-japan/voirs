@@ -5,6 +5,7 @@
 //! voice activity detection, and multi-threaded processing for optimal performance.
 
 pub mod buffer;
+mod griffin_lim;
 pub mod latency;
 
 // Re-export latency types
@@ -726,33 +727,13 @@ impl RealtimeAudioStreamer {
     }
 
     fn mel_to_audio(&self, mel: &MelSpectrogram) -> Result<Vec<f32>> {
-        // Placeholder implementation - in practice this would use a vocoder
-        // For now, generate simple audio based on mel energy
-        let mut audio = Vec::new();
-        let samples_per_frame = 256; // Hop length
-
-        for frame in 0..mel.n_frames {
-            // Calculate frame energy
-            let mut energy = 0.0f32;
-            for mel_bin in 0..mel.n_mels {
-                if frame < mel.data[mel_bin].len() {
-                    energy += mel.data[mel_bin][frame];
-                }
-            }
-            energy /= mel.n_mels as f32;
-
-            // Generate simple sine wave audio
-            for sample_idx in 0..samples_per_frame {
-                let time = (frame * samples_per_frame + sample_idx) as f32
-                    / self.config.sample_rate as f32;
-                let frequency = 440.0 + energy * 200.0; // Simple frequency modulation
-                let amplitude = (energy * 0.1).min(0.1); // Limit amplitude
-                let sample = amplitude * (2.0 * std::f32::consts::PI * frequency * time).sin();
-                audio.push(sample);
-            }
-        }
-
-        Ok(audio)
+        // Vocoder-free reconstruction: invert the mel filterbank to a linear
+        // magnitude spectrogram and recover phase with the Griffin-Lim
+        // algorithm (see the `griffin_lim` submodule). This is self-contained
+        // DSP requiring no neural vocoder and is fully deterministic. Analysis
+        // parameters are derived from the mel spectrogram itself.
+        let params = griffin_lim::GriffinLimParams::for_mel(mel);
+        griffin_lim::griffin_lim_reconstruct(mel, &params)
     }
 
     fn process_audio_buffer(&mut self) -> Result<()> {

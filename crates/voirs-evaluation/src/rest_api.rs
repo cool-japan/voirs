@@ -805,7 +805,7 @@ impl EvaluationApiService {
         audio: &AudioBuffer,
     ) -> Result<AudioCharacteristics, ApiError> {
         let samples = audio.samples();
-        let sample_rate = audio.sample_rate() as f32;
+        let sample_rate = audio.sample_rate();
 
         // Calculate RMS level
         let rms_level = if !samples.is_empty() {
@@ -836,35 +836,14 @@ impl EvaluationApiService {
             0.0
         };
 
-        // Calculate spectral centroid (simplified)
-        let spectral_centroid = if !samples.is_empty() {
-            // Simple approximation based on audio energy distribution
-            let energy_weighted_freq = samples
-                .iter()
-                .enumerate()
-                .map(|(i, &sample)| {
-                    let freq = (i as f32 * sample_rate) / (2.0 * samples.len() as f32);
-                    freq * sample.abs()
-                })
-                .sum::<f32>();
-            let total_energy: f32 = samples.iter().map(|&x| x.abs()).sum();
-            if total_energy > 0.0 {
-                energy_weighted_freq / total_energy
-            } else {
-                1000.0 // Default
-            }
-        } else {
-            1000.0
-        };
+        // Calculate spectral centroid via an FFT magnitude-weighted mean:
+        // Σ(f_k·|X_k|) / Σ|X_k| (Hz).
+        let spectral_centroid = crate::audio_dsp::spectral_centroid_hz(samples, sample_rate);
 
-        // Calculate F0 statistics (simplified)
-        let f0_mean = if !samples.is_empty() {
-            // Simple pitch estimation based on zero crossings
-            let pitch_estimate = zero_crossing_rate * sample_rate / 2.0;
-            pitch_estimate.clamp(80.0, 400.0) // Typical voice range
-        } else {
-            150.0
-        };
+        // Estimate the fundamental frequency with a mean-removed normalized
+        // autocorrelation over the 80–400 Hz range; 0.0 indicates an unvoiced
+        // (or silent) signal.
+        let f0_mean = crate::audio_dsp::autocorrelation_f0(samples, sample_rate);
 
         Ok(AudioCharacteristics {
             dynamic_range: dynamic_range as f64,
@@ -878,12 +857,17 @@ impl EvaluationApiService {
                 voiced_percentage: if rms_level > 0.01 { 75.0 } else { 10.0 },
             },
             spectral_features: SpectralFeatures {
-                spectral_rolloff: (spectral_centroid * 2.0) as f64,
+                // Real FFT-based 85%-cumulative-energy rolloff frequency (Hz).
+                spectral_rolloff: crate::audio_dsp::spectral_rolloff_hz(samples, sample_rate, 0.85)
+                    as f64,
                 spectral_flux: (rms_level * 0.5) as f64,
                 spectral_contrast: vec![0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2],
-                mfcc: vec![
-                    1.0, 0.5, 0.3, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001, 0.0005,
-                ],
+                // Real 13-coefficient MFCC (Hann → rfft → mel filterbank → log →
+                // DCT-II), averaged across frames.
+                mfcc: crate::audio_dsp::mfcc_features(samples, sample_rate, 13)
+                    .into_iter()
+                    .map(f64::from)
+                    .collect(),
             },
         })
     }

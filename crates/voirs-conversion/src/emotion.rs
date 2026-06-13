@@ -6,6 +6,9 @@
 #[cfg(feature = "emotion-integration")]
 use voirs_emotion;
 
+#[cfg(feature = "emotion-integration")]
+use crate::transforms::{PitchTransform, SpeedTransform, Transform};
+
 use crate::{Error, Result};
 
 /// Emotion integration adapter for voice conversion
@@ -500,61 +503,190 @@ impl EmotionConversionAdapter {
         Ok(emotion_state)
     }
 
+    /// Apply a real phase-vocoder pitch shift.
+    ///
+    /// `pitch_factor` arrives as an additive pitch *modulation* centred at 0
+    /// (`0.0` = no change, positive = higher, negative = lower). It is mapped to
+    /// the phase-vocoder frequency ratio as `ratio = 1.0 + pitch_factor`
+    /// (e.g. `+0.2 → 1.2×`, `+1.0 → 2.0×` ≈ one octave up). The shift reuses the
+    /// WOLA phase vocoder in [`crate::transforms::PitchTransform`]
+    /// (`apply_phase_vocoder_pitch_shift`: FRAME = 1024, HOP = 256, Hann
+    /// analysis/synthesis windows, instantaneous-frequency bin remapping and
+    /// OLA normalisation). Pitch shifting preserves length, so the result is
+    /// copied back into the in-place buffer.
     fn apply_pitch_modulation(&self, audio: &mut [f32], pitch_factor: f32) -> Result<()> {
-        // Apply pitch shifting using a simple time-domain approach
-        // In a real implementation, this would use more sophisticated algorithms like PSOLA
-        let shift_amount = (pitch_factor * 0.2).clamp(-0.5, 0.5);
-
-        if shift_amount.abs() < 0.001 {
+        let modulation = pitch_factor.clamp(-1.0, 1.0);
+        if modulation.abs() < 0.001 {
             return Ok(());
         }
+        let ratio = (1.0 + modulation).clamp(0.5, 2.0);
 
-        // Simple pitch shifting by sample rate manipulation simulation
-        for (i, sample) in audio.iter_mut().enumerate() {
-            let phase_shift = (i as f32 * shift_amount * 0.001).sin();
-            *sample *= 1.0 + phase_shift * 0.1;
+        // Real WOLA phase-vocoder pitch shift (output length == input length).
+        let shifted = PitchTransform::new(ratio).apply(audio)?;
+
+        let n = audio.len().min(shifted.len());
+        audio[..n].copy_from_slice(&shifted[..n]);
+        if n < audio.len() {
+            audio[n..].fill(0.0);
         }
-
         Ok(())
     }
 
+    /// Apply a real spectral-envelope (formant) shift that preserves pitch.
+    ///
+    /// `formant_factor` is an additive modulation centred at 0; it maps to an
+    /// envelope-warp ratio `ratio = 1.0 + formant_factor` (`> 1` raises the
+    /// formants, `< 1` lowers them). The algorithm is the classic homomorphic
+    /// (cepstral-liftering) formant shifter — the same spectral-envelope ratio
+    /// technique used elsewhere in VoiRS (cloning `apply_formant_shifts`,
+    /// singing `spectral_conversion`):
+    ///
+    /// 1. STFT each Hann-windowed frame (FRAME = 1024, HOP = 256).
+    /// 2. Estimate the smooth spectral envelope via low-quefrency cepstral
+    ///    liftering: `cepstrum = irfft(log|X|)`, keep `|q| <= LIFTER`, then
+    ///    `env = exp(re(rfft(liftered_cepstrum)))`.
+    /// 3. Warp the envelope frequency axis by `ratio` (`warped[k] = env[k/ratio]`).
+    /// 4. Re-apply to the original excitation via the per-bin magnitude ratio
+    ///    `gain = warped_env / env`, so only the envelope (formants) moves while
+    ///    the harmonic fine structure — and therefore the pitch — is untouched.
+    /// 5. ISTFT + Hann synthesis window + overlap-add (normalised by sum w^2).
     fn apply_formant_modification(&self, audio: &mut [f32], formant_factor: f32) -> Result<()> {
-        // Apply formant shifting to modify vocal tract characteristics
-        let formant_shift = (formant_factor * 0.15).clamp(-0.3, 0.3);
+        let shift = formant_factor.clamp(-0.5, 0.5);
+        if shift.abs() < 0.001 {
+            return Ok(());
+        }
+        let formant_ratio = (1.0 + shift).clamp(0.5, 2.0) as f64;
 
-        if formant_shift.abs() < 0.001 {
+        const FRAME: usize = 1024;
+        const HOP: usize = 256;
+        const LIFTER: usize = 30; // cepstral lifter order -> envelope smoothness
+
+        if audio.len() < FRAME {
+            // Too short to estimate a meaningful spectral envelope.
             return Ok(());
         }
 
-        // Simple formant shifting using spectral envelope modification
-        for chunk in audio.chunks_mut(512) {
-            let chunk_len = chunk.len();
-            for (i, sample) in chunk.iter_mut().enumerate() {
-                let freq_factor = 1.0 + formant_shift * (i as f32 / chunk_len as f32);
-                *sample *= freq_factor;
+        let n_bins = FRAME / 2 + 1;
+        let window: Vec<f64> = (0..FRAME)
+            .map(|i| 0.5 - 0.5 * (2.0 * std::f64::consts::PI * i as f64 / FRAME as f64).cos())
+            .collect();
+
+        let mut output = vec![0.0f64; audio.len()];
+        let mut norm = vec![0.0f64; audio.len()];
+
+        let mut start = 0usize;
+        while start + FRAME <= audio.len() {
+            // ── Analysis: Hann window + RFFT ─────────────────────────────
+            let frame: Vec<f64> = audio[start..start + FRAME]
+                .iter()
+                .zip(window.iter())
+                .map(|(&s, &w)| s as f64 * w)
+                .collect();
+            let spectrum = scirs2_fft::rfft(&frame, Some(FRAME))
+                .map_err(|e| Error::processing(format!("formant STFT failed: {e}")))?;
+
+            // ── Spectral envelope via cepstral liftering ─────────────────
+            let log_mag: Vec<f64> = spectrum.iter().map(|c| (c.norm() + 1e-10).ln()).collect();
+            // Real cepstrum (irfft of the real log-magnitude half-spectrum).
+            let mut cepstrum = scirs2_fft::irfft(log_mag.as_slice(), Some(FRAME))
+                .map_err(|e| Error::processing(format!("cepstrum IFFT failed: {e}")))?;
+            // Low-quefrency lifter: keep the slowly varying (formant) structure.
+            for (q_idx, c) in cepstrum.iter_mut().enumerate() {
+                let quefrency = q_idx.min(FRAME - q_idx);
+                if quefrency > LIFTER {
+                    *c = 0.0;
+                }
+            }
+            // Smoothed log-envelope = re(rfft(liftered cepstrum)); rfft∘irfft is
+            // the identity for scirs2_fft, so no rescaling is required.
+            let env_spec = scirs2_fft::rfft(&cepstrum, Some(FRAME))
+                .map_err(|e| Error::processing(format!("envelope FFT failed: {e}")))?;
+            let envelope: Vec<f64> = env_spec.iter().map(|c| c.re.exp()).collect();
+
+            // ── Warp the envelope frequency axis by `formant_ratio` ──────
+            let warped: Vec<f64> = (0..n_bins)
+                .map(|k| {
+                    let src = k as f64 / formant_ratio;
+                    let lo = src.floor() as usize;
+                    if lo + 1 >= n_bins {
+                        envelope[n_bins - 1]
+                    } else {
+                        let frac = src - lo as f64;
+                        envelope[lo] * (1.0 - frac) + envelope[lo + 1] * frac
+                    }
+                })
+                .collect();
+
+            // ── Re-apply warped envelope to the original excitation ──────
+            let mut new_spectrum = spectrum.clone();
+            for ((c, &w), &e) in new_spectrum
+                .iter_mut()
+                .zip(warped.iter())
+                .zip(envelope.iter())
+            {
+                let gain = (w / e.max(1e-10)).clamp(0.1, 10.0);
+                c.re *= gain;
+                c.im *= gain;
+            }
+
+            // ── Synthesis: ISTFT + Hann window + overlap-add ─────────────
+            let time_frame = scirs2_fft::irfft(new_spectrum.as_slice(), Some(FRAME))
+                .map_err(|e| Error::processing(format!("formant ISTFT failed: {e}")))?;
+            for (j, (&w, &s)) in window.iter().zip(time_frame.iter()).enumerate() {
+                let idx = start + j;
+                if idx < output.len() {
+                    output[idx] += s * w;
+                    norm[idx] += w * w;
+                }
+            }
+
+            start += HOP;
+        }
+
+        // OLA normalisation (leave uncovered edge samples untouched).
+        for ((s, &o), &nrm) in audio.iter_mut().zip(output.iter()).zip(norm.iter()) {
+            if nrm > 1e-8 {
+                *s = (o / nrm) as f32;
             }
         }
 
         Ok(())
     }
 
+    /// Apply a real, pitch-preserving time-scale modification (TSM).
+    ///
+    /// The previous implementation merely scaled amplitude (loudness), which is
+    /// not a tempo change. This reuses the phase-vocoder TSM in
+    /// [`crate::transforms::SpeedTransform`]
+    /// (`apply_psola_time_stretch`: analysis hop != synthesis hop, so duration
+    /// changes while pitch is preserved).
+    ///
+    /// `rhythm_factor` is an additive modulation centred at 0; it maps to the
+    /// time-scale (speed) ratio `speed = 1.0 + rhythm_factor` (`> 1` = faster /
+    /// shorter, `< 1` = slower / longer).
+    ///
+    /// Buffer-length contract: TSM changes the sample count, but this helper
+    /// operates on a fixed-length `&mut [f32]`. We therefore render the
+    /// pitch-preserved, time-scaled signal and map it into the buffer by copying
+    /// the leading samples and zero-padding (faster) or truncating (slower). We
+    /// deliberately do *not* resample back to the original length, because that
+    /// would re-introduce a pitch shift and defeat the pitch-preserving property
+    /// of TSM.
     fn apply_rhythm_modification(&self, audio: &mut [f32], rhythm_factor: f32) -> Result<()> {
-        // Apply rhythm/tempo adjustments based on dominance
-        let tempo_change = (rhythm_factor * 0.1).clamp(-0.2, 0.2);
-
-        if tempo_change.abs() < 0.001 {
+        let rhythm = rhythm_factor.clamp(-0.5, 0.5);
+        if rhythm.abs() < 0.001 {
             return Ok(());
         }
+        let speed = (1.0 + rhythm).clamp(0.25, 4.0);
 
-        // Simple tempo modification by selective sample amplification
-        let window_size = 1024;
-        for chunk in audio.chunks_mut(window_size) {
-            let energy_factor = 1.0 + tempo_change;
-            for sample in chunk.iter_mut() {
-                *sample *= energy_factor;
-            }
+        // Real pitch-preserving phase-vocoder time-scale modification.
+        let stretched = SpeedTransform::new(speed).apply(audio)?;
+
+        let n = audio.len().min(stretched.len());
+        audio[..n].copy_from_slice(&stretched[..n]);
+        if n < audio.len() {
+            audio[n..].fill(0.0);
         }
-
         Ok(())
     }
 
@@ -967,6 +1099,214 @@ mod tests {
         // Test empty audio error
         let result = adapter.detect_source_emotion(&[]);
         assert!(result.is_err());
+    }
+
+    // ── Real-DSP tests for pitch / formant / rhythm modification ──────────
+
+    /// Frequency (Hz) of the largest non-DC bin of a Hann-windowed spectrum.
+    #[cfg(feature = "emotion-integration")]
+    fn detect_peak_frequency(signal: &[f32], sample_rate: f32) -> f32 {
+        let n = signal.len();
+        let windowed: Vec<f64> = signal
+            .iter()
+            .enumerate()
+            .map(|(i, &s)| {
+                let w = 0.5 - 0.5 * (2.0 * std::f64::consts::PI * i as f64 / n as f64).cos();
+                s as f64 * w
+            })
+            .collect();
+        let spectrum = scirs2_fft::rfft(&windowed, Some(n)).expect("rfft");
+        let mut best_bin = 1usize;
+        let mut best_mag = 0.0f64;
+        for (k, c) in spectrum.iter().enumerate().skip(1) {
+            let m = c.norm();
+            if m > best_mag {
+                best_mag = m;
+                best_bin = k;
+            }
+        }
+        best_bin as f32 * sample_rate / n as f32
+    }
+
+    /// Autocorrelation pitch-period (in samples) within `[min_lag, max_lag]`.
+    #[cfg(feature = "emotion-integration")]
+    fn detect_fundamental_period(signal: &[f32], min_lag: usize, max_lag: usize) -> usize {
+        let r0: f64 = signal.iter().map(|&x| (x as f64) * (x as f64)).sum();
+        let r0 = r0.max(1e-12);
+        let upper = max_lag.min(signal.len().saturating_sub(1));
+        let mut best_lag = min_lag;
+        let mut best = f64::NEG_INFINITY;
+        for lag in min_lag..=upper {
+            let mut r = 0.0f64;
+            for n in 0..(signal.len() - lag) {
+                r += signal[n] as f64 * signal[n + lag] as f64;
+            }
+            let norm = r / r0;
+            if norm > best {
+                best = norm;
+                best_lag = lag;
+            }
+        }
+        best_lag
+    }
+
+    /// Magnitude-weighted spectral centroid (Hz) of a Hann-windowed spectrum.
+    #[cfg(feature = "emotion-integration")]
+    fn spectral_centroid_hz(signal: &[f32], sample_rate: f32) -> f32 {
+        let n = signal.len();
+        let windowed: Vec<f64> = signal
+            .iter()
+            .enumerate()
+            .map(|(i, &s)| {
+                let w = 0.5 - 0.5 * (2.0 * std::f64::consts::PI * i as f64 / n as f64).cos();
+                s as f64 * w
+            })
+            .collect();
+        let spectrum = scirs2_fft::rfft(&windowed, Some(n)).expect("rfft");
+        let mut wsum = 0.0f64;
+        let mut msum = 0.0f64;
+        for (k, c) in spectrum.iter().enumerate() {
+            let m = c.norm();
+            wsum += k as f64 * m;
+            msum += m;
+        }
+        if msum < 1e-12 {
+            return 0.0;
+        }
+        (wsum / msum) as f32 * sample_rate / n as f32
+    }
+
+    #[cfg(feature = "emotion-integration")]
+    #[test]
+    fn test_pitch_modulation_shifts_octave_up() {
+        let adapter = EmotionConversionAdapter::new();
+        let sr = 22050.0f32;
+        let f0 = 220.0f32;
+        let n = 8192;
+        let mut audio: Vec<f32> = (0..n)
+            .map(|i| (2.0 * std::f32::consts::PI * f0 * i as f32 / sr).sin())
+            .collect();
+
+        let before = detect_peak_frequency(&audio, sr);
+        // modulation 1.0 -> frequency ratio 2.0 (one octave up)
+        adapter.apply_pitch_modulation(&mut audio, 1.0).unwrap();
+        let after = detect_peak_frequency(&audio, sr);
+
+        assert!(audio.iter().all(|x| x.is_finite()));
+        assert_eq!(audio.len(), n); // pitch shift preserves length
+        let ratio = after / before;
+        assert!(
+            (1.7..=2.3).contains(&ratio),
+            "expected ~2x pitch (before={before} after={after} ratio={ratio})"
+        );
+    }
+
+    #[cfg(feature = "emotion-integration")]
+    #[test]
+    fn test_formant_modification_preserves_pitch() {
+        let adapter = EmotionConversionAdapter::new();
+        let sr = 22050.0f32;
+        let f0 = 150.0f32;
+        let n = 8192;
+        let formant_hz = 1500.0f32;
+        let sigma = 700.0f32;
+
+        // Harmonic complex with a Gaussian spectral (formant) envelope.
+        let mut audio = vec![0.0f32; n];
+        for k in 1..=40 {
+            let fh = k as f32 * f0;
+            if fh >= sr / 2.0 {
+                break;
+            }
+            let d = fh - formant_hz;
+            let amp = (-(d * d) / (2.0 * sigma * sigma)).exp();
+            for (i, s) in audio.iter_mut().enumerate() {
+                *s += amp * (2.0 * std::f32::consts::PI * fh * i as f32 / sr).sin();
+            }
+        }
+        let peak = audio.iter().fold(0.0f32, |m, &x| m.max(x.abs())).max(1e-6);
+        for s in audio.iter_mut() {
+            *s /= peak;
+        }
+
+        let min_lag = (sr / 400.0) as usize;
+        let max_lag = (sr / 80.0) as usize;
+        let period_before = detect_fundamental_period(&audio, min_lag, max_lag);
+        let centroid_before = spectral_centroid_hz(&audio, sr);
+
+        // formant_factor 0.5 -> envelope warp ratio 1.5 (formants up, pitch fixed)
+        adapter.apply_formant_modification(&mut audio, 0.5).unwrap();
+
+        let period_after = detect_fundamental_period(&audio, min_lag, max_lag);
+        let centroid_after = spectral_centroid_hz(&audio, sr);
+
+        assert!(audio.iter().all(|x| x.is_finite()));
+        assert_eq!(audio.len(), n);
+
+        // F0 (autocorrelation period) preserved within ~10 %.
+        let f0_before = sr / period_before as f32;
+        let f0_after = sr / period_after as f32;
+        assert!(
+            (f0_after - f0_before).abs() / f0_before < 0.1,
+            "F0 should be preserved (before={f0_before} after={f0_after})"
+        );
+        // Spectral envelope (formants) shifted upward.
+        assert!(
+            centroid_after > centroid_before * 1.02,
+            "centroid should rise (before={centroid_before} after={centroid_after})"
+        );
+    }
+
+    #[cfg(feature = "emotion-integration")]
+    #[test]
+    fn test_rhythm_modification_preserves_frequency() {
+        let adapter = EmotionConversionAdapter::new();
+        let sr = 22050.0f32;
+        let f0 = 440.0f32;
+        let n = 8192;
+        let mut audio: Vec<f32> = (0..n)
+            .map(|i| (2.0 * std::f32::consts::PI * f0 * i as f32 / sr).sin())
+            .collect();
+
+        let before = detect_peak_frequency(&audio, sr);
+        // rhythm_factor 0.3 -> time-scale (speed) 1.3; pitch must be preserved
+        adapter.apply_rhythm_modification(&mut audio, 0.3).unwrap();
+        let after = detect_peak_frequency(&audio, sr);
+
+        assert!(audio.iter().all(|x| x.is_finite()));
+        assert_eq!(audio.len(), n); // in-place length contract honored
+        assert!(
+            (after - before).abs() < 30.0,
+            "tempo change must preserve pitch (before={before} after={after})"
+        );
+    }
+
+    #[cfg(feature = "emotion-integration")]
+    #[test]
+    fn test_dsp_outputs_finite_and_length_preserved() {
+        let adapter = EmotionConversionAdapter::new();
+        let sr = 22050.0f32;
+        let n = 4096;
+        let base: Vec<f32> = (0..n)
+            .map(|i| 0.5 * (2.0 * std::f32::consts::PI * 300.0 * i as f32 / sr).sin())
+            .collect();
+
+        for &factor in &[-0.4f32, -0.1, 0.1, 0.4] {
+            let mut a = base.clone();
+            adapter.apply_pitch_modulation(&mut a, factor).unwrap();
+            assert_eq!(a.len(), n);
+            assert!(a.iter().all(|x| x.is_finite()));
+
+            let mut b = base.clone();
+            adapter.apply_formant_modification(&mut b, factor).unwrap();
+            assert_eq!(b.len(), n);
+            assert!(b.iter().all(|x| x.is_finite()));
+
+            let mut c = base.clone();
+            adapter.apply_rhythm_modification(&mut c, factor).unwrap();
+            assert_eq!(c.len(), n);
+            assert!(c.iter().all(|x| x.is_finite()));
+        }
     }
 
     #[cfg(not(feature = "emotion-integration"))]

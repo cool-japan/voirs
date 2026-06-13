@@ -297,8 +297,15 @@ pub fn read_ogg_container<P: AsRef<Path>>(path: P) -> Result<AudioBuffer> {
 mod tests {
     use super::*;
     use crate::containers::{AudioMetadata, ContainerFormat};
+    // Only the `ffi-codecs`-gated round-trip tests touch the filesystem.
+    #[cfg(feature = "ffi-codecs")]
     use std::fs;
 
+    // Requires the libopus encoder: `write_ogg_container` calls `encode_opus_bytes`,
+    // which is a deliberate error-returning stub when `ffi-codecs` is off (the default
+    // pure-Rust build). Gate this test on the feature so the default suite stays green,
+    // matching the `#[cfg(all(test, feature = "ffi-codecs"))]` pattern in `codecs/opus.rs`.
+    #[cfg(feature = "ffi-codecs")]
     #[test]
     fn test_ogg_container_writing() {
         // Create longer audio data (1 second at 48kHz) for proper Opus encoding
@@ -330,6 +337,8 @@ mod tests {
         let _ = fs::remove_file(test_path);
     }
 
+    // Gated for the same reason as `test_ogg_container_writing` (needs the libopus encoder).
+    #[cfg(feature = "ffi-codecs")]
     #[test]
     fn test_ogg_container_with_metadata() {
         // Create longer stereo audio data for proper Opus encoding

@@ -3,6 +3,7 @@
 //! This module provides advanced emotion transfer capabilities for singing synthesis,
 //! enabling dynamic emotion manipulation during real-time performance.
 
+use crate::precision_quality::functions::detect_f0_autocorr_frame;
 use crate::types::{Articulation, Dynamics, Expression};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -213,22 +214,216 @@ impl EmotionDetector {
         }
     }
 
-    /// Extract spectral features from audio
+    /// Extract spectral features from an audio frame.
+    ///
+    /// Computes a Hann-windowed real FFT ([`scirs2_fft::rfft`]) over the leading
+    /// `frame_size` samples and derives a fixed-layout descriptor (length 5):
+    ///
+    /// | index | feature                              | units / range                 |
+    /// |-------|--------------------------------------|-------------------------------|
+    /// | 0     | mean-square energy                   | linear, `>= 0`                |
+    /// | 1     | spectral centroid (normalized)       | fraction of Nyquist, `[0, 1]` |
+    /// | 2     | spectral rolloff at 85 % energy      | fraction of Nyquist, `[0, 1]` |
+    /// | 3     | spectral bandwidth (centroid spread) | fraction of Nyquist, `[0, 1]` |
+    /// | 4     | spectral flatness (Wiener entropy)   | `[0, 1]` (1 = noise-like)     |
+    ///
+    /// Frequencies are normalized to the Nyquist limit so the descriptor does not
+    /// depend on the sample rate. Index 0 (energy) is retained for the downstream
+    /// heuristic emotion classifier.
     fn extract_spectral_features(&self, audio: &[f32]) -> Vec<f32> {
-        // Simplified spectral feature extraction
-        // In production, this would use FFT and compute MFCC, spectral centroid, etc.
-        let energy = audio.iter().map(|&x| x * x).sum::<f32>() / audio.len() as f32;
-        let mean = audio.iter().sum::<f32>() / audio.len() as f32;
-        vec![energy, mean, energy.sqrt()]
+        let energy = if audio.is_empty() {
+            0.0
+        } else {
+            audio.iter().map(|&x| x * x).sum::<f32>() / audio.len() as f32
+        };
+
+        let frame_len = self.feature_config.frame_size.min(audio.len());
+        if frame_len < 4 {
+            return vec![energy, 0.0, 0.0, 0.0, 0.0];
+        }
+
+        // Hann window to suppress spectral leakage.
+        let windowed: Vec<f32> = audio[..frame_len]
+            .iter()
+            .enumerate()
+            .map(|(i, &s)| {
+                let w = 0.5
+                    * (1.0
+                        - (2.0 * std::f32::consts::PI * i as f32 / (frame_len - 1) as f32).cos());
+                s * w
+            })
+            .collect();
+
+        let spectrum = match scirs2_fft::rfft(&windowed, None) {
+            Ok(s) => s,
+            Err(_) => return vec![energy, 0.0, 0.0, 0.0, 0.0],
+        };
+        let n_bins = spectrum.len();
+        if n_bins < 2 {
+            return vec![energy, 0.0, 0.0, 0.0, 0.0];
+        }
+
+        let mags: Vec<f64> = spectrum
+            .iter()
+            .map(|c| (c.re * c.re + c.im * c.im).sqrt())
+            .collect();
+        let total_mag: f64 = mags.iter().sum();
+        if total_mag <= 1e-12 {
+            return vec![energy, 0.0, 0.0, 0.0, 0.0];
+        }
+
+        // Bin `k` maps to normalized frequency `k / (n_bins - 1)` (1.0 == Nyquist).
+        let max_bin = (n_bins - 1) as f64;
+        let centroid: f64 = mags
+            .iter()
+            .enumerate()
+            .map(|(k, &m)| (k as f64 / max_bin) * m)
+            .sum::<f64>()
+            / total_mag;
+
+        // Magnitude-weighted spread around the centroid.
+        let variance: f64 = mags
+            .iter()
+            .enumerate()
+            .map(|(k, &m)| {
+                let d = k as f64 / max_bin - centroid;
+                d * d * m
+            })
+            .sum::<f64>()
+            / total_mag;
+        let bandwidth = variance.sqrt();
+
+        // Normalized frequency below which 85 % of the magnitude lies.
+        let rolloff_threshold = 0.85 * total_mag;
+        let mut cumulative = 0.0f64;
+        let mut rolloff_bin = max_bin;
+        for (k, &m) in mags.iter().enumerate() {
+            cumulative += m;
+            if cumulative >= rolloff_threshold {
+                rolloff_bin = k as f64;
+                break;
+            }
+        }
+        let rolloff = rolloff_bin / max_bin;
+
+        // Spectral flatness: geometric mean / arithmetic mean of the power spectrum.
+        let power: Vec<f64> = mags.iter().map(|&m| (m * m).max(1e-20)).collect();
+        let log_mean = power.iter().map(|p| p.ln()).sum::<f64>() / power.len() as f64;
+        let geo_mean = log_mean.exp();
+        let arith_mean = power.iter().sum::<f64>() / power.len() as f64;
+        let flatness = if arith_mean > 1e-20 {
+            (geo_mean / arith_mean).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+
+        vec![
+            energy,
+            centroid.clamp(0.0, 1.0) as f32,
+            rolloff.clamp(0.0, 1.0) as f32,
+            bandwidth.clamp(0.0, 1.0) as f32,
+            flatness as f32,
+        ]
     }
 
-    /// Extract prosodic features from audio
-    fn extract_prosodic_features(&self, audio: &[f32], _sample_rate: u32) -> Vec<f32> {
-        // Simplified prosodic feature extraction
-        // In production, this would extract F0, intensity contour, speech rate, etc.
-        let max_amplitude = audio.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
-        let variance = audio.iter().map(|&x| x * x).sum::<f32>() / audio.len() as f32;
-        vec![max_amplitude, variance]
+    /// Extract prosodic features from an audio frame.
+    ///
+    /// Frames the signal and runs the crate autocorrelation F0 detector
+    /// ([`detect_f0_autocorr_frame`]) over each frame to form an F0 contour, then
+    /// derives pitch, intensity and rhythm descriptors (length 7):
+    ///
+    /// | index | feature                          | units                  |
+    /// |-------|----------------------------------|------------------------|
+    /// | 0     | peak amplitude                   | linear, `[0, 1]`       |
+    /// | 1     | mean F0 over voiced frames       | Hz (`0` if unvoiced)   |
+    /// | 2     | F0 standard deviation            | Hz                     |
+    /// | 3     | F0 range (max - min, voiced)     | Hz                     |
+    /// | 4     | mean short-time intensity (RMS)  | linear                 |
+    /// | 5     | intensity standard deviation     | linear                 |
+    /// | 6     | onset rate                       | onsets per second      |
+    ///
+    /// Index 0 (peak amplitude) is retained for the downstream heuristic classifier.
+    fn extract_prosodic_features(&self, audio: &[f32], sample_rate: u32) -> Vec<f32> {
+        let peak_amplitude = audio.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
+        if audio.is_empty() || sample_rate == 0 {
+            return vec![peak_amplitude, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        }
+
+        let frame_size = self.feature_config.frame_size.max(256);
+        let hop_size = self.feature_config.hop_size.max(1);
+
+        let mut f0_values: Vec<f32> = Vec::new();
+        let mut intensities: Vec<f32> = Vec::new();
+
+        let mut pos = 0;
+        while pos < audio.len() {
+            let end = (pos + frame_size).min(audio.len());
+            let frame = &audio[pos..end];
+            if frame.len() >= 64 {
+                let f0 = robust_frame_f0(frame, sample_rate as f32);
+                if f0 > 0.0 {
+                    f0_values.push(f0);
+                }
+            }
+            let rms = (frame.iter().map(|&x| x * x).sum::<f32>() / frame.len() as f32).sqrt();
+            intensities.push(rms);
+            if end == audio.len() {
+                break;
+            }
+            pos += hop_size;
+        }
+
+        // F0 statistics over voiced frames.
+        let (f0_mean, f0_std, f0_range) = if f0_values.is_empty() {
+            (0.0, 0.0, 0.0)
+        } else {
+            let mean = f0_values.iter().sum::<f32>() / f0_values.len() as f32;
+            let var =
+                f0_values.iter().map(|&f| (f - mean).powi(2)).sum::<f32>() / f0_values.len() as f32;
+            let min = f0_values.iter().copied().fold(f32::INFINITY, f32::min);
+            let max = f0_values.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            (mean, var.sqrt(), max - min)
+        };
+
+        // Intensity-envelope statistics.
+        let (intensity_mean, intensity_std) = if intensities.is_empty() {
+            (0.0, 0.0)
+        } else {
+            let mean = intensities.iter().sum::<f32>() / intensities.len() as f32;
+            let var = intensities.iter().map(|&v| (v - mean).powi(2)).sum::<f32>()
+                / intensities.len() as f32;
+            (mean, var.sqrt())
+        };
+
+        // Onset rate: count rising intensity transitions crossing an adaptive
+        // threshold, normalized by duration -> a speaking/syllable-rate proxy.
+        let onset_rate = if intensities.len() >= 2 {
+            let threshold = intensity_mean.max(1e-4) * 0.5;
+            let mut onsets = 0usize;
+            for w in intensities.windows(2) {
+                if w[0] <= threshold && w[1] > threshold {
+                    onsets += 1;
+                }
+            }
+            let duration = audio.len() as f32 / sample_rate as f32;
+            if duration > 0.0 {
+                onsets as f32 / duration
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+
+        vec![
+            peak_amplitude,
+            f0_mean,
+            f0_std,
+            f0_range,
+            intensity_mean,
+            intensity_std,
+            onset_rate,
+        ]
     }
 
     /// Classify emotion from features
@@ -518,6 +713,69 @@ pub struct EmotionSynthesisParams {
     pub vibrato_depth: f32,
 }
 
+/// Normalized autocorrelation coefficient of a frame at `lag`, clamped to `[0, 1]`.
+fn normalized_autocorr(frame: &[f32], lag: usize) -> f32 {
+    if lag == 0 || lag >= frame.len() {
+        return 0.0;
+    }
+    let mean = frame.iter().sum::<f32>() / frame.len() as f32;
+    let n = frame.len() - lag;
+    let mut cross = 0.0f32;
+    let mut left = 0.0f32;
+    let mut right = 0.0f32;
+    for i in 0..n {
+        let a = frame[i] - mean;
+        let b = frame[i + lag] - mean;
+        cross += a * b;
+        left += a * a;
+        right += b * b;
+    }
+    let denom = (left * right).sqrt();
+    if denom > 1e-12 {
+        (cross / denom).clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
+/// Robust per-frame F0 (Hz) via autocorrelation with octave-down correction.
+///
+/// Wraps the crate detector [`detect_f0_autocorr_frame`], which maximizes a *raw*
+/// autocorrelation and can therefore lock onto an integer multiple of the true
+/// period (an octave-down error). The frame is peak-normalized so the detector's
+/// raw threshold is gain-robust, and when a shorter sub-period correlates at
+/// least as well, the higher (fundamental) frequency is preferred. This mirrors
+/// the proven approach used by the zero-shot voice analyzer.
+fn robust_frame_f0(frame: &[f32], sample_rate: f32) -> f32 {
+    let peak = frame.iter().fold(0.0f32, |m, &x| m.max(x.abs()));
+    if peak <= 1e-9 {
+        return 0.0;
+    }
+    let normalized: Vec<f32> = frame.iter().map(|&x| x / peak).collect();
+
+    let coarse = detect_f0_autocorr_frame(&normalized, sample_rate);
+    if coarse <= 0.0 {
+        return 0.0;
+    }
+    let period = (sample_rate / coarse).round() as usize;
+    if period < 2 {
+        return coarse;
+    }
+    let min_lag = ((sample_rate / 800.0) as usize).max(2);
+    let base = normalized_autocorr(&normalized, period);
+    let mut best_period = period;
+    for div in [4usize, 3, 2] {
+        let candidate = period / div;
+        if candidate >= min_lag
+            && normalized_autocorr(&normalized, candidate) >= 0.85 * base.max(1e-6)
+        {
+            best_period = candidate;
+            break;
+        }
+    }
+    sample_rate / best_period as f32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -656,5 +914,82 @@ mod tests {
         assert!(config.realtime);
         assert_eq!(config.smoothness, 0.7);
         assert_eq!(config.intensity_scale, 1.0);
+    }
+
+    /// Generate a steady sinusoid of the given frequency.
+    fn make_tone(freq: f32, sample_rate: u32, secs: f32) -> Vec<f32> {
+        let n = (sample_rate as f32 * secs) as usize;
+        (0..n)
+            .map(|i| {
+                let t = i as f32 / sample_rate as f32;
+                0.8 * (2.0 * std::f32::consts::PI * freq * t).sin()
+            })
+            .collect()
+    }
+
+    /// Deterministic, dependency-free white noise via a PCG-style LCG.
+    fn make_white_noise(n: usize, seed: u64) -> Vec<f32> {
+        let mut state = seed;
+        (0..n)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                // Top 31 bits -> [0, 1), mapped to the symmetric range [-1, 1).
+                let u = (state >> 33) as f32 / (1u64 << 31) as f32;
+                u * 2.0 - 1.0
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_spectral_features_tone_vs_noise() {
+        let sr = 44100;
+        let detector = EmotionDetector::default();
+
+        // Low pure tone: peaked spectrum -> low centroid, low flatness.
+        let tone = make_tone(300.0, sr, 0.1);
+        // Broadband noise: flat spectrum -> mid centroid, high flatness.
+        let noise = make_white_noise(4096, 0x1234_5678);
+
+        let sf_tone = detector.extract_spectral_features(&tone);
+        let sf_noise = detector.extract_spectral_features(&noise);
+
+        assert_eq!(sf_tone.len(), 5);
+        assert_eq!(sf_noise.len(), 5);
+
+        // Flatness: noise is far closer to 1.0 than a tone.
+        assert!(
+            sf_noise[4] > sf_tone[4] + 0.2,
+            "flatness tone {} vs noise {}",
+            sf_tone[4],
+            sf_noise[4]
+        );
+        // Centroid: broadband noise sits well above a low 300 Hz tone.
+        assert!(
+            sf_noise[1] > sf_tone[1],
+            "centroid tone {} vs noise {}",
+            sf_tone[1],
+            sf_noise[1]
+        );
+        // A low tone's normalized centroid stays near the bottom of the band.
+        assert!(sf_tone[1] < 0.2, "low-tone centroid {}", sf_tone[1]);
+    }
+
+    #[test]
+    fn test_prosodic_f0_synthetic_tone() {
+        let sr = 44100;
+        let detector = EmotionDetector::default();
+        let tone = make_tone(220.0, sr, 0.5);
+
+        let pf = detector.extract_prosodic_features(&tone, sr);
+        assert_eq!(pf.len(), 7);
+
+        // Mean F0 should match the synthesized 220 Hz tone.
+        assert!((pf[1] - 220.0).abs() < 15.0, "mean F0 {}", pf[1]);
+        // A steady tone has near-zero F0 spread.
+        assert!(pf[2] < 20.0, "F0 std {}", pf[2]);
+        // A continuous tone produces essentially no syllable onsets.
+        assert!(pf[6] < 5.0, "onset rate {}", pf[6]);
     }
 }

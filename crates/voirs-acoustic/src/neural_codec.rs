@@ -13,6 +13,7 @@
 
 use candle_core::{DType, Device, Tensor};
 use candle_nn::{Linear, Module};
+use scirs2_fft::rfft;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -967,9 +968,12 @@ impl CodecQualityMetrics {
         let snr_db = 20.0 * (signal_rms / noise_floor).log10();
 
         // --- Bandwidth via power-spectral roll-off ---
-        // We use a rectangular DFT (no scirs2_fft import needed here—this is
-        // a simple Goertzel-free spectral scan with direct summation over the
-        // longest power-of-two window that fits in `samples`).
+        // One-sided power spectrum over the longest power-of-two window that
+        // fits in `samples`, computed with the SciRS2 real-FFT (`rfft`,
+        // O(N log N)) rather than a direct O(N²) DFT. `rfft` is the
+        // unnormalised forward transform, so each bin is the exact `|X[k]|²`
+        // the previous direct DFT produced — identical length, scaling and
+        // (rectangular) windowing, leaving every downstream metric unchanged.
         let fft_len: usize = {
             let mut n = 1usize;
             while n * 2 <= samples.len().min(8192) {
@@ -979,20 +983,9 @@ impl CodecQualityMetrics {
         };
         let window = &samples[..fft_len];
 
-        // Compute the one-sided power spectrum via direct DFT (O(N²) for small N).
-        // For fft_len ≤ 8192 this is fast enough.
-        let n_bins = fft_len / 2 + 1;
-        let mut power: Vec<f32> = Vec::with_capacity(n_bins);
-        use std::f32::consts::PI as PI_F32;
-        for k in 0..n_bins {
-            let (mut re, mut im) = (0.0_f32, 0.0_f32);
-            let theta = -2.0 * PI_F32 * k as f32 / fft_len as f32;
-            for (n, &s) in window.iter().enumerate() {
-                re += s * (theta * n as f32).cos();
-                im += s * (theta * n as f32).sin();
-            }
-            power.push(re * re + im * im);
-        }
+        // Rectangular-windowed |X[k]|² for k = 0..=fft_len/2 (length fft_len/2 + 1).
+        let power = Self::one_sided_power_spectrum(window);
+        let n_bins = power.len();
 
         let peak_power = power.iter().cloned().fold(0.0_f32, f32::max).max(1e-30);
         let threshold = peak_power * 10.0_f32.powf(-60.0 / 10.0); // −60 dBFS
@@ -1027,6 +1020,30 @@ impl CodecQualityMetrics {
             bitrate_kbps,
             compression_ratio,
             latency_ms,
+        }
+    }
+
+    /// One-sided power spectrum `|X[k]|²` for `k = 0..=window.len()/2`.
+    ///
+    /// Computed with [`scirs2_fft::rfft`] — the unnormalised forward real-FFT
+    /// (`X[k] = Σₙ x[n]·e^{-2πi k n / N}`) — applied to the rectangularly
+    /// windowed (i.e. simply truncated) signal. The result therefore matches
+    /// a direct O(N²) DFT exactly in length (`N/2 + 1`), scaling (none) and
+    /// windowing, but runs in O(N log N). On the (practically unreachable)
+    /// FFT error path it returns an all-zero spectrum of the correct length so
+    /// callers stay infallible.
+    fn one_sided_power_spectrum(window: &[f32]) -> Vec<f32> {
+        let fft_len = window.len();
+        let n_bins = fft_len / 2 + 1;
+
+        // Promote to f64 for the transform; `rfft` is unnormalised, so the
+        // magnitude-squared of each bin equals the previous direct-DFT value
+        // up to floating-point rounding.
+        let buf_f64: Vec<f64> = window.iter().map(|&s| f64::from(s)).collect();
+
+        match rfft(&buf_f64, Some(fft_len)) {
+            Ok(spectrum) => spectrum.iter().map(|c| c.norm_sqr() as f32).collect(),
+            Err(_) => vec![0.0_f32; n_bins],
         }
     }
 
@@ -1596,5 +1613,58 @@ mod tests {
             noise_metrics.mcd,
             sine_metrics.mcd
         );
+    }
+
+    /// The SciRS2 `rfft`-based one-sided power spectrum must match a reference
+    /// direct O(N²) DFT bin-for-bin, proving the FFT upgrade is behaviour-
+    /// preserving: identical length (`N/2 + 1`), scaling (unnormalised) and
+    /// rectangular windowing.
+    #[test]
+    fn test_one_sided_power_spectrum_matches_direct_dft() {
+        // Deterministic, non-trivial signal: DC offset + two tones so that
+        // both low and high bins carry energy.
+        let fft_len = 64usize;
+        let window: Vec<f32> = (0..fft_len)
+            .map(|n| {
+                let t = n as f32;
+                0.3 + (2.0 * std::f32::consts::PI * 3.0 * t / fft_len as f32).sin()
+                    + 0.5 * (2.0 * std::f32::consts::PI * 11.0 * t / fft_len as f32).cos()
+            })
+            .collect();
+
+        // Reference: naive one-sided |X[k]|² via the textbook DFT formula,
+        // accumulated in f64 to mirror the production rfft path's precision.
+        let n_bins = fft_len / 2 + 1;
+        let mut reference: Vec<f32> = Vec::with_capacity(n_bins);
+        for k in 0..n_bins {
+            let theta = -2.0 * std::f64::consts::PI * k as f64 / fft_len as f64;
+            let (mut re, mut im) = (0.0_f64, 0.0_f64);
+            for (n, &s) in window.iter().enumerate() {
+                let angle = theta * n as f64;
+                re += f64::from(s) * angle.cos();
+                im += f64::from(s) * angle.sin();
+            }
+            reference.push((re * re + im * im) as f32);
+        }
+
+        let power = CodecQualityMetrics::one_sided_power_spectrum(&window);
+
+        assert_eq!(
+            power.len(),
+            reference.len(),
+            "power spectrum length must equal fft_len/2 + 1"
+        );
+
+        // Both paths sum in f64 and cast to f32, so only float rounding can
+        // separate them. Bound the per-bin error relative to the spectral peak
+        // (with a tiny absolute floor for near-zero bins).
+        let peak = reference.iter().copied().fold(0.0_f32, f32::max).max(1e-12);
+        let tol = 1e-5_f32 * peak + 1e-6_f32;
+        for (k, (&p, &r)) in power.iter().zip(reference.iter()).enumerate() {
+            assert!(
+                (p - r).abs() <= tol,
+                "bin {k}: rfft power {p} vs reference DFT {r} exceeds tolerance {tol}"
+            );
+        }
     }
 }

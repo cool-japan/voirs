@@ -8,6 +8,51 @@ use crate::FeedbackError;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
+/// Sample rate (in Hz) assumed by the real-time feedback audio pipeline.
+///
+/// The pipeline operates on 16 kHz speech audio. This constant is the single
+/// source of truth for the sample rate used by spectral feature extraction
+/// (spectral-centroid frequency mapping, the mel filter bank, and pitch
+/// estimation) throughout this module.
+const DEFAULT_SAMPLE_RATE_HZ: f32 = 16_000.0;
+
+/// Compute the magnitude spectrum of a real-valued audio frame via a real FFT.
+///
+/// Uses [`scirs2_fft::rfft`] (an O(n log n) real-input FFT) instead of a naive
+/// O(n²) DFT. For an input frame of length `n`, the returned vector holds the
+/// `n / 2` positive-frequency magnitudes `|X_k|` (bins `0..n/2`, i.e. DC up to
+/// just below Nyquist), matching the layout expected by the mel filter bank and
+/// the spectral-centroid computation. Bin `k` corresponds to the frequency
+/// `k * sample_rate / n`.
+///
+/// Returns an empty vector for frames shorter than two samples.
+///
+/// # Errors
+///
+/// Returns [`FeedbackError::ProcessingError`] if the underlying FFT fails.
+fn compute_fft_magnitude_spectrum(frame: &[f32]) -> Result<Vec<f32>, FeedbackError> {
+    let n = frame.len();
+    let half = n / 2;
+    if half == 0 {
+        return Ok(Vec::new());
+    }
+
+    // `scirs2_fft::rfft` consumes f64 samples and returns `n / 2 + 1` complex
+    // bins (DC through Nyquist).
+    let input: Vec<f64> = frame.iter().map(|&sample| f64::from(sample)).collect();
+    let spectrum = scirs2_fft::rfft(&input, Some(n)).map_err(|err| {
+        FeedbackError::ProcessingError(format!("FFT magnitude computation failed: {err}"))
+    })?;
+
+    // Keep the first `n / 2` bins to preserve the historical magnitude-spectrum
+    // layout consumed by downstream feature extractors.
+    Ok(spectrum
+        .iter()
+        .take(half)
+        .map(|bin| bin.norm() as f32)
+        .collect())
+}
+
 /// Voice Activity Detection (VAD) system
 pub struct VoiceActivityDetector {
     config: VadConfig,
@@ -103,20 +148,33 @@ impl VoiceActivityDetector {
         crossings as f32 / (frame.len() - 1) as f32
     }
 
-    /// Calculate spectral centroid (simplified)
+    /// Calculate the spectral centroid of a frame, in Hz.
+    ///
+    /// Computes the magnitude-weighted mean frequency
+    /// `Σ(f_k · |X_k|) / Σ|X_k|` from a real FFT magnitude spectrum, where
+    /// `f_k = k · sample_rate / n`. Returns `0.0` for empty or silent frames.
     fn calculate_spectral_centroid(&self, frame: &[f32]) -> f32 {
-        if frame.is_empty() {
+        let n = frame.len();
+        if n < 2 {
             return 0.0;
         }
 
-        // Simple spectral centroid approximation using high-frequency energy
-        let mid_point = frame.len() / 2;
-        let low_energy: f32 = frame[0..mid_point].iter().map(|&x| x.abs()).sum();
-        let high_energy: f32 = frame[mid_point..].iter().map(|&x| x.abs()).sum();
+        let magnitudes = match compute_fft_magnitude_spectrum(frame) {
+            Ok(magnitudes) => magnitudes,
+            Err(_) => return 0.0,
+        };
 
-        let total_energy = low_energy + high_energy;
-        if total_energy > 0.0 {
-            high_energy / total_energy
+        let freq_resolution = DEFAULT_SAMPLE_RATE_HZ / n as f32;
+        let mut weighted_sum = 0.0f32;
+        let mut magnitude_sum = 0.0f32;
+        for (bin_index, &magnitude) in magnitudes.iter().enumerate() {
+            let frequency_hz = bin_index as f32 * freq_resolution;
+            weighted_sum += frequency_hz * magnitude;
+            magnitude_sum += magnitude;
+        }
+
+        if magnitude_sum > 1e-6 {
+            weighted_sum / magnitude_sum
         } else {
             0.0
         }
@@ -168,7 +226,17 @@ impl VoiceActivityDetector {
     fn ml_based_vad(&self, energy: f32, zcr: f32, spectral_centroid: f32) -> bool {
         // Simple linear classifier weights (could be trained on data)
         let weights = [2.0, 1.5, 1.2]; // [energy, zcr, spectral]
-        let features = [(energy - self.noise_floor).max(0.0), zcr, spectral_centroid];
+
+        // The spectral centroid is expressed in Hz; normalise it to the unit
+        // range against the Nyquist frequency so it stays commensurate with the
+        // energy and zero-crossing features (and with `ml_threshold`).
+        let nyquist = DEFAULT_SAMPLE_RATE_HZ / 2.0;
+        let normalized_centroid = (spectral_centroid / nyquist).clamp(0.0, 1.0);
+        let features = [
+            (energy - self.noise_floor).max(0.0),
+            zcr,
+            normalized_centroid,
+        ];
 
         let score: f32 = weights
             .iter()
@@ -268,9 +336,9 @@ pub struct VadConfig {
     pub zcr_threshold: f32,
     /// Maximum zero crossing rate threshold (to filter noise)
     pub max_zcr_threshold: f32,
-    /// Spectral centroid threshold
+    /// Minimum spectral centroid (in Hz) indicative of voice activity
     pub spectral_threshold: f32,
-    /// Maximum spectral centroid threshold
+    /// Maximum spectral centroid (in Hz) indicative of voice activity
     pub max_spectral_threshold: f32,
     /// Machine learning classifier threshold
     pub ml_threshold: f32,
@@ -291,8 +359,8 @@ impl Default for VadConfig {
             energy_threshold_multiplier: 3.0,
             zcr_threshold: 0.1,
             max_zcr_threshold: 0.8,
-            spectral_threshold: 0.3,
-            max_spectral_threshold: 0.9,
+            spectral_threshold: 200.0,
+            max_spectral_threshold: 8000.0,
             ml_threshold: 1.0,
             decision_threshold: 0.5,
             algorithm_weights: [2.0, 1.0, 1.0, 1.5], // Favor energy and ML
@@ -549,7 +617,7 @@ impl FeatureExtractor {
         let windowed_frame = self.apply_hamming_window(frame);
 
         // Step 2: Compute FFT magnitude spectrum
-        let spectrum = self.compute_fft_magnitude(&windowed_frame)?;
+        let spectrum = compute_fft_magnitude_spectrum(&windowed_frame)?;
 
         // Step 3: Apply mel filter bank
         let mel_energies = self.apply_mel_filter_bank(&spectrum)?;
@@ -584,33 +652,10 @@ impl FeatureExtractor {
             .collect()
     }
 
-    /// Compute FFT magnitude spectrum (simplified implementation)
-    fn compute_fft_magnitude(&self, frame: &[f32]) -> Result<Vec<f32>, FeedbackError> {
-        let n = frame.len();
-        let mut spectrum = vec![0.0; n / 2];
-
-        // Simplified FFT magnitude calculation
-        // In a real implementation, this would use an FFT library like rustfft
-        for k in 0..n / 2 {
-            let mut real = 0.0;
-            let mut imag = 0.0;
-
-            for (i, &sample) in frame.iter().enumerate() {
-                let angle = -2.0 * std::f32::consts::PI * k as f32 * i as f32 / n as f32;
-                real += sample * angle.cos();
-                imag += sample * angle.sin();
-            }
-
-            spectrum[k] = (real * real + imag * imag).sqrt();
-        }
-
-        Ok(spectrum)
-    }
-
     /// Apply mel filter bank to the spectrum
     fn apply_mel_filter_bank(&self, spectrum: &[f32]) -> Result<Vec<f32>, FeedbackError> {
         let num_filters = 26; // Standard number of mel filters
-        let sample_rate = 16000.0; // Default sample rate for speech processing
+        let sample_rate = DEFAULT_SAMPLE_RATE_HZ; // Default sample rate for speech processing
         let nyquist = sample_rate / 2.0;
 
         // Convert frequency to mel scale
@@ -717,7 +762,7 @@ impl FeatureExtractor {
 
         if max_correlation > 0.3 && best_lag > 0 {
             // Convert lag to frequency (assuming 16kHz sample rate)
-            16000.0 / best_lag as f32
+            DEFAULT_SAMPLE_RATE_HZ / best_lag as f32
         } else {
             0.0 // No clear pitch detected
         }
@@ -935,5 +980,71 @@ mod tests {
         let stats = vad.get_statistics();
         assert!(stats.current_noise_floor > 0.0);
         assert!(stats.adaptive_threshold > stats.current_noise_floor);
+    }
+
+    /// A bin-aligned sine tone should concentrate its FFT magnitude at the
+    /// corresponding frequency bin.
+    #[test]
+    fn test_fft_magnitude_concentrates_at_tone_bin() {
+        let n = 512usize;
+        let k0 = 32usize; // Frequency bin the tone is aligned to.
+        let frame: Vec<f32> = (0..n)
+            .map(|i| (2.0 * std::f32::consts::PI * k0 as f32 * i as f32 / n as f32).sin())
+            .collect();
+
+        let spectrum = compute_fft_magnitude_spectrum(&frame).expect("FFT should succeed");
+        assert_eq!(spectrum.len(), n / 2);
+
+        let peak_bin = spectrum
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(b.1))
+            .map(|(bin, _)| bin)
+            .expect("spectrum is non-empty");
+        assert_eq!(peak_bin, k0);
+    }
+
+    /// The spectral centroid (in Hz) of a high-frequency tone must exceed that
+    /// of a low-frequency tone, and each should sit near the tone's frequency.
+    #[test]
+    fn test_spectral_centroid_orders_by_frequency() {
+        let vad = VoiceActivityDetector::new(VadConfig::default());
+        let n = 512usize;
+
+        let make_tone = |k0: f32| -> Vec<f32> {
+            (0..n)
+                .map(|i| (2.0 * std::f32::consts::PI * k0 * i as f32 / n as f32).sin())
+                .collect()
+        };
+
+        // k = 16 -> 16 * 16000 / 512 = 500 Hz; k = 128 -> 4000 Hz.
+        let low_centroid = vad.calculate_spectral_centroid(&make_tone(16.0));
+        let high_centroid = vad.calculate_spectral_centroid(&make_tone(128.0));
+
+        assert!(
+            high_centroid > low_centroid,
+            "high tone centroid ({high_centroid}) should exceed low tone centroid ({low_centroid})"
+        );
+        assert!((low_centroid - 500.0).abs() < 50.0, "got {low_centroid} Hz");
+        assert!(
+            (high_centroid - 4000.0).abs() < 50.0,
+            "got {high_centroid} Hz"
+        );
+    }
+
+    /// Silent and empty frames must yield a safe zero centroid (no NaN / Inf).
+    #[test]
+    fn test_spectral_centroid_silence_is_zero() {
+        let vad = VoiceActivityDetector::new(VadConfig::default());
+
+        let silence = vec![0.0f32; 512];
+        let centroid = vad.calculate_spectral_centroid(&silence);
+        assert!(
+            centroid.abs() < 1e-6,
+            "silence centroid should be ~0, got {centroid}"
+        );
+
+        let empty_centroid = vad.calculate_spectral_centroid(&[]);
+        assert!(empty_centroid.abs() < 1e-6);
     }
 }

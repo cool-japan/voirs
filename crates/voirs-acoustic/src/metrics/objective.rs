@@ -4,6 +4,7 @@
 //! including spectral distortion, signal-to-noise ratio, total harmonic distortion,
 //! and pitch accuracy measurements.
 
+use crate::mel::{hz_to_mel, mel_to_hz};
 use crate::{AcousticError, Result};
 use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
@@ -382,15 +383,48 @@ impl ObjectiveEvaluator {
         20.0 * (magnitude + 1e-10).log10()
     }
 
+    /// Estimate a per-frame fundamental-frequency (F0) contour from a log/linear
+    /// mel spectrogram.
+    ///
+    /// # Method
+    ///
+    /// Only the mel spectrogram is available here (no raw time-domain signal),
+    /// so a time-domain autocorrelation tracker is not possible. Instead this
+    /// performs a **parabolically-interpolated spectral-peak** estimate:
+    ///
+    /// 1. For each frame, locate the dominant mel band (peak energy).
+    /// 2. Refine the peak to sub-bin resolution with 3-point parabolic
+    ///    interpolation over the neighbouring bands.
+    /// 3. Map the fractional bin position back to Hz through the inverse mel
+    ///    scale, using the standard triangular-filterbank centre convention
+    ///    (a bank of `n_mels` filters has `n_mels + 2` mel points equally
+    ///    spaced over `[mel(f_min), mel(f_max)]`, filter `b` centred on point
+    ///    `b + 1`).
+    /// 4. Smooth across frames for octave consistency: a median filter removes
+    ///    impulsive bin-pick errors and a continuity pass snaps octave jumps
+    ///    toward a slowly-tracking reference.
+    ///
+    /// The source sample rate is not carried by [`ObjectiveEvaluator`], so the
+    /// historical 22.05 kHz / full-band assumption is retained for the mel→Hz
+    /// mapping.
     fn extract_pitch_contour(&self, mel_data: &[Vec<f32>]) -> Result<Vec<f32>> {
+        if mel_data.is_empty() || mel_data[0].is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let n_mels = mel_data.len();
         let n_frames = mel_data[0].len();
+
+        const SAMPLE_RATE: f32 = 22050.0;
+        let mel_min = hz_to_mel(0.0);
+        let mel_max = hz_to_mel(SAMPLE_RATE / 2.0);
+
         let mut pitch_contour = Vec::with_capacity(n_frames);
 
         for frame_idx in 0..n_frames {
-            // Find the frequency bin with maximum energy (simplified F0 estimation)
-            let mut max_energy = 0.0f32;
-            let mut max_bin = 0;
-
+            // 1. Locate the dominant mel band for this frame.
+            let mut max_energy = f32::NEG_INFINITY;
+            let mut max_bin = 0usize;
             for (bin, mel_channel) in mel_data.iter().enumerate() {
                 if frame_idx < mel_channel.len() {
                     let energy = mel_channel[frame_idx].abs();
@@ -401,10 +435,31 @@ impl ObjectiveEvaluator {
                 }
             }
 
-            // Convert bin to approximate frequency (simplified)
-            let frequency = max_bin as f32 * 22050.0 / 2.0 / mel_data.len() as f32;
-            pitch_contour.push(frequency);
+            // 2. Parabolic interpolation around the peak for sub-bin accuracy.
+            let refined_bin = if max_bin > 0 && max_bin + 1 < n_mels {
+                let left = mel_data[max_bin - 1][frame_idx].abs();
+                let center = mel_data[max_bin][frame_idx].abs();
+                let right = mel_data[max_bin + 1][frame_idx].abs();
+                let denom = left - 2.0 * center + right;
+                if denom.abs() > 1e-12 {
+                    let delta = 0.5 * (left - right) / denom;
+                    max_bin as f32 + delta.clamp(-0.5, 0.5)
+                } else {
+                    max_bin as f32
+                }
+            } else {
+                max_bin as f32
+            };
+
+            // 3. Map the fractional bin position through the mel→Hz inverse.
+            let mel_value =
+                mel_min + (mel_max - mel_min) * (refined_bin + 1.0) / (n_mels as f32 + 1.0);
+            pitch_contour.push(mel_to_hz(mel_value));
         }
+
+        // 4. Octave-consistency + continuity smoothing across frames.
+        pitch_contour = median_filter(&pitch_contour, 5);
+        enforce_octave_continuity(&mut pitch_contour);
 
         Ok(pitch_contour)
     }
@@ -452,6 +507,63 @@ impl ObjectiveEvaluator {
         }
 
         windowed
+    }
+}
+
+/// Apply a sliding-window median filter, removing impulsive outliers from a
+/// pitch contour while preserving genuine trends (a constant or monotonic input
+/// is returned essentially unchanged).
+fn median_filter(values: &[f32], window: usize) -> Vec<f32> {
+    let n = values.len();
+    if n == 0 || window <= 1 {
+        return values.to_vec();
+    }
+
+    let half = window / 2;
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let lo = i.saturating_sub(half);
+        let hi = (i + half + 1).min(n);
+        let mut window_values: Vec<f32> = values[lo..hi].to_vec();
+        window_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        out.push(window_values[window_values.len() / 2]);
+    }
+    out
+}
+
+/// Remove octave jumps from a pitch contour by snapping each value toward a
+/// slowly-tracking reference using power-of-two shifts. Smooth, gradual pitch
+/// motion (each step well below an octave) is left untouched; abrupt doublings
+/// or halvings are folded back into the running register.
+fn enforce_octave_continuity(values: &mut [f32]) {
+    if values.len() < 2 {
+        return;
+    }
+
+    // Seed the reference with the first strictly-positive frequency.
+    let mut reference = values.iter().copied().find(|&v| v > 0.0).unwrap_or(0.0);
+
+    for value in values.iter_mut() {
+        if *value <= 0.0 {
+            continue;
+        }
+        if reference <= 0.0 {
+            reference = *value;
+            continue;
+        }
+
+        // Fold the candidate into [reference / √2, reference · √2] via octaves.
+        let mut candidate = *value;
+        while candidate > reference * std::f32::consts::SQRT_2 {
+            candidate *= 0.5;
+        }
+        while candidate < reference / std::f32::consts::SQRT_2 {
+            candidate *= 2.0;
+        }
+        *value = candidate;
+
+        // Slow follower keeps the reference centred on the corrected contour.
+        reference = 0.5 * reference + 0.5 * candidate;
     }
 }
 
@@ -577,5 +689,103 @@ mod tests {
 
         let db_value = evaluator.magnitude_to_db(0.1);
         assert_eq!(db_value, -20.0); // 0.1 magnitude = -20 dB
+    }
+
+    /// A mel spectrogram whose energy sits in a fixed band must yield an F0 at
+    /// that band's centre frequency, via the mel→Hz inverse mapping.
+    #[test]
+    fn test_pitch_contour_fixed_band() {
+        let evaluator = ObjectiveEvaluator::new();
+
+        let n_mels = 80usize;
+        let center = 20usize;
+        let n_frames = 8usize;
+
+        // Symmetric Gaussian bump centred on mel band `center` for every frame.
+        let mut mel_data = vec![vec![0.0f32; n_frames]; n_mels];
+        for (bin, channel) in mel_data.iter_mut().enumerate() {
+            let dist = bin as f32 - center as f32;
+            let value = (-(dist * dist) / 8.0).exp();
+            for sample in channel.iter_mut() {
+                *sample = value;
+            }
+        }
+
+        let contour = evaluator.extract_pitch_contour(&mel_data).unwrap();
+        assert_eq!(contour.len(), n_frames);
+
+        // Expected centre frequency for the dominant band.
+        let mel_min = hz_to_mel(0.0);
+        let mel_max = hz_to_mel(22050.0 / 2.0);
+        let mel_value =
+            mel_min + (mel_max - mel_min) * (center as f32 + 1.0) / (n_mels as f32 + 1.0);
+        let expected = mel_to_hz(mel_value);
+
+        for &freq in &contour {
+            assert!(freq.is_finite() && freq > 0.0, "invalid F0: {freq}");
+            assert!(
+                (freq - expected).abs() < expected * 0.02,
+                "F0 {freq} not within 2% of expected {expected}"
+            );
+        }
+    }
+
+    /// A gradual upward sweep of the dominant band must produce a rising F0
+    /// contour (the octave-continuity smoothing must not flatten genuine,
+    /// sub-octave pitch motion).
+    #[test]
+    fn test_pitch_contour_sweep_is_monotonic() {
+        let evaluator = ObjectiveEvaluator::new();
+
+        let n_mels = 80usize;
+        let n_frames = 20usize;
+
+        // Frame f has its peak at band (10 + f), a gentle one-bin-per-frame rise.
+        let mut mel_data = vec![vec![0.0f32; n_frames]; n_mels];
+        for frame_idx in 0..n_frames {
+            let peak = 10 + frame_idx;
+            for (bin, channel) in mel_data.iter_mut().enumerate() {
+                let dist = bin as f32 - peak as f32;
+                channel[frame_idx] = (-(dist * dist) / 8.0).exp();
+            }
+        }
+
+        let contour = evaluator.extract_pitch_contour(&mel_data).unwrap();
+        assert_eq!(contour.len(), n_frames);
+
+        for &freq in &contour {
+            assert!(freq.is_finite() && freq > 0.0, "invalid F0: {freq}");
+        }
+
+        // The sweep rises overall, end clearly above start.
+        assert!(
+            contour[n_frames - 1] > contour[0] * 1.2,
+            "expected rising sweep: first {}, last {}",
+            contour[0],
+            contour[n_frames - 1]
+        );
+    }
+
+    #[test]
+    fn test_median_filter_removes_outlier() {
+        // A single spike between flat neighbours must be suppressed.
+        let values = [100.0f32, 100.0, 900.0, 100.0, 100.0];
+        let filtered = median_filter(&values, 5);
+        assert_eq!(filtered.len(), values.len());
+        for &v in &filtered {
+            assert!((v - 100.0).abs() < 1e-3, "outlier not removed: {v}");
+        }
+    }
+
+    #[test]
+    fn test_octave_continuity_folds_jump() {
+        // A doubled (octave-up) frame should be folded back near its neighbours.
+        let mut values = [220.0f32, 220.0, 440.0, 220.0, 220.0];
+        enforce_octave_continuity(&mut values);
+        assert!(
+            (values[2] - 220.0).abs() < 1.0,
+            "octave jump not corrected: {}",
+            values[2]
+        );
     }
 }

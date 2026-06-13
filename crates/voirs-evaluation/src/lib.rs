@@ -142,6 +142,8 @@ pub use voirs_sdk::{AudioBuffer, LanguageCode, Phoneme, VoirsError};
 pub mod accuracy_benchmarks;
 pub mod advanced_preprocessing;
 pub mod audio;
+/// Shared audio DSP primitives (spectral centroid/rolloff, MFCC, pitch)
+pub(crate) mod audio_dsp;
 /// Audit trail system for compliance and security monitoring
 pub mod audit;
 pub mod automated_benchmarks;

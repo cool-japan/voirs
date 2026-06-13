@@ -535,6 +535,153 @@ pub struct ProcessingChain {
     pub enabled: bool,
 }
 
+// ---------------------------------------------------------------------------
+// Freeverb-style algorithmic reverberator
+// ---------------------------------------------------------------------------
+
+/// Comb-filter delay-line tunings (samples at 44.1 kHz) from the classic Freeverb.
+const FREEVERB_COMB_TUNINGS: [usize; 8] = [1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617];
+/// All-pass delay-line tunings (samples at 44.1 kHz).
+const FREEVERB_ALLPASS_TUNINGS: [usize; 4] = [556, 441, 341, 225];
+/// Sample rate the tunings above were chosen for.
+const FREEVERB_REFERENCE_SAMPLE_RATE: f32 = 44_100.0;
+/// Input gain applied before the comb bank to keep the wet path well-conditioned.
+const FREEVERB_FIXED_GAIN: f32 = 0.015;
+/// Maps `room_size` ∈ [0, 1] onto comb feedback ∈ [0.7, 0.98] (always < 1 → stable).
+const FREEVERB_ROOM_SCALE: f32 = 0.28;
+/// Feedback offset paired with [`FREEVERB_ROOM_SCALE`].
+const FREEVERB_ROOM_OFFSET: f32 = 0.7;
+/// Maps `damping` ∈ [0, 1] onto the comb low-pass coefficient ∈ [0, 0.4].
+const FREEVERB_DAMP_SCALE: f32 = 0.4;
+/// Fixed all-pass feedback coefficient.
+const FREEVERB_ALLPASS_FEEDBACK: f32 = 0.5;
+
+/// Low-pass-damped feedback comb filter (one of Freeverb's parallel combs).
+#[derive(Debug, Clone)]
+struct FreeverbComb {
+    /// Ring buffer holding the delay line.
+    buffer: Vec<f32>,
+    /// Current read/write position in the ring buffer.
+    index: usize,
+    /// One-pole low-pass state in the feedback path.
+    filter_store: f32,
+    /// Recirculation gain (< 1 for stability).
+    feedback: f32,
+    /// Low-pass coefficient on the delayed sample.
+    damp1: f32,
+    /// Low-pass coefficient on the previous filter state (`1 - damp1`).
+    damp2: f32,
+}
+
+impl FreeverbComb {
+    fn new(size: usize, feedback: f32, damp: f32) -> Self {
+        Self {
+            buffer: vec![0.0; size.max(1)],
+            index: 0,
+            filter_store: 0.0,
+            feedback,
+            damp1: damp,
+            damp2: 1.0 - damp,
+        }
+    }
+
+    fn process(&mut self, input: f32) -> f32 {
+        let output = self.buffer[self.index];
+        // One-pole low-pass in the feedback path → frequency-dependent decay.
+        self.filter_store = output * self.damp2 + self.filter_store * self.damp1;
+        self.buffer[self.index] = input + self.filter_store * self.feedback;
+        self.index += 1;
+        if self.index >= self.buffer.len() {
+            self.index = 0;
+        }
+        output
+    }
+}
+
+/// Schroeder all-pass section used to build echo density on the output path.
+#[derive(Debug, Clone)]
+struct FreeverbAllpass {
+    /// Ring buffer holding the delay line.
+    buffer: Vec<f32>,
+    /// Current read/write position in the ring buffer.
+    index: usize,
+    /// Recirculation gain.
+    feedback: f32,
+}
+
+impl FreeverbAllpass {
+    fn new(size: usize, feedback: f32) -> Self {
+        Self {
+            buffer: vec![0.0; size.max(1)],
+            index: 0,
+            feedback,
+        }
+    }
+
+    fn process(&mut self, input: f32) -> f32 {
+        let buffered = self.buffer[self.index];
+        let output = buffered - input;
+        self.buffer[self.index] = input + buffered * self.feedback;
+        self.index += 1;
+        if self.index >= self.buffer.len() {
+            self.index = 0;
+        }
+        output
+    }
+}
+
+/// Compact mono Freeverb: eight parallel damped comb filters summed into four
+/// series all-pass sections. Feedback is held strictly below 1, so the impulse
+/// response is finite-energy and always decays.
+#[derive(Debug, Clone)]
+struct Freeverb {
+    /// Parallel comb-filter bank.
+    combs: Vec<FreeverbComb>,
+    /// Series all-pass diffusion chain.
+    allpasses: Vec<FreeverbAllpass>,
+}
+
+impl Freeverb {
+    fn new(room_size: f32, damping: f32, sample_rate: f32) -> Self {
+        let feedback = room_size.clamp(0.0, 1.0) * FREEVERB_ROOM_SCALE + FREEVERB_ROOM_OFFSET;
+        let damp = damping.clamp(0.0, 1.0) * FREEVERB_DAMP_SCALE;
+        // Scale the reference tunings to the actual sample rate.
+        let sr_scale = (sample_rate / FREEVERB_REFERENCE_SAMPLE_RATE).max(0.1);
+
+        let combs = FREEVERB_COMB_TUNINGS
+            .iter()
+            .map(|&tuning| {
+                let size = (tuning as f32 * sr_scale).round() as usize;
+                FreeverbComb::new(size, feedback, damp)
+            })
+            .collect();
+        let allpasses = FREEVERB_ALLPASS_TUNINGS
+            .iter()
+            .map(|&tuning| {
+                let size = (tuning as f32 * sr_scale).round() as usize;
+                FreeverbAllpass::new(size, FREEVERB_ALLPASS_FEEDBACK)
+            })
+            .collect();
+
+        Self { combs, allpasses }
+    }
+
+    /// Process one input sample and return the wet (reverberated) sample.
+    fn process(&mut self, input: f32) -> f32 {
+        let scaled = input * FREEVERB_FIXED_GAIN;
+        // Parallel comb bank.
+        let mut wet = 0.0f32;
+        for comb in &mut self.combs {
+            wet += comb.process(scaled);
+        }
+        // Series all-pass diffusion.
+        for allpass in &mut self.allpasses {
+            wet = allpass.process(wet);
+        }
+        wet
+    }
+}
+
 /// Example reverb plugin implementation
 #[derive(Debug)]
 pub struct ReverbPlugin {
@@ -630,23 +777,20 @@ impl SpatialPlugin for ReverbPlugin {
             return Err(Error::LegacyAudio("Plugin is in error state".to_string()));
         }
 
-        // Calculate distance for reverb scaling
+        // Reverb send rises with distance (more reflected vs. direct energy).
         let distance = listener_position.distance_to(&source_position);
-        let reverb_scale = (distance / 10.0).min(1.0); // Scale reverb with distance
+        let reverb_scale = (distance / 10.0).min(1.0);
 
-        // Simple reverb simulation (placeholder for real implementation)
+        // A Freeverb tank parameterised by the plugin's room size and damping.
+        // It is instantiated per call because `process_audio` borrows `&self`; the
+        // tank carries no cross-buffer state in this example plugin.
+        let mut reverb = Freeverb::new(self.room_size, self.damping, context.sample_rate);
+
         let mut output = Vec::with_capacity(audio.len());
-        for (i, &sample) in audio.iter().enumerate() {
-            // Simple delay-based reverb
-            let delayed_sample = if i >= context.buffer_size / 4 {
-                audio[i - context.buffer_size / 4] * self.room_size * reverb_scale
-            } else {
-                0.0
-            };
-
-            let wet = delayed_sample * self.wet_level * reverb_scale;
+        for &sample in audio {
+            let wet = reverb.process(sample);
             let dry = sample * self.dry_level;
-            output.push(dry + wet);
+            output.push(dry + wet * self.wet_level * reverb_scale);
         }
 
         Ok(output)
@@ -787,5 +931,48 @@ mod tests {
 
         manager.unregister_plugin("Spatial Reverb").await.unwrap();
         assert!(!manager.has_plugin("Spatial Reverb"));
+    }
+
+    #[test]
+    async fn test_reverb_impulse_produces_decaying_bounded_tail() {
+        let mut plugin = ReverbPlugin::new();
+        plugin.initialize(PluginConfig::default()).await.unwrap();
+
+        let len = 30_000;
+        let mut audio = vec![0.0f32; len];
+        audio[0] = 1.0; // unit impulse
+
+        let listener = Position3D::new(0.0, 0.0, 0.0);
+        // Far source → reverb send saturates (distance ≥ 10 gives full wet level).
+        let source = Position3D::new(12.0, 0.0, 0.0);
+        let context = ProcessingContext::default();
+
+        let output = plugin
+            .process_audio(&audio, listener, source, &context)
+            .await
+            .unwrap();
+        assert_eq!(output.len(), len);
+
+        // Every sample must be finite and bounded (feedback < 1 guarantees this).
+        for (i, &s) in output.iter().enumerate() {
+            assert!(s.is_finite(), "non-finite output at {i}");
+            assert!(s.abs() < 4.0, "reverb blew up at {i}: {s}");
+        }
+
+        // A reverberant tail must exist beyond the dry impulse at index 0.
+        let tail_energy: f32 = output[1..].iter().map(|s| s * s).sum();
+        assert!(tail_energy > 0.0, "no reverb tail: {tail_energy}");
+
+        // The tail must decay: an early window holds more energy than a later one.
+        let window_energy = |start: usize, end: usize| -> f32 {
+            output[start..end.min(len)].iter().map(|s| s * s).sum()
+        };
+        let early = window_energy(2_000, 7_000);
+        let late = window_energy(22_000, 27_000);
+        assert!(early > 0.0, "no early tail energy: {early}");
+        assert!(
+            early > late,
+            "tail should decay: early={early}, late={late}"
+        );
     }
 }

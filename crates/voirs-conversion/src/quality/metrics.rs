@@ -12,6 +12,41 @@ const F0_MAX_HZ: f32 = 800.0;
 /// Minimum normalised autocorrelation value to declare a frame voiced.
 const VOICED_THRESHOLD: f32 = 0.35;
 
+// ---------------------------------------------------------------------------
+// Psychoacoustic (Bark critical-band) model constants
+// ---------------------------------------------------------------------------
+
+/// FFT size used by `calculate_power_spectrum`; shared so the Bark bin → frequency
+/// mapping in the loudness/sharpness models stays exactly in step with the spectrum.
+const POWER_SPECTRUM_N_FFT: usize = 512;
+/// Number of Bark critical bands spanning the audible range (~0–24 Bark).
+const NUM_BARK_BANDS: usize = 24;
+/// Width of each critical band on the Bark scale (Bark).
+const BARK_BAND_WIDTH: f32 = 1.0;
+/// Reference excitation `E0` for the specific-loudness power law, expressed in the FFT's
+/// native power units for normalised `[-1, 1]` float audio.
+const LOUDNESS_E0: f32 = 1.0;
+/// Excitation at threshold in quiet — gates numerically-silent bands to zero loudness.
+const LOUDNESS_E_THRESHOLD: f32 = 0.01;
+/// Stevens' compressive power-law exponent for the intensity → loudness mapping.
+const LOUDNESS_EXPONENT: f32 = 0.23;
+/// Half-saturation constant mapping total loudness (sone) → `[0, 1)` monotonically.
+const LOUDNESS_SATURATION: f32 = 8.0;
+/// DIN 45692 sharpness scaling constant (acum).
+const SHARPNESS_C: f32 = 0.11;
+/// Bark value above which the DIN 45692 sharpness weighting `g(z)` rises above unity.
+const SHARPNESS_Z_KNEE: f32 = 16.0;
+/// Roughness analysis STFT window length (samples) — short enough to track the temporal
+/// envelope modulation that drives roughness.
+const ROUGHNESS_WINDOW: usize = 128;
+/// Roughness analysis STFT hop (samples); the frame rate `sr/hop` must exceed twice the
+/// highest perceptually-relevant modulation frequency (~300 Hz).
+const ROUGHNESS_HOP: usize = 32;
+/// Modulation frequency of peak roughness sensitivity (Hz, Fastl & Zwicker).
+const ROUGHNESS_PEAK_HZ: f32 = 70.0;
+/// Half-saturation constant mapping summed roughness → `[0, 1)` monotonically.
+const ROUGHNESS_SATURATION: f32 = 2.0;
+
 /// Objective quality metrics system for conversion evaluation
 #[derive(Debug, Clone)]
 pub struct QualityMetricsSystem {
@@ -154,11 +189,7 @@ impl QualityMetricsSystem {
     }
 
     /// Extract quality-relevant features from audio
-    fn extract_quality_features(
-        &self,
-        audio: &[f32],
-        _sample_rate: u32,
-    ) -> Result<QualityFeatures> {
+    fn extract_quality_features(&self, audio: &[f32], sample_rate: u32) -> Result<QualityFeatures> {
         // Extract spectral features (simplified MFCCs)
         let spectral = self.extract_spectral_features(audio);
 
@@ -169,7 +200,7 @@ impl QualityMetricsSystem {
         let prosodic = self.extract_prosodic_features(audio);
 
         // Extract perceptual features
-        let perceptual = self.extract_perceptual_features(audio);
+        let perceptual = self.extract_perceptual_features(audio, sample_rate);
 
         Ok(QualityFeatures {
             spectral,
@@ -245,19 +276,19 @@ impl QualityMetricsSystem {
         features
     }
 
-    fn extract_perceptual_features(&self, audio: &[f32]) -> Vec<f32> {
+    fn extract_perceptual_features(&self, audio: &[f32], sample_rate: u32) -> Vec<f32> {
         let mut features = Vec::new();
 
-        // Loudness estimate
-        let loudness = self.estimate_loudness(audio);
+        // Loudness estimate (Zwicker / ISO 532-B style)
+        let loudness = self.estimate_loudness(audio, sample_rate);
         features.push(loudness);
 
-        // Sharpness estimate
-        let sharpness = self.estimate_sharpness(audio);
+        // Sharpness estimate (DIN 45692)
+        let sharpness = self.estimate_sharpness(audio, sample_rate);
         features.push(sharpness);
 
-        // Roughness estimate
-        let roughness = self.estimate_roughness(audio);
+        // Roughness estimate (critical-band envelope modulation)
+        let roughness = self.estimate_roughness(audio, sample_rate);
         features.push(roughness);
 
         features
@@ -269,7 +300,7 @@ impl QualityMetricsSystem {
         // Hann-windowed FFT magnitude spectrum.
         // n_fft = 512 when enough samples are available; otherwise next power-of-two.
         // Returns magnitude (not squared) for n_fft/2 + 1 bins.
-        const N_FFT: usize = 512;
+        const N_FFT: usize = POWER_SPECTRUM_N_FFT;
         let empty_len = N_FFT / 2 + 1;
 
         if audio.len() < 4 {
@@ -584,39 +615,220 @@ impl QualityMetricsSystem {
         vec![speech_rate]
     }
 
-    fn estimate_loudness(&self, audio: &[f32]) -> f32 {
-        // Simplified loudness estimation based on RMS
-        let rms = (audio.iter().map(|x| x * x).sum::<f32>() / audio.len() as f32).sqrt();
-        (rms * 100.0).min(1.0) // Normalize to 0-1 range
+    /// Estimate perceived loudness with a Zwicker / ISO 532-B style critical-band model.
+    ///
+    /// The magnitude spectrum (reused from `calculate_power_spectrum`) is squared into
+    /// power, mapped onto the Bark critical-band scale, spread with Schroeder's spreading
+    /// function, and converted to specific loudness `N'(z)` via Stevens' compressive power
+    /// law `N'(z) ∝ (E/E0)^0.23`. The total loudness `N = Σ N'(z)·ΔBark` (sone) is mapped
+    /// through the monotonic soft-saturation `N / (N + K)` so the result stays in `[0, 1)`
+    /// while remaining a strictly increasing function of true loudness — not raw RMS.
+    fn estimate_loudness(&self, audio: &[f32], sample_rate: u32) -> f32 {
+        let (_specific, total_loudness) = self.specific_loudness(audio, sample_rate);
+        total_loudness / (total_loudness + LOUDNESS_SATURATION)
     }
 
-    fn estimate_sharpness(&self, audio: &[f32]) -> f32 {
-        // Simplified sharpness based on high-frequency content
-        let spectrum = self.calculate_power_spectrum(audio);
-        let total_energy: f32 = spectrum.iter().sum();
+    /// Estimate sharpness (acum) following DIN 45692.
+    ///
+    /// `S = c · Σ(N'(z)·g(z)·z·ΔBark) / Σ(N'(z)·ΔBark)`, where the band-weighting `g(z)` is
+    /// unity up to `SHARPNESS_Z_KNEE` Bark and rises as `0.066·exp(0.171·z)` above it, and
+    /// `c = SHARPNESS_C`. The specific loudness `N'(z)` is shared with the loudness model so
+    /// high-frequency energy raises sharpness through the Bark-weighted loudness centroid.
+    fn estimate_sharpness(&self, audio: &[f32], sample_rate: u32) -> f32 {
+        let (specific, _total) = self.specific_loudness(audio, sample_rate);
 
-        if total_energy > 0.0 {
-            let hf_start = spectrum.len() * 2 / 3; // Upper third of spectrum
-            let hf_energy: f32 = spectrum[hf_start..].iter().sum();
-            hf_energy / total_energy
+        let mut numerator = 0.0_f32;
+        let mut denominator = 0.0_f32;
+        for (band, &n_prime) in specific.iter().enumerate() {
+            // Band centre on the Bark scale.
+            let z = (band as f32 + 0.5) * BARK_BAND_WIDTH;
+            let g = if z <= SHARPNESS_Z_KNEE {
+                1.0
+            } else {
+                0.066 * (0.171 * z).exp()
+            };
+            numerator += n_prime * g * z * BARK_BAND_WIDTH;
+            denominator += n_prime * BARK_BAND_WIDTH;
+        }
+
+        if denominator > f32::EPSILON {
+            SHARPNESS_C * numerator / denominator
         } else {
             0.0
         }
     }
 
-    fn estimate_roughness(&self, audio: &[f32]) -> f32 {
-        // Simplified roughness based on amplitude modulation
-        if audio.len() < 3 {
+    /// Estimate roughness from critical-band temporal-envelope modulation.
+    ///
+    /// A short-window STFT (`ROUGHNESS_WINDOW` / `ROUGHNESS_HOP`) yields a per-frame energy
+    /// time series — the temporal envelope — for each Bark band. The modulation spectrum of
+    /// every band envelope is taken with `scirs2_fft::rfft`; each AC component is normalised
+    /// by the envelope DC to form a modulation-depth index, squared, and weighted by the
+    /// roughness modulation-frequency curve `roughness_weight` (peaking near
+    /// `ROUGHNESS_PEAK_HZ`). The summed contribution is soft-saturated into a stable `[0, 1)`
+    /// scalar. A Hann window is applied to each envelope before the FFT to suppress leakage;
+    /// its coherent gain cancels in the AC/DC ratio, so modulation depth is preserved.
+    fn estimate_roughness(&self, audio: &[f32], sample_rate: u32) -> f32 {
+        let envelopes = self.band_energy_envelopes(audio, sample_rate);
+        let n_frames = envelopes.first().map_or(0, Vec::len);
+        if n_frames < 4 {
             return 0.0;
         }
 
-        let mut modulation = 0.0;
-        for i in 1..audio.len() - 1 {
-            let local_variation = (audio[i + 1] - audio[i - 1]).abs();
-            modulation += local_variation;
+        let frame_rate = sample_rate as f32 / ROUGHNESS_HOP as f32;
+        let n_pad = n_frames.next_power_of_two();
+
+        // Hann window over the envelope time series (length is uniform across bands).
+        let hann: Vec<f64> = (0..n_frames)
+            .map(|i| {
+                0.5 * (1.0
+                    - (2.0 * std::f64::consts::PI * i as f64 / (n_frames - 1).max(1) as f64).cos())
+            })
+            .collect();
+
+        let mut total_roughness = 0.0_f32;
+        for envelope in &envelopes {
+            // Hann-window the envelope, then zero-pad (tapered ends keep padding artefact-free).
+            let mut buf: Vec<f64> = envelope
+                .iter()
+                .zip(hann.iter())
+                .map(|(&e, &w)| e as f64 * w)
+                .collect();
+            buf.resize(n_pad, 0.0_f64);
+
+            let spectrum = match scirs2_fft::rfft(&buf, Some(n_pad)) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            // DC term anchors the modulation-depth normalisation.
+            let dc = spectrum.first().map_or(0.0_f32, |c| c.norm() as f32);
+            if dc <= f32::EPSILON {
+                continue;
+            }
+
+            let mut band_roughness = 0.0_f32;
+            for (k, c) in spectrum.iter().enumerate().skip(1) {
+                let f_mod = k as f32 * frame_rate / n_pad as f32;
+                let depth = c.norm() as f32 / dc;
+                band_roughness += depth * depth * roughness_weight(f_mod);
+            }
+            total_roughness += band_roughness;
         }
 
-        (modulation / (audio.len() - 2) as f32).min(1.0)
+        total_roughness / (total_roughness + ROUGHNESS_SATURATION)
+    }
+
+    /// Spread per-band excitation (linear power) on the Bark critical-band scale.
+    ///
+    /// FFT magnitudes from `calculate_power_spectrum` are squared into power, accumulated
+    /// into `NUM_BARK_BANDS` critical bands via the Zwicker Bark mapping, then convolved
+    /// with Schroeder's spreading function to model upward/downward auditory masking.
+    fn bark_band_excitation(&self, audio: &[f32], sample_rate: u32) -> Vec<f32> {
+        let magnitudes = self.calculate_power_spectrum(audio);
+        let sr = sample_rate as f32;
+
+        // Reconstruct the FFT size used by `calculate_power_spectrum` so bin → frequency
+        // mapping is exact. Zero-padded bins (short inputs) carry no power and stay harmless.
+        let n_fft = if audio.len() >= POWER_SPECTRUM_N_FFT {
+            POWER_SPECTRUM_N_FFT
+        } else {
+            audio.len().next_power_of_two().max(2)
+        };
+
+        let mut excitation = vec![0.0_f32; NUM_BARK_BANDS];
+        for (i, &mag) in magnitudes.iter().enumerate() {
+            let freq = i as f32 * sr / n_fft as f32;
+            let band = (hz_to_bark(freq) / BARK_BAND_WIDTH) as usize;
+            if band < NUM_BARK_BANDS {
+                // power = magnitude²
+                excitation[band] += mag * mag;
+            }
+        }
+
+        // Convolve with Schroeder's spreading function (linear power domain).
+        let mut spread = vec![0.0_f32; NUM_BARK_BANDS];
+        for (target, slot) in spread.iter_mut().enumerate() {
+            let mut acc = 0.0_f32;
+            for (source, &e) in excitation.iter().enumerate() {
+                let delta_z = (target as f32 - source as f32) * BARK_BAND_WIDTH;
+                acc += e * spreading_function(delta_z);
+            }
+            *slot = acc;
+        }
+        spread
+    }
+
+    /// Specific loudness `N'(z)` per Bark band (sone/Bark) and total loudness `N` (sone).
+    ///
+    /// Stevens' compressive power law with a threshold-in-quiet floor:
+    /// `N'(z) = max(0, (E/E0)^0.23 - (E_TQ/E0)^0.23)`.
+    fn specific_loudness(&self, audio: &[f32], sample_rate: u32) -> (Vec<f32>, f32) {
+        let excitation = self.bark_band_excitation(audio, sample_rate);
+        let threshold_term = (LOUDNESS_E_THRESHOLD / LOUDNESS_E0).powf(LOUDNESS_EXPONENT);
+
+        let specific: Vec<f32> = excitation
+            .iter()
+            .map(|&e| ((e / LOUDNESS_E0).powf(LOUDNESS_EXPONENT) - threshold_term).max(0.0))
+            .collect();
+        let total = specific.iter().sum::<f32>() * BARK_BAND_WIDTH;
+        (specific, total)
+    }
+
+    /// Per-Bark-band temporal-envelope time series obtained from a short-window STFT.
+    ///
+    /// Returns one envelope (per-frame band energy) for each of `NUM_BARK_BANDS` critical
+    /// bands; all envelopes share the same length (one sample per analysis frame). The short
+    /// window and hop give a frame rate high enough to resolve amplitude modulation across
+    /// the roughness-relevant range (up to ~300 Hz).
+    fn band_energy_envelopes(&self, audio: &[f32], sample_rate: u32) -> Vec<Vec<f32>> {
+        let window = ROUGHNESS_WINDOW;
+        let hop = ROUGHNESS_HOP;
+        if audio.len() < window {
+            return Vec::new();
+        }
+
+        let sr = sample_rate as f32;
+        let n_out = window / 2 + 1;
+        let mut envelopes: Vec<Vec<f32>> = vec![Vec::new(); NUM_BARK_BANDS];
+
+        // Per-frame Hann window.
+        let hann: Vec<f64> = (0..window)
+            .map(|i| {
+                0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / (window - 1) as f64).cos())
+            })
+            .collect();
+
+        // Precompute bin → Bark band mapping for the analysis window.
+        let bin_band: Vec<Option<usize>> = (0..n_out)
+            .map(|i| {
+                let freq = i as f32 * sr / window as f32;
+                let band = (hz_to_bark(freq) / BARK_BAND_WIDTH) as usize;
+                (band < NUM_BARK_BANDS).then_some(band)
+            })
+            .collect();
+
+        let mut start = 0;
+        while start + window <= audio.len() {
+            let buf: Vec<f64> = (0..window)
+                .map(|i| audio[start + i] as f64 * hann[i])
+                .collect();
+            if let Ok(spectrum) = scirs2_fft::rfft(&buf, Some(window)) {
+                let mut band_energy = vec![0.0_f32; NUM_BARK_BANDS];
+                for (c, &band_opt) in spectrum.iter().take(n_out).zip(bin_band.iter()) {
+                    if let Some(band) = band_opt {
+                        let mag = c.norm() as f32;
+                        band_energy[band] += mag * mag;
+                    }
+                }
+                for (band, e) in band_energy.into_iter().enumerate() {
+                    envelopes[band].push(e);
+                }
+            }
+            start += hop;
+        }
+
+        envelopes
     }
 
     // Quality calculation methods
@@ -776,6 +988,41 @@ impl Default for QualityMetricsSystem {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Psychoacoustic helper functions (Bark scale, masking, roughness weighting)
+// ---------------------------------------------------------------------------
+
+/// Convert a frequency (Hz) to the Bark critical-band scale (Zwicker & Terhardt, 1980).
+///
+/// `z = 13·atan(0.00076·f) + 3.5·atan((f/7500)²)` [Bark].
+fn hz_to_bark(freq_hz: f32) -> f32 {
+    let f = freq_hz.max(0.0);
+    13.0 * (0.000_76 * f).atan() + 3.5 * (f / 7500.0).powi(2).atan()
+}
+
+/// Schroeder's (1979) auditory spreading function, returned as a linear power gain.
+///
+/// `10·log10(SF) = 15.81 + 7.5·(Δz + 0.474) - 17.5·sqrt(1 + (Δz + 0.474)²)` [dB]. Models the
+/// asymmetric upward/downward spread of masking between adjacent critical bands.
+fn spreading_function(delta_z: f32) -> f32 {
+    let x = delta_z + 0.474;
+    let db = 15.81 + 7.5 * x - 17.5 * (1.0 + x * x).sqrt();
+    10.0_f32.powf(db / 10.0)
+}
+
+/// Roughness sensitivity as a function of envelope modulation frequency (Hz).
+///
+/// A gamma-shaped band-pass weighting that is zero at DC, unity at `ROUGHNESS_PEAK_HZ`
+/// (Fastl & Zwicker locate maximum roughness near 70 Hz modulation), and decays for higher
+/// modulation frequencies: `w(f) = (f/f0)·exp(1 - f/f0)`.
+fn roughness_weight(f_mod: f32) -> f32 {
+    if f_mod <= 0.0 {
+        return 0.0;
+    }
+    let u = f_mod / ROUGHNESS_PEAK_HZ;
+    u * (1.0 - u).exp()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -845,5 +1092,106 @@ mod tests {
         let silence = vec![0.0_f32; 4096];
         let f0 = sys.estimate_f0_simple(&silence);
         assert_eq!(f0, 0.0, "silence should return F0=0.0");
+    }
+
+    // -----------------------------------------------------------------------
+    // Psychoacoustic (Bark critical-band) tests
+    // -----------------------------------------------------------------------
+
+    /// Amplitude-modulated tone: carrier `carrier_hz` modulated at `mod_hz` with depth.
+    fn make_am_sine(
+        carrier_hz: f32,
+        mod_hz: f32,
+        depth: f32,
+        sample_rate: f32,
+        num_samples: usize,
+    ) -> Vec<f32> {
+        (0..num_samples)
+            .map(|i| {
+                let t = i as f32 / sample_rate;
+                let envelope = 1.0 + depth * (2.0 * std::f32::consts::PI * mod_hz * t).sin();
+                envelope * (2.0 * std::f32::consts::PI * carrier_hz * t).sin()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_sharpness_high_tone_sharper_than_low_tone() {
+        // DIN 45692: a 1 kHz tone sits at a higher Bark centroid than a 200 Hz tone,
+        // so it must be measured as sharper.
+        let sys = QualityMetricsSystem::new();
+        let sr: u32 = 22050;
+        let high = make_sine(1000.0, sr as f32, 8192);
+        let low = make_sine(200.0, sr as f32, 8192);
+
+        let sharp_high = sys.estimate_sharpness(&high, sr);
+        let sharp_low = sys.estimate_sharpness(&low, sr);
+
+        assert!(
+            sharp_high > sharp_low,
+            "1 kHz tone (S={sharp_high}) should be sharper than 200 Hz tone (S={sharp_low})"
+        );
+    }
+
+    #[test]
+    fn test_roughness_modulated_rougher_than_unmodulated() {
+        // A 70 Hz amplitude-modulated tone sits at the roughness sensitivity peak and must
+        // be rougher than the same carrier with no modulation.
+        let sys = QualityMetricsSystem::new();
+        let sr: u32 = 22050;
+        let modulated = make_am_sine(1000.0, 70.0, 0.9, sr as f32, 16384);
+        let plain = make_sine(1000.0, sr as f32, 16384);
+
+        let rough_mod = sys.estimate_roughness(&modulated, sr);
+        let rough_plain = sys.estimate_roughness(&plain, sr);
+
+        assert!(
+            rough_mod > rough_plain,
+            "70 Hz AM tone (R={rough_mod}) should be rougher than unmodulated tone (R={rough_plain})"
+        );
+    }
+
+    #[test]
+    fn test_loudness_monotonic_in_amplitude() {
+        // Loudness must increase with level — a property RMS shares but which here must
+        // survive the full Bark-band / power-law / saturation pipeline.
+        let sys = QualityMetricsSystem::new();
+        let sr: u32 = 22050;
+        let base = make_sine(440.0, sr as f32, 8192);
+        let quiet: Vec<f32> = base.iter().map(|s| s * 0.1).collect();
+        let loud: Vec<f32> = base.iter().map(|s| s * 0.5).collect();
+
+        let loud_loudness = sys.estimate_loudness(&loud, sr);
+        let quiet_loudness = sys.estimate_loudness(&quiet, sr);
+
+        assert!(
+            loud_loudness > quiet_loudness,
+            "louder input (L={loud_loudness}) should exceed quieter input (L={quiet_loudness})"
+        );
+    }
+
+    #[test]
+    fn test_psychoacoustic_outputs_finite_and_nonnegative() {
+        let sys = QualityMetricsSystem::new();
+        let sr: u32 = 22050;
+        let audio = make_am_sine(800.0, 50.0, 0.7, sr as f32, 8192);
+
+        let loudness = sys.estimate_loudness(&audio, sr);
+        let sharpness = sys.estimate_sharpness(&audio, sr);
+        let roughness = sys.estimate_roughness(&audio, sr);
+
+        for (name, value) in [
+            ("loudness", loudness),
+            ("sharpness", sharpness),
+            ("roughness", roughness),
+        ] {
+            assert!(value.is_finite(), "{name} must be finite, got {value}");
+            assert!(value >= 0.0, "{name} must be non-negative, got {value}");
+        }
+
+        // Silence must be well-defined and yield zero loudness.
+        let silence = vec![0.0_f32; 8192];
+        assert_eq!(sys.estimate_loudness(&silence, sr), 0.0);
+        assert!(sys.estimate_roughness(&silence, sr).is_finite());
     }
 }

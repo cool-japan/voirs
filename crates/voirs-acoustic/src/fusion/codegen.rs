@@ -49,7 +49,12 @@ impl CodegenTarget {
         // Check SIMD capabilities using runtime detection
         #[cfg(target_arch = "x86_64")]
         {
-            if std::is_x86_feature_detected!("avx2") || std::is_x86_feature_detected!("avx512f") {
+            // Bind macro results to locals: inlining both `is_x86_feature_detected!`
+            // calls inside the `||` trips a clippy `nonminimal_bool` false-positive
+            // (it mis-reads the macro expansion as a duplicable boolean term).
+            let has_avx2 = std::is_x86_feature_detected!("avx2");
+            let has_avx512 = std::is_x86_feature_detected!("avx512f");
+            if has_avx2 || has_avx512 {
                 CodegenTarget::CpuSimd
             } else {
                 CodegenTarget::Cpu
