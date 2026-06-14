@@ -6,7 +6,7 @@
 use crate::types::AdvancedFeature;
 use crate::{Result, VoirsError};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -54,23 +54,44 @@ pub struct PerformanceMetrics {
     pub feature_stats: FeaturePerformanceStats,
 }
 
+/// Maximum number of recent RTF samples retained for percentile estimation.
+///
+/// Bounds the memory used by [`RealTimeFactorStats::recent_samples`]: once the
+/// retained window is full the oldest sample is evicted before a new one is
+/// appended, so the buffer never grows beyond this many `f64` values.
+const MAX_RTF_SAMPLES: usize = 1024;
+
 /// Real-time factor (RTF) statistics for streaming synthesis.
+///
+/// The `average_rtf`, `min_rtf`, `max_rtf` and `p95_rtf` fields are all derived
+/// from the same bounded window of recent samples ([`Self::recent_samples`]),
+/// so they remain mutually consistent (e.g. `min_rtf <= p95_rtf <= max_rtf`
+/// always holds). `rtf_violations` is the only lifetime-cumulative field.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RealTimeFactorStats {
-    /// Average real-time factor
+    /// Average real-time factor (mean over the retained sample window)
     pub average_rtf: f64,
 
-    /// Minimum real-time factor
+    /// Minimum real-time factor (over the retained sample window)
     pub min_rtf: f64,
 
-    /// Maximum real-time factor
+    /// Maximum real-time factor (over the retained sample window)
     pub max_rtf: f64,
 
-    /// 95th percentile real-time factor
+    /// 95th percentile real-time factor (nearest-rank, over the retained window)
     pub p95_rtf: f64,
 
-    /// Number of real-time violations (RTF > 1.0)
+    /// Number of real-time violations (RTF > 1.0), counted over all time
     pub rtf_violations: u64,
+
+    /// Bounded ring buffer of the most recent RTF samples (capped at
+    /// [`MAX_RTF_SAMPLES`]).
+    ///
+    /// Retained so that the distributional statistics above can be computed
+    /// exactly (true nearest-rank percentile) instead of approximated. Kept
+    /// memory-bounded by evicting the oldest sample once the cap is reached.
+    #[serde(default)]
+    pub recent_samples: VecDeque<f64>,
 }
 
 /// Audio quality metrics tracking.
@@ -531,24 +552,37 @@ impl PerformanceMonitor {
     }
 
     fn update_rtf_stats(&self, stats: &mut RealTimeFactorStats, rtf: f64) {
-        let count = stats.average_rtf;
-        if count == 0.0 {
-            stats.average_rtf = rtf;
-            stats.min_rtf = rtf;
-            stats.max_rtf = rtf;
-        } else {
-            // Simple running average (could be enhanced with proper statistical tracking)
-            stats.average_rtf = (stats.average_rtf + rtf) / 2.0;
-            stats.min_rtf = stats.min_rtf.min(rtf);
-            stats.max_rtf = stats.max_rtf.max(rtf);
+        // Retain a bounded window of the most recent RTF samples (ring buffer).
+        // Evict the oldest sample once the window is full so memory stays bounded.
+        if stats.recent_samples.len() >= MAX_RTF_SAMPLES {
+            stats.recent_samples.pop_front();
         }
+        stats.recent_samples.push_back(rtf);
 
+        // RTF violations are tracked as a lifetime counter (RTF > 1.0 means the
+        // synthesis ran slower than real time), independent of the sample window.
         if rtf > 1.0 {
             stats.rtf_violations += 1;
         }
 
-        // Approximate 95th percentile (simplified)
-        stats.p95_rtf = stats.max_rtf * 0.95;
+        // Recompute mean / min / max from the retained window in a single pass so
+        // that every distributional statistic is derived from the same sample set
+        // and they stay mutually consistent.
+        let n = stats.recent_samples.len();
+        let mut sum = 0.0;
+        let mut min_rtf = f64::INFINITY;
+        let mut max_rtf = f64::NEG_INFINITY;
+        for &sample in &stats.recent_samples {
+            sum += sample;
+            min_rtf = min_rtf.min(sample);
+            max_rtf = max_rtf.max(sample);
+        }
+        stats.average_rtf = sum / n as f64;
+        stats.min_rtf = min_rtf;
+        stats.max_rtf = max_rtf;
+
+        // True 95th percentile via the nearest-rank method over the same window.
+        stats.p95_rtf = percentile_nearest_rank(&stats.recent_samples, 95.0);
     }
 
     /// Record feature-specific performance metrics.
@@ -992,8 +1026,30 @@ impl Default for RealTimeFactorStats {
             max_rtf: 0.0,
             p95_rtf: 0.0,
             rtf_violations: 0,
+            recent_samples: VecDeque::new(),
         }
     }
+}
+
+/// Compute the percentile of a set of samples using the nearest-rank method.
+///
+/// The nearest-rank percentile is the value at 1-based rank
+/// `ceil(p/100 · n)` of the ascending-sorted samples, i.e. the element at
+/// 0-based index `ceil(p/100 · n) − 1`. For example, the 95th percentile of
+/// `1..=100` is exactly `95`.
+///
+/// Returns `0.0` when `samples` is empty. `p` is expected in `[0, 100]`; the
+/// resulting index is clamped to a valid range to remain robust at the bounds.
+fn percentile_nearest_rank(samples: &VecDeque<f64>, p: f64) -> f64 {
+    let n = samples.len();
+    if n == 0 {
+        return 0.0;
+    }
+    let mut sorted: Vec<f64> = samples.iter().copied().collect();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let rank = ((p / 100.0) * n as f64).ceil() as usize;
+    let index = rank.saturating_sub(1).min(n - 1);
+    sorted[index]
 }
 
 impl Default for QualityMetrics {
@@ -1153,5 +1209,76 @@ mod tests {
 
         let metrics = monitor.get_metrics().unwrap();
         assert_eq!(metrics.total_syntheses, 0);
+    }
+
+    #[test]
+    fn test_nearest_rank_p95_exact() {
+        // Nearest-rank p95 of 1..=100 must be exactly 95.
+        let samples: VecDeque<f64> = (1..=100).map(|v| v as f64).collect();
+        assert_eq!(percentile_nearest_rank(&samples, 95.0), 95.0);
+        // p100 is the maximum; p1 lands on the smallest value (rank ceil(0.01*100)=1).
+        assert_eq!(percentile_nearest_rank(&samples, 100.0), 100.0);
+        assert_eq!(percentile_nearest_rank(&samples, 1.0), 1.0);
+        // p50 nearest-rank: rank ceil(0.5*100)=50 -> 0-based index 49 -> value 50.
+        assert_eq!(percentile_nearest_rank(&samples, 50.0), 50.0);
+    }
+
+    #[test]
+    fn test_percentile_edge_cases() {
+        // Empty input is defined to return 0.0.
+        let empty: VecDeque<f64> = VecDeque::new();
+        assert_eq!(percentile_nearest_rank(&empty, 95.0), 0.0);
+        // Single element is returned for any percentile.
+        let single: VecDeque<f64> = VecDeque::from([0.42]);
+        assert_eq!(percentile_nearest_rank(&single, 95.0), 0.42);
+        assert_eq!(percentile_nearest_rank(&single, 0.0), 0.42);
+        // Unsorted input is handled (sorted internally).
+        let unsorted: VecDeque<f64> = VecDeque::from([5.0, 1.0, 4.0, 2.0, 3.0]);
+        // rank ceil(0.95*5)=ceil(4.75)=5 -> index 4 -> max value 5.0.
+        assert_eq!(percentile_nearest_rank(&unsorted, 95.0), 5.0);
+    }
+
+    #[test]
+    fn test_rtf_stats_real_percentile() {
+        let monitor = PerformanceMonitor::new();
+        // Feed RTF samples 1.0, 2.0, ..., 100.0 via processing/audio duration ratio.
+        for v in 1..=100u64 {
+            monitor
+                .record_synthesis(Duration::from_millis(v), Duration::from_millis(1))
+                .unwrap();
+        }
+        let stats = monitor.get_metrics().unwrap().rtf_stats;
+
+        // All 100 samples retained (below the cap), so stats are exact.
+        assert_eq!(stats.recent_samples.len(), 100);
+        assert!(
+            (stats.p95_rtf - 95.0).abs() < 1e-9,
+            "expected real p95 == 95, got {}",
+            stats.p95_rtf
+        );
+        assert!((stats.min_rtf - 1.0).abs() < 1e-9);
+        assert!((stats.max_rtf - 100.0).abs() < 1e-9);
+        assert!((stats.average_rtf - 50.5).abs() < 1e-9);
+        // RTF > 1.0 for the values 2..=100 => 99 cumulative violations.
+        assert_eq!(stats.rtf_violations, 99);
+        // Consistency invariant: min <= p95 <= max.
+        assert!(stats.min_rtf <= stats.p95_rtf && stats.p95_rtf <= stats.max_rtf);
+    }
+
+    #[test]
+    fn test_rtf_sample_window_is_bounded() {
+        let monitor = PerformanceMonitor::new();
+        // Record more samples than the retention cap and confirm it stays bounded.
+        for _ in 0..(MAX_RTF_SAMPLES + 500) {
+            monitor
+                .record_synthesis(Duration::from_millis(10), Duration::from_millis(100))
+                .unwrap();
+        }
+        let stats = monitor.get_metrics().unwrap().rtf_stats;
+        assert_eq!(stats.recent_samples.len(), MAX_RTF_SAMPLES);
+        // Every sample is rtf = 0.1, so all derived statistics equal 0.1.
+        assert!((stats.p95_rtf - 0.1).abs() < 1e-9);
+        assert!((stats.average_rtf - 0.1).abs() < 1e-9);
+        assert_eq!(stats.rtf_violations, 0);
     }
 }

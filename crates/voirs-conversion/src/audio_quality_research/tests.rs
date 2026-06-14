@@ -191,4 +191,112 @@ mod audio_quality_research_tests {
         researcher.clear_cache();
         assert_eq!(researcher.analysis_cache.len(), 0);
     }
+
+    // ── Psychoacoustic helpers (batch-17 real-DSP) ────────────────────────────
+
+    /// Deterministic pure sine tone.
+    fn pure_tone(freq_hz: f32, sample_rate: f32, len: usize) -> Vec<f32> {
+        (0..len)
+            .map(|i| (2.0 * std::f32::consts::PI * freq_hz * i as f32 / sample_rate).sin())
+            .collect()
+    }
+
+    /// Deterministic white-ish noise from a fixed LCG seed (no rng crate).
+    fn deterministic_noise(len: usize) -> Vec<f32> {
+        let mut state: u32 = 0x1234_5678;
+        (0..len)
+            .map(|_| {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                ((state >> 8) as f32 / (1u32 << 24) as f32) * 2.0 - 1.0
+            })
+            .collect()
+    }
+
+    fn researcher() -> AudioQualityResearcher {
+        AudioQualityResearcher::new(ResearchConfig::default()).unwrap()
+    }
+
+    #[test]
+    fn test_critical_bands_identical_is_zero() {
+        let r = researcher();
+        let audio = pure_tone(440.0, 16000.0, 1024);
+        let analysis = r.analyze_critical_bands(&audio, &audio, 16000).unwrap();
+
+        assert!(
+            analysis.overall_distortion < 1e-4,
+            "identical signals must have ~0 distortion, got {}",
+            analysis.overall_distortion
+        );
+        // Preservation ratios should be ~1 for an unchanged signal.
+        assert!((analysis.hf_preservation - 1.0).abs() < 1e-3);
+        assert!((analysis.lf_preservation - 1.0).abs() < 1e-3);
+        assert_eq!(analysis.band_deviations.len(), 24);
+    }
+
+    #[test]
+    fn test_critical_bands_differ_for_different_inputs() {
+        let r = researcher();
+        let original = pure_tone(440.0, 16000.0, 1024);
+        // A different-frequency tone redistributes band energy.
+        let processed = pure_tone(2000.0, 16000.0, 1024);
+
+        let analysis = r
+            .analyze_critical_bands(&original, &processed, 16000)
+            .unwrap();
+        assert!(
+            analysis.overall_distortion > 0.05,
+            "different signals must show distortion, got {}",
+            analysis.overall_distortion
+        );
+    }
+
+    #[test]
+    fn test_tonality_high_for_tone_low_for_noise() {
+        let r = researcher();
+        let tone = pure_tone(440.0, 16000.0, 1024);
+        let noise = deterministic_noise(1024);
+
+        let tone_tonality = r.analyze_tonality(&tone, &tone).unwrap();
+        let noise_tonality = r.analyze_tonality(&noise, &noise).unwrap();
+
+        assert!(
+            tone_tonality.tonal_noise_ratio > noise_tonality.tonal_noise_ratio,
+            "tone tonality {} should exceed noise tonality {}",
+            tone_tonality.tonal_noise_ratio,
+            noise_tonality.tonal_noise_ratio
+        );
+        assert!(
+            tone_tonality.tonal_noise_ratio > 0.5,
+            "pure tone should be highly tonal, got {}",
+            tone_tonality.tonal_noise_ratio
+        );
+        // Identical inputs → near-perfect preservation.
+        assert!(tone_tonality.tonal_preservation > 0.99);
+        assert!(tone_tonality.spectral_peaks_preservation > 0.99);
+    }
+
+    #[test]
+    fn test_sharpness_difference_zero_for_identical_positive_for_brighter() {
+        let r = researcher();
+        let audio = pure_tone(440.0, 16000.0, 1024);
+
+        let same = r.calculate_sharpness_difference(&audio, &audio).unwrap();
+        assert!(
+            same < 1e-5,
+            "identical signals must have ~0 sharpness difference, got {same}"
+        );
+
+        // Brighten by mixing in a high-frequency tone → higher sharpness.
+        let high = pure_tone(6000.0, 16000.0, 1024);
+        let brighter: Vec<f32> = audio
+            .iter()
+            .zip(high.iter())
+            .map(|(&a, &h)| a + 0.8 * h)
+            .collect();
+        let diff = r.calculate_sharpness_difference(&audio, &brighter).unwrap();
+        assert!(
+            diff > 1e-3,
+            "a brightened copy must have a positive sharpness difference, got {diff}"
+        );
+    }
 }

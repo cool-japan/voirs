@@ -1,5 +1,6 @@
 //! Context-sensitive pronunciation analysis and processing.
 
+use crate::phonology::{get_features, PhonologicalFeature};
 use crate::ssml::dictionary::{PartOfSpeech, PronunciationContext};
 use crate::{LanguageCode, Result};
 use serde::{Deserialize, Serialize};
@@ -540,7 +541,27 @@ impl ContextAnalyzer {
         }
     }
 
-    /// Evaluate phonetic condition
+    /// Evaluate a phonetic environment condition.
+    ///
+    /// The condition's [`PhoneticCondition::preceding`] / [`PhoneticCondition::following`]
+    /// fields hold the phoneme sequences that must surround the target word. Because
+    /// the analyzer is fed raw orthographic tokens (not a phonemic transcription) and
+    /// no full G2P backend is wired into it, neighbouring words are approximated to
+    /// IPA phonemes via a per-grapheme English letter→IPA map ([`grapheme_to_ipa`]).
+    /// The actual comparison is fully feature-based: each expected phoneme is matched
+    /// against the corresponding contextual phoneme using the crate's IPA distinctive
+    /// feature table ([`crate::phonology::get_features`]) over voicing, place, manner
+    /// and the vowel/consonant distinction (see [`phoneme_features_match`]).
+    ///
+    /// The `preceding` sequence is aligned so that its final element sits immediately
+    /// before the word; `following` is aligned so its first element sits immediately
+    /// after it. If there is not enough contextual material to fill the requested
+    /// sequence, the condition cannot hold and `false` is returned.
+    ///
+    /// Limitation: [`PhoneticCondition::syllable_structure`] and
+    /// [`PhoneticCondition::stress_pattern`] require a syllabifier / lexical-stress
+    /// model that is not available to the context analyzer, so they are not evaluated
+    /// here (treated as non-constraining) rather than fabricated.
     fn evaluate_phonetic_condition(
         &self,
         condition: &PhoneticCondition,
@@ -548,79 +569,105 @@ impl ContextAnalyzer {
         sentence: &[String],
         word_index: usize,
     ) -> Result<bool> {
-        // Simplified phonetic analysis
-        // In practice, would need phonetic transcription of the sentence
-
-        if let Some(_preceding) = &condition.preceding {
-            // Check if preceding phonetic context matches
-            if word_index > 0 {
-                let prev_word = &sentence[word_index - 1];
-                // Simplified check - just look at word ending
-                let _last_char = prev_word.chars().last().unwrap_or(' ');
-                // This would be much more sophisticated in practice
+        // Preceding phonetic environment: the phonemes ending just before the word.
+        if let Some(expected) = &condition.preceding {
+            if !expected.is_empty() {
+                let actual = collect_preceding_ipa(sentence, word_index, expected.len());
+                if actual.len() < expected.len() {
+                    // Not enough preceding context to satisfy the requested sequence.
+                    return Ok(false);
+                }
+                for (exp, act) in expected.iter().zip(actual.iter()) {
+                    if !phoneme_features_match(exp, act) {
+                        return Ok(false);
+                    }
+                }
             }
         }
 
-        if let Some(_following) = &condition.following {
-            // Check if following phonetic context matches
-            if word_index + 1 < sentence.len() {
-                let next_word = &sentence[word_index + 1];
-                // Simplified check - just look at word beginning
-                let _first_char = next_word.chars().next().unwrap_or(' ');
-                // This would be much more sophisticated in practice
+        // Following phonetic environment: the phonemes starting just after the word.
+        if let Some(expected) = &condition.following {
+            if !expected.is_empty() {
+                let actual = collect_following_ipa(sentence, word_index, expected.len());
+                if actual.len() < expected.len() {
+                    return Ok(false);
+                }
+                for (exp, act) in expected.iter().zip(actual.iter()) {
+                    if !phoneme_features_match(exp, act) {
+                        return Ok(false);
+                    }
+                }
             }
         }
 
-        // For now, return true (would need proper phonetic analysis)
         Ok(true)
     }
 
-    /// Match pattern against sentence
+    /// Match a context pattern against the sentence around `word_index`.
+    ///
+    /// The pattern window is centred on the target word (mirroring the original
+    /// heuristic) and matched greedily with a moving cursor so that
+    /// [`PatternToken::Optional`] tokens may be skipped: an optional token consumes
+    /// the word at the cursor only when its inner pattern matches, otherwise the
+    /// token is treated as absent and the cursor stays put. Required tokens must
+    /// have a matching word present at the cursor, so a required token that is
+    /// missing or mismatched fails the whole pattern.
     fn match_pattern(
         &self,
         pattern: &ContextPattern,
         sentence: &[String],
         word_index: usize,
     ) -> bool {
-        // Simplified pattern matching
-        // In practice, would implement full pattern matching with all token types
-
-        let start_index = word_index.saturating_sub(pattern.tokens.len() / 2);
-        let end_index = (word_index + pattern.tokens.len() / 2 + 1).min(sentence.len());
-
-        if end_index - start_index < pattern.tokens.len() {
+        if pattern.tokens.is_empty() {
             return false;
         }
 
-        // Simple token matching (would be much more sophisticated)
-        for (i, token) in pattern.tokens.iter().enumerate() {
-            if let Some(word) = sentence.get(start_index + i) {
-                if !self.match_token(token, word) {
-                    return false;
+        let start_index = word_index.saturating_sub(pattern.tokens.len() / 2);
+        let mut cursor = start_index;
+
+        for token in &pattern.tokens {
+            match token {
+                PatternToken::Optional(inner) => {
+                    // Optional: consume the current word only if the inner pattern
+                    // matches; otherwise leave the cursor in place (absence is fine).
+                    if let Some(word) = sentence.get(cursor) {
+                        if self.match_token(inner, word) {
+                            cursor += 1;
+                        }
+                    }
                 }
-            } else {
-                return false;
+                _ => {
+                    // Required: a matching word must be present at the cursor.
+                    match sentence.get(cursor) {
+                        Some(word) if self.match_token(token, word) => cursor += 1,
+                        _ => return false,
+                    }
+                }
             }
         }
 
         true
     }
 
-    /// Match a single pattern token
-    #[allow(clippy::only_used_in_recursion)]
+    /// Match a single pattern token against a word.
+    ///
+    /// Note on [`PatternToken::Optional`]: this entry point is only reached with a
+    /// *present* word, so an optional token here matches exactly when its inner
+    /// pattern does. The "optional token may be absent" semantics are handled by
+    /// [`Self::match_pattern`], which can skip an optional token entirely.
     fn match_token(&self, token: &PatternToken, word: &str) -> bool {
         match token {
             PatternToken::Word(expected) => word.to_lowercase() == expected.to_lowercase(),
             PatternToken::Wildcard => true,
-            PatternToken::Pos(_expected_pos) => {
-                // Would need POS tagging here
-                true // Simplified
+            PatternToken::Pos(expected_pos) => {
+                // Matched against the crate's rule-based `simple_pos_tag` heuristic —
+                // the only POS information available to the analyzer. There is no
+                // statistical/learned POS tagger here, so accuracy is limited to what
+                // that lexical+suffix heuristic provides (documented limitation).
+                self.simple_pos_tag(word) == *expected_pos
             }
-            PatternToken::PhoneticFeature(_) => {
-                // Would need phonetic analysis here
-                true // Simplified
-            }
-            PatternToken::Optional(_) => true, // Always matches
+            PatternToken::PhoneticFeature(feature) => word_has_phonetic_feature(word, feature),
+            PatternToken::Optional(inner) => self.match_token(inner, word),
             PatternToken::Alternative(alternatives) => {
                 alternatives.iter().any(|alt| self.match_token(alt, word))
             }
@@ -693,6 +740,209 @@ impl ContextAnalyzer {
     /// Clear POS cache
     pub fn clear_pos_cache(&mut self) {
         self.pos_cache.clear();
+    }
+}
+
+/// Approximate the IPA phoneme produced by a single English grapheme.
+///
+/// This is a deliberately coarse, deterministic per-letter map used only to derive
+/// a phonetic *environment* for context matching when no full G2P transcription is
+/// available. Digraphs, silent letters and context-dependent realisations are not
+/// modelled; the resulting symbols are looked up in [`crate::phonology::get_features`]
+/// for distinctive-feature comparison. Returns `None` for non-alphabetic characters.
+fn grapheme_to_ipa(c: char) -> Option<&'static str> {
+    let symbol = match c.to_ascii_lowercase() {
+        // Vowels (mapped to monophthongs known to the feature table).
+        'a' => "a",
+        'e' => "e",
+        'i' => "i",
+        'o' => "o",
+        'u' => "u",
+        // Consonants.
+        'b' => "b",
+        'c' | 'k' | 'q' | 'x' => "k",
+        'd' => "d",
+        'f' => "f",
+        'g' => "g",
+        'h' => "h",
+        'j' => "dʒ",
+        'l' => "l",
+        'm' => "m",
+        'n' => "n",
+        'p' => "p",
+        'r' => "r",
+        's' => "s",
+        't' => "t",
+        'v' => "v",
+        'w' => "w",
+        'y' => "j",
+        'z' => "z",
+        _ => return None,
+    };
+    Some(symbol)
+}
+
+/// Collect up to `n` approximate IPA phonemes immediately preceding `word_index`,
+/// returned in left-to-right order (so the final element is adjacent to the word).
+fn collect_preceding_ipa(sentence: &[String], word_index: usize, n: usize) -> Vec<&'static str> {
+    let mut phonemes = Vec::new();
+    for word in &sentence[..word_index.min(sentence.len())] {
+        for c in word.chars() {
+            if let Some(symbol) = grapheme_to_ipa(c) {
+                phonemes.push(symbol);
+            }
+        }
+    }
+    let start = phonemes.len().saturating_sub(n);
+    phonemes[start..].to_vec()
+}
+
+/// Collect up to `n` approximate IPA phonemes immediately following `word_index`,
+/// returned in left-to-right order (so the first element is adjacent to the word).
+fn collect_following_ipa(sentence: &[String], word_index: usize, n: usize) -> Vec<&'static str> {
+    let mut phonemes = Vec::new();
+    let start = (word_index + 1).min(sentence.len());
+    'outer: for word in &sentence[start..] {
+        for c in word.chars() {
+            if let Some(symbol) = grapheme_to_ipa(c) {
+                phonemes.push(symbol);
+                if phonemes.len() >= n {
+                    break 'outer;
+                }
+            }
+        }
+    }
+    phonemes
+}
+
+/// First approximate IPA phoneme of a word (its onset), if any letter maps.
+fn word_initial_ipa(word: &str) -> Option<&'static str> {
+    word.chars().find_map(grapheme_to_ipa)
+}
+
+/// Return `true` when `expected` and `actual` agree on the single member of
+/// `category` specified by `expected`. If `expected` does not specify any member of
+/// the category, the category is not constraining and the function returns `true`.
+fn category_matches(
+    expected: &[PhonologicalFeature],
+    actual: &[PhonologicalFeature],
+    category: &[PhonologicalFeature],
+) -> bool {
+    match category
+        .iter()
+        .copied()
+        .find(|feat| expected.contains(feat))
+    {
+        Some(expected_feat) => actual.contains(&expected_feat),
+        None => true,
+    }
+}
+
+/// Decide whether an `expected` phoneme symbol matches an `actual` phoneme symbol
+/// using IPA distinctive features.
+///
+/// Comparison rules:
+/// * Identical symbols always match.
+/// * Otherwise both symbols are resolved to feature sets via
+///   [`crate::phonology::get_features`]; an unknown symbol (empty feature set)
+///   only matches by exact string (already handled above), so it returns `false`.
+/// * A vowel never matches a consonant (and vice versa).
+/// * Two consonants match iff they agree on voicing, place and manner.
+/// * Two vowels match iff they agree on backness (front/central/back) and height
+///   (high/mid/low).
+fn phoneme_features_match(expected: &str, actual: &str) -> bool {
+    use PhonologicalFeature::*;
+
+    if expected == actual {
+        return true;
+    }
+
+    let expected_features = get_features(expected);
+    let actual_features = get_features(actual);
+    if expected_features.is_empty() || actual_features.is_empty() {
+        // At least one symbol is outside the feature table; with the exact-match
+        // case already excluded above there is no feature-based reason to match.
+        return false;
+    }
+
+    let expected_vowel = expected_features.contains(&Vowel);
+    let actual_vowel = actual_features.contains(&Vowel);
+    if expected_vowel != actual_vowel {
+        return false;
+    }
+
+    if expected_vowel {
+        const BACKNESS: [PhonologicalFeature; 3] = [Front, Central, Back];
+        const HEIGHT: [PhonologicalFeature; 3] = [High, Mid, Low];
+        category_matches(&expected_features, &actual_features, &BACKNESS)
+            && category_matches(&expected_features, &actual_features, &HEIGHT)
+    } else {
+        const VOICING: [PhonologicalFeature; 2] = [Voiced, Voiceless];
+        const PLACE: [PhonologicalFeature; 8] = [
+            Bilabial,
+            Labiodental,
+            Dental,
+            Alveolar,
+            Postalveolar,
+            Palatal,
+            Velar,
+            Glottal,
+        ];
+        const MANNER: [PhonologicalFeature; 6] = [Stop, Fricative, Affricate, Nasal, Liquid, Glide];
+        category_matches(&expected_features, &actual_features, &VOICING)
+            && category_matches(&expected_features, &actual_features, &PLACE)
+            && category_matches(&expected_features, &actual_features, &MANNER)
+    }
+}
+
+/// Test whether a word's onset phoneme carries the named IPA feature.
+///
+/// The feature name is matched case-insensitively against the vowel/consonant
+/// class, voicing, manner and place dimensions of [`PhonologicalFeature`]. The
+/// word's onset is approximated by its first mappable grapheme. Unknown feature
+/// names match nothing (conservative) rather than defaulting to `true`.
+fn word_has_phonetic_feature(word: &str, feature: &str) -> bool {
+    use PhonologicalFeature::*;
+
+    let Some(initial) = word_initial_ipa(word) else {
+        return false;
+    };
+    let features = get_features(initial);
+    if features.is_empty() {
+        return false;
+    }
+
+    match feature.trim().to_ascii_lowercase().as_str() {
+        // Broad class.
+        "vowel" => features.contains(&Vowel),
+        "consonant" => !features.contains(&Vowel),
+        // Voicing.
+        "voiced" => features.contains(&Voiced),
+        "voiceless" | "unvoiced" => features.contains(&Voiceless),
+        // Manner.
+        "stop" | "plosive" => features.contains(&Stop),
+        "fricative" => features.contains(&Fricative),
+        "affricate" => features.contains(&Affricate),
+        "nasal" => features.contains(&Nasal),
+        "liquid" => features.contains(&Liquid),
+        "glide" | "approximant" | "semivowel" => features.contains(&Glide),
+        // Place of articulation.
+        "bilabial" => features.contains(&Bilabial),
+        "labiodental" => features.contains(&Labiodental),
+        "dental" => features.contains(&Dental),
+        "alveolar" => features.contains(&Alveolar),
+        "postalveolar" => features.contains(&Postalveolar),
+        "palatal" => features.contains(&Palatal),
+        "velar" => features.contains(&Velar),
+        "glottal" => features.contains(&Glottal),
+        // Vowel backness / height.
+        "front" => features.contains(&Front),
+        "central" => features.contains(&Central),
+        "back" => features.contains(&Back),
+        "high" => features.contains(&High),
+        "mid" => features.contains(&Mid),
+        "low" => features.contains(&Low),
+        _ => false,
     }
 }
 
@@ -784,5 +1034,185 @@ mod tests {
 
         assert!(analyzer.check_following_words(&words, &sentence, 1));
         assert!(!analyzer.check_following_words(&words, &sentence, 2));
+    }
+
+    fn phonetic_condition(
+        preceding: Option<Vec<&str>>,
+        following: Option<Vec<&str>>,
+    ) -> PhoneticCondition {
+        PhoneticCondition {
+            preceding: preceding.map(|v| v.into_iter().map(String::from).collect()),
+            following: following.map(|v| v.into_iter().map(String::from).collect()),
+            syllable_structure: None,
+            stress_pattern: None,
+        }
+    }
+
+    #[test]
+    fn test_grapheme_to_ipa_and_features() {
+        // Sanity: graphemes resolve to symbols the feature table understands.
+        assert_eq!(grapheme_to_ipa('s'), Some("s"));
+        assert_eq!(grapheme_to_ipa('a'), Some("a"));
+        assert_eq!(grapheme_to_ipa('1'), None);
+        assert!(
+            get_features(grapheme_to_ipa('s').unwrap()).contains(&PhonologicalFeature::Fricative)
+        );
+    }
+
+    #[test]
+    fn test_phoneme_features_match() {
+        // Identical symbols match.
+        assert!(phoneme_features_match("s", "s"));
+        // Same place + manner but different voicing must NOT match (/s/ vs /z/).
+        assert!(!phoneme_features_match("z", "s"));
+        // Same place + voicing but different manner must NOT match (/t/ vs /s/).
+        assert!(!phoneme_features_match("t", "s"));
+        // Different place must NOT match (/p/ vs /t/).
+        assert!(!phoneme_features_match("p", "t"));
+        // Vowel vs consonant never match.
+        assert!(!phoneme_features_match("a", "t"));
+        // Different vowels (backness/height) do not match.
+        assert!(!phoneme_features_match("i", "a"));
+        // Unknown symbol only matches itself.
+        assert!(!phoneme_features_match("@@", "s"));
+    }
+
+    #[test]
+    fn test_phonetic_condition_matching_context() {
+        let analyzer = ContextAnalyzer::new(LanguageCode::EnUs);
+        // "cats are good": for the word "are" (index 1) the preceding phoneme is
+        // /s/ (end of "cats") and the following phoneme is /g/ (start of "good").
+        let sentence = vec!["cats".to_string(), "are".to_string(), "good".to_string()];
+
+        let preceding_match = phonetic_condition(Some(vec!["s"]), None);
+        assert!(analyzer
+            .evaluate_phonetic_condition(&preceding_match, "are", &sentence, 1)
+            .unwrap());
+
+        let following_match = phonetic_condition(None, Some(vec!["g"]));
+        assert!(analyzer
+            .evaluate_phonetic_condition(&following_match, "are", &sentence, 1)
+            .unwrap());
+    }
+
+    #[test]
+    fn test_phonetic_condition_not_matching_context() {
+        let analyzer = ContextAnalyzer::new(LanguageCode::EnUs);
+        let sentence = vec!["cats".to_string(), "are".to_string(), "good".to_string()];
+
+        // Preceding phoneme is /s/, condition wants /m/ (nasal, voiced) -> no match.
+        let nasal = phonetic_condition(Some(vec!["m"]), None);
+        assert!(!analyzer
+            .evaluate_phonetic_condition(&nasal, "are", &sentence, 1)
+            .unwrap());
+
+        // Voicing-only difference: /s/ present, /z/ required -> no match.
+        let voiced = phonetic_condition(Some(vec!["z"]), None);
+        assert!(!analyzer
+            .evaluate_phonetic_condition(&voiced, "are", &sentence, 1)
+            .unwrap());
+
+        // Following phoneme is /g/ (voiced velar stop), condition wants /k/
+        // (voiceless velar stop) -> voicing differs -> no match.
+        let voiceless_follow = phonetic_condition(None, Some(vec!["k"]));
+        assert!(!analyzer
+            .evaluate_phonetic_condition(&voiceless_follow, "are", &sentence, 1)
+            .unwrap());
+    }
+
+    #[test]
+    fn test_phonetic_condition_insufficient_context() {
+        let analyzer = ContextAnalyzer::new(LanguageCode::EnUs);
+        let sentence = vec!["start".to_string(), "here".to_string()];
+
+        // Word at index 0 has no preceding context, so a preceding requirement
+        // cannot be satisfied.
+        let needs_preceding = phonetic_condition(Some(vec!["t"]), None);
+        assert!(!analyzer
+            .evaluate_phonetic_condition(&needs_preceding, "start", &sentence, 0)
+            .unwrap());
+    }
+
+    #[test]
+    fn test_match_token_pos() {
+        let analyzer = ContextAnalyzer::new(LanguageCode::EnUs);
+        assert!(analyzer.match_token(&PatternToken::Pos(PartOfSpeech::Determiner), "the"));
+        // "the" is a determiner, not a noun.
+        assert!(!analyzer.match_token(&PatternToken::Pos(PartOfSpeech::Noun), "the"));
+        // Unknown word defaults to noun in the rule-based tagger.
+        assert!(analyzer.match_token(&PatternToken::Pos(PartOfSpeech::Noun), "apple"));
+    }
+
+    #[test]
+    fn test_match_token_phonetic_feature() {
+        let analyzer = ContextAnalyzer::new(LanguageCode::EnUs);
+        // "apple" starts with a vowel.
+        assert!(analyzer.match_token(&PatternToken::PhoneticFeature("vowel".to_string()), "apple"));
+        assert!(!analyzer.match_token(
+            &PatternToken::PhoneticFeature("consonant".to_string()),
+            "apple"
+        ));
+        // "table" starts with a voiceless alveolar stop.
+        assert!(analyzer.match_token(&PatternToken::PhoneticFeature("stop".to_string()), "table"));
+        assert!(analyzer.match_token(
+            &PatternToken::PhoneticFeature("voiceless".to_string()),
+            "table"
+        ));
+        assert!(!analyzer.match_token(&PatternToken::PhoneticFeature("vowel".to_string()), "table"));
+        // "milk" starts with a nasal.
+        assert!(analyzer.match_token(&PatternToken::PhoneticFeature("nasal".to_string()), "milk"));
+        // Unknown feature name matches nothing.
+        assert!(!analyzer.match_token(
+            &PatternToken::PhoneticFeature("sparkly".to_string()),
+            "milk"
+        ));
+    }
+
+    #[test]
+    fn test_match_token_optional_present() {
+        let analyzer = ContextAnalyzer::new(LanguageCode::EnUs);
+        let optional_the = PatternToken::Optional(Box::new(PatternToken::Word("the".to_string())));
+        // Present word matching the inner pattern.
+        assert!(analyzer.match_token(&optional_the, "the"));
+        // Present word that does not match the inner pattern.
+        assert!(!analyzer.match_token(&optional_the, "cat"));
+    }
+
+    #[test]
+    fn test_match_pattern_optional_absent_still_matches() {
+        let analyzer = ContextAnalyzer::new(LanguageCode::EnUs);
+        let sentence = vec!["the".to_string(), "cat".to_string()];
+
+        // [the] [Noun] [optional "please"] — the optional trailing token is absent
+        // from the sentence but the pattern still matches.
+        let pattern = ContextPattern {
+            tokens: vec![
+                PatternToken::Word("the".to_string()),
+                PatternToken::Pos(PartOfSpeech::Noun),
+                PatternToken::Optional(Box::new(PatternToken::Word("please".to_string()))),
+            ],
+            context: PronunciationContext::Stressed,
+            confidence: 0.5,
+            frequency: 0.5,
+        };
+        assert!(analyzer.match_pattern(&pattern, &sentence, 1));
+    }
+
+    #[test]
+    fn test_match_pattern_required_mismatch_fails() {
+        let analyzer = ContextAnalyzer::new(LanguageCode::EnUs);
+        let sentence = vec!["the".to_string(), "cat".to_string()];
+
+        // Required second token "dog" does not match "cat" -> pattern fails.
+        let pattern = ContextPattern {
+            tokens: vec![
+                PatternToken::Word("the".to_string()),
+                PatternToken::Word("dog".to_string()),
+            ],
+            context: PronunciationContext::Stressed,
+            confidence: 0.5,
+            frequency: 0.5,
+        };
+        assert!(!analyzer.match_pattern(&pattern, &sentence, 1));
     }
 }

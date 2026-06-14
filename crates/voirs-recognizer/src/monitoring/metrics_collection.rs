@@ -630,18 +630,102 @@ impl SystemResourceMonitor {
         }
     }
 
-    /// Get CPU usage percentage (placeholder implementation)
+    /// Get CPU usage percentage by sampling `/proc/stat` twice (Linux).
+    ///
+    /// Reads the aggregate `cpu` line, waits a short interval, reads it again and
+    /// computes `busy_delta / total_delta * 100`, where `busy = total - idle` and
+    /// `idle` includes the `iowait` field. Returns `0.0` if `/proc/stat` cannot be
+    /// parsed or no time elapsed between samples.
+    #[cfg(target_os = "linux")]
     fn get_cpu_usage() -> f64 {
-        // In a real implementation, this would read from /proc/stat or use system APIs
-        scirs2_core::random::random::<f64>() * 100.0
+        // (idle_jiffies, total_jiffies) from the aggregate `cpu` line of /proc/stat.
+        fn read_cpu_jiffies() -> Option<(u64, u64)> {
+            let stat = std::fs::read_to_string("/proc/stat").ok()?;
+            let line = stat.lines().next()?;
+            let mut fields = line.split_whitespace();
+            if fields.next()? != "cpu" {
+                return None;
+            }
+            let values: Vec<u64> = fields.filter_map(|v| v.parse::<u64>().ok()).collect();
+            // Need at least user, nice, system, idle.
+            if values.len() < 4 {
+                return None;
+            }
+            let idle = values[3] + values.get(4).copied().unwrap_or(0); // idle + iowait
+            let total: u64 = values.iter().sum();
+            Some((idle, total))
+        }
+
+        let Some((idle_start, total_start)) = read_cpu_jiffies() else {
+            return 0.0;
+        };
+        thread::sleep(Duration::from_millis(100));
+        let Some((idle_end, total_end)) = read_cpu_jiffies() else {
+            return 0.0;
+        };
+
+        let total_delta = total_end.saturating_sub(total_start);
+        if total_delta == 0 {
+            return 0.0;
+        }
+        let idle_delta = idle_end.saturating_sub(idle_start);
+        let busy_delta = total_delta.saturating_sub(idle_delta);
+        ((busy_delta as f64 / total_delta as f64) * 100.0).clamp(0.0, 100.0)
     }
 
-    /// Get memory usage in bytes (placeholder implementation)
+    /// Conservative fallback CPU usage for non-Linux platforms.
+    #[cfg(not(target_os = "linux"))]
+    fn get_cpu_usage() -> f64 {
+        // No portable, dependency-free CPU sampling is available off Linux.
+        0.0
+    }
+
+    /// Get `(used, total)` memory in bytes from `/proc` (Linux).
+    ///
+    /// `used` is this process's resident set size (`VmRSS` from
+    /// `/proc/self/status`) and `total` is the machine's physical RAM
+    /// (`MemTotal` from `/proc/meminfo`). If `MemTotal` is unavailable, the
+    /// process RSS is used as the total so the usage ratio stays well-defined.
+    #[cfg(target_os = "linux")]
     fn get_memory_usage() -> (usize, usize) {
-        // In a real implementation, this would read from /proc/meminfo or use system APIs
-        let total = 8 * 1024 * 1024 * 1024; // 8GB
-        let used = (scirs2_core::random::random::<f64>() * 0.8 * total as f64) as usize;
-        (used, total)
+        // First whitespace-separated value (in kB) of a /proc line starting with
+        // `prefix`, converted to bytes.
+        fn read_kb_field(contents: &str, prefix: &str) -> Option<usize> {
+            for line in contents.lines() {
+                if let Some(rest) = line.strip_prefix(prefix) {
+                    if let Some(kb_str) = rest.split_whitespace().next() {
+                        if let Ok(kb) = kb_str.parse::<usize>() {
+                            return Some(kb * 1024);
+                        }
+                    }
+                }
+            }
+            None
+        }
+
+        let process_rss = std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|status| read_kb_field(&status, "VmRSS:"))
+            .unwrap_or(0);
+
+        let mem_total = std::fs::read_to_string("/proc/meminfo")
+            .ok()
+            .and_then(|meminfo| read_kb_field(&meminfo, "MemTotal:"))
+            .unwrap_or(0);
+
+        let total = if mem_total > 0 {
+            mem_total
+        } else {
+            process_rss
+        };
+        (process_rss, total)
+    }
+
+    /// Conservative fallback memory figures for non-Linux platforms.
+    #[cfg(not(target_os = "linux"))]
+    fn get_memory_usage() -> (usize, usize) {
+        // Fixed estimate (64 MB used of 8 GB total) — no RNG, no platform APIs.
+        (64 * 1024 * 1024, 8 * 1024 * 1024 * 1024)
     }
 
     /// Get GPU usage percentage (placeholder implementation)
@@ -1240,6 +1324,26 @@ mod tests {
         assert!(metrics.contains_key("test_counter"));
         assert!(metrics.contains_key("test_gauge"));
         assert!(metrics.contains_key("test_histogram"));
+    }
+
+    #[test]
+    fn test_system_memory_usage_is_real() {
+        let (used, total) = SystemResourceMonitor::get_memory_usage();
+        assert!(used > 0, "memory used should be > 0, got {used}");
+        assert!(total > 0, "memory total should be > 0, got {total}");
+        assert!(
+            used <= total,
+            "used ({used}) should not exceed total ({total})"
+        );
+    }
+
+    #[test]
+    fn test_system_cpu_usage_in_range() {
+        let cpu = SystemResourceMonitor::get_cpu_usage();
+        assert!(
+            (0.0..=100.0).contains(&cpu),
+            "cpu usage {cpu} should be within [0, 100]"
+        );
     }
 
     #[test]

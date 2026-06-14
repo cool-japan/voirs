@@ -295,36 +295,12 @@ impl LoudnessProcessor {
     fn apply_k_weighting(&self, audio: &[f32]) -> Vec<f32> {
         let fs = self.sample_rate as f64;
 
-        // ---- Stage 1: pre-filter (high-shelf) ----
-        // Analogue prototype parameters (from ITU-R BS.1770-4 Annex 1).
-        let f0_pre = 1_681.974_450_955_533_f64;
-        let q_pre = 0.707_175_236_955_419_6_f64;
-        let db_pre = 3.999_843_853_973_347_f64;
-
-        let k = (std::f64::consts::PI * f0_pre / fs).tan();
-        let v0 = 10.0_f64.powf(db_pre / 20.0);
-        let sqrt2 = std::f64::consts::SQRT_2;
-
-        // High-shelf bilinear transform (boost, V0 > 1):
-        let norm = 1.0 / (1.0 + sqrt2 / q_pre * k + k * k);
-        // b0, b1, b2 scaled by 1/norm:
-        let b0_pre = (v0 + (v0 * 2.0_f64).sqrt() / q_pre * k + k * k) * norm;
-        let b1_pre = (2.0 * (k * k - v0)) * norm;
-        let b2_pre = (v0 - (v0 * 2.0_f64).sqrt() / q_pre * k + k * k) * norm;
-        let a1_pre = (2.0 * (k * k - 1.0)) * norm;
-        let a2_pre = (1.0 - sqrt2 / q_pre * k + k * k) * norm;
-
-        // ---- Stage 2: high-pass RLB ----
-        // Analogue prototype: f0 = 38.135 Hz (second-order Butterworth high-pass).
-        let f0_rlb = 38.135_047_196_563_6_f64;
-        let k2 = (std::f64::consts::PI * f0_rlb / fs).tan();
-        let norm2 = 1.0 / (1.0 + sqrt2 * k2 + k2 * k2);
-
-        let b0_rlb = norm2;
-        let b1_rlb = -2.0 * norm2;
-        let b2_rlb = norm2;
-        let a1_rlb = 2.0 * (k2 * k2 - 1.0) * norm2;
-        let a2_rlb = (1.0 - sqrt2 * k2 + k2 * k2) * norm2;
+        // ---- K-weighting biquad coefficients (BS.1770-4), derived for `fs` ----
+        // See `k_weighting_pre_coeffs` / `k_weighting_rlb_coeffs` below for the
+        // canonical bilinear-transform derivation (reproduces the published 48 kHz
+        // reference coefficients exactly).
+        let [b0_pre, b1_pre, b2_pre, a1_pre, a2_pre] = Self::k_weighting_pre_coeffs(fs);
+        let [b0_rlb, b1_rlb, b2_rlb, a1_rlb, a2_rlb] = Self::k_weighting_rlb_coeffs(fs);
 
         // ---- Run the two biquad stages in series (direct form II) ----
         let mut w1 = [0.0f64; 2]; // state for stage 1
@@ -350,6 +326,55 @@ impl LoudnessProcessor {
                 y2 as f32
             })
             .collect()
+    }
+
+    /// BS.1770-4 K-weighting stage-1 "pre-filter" (high-shelf) biquad
+    /// coefficients `[b0, b1, b2, a1, a2]` (normalised to a0 = 1), derived for
+    /// `fs` (Hz) via the bilinear transform (the canonical EBU R128 / De Man
+    /// derivation). At 48 kHz this reproduces the published BS.1770-4 reference
+    /// `b = [1.53512485958697, -2.69169618940638, 1.19839281085285]`,
+    /// `a = [1, -1.69065929318241, 0.73248077421585]`.
+    fn k_weighting_pre_coeffs(fs: f64) -> [f64; 5] {
+        let f0 = 1_681.974_450_955_532_f64;
+        let q = 0.707_175_236_955_419_3_f64;
+        let gain_db = 3.999_843_853_973_347_f64;
+
+        let k = (std::f64::consts::PI * f0 / fs).tan();
+        let k2 = k * k;
+        let vh = 10.0_f64.powf(gain_db / 20.0);
+        let vb = vh.powf(0.499_666_774_154_541_6_f64);
+        let denom = 1.0 + k / q + k2;
+
+        [
+            (vh + vb * k / q + k2) / denom,
+            2.0 * (k2 - vh) / denom,
+            (vh - vb * k / q + k2) / denom,
+            2.0 * (k2 - 1.0) / denom,
+            (1.0 - k / q + k2) / denom,
+        ]
+    }
+
+    /// BS.1770-4 K-weighting stage-2 RLB (revised low-frequency B-weighting)
+    /// high-pass biquad coefficients `[b0, b1, b2, a1, a2]`. The numerator is
+    /// exactly `[1, -2, 1]`; the denominator is derived for `fs` (Hz) with
+    /// Q ≈ 0.5003 (this is the RLB prototype, NOT a Butterworth Q = 0.707).
+    /// At 48 kHz this reproduces the reference
+    /// `a = [1, -1.99004745483398, 0.99007225036616]`.
+    fn k_weighting_rlb_coeffs(fs: f64) -> [f64; 5] {
+        let f0 = 38.135_470_876_139_82_f64;
+        let q = 0.500_327_037_325_395_3_f64;
+
+        let k = (std::f64::consts::PI * f0 / fs).tan();
+        let k2 = k * k;
+        let denom = 1.0 + k / q + k2;
+
+        [
+            1.0,
+            -2.0,
+            1.0,
+            2.0 * (k2 - 1.0) / denom,
+            (1.0 - k / q + k2) / denom,
+        ]
     }
 
     pub fn measure_loudness_range(&self, audio: &[f32]) -> f32 {
@@ -975,7 +1000,6 @@ impl DeEsser {
 
 /// Broadcast-standard equalizer
 pub struct BroadcastEqualizer {
-    #[allow(dead_code)]
     sample_rate: f32,
     low_shelf_gain: f32,
     mid_peak_gain: f32,
@@ -992,34 +1016,37 @@ impl BroadcastEqualizer {
         }
     }
 
+    /// Apply the broadcast EQ curve to a block of samples.
+    ///
+    /// Implemented as three cascaded second-order RBJ Audio EQ Cookbook biquads
+    /// (the same canonical designs used elsewhere in the crate's
+    /// [`crate::effects::frequency::BiquadFilter`]):
+    ///
+    /// * a **low shelf** at 100 Hz with `low_shelf_gain` dB,
+    /// * a **peaking** bell at 1 kHz with `mid_peak_gain` dB,
+    /// * a **high shelf** at 10 kHz with `high_shelf_gain` dB.
+    ///
+    /// Each filter carries its own delay line, so the cascade is a stable,
+    /// well-defined IIR response rather than the previous ad-hoc one-pole hacks.
+    /// Filters are designed per call from the configured gains.
     pub fn process(&mut self, audio: &[f32]) -> Result<Vec<f32>, BroadcastError> {
-        // Simplified EQ implementation
+        use crate::effects::frequency::BiquadFilter;
+
+        let mut low_shelf = BiquadFilter::new();
+        low_shelf.design_low_shelf(self.sample_rate, 100.0, self.low_shelf_gain, 0.7);
+
+        let mut mid_peak = BiquadFilter::new();
+        mid_peak.design_peak(self.sample_rate, 1000.0, self.mid_peak_gain, 1.0);
+
+        let mut high_shelf = BiquadFilter::new();
+        high_shelf.design_high_shelf(self.sample_rate, 10000.0, self.high_shelf_gain, 0.7);
+
         let mut equalized = Vec::with_capacity(audio.len());
-        let mut low_history = [0.0f32; 2];
-        let mut mid_history = [0.0f32; 2];
-        let mut high_history = [0.0f32; 2];
-
         for &sample in audio {
-            // Low shelf (simplified) - use low_shelf_gain
-            let low_gain = 10.0_f32.powf(self.low_shelf_gain / 20.0) - 1.0;
-            let low_enhanced = sample + low_history[0] * (low_gain * 0.1);
-            low_history[1] = low_history[0];
-            low_history[0] = sample;
-
-            // Mid peak (simplified) - use mid_peak_gain
-            let mid_gain = 10.0_f32.powf(self.mid_peak_gain / 20.0) - 1.0;
-            let mid_enhanced = low_enhanced + (sample - mid_history[0] * 0.5) * (mid_gain * 0.1);
-            mid_history[1] = mid_history[0];
-            mid_history[0] = sample;
-
-            // High shelf (simplified) - use high_shelf_gain
-            let high_gain = 10.0_f32.powf(self.high_shelf_gain / 20.0) - 1.0;
-            let high_enhanced =
-                mid_enhanced + (sample - high_history[0] * 0.9) * (high_gain * 0.05);
-            high_history[1] = high_history[0];
-            high_history[0] = sample;
-
-            equalized.push(high_enhanced);
+            let y = low_shelf.process(sample);
+            let y = mid_peak.process(y);
+            let y = high_shelf.process(y);
+            equalized.push(y);
         }
 
         Ok(equalized)
@@ -1280,6 +1307,42 @@ mod tests {
         );
     }
 
+    /// The derived K-weighting biquad coefficients must reproduce the canonical
+    /// ITU-R BS.1770-4 reference values at 48 kHz (guards against the spurious
+    /// √2-factor derivation that does not match the standard).
+    #[test]
+    fn test_k_weighting_coeffs_match_bs1770_reference_48k() {
+        let pre = LoudnessProcessor::k_weighting_pre_coeffs(48_000.0);
+        let pre_ref = [
+            1.535_124_859_586_97_f64,
+            -2.691_696_189_406_38,
+            1.198_392_810_852_85,
+            -1.690_659_293_182_41,
+            0.732_480_774_215_85,
+        ];
+        for (got, want) in pre.into_iter().zip(pre_ref) {
+            assert!(
+                (got - want).abs() < 1e-6,
+                "pre-filter coeff {got} != reference {want}"
+            );
+        }
+
+        let rlb = LoudnessProcessor::k_weighting_rlb_coeffs(48_000.0);
+        let rlb_ref = [
+            1.0_f64,
+            -2.0,
+            1.0,
+            -1.990_047_454_833_98,
+            0.990_072_250_366_16,
+        ];
+        for (got, want) in rlb.into_iter().zip(rlb_ref) {
+            assert!(
+                (got - want).abs() < 1e-6,
+                "RLB coeff {got} != reference {want}"
+            );
+        }
+    }
+
     // ------- True-peak oversampling tests -------
 
     /// For a Nyquist-rate alternating signal (+1/−1) the true peak measured by
@@ -1417,5 +1480,58 @@ mod tests {
         // Empty input -> empty output, no panic.
         let empty = enhancer.process(&[]).expect("empty input must succeed");
         assert!(empty.is_empty());
+    }
+
+    // ------- Broadcast equalizer (RBJ biquad) tests -------
+
+    /// A positive low-shelf gain must raise low-band energy relative to the
+    /// unity-gain case (verified via FFT band energies through the real biquad).
+    #[test]
+    fn test_broadcast_eq_low_shelf_boost_raises_low_band_energy() {
+        let sample_rate = 48_000.0f32;
+        let n = 8_192usize; // power of two -> clean band integration
+
+        // Broadband two-tone: a low tone (boosted by the 100 Hz shelf) and a high
+        // tone (above the shelf, essentially untouched).
+        let signal: Vec<f32> = (0..n)
+            .map(|i| {
+                let t = i as f32 / sample_rate;
+                0.3 * (2.0 * std::f32::consts::PI * 60.0 * t).sin()
+                    + 0.3 * (2.0 * std::f32::consts::PI * 6_000.0 * t).sin()
+            })
+            .collect();
+
+        // Flat reference (all gains at 0 dB -> unity biquads).
+        let mut eq_flat = BroadcastEqualizer::new(sample_rate);
+        eq_flat.low_shelf_gain = 0.0;
+        eq_flat.mid_peak_gain = 0.0;
+        eq_flat.high_shelf_gain = 0.0;
+        let flat = eq_flat.process(&signal).expect("flat EQ");
+
+        // Low-shelf boosted.
+        let mut eq_boost = BroadcastEqualizer::new(sample_rate);
+        eq_boost.low_shelf_gain = 12.0;
+        eq_boost.mid_peak_gain = 0.0;
+        eq_boost.high_shelf_gain = 0.0;
+        let boosted = eq_boost.process(&signal).expect("boosted EQ");
+
+        let low_flat = band_energy(&flat, sample_rate, 20.0, 150.0);
+        let low_boost = band_energy(&boosted, sample_rate, 20.0, 150.0);
+        let high_flat = band_energy(&flat, sample_rate, 4_000.0, 8_000.0);
+        let high_boost = band_energy(&boosted, sample_rate, 4_000.0, 8_000.0);
+
+        assert!(
+            low_boost > low_flat * 1.5,
+            "low-shelf boost must raise low-band energy: flat {low_flat:.4}, boosted {low_boost:.4}"
+        );
+        // The high band sits above the shelf and should be left roughly alone.
+        assert!(
+            (high_boost / high_flat - 1.0).abs() < 0.2,
+            "high band should be ~unchanged by the low shelf (flat {high_flat:.4}, boosted {high_boost:.4})"
+        );
+        assert!(
+            flat.iter().chain(boosted.iter()).all(|s| s.is_finite()),
+            "all EQ output samples must be finite"
+        );
     }
 }

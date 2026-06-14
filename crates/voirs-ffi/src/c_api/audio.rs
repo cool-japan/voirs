@@ -72,6 +72,7 @@ pub unsafe extern "C" fn voirs_audio_apply_effects(
         return VoirsErrorCode::InvalidParameter;
     }
 
+    let sample_rate = audio_buffer.sample_rate as f32;
     let samples =
         std::slice::from_raw_parts_mut(audio_buffer.samples, audio_buffer.length as usize);
 
@@ -80,6 +81,7 @@ pub unsafe extern "C" fn voirs_audio_apply_effects(
         2 => apply_compression(samples, effect_config.strength, effect_config.param1),
         3 => apply_eq(
             samples,
+            sample_rate,
             effect_config.strength,
             effect_config.param1,
             effect_config.param2,
@@ -522,16 +524,93 @@ fn apply_compression(samples: &mut [f32], ratio: f32, threshold: f32) {
     }
 }
 
-fn apply_eq(samples: &mut [f32], gain: f32, frequency: f32, q_factor: f32) {
-    // Simple peak EQ filter
-    let gain_linear = gain * 2.0 - 1.0; // Convert 0-1 to -1 to 1
-    let _freq_norm = frequency.clamp(0.0, 1.0);
-    let _q = q_factor.clamp(0.1, 10.0);
+/// Apply a parametric peaking equalizer to a buffer in place.
+///
+/// The C-ABI [`VoirsAudioEffectConfig`] only exposes three scalar parameters, so
+/// they are mapped onto real EQ units as follows:
+/// * `gain` is the `0.0..=1.0` effect strength; `0.5` is neutral and the usable
+///   range is mapped linearly onto `±15 dB` of peaking gain. A strength of `0.5`
+///   therefore produces a bit-exact identity.
+/// * `frequency` is the band centre frequency in Hz (`param1`).
+/// * `q_factor` is the band quality factor (`param2`); a non-positive value
+///   selects a sensible default of `1.0`.
+///
+/// Multiple bands can be applied by calling [`apply_peaking_eq`] repeatedly on
+/// the same buffer (each call filters in series).
+fn apply_eq(samples: &mut [f32], sample_rate: f32, gain: f32, frequency: f32, q_factor: f32) {
+    const MAX_EQ_GAIN_DB: f32 = 15.0;
+    let gain_db = (gain.clamp(0.0, 1.0) - 0.5) * 2.0 * MAX_EQ_GAIN_DB;
+    let q = if q_factor > 0.0 { q_factor } else { 1.0 };
+    apply_peaking_eq(samples, sample_rate, frequency, q, gain_db);
+}
 
-    // Simple gain adjustment based on frequency content
-    // This is a simplified EQ - a real implementation would use proper filter coefficients
+/// Apply a single RBJ Audio-EQ-Cookbook peaking-EQ biquad band, in place.
+///
+/// Coefficients follow Robert Bristow-Johnson's cookbook (peaking EQ):
+///
+/// ```text
+/// A   = 10^(gain_db / 40)
+/// w0  = 2*pi * f0 / fs
+/// a   = sin(w0) / (2*Q)          (alpha)
+///
+/// b0 = 1 + a*A          a0 = 1 + a/A
+/// b1 = -2*cos(w0)       a1 = -2*cos(w0)
+/// b2 = 1 - a*A          a2 = 1 - a/A
+/// ```
+///
+/// The coefficients are normalized by `a0` and the difference equation is
+/// evaluated with a direct-form II transposed structure:
+///
+/// ```text
+/// y[n] = b0*x[n] + s1
+/// s1   = b1*x[n] - a1*y[n] + s2
+/// s2   = b2*x[n] - a2*y[n]
+/// ```
+///
+/// A gain of exactly `0 dB` is a bit-exact identity (the function returns early),
+/// as are degenerate parameters (non-finite/out-of-range `f0`, `Q <= 0`, or a
+/// non-positive sample rate), which would otherwise yield NaN/inf coefficients.
+fn apply_peaking_eq(samples: &mut [f32], sample_rate: f32, f0: f32, q: f32, gain_db: f32) {
+    // 0 dB peaking gain leaves the signal untouched; short-circuit so the buffer
+    // is returned bit-for-bit identical rather than relying on float round-trips.
+    if gain_db == 0.0 || samples.is_empty() {
+        return;
+    }
+
+    let nyquist = sample_rate * 0.5;
+    if !sample_rate.is_finite()
+        || sample_rate <= 0.0
+        || !f0.is_finite()
+        || f0 <= 0.0
+        || f0 >= nyquist
+        || !q.is_finite()
+        || q <= 0.0
+    {
+        return;
+    }
+
+    let a = 10.0_f32.powf(gain_db / 40.0);
+    let w0 = 2.0 * std::f32::consts::PI * f0 / sample_rate;
+    let (sin_w0, cos_w0) = w0.sin_cos();
+    let alpha = sin_w0 / (2.0 * q);
+
+    // Un-normalized peaking-EQ coefficients (RBJ cookbook).
+    let a0 = 1.0 + alpha / a;
+    let b0 = (1.0 + alpha * a) / a0;
+    let b1 = (-2.0 * cos_w0) / a0;
+    let b2 = (1.0 - alpha * a) / a0;
+    let a1 = (-2.0 * cos_w0) / a0;
+    let a2 = (1.0 - alpha / a) / a0;
+
+    // Direct-form II transposed evaluation of the biquad.
+    let mut s1 = 0.0_f32;
+    let mut s2 = 0.0_f32;
     for sample in samples.iter_mut() {
-        *sample *= 1.0 + gain_linear * 0.3; // Simple gain adjustment
+        let x = *sample;
+        let y = b0 * x + s1;
+        s1 = b1 * x - a1 * y + s2;
+        s2 = b2 * x - a2 * y;
+        *sample = y;
     }
 }
 
@@ -546,6 +625,100 @@ mod tests {
         assert_eq!(config.effect_type, 0);
         assert_eq!(config.strength, 0.5);
         assert_eq!(config.enabled, 0);
+    }
+
+    /// Sum of squares ("energy") of a signal.
+    fn energy(samples: &[f32]) -> f32 {
+        samples.iter().map(|&x| x * x).sum()
+    }
+
+    /// Generate a unit-amplitude sine tone.
+    fn sine_tone(freq: f32, sample_rate: f32, len: usize) -> Vec<f32> {
+        (0..len)
+            .map(|n| (2.0 * std::f32::consts::PI * freq * n as f32 / sample_rate).sin())
+            .collect()
+    }
+
+    #[test]
+    fn test_eq_0db_is_identity() {
+        // A 0 dB peaking band must leave the signal bit-for-bit unchanged.
+        let sample_rate = 48_000.0;
+        let original = sine_tone(440.0, sample_rate, 2048);
+        let mut processed = original.clone();
+        apply_peaking_eq(&mut processed, sample_rate, 1_000.0, 1.0, 0.0);
+        assert_eq!(original, processed);
+    }
+
+    #[test]
+    fn test_eq_neutral_strength_is_identity() {
+        // Strength 0.5 maps to 0 dB through `apply_eq`, i.e. an identity filter.
+        let sample_rate = 44_100.0;
+        let original = sine_tone(440.0, sample_rate, 1024);
+        let mut processed = original.clone();
+        apply_eq(&mut processed, sample_rate, 0.5, 1_000.0, 1.0);
+        for (a, b) in original.iter().zip(processed.iter()) {
+            assert!((a - b).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn test_eq_boost_raises_energy_at_center_only() {
+        let sample_rate = 48_000.0;
+        let len = 9_600; // 0.2 s
+        let f0 = 1_000.0;
+        let gain_db = 12.0;
+        let q = 1.0;
+
+        // Tone at the EQ centre frequency.
+        let center_tone = sine_tone(f0, sample_rate, len);
+        let mut center_boosted = center_tone.clone();
+        apply_peaking_eq(&mut center_boosted, sample_rate, f0, q, gain_db);
+
+        // Tone three octaves above the centre (well outside the band).
+        let distant_freq = 8_000.0;
+        let distant_tone = sine_tone(distant_freq, sample_rate, len);
+        let mut distant_processed = distant_tone.clone();
+        apply_peaking_eq(&mut distant_processed, sample_rate, f0, q, gain_db);
+
+        // Measure steady-state energy over the second half to skip filter warm-up.
+        let half = len / 2;
+        let center_before = energy(&center_tone[half..]);
+        let center_after = energy(&center_boosted[half..]);
+        let distant_before = energy(&distant_tone[half..]);
+        let distant_after = energy(&distant_processed[half..]);
+
+        // A +12 dB boost at f0 multiplies on-band energy by ~10^(12/10) ≈ 15.8×.
+        assert!(
+            center_after > center_before * 4.0,
+            "expected strong boost at f0: {center_before} -> {center_after}"
+        );
+        // The distant tone should be essentially untouched (within 15%).
+        let ratio = distant_after / distant_before;
+        assert!(
+            (0.85..=1.15).contains(&ratio),
+            "distant tone energy changed too much: ratio = {ratio}"
+        );
+    }
+
+    #[test]
+    fn test_eq_invalid_parameters_are_identity() {
+        let sample_rate = 48_000.0;
+        let original = sine_tone(440.0, sample_rate, 512);
+
+        // f0 above Nyquist -> identity.
+        let mut above_nyquist = original.clone();
+        apply_peaking_eq(&mut above_nyquist, sample_rate, 30_000.0, 1.0, 6.0);
+        assert_eq!(original, above_nyquist);
+
+        // Non-positive Q -> identity.
+        let mut bad_q = original.clone();
+        apply_peaking_eq(&mut bad_q, sample_rate, 1_000.0, 0.0, 6.0);
+        assert_eq!(original, bad_q);
+
+        // f0 == 0 (DC) -> identity.
+        let mut dc = original.clone();
+        apply_peaking_eq(&mut dc, sample_rate, 0.0, 1.0, 6.0);
+        assert_eq!(original, dc);
     }
 
     #[test]

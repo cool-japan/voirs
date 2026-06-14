@@ -8,6 +8,7 @@
 //! - Perceptual spectral shaping
 
 use crate::RecognitionError;
+use scirs2_core::Complex as FftComplex;
 use std::f32::consts::PI;
 use voirs_sdk::AudioBuffer;
 
@@ -191,7 +192,7 @@ impl AdvancedSpectralProcessor {
             }
 
             // Forward FFT
-            self.real_fft(&frame);
+            self.real_fft(&frame)?;
 
             // Extract magnitude and phase
             let mut magnitudes = vec![0.0; self.config.fft_size / 2 + 1];
@@ -243,7 +244,7 @@ impl AdvancedSpectralProcessor {
             }
 
             // Inverse FFT
-            let enhanced_frame = self.inverse_real_fft();
+            let enhanced_frame = self.inverse_real_fft()?;
 
             // Overlap-add synthesis
             self.overlap_add(&enhanced_frame, &mut enhanced_samples, pos);
@@ -478,44 +479,58 @@ impl AdvancedSpectralProcessor {
         }
     }
 
-    /// Simplified real FFT (placeholder - in production use a proper FFT library)
-    fn real_fft(&mut self, input: &[f32]) {
-        // This is a simplified implementation
-        // In production, use rustfft or similar
-        for k in 0..=(self.config.fft_size / 2) {
-            let mut real_sum = 0.0;
-            let mut imag_sum = 0.0;
+    /// Forward one-sided real FFT via the SciRS2 abstraction.
+    ///
+    /// Computes the unnormalized DFT `X[k] = Σ_n x[n] · e^{-2πi·kn/N}` for the
+    /// non-negative frequencies `k = 0..=N/2` and stores it in `self.fft_buffer`.
+    /// This replaces the previous O(N²) naive DFT with `scirs2_fft::rfft`
+    /// (O(N log N)) while preserving the exact normalization callers rely on: the
+    /// forward transform is left unnormalized and the matching
+    /// [`Self::inverse_real_fft`] carries the `1/N` factor.
+    fn real_fft(&mut self, input: &[f32]) -> Result<(), RecognitionError> {
+        let n = self.config.fft_size;
+        let buf_f64: Vec<f64> = input.iter().take(n).map(|&s| f64::from(s)).collect();
 
-            for n in 0..self.config.fft_size {
-                let angle = -2.0 * PI * k as f32 * n as f32 / self.config.fft_size as f32;
-                real_sum += input[n] * angle.cos();
-                imag_sum += input[n] * angle.sin();
+        let spectrum = scirs2_fft::rfft(&buf_f64, Some(n)).map_err(|e| {
+            RecognitionError::AudioProcessingError {
+                message: format!("rfft failed in advanced spectral processing: {e}"),
+                source: None,
             }
+        })?;
 
-            self.fft_buffer[k] = Complex::new(real_sum, imag_sum);
+        for (k, bin) in spectrum.iter().enumerate().take(n / 2 + 1) {
+            self.fft_buffer[k] = Complex::new(bin.re as f32, bin.im as f32);
         }
+
+        Ok(())
     }
 
-    /// Simplified inverse real FFT
-    fn inverse_real_fft(&self) -> Vec<f32> {
-        let mut output = vec![0.0; self.config.fft_size];
+    /// Inverse one-sided real FFT via the SciRS2 abstraction.
+    ///
+    /// Reconstructs the real time-domain frame from the `N/2 + 1` non-negative
+    /// frequency bins currently held in `self.fft_buffer`, using
+    /// `scirs2_fft::irfft` (which carries the `1/N` normalization). This is the
+    /// exact inverse of [`Self::real_fft`], replacing the previous O(N²) IDFT.
+    fn inverse_real_fft(&self) -> Result<Vec<f32>, RecognitionError> {
+        let n = self.config.fft_size;
 
-        for n in 0..self.config.fft_size {
-            for k in 0..=(self.config.fft_size / 2) {
-                let angle = 2.0 * PI * k as f32 * n as f32 / self.config.fft_size as f32;
-                let weight = if k == 0 || k == self.config.fft_size / 2 {
-                    1.0
-                } else {
-                    2.0
-                };
-                output[n] += weight
-                    * (self.fft_buffer[k].real * angle.cos()
-                        - self.fft_buffer[k].imag * angle.sin());
+        let complex_bins: Vec<FftComplex<f64>> = (0..=n / 2)
+            .map(|k| {
+                FftComplex::new(
+                    f64::from(self.fft_buffer[k].real),
+                    f64::from(self.fft_buffer[k].imag),
+                )
+            })
+            .collect();
+
+        let time_domain = scirs2_fft::irfft(&complex_bins, Some(n)).map_err(|e| {
+            RecognitionError::AudioProcessingError {
+                message: format!("irfft failed in advanced spectral processing: {e}"),
+                source: None,
             }
-            output[n] /= self.config.fft_size as f32;
-        }
+        })?;
 
-        output
+        Ok(time_domain.iter().map(|&x| x as f32).collect())
     }
 
     /// Overlap-add synthesis
@@ -601,5 +616,78 @@ mod tests {
         let magnitudes = vec![1.0, 2.0, 3.0, 2.0, 1.0];
         let centroid = processor.calculate_spectral_centroid(&magnitudes);
         assert!(centroid > 0.0);
+    }
+
+    /// `real_fft` must equal a hand-coded reference DFT on a small input.
+    ///
+    /// The reference uses the same unnormalized forward convention
+    /// `X[k] = Σ_n x[n]·e^{-2πi·kn/N}` that `scirs2_fft::rfft` implements.
+    #[test]
+    fn test_real_fft_matches_naive_dft() {
+        let config = AdvancedSpectralConfig {
+            fft_size: 8,
+            hop_length: 4,
+            ..Default::default()
+        };
+        let mut processor = AdvancedSpectralProcessor::new(config).unwrap();
+
+        let input: Vec<f32> = vec![1.0, -2.0, 3.0, 0.5, -1.5, 2.0, 0.0, -0.25];
+        processor.real_fft(&input).unwrap();
+
+        let n = 8usize;
+        for k in 0..=(n / 2) {
+            let mut ref_re = 0.0f64;
+            let mut ref_im = 0.0f64;
+            for (sample_idx, &sample) in input.iter().enumerate() {
+                let angle = -2.0 * std::f64::consts::PI * k as f64 * sample_idx as f64 / n as f64;
+                ref_re += f64::from(sample) * angle.cos();
+                ref_im += f64::from(sample) * angle.sin();
+            }
+
+            let got = processor.fft_buffer[k];
+            assert!(
+                (f64::from(got.real) - ref_re).abs() < 1e-3,
+                "bin {k} real: got {}, expected {ref_re}",
+                got.real
+            );
+            assert!(
+                (f64::from(got.imag) - ref_im).abs() < 1e-3,
+                "bin {k} imag: got {}, expected {ref_im}",
+                got.imag
+            );
+        }
+    }
+
+    /// `real_fft` followed by `inverse_real_fft` must recover the original tone.
+    ///
+    /// Exercises the `rfft → irfft` round-trip (the inverse carries `1/N`).
+    #[test]
+    fn test_fft_roundtrip_recovers_tone() {
+        let n = 64usize;
+        let config = AdvancedSpectralConfig {
+            fft_size: n,
+            hop_length: n / 2,
+            ..Default::default()
+        };
+        let mut processor = AdvancedSpectralProcessor::new(config).unwrap();
+
+        // A pure tone at exactly 5 cycles per frame.
+        let input: Vec<f32> = (0..n)
+            .map(|i| (2.0 * PI * 5.0 * i as f32 / n as f32).sin())
+            .collect();
+
+        processor.real_fft(&input).unwrap();
+        let reconstructed = processor.inverse_real_fft().unwrap();
+
+        assert_eq!(reconstructed.len(), n);
+        let max_err = input
+            .iter()
+            .zip(reconstructed.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(
+            max_err < 1e-3,
+            "rfft/irfft round-trip error too large: {max_err}"
+        );
     }
 }

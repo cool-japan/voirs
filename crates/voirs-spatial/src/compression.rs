@@ -9,9 +9,13 @@ use crate::types::Position3D;
 use crate::{Error, Result};
 use scirs2_core::ndarray::{Array1, Array2, Array3, Axis};
 use scirs2_core::Complex32;
+use scirs2_fft::{ComplexToReal, RealFftPlanner, RealToComplex};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::f32::consts::PI;
+
+/// Canonical Huffman entropy coder used by the entropy-coding stage.
+mod huffman;
 
 /// Spatial audio compression codec types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -595,38 +599,21 @@ impl SpatialCompressor {
         Ok(quantized)
     }
 
-    /// Apply entropy coding to compressed data
+    /// Apply entropy coding to compressed data.
+    ///
+    /// Uses canonical Huffman coding over the byte stream (see the
+    /// [`huffman`] module). The transform is exactly inverted by
+    /// [`Self::decode_entropy_coding`] and is guaranteed never to inflate the
+    /// data by more than a single format-marker byte (it falls back to a raw
+    /// block for incompressible input).
     fn apply_entropy_coding(&self, data: &[u8]) -> Result<Vec<u8>> {
-        // Simplified entropy coding (in practice, would use arithmetic coding or similar)
-        let mut compressed = Vec::new();
-        let mut i = 0;
+        Ok(huffman::encode(data))
+    }
 
-        while i < data.len() {
-            let current_byte = data[i];
-            let mut run_length = 1;
-
-            // Simple run-length encoding
-            while i + run_length < data.len()
-                && data[i + run_length] == current_byte
-                && run_length < 255
-            {
-                run_length += 1;
-            }
-
-            if run_length > 3 {
-                compressed.push(0xFF); // Escape sequence
-                compressed.push(current_byte);
-                compressed.push(run_length as u8);
-            } else {
-                for _ in 0..run_length {
-                    compressed.push(current_byte);
-                }
-            }
-
-            i += run_length;
-        }
-
-        Ok(compressed)
+    /// Reverse [`Self::apply_entropy_coding`], reconstructing the exact original
+    /// bytes from a canonical-Huffman-coded buffer.
+    fn decode_entropy_coding(&self, data: &[u8]) -> Result<Vec<u8>> {
+        huffman::decode(data).map_err(Error::LegacyProcessing)
     }
 
     /// Convert audio data to ambisonics representation
@@ -690,15 +677,115 @@ impl SpatialCompressor {
         }
     }
 
-    /// Filter frequency range from audio data (simplified)
+    /// Apply a frequency-domain band-pass filter to every channel of `audio_data`.
+    ///
+    /// Each row of the input (one source/channel) is processed independently:
+    ///
+    /// 1. The samples are zero-padded to the next power of two and multiplied by
+    ///    a periodic Hann window to suppress spectral leakage at the block edges.
+    /// 2. A real forward FFT (`scirs2_fft::RealFftPlanner`) produces the
+    ///    half-spectrum of `fft_len / 2 + 1` complex bins.  Bin `k` maps to the
+    ///    physical frequency `k · sample_rate / fft_len` (Hz); using the real
+    ///    FFT implicitly preserves the symmetric negative-frequency bins.
+    /// 3. Every bin whose center frequency lies outside the inclusive
+    ///    `[low_freq, high_freq]` pass-band is zeroed.
+    /// 4. The inverse real FFT reconstructs the time-domain signal (the
+    ///    `scirs2_fft` inverse already normalises by `1/N`), and the first `n`
+    ///    samples are written back to the output row.
+    ///
+    /// The sample rate is taken from [`SpatialCompressionConfig::sample_rate`]
+    /// (`self.config.sample_rate`).  This mirrors the real band-pass filters used
+    /// in `core.rs` (`apply_air_absorption`) and the SDK audio enhancement path.
     fn filter_frequency_range(
         &self,
         audio_data: &Array2<f32>,
-        _low_freq: f32,
-        _high_freq: f32,
+        low_freq: f32,
+        high_freq: f32,
     ) -> Result<Array2<f32>> {
-        // In a full implementation, this would apply proper frequency domain filtering
-        Ok(audio_data.clone())
+        let n = audio_data.ncols();
+        let mut filtered = audio_data.clone();
+
+        // Signals shorter than a minimal FFT block (or empty) cannot be
+        // meaningfully band-limited; leave them untouched.
+        if n < 4 {
+            return Ok(filtered);
+        }
+
+        let sample_rate = self.config.sample_rate;
+        if sample_rate <= 0.0 {
+            return Err(Error::LegacyProcessing(
+                "invalid sample rate for frequency filtering".to_string(),
+            ));
+        }
+
+        let fft_len = n.next_power_of_two();
+        let n_bins = fft_len / 2 + 1;
+        let bin_hz = sample_rate / fft_len as f32;
+
+        // Precompute the inclusive pass-band mask once for all channels.
+        // Bin k corresponds to frequency k * sample_rate / fft_len.
+        let pass_mask: Vec<bool> = (0..n_bins)
+            .map(|k| {
+                let freq_hz = k as f32 * bin_hz;
+                freq_hz >= low_freq && freq_hz <= high_freq
+            })
+            .collect();
+
+        // Precompute a periodic Hann window over the padded block.
+        let window: Vec<f32> = (0..fft_len)
+            .map(|i| {
+                let phase = 2.0 * PI * i as f32 / fft_len as f32;
+                0.5 - 0.5 * phase.cos()
+            })
+            .collect();
+
+        let mut planner = RealFftPlanner::<f32>::new();
+        let fwd = planner.plan_fft_forward(fft_len);
+        let inv = planner.plan_fft_inverse(fft_len);
+
+        let mut input = vec![0.0f32; fft_len];
+        let mut spectrum = vec![Complex32::new(0.0, 0.0); n_bins];
+        let mut output = vec![0.0f32; fft_len];
+
+        for ch in 0..audio_data.nrows() {
+            // Window the zero-padded channel signal.
+            let row = audio_data.row(ch);
+            for (slot, (&sample, &w)) in input.iter_mut().zip(row.iter().zip(window.iter())) {
+                *slot = sample * w;
+            }
+            // Clear the zero-padding tail (samples beyond `n`).
+            for slot in input.iter_mut().skip(n) {
+                *slot = 0.0;
+            }
+
+            if fwd.process(&input, &mut spectrum).is_err() {
+                return Err(Error::LegacyProcessing(
+                    "forward FFT failed during frequency filtering".to_string(),
+                ));
+            }
+
+            // Zero every bin outside the pass-band.
+            for (bin, keep) in spectrum.iter_mut().zip(pass_mask.iter()) {
+                if !*keep {
+                    *bin = Complex32::new(0.0, 0.0);
+                }
+            }
+
+            if inv.process(&spectrum, &mut output).is_err() {
+                return Err(Error::LegacyProcessing(
+                    "inverse FFT failed during frequency filtering".to_string(),
+                ));
+            }
+
+            // The scirs2_fft inverse already applies the 1/N normalisation;
+            // write back only the original `n` samples.
+            let mut out_row = filtered.row_mut(ch);
+            for (dst, &src) in out_row.iter_mut().zip(output.iter()) {
+                *dst = src;
+            }
+        }
+
+        Ok(filtered)
     }
 
     /// Quantize mixing weights with lower precision
@@ -965,5 +1052,187 @@ mod tests {
 
         let model = PerceptualModel::new(&params, 48000.0);
         assert!(model.is_ok());
+    }
+
+    /// Deterministic LCG byte source (not the `rand` crate) for reproducible
+    /// entropy-coding round-trip corpora.
+    fn lcg_bytes(seed: u64, len: usize) -> Vec<u8> {
+        let mut state = seed;
+        (0..len)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                ((state >> 32) & 0xFF) as u8
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_entropy_coding_roundtrip_through_compressor() {
+        let config = SpatialCompressionConfig::default();
+        let compressor = SpatialCompressor::new(config).unwrap();
+
+        // Empty, single-symbol, highly repetitive, and high-entropy inputs.
+        let cases: Vec<Vec<u8>> = vec![
+            Vec::new(),
+            vec![77u8; 1],
+            vec![5u8; 4096],
+            lcg_bytes(0xa5a5_5a5a_1234_5678, 3000),
+        ];
+
+        for data in &cases {
+            let encoded = compressor.apply_entropy_coding(data).unwrap();
+            let decoded = compressor.decode_entropy_coding(&encoded).unwrap();
+            assert_eq!(&decoded, data, "entropy-coding round-trip must be lossless");
+            // No inflation beyond the single format-marker byte.
+            assert!(encoded.len() <= data.len() + 1);
+        }
+    }
+
+    #[test]
+    fn test_entropy_coding_compresses_repetitive() {
+        let config = SpatialCompressionConfig::default();
+        let compressor = SpatialCompressor::new(config).unwrap();
+
+        // Skewed/repetitive payload: mostly zeros with occasional spikes.
+        let mut data = vec![0u8; 8000];
+        for (i, byte) in data.iter_mut().enumerate() {
+            if i % 37 == 0 {
+                *byte = (i % 251) as u8;
+            }
+        }
+
+        let encoded = compressor.apply_entropy_coding(&data).unwrap();
+        assert!(
+            encoded.len() < data.len(),
+            "repetitive data should compress: {} -> {}",
+            data.len(),
+            encoded.len()
+        );
+        let decoded = compressor.decode_entropy_coding(&encoded).unwrap();
+        assert_eq!(decoded, data);
+    }
+
+    /// Sum of squared samples (proxy for signal energy) over a single row.
+    fn row_energy(data: &Array2<f32>, row: usize) -> f64 {
+        data.row(row).iter().map(|&s| (s as f64) * (s as f64)).sum()
+    }
+
+    /// Build a single-channel `Array2` holding a pure sine tone at `freq_hz`.
+    fn tone(freq_hz: f32, sample_rate: f32, len: usize) -> Array2<f32> {
+        let samples: Vec<f32> = (0..len)
+            .map(|i| (2.0 * PI * freq_hz * i as f32 / sample_rate).sin())
+            .collect();
+        Array2::from_shape_vec((1, len), samples).unwrap()
+    }
+
+    #[test]
+    fn test_filter_frequency_range_isolates_passband_tone() {
+        let config = SpatialCompressionConfig::default();
+        let compressor = SpatialCompressor::new(config).unwrap();
+
+        let sample_rate = 48_000.0f32;
+        let len = 4096; // power of two => fft_len == len, ~11.7 Hz bin spacing
+        let low_tone_hz = 1_000.0f32;
+        let high_tone_hz = 8_000.0f32;
+
+        // Mixed signal: low tone + high tone.
+        let low = tone(low_tone_hz, sample_rate, len);
+        let high = tone(high_tone_hz, sample_rate, len);
+        let mixed = &low + &high;
+
+        // Band-pass around ONLY the low tone (500 Hz .. 2 kHz).
+        let filtered = compressor
+            .filter_frequency_range(&mixed, 500.0, 2_000.0)
+            .unwrap();
+
+        // Energy of an isolated low tone (windowed reference) to compare against.
+        let low_only = compressor
+            .filter_frequency_range(&low, 500.0, 2_000.0)
+            .unwrap();
+
+        let filtered_energy = row_energy(&filtered, 0);
+        let low_ref_energy = row_energy(&low_only, 0);
+
+        // The pass-band tone's energy is largely retained ...
+        assert!(
+            filtered_energy > 0.7 * low_ref_energy,
+            "pass-band tone energy should be retained: {filtered_energy} vs {low_ref_energy}"
+        );
+
+        // ... while the out-of-band (8 kHz) tone is strongly attenuated.
+        // Reconstruct what the high tone contributed by removing the low part.
+        let high_residual = &filtered - &low_only;
+        let residual_energy = row_energy(&high_residual, 0);
+        assert!(
+            residual_energy < 0.05 * filtered_energy,
+            "out-of-band tone must be strongly attenuated: residual {residual_energy} vs kept {filtered_energy}"
+        );
+    }
+
+    #[test]
+    fn test_filter_frequency_range_empty_band_silences() {
+        let config = SpatialCompressionConfig::default();
+        let compressor = SpatialCompressor::new(config).unwrap();
+
+        let sample_rate = 48_000.0f32;
+        let len = 4096;
+
+        // Signal energy lives only at 1 kHz and 8 kHz.
+        let mixed = &tone(1_000.0, sample_rate, len) + &tone(8_000.0, sample_rate, len);
+        let input_energy = row_energy(&mixed, 0);
+
+        // A band containing neither tone => essentially no surviving energy.
+        let filtered = compressor
+            .filter_frequency_range(&mixed, 15_000.0, 16_000.0)
+            .unwrap();
+        let out_energy = row_energy(&filtered, 0);
+
+        assert!(
+            out_energy < 1e-3 * input_energy,
+            "excluding all spectral content should yield near-silence: {out_energy} vs {input_energy}"
+        );
+    }
+
+    #[test]
+    fn test_filter_frequency_range_full_band_is_near_identity() {
+        let config = SpatialCompressionConfig::default();
+        let compressor = SpatialCompressor::new(config).unwrap();
+
+        let sample_rate = 48_000.0f32;
+        let len = 4096;
+        let nyquist = sample_rate / 2.0;
+
+        let mixed = &tone(1_000.0, sample_rate, len) + &tone(8_000.0, sample_rate, len);
+
+        // Pass the entire spectrum [0, Nyquist]: window -> FFT -> (no zeroing) ->
+        // inverse FFT is an identity on the Hann-windowed signal.
+        let filtered = compressor
+            .filter_frequency_range(&mixed, 0.0, nyquist)
+            .unwrap();
+
+        // Build the Hann-windowed reference the filter operates on.
+        let window: Vec<f32> = (0..len)
+            .map(|i| {
+                let phase = 2.0 * PI * i as f32 / len as f32;
+                0.5 - 0.5 * phase.cos()
+            })
+            .collect();
+        let reference: Vec<f32> = mixed
+            .row(0)
+            .iter()
+            .zip(window.iter())
+            .map(|(&s, &w)| s * w)
+            .collect();
+
+        let mut max_abs_err = 0.0f32;
+        for (&got, &want) in filtered.row(0).iter().zip(reference.iter()) {
+            max_abs_err = max_abs_err.max((got - want).abs());
+        }
+        assert!(
+            max_abs_err < 1e-3,
+            "full-band filtering must reproduce the windowed signal: max err {max_abs_err}"
+        );
     }
 }

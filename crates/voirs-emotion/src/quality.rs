@@ -46,9 +46,60 @@
 //! ```
 
 use crate::prelude::*;
+use scirs2_fft::rfft;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+
+/// Default sample rate assumed for spectral analysis in this module.
+const ANALYSIS_SAMPLE_RATE: f64 = 44100.0;
+
+/// Compute the Hann-windowed real-FFT magnitude spectrum of `audio`.
+///
+/// Returns the magnitude of each frequency bin (length `N/2 + 1`). Empty input
+/// or an FFT failure yields an empty vector.
+fn rfft_magnitudes(audio: &[f32]) -> Vec<f64> {
+    let n = audio.len();
+    if n < 2 {
+        return Vec::new();
+    }
+
+    let windowed: Vec<f64> = audio
+        .iter()
+        .enumerate()
+        .map(|(i, &x)| {
+            let w = 0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / n as f64).cos());
+            x as f64 * w
+        })
+        .collect();
+
+    match rfft(&windowed, Some(n)) {
+        Ok(spec) => spec
+            .iter()
+            .map(|c| (c.re * c.re + c.im * c.im).sqrt())
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Spectral centroid (Hz) from a magnitude spectrum and sample rate.
+fn centroid_from_magnitudes(magnitudes: &[f64], sample_rate: f64, n: usize) -> f64 {
+    if magnitudes.is_empty() || n == 0 {
+        return 0.0;
+    }
+    let bin_hz = sample_rate / n as f64;
+    let mut weighted = 0.0;
+    let mut total = 0.0;
+    for (k, &mag) in magnitudes.iter().enumerate() {
+        weighted += (k as f64 * bin_hz) * mag;
+        total += mag;
+    }
+    if total > 1e-12 {
+        weighted / total
+    } else {
+        0.0
+    }
+}
 
 /// Quality measurement targets based on TODO.md goals
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -620,14 +671,42 @@ impl QualityAnalyzer {
         Ok(power / audio_data.len() as f64)
     }
 
-    async fn calculate_spectral_centroid(&self, _audio_data: &[f32]) -> Result<f64> {
-        // Simplified spectral centroid calculation
-        Ok(2000.0) // Typical speech centroid around 2kHz
+    /// Spectral centroid in Hz computed from a Hann-windowed real FFT.
+    ///
+    /// `centroid = Σ(f_k·|X_k|) / Σ|X_k|` with `f_k = k · sample_rate / N`.
+    async fn calculate_spectral_centroid(&self, audio_data: &[f32]) -> Result<f64> {
+        let magnitudes = rfft_magnitudes(audio_data);
+        Ok(centroid_from_magnitudes(
+            &magnitudes,
+            ANALYSIS_SAMPLE_RATE,
+            audio_data.len(),
+        ))
     }
 
-    async fn calculate_spectral_bandwidth(&self, _audio_data: &[f32]) -> Result<f64> {
-        // Simplified spectral bandwidth calculation
-        Ok(4000.0) // Typical speech bandwidth
+    /// Spectral bandwidth (spread) in Hz around the spectral centroid.
+    ///
+    /// `bandwidth = sqrt(Σ((f_k − centroid)²·|X_k|) / Σ|X_k|)`.
+    async fn calculate_spectral_bandwidth(&self, audio_data: &[f32]) -> Result<f64> {
+        let magnitudes = rfft_magnitudes(audio_data);
+        let n = audio_data.len();
+        if magnitudes.is_empty() || n == 0 {
+            return Ok(0.0);
+        }
+        let centroid = centroid_from_magnitudes(&magnitudes, ANALYSIS_SAMPLE_RATE, n);
+        let bin_hz = ANALYSIS_SAMPLE_RATE / n as f64;
+        let mut weighted = 0.0;
+        let mut total = 0.0;
+        for (k, &mag) in magnitudes.iter().enumerate() {
+            let f = k as f64 * bin_hz;
+            let diff = f - centroid;
+            weighted += diff * diff * mag;
+            total += mag;
+        }
+        if total > 1e-12 {
+            Ok((weighted / total).sqrt())
+        } else {
+            Ok(0.0)
+        }
     }
 
     async fn calculate_zero_crossing_rate(&self, audio_data: &[f32]) -> Result<f64> {
@@ -909,6 +988,68 @@ mod tests {
 
         let power = analyzer.calculate_total_power(&audio_data).await.unwrap();
         assert!(power > 0.0);
+    }
+
+    /// Build a single-frequency tone at the module's analysis sample rate.
+    fn tone(freq: f64, len: usize) -> Vec<f32> {
+        (0..len)
+            .map(|i| {
+                (2.0 * std::f64::consts::PI * freq * i as f64 / ANALYSIS_SAMPLE_RATE).sin() as f32
+                    * 0.5
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn test_spectral_centroid_near_tone() {
+        let analyzer = QualityAnalyzer::new().unwrap();
+        let audio = tone(3000.0, 8192);
+        let centroid = analyzer.calculate_spectral_centroid(&audio).await.unwrap();
+        assert!(
+            (centroid - 3000.0).abs() < 250.0,
+            "centroid {centroid} not near 3000 Hz"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_spectral_centroid_hf_vs_lf() {
+        let analyzer = QualityAnalyzer::new().unwrap();
+        let lf = analyzer
+            .calculate_spectral_centroid(&tone(400.0, 8192))
+            .await
+            .unwrap();
+        let hf = analyzer
+            .calculate_spectral_centroid(&tone(7000.0, 8192))
+            .await
+            .unwrap();
+        assert!(hf > lf, "hf centroid {hf} should exceed lf {lf}");
+    }
+
+    #[tokio::test]
+    async fn test_spectral_bandwidth_two_tone_wider() {
+        let analyzer = QualityAnalyzer::new().unwrap();
+        let len = 8192;
+
+        let single = tone(2000.0, len);
+        // Two widely separated tones produce a broader spectral spread.
+        let two: Vec<f32> = (0..len)
+            .map(|i| {
+                let t = i as f64 / ANALYSIS_SAMPLE_RATE;
+                ((2.0 * std::f64::consts::PI * 500.0 * t).sin()
+                    + (2.0 * std::f64::consts::PI * 9000.0 * t).sin()) as f32
+                    * 0.25
+            })
+            .collect();
+
+        let bw_single = analyzer
+            .calculate_spectral_bandwidth(&single)
+            .await
+            .unwrap();
+        let bw_two = analyzer.calculate_spectral_bandwidth(&two).await.unwrap();
+        assert!(
+            bw_two > bw_single,
+            "two-tone bandwidth {bw_two} should exceed single-tone {bw_single}"
+        );
     }
 
     #[test]

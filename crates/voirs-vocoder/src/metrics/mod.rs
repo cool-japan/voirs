@@ -11,6 +11,19 @@ use crate::{AudioBuffer, Result, VocoderError};
 use scirs2_core::ndarray::{s, Array1, Array2};
 use std::f32::consts::PI;
 
+/// Generate a periodic Hann window of the given length.
+///
+/// Used to taper analysis frames before the FFT so that spectral leakage does
+/// not smear a single tone's energy across many bins.
+fn hann_window(length: usize) -> Vec<f32> {
+    if length <= 1 {
+        return vec![1.0; length];
+    }
+    (0..length)
+        .map(|i| 0.5 * (1.0 - (2.0 * PI * i as f32 / (length - 1) as f32).cos()))
+        .collect()
+}
+
 pub mod mos;
 pub mod pesq;
 pub mod si_sdr;
@@ -262,49 +275,84 @@ impl QualityCalculator {
         }
     }
 
-    /// Calculate total harmonic distortion plus noise
+    /// Calculate total harmonic distortion plus noise (THD+N), as a percentage.
+    ///
+    /// The signal is windowed (Hann, to limit spectral leakage) and transformed
+    /// with a real FFT. The fundamental is located as the strongest spectral peak
+    /// within a plausible voice/test-tone F0 range (50 Hz – Nyquist/4). Its energy
+    /// is summed over a small bin neighbourhood to recover leakage. Everything
+    /// outside the fundamental neighbourhood (every harmonic and all noise) is the
+    /// distortion-plus-noise residual:
+    ///
+    /// `THD+N = sqrt((total_energy − fundamental_energy) / fundamental_energy)`
+    ///
+    /// reported as a percentage. A pure tone yields ≈ 0; injected harmonics raise
+    /// it monotonically.
     fn calculate_thd_n(&self, audio: &Array1<f32>) -> f32 {
-        // Simplified THD+N calculation
-        // In practice, this would require more sophisticated harmonic analysis
-
-        // Calculate RMS of the signal
-        let _rms: f32 = (audio.iter().map(|&x| x * x).sum::<f32>() / audio.len() as f32).sqrt();
-
-        // Estimate distortion using high-frequency content as a proxy
         let fft_size = self.config.frame_size;
-        if audio.len() < fft_size {
+        if audio.len() < fft_size || fft_size < 4 {
             return 0.0;
         }
 
-        // Use first frame for analysis
-        let audio_slice = audio.slice(s![..fft_size]);
-        let input: Vec<f64> = audio_slice.iter().map(|&x| x as f64).collect();
+        // Window the first analysis frame to reduce spectral leakage.
+        let window = hann_window(fft_size);
+        let input: Vec<f64> = audio
+            .slice(s![..fft_size])
+            .iter()
+            .zip(window.iter())
+            .map(|(&x, &w)| (x * w) as f64)
+            .collect();
 
-        // Compute FFT using scirs2_fft
-        let output = match scirs2_fft::rfft(&input, None) {
-            Ok(spectrum) => spectrum,
+        let spectrum = match scirs2_fft::rfft(&input, Some(fft_size)) {
+            Ok(s) => s,
             Err(_) => return 0.0,
         };
 
-        // Calculate energy in high frequencies (rough distortion estimate)
-        let nyquist_bin = fft_size / 2;
-        let high_freq_start = nyquist_bin / 2; // Above 1/4 Nyquist
-
-        let high_freq_energy: f32 = output[high_freq_start..nyquist_bin.min(output.len())]
+        let num_bins = fft_size / 2 + 1;
+        let mag2: Vec<f64> = spectrum
             .iter()
-            .map(|c| (c.re * c.re + c.im * c.im) as f32)
-            .sum();
+            .take(num_bins)
+            .map(|c| c.re * c.re + c.im * c.im)
+            .collect();
 
-        let total_energy: f32 = output[1..nyquist_bin.min(output.len())]
-            .iter()
-            .map(|c| (c.re * c.re + c.im * c.im) as f32)
-            .sum();
-
-        if total_energy > 0.0 {
-            (high_freq_energy / total_energy * 100.0).min(100.0)
-        } else {
-            0.0
+        // Total energy excluding the DC bin (DC is not part of THD+N).
+        let total_energy: f64 = mag2.iter().skip(1).sum();
+        if total_energy <= 0.0 {
+            return 0.0;
         }
+
+        // Search for the fundamental in a plausible F0 band: from ~50 Hz up to a
+        // quarter of Nyquist, so that at least the 2nd–4th harmonics remain inside
+        // the analysed band.
+        let bin_hz = self.config.sample_rate as f32 / fft_size as f32;
+        let low_bin = ((50.0 / bin_hz).floor() as usize).max(1);
+        let high_bin = (num_bins / 4).max(low_bin + 1).min(num_bins - 1);
+
+        let mut fundamental_bin = low_bin;
+        let mut peak_mag2 = 0.0_f64;
+        for (bin, &m2) in mag2.iter().enumerate().take(high_bin + 1).skip(low_bin) {
+            if m2 > peak_mag2 {
+                peak_mag2 = m2;
+                fundamental_bin = bin;
+            }
+        }
+
+        if peak_mag2 <= 0.0 {
+            return 0.0;
+        }
+
+        // Fundamental energy: peak bin plus ±2 neighbours to absorb leakage.
+        let leak = 2usize;
+        let f_lo = fundamental_bin.saturating_sub(leak);
+        let f_hi = (fundamental_bin + leak).min(num_bins - 1);
+        let fundamental_energy: f64 = mag2[f_lo..=f_hi].iter().sum();
+        if fundamental_energy <= 0.0 {
+            return 0.0;
+        }
+
+        // Distortion + noise is everything that is not the fundamental.
+        let residual = (total_energy - fundamental_energy).max(0.0);
+        ((residual / fundamental_energy).sqrt() as f32 * 100.0).min(100.0)
     }
 
     /// Calculate peak signal-to-noise ratio
@@ -529,5 +577,65 @@ mod tests {
 
         let result = calculator.validate_inputs(&audio1, &audio2);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_thd_n_pure_sine_near_zero() {
+        let mut config = QualityConfig::default();
+        config.sample_rate = 22050;
+        config.frame_size = 4096;
+        let calculator = QualityCalculator::new(config);
+
+        let sr = 22050.0_f32;
+        let freq = 440.0_f32;
+        let signal: Vec<f32> = (0..8192)
+            .map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / sr).sin())
+            .collect();
+        let signal = Array1::from_vec(signal);
+
+        let thd_n = calculator.calculate_thd_n(&signal);
+        // A clean tone: THD+N should be very small (well under 5%).
+        assert!(
+            thd_n < 5.0,
+            "pure sine THD+N should be near zero, got {thd_n}%"
+        );
+    }
+
+    #[test]
+    fn test_thd_n_with_harmonics_is_larger() {
+        let mut config = QualityConfig::default();
+        config.sample_rate = 22050;
+        config.frame_size = 4096;
+        let calculator = QualityCalculator::new(config);
+
+        let sr = 22050.0_f32;
+        let f0 = 440.0_f32;
+        // Fundamental + sizeable 2nd and 3rd harmonics -> clearly nonzero THD+N.
+        let dirty: Vec<f32> = (0..8192)
+            .map(|i| {
+                let t = i as f32 / sr;
+                (2.0 * std::f32::consts::PI * f0 * t).sin()
+                    + 0.5 * (2.0 * std::f32::consts::PI * 2.0 * f0 * t).sin()
+                    + 0.3 * (2.0 * std::f32::consts::PI * 3.0 * f0 * t).sin()
+            })
+            .collect();
+        let dirty = Array1::from_vec(dirty);
+
+        let clean: Vec<f32> = (0..8192)
+            .map(|i| (2.0 * std::f32::consts::PI * f0 * i as f32 / sr).sin())
+            .collect();
+        let clean = Array1::from_vec(clean);
+
+        let thd_dirty = calculator.calculate_thd_n(&dirty);
+        let thd_clean = calculator.calculate_thd_n(&clean);
+
+        assert!(
+            thd_dirty > 10.0,
+            "harmonic-laden signal should have clearly positive THD+N, got {thd_dirty}%"
+        );
+        assert!(
+            thd_dirty > thd_clean,
+            "harmonic signal ({thd_dirty}%) must exceed clean tone ({thd_clean}%)"
+        );
     }
 }

@@ -309,11 +309,48 @@ impl EmotionController {
         0.3 // Placeholder value
     }
 
+    /// Spectral centroid of the buffer, normalized to `[0, 1]` by the Nyquist
+    /// frequency. Uses a Hann-windowed real FFT ([`scirs2_fft::rfft`]).
     #[cfg(feature = "sdk-integration")]
-    fn calculate_spectral_centroid(&self, _audio: &AudioBuffer) -> f32 {
-        // Simplified spectral centroid calculation
-        // In real implementation, would use FFT and spectral analysis
-        0.5 // Placeholder value
+    fn calculate_spectral_centroid(&self, audio: &AudioBuffer) -> f32 {
+        use scirs2_fft::rfft;
+
+        let samples = audio.samples();
+        let n = samples.len();
+        if n < 2 || audio.sample_rate == 0 {
+            return 0.0;
+        }
+
+        let windowed: Vec<f64> = samples
+            .iter()
+            .enumerate()
+            .map(|(i, &x)| {
+                let w = 0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / n as f64).cos());
+                x as f64 * w
+            })
+            .collect();
+
+        let spectrum = match rfft(&windowed, Some(n)) {
+            Ok(spec) => spec,
+            Err(_) => return 0.0,
+        };
+
+        let bin_hz = audio.sample_rate as f64 / n as f64;
+        let mut weighted = 0.0;
+        let mut total = 0.0;
+        for (k, c) in spectrum.iter().enumerate() {
+            let mag = (c.re * c.re + c.im * c.im).sqrt();
+            weighted += (k as f64 * bin_hz) * mag;
+            total += mag;
+        }
+
+        if total <= 1e-12 {
+            return 0.0;
+        }
+
+        let centroid_hz = weighted / total;
+        let nyquist = audio.sample_rate as f64 / 2.0;
+        (centroid_hz / nyquist).clamp(0.0, 1.0) as f32
     }
 
     /// Create audio effect plugin for real-time processing
@@ -1069,5 +1106,29 @@ mod tests {
         let hook = BasicAcousticHook::new("test-hook".to_string());
         assert_eq!(hook.name(), "test-hook");
         assert!(hook.apply_placeholder().await.is_ok());
+    }
+
+    #[cfg(feature = "sdk-integration")]
+    #[test]
+    fn test_sdk_spectral_centroid_normalized() {
+        let controller = EmotionController::new().unwrap();
+        let sr = 44100u32;
+
+        let tone = |freq: f32| -> Vec<f32> {
+            (0..8192)
+                .map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / sr as f32).sin() * 0.5)
+                .collect()
+        };
+
+        let lf = AudioBuffer::new(tone(400.0), sr, 1);
+        let hf = AudioBuffer::new(tone(8000.0), sr, 1);
+
+        let c_lf = controller.calculate_spectral_centroid(&lf);
+        let c_hf = controller.calculate_spectral_centroid(&hf);
+
+        // Normalized centroid must lie in [0, 1] and rank HF above LF.
+        assert!((0.0..=1.0).contains(&c_lf));
+        assert!((0.0..=1.0).contains(&c_hf));
+        assert!(c_hf > c_lf, "hf {c_hf} should exceed lf {c_lf}");
     }
 }

@@ -418,11 +418,9 @@ impl AudioData {
 
     /// Calculate integrated loudness following ITU-R BS.1770-4
     fn calculate_integrated_loudness(&self) -> f32 {
-        // For simplicity, we'll implement a basic LUFS calculation
-        // Full implementation would include K-weighting filter and gating
-
-        // Apply basic pre-filter (approximation of K-weighting)
-        let filtered_samples = self.apply_k_weighting_approximation();
+        // ITU-R BS.1770-4 integrated loudness: K-weighting (pre-filter + RLB
+        // high-pass) followed by a gated mean square over 400 ms blocks.
+        let filtered_samples = self.apply_k_weighting();
 
         // Calculate mean square with gating
         let mean_square = self.calculate_gated_mean_square(&filtered_samples);
@@ -435,18 +433,107 @@ impl AudioData {
         }
     }
 
-    /// Apply K-weighting filter approximation
-    fn apply_k_weighting_approximation(&self) -> Vec<f32> {
-        // Simplified K-weighting using high-shelf filter approximation
-        // Full implementation would use proper biquad filters
-        let mut filtered = self.samples.clone();
-
-        // Simple high-frequency emphasis (approximating K-weighting)
-        for i in 1..filtered.len() {
-            filtered[i] = filtered[i] + 0.1 * (filtered[i] - filtered[i - 1]);
+    /// Apply the ITU-R BS.1770-4 K-weighting filter (two cascaded biquad IIR
+    /// stages) to the sample buffer.
+    ///
+    /// * **Stage 1 — pre-filter (high-shelf, ~1682 Hz, +4 dB, Q ≈ 0.707):**
+    ///   models the acoustic effect of the head, gently boosting high
+    ///   frequencies.
+    /// * **Stage 2 — RLB high-pass (~38 Hz, Q ≈ 0.5 / second-order Butterworth):**
+    ///   the revised low-frequency B-weighting that strongly attenuates DC and
+    ///   sub-bass.
+    ///
+    /// Both stages are second-order sections whose coefficients are derived from
+    /// the analogue prototypes of BS.1770-4 Annex 1 via the bilinear transform
+    /// for the actual sample rate (so the response is correct at any rate, not
+    /// just 48 kHz). The filtering is performed in `f64` for numerical
+    /// stability. The buffer is treated as a single channel-agnostic stream,
+    /// matching the integrated-loudness measurement that consumes it.
+    fn apply_k_weighting(&self) -> Vec<f32> {
+        let fs = f64::from(self.sample_rate);
+        if fs <= 0.0 || self.samples.is_empty() {
+            return self.samples.clone();
         }
 
-        filtered
+        // ---- K-weighting biquad coefficients (BS.1770-4), derived for `fs` ----
+        // See `k_weighting_pre_coeffs` / `k_weighting_rlb_coeffs` below for the
+        // canonical bilinear-transform derivation (reproduces the published
+        // 48 kHz reference coefficients exactly).
+        let [b0_pre, b1_pre, b2_pre, a1_pre, a2_pre] = Self::k_weighting_pre_coeffs(fs);
+        let [b0_rlb, b1_rlb, b2_rlb, a1_rlb, a2_rlb] = Self::k_weighting_rlb_coeffs(fs);
+
+        // ---- Run the two biquad stages in series (direct form II) ----
+        let mut w1 = [0.0f64; 2]; // state for stage 1
+        let mut w2 = [0.0f64; 2]; // state for stage 2
+
+        self.samples
+            .iter()
+            .map(|&x| {
+                let xd = f64::from(x);
+
+                // Stage 1
+                let w1n = xd - a1_pre * w1[0] - a2_pre * w1[1];
+                let y1 = b0_pre * w1n + b1_pre * w1[0] + b2_pre * w1[1];
+                w1[1] = w1[0];
+                w1[0] = w1n;
+
+                // Stage 2
+                let w2n = y1 - a1_rlb * w2[0] - a2_rlb * w2[1];
+                let y2 = b0_rlb * w2n + b1_rlb * w2[0] + b2_rlb * w2[1];
+                w2[1] = w2[0];
+                w2[0] = w2n;
+
+                y2 as f32
+            })
+            .collect()
+    }
+
+    /// BS.1770-4 K-weighting stage-1 "pre-filter" (high-shelf) biquad
+    /// coefficients `[b0, b1, b2, a1, a2]` (normalised to a0 = 1), derived for
+    /// `fs` (Hz) via the bilinear transform (canonical EBU R128 / De Man
+    /// derivation). At 48 kHz this reproduces the published BS.1770-4 reference
+    /// `b = [1.53512485958697, -2.69169618940638, 1.19839281085285]`,
+    /// `a = [1, -1.69065929318241, 0.73248077421585]`.
+    fn k_weighting_pre_coeffs(fs: f64) -> [f64; 5] {
+        let f0 = 1_681.974_450_955_532_f64;
+        let q = 0.707_175_236_955_419_3_f64;
+        let gain_db = 3.999_843_853_973_347_f64;
+
+        let k = (std::f64::consts::PI * f0 / fs).tan();
+        let k2 = k * k;
+        let vh = 10.0_f64.powf(gain_db / 20.0);
+        let vb = vh.powf(0.499_666_774_154_541_6_f64);
+        let denom = 1.0 + k / q + k2;
+
+        [
+            (vh + vb * k / q + k2) / denom,
+            2.0 * (k2 - vh) / denom,
+            (vh - vb * k / q + k2) / denom,
+            2.0 * (k2 - 1.0) / denom,
+            (1.0 - k / q + k2) / denom,
+        ]
+    }
+
+    /// BS.1770-4 K-weighting stage-2 RLB (revised low-frequency B-weighting)
+    /// high-pass biquad coefficients `[b0, b1, b2, a1, a2]`. The numerator is
+    /// exactly `[1, -2, 1]`; the denominator is derived for `fs` (Hz) with
+    /// Q ≈ 0.5003 (the RLB prototype, NOT a Butterworth Q = 0.707). At 48 kHz
+    /// this reproduces the reference `a = [1, -1.99004745483398, 0.99007225036616]`.
+    fn k_weighting_rlb_coeffs(fs: f64) -> [f64; 5] {
+        let f0 = 38.135_470_876_139_82_f64;
+        let q = 0.500_327_037_325_395_3_f64;
+
+        let k = (std::f64::consts::PI * f0 / fs).tan();
+        let k2 = k * k;
+        let denom = 1.0 + k / q + k2;
+
+        [
+            1.0,
+            -2.0,
+            1.0,
+            2.0 * (k2 - 1.0) / denom,
+            (1.0 - k / q + k2) / denom,
+        ]
     }
 
     /// Calculate gated mean square for LUFS measurement
@@ -1286,5 +1373,116 @@ mod tests {
         assert!((AudioData::modified_bessel_i0(0.0) - 1.0).abs() < 1e-10);
         assert!((AudioData::modified_bessel_i0(1.0) - 1.2660658777520084).abs() < 1e-10);
         assert!((AudioData::modified_bessel_i0(2.0) - 2.2795853023360673).abs() < 1e-10);
+    }
+
+    // ------- ITU-R BS.1770-4 K-weighting filter tests -------
+
+    /// RMS of a slice (helper for the K-weighting assertions).
+    fn slice_rms(samples: &[f32]) -> f32 {
+        if samples.is_empty() {
+            return 0.0;
+        }
+        let sum_sq: f64 = samples.iter().map(|&s| f64::from(s) * f64::from(s)).sum();
+        (sum_sq / samples.len() as f64).sqrt() as f32
+    }
+
+    /// `n` samples of a unit-amplitude sine at `freq` Hz for `sample_rate`.
+    fn sine(freq: f64, sample_rate: u32, n: usize) -> Vec<f32> {
+        (0..n)
+            .map(|i| {
+                (2.0 * std::f64::consts::PI * freq * i as f64 / f64::from(sample_rate)).sin() as f32
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_k_weighting_attenuates_dc() {
+        let sample_rate = 48_000u32;
+        // 0.5 s of DC (constant 1.0) — the RLB high-pass must remove it.
+        let audio = AudioData::new(vec![1.0f32; 24_000], sample_rate, 1);
+        let filtered = audio.apply_k_weighting();
+
+        assert_eq!(filtered.len(), 24_000);
+        assert!(filtered.iter().all(|s| s.is_finite()));
+
+        // Once the filter settles, the steady-state response to DC is ~0.
+        let tail = &filtered[filtered.len() - 4_000..];
+        let tail_rms = slice_rms(tail);
+        assert!(
+            tail_rms < 0.01,
+            "DC should be strongly attenuated, tail RMS = {tail_rms}"
+        );
+    }
+
+    #[test]
+    fn test_k_weighting_boosts_2khz_relative_to_100hz() {
+        let sample_rate = 48_000u32;
+        let n = 24_000usize; // 0.5 s
+
+        let low = AudioData::new(sine(100.0, sample_rate, n), sample_rate, 1);
+        let high = AudioData::new(sine(2_000.0, sample_rate, n), sample_rate, 1);
+
+        let low_filt = low.apply_k_weighting();
+        let high_filt = high.apply_k_weighting();
+
+        // Use the second half to skip the startup transient. Both inputs are
+        // unit sines, so a single reference input RMS (~1/sqrt(2)) applies.
+        let half = n / 2;
+        let in_rms = slice_rms(&sine(100.0, sample_rate, n)[half..]);
+        let low_gain = slice_rms(&low_filt[half..]) / in_rms;
+        let high_gain = slice_rms(&high_filt[half..]) / in_rms;
+
+        // K-weighting gently boosts highs: 2 kHz gain clearly exceeds 100 Hz
+        // gain and sits above unity, while 100 Hz stays near unity.
+        assert!(
+            high_gain > low_gain * 1.1,
+            "2 kHz gain {high_gain} should exceed 100 Hz gain {low_gain}"
+        );
+        assert!(
+            high_gain > 1.0,
+            "2 kHz should be boosted above unity, got {high_gain}"
+        );
+    }
+
+    #[test]
+    fn test_k_weighting_empty_input() {
+        let audio = AudioData::new(Vec::new(), 48_000, 1);
+        assert!(audio.apply_k_weighting().is_empty());
+    }
+
+    /// The derived K-weighting biquad coefficients must reproduce the canonical
+    /// ITU-R BS.1770-4 reference values at 48 kHz (guards against the spurious
+    /// √2-factor derivation that does not match the standard).
+    #[test]
+    fn test_k_weighting_coeffs_match_bs1770_reference_48k() {
+        let pre = AudioData::k_weighting_pre_coeffs(48_000.0);
+        let pre_ref = [
+            1.535_124_859_586_97_f64,
+            -2.691_696_189_406_38,
+            1.198_392_810_852_85,
+            -1.690_659_293_182_41,
+            0.732_480_774_215_85,
+        ];
+        for (got, want) in pre.into_iter().zip(pre_ref) {
+            assert!(
+                (got - want).abs() < 1e-6,
+                "pre-filter coeff {got} != reference {want}"
+            );
+        }
+
+        let rlb = AudioData::k_weighting_rlb_coeffs(48_000.0);
+        let rlb_ref = [
+            1.0_f64,
+            -2.0,
+            1.0,
+            -1.990_047_454_833_98,
+            0.990_072_250_366_16,
+        ];
+        for (got, want) in rlb.into_iter().zip(rlb_ref) {
+            assert!(
+                (got - want).abs() < 1e-6,
+                "RLB coeff {got} != reference {want}"
+            );
+        }
     }
 }

@@ -894,31 +894,72 @@ impl StyleConsistencyEngine {
     }
 
     /// Extract articulation features
+    ///
+    /// Computes a real magnitude spectrum of the leading audio frame via a
+    /// Hann-windowed real FFT (`scirs2_fft::rfft`) and derives articulation
+    /// descriptors from it:
+    ///
+    /// * `vowel_formants` — the first three formant candidates `(F1, F2, F3)`,
+    ///   located by scanning the low-frequency portion of the **true** magnitude
+    ///   spectrum `|X_k|` for local peaks (in Hz, via `freq_per_bin`).
+    /// * `consonant_clarity` — fraction of spectral energy above 2 kHz.
+    /// * `spectral_tilt` — low-band (<1 kHz) to high-band (>2 kHz) energy ratio.
+    ///
+    /// The frame is `fft_size = 1024` samples (zero-padded when the input is
+    /// shorter), so the half-spectrum has exactly `fft_size / 2` magnitude bins
+    /// and the `freq_per_bin = sample_rate / fft_size` bin-to-Hz mapping used by
+    /// the peak picker and the energy-band slices is exact.
     fn extract_articulation_features(
         &self,
         audio_data: &[f32],
         sample_rate: u32,
     ) -> Result<ArticulationFeatures> {
-        // Simplified articulation feature extraction
-
-        // Calculate spectral features
+        // Calculate spectral features from a real magnitude spectrum.
         let fft_size = 1024;
-        let mut spectrum = vec![0.0; fft_size / 2];
 
-        if audio_data.len() >= fft_size {
-            // Simple magnitude spectrum
-            for i in 0..fft_size / 2 {
-                if i < audio_data.len() {
-                    spectrum[i] = audio_data[i].abs();
-                }
+        // Build a Hann-windowed, zero-padded frame from the leading audio so the
+        // FFT operates on a proper analysis window rather than raw time samples.
+        let frame_len = audio_data.len().min(fft_size);
+        let mut windowed = vec![0.0f64; fft_size];
+        if frame_len > 1 {
+            let denom = (frame_len - 1) as f64;
+            for (i, slot) in windowed.iter_mut().take(frame_len).enumerate() {
+                let hann = 0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / denom).cos());
+                *slot = audio_data[i] as f64 * hann;
+            }
+        } else if frame_len == 1 {
+            windowed[0] = audio_data[0] as f64;
+        }
+
+        // Real FFT -> per-bin magnitude |X_k|. The half-spectrum has fft_size/2+1
+        // bins (0..=Nyquist); keep the first fft_size/2 so the index arithmetic
+        // below (which assumes a `fft_size / 2`-length spectrum) stays exact.
+        let half = fft_size / 2;
+        let mut spectrum = vec![0.0f32; half];
+        if frame_len > 0 {
+            let bins =
+                scirs2_fft::rfft(&windowed, Some(fft_size)).map_err(|e| Error::Processing {
+                    operation: "extract_articulation_features".to_string(),
+                    message: format!("articulation FFT failed: {e}"),
+                    context: None,
+                    recovery_suggestions: Box::new(Vec::new()),
+                })?;
+            for (out, c) in spectrum.iter_mut().zip(bins.iter().take(half)) {
+                *out = ((c.re * c.re + c.im * c.im).sqrt()) as f32;
             }
         }
 
-        // Estimate formants (simplified)
+        // Estimate formants from the magnitude spectrum.
         let freq_per_bin = sample_rate as f32 / fft_size as f32;
         let mut formants = Vec::new();
 
-        // Look for peaks in low frequencies (simplified formant detection)
+        // Relative peak threshold: scale with the spectrum's own peak so the
+        // detector is robust to absolute signal level (silence yields no peaks).
+        let spectrum_peak = spectrum.iter().copied().fold(0.0f32, f32::max);
+        let peak_threshold = spectrum_peak * 0.05;
+
+        // Look for peaks in low frequencies (formant candidates) by scanning the
+        // lower quarter of the spectrum in fixed-width bin windows.
         for window_start in (0..spectrum.len() / 4).step_by(20) {
             let window_end = (window_start + 20).min(spectrum.len());
             if let Some((peak_idx, &peak_val)) = spectrum[window_start..window_end]
@@ -927,7 +968,7 @@ impl StyleConsistencyEngine {
                 .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             {
                 let freq = (window_start + peak_idx) as f32 * freq_per_bin;
-                if peak_val > 0.01 && freq > 200.0 && freq < 3000.0 {
+                if peak_val > peak_threshold && freq > 200.0 && freq < 3000.0 {
                     formants.push((freq, freq * 1.2, freq * 1.5)); // F1, F2, F3 estimates
                 }
             }
@@ -1631,6 +1672,126 @@ mod tests {
 
         let estimated_f0 = result.unwrap();
         assert!(estimated_f0 > 180.0 && estimated_f0 < 220.0); // Should be close to 200Hz
+    }
+
+    /// Helper: synthesize a deterministic multi-sine signal.
+    fn synth_tones(sample_rate: u32, duration_s: f32, freqs: &[f32]) -> Vec<f32> {
+        let n = (sample_rate as f32 * duration_s) as usize;
+        let mut audio = Vec::with_capacity(n);
+        for i in 0..n {
+            let t = i as f32 / sample_rate as f32;
+            let mut sample = 0.0f32;
+            for &f in freqs {
+                sample += (2.0 * std::f32::consts::PI * f * t).sin();
+            }
+            // Normalize by component count so amplitude stays in a sane range.
+            audio.push(sample / freqs.len().max(1) as f32 * 0.8);
+        }
+        audio
+    }
+
+    /// A signal with energy at known formant frequencies must yield formant peak
+    /// picks near those frequencies (in Hz), NOT artifacts of the raw waveform.
+    #[test]
+    fn test_articulation_formants_match_known_frequencies() {
+        let config = StyleConsistencyConfig::default();
+        let engine = StyleConsistencyEngine::new(config);
+
+        let sample_rate = 16000;
+        // Place tones in distinct low-frequency analysis windows, all within the
+        // (200 Hz, 3000 Hz) formant acceptance band of the peak picker.
+        let tones = [500.0f32, 1200.0, 1800.0];
+        let audio = synth_tones(sample_rate, 0.2, &tones);
+
+        let features = engine
+            .extract_articulation_features(&audio, sample_rate)
+            .expect("articulation extraction should succeed");
+
+        assert_eq!(features.vowel_formants.len(), 3);
+
+        // freq_per_bin = 16000 / 1024 = 15.625 Hz. Allow a tolerance of a couple
+        // of bins (~50 Hz) to account for windowing/spectral leakage.
+        let tolerance = 50.0f32;
+        let detected_f1: Vec<f32> = features.vowel_formants.iter().map(|f| f.0).collect();
+
+        for &expected in &tones {
+            let found = detected_f1
+                .iter()
+                .any(|&f| (f - expected).abs() <= tolerance);
+            assert!(
+                found,
+                "expected a detected formant near {expected} Hz, got {detected_f1:?}"
+            );
+        }
+
+        // Sanity: every detected F1 must lie in the picker's acceptance band, and
+        // none may sit at a raw-waveform artifact frequency (e.g. ~0 Hz / DC).
+        for &f in &detected_f1 {
+            assert!(
+                f > 200.0 && f < 3000.0,
+                "formant {f} Hz out of expected band"
+            );
+        }
+    }
+
+    /// A single-tone signal and a multi-formant signal must differ in their
+    /// detected formant sets — proving the spectrum reflects real frequency
+    /// content rather than copied time-domain sample magnitudes.
+    #[test]
+    fn test_articulation_single_vs_multi_formant_differ() {
+        let config = StyleConsistencyConfig::default();
+        let engine = StyleConsistencyEngine::new(config);
+
+        let sample_rate = 16000;
+
+        let single = synth_tones(sample_rate, 0.2, &[500.0]);
+        let multi = synth_tones(sample_rate, 0.2, &[500.0, 1200.0, 1800.0]);
+
+        let single_feat = engine
+            .extract_articulation_features(&single, sample_rate)
+            .expect("single-tone extraction should succeed");
+        let multi_feat = engine
+            .extract_articulation_features(&multi, sample_rate)
+            .expect("multi-tone extraction should succeed");
+
+        // The single tone has energy near 500 Hz only; the multi-formant signal
+        // additionally has energy at 1200/1800 Hz. The detected formant sets must
+        // therefore differ (a fake time-magnitude "spectrum" would be insensitive
+        // to which sinusoids are present).
+        let single_f1: Vec<i32> = single_feat
+            .vowel_formants
+            .iter()
+            .map(|f| (f.0 / 15.625).round() as i32)
+            .collect();
+        let multi_f1: Vec<i32> = multi_feat
+            .vowel_formants
+            .iter()
+            .map(|f| (f.0 / 15.625).round() as i32)
+            .collect();
+
+        assert_ne!(
+            single_f1, multi_f1,
+            "single-tone and multi-formant signals must produce different formant sets"
+        );
+
+        // The single tone should not surface a genuine high-frequency formant
+        // near 1800 Hz, whereas the multi-formant signal should.
+        let multi_has_1800 = multi_feat
+            .vowel_formants
+            .iter()
+            .any(|f| (f.0 - 1800.0).abs() <= 50.0);
+        let single_has_1800 = single_feat
+            .vowel_formants
+            .iter()
+            .any(|f| (f.0 - 1800.0).abs() <= 50.0);
+        assert!(
+            multi_has_1800,
+            "multi-formant signal should detect ~1800 Hz"
+        );
+        assert!(
+            !single_has_1800,
+            "single 500 Hz tone should not detect a real ~1800 Hz formant"
+        );
     }
 
     #[test]

@@ -200,37 +200,157 @@ pub fn apply_low_pass_filter(samples: &mut [f32], alpha: f32) {
     }
 }
 
-/// Calculate spectral envelope using simple DFT approximation (optimized)
+/// Round `n` up to the next power of two, with a sane minimum of two.
+///
+/// Used to pick an FFT length `>= n` so `scirs2_fft::rfft` operates on a
+/// radix-friendly size while still covering the full analysis window.
+fn next_pow2_audio(n: usize) -> usize {
+    let mut p = 1usize;
+    while p < n {
+        p <<= 1;
+    }
+    p.max(2)
+}
+
+/// Compute a periodic Hann window of length `n` (`0.5 - 0.5·cos(2πi/n)`).
+///
+/// Tapering the analysis window before the FFT suppresses spectral leakage so
+/// the envelope of a pure tone concentrates around its true frequency bin
+/// instead of smearing across the whole band.
+fn hann_window_audio(n: usize) -> Vec<f32> {
+    if n <= 1 {
+        return vec![1.0; n.max(1)];
+    }
+    let denom = n as f32;
+    (0..n)
+        .map(|i| 0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / denom).cos())
+        .collect()
+}
+
+/// Calculate the spectral envelope of an audio signal.
+///
+/// Unlike a per-time-segment energy profile, this computes a genuine spectral
+/// envelope: the signal is Hann-windowed, transformed to the frequency domain
+/// with the real-input FFT ([`scirs2_fft::rfft`]), reduced to its magnitude
+/// spectrum `|X[k]|`, smoothed with a moving-average (cepstral-style) lifter to
+/// strip the fine harmonic ripple, and finally resampled onto exactly `bins`
+/// output points spanning `[0, Nyquist]`.
+///
+/// The returned vector therefore has length `bins`, with bin `b` corresponding
+/// to the normalized frequency `b / (bins - 1)` of the Nyquist band. A pure
+/// tone yields a peak in the bin nearest its frequency; broadband signals yield
+/// a flatter envelope. All values are non-negative magnitudes.
+///
+/// # Arguments
+///
+/// * `samples` - Real-valued, time-domain audio samples.
+/// * `bins` - Desired length of the output envelope (number of frequency bins).
+///
+/// # Returns
+///
+/// A `Vec<f32>` of length `bins` holding the smoothed magnitude envelope. An
+/// empty input or `bins == 0` yields `vec![0.0; bins]`.
 pub fn calculate_spectral_envelope(samples: &[f32], bins: usize) -> Vec<f32> {
     if samples.is_empty() || bins == 0 {
         return vec![0.0; bins];
     }
 
-    // Pre-allocate with exact capacity and initialize with zeros
-    let mut envelope = Vec::with_capacity(bins);
-    envelope.resize(bins, 0.0);
+    // Cap the analysis window so a single FFT stays affordable for long buffers
+    // (32768 samples is ~0.74 s at 44.1 kHz, plenty for global spectral shape).
+    let analysis_len = samples.len().min(32768);
+    let fft_len = next_pow2_audio(analysis_len);
 
-    let samples_per_bin = samples.len() / bins;
-
-    if samples_per_bin == 0 {
-        return envelope;
+    // Apply a Hann window over the used samples, zero-padding to `fft_len`.
+    let window = hann_window_audio(analysis_len);
+    let mut buffer: Vec<f32> = vec![0.0; fft_len];
+    for (slot, (&sample, &w)) in buffer
+        .iter_mut()
+        .zip(samples[..analysis_len].iter().zip(window.iter()))
+    {
+        *slot = sample * w;
     }
 
-    // Optimize by avoiding repeated bounds checks and memory allocations
-    let mut bin_idx = 0;
-    while bin_idx < bins {
-        let start_idx = bin_idx * samples_per_bin;
-        let end_idx = ((bin_idx + 1) * samples_per_bin).min(samples.len());
+    // Real-input FFT -> non-negative-frequency magnitude spectrum (|X[k]|).
+    // On the (extremely unlikely) FFT failure path, fall back to a flat
+    // envelope rather than propagating an error through this infallible API.
+    let spectrum = match scirs2_fft::rfft(&buffer, Some(fft_len)) {
+        Ok(spectrum) => spectrum,
+        Err(_) => return vec![0.0; bins],
+    };
+    let magnitude: Vec<f32> = spectrum
+        .iter()
+        .map(|c| ((c.re * c.re + c.im * c.im).sqrt()) as f32)
+        .collect();
 
-        if start_idx < end_idx {
-            // Direct slice access without additional bounds checks
-            let bin_samples = unsafe { samples.get_unchecked(start_idx..end_idx) };
-            envelope[bin_idx] = calculate_rms(bin_samples);
+    if magnitude.is_empty() {
+        return vec![0.0; bins];
+    }
+
+    // Smooth the magnitude spectrum with a centered moving average. This acts as
+    // a low-quefrency lifter, removing harmonic fine structure while retaining
+    // the broad spectral shape (formant-like envelope). The half-width scales
+    // with the spectrum size but stays small relative to it.
+    let smoothed = moving_average_lifter(&magnitude);
+
+    // Resample the smoothed spectrum onto exactly `bins` evenly spaced points
+    // across the non-negative frequency axis, preserving the documented length.
+    resample_linear(&smoothed, bins)
+}
+
+/// Smooth a magnitude spectrum with a centered moving-average lifter.
+///
+/// The half-window grows with the spectrum length (about 1.5% of the bins, at
+/// least one) so harmonic ripple is averaged out while broad formant structure
+/// survives. Edges use a shrinking window (clamped to the valid range) so the
+/// output keeps the input length without introducing boundary bias.
+fn moving_average_lifter(magnitude: &[f32]) -> Vec<f32> {
+    let len = magnitude.len();
+    if len <= 2 {
+        return magnitude.to_vec();
+    }
+
+    let half = ((len as f32 * 0.015).round() as usize).max(1);
+    let mut smoothed = Vec::with_capacity(len);
+    for i in 0..len {
+        let start = i.saturating_sub(half);
+        let end = (i + half + 1).min(len);
+        let slice = &magnitude[start..end];
+        let mean = slice.iter().sum::<f32>() / slice.len() as f32;
+        smoothed.push(mean);
+    }
+    smoothed
+}
+
+/// Linearly resample `source` onto `bins` evenly spaced points.
+///
+/// Bin `b` samples `source` at normalized position `b / (bins - 1)`, linearly
+/// interpolating between adjacent source values. This maps the frequency axis
+/// `[0, Nyquist]` of the spectrum onto the requested number of output bins while
+/// preserving peak locations (a peak in `source` lands in the nearest output
+/// bin). When `bins == 1`, the single output equals `source[0]`.
+fn resample_linear(source: &[f32], bins: usize) -> Vec<f32> {
+    if source.is_empty() {
+        return vec![0.0; bins];
+    }
+    if bins == 1 {
+        return vec![source[0]];
+    }
+
+    let src_last = source.len() - 1;
+    let mut out = Vec::with_capacity(bins);
+    for b in 0..bins {
+        // Position in source coordinates for output bin `b`.
+        let pos = b as f32 / (bins - 1) as f32 * src_last as f32;
+        let lower = pos.floor() as usize;
+        if lower >= src_last {
+            out.push(source[src_last]);
+        } else {
+            let frac = pos - lower as f32;
+            let value = source[lower] * (1.0 - frac) + source[lower + 1] * frac;
+            out.push(value);
         }
-        bin_idx += 1;
     }
-
-    envelope
+    out
 }
 
 /// Optimized buffer pool for frequent audio buffer allocations
@@ -1489,6 +1609,13 @@ mod tests {
         assert!(samples[1] > 0.0); // Should be smoothed from 0.0
     }
 
+    /// Generate a deterministic pure sine tone (no RNG involved).
+    fn generate_tone(freq_hz: f32, sample_rate: f32, num_samples: usize) -> Vec<f32> {
+        (0..num_samples)
+            .map(|i| (2.0 * std::f32::consts::PI * freq_hz * i as f32 / sample_rate).sin())
+            .collect()
+    }
+
     #[test]
     fn test_spectral_envelope() {
         let samples = vec![0.5, 0.8, 0.3, 0.7, 0.2, 0.9, 0.1, 0.6];
@@ -1498,6 +1625,106 @@ mod tests {
         for &val in &envelope {
             assert!(val >= 0.0);
         }
+    }
+
+    #[test]
+    fn test_spectral_envelope_length_contract() {
+        // The output length must always equal the requested number of bins,
+        // independent of the (windowed/zero-padded) FFT length used internally.
+        let samples = generate_tone(440.0, 16_000.0, 4096);
+        for bins in [1_usize, 4, 16, 64, 128, 257] {
+            let envelope = calculate_spectral_envelope(&samples, bins);
+            assert_eq!(envelope.len(), bins, "length mismatch for bins={bins}");
+            for &v in &envelope {
+                assert!(v >= 0.0, "envelope values must be non-negative");
+            }
+        }
+
+        // Degenerate inputs still honor the contract.
+        assert_eq!(calculate_spectral_envelope(&[], 8).len(), 8);
+        assert_eq!(calculate_spectral_envelope(&samples, 0).len(), 0);
+    }
+
+    #[test]
+    fn test_spectral_envelope_tone_peaks_at_frequency_bin() {
+        // A pure tone's envelope should peak in the output bin nearest its
+        // frequency. Output bin `b` maps to normalized frequency
+        // `b / (bins - 1)` of the Nyquist band, so the expected peak bin is
+        // `round((freq / nyquist) * (bins - 1))`.
+        let sample_rate = 16_000.0f32;
+        let nyquist = sample_rate / 2.0;
+        let bins = 64usize;
+
+        for &freq in &[1000.0f32, 2000.0, 4000.0] {
+            let samples = generate_tone(freq, sample_rate, 8192);
+            let envelope = calculate_spectral_envelope(&samples, bins);
+
+            let peak_bin = envelope
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+                .map(|(idx, _)| idx)
+                .unwrap();
+
+            let expected_bin = ((freq / nyquist) * (bins - 1) as f32).round() as isize;
+
+            // Allow a small tolerance for windowing/smoothing spread.
+            let diff = (peak_bin as isize - expected_bin).abs();
+            assert!(
+                diff <= 2,
+                "tone {freq} Hz: peak bin {peak_bin}, expected ~{expected_bin} (diff {diff})"
+            );
+        }
+    }
+
+    #[test]
+    fn test_spectral_envelope_broadband_vs_narrowband() {
+        // A narrowband signal (single tone) should have a much "peakier"
+        // envelope than a broadband signal (sum of many tones spread across the
+        // band). We quantify peakiness as max / mean of the envelope.
+        let sample_rate = 16_000.0f32;
+        let bins = 64usize;
+        let num_samples = 8192usize;
+
+        // Narrowband: a single mid-band tone.
+        let narrowband = generate_tone(2000.0, sample_rate, num_samples);
+        let narrow_env = calculate_spectral_envelope(&narrowband, bins);
+
+        // Broadband: many tones spread across the spectrum.
+        let mut broadband = vec![0.0f32; num_samples];
+        let freqs = [
+            300.0, 700.0, 1300.0, 2100.0, 3000.0, 4100.0, 5200.0, 6300.0, 7000.0,
+        ];
+        for &f in &freqs {
+            for (i, slot) in broadband.iter_mut().enumerate() {
+                *slot += (2.0 * std::f32::consts::PI * f * i as f32 / sample_rate).sin();
+            }
+        }
+        let broad_env = calculate_spectral_envelope(&broadband, bins);
+
+        let peakiness = |env: &[f32]| -> f32 {
+            let mean = env.iter().sum::<f32>() / env.len() as f32;
+            let max = env.iter().cloned().fold(0.0f32, f32::max);
+            if mean > 0.0 {
+                max / mean
+            } else {
+                0.0
+            }
+        };
+
+        let narrow_peak = peakiness(&narrow_env);
+        let broad_peak = peakiness(&broad_env);
+
+        // The two envelopes must be distinguishable, with the narrowband one
+        // being substantially peakier than the broadband one.
+        assert!(
+            narrow_peak > broad_peak,
+            "narrowband peakiness {narrow_peak} should exceed broadband {broad_peak}"
+        );
+        assert!(
+            narrow_peak > broad_peak * 1.5,
+            "narrowband ({narrow_peak}) should be clearly peakier than broadband ({broad_peak})"
+        );
     }
 
     #[test]

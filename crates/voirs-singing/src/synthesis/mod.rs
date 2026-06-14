@@ -11,6 +11,8 @@ pub mod harmonic;
 pub mod models;
 pub mod noise;
 pub mod processor;
+/// Real DSP primitives backing the synthesized-audio quality metrics.
+pub(crate) mod quality_dsp;
 pub mod results;
 pub mod spectral;
 

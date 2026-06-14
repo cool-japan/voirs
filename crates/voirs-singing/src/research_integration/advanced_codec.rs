@@ -574,26 +574,65 @@ impl PerceptualLoss {
         loss / len as f32
     }
 
-    /// Compute STFT magnitude
+    /// Compute the STFT magnitude spectrogram.
+    ///
+    /// Each `hop_length`-spaced frame is Hann-windowed and transformed with a
+    /// real FFT ([`scirs2_fft::rfft`]), yielding `fft_size / 2 + 1` non-negative
+    /// magnitude bins (`|X_k|`) per frame. The per-frame bin vectors are
+    /// concatenated into a single flattened spectrogram so that the
+    /// element-wise log-L1 in [`Self::compute_stft_loss`] compares true
+    /// per-bin magnitudes rather than a single collapsed scalar per frame.
+    ///
+    /// Returns an empty vector when the input is shorter than a single frame.
     fn compute_stft_magnitude(
         &self,
         audio: &[f32],
         fft_size: usize,
         hop_length: usize,
     ) -> Vec<f32> {
+        let num_bins = fft_size / 2 + 1;
         let mut magnitudes = Vec::new();
 
-        for start in (0..audio.len()).step_by(hop_length) {
-            let end = (start + fft_size).min(audio.len());
-            let frame = &audio[start..end];
+        if audio.len() < fft_size || fft_size == 0 {
+            return magnitudes;
+        }
 
-            // Compute magnitude (simplified without actual FFT for now)
-            let magnitude: f32 = frame.iter().map(|x| x.abs()).sum();
-            magnitudes.push(magnitude / frame.len() as f32);
+        let mut frame = vec![0.0f32; fft_size];
+        let mut start = 0usize;
+
+        while start + fft_size <= audio.len() {
+            // Hann-window the frame to reduce spectral leakage.
+            for (i, slot) in frame.iter_mut().enumerate() {
+                *slot = audio[start + i] * hann_window(i, fft_size);
+            }
+
+            // Real FFT -> `fft_size / 2 + 1` complex bins; push the full
+            // per-bin magnitude vector for this frame.
+            if let Ok(spectrum) = scirs2_fft::rfft(&frame, Some(fft_size)) {
+                magnitudes.reserve(num_bins);
+                for bin in spectrum.iter().take(num_bins) {
+                    magnitudes.push((bin.re * bin.re + bin.im * bin.im).sqrt() as f32);
+                }
+            }
+
+            start += hop_length;
         }
 
         magnitudes
     }
+}
+
+/// Periodic Hann window coefficient `w(i)` for a window of `size` samples.
+///
+/// Uses the periodic (DFT-even) convention `0.5 * (1 - cos(2πi / size))`, which
+/// is the appropriate form for spectral analysis with the real FFT.
+#[inline]
+fn hann_window(i: usize, size: usize) -> f32 {
+    if size <= 1 {
+        return 1.0;
+    }
+    use std::f32::consts::PI;
+    0.5 * (1.0 - (2.0 * PI * i as f32 / size as f32).cos())
 }
 
 impl Default for PerceptualLoss {
@@ -817,5 +856,60 @@ mod tests {
         // This might not always be true with random codebooks, but demonstrates the principle
         assert!(error_small >= 0.0);
         assert!(error_large >= 0.0);
+    }
+
+    #[test]
+    fn test_stft_magnitude_bin_count() {
+        let perceptual_loss = PerceptualLoss::new();
+
+        let fft_size = 512usize;
+        let hop = 256usize;
+        let num_bins = fft_size / 2 + 1;
+
+        // Two full frames fit in this length given the hop.
+        let audio = vec![0.1f32; fft_size + hop];
+        let spec = perceptual_loss.compute_stft_magnitude(&audio, fft_size, hop);
+
+        // The flattened spectrogram length must be a multiple of the per-frame
+        // bin count (`fft_size / 2 + 1`), not one scalar per frame.
+        assert!(!spec.is_empty());
+        assert_eq!(spec.len() % num_bins, 0);
+        assert!(spec.len() / num_bins >= 2);
+    }
+
+    #[test]
+    fn test_stft_magnitude_peaks_at_tone_bin() {
+        let perceptual_loss = PerceptualLoss::new();
+
+        let fft_size = 512usize;
+        let hop = 512usize;
+        let num_bins = fft_size / 2 + 1;
+        let bin = 20usize; // integer-period tone aligned to a DFT bin
+
+        use std::f32::consts::PI;
+        let audio: Vec<f32> = (0..fft_size)
+            .map(|i| (2.0 * PI * bin as f32 * i as f32 / fft_size as f32).sin())
+            .collect();
+
+        let spec = perceptual_loss.compute_stft_magnitude(&audio, fft_size, hop);
+        assert_eq!(spec.len(), num_bins);
+
+        // The per-frame magnitude must peak at the tone's bin.
+        let peak = spec
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .map(|(i, _)| i)
+            .unwrap();
+        assert_eq!(peak, bin, "STFT magnitude peak not at the tone's bin");
+    }
+
+    #[test]
+    fn test_stft_magnitude_too_short_is_empty() {
+        let perceptual_loss = PerceptualLoss::new();
+        let audio = vec![0.5f32; 100];
+        // Shorter than fft_size -> no full frame -> empty spectrogram.
+        let spec = perceptual_loss.compute_stft_magnitude(&audio, 512, 256);
+        assert!(spec.is_empty());
     }
 }

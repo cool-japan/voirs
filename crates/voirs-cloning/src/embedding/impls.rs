@@ -804,16 +804,90 @@ impl SpeakerEmbeddingExtractor {
         }
     }
 
-    /// Compute spectral centroid
-    fn compute_spectral_centroid(&self, audio: &[f32], sample_rate: u32) -> Result<f32> {
-        // Simplified spectral centroid calculation
-        Ok(sample_rate as f32 / 4.0) // Placeholder
+    /// Compute the magnitude spectrum of an audio frame via a real FFT.
+    ///
+    /// A Hann window is applied before the transform to reduce spectral
+    /// leakage. The returned vector contains the `N/2 + 1` non-redundant
+    /// magnitude bins produced by [`scirs2_fft::rfft`].
+    fn rfft_magnitudes(audio: &[f32]) -> Vec<f32> {
+        let n = audio.len();
+        if n == 0 {
+            return Vec::new();
+        }
+        // Hann window to limit spectral leakage.
+        let windowed: Vec<f64> = audio
+            .iter()
+            .enumerate()
+            .map(|(i, &x)| {
+                let w = if n > 1 {
+                    0.5 - 0.5 * (2.0 * std::f64::consts::PI * i as f64 / (n - 1) as f64).cos()
+                } else {
+                    1.0
+                };
+                x as f64 * w
+            })
+            .collect();
+
+        let num_bins = n / 2 + 1;
+        let spectrum = scirs2_fft::rfft(&windowed, None)
+            .unwrap_or_else(|_| vec![scirs2_core::Complex::new(0.0, 0.0); num_bins]);
+
+        spectrum
+            .iter()
+            .take(num_bins)
+            .map(|c| ((c.re * c.re + c.im * c.im).sqrt()) as f32)
+            .collect()
     }
 
-    /// Compute spectral bandwidth
+    /// Compute the spectral centroid (Hz): the magnitude-weighted mean
+    /// frequency of the signal, `Σ(f_k·|X_k|) / Σ|X_k|` with `f_k = k·sr/N`.
+    fn compute_spectral_centroid(&self, audio: &[f32], sample_rate: u32) -> Result<f32> {
+        if audio.is_empty() {
+            return Ok(0.0);
+        }
+        let n = audio.len();
+        let mags = Self::rfft_magnitudes(audio);
+
+        let mut weighted = 0.0f64;
+        let mut total = 0.0f64;
+        for (k, &m) in mags.iter().enumerate() {
+            let freq = k as f64 * sample_rate as f64 / n as f64;
+            weighted += freq * m as f64;
+            total += m as f64;
+        }
+
+        if total > 0.0 {
+            Ok((weighted / total) as f32)
+        } else {
+            Ok(0.0)
+        }
+    }
+
+    /// Compute the spectral bandwidth (Hz): the magnitude-weighted standard
+    /// deviation of frequency about the spectral centroid,
+    /// `sqrt(Σ((f_k − centroid)²·|X_k|) / Σ|X_k|)`.
     fn compute_spectral_bandwidth(&self, audio: &[f32], sample_rate: u32) -> Result<f32> {
-        // Simplified spectral bandwidth calculation
-        Ok(sample_rate as f32 / 8.0) // Placeholder
+        if audio.is_empty() {
+            return Ok(0.0);
+        }
+        let n = audio.len();
+        let centroid = self.compute_spectral_centroid(audio, sample_rate)? as f64;
+        let mags = Self::rfft_magnitudes(audio);
+
+        let mut weighted_var = 0.0f64;
+        let mut total = 0.0f64;
+        for (k, &m) in mags.iter().enumerate() {
+            let freq = k as f64 * sample_rate as f64 / n as f64;
+            let diff = freq - centroid;
+            weighted_var += diff * diff * m as f64;
+            total += m as f64;
+        }
+
+        if total > 0.0 {
+            Ok((weighted_var / total).sqrt() as f32)
+        } else {
+            Ok(0.0)
+        }
     }
 
     /// Compute jitter (F0 perturbation)
@@ -1487,5 +1561,79 @@ impl FeatureExtractor {
         }
 
         Ok(dct_matrix)
+    }
+}
+
+#[cfg(test)]
+mod spectral_tests {
+    use super::*;
+
+    /// Generate a deterministic pure sine tone (no RNG).
+    fn sine_tone(freq: f32, sample_rate: u32, n: usize) -> Vec<f32> {
+        (0..n)
+            .map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / sample_rate as f32).sin())
+            .collect()
+    }
+
+    #[test]
+    fn test_spectral_centroid_matches_tone() {
+        let config = EmbeddingConfig::default();
+        let extractor = SpeakerEmbeddingExtractor::new(config).unwrap();
+        let sr = 16000u32;
+        let tone_freq = 2000.0f32;
+        let audio = sine_tone(tone_freq, sr, 4096);
+
+        let centroid = extractor.compute_spectral_centroid(&audio, sr).unwrap();
+        // The centroid of a single tone should land near the tone frequency.
+        // Allow a window for windowing/leakage effects.
+        assert!(
+            (centroid - tone_freq).abs() < 200.0,
+            "centroid {centroid} not near tone {tone_freq}"
+        );
+    }
+
+    #[test]
+    fn test_spectral_centroid_tracks_frequency() {
+        let config = EmbeddingConfig::default();
+        let extractor = SpeakerEmbeddingExtractor::new(config).unwrap();
+        let sr = 16000u32;
+        let low = sine_tone(1000.0, sr, 4096);
+        let high = sine_tone(4000.0, sr, 4096);
+
+        let c_low = extractor.compute_spectral_centroid(&low, sr).unwrap();
+        let c_high = extractor.compute_spectral_centroid(&high, sr).unwrap();
+        assert!(
+            c_high > c_low,
+            "higher tone should have higher centroid: {c_high} vs {c_low}"
+        );
+    }
+
+    #[test]
+    fn test_spectral_bandwidth_pure_tone_is_small() {
+        let config = EmbeddingConfig::default();
+        let extractor = SpeakerEmbeddingExtractor::new(config).unwrap();
+        let sr = 16000u32;
+        let tone = sine_tone(2000.0, sr, 4096);
+
+        let bw = extractor.compute_spectral_bandwidth(&tone, sr).unwrap();
+        // A pure tone concentrates energy at one frequency => small bandwidth
+        // relative to the Nyquist range.
+        assert!(bw >= 0.0, "bandwidth must be non-negative");
+        assert!(
+            bw < (sr as f32) / 8.0,
+            "pure-tone bandwidth {bw} unexpectedly large"
+        );
+    }
+
+    #[test]
+    fn test_spectral_centroid_ignores_old_placeholder() {
+        // Regression guard: the old stub returned sample_rate/4 regardless of
+        // input. A flat (silent) signal must not produce that value.
+        let config = EmbeddingConfig::default();
+        let extractor = SpeakerEmbeddingExtractor::new(config).unwrap();
+        let sr = 16000u32;
+        let silence = vec![0.0f32; 2048];
+        let centroid = extractor.compute_spectral_centroid(&silence, sr).unwrap();
+        assert_eq!(centroid, 0.0, "silence should yield zero centroid");
     }
 }

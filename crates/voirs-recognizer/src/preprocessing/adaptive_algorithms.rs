@@ -8,6 +8,7 @@
 //! - Adaptive filtering based on audio content analysis
 
 use crate::RecognitionError;
+use scirs2_core::Complex;
 use std::collections::VecDeque;
 use voirs_sdk::AudioBuffer;
 
@@ -769,20 +770,31 @@ impl SpectralAnalyzer {
             })
             .collect();
 
-        // Simple magnitude spectrum computation (placeholder for proper FFT)
-        let mut spectrum = vec![0.0; window_size / 2];
-        for i in 0..spectrum.len() {
-            let mut real_sum = 0.0;
-            let mut imag_sum = 0.0;
+        // Real-FFT magnitude spectrum via the SciRS2 abstraction.
+        //
+        // This replaces the previous O(N²) naive DFT loop with `scirs2_fft::rfft`
+        // (O(N log N)), mirroring the rfft usage already established elsewhere in
+        // this crate (e.g. `noise_suppression.rs`, `advanced_spectral.rs`). The
+        // output shape and semantics are preserved exactly: `spectrum` holds the
+        // first `window_size / 2` non-negative-frequency magnitudes, matching the
+        // bin → frequency mapping (`i · sample_rate / (2 · spectrum.len())`) that
+        // the downstream spectral-feature helpers rely on. The forward transform
+        // is left unnormalized, identical to the discarded DFT.
+        let buf_f64: Vec<f64> = windowed.iter().map(|&s| f64::from(s)).collect();
+        let complex_spectrum: Vec<Complex<f64>> = scirs2_fft::rfft(&buf_f64, Some(window_size))
+            .map_err(|e| RecognitionError::AudioProcessingError {
+                message: format!("rfft failed in adaptive spectral analysis: {e}"),
+                source: None,
+            })?;
 
-            for n in 0..window_size {
-                let angle = -2.0 * std::f32::consts::PI * i as f32 * n as f32 / window_size as f32;
-                real_sum += windowed[n] * angle.cos();
-                imag_sum += windowed[n] * angle.sin();
-            }
-
-            spectrum[i] = (real_sum * real_sum + imag_sum * imag_sum).sqrt();
-        }
+        // `rfft` returns `window_size / 2 + 1` bins (DC..=Nyquist); keep the first
+        // `window_size / 2` magnitudes so the spectrum length is byte-for-byte the
+        // same as the previous implementation.
+        let spectrum: Vec<f32> = complex_spectrum
+            .iter()
+            .take(window_size / 2)
+            .map(|c| c.norm() as f32)
+            .collect();
 
         // Calculate spectral features
         let centroid = self.calculate_spectral_centroid(&spectrum);
@@ -968,5 +980,64 @@ mod tests {
         assert!(features.rolloff >= 0.0);
         assert!(features.flatness >= 0.0);
         assert!(features.flux >= 0.0);
+    }
+
+    /// The rfft-based magnitude spectrum must peak at the bin corresponding to a
+    /// pure input tone. For a sine at `f` with FFT size `N` and sample rate `sr`,
+    /// the dominant bin is `round(f · N / sr)`. This is deterministic (no RNG).
+    #[test]
+    fn test_spectral_analyzer_peaks_at_tone_bin() {
+        let fft_size = 2048usize;
+        let sample_rate = 16000u32;
+        let mut analyzer = SpectralAnalyzer::new(fft_size, sample_rate).unwrap();
+
+        // 1000 Hz tone -> expected bin = 1000 * 2048 / 16000 = 128.
+        let freq = 1000.0f32;
+        let expected_bin = (freq * fft_size as f32 / sample_rate as f32).round() as usize;
+
+        let samples: Vec<f32> = (0..fft_size)
+            .map(|i| {
+                let t = i as f32 / sample_rate as f32;
+                (2.0 * std::f32::consts::PI * freq * t).sin()
+            })
+            .collect();
+
+        // Re-run the same windowing + rfft path the analyzer uses, then inspect
+        // the resulting magnitude spectrum directly to locate the peak bin.
+        let window_size = fft_size.min(samples.len());
+        let windowed: Vec<f32> = samples[..window_size]
+            .iter()
+            .enumerate()
+            .map(|(i, &x)| {
+                let w = 0.5
+                    * (1.0
+                        - (2.0 * std::f32::consts::PI * i as f32 / (window_size - 1) as f32).cos());
+                x * w
+            })
+            .collect();
+        let buf_f64: Vec<f64> = windowed.iter().map(|&s| f64::from(s)).collect();
+        let complex_spectrum = scirs2_fft::rfft(&buf_f64, Some(window_size)).unwrap();
+        let spectrum: Vec<f32> = complex_spectrum
+            .iter()
+            .take(window_size / 2)
+            .map(|c| c.norm() as f32)
+            .collect();
+
+        let (peak_bin, _) = spectrum
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .unwrap();
+
+        // Hann windowing spreads energy across adjacent bins; allow ±1 tolerance.
+        assert!(
+            (peak_bin as isize - expected_bin as isize).abs() <= 1,
+            "peak bin {peak_bin} not within 1 of expected {expected_bin}"
+        );
+
+        // Smoke-check the public path still produces sane features for the tone.
+        let features = analyzer.analyze(&samples).unwrap();
+        assert!(features.centroid > 0.0);
+        assert!(features.centroid < (sample_rate as f32 / 2.0));
     }
 }

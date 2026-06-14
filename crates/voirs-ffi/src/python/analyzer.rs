@@ -88,6 +88,13 @@ impl PyAudioAnalyzer {
     }
 
     /// Compute spectral centroid (brightness measure)
+    ///
+    /// The spectral centroid is the magnitude-weighted mean of the frequency
+    /// components, i.e. `centroid = Σ(f_k · |X_k|) / Σ|X_k|`, where `X_k` is the
+    /// `k`-th bin of the real FFT of the (Hann-windowed) signal and
+    /// `f_k = k · sample_rate / n` is the frequency of that bin in Hz. The result
+    /// is a perceptual "brightness" measure: signals dominated by high-frequency
+    /// content yield a larger centroid than low-frequency-dominant signals.
     #[staticmethod]
     fn spectral_centroid<'py>(
         py: Python<'py>,
@@ -95,24 +102,106 @@ impl PyAudioAnalyzer {
         sample_rate: u32,
     ) -> PyResult<f32> {
         let samples = audio.as_array();
-        let n = samples.len();
+        let slice = samples.as_slice().ok_or_else(|| {
+            PyRuntimeError::new_err("Audio array must be contiguous for spectral analysis")
+        })?;
+        spectral_centroid_core(slice, sample_rate)
+            .map_err(|e| PyRuntimeError::new_err(format!("RFFT failed: {}", e)))
+    }
+}
 
-        // Simple spectral centroid calculation (placeholder for real FFT)
-        let mut magnitude_sum = 0.0f32;
-        let mut weighted_sum = 0.0f32;
+/// Pure-numeric spectral centroid, independent of the Python runtime.
+///
+/// Applies a Hann window, takes the real FFT (`scirs2_fft::rfft`), and returns
+/// the magnitude-weighted mean frequency `Σ(f_k · |X_k|) / Σ|X_k|` in Hz, with
+/// `f_k = k · sample_rate / n`. Returns `0.0` for signals shorter than two
+/// samples or with zero total magnitude.
+#[cfg(feature = "numpy")]
+fn spectral_centroid_core(samples: &[f32], sample_rate: u32) -> scirs2_fft::FFTResult<f32> {
+    let n = samples.len();
 
-        for (i, &sample) in samples.iter().enumerate() {
-            let magnitude = sample.abs();
-            let freq = (i as f32 * sample_rate as f32) / (n as f32);
+    // A spectral centroid is undefined for fewer than two samples (no
+    // resolvable frequency bins beyond DC).
+    if n < 2 {
+        return Ok(0.0);
+    }
 
-            magnitude_sum += magnitude;
-            weighted_sum += magnitude * freq;
-        }
+    // Apply a Hann window to reduce spectral leakage, then take the real FFT.
+    // `rfft` is evaluated in f64 for precision; the one-sided spectrum has
+    // `n / 2 + 1` complex bins.
+    let denom = (n - 1) as f64;
+    let windowed: Vec<f64> = samples
+        .iter()
+        .enumerate()
+        .map(|(i, &sample)| {
+            let hann = 0.5 - 0.5 * (2.0 * std::f64::consts::PI * i as f64 / denom).cos();
+            sample as f64 * hann
+        })
+        .collect();
 
-        if magnitude_sum > 0.0 {
-            Ok(weighted_sum / magnitude_sum)
-        } else {
-            Ok(0.0)
-        }
+    let spectrum = scirs2_fft::rfft(&windowed, None)?;
+
+    // centroid = Σ(f_k · |X_k|) / Σ|X_k| with f_k = k · sample_rate / n.
+    let bin_hz = sample_rate as f64 / n as f64;
+    let mut magnitude_sum = 0.0f64;
+    let mut weighted_sum = 0.0f64;
+    for (k, bin) in spectrum.iter().enumerate() {
+        let magnitude = bin.norm();
+        let freq = k as f64 * bin_hz;
+        magnitude_sum += magnitude;
+        weighted_sum += magnitude * freq;
+    }
+
+    if magnitude_sum > 0.0 {
+        Ok((weighted_sum / magnitude_sum) as f32)
+    } else {
+        Ok(0.0)
+    }
+}
+
+#[cfg(all(test, feature = "numpy"))]
+mod tests {
+    use super::*;
+
+    /// Generate `n` samples of a sine wave at `freq` Hz sampled at `sample_rate`.
+    fn sine(freq: f32, sample_rate: u32, n: usize) -> Vec<f32> {
+        (0..n)
+            .map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / sample_rate as f32).sin())
+            .collect()
+    }
+
+    #[test]
+    fn test_spectral_centroid_low_below_high() {
+        let sample_rate = 16_000;
+        let n = 2048;
+        // 200 Hz dominant vs 6000 Hz dominant.
+        let low = sine(200.0, sample_rate, n);
+        let high = sine(6000.0, sample_rate, n);
+
+        let centroid_low = spectral_centroid_core(&low, sample_rate).expect("low centroid");
+        let centroid_high = spectral_centroid_core(&high, sample_rate).expect("high centroid");
+
+        assert!(
+            centroid_low < centroid_high,
+            "low-frequency centroid ({centroid_low}) should be below high-frequency centroid ({centroid_high})"
+        );
+        // Each centroid should sit reasonably near its tone's frequency.
+        assert!(
+            centroid_low < 1500.0,
+            "low centroid too high: {centroid_low}"
+        );
+        assert!(
+            centroid_high > 4000.0,
+            "high centroid too low: {centroid_high}"
+        );
+    }
+
+    #[test]
+    fn test_spectral_centroid_degenerate_inputs() {
+        // Fewer than two samples => 0.0.
+        assert_eq!(spectral_centroid_core(&[], 16_000).unwrap(), 0.0);
+        assert_eq!(spectral_centroid_core(&[0.5], 16_000).unwrap(), 0.0);
+        // All-zero signal => 0.0 (no magnitude).
+        assert_eq!(spectral_centroid_core(&[0.0; 64], 16_000).unwrap(), 0.0);
     }
 }

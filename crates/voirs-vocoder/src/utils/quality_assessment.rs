@@ -8,7 +8,6 @@
 //! - Comparative quality analysis
 
 use crate::{AudioBuffer, Result, VocoderError};
-use scirs2_core::ndarray::Array1;
 use std::f32;
 
 /// Audio quality assessment result
@@ -268,39 +267,81 @@ fn estimate_snr(samples: &[f32]) -> f32 {
     10.0 * (signal_energy / noise_energy).log10()
 }
 
-/// Calculate spectral flatness (quick approximation)
+/// Calculate the spectral flatness (Wiener entropy) of a signal.
+///
+/// Spectral flatness is defined as the ratio of the geometric mean to the
+/// arithmetic mean of the power/magnitude spectrum:
+///
+/// ```text
+/// flatness = geometric_mean(|X_k|) / arithmetic_mean(|X_k|)
+///          = exp(mean(ln(|X_k| + ε))) / (mean(|X_k|) + ε)
+/// ```
+///
+/// The result lies in `[0, 1]`. A value near `1.0` indicates a flat,
+/// noise-like spectrum (energy spread evenly across all frequencies), while a
+/// value near `0.0` indicates a tonal signal whose energy is concentrated in a
+/// few spectral peaks.
+///
+/// This implementation computes a true magnitude spectrum via
+/// [`scirs2_fft::rfft`]. The largest power-of-two window not exceeding the
+/// signal length (capped to `[256, 8192]`) is extracted and Hann-windowed
+/// before the transform. The DC bin (`k = 0`) is excluded because it only
+/// reflects the signal mean / DC offset and would otherwise bias the flatness
+/// of a centred tonal signal upward.
 fn calculate_spectral_flatness_quick(samples: &[f32]) -> f32 {
-    // Use time-domain approximation
-    // Spectral flatness: geometric mean / arithmetic mean of spectrum magnitudes
+    const EPSILON: f64 = 1e-10;
 
-    // Approximate using local variance
-    let window_size = 64;
-    let mut flatness_values = Vec::new();
-
-    for chunk in samples.chunks(window_size) {
-        if chunk.len() < window_size / 2 {
-            continue;
-        }
-
-        let mean = chunk.iter().sum::<f32>() / chunk.len() as f32;
-        let variance = chunk.iter().map(|&s| (s - mean).powi(2)).sum::<f32>() / chunk.len() as f32;
-        let std_dev = variance.sqrt();
-
-        // High variance relative to mean suggests flatness (noise-like)
-        let local_flatness = if mean.abs() > 1e-8 {
-            (std_dev / mean.abs()).clamp(0.0, 2.0) / 2.0
-        } else {
-            0.5
-        };
-
-        flatness_values.push(local_flatness);
+    // Need at least a small window to form a meaningful spectrum.
+    if samples.len() < 4 {
+        return 0.0;
     }
 
-    if flatness_values.is_empty() {
-        0.5
-    } else {
-        flatness_values.iter().sum::<f32>() / flatness_values.len() as f32
+    // FFT size: largest power of two <= signal length, clamped to [256, 8192].
+    let mut fft_size = 256;
+    while fft_size * 2 <= samples.len() && fft_size < 8192 {
+        fft_size *= 2;
     }
+    // If the signal is shorter than the minimum window, shrink to fit.
+    if fft_size > samples.len() {
+        fft_size = samples.len();
+    }
+
+    // Apply a Hann window to reduce spectral leakage, promoting to f64 for the
+    // FFT (matching the rest of the crate's spectral analysis).
+    let denom = (fft_size.saturating_sub(1)).max(1) as f64;
+    let windowed: Vec<f64> = (0..fft_size)
+        .map(|i| {
+            let hann = 0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / denom).cos());
+            samples[i] as f64 * hann
+        })
+        .collect();
+
+    // Real FFT -> half-spectrum of complex bins.
+    let spectrum = match scirs2_fft::rfft(&windowed, None) {
+        Ok(s) => s,
+        // On failure, treat the spectrum as undefined (tonal / no flatness).
+        Err(_) => return 0.0,
+    };
+
+    // Magnitudes |X_k|, skipping the DC bin (k = 0).
+    let magnitudes: Vec<f64> = spectrum.iter().skip(1).map(|c| c.norm()).collect();
+    if magnitudes.is_empty() {
+        return 0.0;
+    }
+
+    let n = magnitudes.len() as f64;
+
+    // Arithmetic mean of magnitudes.
+    let arithmetic_mean = magnitudes.iter().sum::<f64>() / n;
+
+    // Geometric mean computed in the log domain for numerical stability:
+    //   exp( mean( ln(|X_k| + ε) ) )
+    let log_mean = magnitudes.iter().map(|&m| (m + EPSILON).ln()).sum::<f64>() / n;
+    let geometric_mean = log_mean.exp();
+
+    let flatness = geometric_mean / (arithmetic_mean + EPSILON);
+
+    (flatness as f32).clamp(0.0, 1.0)
 }
 
 /// Calculate zero-crossing rate
@@ -462,5 +503,90 @@ mod tests {
         // Generated should have similar quality
         assert!(relative > 0.8);
         assert!(relative < 1.2);
+    }
+
+    /// Generate deterministic pseudo-random white noise in `[-amplitude, amplitude]`
+    /// using a fixed linear congruential generator (no RNG crate dependency).
+    fn deterministic_white_noise(len: usize, amplitude: f32, seed: u64) -> Vec<f32> {
+        // Numerical Recipes LCG constants.
+        let mut state = seed;
+        (0..len)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                // Use the high 32 bits for better-quality output.
+                let unit = (state >> 32) as f32 / u32::MAX as f32; // [0, 1]
+                (unit * 2.0 - 1.0) * amplitude
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_spectral_flatness_white_noise_near_one() {
+        // White noise has a roughly flat spectrum -> flatness near 1.0.
+        let samples = deterministic_white_noise(8192, 0.5, 0x1234_5678_9abc_def0);
+        let flatness = calculate_spectral_flatness_quick(&samples);
+
+        assert!(
+            flatness > 0.4,
+            "white-noise flatness should be high, got {flatness}"
+        );
+        assert!(
+            (0.0..=1.0).contains(&flatness),
+            "flatness must be within [0, 1], got {flatness}"
+        );
+    }
+
+    #[test]
+    fn test_spectral_flatness_pure_tone_near_zero() {
+        // A pure sine concentrates energy in a single bin -> flatness near 0.
+        let sample_rate = 22050.0_f32;
+        let frequency = 440.0_f32;
+        let samples: Vec<f32> = (0..8192)
+            .map(|i| {
+                let t = i as f32 / sample_rate;
+                0.5 * (2.0 * std::f32::consts::PI * frequency * t).sin()
+            })
+            .collect();
+
+        let flatness = calculate_spectral_flatness_quick(&samples);
+
+        assert!(
+            flatness < 0.1,
+            "pure-tone flatness should be near zero, got {flatness}"
+        );
+        assert!(
+            (0.0..=1.0).contains(&flatness),
+            "flatness must be within [0, 1], got {flatness}"
+        );
+    }
+
+    #[test]
+    fn test_spectral_flatness_noise_greater_than_tone() {
+        let noise = deterministic_white_noise(8192, 0.5, 0x0fed_cba9_8765_4321);
+        let sample_rate = 22050.0_f32;
+        let frequency = 220.0_f32;
+        let tone: Vec<f32> = (0..8192)
+            .map(|i| {
+                let t = i as f32 / sample_rate;
+                0.5 * (2.0 * std::f32::consts::PI * frequency * t).sin()
+            })
+            .collect();
+
+        let noise_flatness = calculate_spectral_flatness_quick(&noise);
+        let tone_flatness = calculate_spectral_flatness_quick(&tone);
+
+        assert!(
+            noise_flatness > tone_flatness,
+            "noise flatness ({noise_flatness}) should exceed tone flatness ({tone_flatness})"
+        );
+    }
+
+    #[test]
+    fn test_spectral_flatness_short_signal_is_safe() {
+        // Below the minimum window size, the function must not panic.
+        let flatness = calculate_spectral_flatness_quick(&[0.1, -0.2, 0.05]);
+        assert!((0.0..=1.0).contains(&flatness));
     }
 }

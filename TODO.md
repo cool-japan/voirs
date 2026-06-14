@@ -1,7 +1,7 @@
 # VoiRS Development Roadmap & TODO
 
 > **Status**: Current Version 0.1.0 - **PRODUCTION READY**
-> **Last Updated**: 2026-06-13
+> **Last Updated**: 2026-06-14
 > **Next Milestone**: Version 0.2.0 - Advanced Neural Features & Production Optimization
 
 ## Stubs to implement (added 2026-06-12 by /cooljapan-stub-check)
@@ -9,7 +9,108 @@
 - [x] `voirs-emotion`: `crates/voirs-emotion/src/debug.rs:155` — replaced placeholder `EmotionParameters::neutral()` with real state via `processor.get_current_state().await` → `EmotionState::get_interpolated()` (captures the effective emotion mid-transition); `context` flows into snapshot metadata; `active_interpolations` now reflects `is_transitioning()`. (DONE batch 9)
   - Priority: P2 | Scope: trivial | Hint: none
 
-## Latest Development Session (2026-06-13 batch 13)
+## Latest Development Session (2026-06-14 batch 18)
+
+**Mock→Real FFT DSP (batch 18) — 6 parallel workstreams (disjoint crates).** A 4th independent survey again
+overturned "exhausted": ~18 more constant-return / time-domain spectral stubs (`calculate_spectral_centroid`
+returning a hardcoded constant with `_audio` unused, O(N²) DFT loops, no-op filters). All use the already-present
+`scirs2-fft` (no new deps). All cleared; each crate self-verified green; workspace `cargo check` green.
+
+- [x] **voirs-emotion** (signal_processing.rs, quality.rs, sdk_integration.rs, acoustic/adapter/features.rs): time-domain `calculate_spectral_centroid` → real rfft centroid; `apply_spectral_processing` (passthrough) → real STFT via the existing `SpectralProcessor::process_spectrum` + COLA OLA; constant `calculate_spectral_centroid`(2000)/`calculate_spectral_bandwidth`(4000) → real rfft; `extract_tempo_variations` (vec![1.0;10]) → onset-flux autocorrelation IOI ratios. 481 / 488(sdk-integration) pass.
+- [x] **voirs-cloning** (embedding/impls.rs, deep_mos.rs, age_gender_adaptation.rs, conversion.rs): `compute_spectral_centroid`(sr/4)/`compute_spectral_bandwidth`(sr/8) → real rfft; `compute_fft_magnitude` (|samples|) → real FFT; `extract_formant_frequencies`(const)/`find_spectral_peaks`(autocorr) → real rfft peak-pick; `generate_spectral_transformation`(ones) + `apply_formant_transformation`/`apply_spectral_transformation` (passthrough) → real STFT warp; `apply_f0_conversion` (amplitude scale mislabeled pitch shift) → real SOLA granular pitch shifter. 627 pass.
+- [x] **voirs-spatial/compression.rs**: `filter_frequency_range` (no-op clone, freqs unused) → real FFT band-pass (Hann → rfft → zero bins outside [low,high] → irfft), mirroring core.rs. 484 pass.
+- [x] **voirs-dataset** (validation/quality.rs, augmentation/noise.rs): O(N²) DFT `compute_frame_spectral_features` → rfft; time-domain `calculate_spectral_centroid` → rfft centroid. 766 pass.
+- [x] **voirs-ffi/utils/audio.rs**: `calculate_spectral_envelope` (per-time RMS bins, not spectral) → real rfft magnitude + cepstral-style smoothing + resample. 315 pass (+1 known MP3 placeholder).
+- [x] **voirs-recognizer** (preprocessing/adaptive_algorithms.rs, phoneme/analysis.rs): O(N²) DFT spectral analyze → rfft; `pitch_prominence` (hardcoded 0.8/0.3 from duration) → real normalized-autocorrelation prominence (signal-aware path added; backward-compat fallback kept). 652 pass.
+
+**Combined verification (batch 18)**: each crate self-verified clippy `-D warnings` clean + nextest green (only pre-existing env fail: ffi MP3 placeholder) ✅; workspace `cargo check` exit 0 ✅.
+
+## Development Session (2026-06-14 batch 17)
+
+**Mock→Real DSP/stats replacements (batch 17) — 7 parallel workstreams (disjoint crates).** Two
+independent read-only surveys again overturned a premature "exhausted" verdict — ~19 more self-contained
+stubs across 7 crates. All cleared and verified green.
+
+- [x] **voirs-singing/effects/helpers.rs + pitch.rs**: fake `Pink = white*0.7`/`Brown = white*0.5` → real colored noise (Paul Kellet 7-pole pink, leaky-integrator brown) on the existing LCG; `hermite_interpolation`/`bezier_interpolation` (both delegated to cubic) → real cubic Hermite (Catmull-Rom tangents) + cubic Bézier (Hermite→Bézier control points). 6 tests. 579 pass.
+- [x] **voirs-conversion/audio_quality_research/psychoacoustic_methods.rs + core/signal_processing.rs + transforms.rs**: hardcoded `analyze_critical_bands`/`analyze_tonality`/`calculate_sharpness_difference` → real Bark-band energy compare / spectral-flatness tonality / sharpness diff; `adjust_spectral_tilt` (time-position ramp — mathematically wrong) → real one-pole high-shelf; `shift_formants`/`adjust_vocal_tract_length` (amplitude scale) → real STFT spectral-envelope warp (`warp_spectral_envelope`). **A property test caught a latent bug**: the age transform's new high-shelf (`apply_spectral_scaling`, gain `exp(scale−1)`) boosted a unit input to peak 12.5 (age 5→50 ⇒ ~8.7× HF gain); fixed with input-peak output bounding. Replaced the VTL unit test's invalid sparse two-tone with a harmonic-rich glottal+formant signal (envelope-warp needs broadband content to relocate energy). 435/435 pass.
+- [x] **voirs-vocoder — 6 fixes (loss/spectral.rs, metrics/mod.rs, effects/validation.rs, broadcast_quality.rs, effects/frequency.rs, models/spatial/mod.rs)**: O(N²) DFT spectrogram → `scirs2_fft::rfft`; two fake THD+N (HF-energy proxy / time-window energy) → real fundamental+harmonic detection; `BroadcastEqualizer::process` (leaky one-pole hacks) → the crate's real RBJ `design_low_shelf/peak/high_shelf` biquads; `ParametricEQ` LowPass (mis-routed to highpass) → real RBJ `design_lowpass`; manual cosine-synthesis STFT/ISTFT → `rfft`/`irfft` + COLA-normalized overlap-add. 9 tests. 885 pass (+2 known ALSA).
+- [x] **voirs-dataset/research/experiments.rs + research/analysis.rs**: t-test `p = exp(−t²/2)` → real two-sided Student-t CDF via hand-rolled regularized incomplete beta (Lanczos ln-gamma + Lentz `betacf`/`betai`) + Welch-Satterthwaite df; `approximate_normality_test` heuristic → real Jarque-Bera `JB = n(S²/6 + K²/24)` → χ²(2) closed form `exp(−JB/2)`. 9 tests. 761 pass.
+- [x] **voirs-spatial/utils.rs + room.rs**: hardcoded `frequency_flatness`(0.9) → real spectral flatness (Wiener entropy via rfft); `stereo_imaging`(0.8) → real crest-factor proxy (true L/R not reachable on the mono path — limitation documented); `calculate_frequency_attenuation` (flat band-average) → real A-weighted frequency-weighted reflection (downstream carries only a scalar — documented). 8 tests. 481 pass.
+- [x] **voirs-sdk/audio/utilities.rs**: formant peak-pick (raw 3-sample maxima) → parabolic (quadratic) sub-bin interpolation on the existing real LPC response. 4 tests. 575 pass (+1 known ALSA).
+- [x] **voirs-ffi/python/analyzer.rs + audio_buffer.rs**: `spectral_centroid` (time-domain index weighting) + `get_spectrum` (fake re/im pairing) → real FFT via `scirs2_fft`; added `scirs2-fft.workspace = true` to voirs-ffi. 332 pass (+1 known MP3 placeholder).
+
+**Combined verification (batch 17)**: clippy `-D warnings` clean across all 7 crates ✅ | per-crate nextest green (only pre-existing env fails: vocoder 2 ALSA, sdk 1 ALSA + 1 backtrace-symbolization, ffi 1 MP3 placeholder) ✅.
+
+## Workspace build blocker fixed (2026-06-14)
+
+The recent "CUDA" commit's dependency churn pulled `alloc-stdlib 0.2.3 → alloc-no-stdlib 3.0.0`, incompatible
+with `brotli 8.0.3`'s direct `alloc-no-stdlib 2.0.4` (the `StandardAlloc: Allocator<u8>` trait then exists in
+two versions) → every crate downstream of `parquet→brotli` (dataset, sdk, evaluation, recognizer, feedback,
+cli, ffi) failed to build. Fixed by pinning `alloc-stdlib` back to `0.2.2` in `Cargo.lock` (transitive-only,
+reversible) — collapses `alloc-no-stdlib` to a single 2.0.4.
+
+## Development Session (2026-06-14 batch 16)
+
+**Mock→Real statistics + DSP feature extractors (batch 16) — survey-driven, concentrated in voirs-evaluation.**
+An independent survey overturned the batch-15 "exhausted" verdict, finding fabricated statistics + constant-return extractors.
+
+- [x] **voirs-evaluation/statistical/basic_tests.rs + ab_testing.rs + commercial_tool_comparison.rs**: piecewise-linear t/F p-value tables → `statrs` `StudentsT`/`FisherSnedecor` CDF/inverse-CDF (already a dep); fake `spearman = pearson*0.95`/`kendall = pearson*0.9` → wired the crate's real `spearman_correlation`/`kendall_correlation`; fake Mann-Whitney (`U = n1·n2/2`) → real tie-corrected rank-sum U + normal-approx p + rank-biserial effect size.
+- [x] **voirs-evaluation/quality/evaluator.rs (+ new evaluator_dsp.rs)**: ~12 constant-return extractors (rolloff=8000, flux=0.1, …) → real DSP (85%-rolloff, half-wave spectral flux, Zwicker sharpness, Vassilakis roughness, SFM tonality, autocorr harmonicity, spectral convergence / log-spectral distance, cosine/Pearson similarities, phase coherence).
+- [x] **voirs-evaluation/quality/spectral_analysis.rs (+ new sibling dsp module)**: the "Placeholder implementations" block (irregularity, rolloff, contrast, modulation spectrum, AM/FM depth, attack/decay, envelope periodicity, mod peaks) → real DSP. (A DC-input unit test, stale-coupled to the old constant rolloff, fixed to use a real signal.)
+- [x] **voirs-acoustic/metrics/perceptual.rs**: crude 1-pole A-weighting → real IEC 61672 biquad cascade (bilinear transform); equal-bin Bark → Traunmüller Hz→Bark + triangular filterbank; O(N²) DFT → `scirs2_fft::rfft`.
+- [x] **voirs-dataset/audio/advanced_analysis.rs**: 1-pole R128 prefilter → real BS.1770 two-stage K-weighting (reusing `AudioData::k_weighting_*`); ungated mean-square → real −70 LUFS absolute + −10 LU relative gating (400 ms / 75%-overlap blocks).
+- [x] **voirs-sdk/batch/optimization.rs**: `NormalizationStrategy::Phonetic` (lowercase-strip) → real Metaphone phonetic encoding (new `phonetic.rs`).
+- [x] **voirs-spatial/compression.rs**: `apply_entropy_coding` (byte RLE) → real canonical Huffman coder + matching decoder (round-trip, never-inflate guard).
+
+**Combined verification (batch 16)**: clippy `-D warnings` clean (5 crates) ✅ | nextest 3650+ pass (only pre-existing env fails: sdk ALSA + backtrace-symbolization) ✅ | one real regression fixed (spectral_complexity DC-input test). Required first fixing the brotli/alloc-no-stdlib lockfile blocker above.
+
+## Previous Development Session (2026-06-14 batch 15)
+
+**Mock→Real DSP/algorithm replacements (batch 15) — 7 parallel workstreams (disjoint crates).**
+A fresh full-workspace re-survey (4 read-only agents) overturned the batch-13 "sprint complete /
+out of scope" conclusion: the never-deeply-swept crates (g2p, dataset, sdk, cli, ffi) plus leftover
+corners still held real, self-contained stubs. Batches 14–15 cleared them.
+
+- [x] **voirs-recognizer/analysis/quality.rs — real tonnetz**: `calculate_tonnetz()` (was `vec![0.0;6]`, "Simplified") → real 6-D tonal-centroid projection of the 12-bin chromagram (3 harmonic circles — perfect-fifth/major-third/minor-third — each a chroma-weighted (sin,cos) pair, L1-normalized, divide-by-zero guarded). Reimplemented the proven math from `voirs-dataset/audio/advanced_analysis.rs` locally (no dataset dep). 5 tests. 14/14 analysis::quality.
+- [x] **voirs-acoustic/singing.rs (+ new singing_g2p.rs, 626 lines) — real lyrics→phoneme**: replaced the ~24-entry hardcoded map. Evaluated wiring voirs-g2p (already a dep) but rejected it for 3 concrete reasons (IPA-mora vs decomposed-ASCII phoneme convention mismatch; lyrics are romaji not kana; sync↔async runtime boundary). Built a systematic complete mora table instead: full gojūon + dakuten/handakuten + yōon (きゃ/しゃ…) + sokuon gemination (っ) + long vowels (ー) + moraic nasal (ん), accepting hiragana/katakana/romaji. 12 tests. 854 pass.
+- [x] **voirs-g2p/ssml/context.rs — real SSML phonetic matching**: `evaluate_phonetic_condition()` + `match_token()` (both unconditional `return true`) → real IPA distinctive-feature comparison via the crate's existing `phonology::get_features` (voicing/place/manner for consonants, backness/height for vowels), plus greedy optional-token matching in `match_pattern`. Documented conservative limits (rule-based POS via existing `simple_pos_tag`; grapheme→IPA approximation for neighbour words; syllable/stress conditions treated non-constraining — no model available). 10 tests. 573/573.
+- [x] **voirs-conversion/processing.rs — finished feature extractors + killed stale labels**: **found a real defect** — `estimate_f0_contour` fed 10 ms / 220-sample frames to the (real) autocorr-F0, so white noise read as 100% voiced at a phantom ~101 Hz; rewrote framing to 50 ms window / 10 ms hop (>50% overlap at min pitch) → tone 150 Hz/0 std/100% voiced, noise 0% voiced. Fixed an inconsistent descriptor length (13 vs 17 dims). Confirmed `compute_mel_spectrum`/`compute_spectral_flux`/`estimate_f0_autocorrelation`/`estimate_speaking_rate` already real → corrected 4 stale "simplified" comments only. 4 tests. 426/426.
+- [x] **voirs-cloning/adaptation.rs — real MLLR**: `adapt_mllr()` (identity + random noise) → real Maximum Likelihood Linear Regression: classical normal equations solved row-by-row (`G_i·w_iᵀ = k_i` with per-dim Gauss accumulator/cross-correlation), OLS fallback (shared `G` factored once via LU + partial pivoting) when variances/counts absent, Tikhonov ridge regularization, safe identity fallback on singular/empty input. Internal f64. 4 tests. 612 pass.
+- [x] **voirs-dataset/ml/features/content_embeddings.rs (+ new ipa_features.rs, 530 lines) — real IPA feature matrix**: `extract_phoneme_features()` (hardcoded ~4-dim for ~15 phonemes, rest zero) → a 20-dim distinctive-feature matrix covering 80 phoneme classes / 135 surface spellings (ARPAbet + IPA, `OnceLock<HashMap>`, stress/length/tie-diacritic normalization, unknown→neutral). **Fixed a latent caller bug**: it was `format!("{p:?}")`-ing the whole `Phoneme` struct and scoring characters of `"Phoneme { … }"` instead of the symbol. 18 tests. 746 pass.
+- [x] **voirs-vocoder/post_processing/noise_gate.rs + performance.rs — real spectral subtraction + /proc metrics**: `apply_spectral_subtraction()` (time-domain `*(1−f·0.5)`) → real STFT spectral subtraction (`scirs2_fft::rfft`, Hann 1024/256 75% overlap, per-bin magnitude − α·noise with β spectral floor, original phase, `irfft` weighted-overlap-add; noise estimate from a learned profile or the quietest ~20% frames) and **rewrote the broken streaming OLA** into correct WOLA. `estimate_cpu_usage`/`estimate_memory_usage` ("simplified") → real `/proc/self/stat` utime+stime deltas and `/proc/self/status` VmRSS. 4 tests. 876 pass (+2 known ALSA).
+
+**Test Results (per-crate, agent-verified)**: recognizer ✅ | acoustic 854 ✅ | g2p 573 ✅ | conversion 426 ✅ | cloning 612 ✅ | dataset 746 ✅ | vocoder 876 (+2 pre-existing ALSA) ✅ | clippy `-D warnings` clean across all 7 ✅. Combined workspace verification run separately.
+
+---
+
+## K-weighting BS.1770-4 standards fix (2026-06-14)
+
+While implementing batch 14 (WS3, voirs-evaluation), a **real standards-compliance bug** was found in the existing K-weighting loudness filter:
+
+- `voirs-vocoder/broadcast_quality.rs` (batch-8 code) derived the BS.1770-4 biquads with **spurious √2 factors**, so its coefficients did NOT match the published standard: stage-1 shelf `b0 = 1.5206` (ref `1.53512`), and stage-2 RLB `a1 = −1.9929` (ref `−1.99005`) — the RLB was modelled as a Butterworth (Q = 0.707) and its `[1,−2,1]` numerator was wrongly normalized, instead of the RLB prototype (Q ≈ 0.5003, unnormalized numerator). batch-14 WS5 had ported the same buggy derivation into `voirs-dataset/lib.rs`.
+- **Fix**: replaced the derivation at all 3 sites (`voirs-vocoder/broadcast_quality.rs`, `voirs-dataset/lib.rs`, `voirs-evaluation/quality/psychoacoustic.rs`) with the canonical De Man / EBU R128 bilinear-transform derivation, extracted into testable associated fns `k_weighting_pre_coeffs(fs)` / `k_weighting_rlb_coeffs(fs)`, and added **48 kHz reference-coefficient assertion tests** (match the published `b/a` within 1e-6) so the standard is locked in. Also fixed a `clippy::excessive_precision` on the 17-significant-figure `f0` literal (including evaluation's instance, which the batch-14 combined clippy had served from cache and never actually re-linted). All 9 K-weighting tests pass; vocoder+dataset+evaluation clippy `-D warnings` clean; behavioral DC-attenuation / 2 kHz-boost tests still hold.
+
+---
+
+## Previous Development Session (2026-06-14 batch 14)
+
+**Mock→Real DSP/algorithm replacements (batch 14) — 9 parallel workstreams (disjoint crates):**
+
+- [x] **voirs-emotion/formant.rs — real LPC formants**: `extract_formants()` (hardcoded `neutral_male()`) → Hann autocorrelation → Levinson-Durbin LPC (order 2+sr/1000) → LPC spectral-envelope peak-pick for F1/F2/F3 + −3 dB bandwidths; neutral kept only as silence/degenerate fallback. 5 tests. 470 pass.
+- [x] **voirs-singing/synthesis/core.rs (+ new quality_dsp.rs) — real quality metrics**: 5 hardcoded constants → real analysis of the synthesized buffer: pitch-accuracy (cents vs intended notes / F0-stability), HNR-based harmonic_quality + noise_level, spectral tonality/centroid, LPC formant clarity. 9 tests. 572 pass.
+- [x] **voirs-evaluation/quality/psychoacoustic.rs — real K-weighting**: 1st-order IIR → canonical BS.1770-4 two-stage cascade (see standards-fix above). 4 tests. 950 pass.
+- [x] **voirs-recognizer — O(N²)→FFT + real metrics**: `advanced_spectral.rs` real_fft/inverse_real_fft → `scirs2_fft::rfft`/`irfft`; `asr/transformer.rs` extract_features per-frame DFT → rfft magnitudes; `monitoring/metrics_collection.rs` get_cpu/get_memory random → real `/proc/stat` + `/proc/self/status`. SKIP transformer transcribe() (needs a model). 5 tests. 643 + 16 (transformer) pass.
+- [x] **voirs-dataset — real K-weighting + stat tests/divergences (+ new stats.rs)**: `lib.rs` crude K-weighting → real (see standards-fix); `ml/domain/adapter.rs` mean/variance proxies → real KS / Mann-Whitney U / Chi-square / Anderson-Darling, and Wasserstein-1 / Jensen-Shannon / KL / MMD. 27 tests. 727 pass.
+- [x] **voirs-ffi — real EQ + real RSS/GPU**: `c_api/audio.rs` apply_eq flat-gain → RBJ peaking biquad (0 dB = identity); `python/pipeline.rs` get_memory_usage_mb 0.0 → `/proc/self/status` VmRSS / getrusage, is_gpu_available false → CUDA_VISIBLE_DEVICES probe. 7 tests.
+- [x] **voirs-sdk — real p95 + audio-derived singing stats**: `performance.rs` p95≈max·0.95 → true nearest-rank percentile over a bounded sample ring; `singing.rs` synthesize_score hardcoded → audio-derived pitch-accuracy/vibrato-consistency/breath-quality from the synthesized buffer. 11 tests.
+- [x] **voirs-g2p/advanced.rs (+ new duration.rs) — real phoneme durations**: flat 100 ms/phoneme → Klatt-style model (per-class base durations, stress lengthening, phrase-final lengthening, syllable position, rate scaling, clamped). 10 tests. 563 pass.
+- [x] **voirs-spatial/performance.rs — real /proc metrics**: get_cpu/get_memory `fastrand` mocks → real `/proc/stat` delta-jiffy CPU% and `/proc/self/status` VmRSS, Linux-gated with non-RNG fallback. 10 tests. 460 pass.
+
+**Combined verification (batch 14)**: clippy `-D warnings` clean (9 crates default + ffi/python, sdk/singing, recognizer/transformer feature builds) ✅ | nextest 5258/5260 (2 pre-existing env: voirs-ffi MP3-encoder placeholder, voirs-sdk ALSA no-soundcard) ✅ | workspace `cargo check` green ✅.
+
+---
+
+## Previous Development Session (2026-06-13 batch 13)
 
 **Mock→Real DSP Replacements (batch 13) — 2 workstreams (tail of the sprint):**
 

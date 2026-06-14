@@ -5,6 +5,7 @@
 
 use super::types::*;
 use crate::{EvaluationError, EvaluationResult};
+use statrs::distribution::{ContinuousCDF, FisherSnedecor, StudentsT};
 use std::collections::HashMap;
 
 /// Main statistical analyzer that provides all statistical testing functionality
@@ -100,19 +101,9 @@ impl StatisticalAnalyzer {
         };
         let degrees_of_freedom = (n - 1.0) as usize;
 
-        // Simplified p-value calculation based on t-statistic magnitude
-        let abs_t = t_statistic.abs();
-        let p_value = if abs_t < 1.0 {
-            1.0 - abs_t * 0.3 // Small t-values get large p-values
-        } else if abs_t < 2.0 {
-            0.7 - (abs_t - 1.0) * 0.6 // Medium t-values
-        } else if abs_t < 3.0 {
-            0.1 - (abs_t - 2.0) * 0.08 // Large t-values get small p-values
-        } else {
-            0.02 - (abs_t - 3.0) * 0.005 // Very large t-values get very small p-values
-        }
-        .max(0.001)
-        .min(1.0);
+        // Exact two-sided p-value from the Student's t-distribution with
+        // n - 1 degrees of freedom: p = 2 * (1 - F(|t|)).
+        let p_value = (2.0 * (1.0 - self.t_cdf(t_statistic.abs(), n - 1.0))).clamp(0.0, 1.0);
 
         let effect_size = mean_diff / variance.sqrt(); // Cohen's d
         let is_significant = p_value < alpha;
@@ -168,10 +159,27 @@ impl StatisticalAnalyzer {
 
         combined.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
-        // Calculate ranks (simplified - doesn't handle ties properly)
-        let mut ranks = vec![0.0; combined.len()];
-        for (i, _) in combined.iter().enumerate() {
-            ranks[i] = (i + 1) as f32;
+        // Assign fractional (mid-) ranks, averaging tied values so equal
+        // observations share the mean of the ranks they span.
+        let total = combined.len();
+        let mut ranks = vec![0.0_f32; total];
+        let mut tie_correction = 0.0_f64; // sum of (t^3 - t) over tie groups
+        let mut i = 0;
+        while i < total {
+            let mut j = i + 1;
+            while j < total && combined[j].0 == combined[i].0 {
+                j += 1;
+            }
+            // Ranks i..j (0-based) correspond to natural ranks (i+1)..=j.
+            let avg_rank = ((i + 1 + j) as f32) / 2.0;
+            for r in ranks.iter_mut().take(j).skip(i) {
+                *r = avg_rank;
+            }
+            let t = (j - i) as f64;
+            if t > 1.0 {
+                tie_correction += t * t * t - t;
+            }
+            i = j;
         }
 
         // Sum ranks for group 1
@@ -189,13 +197,24 @@ impl StatisticalAnalyzer {
         let u2 = n1 * n2 - u1;
         let u_statistic = u1.min(u2);
 
-        // Normal approximation for large samples
+        // Normal approximation with a continuity-style tie correction to the
+        // variance: Var(U) = n1*n2/12 * ((N+1) - sum(t^3 - t)/(N*(N-1))).
+        let n = (n1 + n2) as f64;
         let mean_u = n1 * n2 / 2.0;
-        let std_u = ((n1 * n2 * (n1 + n2 + 1.0)) / 12.0).sqrt();
-        let z_score = (u_statistic - mean_u) / std_u;
+        let var_u = if n > 1.0 {
+            (n1 as f64 * n2 as f64 / 12.0) * ((n + 1.0) - tie_correction / (n * (n - 1.0)))
+        } else {
+            0.0
+        };
+        let std_u = var_u.max(0.0).sqrt() as f32;
+        let z_score = if std_u > 0.0 {
+            (u_statistic - mean_u) / std_u
+        } else {
+            0.0
+        };
 
-        // Simplified p-value calculation
-        let p_value = 2.0 * (1.0 - self.normal_cdf(z_score.abs()));
+        // Two-sided p-value from the normal approximation.
+        let p_value = (2.0 * (1.0 - self.normal_cdf(z_score.abs()))).clamp(0.0, 1.0);
 
         let effect_size = 1.0 - (2.0 * u_statistic) / (n1 * n2); // Rank-biserial correlation
         let is_significant = p_value < alpha;
@@ -226,41 +245,21 @@ impl StatisticalAnalyzer {
         })
     }
 
-    /// Helper function for t-distribution CDF (simplified)
+    /// Cumulative distribution function of the Student's t-distribution.
+    ///
+    /// Returns `P(T <= t)` for a central Student's t random variable with
+    /// `df` degrees of freedom, computed exactly via the regularized
+    /// incomplete beta function provided by `statrs`. Degenerate inputs
+    /// (non-finite `t`/`df` or `df <= 0`) fall back to the symmetric centre
+    /// value `0.5` so callers never panic.
     fn t_cdf(&self, t: f32, df: f32) -> f32 {
         if !t.is_finite() || !df.is_finite() || df <= 0.0 {
             return 0.5;
         }
 
-        let abs_t = t.abs();
-
-        // Very simple approximation for testing purposes
-        // Maps common t-values to reasonable probabilities
-        let prob = if abs_t < 0.5 {
-            0.5 + abs_t * 0.2 // Small t-values get p > 0.5
-        } else if abs_t < 1.0 {
-            0.7 + (abs_t - 0.5) * 0.2
-        } else if abs_t < 2.0 {
-            0.9 + (abs_t - 1.0) * 0.08
-        } else if abs_t < 3.0 {
-            0.98 + (abs_t - 2.0) * 0.015
-        } else {
-            0.995 + (abs_t - 3.0) * 0.001 // Very large t-values approach 1.0
-        };
-
-        // Apply degrees of freedom adjustment (smaller df = more conservative)
-        let df_adjustment = if df < 10.0 {
-            0.95 + df * 0.005 // Smaller df gives slightly smaller probabilities
-        } else {
-            1.0
-        };
-
-        let result = prob * df_adjustment;
-
-        if t >= 0.0 {
-            result.max(0.5).min(1.0)
-        } else {
-            (1.0 - result).max(0.0).min(0.5)
+        match StudentsT::new(0.0, 1.0, df as f64) {
+            Ok(dist) => dist.cdf(t as f64) as f32,
+            Err(_) => 0.5,
         }
     }
 
@@ -341,19 +340,10 @@ impl StatisticalAnalyzer {
         };
         let degrees_of_freedom = (n - 2.0) as usize;
 
-        // Simplified p-value calculation based on t-statistic magnitude
-        let abs_t = t_statistic.abs();
-        let p_value = if abs_t < 1.0 {
-            1.0 - abs_t * 0.3
-        } else if abs_t < 2.0 {
-            0.7 - (abs_t - 1.0) * 0.6
-        } else if abs_t < 3.0 {
-            0.1 - (abs_t - 2.0) * 0.08
-        } else {
-            0.02 - (abs_t - 3.0) * 0.005
-        }
-        .max(0.001)
-        .min(1.0);
+        // Exact two-sided p-value for the correlation t-statistic
+        // t = r * sqrt((n - 2) / (1 - r^2)) under the Student's t with n - 2
+        // degrees of freedom: p = 2 * (1 - F(|t|)).
+        let p_value = (2.0 * (1.0 - self.t_cdf(t_statistic.abs(), n - 2.0))).clamp(0.0, 1.0);
         let is_significant = p_value < self.config.alpha;
 
         let interpretation = if is_significant {
@@ -421,19 +411,9 @@ impl StatisticalAnalyzer {
         };
         let degrees_of_freedom = (n1 + n2 - 2.0) as usize;
 
-        // Simplified p-value calculation based on t-statistic magnitude
-        let abs_t = t_statistic.abs();
-        let p_value = if abs_t < 1.0 {
-            1.0 - abs_t * 0.3
-        } else if abs_t < 2.0 {
-            0.7 - (abs_t - 1.0) * 0.6
-        } else if abs_t < 3.0 {
-            0.1 - (abs_t - 2.0) * 0.08
-        } else {
-            0.02 - (abs_t - 3.0) * 0.005
-        }
-        .max(0.001)
-        .min(1.0);
+        // Exact two-sided p-value from the pooled-variance Student's t with
+        // n1 + n2 - 2 degrees of freedom: p = 2 * (1 - F(|t|)).
+        let p_value = (2.0 * (1.0 - self.t_cdf(t_statistic.abs(), n1 + n2 - 2.0))).clamp(0.0, 1.0);
         let is_significant = p_value < self.config.alpha;
 
         let interpretation = if is_significant {
@@ -459,17 +439,29 @@ impl StatisticalAnalyzer {
         })
     }
 
-    /// Perform power analysis for t-test
+    /// Estimate the statistical power of a two-sample, two-sided t-test.
+    ///
+    /// The power is the probability of correctly rejecting the null
+    /// hypothesis given a true standardized mean difference (Cohen's d).
+    /// It is derived from the actual effect size and per-group sample size
+    /// `n` via the non-centrality parameter `ncp = d * sqrt(n / 2)`, then
+    /// approximated by shifting the central Student's t-distribution by
+    /// `ncp` (the same noncentral-by-shift approximation used elsewhere in
+    /// this crate): `power = (1 - F(t_crit - ncp)) + F(-t_crit - ncp)`.
     pub fn power_analysis_t_test(&self, config: &ABTestConfig) -> PowerAnalysisResult {
-        // Simplified power analysis calculation
         let alpha = config.alpha as f32;
         let effect_size = config.effect_size as f32;
         let n = (config.sample_size_a + config.sample_size_b) as f32 / 2.0;
+        let df = (2.0 * n - 2.0).max(1.0);
 
-        // Simplified power calculation (would use proper power analysis in real implementation)
-        let ncp = effect_size * (n / 2.0).sqrt(); // Non-centrality parameter
-        let critical_t = self.t_inv(1.0 - alpha / 2.0, (2.0 * n - 2.0) as f32);
-        let power = 1.0 - self.t_cdf(critical_t, (2.0 * n - 2.0) as f32) as f64;
+        // Non-centrality parameter for the standardized mean difference.
+        let ncp = effect_size * (n / 2.0).sqrt();
+        let critical_t = self.t_inv(1.0 - alpha / 2.0, df);
+
+        // Two-sided power approximated by shifting the central t by the ncp.
+        let upper = 1.0 - self.t_cdf(critical_t - ncp, df);
+        let lower = self.t_cdf(-critical_t - ncp, df);
+        let power = (upper + lower).clamp(0.0, 1.0) as f64;
 
         PowerAnalysisResult {
             achieved_power: power,
@@ -570,9 +562,15 @@ impl StatisticalAnalyzer {
         })
     }
 
-    /// Helper function for inverse t-distribution (simplified)
+    /// Inverse (quantile function) of the Student's t-distribution.
+    ///
+    /// Returns the value `t` such that `P(T <= t) = p` for a central
+    /// Student's t random variable with `df` degrees of freedom, computed via
+    /// the inverse regularized incomplete beta function in `statrs`. The
+    /// degenerate tails return `+/- inf`; if the distribution cannot be
+    /// constructed (`df <= 0`) the normal-quantile fallback is used so the
+    /// caller never panics.
     fn t_inv(&self, p: f32, df: f32) -> f32 {
-        // Simplified approximation - would use proper inverse t-distribution
         if p >= 1.0 {
             return f32::INFINITY;
         }
@@ -580,14 +578,14 @@ impl StatisticalAnalyzer {
             return f32::NEG_INFINITY;
         }
 
-        // Normal approximation for large df
-        if df > 30.0 {
-            return self.normal_inv(p);
+        if df.is_finite() && df > 0.0 {
+            if let Ok(dist) = StudentsT::new(0.0, 1.0, df as f64) {
+                return dist.inverse_cdf(p as f64) as f32;
+            }
         }
 
-        // Simplified calculation for small df
-        let z = self.normal_inv(p);
-        z * (1.0 + (z * z + 1.0) / (4.0 * df))
+        // Fallback: standard-normal quantile (valid as df -> infinity).
+        self.normal_inv(p)
     }
 
     /// Helper function for inverse normal distribution (simplified)
@@ -739,33 +737,159 @@ impl StatisticalAnalyzer {
         })
     }
 
-    /// Helper function for F-distribution CDF (simplified)
+    /// Cumulative distribution function of the F (Fisher-Snedecor)
+    /// distribution.
+    ///
+    /// Returns `P(F <= f)` for an F random variable with `df1` numerator and
+    /// `df2` denominator degrees of freedom, computed exactly via the
+    /// regularized incomplete beta function in `statrs`. Non-finite or
+    /// non-positive inputs return `0.0`; if the distribution cannot be
+    /// constructed the value also degrades to `0.0` so callers never panic.
     fn f_cdf(&self, f: f32, df1: f32, df2: f32) -> f32 {
         if !f.is_finite() || f <= 0.0 || df1 <= 0.0 || df2 <= 0.0 {
             return 0.0;
         }
 
-        // Simplified F-distribution approximation
-        // For F(1, df2), this approximates t-squared distribution
-        if df1 == 1.0 {
-            let t_equiv = f.sqrt();
-            let t_p = self.t_cdf(t_equiv, df2);
-            return 2.0 * t_p - 1.0;
+        match FisherSnedecor::new(df1 as f64, df2 as f64) {
+            Ok(dist) => dist.cdf(f as f64) as f32,
+            Err(_) => 0.0,
         }
-
-        // Very simplified approximation for general case
-        let mean_f = if df2 > 2.0 { df2 / (df2 - 2.0) } else { 1.0 };
-        if f < mean_f {
-            f / (2.0 * mean_f)
-        } else {
-            0.5 + (f - mean_f) / (4.0 * mean_f)
-        }
-        .min(0.99)
     }
 }
 
 impl Default for StatisticalAnalyzer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod statrs_distribution_tests {
+    use super::*;
+
+    /// The two-sided p-value for t = 2.228 with 10 df is the textbook 0.05
+    /// critical value for a two-tailed test at alpha = 0.05.
+    #[test]
+    fn test_t_cdf_known_two_sided_p() {
+        let analyzer = StatisticalAnalyzer::new();
+        let cdf = analyzer.t_cdf(2.228, 10.0);
+        let two_sided_p = 2.0 * (1.0 - cdf);
+        assert!(
+            (two_sided_p - 0.05).abs() < 1e-3,
+            "expected two-sided p ~= 0.05, got {two_sided_p}"
+        );
+    }
+
+    /// CDF at the centre (t = 0) is exactly 0.5 by symmetry.
+    #[test]
+    fn test_t_cdf_centre_is_half() {
+        let analyzer = StatisticalAnalyzer::new();
+        assert!((analyzer.t_cdf(0.0, 7.0) - 0.5).abs() < 1e-6);
+    }
+
+    /// Degenerate degrees of freedom fall back to the symmetric centre.
+    #[test]
+    fn test_t_cdf_invalid_df_fallback() {
+        let analyzer = StatisticalAnalyzer::new();
+        assert!((analyzer.t_cdf(1.5, 0.0) - 0.5).abs() < 1e-6);
+    }
+
+    /// inverse_cdf and cdf must round-trip: F(F^{-1}(p)) = p.
+    #[test]
+    fn test_t_inv_roundtrip() {
+        let analyzer = StatisticalAnalyzer::new();
+        // 0.975 quantile of t with 10 df is the well-known 2.228.
+        let q = analyzer.t_inv(0.975, 10.0);
+        assert!((q - 2.228).abs() < 2e-3, "expected ~2.228, got {q}");
+        let back = analyzer.t_cdf(q, 10.0);
+        assert!((back - 0.975).abs() < 1e-3);
+    }
+
+    /// F-distribution CDF at a known point: for F(3, 12), the 0.95 quantile
+    /// is 3.490, so CDF(3.490) ~= 0.95 and the upper tail ~= 0.05.
+    #[test]
+    fn test_f_cdf_known_value() {
+        let analyzer = StatisticalAnalyzer::new();
+        let cdf = analyzer.f_cdf(3.490, 3.0, 12.0);
+        assert!((cdf - 0.95).abs() < 5e-3, "expected ~0.95, got {cdf}");
+        let upper_tail = 1.0 - cdf;
+        assert!((upper_tail - 0.05).abs() < 5e-3);
+    }
+
+    /// Non-positive / invalid F inputs return 0.0.
+    #[test]
+    fn test_f_cdf_invalid_inputs() {
+        let analyzer = StatisticalAnalyzer::new();
+        assert_eq!(analyzer.f_cdf(-1.0, 2.0, 5.0), 0.0);
+        assert_eq!(analyzer.f_cdf(2.0, 0.0, 5.0), 0.0);
+    }
+
+    /// Paired t-test on a constant positive shift is highly significant and
+    /// reports the exact small p-value from the real t-distribution.
+    #[test]
+    fn test_paired_t_test_real_p_value() {
+        let analyzer = StatisticalAnalyzer::new();
+        let before = [1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let after = [2.0_f32, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
+        let result = analyzer.paired_t_test(&before, &after, Some(0.05)).unwrap();
+        assert!(result.is_significant);
+        assert!(
+            result.p_value < 0.01,
+            "constant +1 shift should be very significant, p = {}",
+            result.p_value
+        );
+        assert!(result.p_value >= 0.0 && result.p_value <= 1.0);
+    }
+
+    /// Mann-Whitney U on a textbook example with no overlap: groups
+    /// {1,2,3,4} vs {5,6,7,8}. The smaller U is 0 and the rank-biserial
+    /// effect size is exactly 1.0.
+    #[test]
+    fn test_mann_whitney_textbook_no_overlap() {
+        let analyzer = StatisticalAnalyzer::new();
+        let g1 = [1.0_f32, 2.0, 3.0, 4.0];
+        let g2 = [5.0_f32, 6.0, 7.0, 8.0];
+        let result = analyzer.mann_whitney_u_test(&g1, &g2, Some(0.05)).unwrap();
+        assert!((result.test_statistic - 0.0).abs() < 1e-6, "U should be 0");
+        let effect = result.effect_size.unwrap();
+        assert!((effect.abs() - 1.0).abs() < 1e-6, "rank-biserial |r| = 1");
+    }
+
+    /// Linear regression on a perfectly linear relation: slope 2, intercept
+    /// 1, R^2 = 1, and a finite (or saturated) significant F p-value.
+    #[test]
+    fn test_linear_regression_perfect_fit() {
+        let analyzer = StatisticalAnalyzer::new();
+        let x = [1.0_f32, 2.0, 3.0, 4.0, 5.0];
+        let y = [3.0_f32, 5.0, 7.0, 9.0, 11.0]; // y = 2x + 1
+        let result = analyzer.linear_regression(&x, &y).unwrap();
+        assert!((result.slope - 2.0).abs() < 1e-4);
+        assert!((result.intercept - 1.0).abs() < 1e-4);
+        assert!((result.r_squared - 1.0).abs() < 1e-4);
+    }
+
+    /// Power increases with effect size for the same sample size.
+    #[test]
+    fn test_power_monotonic_in_effect_size() {
+        let analyzer = StatisticalAnalyzer::new();
+        let make_config = |effect_size: f64| ABTestConfig {
+            sample_size_a: 30,
+            sample_size_b: 30,
+            effect_size,
+            alpha: 0.05,
+            power: 0.8,
+            two_tailed: true,
+            expected_effect_size: effect_size,
+            minimum_detectable_difference: 0.1,
+        };
+        let p_small = analyzer
+            .power_analysis_t_test(&make_config(0.2))
+            .achieved_power;
+        let p_large = analyzer
+            .power_analysis_t_test(&make_config(1.0))
+            .achieved_power;
+        assert!(p_large > p_small);
+        assert!((0.0..=1.0).contains(&p_small));
+        assert!((0.0..=1.0).contains(&p_large));
     }
 }

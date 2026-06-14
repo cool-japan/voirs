@@ -4,6 +4,7 @@
 
 use super::types::*;
 use crate::{EvaluationError, EvaluationResult};
+use statrs::distribution::{ContinuousCDF, FisherSnedecor, StudentsT};
 use std::collections::HashMap;
 
 /// A/B test configuration
@@ -935,16 +936,21 @@ impl ABTestAnalyzer {
         )
     }
 
-    /// Get t-critical value (approximation)
+    /// Two-sided critical value of the Student's t-distribution.
+    ///
+    /// Returns the upper `1 - alpha/2` quantile of the central Student's t
+    /// with `df` degrees of freedom, i.e. the threshold `t_crit` such that
+    /// `P(|T| > t_crit) = alpha`. Computed exactly via the `statrs` inverse
+    /// CDF; if the distribution cannot be built (`df == 0`) it falls back to
+    /// the corresponding normal critical value so callers never panic.
     fn get_t_critical(&self, alpha: f32, df: usize) -> f32 {
-        // Simplified approximation - in practice would use lookup table or more accurate method
-        if df > 30 {
-            self.get_z_critical(alpha / 2.0)
-        } else {
-            // Rough approximation
-            let base_z = self.get_z_critical(alpha / 2.0);
-            base_z * (1.0 + 1.0 / (4.0 * df as f32))
+        if df >= 1 {
+            if let Ok(dist) = StudentsT::new(0.0, 1.0, df as f64) {
+                return dist.inverse_cdf(1.0 - (alpha as f64) / 2.0) as f32;
+            }
         }
+        // Fallback: standard-normal two-sided critical value.
+        self.get_z_critical(alpha / 2.0)
     }
 
     /// Get z-critical value (approximation)
@@ -965,17 +971,19 @@ impl ABTestAnalyzer {
         }
     }
 
-    /// Approximate t-distribution CDF
+    /// Cumulative distribution function of the Student's t-distribution.
+    ///
+    /// Returns `P(T <= t)` for a central Student's t with `df` degrees of
+    /// freedom, computed exactly via the `statrs` regularized incomplete
+    /// beta function. If the distribution cannot be built (`df == 0`) it
+    /// degrades to the standard-normal CDF (the `df -> infinity` limit).
     fn t_cdf(&self, t: f32, df: usize) -> f32 {
-        if df > 30 {
-            // Use normal approximation for large df
-            self.standard_normal_cdf(t)
-        } else {
-            // Rough approximation for small df
-            let normal_p = self.standard_normal_cdf(t);
-            let adjustment = 1.0 / (4.0 * df as f32);
-            (normal_p * (1.0 + adjustment)).clamp(0.0, 1.0)
+        if df >= 1 {
+            if let Ok(dist) = StudentsT::new(0.0, 1.0, df as f64) {
+                return dist.cdf(t as f64) as f32;
+            }
         }
+        self.standard_normal_cdf(t)
     }
 
     /// Standard normal CDF approximation
@@ -1005,25 +1013,28 @@ impl ABTestAnalyzer {
         0.5 * (1.0 + sign * y)
     }
 
-    /// Approximate F-distribution complement CDF
+    /// Upper-tail (complement) CDF of the F (Fisher-Snedecor) distribution.
+    ///
+    /// Returns `P(F > f) = 1 - CDF(f)` for an F random variable with `df1`
+    /// numerator and `df2` denominator degrees of freedom, computed exactly
+    /// via the `statrs` regularized incomplete beta function. This is the
+    /// p-value of the omnibus ANOVA F-test. Non-positive `f` yields `1.0`;
+    /// `+inf` (a degenerate F-statistic) yields `0.0`; an unconstructable
+    /// distribution also degrades to `0.0` so callers never panic.
     fn f_cdf_complement(&self, f: f32, df1: usize, df2: usize) -> f32 {
         if f <= 0.0 {
             return 1.0;
         }
+        if !f.is_finite() {
+            return 0.0;
+        }
+        if df1 == 0 || df2 == 0 {
+            return 0.0;
+        }
 
-        // Very rough approximation
-        // Convert F to chi-square approximation
-        let chi_square_approx = f * df1 as f32;
-
-        // Rough p-value approximation
-        if chi_square_approx > 20.0 {
-            0.0
-        } else if chi_square_approx > 10.0 {
-            0.01
-        } else if chi_square_approx > 5.0 {
-            0.05
-        } else {
-            0.1
+        match FisherSnedecor::new(df1 as f64, df2 as f64) {
+            Ok(dist) => (1.0 - dist.cdf(f as f64) as f32).clamp(0.0, 1.0),
+            Err(_) => 0.0,
         }
     }
 }
@@ -1139,5 +1150,44 @@ mod tests {
         assert!(analyzer
             .multiple_comparison_test(&single_group, CorrectionMethod::None)
             .is_err());
+    }
+
+    /// The two-sided critical value for 10 df at alpha = 0.05 is the textbook
+    /// 2.228.
+    #[test]
+    fn test_get_t_critical_known_value() {
+        let analyzer = ABTestAnalyzer::new();
+        let t_crit = analyzer.get_t_critical(0.05, 10);
+        assert!(
+            (t_crit - 2.228).abs() < 2e-3,
+            "expected ~2.228, got {t_crit}"
+        );
+    }
+
+    /// t-CDF round-trips against the critical value and is 0.5 at the centre.
+    #[test]
+    fn test_t_cdf_centre_and_known() {
+        let analyzer = ABTestAnalyzer::new();
+        assert!((analyzer.t_cdf(0.0, 9) - 0.5).abs() < 1e-6);
+        // CDF(2.228, df=10) ~= 0.975.
+        assert!((analyzer.t_cdf(2.228, 10) - 0.975).abs() < 1e-3);
+    }
+
+    /// F upper-tail complement at a known quantile: for F(3, 12) the 0.95
+    /// quantile is 3.490, so the complement ~= 0.05.
+    #[test]
+    fn test_f_cdf_complement_known_value() {
+        let analyzer = ABTestAnalyzer::new();
+        let upper = analyzer.f_cdf_complement(3.490, 3, 12);
+        assert!((upper - 0.05).abs() < 5e-3, "expected ~0.05, got {upper}");
+    }
+
+    /// Degenerate F inputs: F <= 0 gives complement 1.0; +inf gives 0.0.
+    #[test]
+    fn test_f_cdf_complement_edge_cases() {
+        let analyzer = ABTestAnalyzer::new();
+        assert_eq!(analyzer.f_cdf_complement(0.0, 2, 5), 1.0);
+        assert_eq!(analyzer.f_cdf_complement(f32::INFINITY, 2, 5), 0.0);
+        assert_eq!(analyzer.f_cdf_complement(2.0, 0, 5), 0.0);
     }
 }

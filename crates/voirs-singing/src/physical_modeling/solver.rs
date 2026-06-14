@@ -5,6 +5,7 @@
 
 use super::boundary_acoustic::AcousticPropagationModel;
 use super::tissue_molecular::{MolecularDynamicsModel, TissueMechanicsModel};
+use scirs2_core::Complex;
 
 /// Multi-scale physics solver for enhanced accuracy
 #[derive(Debug, Clone)]
@@ -197,46 +198,84 @@ impl MultiScalePhysicsSolver {
         Ok(())
     }
 
+    /// Apply frequency-dependent acoustic coupling to the pressure field.
+    ///
+    /// The pressure signal is transformed to the frequency domain with a real
+    /// FFT ([`scirs2_fft::rfft`]), the acoustic propagation model's
+    /// frequency-dependent attenuation is applied to the per-bin **magnitudes**
+    /// while the original **phase** of each complex bin is preserved, and the
+    /// modified complex spectrum is transformed back with the inverse real FFT
+    /// ([`scirs2_fft::irfft`]).
+    ///
+    /// Preserving phase makes the forward → (modify) → inverse round-trip
+    /// mathematically correct: with an identity coupling (no attenuation) the
+    /// reconstructed signal equals the input up to numerical precision, instead
+    /// of the previous magnitude-as-time-sample corruption that discarded all
+    /// phase information.
     fn apply_acoustic_coupling(
         &mut self,
         pressures: &mut [f32],
         velocities: &mut [f32],
         dt: f32,
     ) -> crate::Result<()> {
-        // Apply frequency-dependent attenuation to pressure field
-        let pressure_spectrum = self.fft_transform(pressures);
-        let mut attenuated_spectrum = pressure_spectrum;
-        self.acoustic_propagation
-            .apply_frequency_attenuation(&mut attenuated_spectrum);
+        let _ = (velocities, dt);
 
-        // Transform back (simplified - would use proper IFFT)
-        for (i, &spectrum_val) in attenuated_spectrum.iter().enumerate() {
-            if i < pressures.len() {
-                pressures[i] = spectrum_val * 0.9; // Simplified inverse transform
-            }
+        let n = pressures.len();
+        if n == 0 {
+            return Ok(());
+        }
+
+        // Forward transform: real signal -> `n / 2 + 1` complex bins.
+        let spectrum = self.fft_transform(pressures)?;
+
+        // Extract per-bin magnitudes for the attenuation model, which operates
+        // on a real magnitude spectrum in-place.
+        let mut magnitudes: Vec<f32> = spectrum.iter().map(|bin| bin.norm() as f32).collect();
+        self.acoustic_propagation
+            .apply_frequency_attenuation(&mut magnitudes);
+
+        // Rebuild the complex spectrum from the attenuated magnitudes while
+        // keeping the original phase of every bin (re-scale each bin by the
+        // ratio of new to old magnitude). Bins with (near-)zero magnitude have
+        // undefined phase and are left at zero.
+        let scaled: Vec<Complex<f64>> = spectrum
+            .iter()
+            .zip(magnitudes.iter())
+            .map(|(bin, &new_mag)| {
+                let old_mag = bin.norm();
+                if old_mag > f64::EPSILON {
+                    let ratio = new_mag as f64 / old_mag;
+                    Complex::new(bin.re * ratio, bin.im * ratio)
+                } else {
+                    Complex::new(0.0, 0.0)
+                }
+            })
+            .collect();
+
+        // Inverse transform back to the time domain (phase-preserving).
+        let reconstructed = scirs2_fft::irfft(&scaled, Some(n)).map_err(|e| {
+            crate::Error::Processing(format!("acoustic coupling inverse FFT failed: {e}"))
+        })?;
+        for (slot, value) in pressures.iter_mut().zip(reconstructed.iter()) {
+            *slot = *value as f32;
         }
 
         Ok(())
     }
 
-    fn fft_transform(&self, signal: &[f32]) -> Vec<f32> {
-        // Simplified FFT - in practice would use proper FFT library
-        let mut spectrum = vec![0.0; signal.len()];
-
-        for (k, spec_val) in spectrum.iter_mut().enumerate() {
-            let mut real_sum = 0.0;
-            let mut imag_sum = 0.0;
-
-            for n in 0..signal.len() {
-                let angle = -2.0 * std::f32::consts::PI * (k * n) as f32 / signal.len() as f32;
-                real_sum += signal[n] * angle.cos();
-                imag_sum += signal[n] * angle.sin();
-            }
-
-            *spec_val = (real_sum * real_sum + imag_sum * imag_sum).sqrt();
+    /// Forward real FFT of a real-valued time-domain signal.
+    ///
+    /// Returns the `signal.len() / 2 + 1` non-redundant complex frequency bins
+    /// using [`scirs2_fft::rfft`], preserving both magnitude and phase (the
+    /// previous O(N²) DFT discarded phase by returning only magnitudes). An
+    /// empty input yields an empty spectrum.
+    fn fft_transform(&self, signal: &[f32]) -> crate::Result<Vec<Complex<f64>>> {
+        if signal.is_empty() {
+            return Ok(Vec::new());
         }
-
-        spectrum
+        scirs2_fft::rfft(signal, Some(signal.len())).map_err(|e| {
+            crate::Error::Processing(format!("acoustic coupling forward FFT failed: {e}"))
+        })
     }
 
     /// Estimate total computational cost for simulation
@@ -349,4 +388,92 @@ pub enum PerformanceLevel {
     Balanced,
     /// High accuracy mode with small time steps
     HighAccuracy,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a deterministic test signal (sum of two sinusoids plus a DC
+    /// offset) so that the round-trip exercises non-trivial phase.
+    fn test_signal(n: usize) -> Vec<f32> {
+        use std::f32::consts::PI;
+        (0..n)
+            .map(|i| {
+                let t = i as f32;
+                0.25 + (2.0 * PI * 5.0 * t / n as f32).sin()
+                    + 0.5 * (2.0 * PI * 11.0 * t / n as f32 + 0.7).cos()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_acoustic_coupling_identity_roundtrip_preserves_phase() {
+        let mut solver = MultiScalePhysicsSolver::new(4).expect("solver construction");
+
+        // Identity coupling: zero attenuation across all bins so the
+        // magnitude is unchanged and only the FFT round-trip is exercised.
+        solver.acoustic_propagation.frequency_attenuation = vec![0.0; 4096];
+
+        let n = 256;
+        let input = test_signal(n);
+        let mut pressures = input.clone();
+        let mut velocities = vec![0.0f32; n];
+
+        solver
+            .apply_acoustic_coupling(&mut pressures, &mut velocities, 1e-4)
+            .expect("acoustic coupling");
+
+        // Forward rfft -> irfft with identity coupling must reconstruct the
+        // input within numerical tolerance, proving phase is preserved (the
+        // previous magnitude-as-time-sample code could not pass this).
+        let mse: f64 = input
+            .iter()
+            .zip(pressures.iter())
+            .map(|(&a, &b)| {
+                let d = (a - b) as f64;
+                d * d
+            })
+            .sum::<f64>()
+            / n as f64;
+        let rms = mse.sqrt();
+        assert!(
+            rms < 1e-4,
+            "identity round-trip RMS error too large: {rms} (phase not preserved?)"
+        );
+    }
+
+    #[test]
+    fn test_fft_transform_bin_count_and_spectral_peak() {
+        let solver = MultiScalePhysicsSolver::new(2).expect("solver construction");
+
+        // A pure tone at exactly bin 8 of a 64-point FFT.
+        let n = 64usize;
+        let bin = 8usize;
+        use std::f32::consts::PI;
+        let signal: Vec<f32> = (0..n)
+            .map(|i| (2.0 * PI * bin as f32 * i as f32 / n as f32).sin())
+            .collect();
+
+        let spectrum = solver.fft_transform(&signal).expect("forward fft");
+
+        // rfft returns n / 2 + 1 non-redundant complex bins.
+        assert_eq!(spectrum.len(), n / 2 + 1);
+
+        // The magnitude must peak at the tone's bin.
+        let peak = spectrum
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.norm().partial_cmp(&b.1.norm()).unwrap())
+            .map(|(i, _)| i)
+            .unwrap();
+        assert_eq!(peak, bin, "spectral peak not at the tone's bin");
+    }
+
+    #[test]
+    fn test_fft_transform_empty_signal() {
+        let solver = MultiScalePhysicsSolver::new(1).expect("solver construction");
+        let spectrum = solver.fft_transform(&[]).expect("empty fft");
+        assert!(spectrum.is_empty());
+    }
 }

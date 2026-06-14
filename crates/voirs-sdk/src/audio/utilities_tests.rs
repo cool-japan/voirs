@@ -195,6 +195,133 @@ fn test_estimate_formants_insufficient_samples() {
 }
 
 #[test]
+fn test_parabolic_peak_offset_symmetric() {
+    // A perfectly symmetric peak (equal neighbours) must yield zero offset:
+    // the parabola vertex sits exactly on the central bin.
+    let delta = AudioBuffer::parabolic_peak_offset(1.0, 2.0, 1.0);
+    assert!(
+        delta.abs() < 1e-6,
+        "symmetric peak must give delta ~ 0, got {delta}"
+    );
+}
+
+#[test]
+fn test_parabolic_peak_offset_shifts_toward_larger_neighbor() {
+    // Asymmetric peak: right neighbour larger than left neighbour. The true
+    // sub-bin maximum lies toward the right, so delta must be positive and
+    // strictly inside (0, 0.5].
+    let y_prev = 1.0_f32;
+    let y_peak = 3.0_f32;
+    let y_next = 2.0_f32; // larger right neighbour
+    let delta_right = AudioBuffer::parabolic_peak_offset(y_prev, y_peak, y_next);
+    assert!(
+        delta_right > 0.0 && delta_right <= 0.5,
+        "peak with larger right neighbour must shift up (0, 0.5], got {delta_right}"
+    );
+
+    // Mirror image: left neighbour larger -> delta must be negative and within
+    // [-0.5, 0). By symmetry it should be the exact negation.
+    let delta_left = AudioBuffer::parabolic_peak_offset(y_next, y_peak, y_prev);
+    assert!(
+        delta_left < 0.0 && delta_left >= -0.5,
+        "peak with larger left neighbour must shift down [-0.5, 0), got {delta_left}"
+    );
+    assert!(
+        (delta_left + delta_right).abs() < 1e-6,
+        "mirrored peaks must produce negated offsets: {delta_left} vs {delta_right}"
+    );
+
+    // Closed-form check against the defining formula for the right-biased case.
+    let denom = y_prev - 2.0 * y_peak + y_next;
+    let expected = 0.5 * (y_prev - y_next) / denom;
+    assert!(
+        (delta_right - expected).abs() < 1e-6,
+        "interpolated offset {delta_right} must match formula {expected}"
+    );
+}
+
+#[test]
+fn test_parabolic_peak_offset_refines_toward_true_subbin_peak() {
+    // Sample a known continuous parabola whose true maximum lies BETWEEN two
+    // integer bins, then verify the interpolation recovers a refined frequency
+    // strictly between the surrounding bin centers and CLOSER to the true peak
+    // than the raw bin-center would be.
+    let bin_spacing = 10.0_f32; // Hz per bin
+    let k = 5_usize; // discrete peak bin
+                     // True sub-bin maximum at k + 0.3 (between bin 5 and bin 6).
+    let true_offset = 0.3_f32;
+    // Parabola y(x) = -(x - (k + true_offset))^2 + 100, sampled at k-1, k, k+1.
+    let parab = |x: f32| -(x - (k as f32 + true_offset)).powi(2) + 100.0;
+    let y_prev = parab((k - 1) as f32);
+    let y_peak = parab(k as f32);
+    let y_next = parab((k + 1) as f32);
+
+    // Sanity: the discrete peak really is at bin k.
+    assert!(y_peak > y_prev && y_peak > y_next);
+
+    let delta = AudioBuffer::parabolic_peak_offset(y_prev, y_peak, y_next);
+    let refined_freq = (k as f32 + delta) * bin_spacing;
+
+    let bin_center_freq = k as f32 * bin_spacing;
+    let next_bin_freq = (k + 1) as f32 * bin_spacing;
+    let true_freq = (k as f32 + true_offset) * bin_spacing;
+
+    // Refined frequency must lie strictly between the two bin centers...
+    assert!(
+        refined_freq > bin_center_freq && refined_freq < next_bin_freq,
+        "refined freq {refined_freq} must be strictly between {bin_center_freq} and {next_bin_freq}"
+    );
+    // ...and be closer to the true sub-bin peak than the raw bin center.
+    let raw_err = (bin_center_freq - true_freq).abs();
+    let refined_err = (refined_freq - true_freq).abs();
+    assert!(
+        refined_err < raw_err,
+        "interpolation must reduce error: refined {refined_err} vs raw {raw_err}"
+    );
+    // For an exact parabola the recovery is essentially perfect.
+    assert!(
+        refined_err < 1e-3,
+        "parabolic recovery should be near-exact, residual error {refined_err}"
+    );
+}
+
+#[test]
+fn test_estimate_formants_produces_subbin_frequencies() {
+    // The full pipeline must produce formant frequencies that are NOT snapped
+    // to integer multiples of the FFT bin spacing, proving sub-bin refinement
+    // is active. (Raw peak-picking would always yield k * bin_spacing.)
+    let sample_rate = 22050;
+    let fft_size = 1024.0_f32;
+    let bin_spacing = sample_rate as f32 / fft_size;
+
+    let samples: Vec<f32> = (0..2048)
+        .map(|i| {
+            let t = i as f32 / sample_rate as f32;
+            (2.0 * std::f32::consts::PI * 100.0 * t).sin() * 0.3
+                + (2.0 * std::f32::consts::PI * 500.0 * t).sin() * 0.5
+                + (2.0 * std::f32::consts::PI * 1500.0 * t).sin() * 0.3
+                + (2.0 * std::f32::consts::PI * 2500.0 * t).sin() * 0.2
+        })
+        .collect();
+
+    let buffer = AudioBuffer::mono(samples, sample_rate);
+    let formants = buffer.estimate_formants(4);
+    assert!(!formants.is_empty());
+
+    // At least one formant should carry a fractional-bin component (i.e. it is
+    // not exactly an integer number of bins), demonstrating interpolation.
+    let any_subbin = formants.iter().any(|&f| {
+        let bins = f / bin_spacing;
+        let frac = (bins - bins.round()).abs();
+        frac > 1e-3
+    });
+    assert!(
+        any_subbin,
+        "expected at least one sub-bin (non bin-aligned) formant, got {formants:?}"
+    );
+}
+
+#[test]
 fn test_levinson_durbin() {
     // Test Levinson-Durbin algorithm with known autocorrelation
     let buffer = AudioBuffer::mono(vec![1.0, 0.5, 0.25], 1000);

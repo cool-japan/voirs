@@ -251,7 +251,8 @@ impl ProcessingStage {
             StageType::Resample => self.resample(input),
             StageType::Compression => self.compression(input),
             StageType::Custom(_) => {
-                // Custom processing - placeholder
+                // Custom stages carry no built-in DSP transform; the signal is
+                // passed through unchanged (bespoke behaviour is supplied elsewhere).
                 Ok(input.to_vec())
             }
         }
@@ -569,7 +570,10 @@ impl FeatureExtractor {
         let hop_size = 512;
 
         if audio.len() < window_size {
-            return Ok(vec![0.0; 13]); // Return zero features for short audio
+            // Short audio yields no analysis windows. Return a zero vector whose
+            // length matches the normal path (4 spectral statistics + 13 MFCC
+            // means = 17) so the descriptor length is always stable.
+            return Ok(vec![0.0; 17]);
         }
 
         // Process windows
@@ -600,9 +604,10 @@ impl FeatureExtractor {
             spectral_centroids.push(self.compute_spectral_centroid(&spectrum));
             spectral_rolloffs.push(self.compute_spectral_rolloff(&spectrum, 0.85));
 
-            // Compute MFCCs (simplified)
-            let mel_spectrum = self.compute_mel_spectrum(&spectrum, 13);
-            mfccs.extend(mel_spectrum);
+            // Compute 13 MFCCs (real triangular mel-filterbank + log + DCT-II;
+            // see `compute_mel_spectrum`).
+            let mfcc = self.compute_mel_spectrum(&spectrum, 13);
+            mfccs.extend(mfcc);
         }
 
         // Aggregate features
@@ -654,7 +659,8 @@ impl FeatureExtractor {
         features.push(self.mean(&energy_contour));
         features.push(self.std(&energy_contour));
 
-        // Spectral flux (simplified)
+        // Spectral flux (real half-wave-rectified L2 flux over Hann-windowed
+        // FFT frames; see `compute_spectral_flux`).
         let spectral_flux = self.compute_spectral_flux(audio)?;
         features.push(spectral_flux);
 
@@ -665,7 +671,9 @@ impl FeatureExtractor {
     fn extract_prosodic_features(&self, audio: &[f32]) -> Result<Vec<f32>> {
         let mut features = Vec::new();
 
-        // Fundamental frequency estimation (simplified autocorrelation)
+        // Fundamental frequency contour via normalized autocorrelation with
+        // voicing detection and octave-error guarding (see
+        // `estimate_f0_autocorrelation`).
         let f0_values = self.estimate_f0_contour(audio)?;
 
         if !f0_values.is_empty() {
@@ -683,7 +691,8 @@ impl FeatureExtractor {
         features.push(self.mean(&intensity_values));
         features.push(self.std(&intensity_values));
 
-        // Speaking rate estimate (simplified)
+        // Speaking rate via energy-onset detection (see
+        // `estimate_speaking_rate`).
         let speaking_rate = self.estimate_speaking_rate(audio)?;
         features.push(speaking_rate);
 
@@ -923,17 +932,37 @@ impl FeatureExtractor {
         Ok(self.mean(&flux_values))
     }
 
+    /// Estimate a frame-by-frame fundamental-frequency (F0) contour.
+    ///
+    /// The autocorrelation pitch estimator needs an analysis window long
+    /// enough to retain ample overlap even at the lowest tracked pitch
+    /// (~80 Hz, whose period is `sample_rate / 80` samples). A `sample_rate /
+    /// 20` (~50 ms) window keeps the overlap at that longest lag well above
+    /// 50 %, which suppresses the spurious high-lag (tiny-overlap)
+    /// correlations that a too-short frame would otherwise produce — so noise
+    /// reads as unvoiced rather than as a phantom low pitch. A `sample_rate /
+    /// 100` (~10 ms) hop preserves the contour's time resolution through
+    /// overlapping frames.
     fn estimate_f0_contour(&self, audio: &[f32]) -> Result<Vec<f32>> {
-        let frame_size = self.sample_rate as usize / 100; // 10ms frames
+        let window = (self.sample_rate as usize / 20).max(2); // ~50 ms
+        let hop = (self.sample_rate as usize / 100).max(1); // ~10 ms
         let mut f0_values = Vec::new();
 
-        for chunk in audio.chunks(frame_size) {
-            if chunk.len() < frame_size / 2 {
-                continue;
+        if audio.len() < window {
+            // Shorter than one full window: fall back to a single estimate over
+            // the whole clip, but only when it still leaves the autocorrelation
+            // enough overlap (>= half a window) to be reliable.
+            if audio.len() >= window / 2 {
+                f0_values.push(self.estimate_f0_autocorrelation(audio));
             }
+            return Ok(f0_values);
+        }
 
-            let f0 = self.estimate_f0_autocorrelation(chunk);
-            f0_values.push(f0);
+        let mut start = 0;
+        while start + window <= audio.len() {
+            let frame = &audio[start..start + window];
+            f0_values.push(self.estimate_f0_autocorrelation(frame));
+            start += hop;
         }
 
         Ok(f0_values)
@@ -1467,6 +1496,169 @@ mod tests_mel {
         assert!(
             (rate - expected).abs() < 0.8,
             "Expected speaking rate ~{expected:.2} syll/s, got {rate:.2} syll/s"
+        );
+    }
+
+    /// Euclidean distance between two equal-length feature vectors.
+    fn l2_distance(a: &[f32], b: &[f32]) -> f32 {
+        a.iter()
+            .zip(b.iter())
+            .map(|(x, y)| (x - y).powi(2))
+            .sum::<f32>()
+            .sqrt()
+    }
+
+    #[test]
+    fn test_spectral_centroid_bright_vs_low() {
+        // A high-frequency tone must have a higher spectral centroid than a
+        // low-frequency tone (the defining property of the centroid).
+        let extractor = make_extractor();
+        let low = sine_wave(200.0, extractor.sample_rate, 4096);
+        let bright = sine_wave(5000.0, extractor.sample_rate, 4096);
+
+        let low_centroid = extractor
+            .compute_spectral_centroid(&extractor.compute_representative_spectrum(&low).unwrap());
+        let bright_centroid = extractor.compute_spectral_centroid(
+            &extractor.compute_representative_spectrum(&bright).unwrap(),
+        );
+
+        assert!(
+            bright_centroid > low_centroid,
+            "Bright-tone centroid ({bright_centroid:.1} Hz) should exceed low-tone centroid ({low_centroid:.1} Hz)"
+        );
+        // Sanity bounds: each centroid should sit near its tone's frequency band.
+        assert!(
+            bright_centroid > 2500.0,
+            "Bright-tone centroid should be high, got {bright_centroid:.1} Hz"
+        );
+        assert!(
+            low_centroid < 2000.0,
+            "Low-tone centroid should be low, got {low_centroid:.1} Hz"
+        );
+    }
+
+    #[test]
+    fn test_mfcc_distinct_timbres_differ() {
+        // MFCCs encode timbre, so two signals with the same pitch but very
+        // different spectral envelopes must yield clearly different MFCCs.
+        let extractor = make_extractor();
+        let sr = extractor.sample_rate;
+
+        // Timbre A: a pure 500 Hz tone (energy in one narrow region).
+        let pure = sine_wave(500.0, sr, 4096);
+
+        // Timbre B: a 500 Hz tone rich in odd harmonics (square-wave-like),
+        // spreading energy across a very different spectral envelope.
+        let rich: Vec<f32> = (0..4096)
+            .map(|i| {
+                let t = i as f32 / sr as f32;
+                let mut s = 0.0;
+                for k in [1.0_f32, 3.0, 5.0, 7.0, 9.0] {
+                    s += (1.0 / k) * (2.0 * std::f32::consts::PI * 500.0 * k * t).sin();
+                }
+                s * 0.5
+            })
+            .collect();
+
+        let pure_mfcc = extractor.compute_mel_spectrum(
+            &extractor.compute_representative_spectrum(&pure).unwrap(),
+            13,
+        );
+        let rich_mfcc = extractor.compute_mel_spectrum(
+            &extractor.compute_representative_spectrum(&rich).unwrap(),
+            13,
+        );
+
+        // The transform is deterministic: distance to itself is exactly zero.
+        assert!(
+            l2_distance(&pure_mfcc, &pure_mfcc) < 1e-6,
+            "MFCC extraction must be deterministic"
+        );
+        // Distinct timbres are well separated (measured distance ~110).
+        let dist = l2_distance(&pure_mfcc, &rich_mfcc);
+        assert!(
+            dist > 5.0,
+            "Distinct timbres should give well-separated MFCCs, got distance {dist:.4}"
+        );
+    }
+
+    #[test]
+    fn test_f0_contour_periodic_vs_noise() {
+        // A periodic signal yields a stable, voiced F0 contour; white noise
+        // yields an unvoiced one. This guards against the short-frame
+        // autocorrelation artifact that would otherwise read noise as a
+        // phantom low pitch.
+        let extractor = make_extractor();
+        let sr = extractor.sample_rate;
+
+        let tone = sine_wave(150.0, sr, sr as usize); // 1 second
+        let tone_contour = extractor.estimate_f0_contour(&tone).unwrap();
+        assert!(
+            tone_contour.len() > 10,
+            "Expected a multi-frame contour, got {}",
+            tone_contour.len()
+        );
+        let tone_voiced: Vec<f32> = tone_contour.iter().copied().filter(|&f| f > 0.0).collect();
+        let tone_frac = tone_voiced.len() as f32 / tone_contour.len() as f32;
+        assert!(
+            tone_frac > 0.9,
+            "A periodic tone should be voiced in nearly every frame, got fraction {tone_frac:.2}"
+        );
+
+        let tone_mean = tone_voiced.iter().sum::<f32>() / tone_voiced.len() as f32;
+        assert!(
+            (tone_mean - 150.0).abs() < 10.0,
+            "Stable contour mean should be near 150 Hz, got {tone_mean:.1} Hz"
+        );
+        let tone_std = (tone_voiced
+            .iter()
+            .map(|f| (f - tone_mean).powi(2))
+            .sum::<f32>()
+            / tone_voiced.len() as f32)
+            .sqrt();
+        assert!(
+            tone_std < 8.0,
+            "Periodic contour should be stable (low std), got {tone_std:.2} Hz"
+        );
+
+        // White noise has no periodicity: the contour must be essentially unvoiced.
+        let noise = white_noise(sr as usize, 0x0BAD_F00D);
+        let noise_contour = extractor.estimate_f0_contour(&noise).unwrap();
+        let noise_voiced = noise_contour.iter().filter(|&&f| f > 0.0).count();
+        let noise_frac = noise_voiced as f32 / noise_contour.len().max(1) as f32;
+        assert!(
+            noise_frac < 0.2,
+            "Noise F0 contour should be mostly unvoiced, got voiced fraction {noise_frac:.2}"
+        );
+        assert!(
+            noise_frac < tone_frac,
+            "Noise ({noise_frac:.2}) must be less voiced than a periodic tone ({tone_frac:.2})"
+        );
+    }
+
+    #[test]
+    fn test_spectral_features_stable_length() {
+        // The spectral descriptor length must be identical for short audio
+        // (no analysis windows) and normal audio (4 spectral stats + 13 MFCCs).
+        let extractor = make_extractor();
+        let short = sine_wave(440.0, extractor.sample_rate, 512); // < 1024 window
+        let long = sine_wave(440.0, extractor.sample_rate, 8192);
+
+        let short_features = extractor.extract_spectral_features(&short).unwrap();
+        let long_features = extractor.extract_spectral_features(&long).unwrap();
+
+        assert_eq!(
+            short_features.len(),
+            long_features.len(),
+            "Short ({}) and long ({}) audio must yield equal-length spectral descriptors",
+            short_features.len(),
+            long_features.len()
+        );
+        assert_eq!(
+            long_features.len(),
+            17,
+            "Expected 17 spectral features (4 stats + 13 MFCC means), got {}",
+            long_features.len()
         );
     }
 }

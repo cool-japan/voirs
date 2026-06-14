@@ -15,6 +15,9 @@ use voirs_sdk::AudioBuffer;
 
 use super::{MCDEvaluator, PESQEvaluator, STOIEvaluator};
 
+/// Self-contained DSP feature extractors, in a sibling module per the 2000-line limit.
+mod evaluator_dsp;
+
 /// Quality evaluation implementation
 #[derive(Clone)]
 pub struct QualityEvaluator {
@@ -1517,14 +1520,15 @@ impl QualityEvaluator {
         }
     }
 
+    /// Spectral rolloff: frequency below which 85% of cumulative spectral energy lies (frame-averaged).
     async fn calculate_spectral_rolloff(
         &self,
-        _samples: &[f32],
-        _sample_rate: f32,
-        _window_size: usize,
-        _hop_size: usize,
+        samples: &[f32],
+        sample_rate: f32,
+        window_size: usize,
+        hop_size: usize,
     ) -> Result<f32, EvaluationError> {
-        Ok(8000.0) // Simplified
+        evaluator_dsp::spectral_rolloff(samples, sample_rate, window_size, hop_size, 0.85)
     }
 
     async fn calculate_zero_crossing_rate(&self, samples: &[f32]) -> Result<f32, EvaluationError> {
@@ -1537,13 +1541,14 @@ impl QualityEvaluator {
         Ok(zero_crossings as f32 / samples.len() as f32)
     }
 
+    /// Spectral flux: frame-mean half-wave-rectified spectral difference `Σ_k max(0, |X_t[k]|−|X_{t−1}[k]|)`.
     async fn calculate_spectral_flux(
         &self,
-        _samples: &[f32],
-        _window_size: usize,
-        _hop_size: usize,
+        samples: &[f32],
+        window_size: usize,
+        hop_size: usize,
     ) -> Result<f32, EvaluationError> {
-        Ok(0.1) // Simplified
+        evaluator_dsp::spectral_flux(samples, window_size, hop_size)
     }
 
     async fn calculate_mfcc_features(
@@ -1625,18 +1630,18 @@ impl QualityEvaluator {
 
     async fn calculate_attack_time(
         &self,
-        _samples: &[f32],
-        _sample_rate: f32,
+        samples: &[f32],
+        sample_rate: f32,
     ) -> Result<f32, EvaluationError> {
-        Ok(0.01) // Simplified
+        evaluator_dsp::attack_time(samples, sample_rate)
     }
 
     async fn calculate_decay_time(
         &self,
-        _samples: &[f32],
-        _sample_rate: f32,
+        samples: &[f32],
+        sample_rate: f32,
     ) -> Result<f32, EvaluationError> {
-        Ok(0.1) // Simplified
+        evaluator_dsp::decay_time(samples, sample_rate)
     }
 
     async fn calculate_loudness_perception(
@@ -1650,50 +1655,54 @@ impl QualityEvaluator {
 
     async fn calculate_roughness(
         &self,
-        _samples: &[f32],
-        _sample_rate: f32,
+        samples: &[f32],
+        sample_rate: f32,
     ) -> Result<f32, EvaluationError> {
-        Ok(0.1) // Simplified
+        evaluator_dsp::roughness(samples, sample_rate)
     }
 
     async fn calculate_sharpness(
         &self,
-        _samples: &[f32],
-        _sample_rate: f32,
+        samples: &[f32],
+        sample_rate: f32,
     ) -> Result<f32, EvaluationError> {
-        Ok(1.0) // Simplified
+        evaluator_dsp::sharpness(samples, sample_rate)
     }
 
     async fn calculate_tonality(
         &self,
-        _samples: &[f32],
-        _sample_rate: f32,
+        samples: &[f32],
+        sample_rate: f32,
     ) -> Result<f32, EvaluationError> {
-        Ok(0.5) // Simplified
+        evaluator_dsp::tonality(samples, sample_rate)
     }
 
     async fn calculate_harmonicity(
         &self,
-        _samples: &[f32],
-        _sample_rate: f32,
+        samples: &[f32],
+        sample_rate: f32,
     ) -> Result<f32, EvaluationError> {
-        Ok(0.7) // Simplified
+        evaluator_dsp::harmonicity(samples, sample_rate)
     }
 
     async fn calculate_spectral_similarity(
         &self,
-        _audio: &AudioBuffer,
-        _reference: &AudioBuffer,
+        audio: &AudioBuffer,
+        reference: &AudioBuffer,
     ) -> Result<f32, EvaluationError> {
-        Ok(0.8) // Simplified
+        evaluator_dsp::spectral_similarity(audio.samples(), reference.samples())
     }
 
     async fn calculate_temporal_similarity(
         &self,
-        _audio: &AudioBuffer,
-        _reference: &AudioBuffer,
+        audio: &AudioBuffer,
+        reference: &AudioBuffer,
     ) -> Result<f32, EvaluationError> {
-        Ok(0.7) // Simplified
+        evaluator_dsp::temporal_similarity(
+            audio.samples(),
+            reference.samples(),
+            audio.sample_rate() as f32,
+        )
     }
 
     async fn calculate_energy_difference(
@@ -1708,18 +1717,22 @@ impl QualityEvaluator {
 
     async fn calculate_f0_similarity(
         &self,
-        _audio: &AudioBuffer,
-        _reference: &AudioBuffer,
+        audio: &AudioBuffer,
+        reference: &AudioBuffer,
     ) -> Result<f32, EvaluationError> {
-        Ok(0.9) // Simplified
+        evaluator_dsp::f0_similarity(
+            audio.samples(),
+            reference.samples(),
+            audio.sample_rate() as f32,
+        )
     }
 
     async fn calculate_phase_coherence(
         &self,
-        _audio: &AudioBuffer,
-        _reference: &AudioBuffer,
+        audio: &AudioBuffer,
+        reference: &AudioBuffer,
     ) -> Result<f32, EvaluationError> {
-        Ok(0.6) // Simplified
+        evaluator_dsp::phase_coherence(audio.samples(), reference.samples())
     }
 
     async fn calculate_cross_correlation_peak(
@@ -1755,18 +1768,18 @@ impl QualityEvaluator {
 
     async fn calculate_spectral_convergence(
         &self,
-        _audio: &AudioBuffer,
-        _reference: &AudioBuffer,
+        audio: &AudioBuffer,
+        reference: &AudioBuffer,
     ) -> Result<f32, EvaluationError> {
-        Ok(0.85) // Simplified
+        evaluator_dsp::spectral_convergence(audio.samples(), reference.samples())
     }
 
     async fn calculate_log_spectral_distance(
         &self,
-        _audio: &AudioBuffer,
-        _reference: &AudioBuffer,
+        audio: &AudioBuffer,
+        reference: &AudioBuffer,
     ) -> Result<f32, EvaluationError> {
-        Ok(0.2) // Simplified
+        evaluator_dsp::log_spectral_distance(audio.samples(), reference.samples())
     }
 
     /// Calculate demographic-adapted MOS score

@@ -54,6 +54,9 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
+/// Phonetic encoding (Metaphone) used by [`NormalizationStrategy::Phonetic`].
+mod phonetic;
+
 /// Configuration for batch optimization strategies.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptimizationConfig {
@@ -629,12 +632,12 @@ impl BatchOptimizer {
                     .to_lowercase()
             }
             NormalizationStrategy::Phonetic => {
-                // Simplified phonetic normalization
-                // In production, would use actual phonetic algorithm (Soundex, Metaphone)
-                text.to_lowercase()
-                    .chars()
-                    .filter(|c| c.is_alphabetic())
-                    .collect()
+                // Pronunciation-based key via the classic Metaphone algorithm
+                // (Lawrence Philips, 1990). Each whitespace-separated word is
+                // encoded to a phoneme code and the codes are re-joined, so
+                // similar-sounding requests (e.g. "knight"/"night") collapse to
+                // the same deduplication key. See `phonetic` module for details.
+                phonetic::phonetic_key(text)
             }
         }
     }

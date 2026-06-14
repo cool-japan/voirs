@@ -290,10 +290,74 @@ impl QualityAnalyzer {
     }
 
     /// Calculate tonnetz features
-    async fn calculate_tonnetz(&self, _audio: &AudioBuffer) -> Result<Vec<f32>, RecognitionError> {
-        // Simplified tonnetz calculation
-        // In a real implementation, this would compute harmonic network coordinates
-        Ok(vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0]) // 6D tonnetz space
+    ///
+    /// Computes the 6-dimensional Tonnetz (tonal centroid) representation of the
+    /// audio by projecting its 12-bin chromagram onto the perfect-fifth,
+    /// minor-third, and major-third harmonic circles.
+    async fn calculate_tonnetz(&self, audio: &AudioBuffer) -> Result<Vec<f32>, RecognitionError> {
+        let chroma = self.calculate_chroma(audio).await?;
+        Ok(Self::project_chroma_to_tonnetz(&chroma))
+    }
+
+    /// Project a 12-bin chromagram onto the 6-D Tonnetz (tonal centroid) space.
+    ///
+    /// Implements the Harte-Sandler-Gasser (2006) tonal-centroid transform. The
+    /// chroma vector is projected onto three harmonic circles - perfect fifths,
+    /// minor thirds, and major thirds - each contributing a `(sin, cos)` pair.
+    /// The standard radii are `1.0` for the fifth and minor-third circles and
+    /// `0.5` for the major-third circle. The projection is normalized by the
+    /// chroma sum (L1 energy), guarding the divide-by-sum so that silent or
+    /// malformed input yields an all-zero vector instead of `NaN`/`inf`.
+    ///
+    /// Output layout (canonical librosa ordering):
+    /// `[fifth_sin, fifth_cos, minor3_sin, minor3_cos, major3_sin, major3_cos]`.
+    fn project_chroma_to_tonnetz(chroma: &[f32]) -> Vec<f32> {
+        use std::f32::consts::PI;
+
+        /// Number of pitch classes in the chromatic scale.
+        const N_PITCH_CLASSES: usize = 12;
+        /// Radius of the major-third circle. The fifth and minor-third circles
+        /// use unit radius, so no scaling is applied for them.
+        const RADIUS_MAJOR_THIRD: f32 = 0.5;
+
+        let mut tonnetz = vec![0.0_f32; 6];
+
+        // The chromagram must provide exactly one bin per pitch class.
+        if chroma.len() != N_PITCH_CLASSES {
+            return tonnetz;
+        }
+
+        // L1 energy of the chroma vector. Guard the divide-by-sum so silent
+        // frames produce all zeros rather than NaN/inf.
+        let chroma_sum: f32 = chroma.iter().sum();
+        if chroma_sum <= f32::EPSILON {
+            return tonnetz;
+        }
+
+        for (pitch_class, &energy) in chroma.iter().enumerate() {
+            let position = pitch_class as f32 / N_PITCH_CLASSES as f32;
+
+            // Perfect-fifth circle: 7 semitones per step, unit radius.
+            let fifth_angle = 2.0 * PI * position * 7.0;
+            tonnetz[0] += energy * fifth_angle.sin();
+            tonnetz[1] += energy * fifth_angle.cos();
+
+            // Minor-third circle: minor-third lattice axis, unit radius.
+            let minor_third_angle = 2.0 * PI * position * 9.0;
+            tonnetz[2] += energy * minor_third_angle.sin();
+            tonnetz[3] += energy * minor_third_angle.cos();
+
+            // Major-third circle: 4 semitones per step, radius 0.5.
+            let major_third_angle = 2.0 * PI * position * 4.0;
+            tonnetz[4] += energy * RADIUS_MAJOR_THIRD * major_third_angle.sin();
+            tonnetz[5] += energy * RADIUS_MAJOR_THIRD * major_third_angle.cos();
+        }
+
+        for value in &mut tonnetz {
+            *value /= chroma_sum;
+        }
+
+        tonnetz
     }
 
     /// Calculate RMS (Root Mean Square) energy
@@ -604,6 +668,118 @@ mod tests {
         let sum: f32 = chroma.iter().sum();
         if sum > 0.0 {
             assert!((sum - 1.0).abs() < 0.001);
+        }
+    }
+
+    /// Build a 12-bin chroma vector with unit energy on the given pitch classes.
+    fn chroma_from_pitch_classes(pitch_classes: &[usize]) -> Vec<f32> {
+        let mut chroma = vec![0.0_f32; 12];
+        for &pc in pitch_classes {
+            chroma[pc % 12] = 1.0;
+        }
+        chroma
+    }
+
+    /// Transpose a 12-bin chroma vector up by `semitones`.
+    fn transpose_chroma(chroma: &[f32], semitones: usize) -> Vec<f32> {
+        let mut shifted = vec![0.0_f32; 12];
+        for (pc, &energy) in chroma.iter().enumerate() {
+            shifted[(pc + semitones) % 12] += energy;
+        }
+        shifted
+    }
+
+    #[test]
+    fn test_tonnetz_major_triad_is_stable_nonzero() {
+        // C-E-G major triad maps to pitch classes 0, 4, 7.
+        let chroma = chroma_from_pitch_classes(&[0, 4, 7]);
+        let tonnetz = QualityAnalyzer::project_chroma_to_tonnetz(&chroma);
+
+        assert_eq!(tonnetz.len(), 6);
+        for value in &tonnetz {
+            assert!(value.is_finite(), "tonnetz component must be finite");
+            // A normalized projection onto unit-radius circles is bounded by 1.
+            assert!(value.abs() <= 1.0 + 1e-5);
+        }
+
+        let magnitude: f32 = tonnetz.iter().map(|v| v * v).sum::<f32>().sqrt();
+        assert!(magnitude > 0.1, "major triad must yield a non-zero tonnetz");
+
+        // Stability: the pure projection is deterministic for identical input.
+        let again = QualityAnalyzer::project_chroma_to_tonnetz(&chroma);
+        for (a, b) in tonnetz.iter().zip(again.iter()) {
+            assert!((a - b).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn test_tonnetz_silent_chroma_is_zero_without_nan() {
+        let silent = vec![0.0_f32; 12];
+        let tonnetz = QualityAnalyzer::project_chroma_to_tonnetz(&silent);
+
+        assert_eq!(tonnetz.len(), 6);
+        for value in &tonnetz {
+            assert!(value.is_finite(), "silent chroma must not produce NaN/inf");
+        }
+        assert_eq!(tonnetz, vec![0.0_f32; 6]);
+    }
+
+    #[test]
+    fn test_tonnetz_wrong_length_returns_zero() {
+        let too_short = vec![0.2_f32; 7];
+        assert_eq!(
+            QualityAnalyzer::project_chroma_to_tonnetz(&too_short),
+            vec![0.0_f32; 6]
+        );
+
+        let empty: Vec<f32> = Vec::new();
+        assert_eq!(
+            QualityAnalyzer::project_chroma_to_tonnetz(&empty),
+            vec![0.0_f32; 6]
+        );
+    }
+
+    #[test]
+    fn test_tonnetz_transposition_rotates_circles() {
+        let chroma = chroma_from_pitch_classes(&[0, 4, 7]);
+        let transposed = transpose_chroma(&chroma, 1);
+
+        let base = QualityAnalyzer::project_chroma_to_tonnetz(&chroma);
+        let rotated = QualityAnalyzer::project_chroma_to_tonnetz(&transposed);
+
+        // Transposition rotates each harmonic circle by a fixed angle, so the
+        // magnitude of every (sin, cos) pair is preserved.
+        for (base_pair, rot_pair) in base.chunks(2).zip(rotated.chunks(2)) {
+            let base_mag = (base_pair[0] * base_pair[0] + base_pair[1] * base_pair[1]).sqrt();
+            let rot_mag = (rot_pair[0] * rot_pair[0] + rot_pair[1] * rot_pair[1]).sqrt();
+            assert!(
+                (base_mag - rot_mag).abs() < 1e-5,
+                "circle magnitude changed under transposition: {base_mag} vs {rot_mag}"
+            );
+        }
+
+        // A non-trivial transposition must actually move the vector.
+        let changed = base
+            .iter()
+            .zip(rotated.iter())
+            .any(|(a, b)| (a - b).abs() > 1e-3);
+        assert!(changed, "transposition should rotate the tonnetz vector");
+    }
+
+    #[tokio::test]
+    async fn test_tonnetz_via_audio_pipeline() {
+        let analyzer = QualityAnalyzer::new().await.unwrap();
+
+        // A 440 Hz tone exercises the full chroma -> tonnetz path.
+        let samples: Vec<f32> = (0..2048)
+            .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 16000.0).sin())
+            .collect();
+        let audio = AudioBuffer::new(samples, 16000, 1);
+
+        let tonnetz = analyzer.calculate_tonnetz(&audio).await.unwrap();
+        assert_eq!(tonnetz.len(), 6);
+        for value in &tonnetz {
+            assert!(value.is_finite());
         }
     }
 }

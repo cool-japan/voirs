@@ -348,8 +348,8 @@ impl AdvancedAudioAnalyzer {
         // Apply pre-filter (high-pass + high-frequency shelving)
         let filtered = self.apply_r128_prefilter(samples, sample_rate)?;
 
-        // Calculate mean square with gating
-        let ms = self.calculate_gated_mean_square(&filtered)?;
+        // Calculate mean square with BS.1770-4 two-stage gating
+        let ms = self.calculate_gated_mean_square(&filtered, sample_rate)?;
 
         // Convert to LUFS
         let lufs = -0.691 + 10.0 * ms.log10();
@@ -357,32 +357,168 @@ impl AdvancedAudioAnalyzer {
         Ok(lufs)
     }
 
-    /// Apply EBU R128 pre-filter
-    fn apply_r128_prefilter(&self, samples: &[f32], _sample_rate: f32) -> Result<Vec<f32>> {
-        // Simplified implementation - in practice would use proper digital filters
-        // This is a basic high-pass filter approximation
-        let mut filtered = Vec::with_capacity(samples.len());
-        let alpha = 0.99; // High-pass filter coefficient
-
-        let mut prev_input = 0.0;
-        let mut prev_output = 0.0;
-
-        for &sample in samples {
-            let output = alpha * (prev_output + sample - prev_input);
-            filtered.push(output);
-            prev_input = sample;
-            prev_output = output;
+    /// Apply the ITU-R BS.1770-4 / EBU R128 "K-weighting" pre-filter.
+    ///
+    /// The K-weighting frequency response standardised in ITU-R BS.1770-4
+    /// (Annex 1) and adopted by EBU R128 is realised as a cascade of two
+    /// second-order sections (biquads):
+    ///
+    /// * **Stage 1 — high-shelf (~1.5 kHz, +4 dB):** models the acoustic effect
+    ///   of the head ("pre-filter"), gently boosting high frequencies.
+    /// * **Stage 2 — RLB high-pass (~38 Hz):** the revised low-frequency
+    ///   B-weighting curve, strongly attenuating DC and sub-bass energy.
+    ///
+    /// The biquad coefficients are obtained from the canonical
+    /// bilinear-transform derivation shared with [`AudioData`]
+    /// ([`AudioData::k_weighting_pre_coeffs`] / [`AudioData::k_weighting_rlb_coeffs`]),
+    /// so the response is correct at any sample rate and reproduces the
+    /// published 48 kHz reference coefficients exactly. Filtering is performed
+    /// in `f64` (Direct Form II Transposed-equivalent / Direct Form II) for
+    /// numerical stability, then narrowed back to `f32`.
+    fn apply_r128_prefilter(&self, samples: &[f32], sample_rate: f32) -> Result<Vec<f32>> {
+        let fs = f64::from(sample_rate);
+        if fs <= 0.0 || samples.is_empty() {
+            return Ok(samples.to_vec());
         }
+
+        // Reuse the canonical BS.1770-4 K-weighting biquad coefficients derived
+        // for this sample rate (do NOT re-derive / hardcode here).
+        let [b0_pre, b1_pre, b2_pre, a1_pre, a2_pre] = AudioData::k_weighting_pre_coeffs(fs);
+        let [b0_rlb, b1_rlb, b2_rlb, a1_rlb, a2_rlb] = AudioData::k_weighting_rlb_coeffs(fs);
+
+        // Two biquad stages in series (Direct Form II).
+        let mut w1 = [0.0f64; 2]; // state for stage 1 (high-shelf)
+        let mut w2 = [0.0f64; 2]; // state for stage 2 (RLB high-pass)
+
+        let filtered = samples
+            .iter()
+            .map(|&x| {
+                let xd = f64::from(x);
+
+                // Stage 1: high-shelf
+                let w1n = xd - a1_pre * w1[0] - a2_pre * w1[1];
+                let y1 = b0_pre * w1n + b1_pre * w1[0] + b2_pre * w1[1];
+                w1[1] = w1[0];
+                w1[0] = w1n;
+
+                // Stage 2: RLB high-pass
+                let w2n = y1 - a1_rlb * w2[0] - a2_rlb * w2[1];
+                let y2 = b0_rlb * w2n + b1_rlb * w2[0] + b2_rlb * w2[1];
+                w2[1] = w2[0];
+                w2[0] = w2n;
+
+                y2 as f32
+            })
+            .collect();
 
         Ok(filtered)
     }
 
-    /// Calculate gated mean square for loudness measurement
-    fn calculate_gated_mean_square(&self, samples: &[f32]) -> Result<f32> {
-        // Simple ungated mean square calculation
-        // Real implementation would include absolute and relative gating
-        let sum_squares: f32 = samples.iter().map(|&x| x * x).sum();
-        Ok(sum_squares / samples.len() as f32)
+    /// Calculate the gated mean square of a K-weighted signal for integrated
+    /// loudness measurement, per ITU-R BS.1770-4 / EBU R128.
+    ///
+    /// The integrated-loudness algorithm of BS.1770-4 (§5) is built around a
+    /// two-stage gating procedure applied to overlapping measurement blocks of
+    /// the already K-weighted signal:
+    ///
+    /// 1. **Blocking:** the signal is segmented into 400 ms blocks ("gating
+    ///    blocks") overlapping by 75 % (i.e. a 100 ms hop).
+    /// 2. **Per-block loudness:** each block's mean square `MS` is converted to
+    ///    a loudness value `L = −0.691 + 10·log10(MS)` LUFS (the `−0.691`
+    ///    constant calibrates the K-weighted mean square to LKFS).
+    /// 3. **Absolute gate (`Γ_a = −70 LUFS`):** blocks whose loudness falls
+    ///    below −70 LUFS are discarded (they are treated as silence).
+    /// 4. **Relative gate:** the mean square of the absolute-gated blocks is
+    ///    converted to an integrated loudness `L_abs`; the relative threshold is
+    ///    `Γ_r = L_abs − 10 LU`. Only blocks with loudness `≥ Γ_r` survive.
+    /// 5. **Result:** the (linear) mean square of the relative-gated blocks is
+    ///    returned. The caller converts this to LUFS with the same
+    ///    `−0.691 + 10·log10(·)` mapping.
+    ///
+    /// Edge cases are guarded: if no block survives a gate, the algorithm falls
+    /// back to the previous (looser) set — relative-gated → absolute-gated →
+    /// ungated mean square — so a finite measurement is always produced.
+    ///
+    /// `sample_rate` (Hz) is required to size the 400 ms blocks; it is supplied
+    /// by the caller, which already carries it for the K-weighting filter.
+    fn calculate_gated_mean_square(&self, samples: &[f32], sample_rate: f32) -> Result<f32> {
+        // Ungated mean square of the whole buffer (ultimate fallback).
+        let ungated_ms = |s: &[f32]| -> f32 {
+            if s.is_empty() {
+                0.0
+            } else {
+                s.iter().map(|&x| x * x).sum::<f32>() / s.len() as f32
+            }
+        };
+
+        // 400 ms gating blocks with a 100 ms hop (75 % overlap), per BS.1770-4.
+        let block_size = (sample_rate as f64 * 0.4).round() as usize;
+        let hop_size = (sample_rate as f64 * 0.1).round() as usize;
+
+        // For signals shorter than a single gating block, gating is undefined;
+        // fall back to the plain mean square of the available samples.
+        if block_size == 0 || hop_size == 0 || samples.len() < block_size {
+            return Ok(ungated_ms(samples));
+        }
+
+        // ---- (a)/(b) Per-block mean square (linear domain). ----
+        // Loudness `L = −0.691 + 10·log10(MS)` is monotonic in `MS`, so the
+        // gate thresholds are applied directly on mean-square values to avoid
+        // redundant log/exp round-trips while remaining exactly equivalent.
+        let mut block_ms: Vec<f32> = Vec::new();
+        let mut start = 0usize;
+        while start + block_size <= samples.len() {
+            let block = &samples[start..start + block_size];
+            block_ms.push(ungated_ms(block));
+            start += hop_size;
+        }
+
+        if block_ms.is_empty() {
+            return Ok(ungated_ms(samples));
+        }
+
+        // Absolute gate threshold Γ_a = −70 LUFS expressed as a mean square.
+        // L = −0.691 + 10·log10(MS)  ⇒  MS = 10^((L + 0.691) / 10).
+        let absolute_gate_lufs = -70.0_f64;
+        let absolute_gate_ms = 10.0_f64.powf((absolute_gate_lufs + 0.691) / 10.0) as f32;
+
+        // ---- (c) Absolute gating: keep blocks with loudness ≥ −70 LUFS. ----
+        let abs_gated: Vec<f32> = block_ms
+            .iter()
+            .copied()
+            .filter(|&ms| ms >= absolute_gate_ms)
+            .collect();
+
+        // If everything is below the absolute gate (effectively silence), there
+        // is no meaningful loudness; fall back to the ungated mean square.
+        if abs_gated.is_empty() {
+            return Ok(ungated_ms(samples));
+        }
+
+        // ---- (d) Relative threshold from the absolute-gated blocks. ----
+        // Integrated loudness of the absolute-gated set:
+        //   L_abs = −0.691 + 10·log10(mean(MS_abs));
+        // relative threshold Γ_r = L_abs − 10 LU, i.e. a factor 10^(−1) = 0.1
+        // on the linear mean square.
+        let mean_ms_abs = abs_gated.iter().sum::<f32>() / abs_gated.len() as f32;
+        let relative_gate_ms = mean_ms_abs * 0.1; // −10 LU in the linear domain
+
+        // ---- (e) Relative gating: keep blocks with loudness ≥ Γ_r. ----
+        let rel_gated: Vec<f32> = abs_gated
+            .iter()
+            .copied()
+            .filter(|&ms| ms >= relative_gate_ms)
+            .collect();
+
+        // ---- (f) Mean square of the final surviving set, with fallbacks. ----
+        if rel_gated.is_empty() {
+            // No block clears the relative gate: fall back to the absolute-gated
+            // mean square (already guaranteed non-empty above).
+            return Ok(mean_ms_abs);
+        }
+
+        let gated_ms = rel_gated.iter().sum::<f32>() / rel_gated.len() as f32;
+        Ok(gated_ms)
     }
 
     /// Calculate loudness range
@@ -1081,5 +1217,183 @@ mod tests {
 
         // Should return a reasonable tempo value
         assert!((60.0..=180.0).contains(&tempo));
+    }
+
+    /// Build a single-frequency sine wave (deterministic) for filter tests.
+    fn make_sine(freq: f32, sample_rate: f32, n: usize, amplitude: f32) -> Vec<f32> {
+        (0..n)
+            .map(|i| {
+                let t = i as f32 / sample_rate;
+                (2.0 * PI * freq * t).sin() * amplitude
+            })
+            .collect()
+    }
+
+    fn rms(samples: &[f32]) -> f32 {
+        if samples.is_empty() {
+            return 0.0;
+        }
+        (samples.iter().map(|&x| x * x).sum::<f32>() / samples.len() as f32).sqrt()
+    }
+
+    /// BS.1770-4 gating: a louder block must dominate the gated mean square over
+    /// a quiet block. The relative gate (−10 LU) discards the quiet region, so
+    /// the gated MS sits close to the loud block's MS and far above the naive
+    /// ungated average that would dilute the loud energy with the quiet energy.
+    #[test]
+    fn test_gating_louder_block_dominates() {
+        let config = AdvancedAnalysisConfig::default();
+        let analyzer = AdvancedAudioAnalyzer::new(config).unwrap();
+
+        let sample_rate = 48_000.0_f32;
+        // 5 s loud (constant 0.8) followed by 5 s quiet (0.05). Long regions
+        // keep the handful of 75 %-overlap boundary blocks negligible.
+        let region = 5 * sample_rate as usize;
+        let mut samples = vec![0.8_f32; region];
+        samples.extend(std::iter::repeat_n(0.05_f32, region));
+
+        let gated_ms = analyzer
+            .calculate_gated_mean_square(&samples, sample_rate)
+            .unwrap();
+
+        // Naive ungated mean square would average the loud and quiet halves
+        // (~0.32). The gated value must instead track the loud block.
+        let ungated_ms = samples.iter().map(|&x| x * x).sum::<f32>() / samples.len() as f32;
+        let loud_ms = 0.8_f32 * 0.8_f32; // 0.64
+        let quiet_ms = 0.05_f32 * 0.05_f32; // 0.0025
+
+        assert!(
+            gated_ms > ungated_ms,
+            "gated MS {gated_ms} should exceed ungated MS {ungated_ms}"
+        );
+        assert!(
+            gated_ms >= 0.9 * loud_ms,
+            "gated MS {gated_ms} should track loud-block MS {loud_ms}"
+        );
+        // And it must be nowhere near the quiet level (quiet region gated out).
+        assert!(
+            gated_ms > quiet_ms * 100.0,
+            "gated MS {gated_ms} must not be dragged toward quiet MS {quiet_ms}"
+        );
+    }
+
+    /// BS.1770-4 absolute gate: blocks below −70 LUFS (here, exact silence) are
+    /// excluded. A signal that is silence + one loud burst must yield a gated
+    /// mean square close to the burst's own MS, NOT diluted by the silence.
+    #[test]
+    fn test_gating_excludes_silence_below_absolute_gate() {
+        let config = AdvancedAnalysisConfig::default();
+        let analyzer = AdvancedAudioAnalyzer::new(config).unwrap();
+
+        let sample_rate = 48_000.0_f32;
+        let burst_amp = 0.5_f32;
+        let burst_len = 5 * sample_rate as usize; // 5 s loud burst
+        let sil = 3 * sample_rate as usize; // 3 s silence each side
+
+        // 3 s silence, then a 5 s burst, then 3 s silence.
+        let mut samples = vec![0.0_f32; sil];
+        samples.extend(std::iter::repeat_n(burst_amp, burst_len));
+        samples.extend(std::iter::repeat_n(0.0_f32, sil));
+
+        let gated_ms = analyzer
+            .calculate_gated_mean_square(&samples, sample_rate)
+            .unwrap();
+
+        let burst_ms = burst_amp * burst_amp; // 0.25
+        let ungated_ms = samples.iter().map(|&x| x * x).sum::<f32>() / samples.len() as f32;
+
+        // The silence (loudness = −∞, well below −70 LUFS) is absolute-gated
+        // out; the gated MS tracks the burst, far above the silence-diluted
+        // ungated average (~0.11 over the full 11 s).
+        assert!(
+            gated_ms >= 0.9 * burst_ms,
+            "gated MS {gated_ms} should track burst MS {burst_ms}, not diluted {ungated_ms}"
+        );
+        assert!(
+            gated_ms > ungated_ms * 1.8,
+            "gated MS {gated_ms} should far exceed silence-diluted ungated {ungated_ms}"
+        );
+    }
+
+    /// All-silence input must not panic and should report ~0 mean square via the
+    /// ungated fallback (no block clears the absolute gate).
+    #[test]
+    fn test_gating_all_silence_fallback() {
+        let config = AdvancedAnalysisConfig::default();
+        let analyzer = AdvancedAudioAnalyzer::new(config).unwrap();
+
+        let sample_rate = 48_000.0_f32;
+        let samples = vec![0.0_f32; 2 * sample_rate as usize];
+
+        let gated_ms = analyzer
+            .calculate_gated_mean_square(&samples, sample_rate)
+            .unwrap();
+        assert!(gated_ms.abs() < 1e-9, "all-silence gated MS should be ~0");
+    }
+
+    /// Short signals (shorter than one 400 ms gating block) fall back to a plain
+    /// mean square without panicking.
+    #[test]
+    fn test_gating_short_signal_fallback() {
+        let config = AdvancedAnalysisConfig::default();
+        let analyzer = AdvancedAudioAnalyzer::new(config).unwrap();
+
+        let sample_rate = 48_000.0_f32;
+        let samples = vec![0.5_f32; 100]; // ~2 ms, far below 400 ms
+        let gated_ms = analyzer
+            .calculate_gated_mean_square(&samples, sample_rate)
+            .unwrap();
+        // Plain mean square of constant 0.5 is 0.25.
+        assert!((gated_ms - 0.25).abs() < 1e-6);
+    }
+
+    /// The BS.1770-4 K-weighting pre-filter must strongly attenuate sub-50 Hz
+    /// energy (the RLB high-pass stage), while passing mid-band energy near
+    /// unity.
+    #[test]
+    fn test_prefilter_attenuates_sub_50hz() {
+        let config = AdvancedAnalysisConfig::default();
+        let analyzer = AdvancedAudioAnalyzer::new(config).unwrap();
+
+        let sample_rate = 48_000.0_f32;
+        let n = sample_rate as usize; // 1 s
+                                      // Skip a startup transient when measuring steady-state RMS.
+        let skip = sample_rate as usize / 10; // 100 ms
+
+        // Sub-50 Hz tone (30 Hz): should be heavily attenuated.
+        let low = make_sine(30.0, sample_rate, n, 0.5);
+        let low_filt = analyzer.apply_r128_prefilter(&low, sample_rate).unwrap();
+        let low_ratio = rms(&low_filt[skip..]) / rms(&low[skip..]);
+
+        // Mid-band tone (1 kHz): should pass close to unity (high-shelf adds a
+        // little gain, RLB does not attenuate here).
+        let mid = make_sine(1_000.0, sample_rate, n, 0.5);
+        let mid_filt = analyzer.apply_r128_prefilter(&mid, sample_rate).unwrap();
+        let mid_ratio = rms(&mid_filt[skip..]) / rms(&mid[skip..]);
+
+        // 30 Hz is well into the RLB stop-band → strong attenuation.
+        assert!(
+            low_ratio < 0.6,
+            "30 Hz energy should be attenuated, ratio = {low_ratio}"
+        );
+        // Mid-band passes essentially unchanged (≈ +0..+1 dB from the shelf).
+        assert!(
+            (0.9..=1.3).contains(&mid_ratio),
+            "1 kHz energy should pass near unity, ratio = {mid_ratio}"
+        );
+        // And crucially the low tone is attenuated far more than the mid tone.
+        assert!(
+            low_ratio < mid_ratio * 0.7,
+            "sub-50 Hz ({low_ratio}) must be attenuated more than mid-band ({mid_ratio})"
+        );
+    }
+
+    /// Empty input to the pre-filter must return an empty buffer, not panic.
+    #[test]
+    fn test_prefilter_empty_input() {
+        let config = AdvancedAnalysisConfig::default();
+        let analyzer = AdvancedAudioAnalyzer::new(config).unwrap();
+        let out = analyzer.apply_r128_prefilter(&[], 48_000.0).unwrap();
+        assert!(out.is_empty());
     }
 }

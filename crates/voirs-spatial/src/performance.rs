@@ -228,19 +228,152 @@ impl ResourceMonitor {
         ResourceStatistics::from_samples(samples, self.start_time)
     }
 
-    /// Get current CPU usage (simplified implementation)
+    /// Get current system CPU utilisation as a percentage in `[0, 100]`.
+    ///
+    /// On Linux this samples the aggregate `cpu` line of `/proc/stat` twice,
+    /// separated by [`CPU_SAMPLE_INTERVAL`], and returns the fraction of busy
+    /// jiffies observed over that window. On other platforms a conservative
+    /// `0.0` is returned because no dependency-free counter is available.
     fn get_cpu_usage() -> f32 {
-        // In a real implementation, this would read from /proc/stat on Linux
-        // or use system APIs. For testing, return a mock value.
-        fastrand::f32() * 10.0 // Random 0-10% CPU usage
+        sample_cpu_usage()
     }
 
-    /// Get current memory usage (simplified implementation)
+    /// Get the resident set size (RSS) of the current process, in bytes.
+    ///
+    /// On Linux this parses `VmRSS` from `/proc/self/status` (reported in kB
+    /// and converted to bytes). On other platforms a fixed, conservative
+    /// 64 MB estimate is returned.
     fn get_memory_usage() -> usize {
-        // In a real implementation, this would read system memory usage
-        // For testing, return a mock value.
-        100_000_000 + (fastrand::usize(..50_000_000)) // 100-150 MB
+        sample_memory_usage()
     }
+}
+
+/// Sampling window used when estimating system-wide CPU utilisation.
+///
+/// `/proc/stat` reports cumulative CPU time in jiffies, so a single reading
+/// carries no rate information; two readings separated by this interval are
+/// required to derive a percentage.
+#[cfg(target_os = "linux")]
+const CPU_SAMPLE_INTERVAL: Duration = Duration::from_millis(50);
+
+/// Conservative resident-memory estimate (64 MB) used as a fallback when a real
+/// RSS reading cannot be obtained (missing `VmRSS`, or non-Linux platform).
+const MEMORY_FALLBACK_BYTES: usize = 64 * 1024 * 1024;
+
+/// Aggregate CPU jiffies parsed from the leading `cpu` line of `/proc/stat`.
+#[cfg(target_os = "linux")]
+#[derive(Debug, Clone, Copy)]
+struct CpuTimes {
+    /// Jiffies spent doing work (total minus idle and iowait).
+    busy: u64,
+    /// Total jiffies across every state reported on the `cpu` line.
+    total: u64,
+}
+
+/// Parse the aggregate `cpu` line from the contents of `/proc/stat`.
+///
+/// The first line has the form
+/// `cpu  user nice system idle iowait irq softirq steal guest guest_nice`,
+/// where each value counts jiffies accumulated since boot. Returns `None` if
+/// the line is missing or malformed.
+#[cfg(target_os = "linux")]
+fn parse_proc_stat_cpu(contents: &str) -> Option<CpuTimes> {
+    let line = contents.lines().next()?;
+    let mut fields = line.split_whitespace();
+    if fields.next()? != "cpu" {
+        return None;
+    }
+    let values: Vec<u64> = fields
+        .map(|field| field.parse::<u64>().ok())
+        .collect::<Option<Vec<u64>>>()?;
+    if values.len() < 4 {
+        return None;
+    }
+    let total: u64 = values.iter().sum();
+    let idle = values[3];
+    let iowait = values.get(4).copied().unwrap_or(0);
+    let busy = total.saturating_sub(idle + iowait);
+    Some(CpuTimes { busy, total })
+}
+
+/// Compute the busy-time percentage between two cumulative `/proc/stat`
+/// samples, clamped to `[0, 100]`. Returns `0.0` when no jiffies elapsed
+/// between the two samples.
+#[cfg(target_os = "linux")]
+fn cpu_usage_percentage(previous: CpuTimes, current: CpuTimes) -> f32 {
+    let total_delta = current.total.saturating_sub(previous.total);
+    if total_delta == 0 {
+        return 0.0;
+    }
+    let busy_delta = current.busy.saturating_sub(previous.busy);
+    let percentage = (busy_delta as f64 / total_delta as f64) * 100.0;
+    percentage.clamp(0.0, 100.0) as f32
+}
+
+/// Read and parse the aggregate CPU jiffies from `/proc/stat`.
+#[cfg(target_os = "linux")]
+fn read_cpu_times() -> Option<CpuTimes> {
+    let contents = std::fs::read_to_string("/proc/stat").ok()?;
+    parse_proc_stat_cpu(&contents)
+}
+
+/// Sample system CPU utilisation by reading `/proc/stat` twice across
+/// [`CPU_SAMPLE_INTERVAL`]. Returns a percentage in `[0, 100]`, or `0.0` if the
+/// kernel counters are unavailable.
+#[cfg(target_os = "linux")]
+fn sample_cpu_usage() -> f32 {
+    let previous = match read_cpu_times() {
+        Some(times) => times,
+        None => return 0.0,
+    };
+    std::thread::sleep(CPU_SAMPLE_INTERVAL);
+    let current = match read_cpu_times() {
+        Some(times) => times,
+        None => return 0.0,
+    };
+    cpu_usage_percentage(previous, current)
+}
+
+/// Non-Linux fallback: no dependency-free CPU counter is available, so report a
+/// conservative `0.0`% instead of fabricating a value.
+#[cfg(not(target_os = "linux"))]
+fn sample_cpu_usage() -> f32 {
+    0.0
+}
+
+/// Parse the `VmRSS` field (reported in kB) from `/proc/self/status` and return
+/// the resident set size in bytes. Returns `None` if `VmRSS` is absent or
+/// malformed.
+#[cfg(target_os = "linux")]
+fn parse_vmrss_bytes(status: &str) -> Option<usize> {
+    for line in status.lines() {
+        if let Some(rest) = line.strip_prefix("VmRSS:") {
+            if let Some(kb_field) = rest.split_whitespace().next() {
+                if let Ok(kb) = kb_field.parse::<usize>() {
+                    return Some(kb * 1024);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Sample this process' resident set size (RSS) in bytes from
+/// `/proc/self/status`, falling back to [`MEMORY_FALLBACK_BYTES`] if `VmRSS`
+/// cannot be read.
+#[cfg(target_os = "linux")]
+fn sample_memory_usage() -> usize {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|status| parse_vmrss_bytes(&status))
+        .unwrap_or(MEMORY_FALLBACK_BYTES)
+}
+
+/// Non-Linux fallback: return a fixed, conservative 64 MB estimate instead of a
+/// random value.
+#[cfg(not(target_os = "linux"))]
+fn sample_memory_usage() -> usize {
+    MEMORY_FALLBACK_BYTES
 }
 
 /// Resource usage statistics
@@ -950,5 +1083,116 @@ mod tests {
         metrics.throughput = (1000.0 * 512.0) / 1.0; // samples per second
 
         assert_eq!(metrics.throughput, 512_000.0);
+    }
+
+    #[test]
+    fn test_get_cpu_usage_in_range() {
+        // CPU usage must be a finite, valid percentage on every platform and
+        // must no longer be a random `fastrand` value.
+        let cpu = ResourceMonitor::get_cpu_usage();
+        assert!(cpu.is_finite(), "CPU usage must be finite, got {cpu}");
+        assert!(
+            (0.0..=100.0).contains(&cpu),
+            "CPU usage must be within [0, 100], got {cpu}"
+        );
+    }
+
+    #[test]
+    fn test_get_memory_usage_positive() {
+        // Real RSS (Linux) or the conservative fallback is always a positive
+        // byte count, never a random mock.
+        let bytes = ResourceMonitor::get_memory_usage();
+        assert!(
+            bytes > 0,
+            "memory usage must be positive, got {bytes} bytes"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_parse_proc_stat_cpu_valid() {
+        // total = 100 + 0 + 50 + 800 + 50 = 1000;
+        // busy  = total - idle(800) - iowait(50) = 150.
+        let contents = "cpu  100 0 50 800 50 0 0 0 0 0\ncpu0 10 0 5 80 5 0 0 0 0 0\n";
+        let times = parse_proc_stat_cpu(contents).expect("aggregate cpu line should parse");
+        assert_eq!(times.total, 1000);
+        assert_eq!(times.busy, 150);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_parse_proc_stat_cpu_rejects_invalid() {
+        assert!(parse_proc_stat_cpu("intr 12345 0 0\n").is_none());
+        assert!(parse_proc_stat_cpu("").is_none());
+        // Too few numeric fields (need at least idle at index 3).
+        assert!(parse_proc_stat_cpu("cpu 1 2 3\n").is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_cpu_usage_percentage_half_busy() {
+        let previous = CpuTimes {
+            busy: 100,
+            total: 1000,
+        };
+        let current = CpuTimes {
+            busy: 150,
+            total: 1100,
+        };
+        // busy delta 50 over total delta 100 -> 50%.
+        let percentage = cpu_usage_percentage(previous, current);
+        assert!(
+            (percentage - 50.0).abs() < 1e-3,
+            "expected ~50%, got {percentage}"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_cpu_usage_percentage_zero_delta_is_zero() {
+        let sample = CpuTimes {
+            busy: 500,
+            total: 5000,
+        };
+        assert_eq!(cpu_usage_percentage(sample, sample), 0.0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_cpu_usage_percentage_clamps_to_100() {
+        // Degenerate counters where busy delta exceeds total delta must clamp.
+        let previous = CpuTimes { busy: 0, total: 0 };
+        let current = CpuTimes {
+            busy: 200,
+            total: 100,
+        };
+        assert_eq!(cpu_usage_percentage(previous, current), 100.0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_parse_vmrss_bytes_valid() {
+        let status = "Name:\tvoirs\nVmPeak:\t  20480 kB\nVmRSS:\t   2048 kB\nThreads:\t8\n";
+        let bytes = parse_vmrss_bytes(status).expect("VmRSS should parse");
+        assert_eq!(bytes, 2048 * 1024); // kB -> bytes
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_parse_vmrss_bytes_missing_is_none() {
+        let status = "Name:\tvoirs\nThreads:\t8\n";
+        assert!(parse_vmrss_bytes(status).is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_real_cpu_usage_path_is_valid_percentage() {
+        // Exercises the real /proc/stat double-sampling path end to end.
+        let cpu = sample_cpu_usage();
+        assert!(cpu.is_finite(), "real CPU sample must be finite, got {cpu}");
+        assert!(
+            (0.0..=100.0).contains(&cpu),
+            "real CPU sample out of range: {cpu}"
+        );
     }
 }

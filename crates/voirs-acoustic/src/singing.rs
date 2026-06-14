@@ -802,111 +802,19 @@ impl SingingVoiceSynthesizer {
         Ok(phonemes)
     }
 
-    /// Simple lyrics to phoneme conversion
+    /// Convert a singing-lyric syllable to its phoneme(s).
+    ///
+    /// Performs a real, systematic Japanese grapheme-to-phoneme decomposition
+    /// (see [`crate::singing_g2p`]): every mora is split into its constituent
+    /// consonant + vowel phonemes. Both kana (hiragana/katakana, including yōon,
+    /// sokuon `っ` and the long-vowel mark `ー`) and romaji syllables are
+    /// accepted. A multi-mora lyric is returned as a single space-separated
+    /// phoneme symbol (e.g. `"さくら"` -> `"s a k u r a"`), matching the
+    /// convention used elsewhere in this module. Out-of-vocabulary input
+    /// degrades gracefully to a default vowel instead of failing.
     fn lyrics_to_phoneme(&self, lyrics: &str) -> Result<Phoneme> {
-        // This is a simplified implementation
-        // In a real system, this would use a proper G2P system
-        let phoneme_map = [
-            ("a", "a"),
-            ("e", "e"),
-            ("i", "i"),
-            ("o", "o"),
-            ("u", "u"),
-            ("la", "l a"),
-            ("le", "l e"),
-            ("li", "l i"),
-            ("lo", "l o"),
-            ("lu", "l u"),
-            ("ma", "m a"),
-            ("me", "m e"),
-            ("mi", "m i"),
-            ("mo", "m o"),
-            ("mu", "m u"),
-            ("na", "n a"),
-            ("ne", "n e"),
-            ("ni", "n i"),
-            ("no", "n o"),
-            ("nu", "n u"),
-            ("da", "d a"),
-            ("de", "d e"),
-            ("di", "d i"),
-            ("do", "d o"),
-            ("du", "d u"),
-            ("ta", "t a"),
-            ("te", "t e"),
-            ("ti", "t i"),
-            ("to", "t o"),
-            ("tu", "t u"),
-            ("ka", "k a"),
-            ("ke", "k e"),
-            ("ki", "k i"),
-            ("ko", "k o"),
-            ("ku", "k u"),
-            ("ga", "g a"),
-            ("ge", "g e"),
-            ("gi", "g i"),
-            ("go", "g o"),
-            ("gu", "g u"),
-            ("sa", "s a"),
-            ("se", "s e"),
-            ("si", "s i"),
-            ("so", "s o"),
-            ("su", "s u"),
-            ("za", "z a"),
-            ("ze", "z e"),
-            ("zi", "z i"),
-            ("zo", "z o"),
-            ("zu", "z u"),
-            ("ha", "h a"),
-            ("he", "h e"),
-            ("hi", "h i"),
-            ("ho", "h o"),
-            ("hu", "h u"),
-            ("ba", "b a"),
-            ("be", "b e"),
-            ("bi", "b i"),
-            ("bo", "b o"),
-            ("bu", "b u"),
-            ("pa", "p a"),
-            ("pe", "p e"),
-            ("pi", "p i"),
-            ("po", "p o"),
-            ("pu", "p u"),
-            ("fa", "f a"),
-            ("fe", "f e"),
-            ("fi", "f i"),
-            ("fo", "f o"),
-            ("fu", "f u"),
-            ("va", "v a"),
-            ("ve", "v e"),
-            ("vi", "v i"),
-            ("vo", "v o"),
-            ("vu", "v u"),
-            ("ya", "j a"),
-            ("ye", "j e"),
-            ("yi", "j i"),
-            ("yo", "j o"),
-            ("yu", "j u"),
-            ("ra", "r a"),
-            ("re", "r e"),
-            ("ri", "r i"),
-            ("ro", "r o"),
-            ("ru", "r u"),
-            ("wa", "w a"),
-            ("we", "w e"),
-            ("wi", "w i"),
-            ("wo", "w o"),
-            ("wu", "w u"),
-        ];
-
-        let normalized = lyrics.to_lowercase();
-        let phoneme_symbol = phoneme_map
-            .iter()
-            .find(|(syllable, _)| *syllable == normalized)
-            .map(|(_, phoneme)| *phoneme)
-            .unwrap_or("a"); // Default to 'a' vowel
-
-        Ok(Phoneme::new(phoneme_symbol))
+        let tokens = crate::singing_g2p::lyrics_to_phoneme_tokens(lyrics);
+        Ok(Phoneme::new(tokens.join(" ")))
     }
 
     /// Apply singing-specific prosody modifications
@@ -1178,11 +1086,21 @@ mod tests {
         let config = SingingConfig::default();
         let synthesizer = SingingVoiceSynthesizer::new(config);
 
+        // Legacy romaji single-mora behaviour is preserved.
         let phoneme = synthesizer.lyrics_to_phoneme("la").unwrap();
         assert_eq!(phoneme.symbol, "l a");
 
-        let phoneme2 = synthesizer.lyrics_to_phoneme("unknown").unwrap();
-        assert_eq!(phoneme2.symbol, "a"); // Default fallback
+        // A multi-mora kana lyric is decomposed into the full phoneme sequence.
+        let sakura = synthesizer.lyrics_to_phoneme("さくら").unwrap();
+        assert_eq!(sakura.symbol, "s a k u r a");
+
+        // Romaji multi-mora input is segmented greedily into morae.
+        let romaji = synthesizer.lyrics_to_phoneme("sakura").unwrap();
+        assert_eq!(romaji.symbol, "s a k u r a");
+
+        // Out-of-vocabulary input degrades gracefully (no panic, default vowel).
+        let oov = synthesizer.lyrics_to_phoneme("###").unwrap();
+        assert_eq!(oov.symbol, "a");
     }
 
     #[test]

@@ -134,6 +134,11 @@ pub enum LFOWaveform {
 /// Noise generator for synthesis effects.
 ///
 /// Generates various types of noise with different spectral characteristics.
+///
+/// White noise is produced by an internal linear congruential generator. Pink and
+/// brown noise are derived from that white source using IIR filters whose running
+/// state is held in the fields below, so successive samples are spectrally correct
+/// (true 1/f and 1/f² emphasis) rather than merely amplitude-scaled white noise.
 #[derive(Debug, Clone)]
 pub struct NoiseGenerator {
     /// Type of noise to generate
@@ -142,6 +147,16 @@ pub struct NoiseGenerator {
     amplitude: f32,
     /// Internal random number generator state
     rng_state: u64,
+    /// Paul Kellet pink-noise filter state coefficients (b0..b6).
+    ///
+    /// Seven first-order low-pass sections summed together approximate a
+    /// -3 dB/octave (1/f) spectrum. Each element is updated per sample.
+    pink_state: [f32; 7],
+    /// Brown-noise leaky-integrator state (running accumulator).
+    ///
+    /// A single-pole integrator of the white source yields a -6 dB/octave
+    /// (1/f²) spectrum. The small leak keeps the value from drifting unbounded.
+    brown_state: f32,
 }
 
 impl NoiseGenerator {
@@ -160,6 +175,8 @@ impl NoiseGenerator {
             noise_type,
             amplitude: amplitude.clamp(0.0, 1.0),
             rng_state: 1,
+            pink_state: [0.0; 7],
+            brown_state: 0.0,
         }
     }
 
@@ -173,8 +190,8 @@ impl NoiseGenerator {
 
         let output = match self.noise_type {
             NoiseType::White => white_noise,
-            NoiseType::Pink => white_noise * 0.7, // Simplified pink noise
-            NoiseType::Brown => white_noise * 0.5, // Simplified brown noise
+            NoiseType::Pink => self.generate_pink(white_noise),
+            NoiseType::Brown => self.generate_brown(white_noise),
             NoiseType::Breath => {
                 // Breath-like noise with low-frequency bias
                 white_noise * 0.3 * (1.0 + 0.5 * (self.rng_state as f32 / u64::MAX as f32).sin())
@@ -182,6 +199,57 @@ impl NoiseGenerator {
         };
 
         output * self.amplitude
+    }
+
+    /// Generates one pink-noise sample from a white-noise input.
+    ///
+    /// Implements Paul Kellet's refined pink-noise filter: seven first-order
+    /// low-pass sections (state `b0..b6`) whose coefficients are tuned so the
+    /// summed output approximates a -3 dB/octave (1/f) power spectrum across the
+    /// audio band. The running state is updated in place every call so the
+    /// resulting sequence is genuinely low-frequency-emphasized (its lag-1
+    /// autocorrelation is strongly positive), unlike scaled white noise.
+    ///
+    /// # Arguments
+    ///
+    /// * `white` - White-noise sample in range -1.0 to 1.0.
+    ///
+    /// # Returns
+    ///
+    /// Pink-noise sample, roughly normalized to the same amplitude range as the
+    /// white input via the ~0.11 output scaling.
+    fn generate_pink(&mut self, white: f32) -> f32 {
+        let b = &mut self.pink_state;
+        b[0] = 0.99886 * b[0] + white * 0.0555179;
+        b[1] = 0.99332 * b[1] + white * 0.0750759;
+        b[2] = 0.96900 * b[2] + white * 0.153_852;
+        b[3] = 0.86650 * b[3] + white * 0.3104856;
+        b[4] = 0.55000 * b[4] + white * 0.5329522;
+        b[5] = -0.7616 * b[5] - white * 0.0168980;
+        let pink = b[0] + b[1] + b[2] + b[3] + b[4] + b[5] + b[6] + white * 0.5362;
+        b[6] = white * 0.115926;
+        // Scale so the output sits in approximately the same range as the input.
+        pink * 0.11
+    }
+
+    /// Generates one brown- (red-) noise sample from a white-noise input.
+    ///
+    /// Implements a leaky integrator: `running = (running + 0.02 * white) / 1.02`.
+    /// Integrating white noise yields a -6 dB/octave (1/f²) spectrum, giving an
+    /// even stronger low-frequency emphasis than pink noise. The `/ 1.02` leak
+    /// prevents the accumulator from drifting unbounded (DC runaway). The result
+    /// is scaled by 3.5 to restore usable amplitude and clamped to [-1.0, 1.0].
+    ///
+    /// # Arguments
+    ///
+    /// * `white` - White-noise sample in range -1.0 to 1.0.
+    ///
+    /// # Returns
+    ///
+    /// Brown-noise sample clamped to the range -1.0 to 1.0.
+    fn generate_brown(&mut self, white: f32) -> f32 {
+        self.brown_state = (self.brown_state + 0.02 * white) / 1.02;
+        (self.brown_state * 3.5).clamp(-1.0, 1.0)
     }
 
     /// Generates white noise using linear congruential generator.
@@ -587,4 +655,112 @@ pub enum InterpolationMode {
     Cubic,
     /// Spectral-aware interpolation
     Spectral,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Collect `n` raw (unit-amplitude) samples of a given noise type.
+    ///
+    /// Amplitude is set to 1.0 so the spectral shaping, not the gain, is measured.
+    fn collect_noise(noise_type: NoiseType, n: usize) -> Vec<f32> {
+        let mut gen = NoiseGenerator::new(noise_type, 1.0);
+        (0..n).map(|_| gen.process()).collect()
+    }
+
+    /// Normalized lag-1 autocorrelation of a zero-mean version of `samples`.
+    ///
+    /// Higher values indicate stronger low-frequency emphasis (successive samples
+    /// are more correlated). White noise sits near 0; pink is moderately positive;
+    /// brown approaches 1.
+    fn lag1_autocorrelation(samples: &[f32]) -> f32 {
+        let n = samples.len() as f32;
+        let mean = samples.iter().sum::<f32>() / n;
+        let mut num = 0.0;
+        let mut den = 0.0;
+        for i in 0..samples.len() {
+            let centered = samples[i] - mean;
+            den += centered * centered;
+            if i + 1 < samples.len() {
+                num += centered * (samples[i + 1] - mean);
+            }
+        }
+        if den.abs() < f32::EPSILON {
+            0.0
+        } else {
+            num / den
+        }
+    }
+
+    #[test]
+    fn test_colored_noise_low_frequency_emphasis_ordering() {
+        // Deterministic: the LCG seed is fixed, so these sequences are reproducible.
+        let n = 16_384;
+        let white = collect_noise(NoiseType::White, n);
+        let pink = collect_noise(NoiseType::Pink, n);
+        let brown = collect_noise(NoiseType::Brown, n);
+
+        let r_white = lag1_autocorrelation(&white);
+        let r_pink = lag1_autocorrelation(&pink);
+        let r_brown = lag1_autocorrelation(&brown);
+
+        // Expected low-frequency emphasis ordering: brown > pink > white.
+        assert!(
+            r_brown > r_pink,
+            "brown lag-1 autocorr {r_brown} should exceed pink {r_pink}"
+        );
+        assert!(
+            r_pink > r_white,
+            "pink lag-1 autocorr {r_pink} should exceed white {r_white}"
+        );
+        // White should be close to uncorrelated.
+        assert!(
+            r_white.abs() < 0.2,
+            "white lag-1 autocorr {r_white} should be near zero"
+        );
+        // Brown should be strongly correlated (near a random walk).
+        assert!(
+            r_brown > 0.8,
+            "brown lag-1 autocorr {r_brown} should be strongly positive"
+        );
+    }
+
+    #[test]
+    fn test_pink_brown_not_scaled_white() {
+        // Pink/brown must NOT equal white * constant. Compare the first few samples
+        // of independent generators (same seed) sample-by-sample: a pure scaling
+        // would keep the white/colored ratio constant, which the filters break.
+        let n = 64;
+        let white = collect_noise(NoiseType::White, n);
+        let pink = collect_noise(NoiseType::Pink, n);
+        let brown = collect_noise(NoiseType::Brown, n);
+
+        // Ratio of pink[i]/white[i] must vary (not a single constant scale factor).
+        let ratio0 = pink[1] / white[1];
+        let ratio1 = pink[5] / white[5];
+        assert!(
+            (ratio0 - ratio1).abs() > 1e-4,
+            "pink must be spectrally shaped, not a constant scale of white"
+        );
+
+        let bratio0 = brown[1] / white[1];
+        let bratio1 = brown[5] / white[5];
+        assert!(
+            (bratio0 - bratio1).abs() > 1e-4,
+            "brown must be spectrally shaped, not a constant scale of white"
+        );
+    }
+
+    #[test]
+    fn test_brown_noise_bounded() {
+        // The leaky integrator + clamp keeps brown noise within [-1, 1].
+        let samples = collect_noise(NoiseType::Brown, 8192);
+        for &s in &samples {
+            assert!(
+                (-1.0..=1.0).contains(&s),
+                "brown noise sample {s} out of [-1, 1]"
+            );
+        }
+    }
 }

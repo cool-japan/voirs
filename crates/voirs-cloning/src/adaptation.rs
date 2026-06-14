@@ -311,7 +311,25 @@ impl SpeakerAdapter {
         })
     }
 
-    /// MLLR adaptation implementation
+    /// MLLR (Maximum Likelihood Linear Regression) adaptation.
+    ///
+    /// Estimates the affine transform `W = [A | b]` that maps a speaker-independent
+    /// reference distribution to the observed speaker (adaptation) features under the
+    /// maximum-likelihood / least-squares criterion.
+    ///
+    /// The classical MLLR estimator needs, per regression class, a model mean `μ_m`
+    /// and the adapted observation. This `adapt_mllr` call only receives the
+    /// adaptation feature vectors, so the speaker-independent reference is built in a
+    /// single pass from the pooled per-dimension mean `μ` and standard deviation `σ`
+    /// of those vectors (a one-pass universal-background / standardisation basis).
+    /// Each adaptation frame is then paired with its standardised counterpart
+    /// `s_m = (x_m − μ) / σ`, and `W` is the maximum-likelihood affine map
+    /// `x_m ≈ A·s_m + b`. With unit variances/occupancies the MLLR M-step reduces to
+    /// the ordinary-least-squares normal equations, which is exactly what is solved
+    /// here (the recovered `A ≈ diag(σ)`, `b ≈ μ` form the ML cepstral mean/variance
+    /// transform). Because the alignment/occupancy is fixed (one regression class, no
+    /// posteriors to re-estimate) the closed-form single pass is already the exact ML
+    /// solution; no EM outer loop is required.
     fn adapt_mllr(&self, features: &[Vec<f32>]) -> Result<AdaptationParameters> {
         if features.is_empty() {
             return Err(Error::Processing(
@@ -320,21 +338,60 @@ impl SpeakerAdapter {
         }
 
         let feature_dim = features[0].len();
-        let transform_dim = self.config.mllr_transform_dim.min(feature_dim);
+        if feature_dim == 0 {
+            return Err(Error::Processing(
+                "Zero-dimensional features for MLLR adaptation".to_string(),
+            ));
+        }
 
-        // Initialize transformation matrix (simplified implementation)
-        let mut transform_matrix = Array2::eye(transform_dim);
-        let bias_vector = vec![0.0; transform_dim];
-
-        // In a full implementation, this would use EM algorithm to estimate MLLR parameters
-        // For now, we create a simple identity transform with noise
-        for i in 0..transform_dim {
-            for j in 0..transform_dim {
-                if i != j {
-                    transform_matrix[[i, j]] = (scirs2_core::random::random::<f32>() - 0.5) * 0.1;
+        // Speaker-independent reference statistics (single-pass mean and std).
+        let n = features.len() as f64;
+        let mut mean = vec![0.0f64; feature_dim];
+        for feature_vec in features {
+            for (d, &value) in feature_vec.iter().enumerate() {
+                if d < feature_dim {
+                    mean[d] += value as f64;
                 }
             }
         }
+        mean.iter_mut().for_each(|m| *m /= n);
+
+        let mut variance = vec![0.0f64; feature_dim];
+        for feature_vec in features {
+            for (d, &value) in feature_vec.iter().enumerate() {
+                if d < feature_dim {
+                    let deviation = value as f64 - mean[d];
+                    variance[d] += deviation * deviation;
+                }
+            }
+        }
+        let std: Vec<f64> = variance.iter().map(|v| (v / n).sqrt()).collect();
+
+        // Standardised speaker-independent sources s_m = (x_m − μ) / σ.
+        let sources: Vec<Vec<f32>> = features
+            .iter()
+            .map(|feature_vec| {
+                feature_vec
+                    .iter()
+                    .enumerate()
+                    .map(|(d, &value)| {
+                        let sigma = std[d];
+                        if sigma > 1e-8 {
+                            ((value as f64 - mean[d]) / sigma) as f32
+                        } else {
+                            0.0
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+
+        // Closed-form MLLR / OLS solve with unit variances and occupancies. The
+        // normal matrix is ridge-regularised (scaled by the configured
+        // regularisation strength) and singular systems fall back to identity.
+        let ridge = (self.config.regularization as f64) * 1e-6;
+        let (transform_matrix, bias_vector) =
+            estimate_affine_transform(&sources, features, None, None, ridge);
 
         Ok(AdaptationParameters::MLLR {
             transform_matrix,
@@ -799,6 +856,255 @@ impl SpeakerAdapter {
     }
 }
 
+/// Build the affine identity transform `(A, b)` with `A` of shape
+/// `out_dim × in_dim` (ones on the leading diagonal) and a zero bias.
+///
+/// Used as the safe fall-back whenever the MLLR system is degenerate or singular.
+fn affine_identity(out_dim: usize, in_dim: usize) -> (Array2<f32>, Vec<f32>) {
+    let mut a = Array2::<f32>::zeros((out_dim, in_dim));
+    for i in 0..out_dim.min(in_dim) {
+        a[[i, i]] = 1.0;
+    }
+    (a, vec![0.0f32; out_dim])
+}
+
+/// In-place LU factorisation with partial pivoting.
+///
+/// On success returns the combined lower/upper factors (unit lower triangle stored
+/// below the diagonal) together with the row permutation. Returns `None` when a
+/// pivot magnitude drops below `tol`, i.e. the matrix is (numerically) singular.
+fn lu_factor(mut a: Array2<f64>, tol: f64) -> Option<(Array2<f64>, Vec<usize>)> {
+    let n = a.nrows();
+    let mut piv: Vec<usize> = (0..n).collect();
+
+    for k in 0..n {
+        // Partial pivoting: pick the largest-magnitude entry in column k.
+        let mut pivot_row = k;
+        let mut pivot_mag = a[[k, k]].abs();
+        for i in (k + 1)..n {
+            let mag = a[[i, k]].abs();
+            if mag > pivot_mag {
+                pivot_mag = mag;
+                pivot_row = i;
+            }
+        }
+        if pivot_mag < tol {
+            return None;
+        }
+        if pivot_row != k {
+            for j in 0..n {
+                let tmp = a[[k, j]];
+                a[[k, j]] = a[[pivot_row, j]];
+                a[[pivot_row, j]] = tmp;
+            }
+            piv.swap(k, pivot_row);
+        }
+
+        let pivot = a[[k, k]];
+        for i in (k + 1)..n {
+            let factor = a[[i, k]] / pivot;
+            a[[i, k]] = factor;
+            for j in (k + 1)..n {
+                let above = a[[k, j]];
+                a[[i, j]] -= factor * above;
+            }
+        }
+    }
+
+    Some((a, piv))
+}
+
+/// Solve `A·x = rhs` from a precomputed [`lu_factor`] result.
+fn lu_solve(lu: &Array2<f64>, piv: &[usize], rhs: &[f64]) -> Vec<f64> {
+    let n = lu.nrows();
+    // Apply the row permutation to the right-hand side.
+    let mut x: Vec<f64> = piv.iter().map(|&p| rhs[p]).collect();
+
+    // Forward substitution (unit lower triangle).
+    for i in 0..n {
+        let mut sum = x[i];
+        for j in 0..i {
+            sum -= lu[[i, j]] * x[j];
+        }
+        x[i] = sum;
+    }
+    // Back substitution (upper triangle).
+    for i in (0..n).rev() {
+        let mut sum = x[i];
+        for j in (i + 1)..n {
+            sum -= lu[[i, j]] * x[j];
+        }
+        x[i] = sum / lu[[i, i]];
+    }
+    x
+}
+
+/// Estimate the affine transform `W = [A | b]` (returned as `(A, b)`) mapping each
+/// `source` vector to its paired `target` vector under the maximum-likelihood /
+/// least-squares criterion
+///
+/// ```text
+/// minimise  Σ_m Σ_i (γ_m / σ²_{m,i}) · (a_i·s_m + b_i − t_{m,i})²
+/// ```
+///
+/// This is the classical MLLR estimator. For every output dimension `i` the optimal
+/// row `w_i = [a_i, b_i]` solves the normal equations `G_i · w_iᵀ = k_i`, where
+///
+/// ```text
+/// G_i = Σ_m (γ_m / σ²_{m,i}) · ξ_m ξ_mᵀ      (per-dimension Gauss accumulator)
+/// k_i = Σ_m (γ_m / σ²_{m,i}) · t_{m,i} · ξ_m  (cross-correlation)
+/// ξ_m = [s_mᵀ, 1]ᵀ                            (homogeneous source vector)
+/// ```
+///
+/// * `variances` — optional per-frame, per-output-dimension variances `σ²_{m,i}`.
+///   When `None` every output dimension shares the same Gauss accumulator `G`, so it
+///   is factorised once and reused (ordinary least squares = MLLR with unit
+///   variance). When provided, each output dimension is solved independently with its
+///   own precision-weighted accumulator.
+/// * `occupancies` — optional per-frame occupation counts `γ_m` (default `1`).
+/// * `ridge` — relative Tikhonov regularisation added to the diagonal of `G`
+///   (scaled by its mean diagonal energy) for numerical stability.
+///
+/// Degenerate input (empty, mismatched lengths) and singular systems fall back to the
+/// affine identity, so the function never panics.
+fn estimate_affine_transform(
+    sources: &[Vec<f32>],
+    targets: &[Vec<f32>],
+    variances: Option<&[Vec<f32>]>,
+    occupancies: Option<&[f32]>,
+    ridge: f64,
+) -> (Array2<f32>, Vec<f32>) {
+    let m = sources.len();
+    let in_dim = sources.first().map(Vec::len).unwrap_or(0);
+    let out_dim = targets.first().map(Vec::len).unwrap_or(0);
+
+    // Validate shapes; any inconsistency yields a safe identity transform.
+    if m == 0 || m != targets.len() || in_dim == 0 || out_dim == 0 {
+        return affine_identity(out_dim, in_dim);
+    }
+    if sources.iter().any(|s| s.len() != in_dim) || targets.iter().any(|t| t.len() != out_dim) {
+        return affine_identity(out_dim, in_dim);
+    }
+    if let Some(var) = variances {
+        if var.len() != m || var.iter().any(|v| v.len() != out_dim) {
+            return affine_identity(out_dim, in_dim);
+        }
+    }
+    if let Some(occ) = occupancies {
+        if occ.len() != m {
+            return affine_identity(out_dim, in_dim);
+        }
+    }
+
+    let ext = in_dim + 1; // homogeneous coordinate for the bias term
+    let weight = |row: usize| -> f64 { occupancies.map_or(1.0, |occ| occ[row] as f64) };
+
+    let mut a_mat = Array2::<f32>::zeros((out_dim, in_dim));
+    let mut bias = vec![0.0f32; out_dim];
+
+    match variances {
+        // ---- Ordinary least squares: a single shared Gauss accumulator G. ----
+        None => {
+            let mut g = Array2::<f64>::zeros((ext, ext));
+            let mut k = Array2::<f64>::zeros((ext, out_dim));
+
+            for row in 0..m {
+                let w = weight(row);
+                let s = &sources[row];
+                let t = &targets[row];
+                for p in 0..ext {
+                    let xp = if p < in_dim { s[p] as f64 } else { 1.0 };
+                    let wxp = w * xp;
+                    for q in p..ext {
+                        let xq = if q < in_dim { s[q] as f64 } else { 1.0 };
+                        g[[p, q]] += wxp * xq;
+                    }
+                    for (i, &ti) in t.iter().enumerate() {
+                        k[[p, i]] += wxp * ti as f64;
+                    }
+                }
+            }
+            // Mirror the upper triangle into the lower one.
+            for p in 0..ext {
+                for q in 0..p {
+                    g[[p, q]] = g[[q, p]];
+                }
+            }
+
+            let mean_diag = (g.diag().iter().sum::<f64>() / ext as f64).max(1e-12);
+            for d in g.diag_mut() {
+                *d += ridge * mean_diag;
+            }
+            let tol = 1e-12 * mean_diag.max(1.0);
+
+            match lu_factor(g, tol) {
+                Some((lu, piv)) => {
+                    for i in 0..out_dim {
+                        let rhs: Vec<f64> = (0..ext).map(|p| k[[p, i]]).collect();
+                        let w_row = lu_solve(&lu, &piv, &rhs);
+                        for (j, slot) in a_mat.row_mut(i).iter_mut().enumerate() {
+                            *slot = w_row[j] as f32;
+                        }
+                        bias[i] = w_row[in_dim] as f32;
+                    }
+                }
+                None => return affine_identity(out_dim, in_dim),
+            }
+        }
+        // ---- Precision-weighted MLLR: one accumulator per output dimension. ----
+        Some(var) => {
+            for i in 0..out_dim {
+                let mut g = Array2::<f64>::zeros((ext, ext));
+                let mut k = vec![0.0f64; ext];
+
+                for row in 0..m {
+                    let precision = weight(row) / (var[row][i] as f64).max(1e-8);
+                    let s = &sources[row];
+                    let ti = targets[row][i] as f64;
+                    for p in 0..ext {
+                        let xp = if p < in_dim { s[p] as f64 } else { 1.0 };
+                        let pxp = precision * xp;
+                        for q in p..ext {
+                            let xq = if q < in_dim { s[q] as f64 } else { 1.0 };
+                            g[[p, q]] += pxp * xq;
+                        }
+                        k[p] += pxp * ti;
+                    }
+                }
+                for p in 0..ext {
+                    for q in 0..p {
+                        g[[p, q]] = g[[q, p]];
+                    }
+                }
+
+                let mean_diag = (g.diag().iter().sum::<f64>() / ext as f64).max(1e-12);
+                for d in g.diag_mut() {
+                    *d += ridge * mean_diag;
+                }
+                let tol = 1e-12 * mean_diag.max(1.0);
+
+                match lu_factor(g, tol) {
+                    Some((lu, piv)) => {
+                        let w_row = lu_solve(&lu, &piv, &k);
+                        for (j, slot) in a_mat.row_mut(i).iter_mut().enumerate() {
+                            *slot = w_row[j] as f32;
+                        }
+                        bias[i] = w_row[in_dim] as f32;
+                    }
+                    None => {
+                        // Singular row: keep the identity mapping for this dimension.
+                        if i < in_dim {
+                            a_mat[[i, i]] = 1.0;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    (a_mat, bias)
+}
+
 impl AdaptationNetwork {
     /// Forward pass through the network
     fn forward(&self, input: &Tensor) -> Result<Tensor> {
@@ -918,5 +1224,246 @@ mod tests {
         assert_eq!(config.embedding_dim, 512);
         assert_eq!(config.min_samples, 3);
         assert!(!config.hidden_dims.is_empty());
+    }
+
+    /// Deterministic linear-congruential generator for reproducible test data
+    /// (avoids any statistical RNG dependency in tests).
+    struct Lcg(u64);
+
+    impl Lcg {
+        fn new(seed: u64) -> Self {
+            Lcg(seed | 1)
+        }
+
+        /// Next pseudo-random value in `[0, 1)`.
+        fn unit(&mut self) -> f32 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ((self.0 >> 40) as f32) / ((1u64 << 24) as f32)
+        }
+    }
+
+    /// Total squared error of the affine fit `A·s + b` against `targets`.
+    fn fit_error(a: &Array2<f32>, b: &[f32], sources: &[Vec<f32>], targets: &[Vec<f32>]) -> f64 {
+        let out_dim = b.len();
+        let in_dim = a.ncols();
+        let mut total = 0.0f64;
+        for (s, t) in sources.iter().zip(targets.iter()) {
+            for i in 0..out_dim {
+                let mut pred = b[i] as f64;
+                for j in 0..in_dim {
+                    pred += a[[i, j]] as f64 * s[j] as f64;
+                }
+                let diff = pred - t[i] as f64;
+                total += diff * diff;
+            }
+        }
+        total
+    }
+
+    #[test]
+    fn test_estimate_affine_recovers_known_map() {
+        let in_dim = 4;
+        let out_dim = 4;
+        let m = 60;
+        let mut lcg = Lcg::new(0x1234_5678);
+
+        // Known, well-conditioned affine map (diagonally dominant + off-diagonal mix).
+        let mut a_known = vec![vec![0.0f32; in_dim]; out_dim];
+        let mut b_known = vec![0.0f32; out_dim];
+        for i in 0..out_dim {
+            for j in 0..in_dim {
+                let base = if i == j { 1.0 } else { 0.0 };
+                a_known[i][j] = base + 0.3 * (2.0 * lcg.unit() - 1.0);
+            }
+            b_known[i] = 2.0 * lcg.unit() - 1.0;
+        }
+
+        // Sources from a broad distribution => well-conditioned design matrix.
+        let mut sources = Vec::with_capacity(m);
+        let mut targets = Vec::with_capacity(m);
+        for _ in 0..m {
+            let s: Vec<f32> = (0..in_dim).map(|_| 4.0 * lcg.unit() - 2.0).collect();
+            let t: Vec<f32> = (0..out_dim)
+                .map(|i| {
+                    let mut acc = b_known[i];
+                    for j in 0..in_dim {
+                        acc += a_known[i][j] * s[j];
+                    }
+                    acc
+                })
+                .collect();
+            sources.push(s);
+            targets.push(t);
+        }
+
+        let (a_hat, b_hat) = estimate_affine_transform(&sources, &targets, None, None, 1e-9);
+
+        let err_recovered = fit_error(&a_hat, &b_hat, &sources, &targets);
+        let (a_id, b_id) = affine_identity(out_dim, in_dim);
+        let err_identity = fit_error(&a_id, &b_id, &sources, &targets);
+
+        assert!(
+            err_identity > 1.0,
+            "identity fit error should be substantial: {err_identity}"
+        );
+        assert!(
+            err_recovered < err_identity * 1e-3,
+            "recovered error {err_recovered} should be far below identity error {err_identity}"
+        );
+
+        // Parameters are approximately recovered for the well-conditioned system.
+        for i in 0..out_dim {
+            for j in 0..in_dim {
+                assert!(
+                    (a_hat[[i, j]] - a_known[i][j]).abs() < 1e-2,
+                    "A[{i},{j}] = {} expected {}",
+                    a_hat[[i, j]],
+                    a_known[i][j]
+                );
+            }
+            assert!(
+                (b_hat[i] - b_known[i]).abs() < 1e-2,
+                "b[{i}] = {} expected {}",
+                b_hat[i],
+                b_known[i]
+            );
+        }
+    }
+
+    #[test]
+    fn test_estimate_affine_weighted_mllr() {
+        let in_dim = 3;
+        let out_dim = 3;
+        let m = 40;
+        let mut lcg = Lcg::new(0x0bad_c0de);
+
+        let a_known = [[1.2f32, -0.3, 0.1], [0.0, 0.8, 0.25], [-0.15, 0.05, 1.1]];
+        let b_known = [0.5f32, -0.2, 0.3];
+
+        let mut sources = Vec::new();
+        let mut targets = Vec::new();
+        let mut variances = Vec::new();
+        let mut occupancies = Vec::new();
+        for _ in 0..m {
+            let s: Vec<f32> = (0..in_dim).map(|_| 3.0 * lcg.unit() - 1.5).collect();
+            let t: Vec<f32> = (0..out_dim)
+                .map(|i| {
+                    let mut acc = b_known[i];
+                    for j in 0..in_dim {
+                        acc += a_known[i][j] * s[j];
+                    }
+                    acc
+                })
+                .collect();
+            // Non-uniform but strictly positive precisions/occupancies. As the map is
+            // exact, the precision-weighted MLLR solve still recovers (A, b).
+            let v: Vec<f32> = (0..out_dim).map(|_| 0.5 + lcg.unit()).collect();
+            sources.push(s);
+            targets.push(t);
+            variances.push(v);
+            occupancies.push(0.5 + lcg.unit());
+        }
+
+        let (a_hat, b_hat) = estimate_affine_transform(
+            &sources,
+            &targets,
+            Some(&variances),
+            Some(&occupancies),
+            1e-9,
+        );
+
+        for i in 0..out_dim {
+            for j in 0..in_dim {
+                assert!(
+                    (a_hat[[i, j]] - a_known[i][j]).abs() < 1e-2,
+                    "weighted A[{i},{j}] = {} expected {}",
+                    a_hat[[i, j]],
+                    a_known[i][j]
+                );
+            }
+            assert!(
+                (b_hat[i] - b_known[i]).abs() < 1e-2,
+                "weighted b[{i}] = {} expected {}",
+                b_hat[i],
+                b_known[i]
+            );
+        }
+    }
+
+    #[test]
+    fn test_estimate_affine_singular_returns_identity() {
+        // A single sample with no regularisation leaves the Gauss matrix rank-deficient
+        // (ext = in_dim + 1 = 4 > rank 1) so the solve must fall back to identity.
+        let sources = vec![vec![1.0f32, 2.0, 3.0]];
+        let targets = vec![vec![4.0f32, 5.0, 6.0]];
+        let (a_hat, b_hat) = estimate_affine_transform(&sources, &targets, None, None, 0.0);
+        let (a_id, b_id) = affine_identity(3, 3);
+        for i in 0..3 {
+            for j in 0..3 {
+                assert!(
+                    (a_hat[[i, j]] - a_id[[i, j]]).abs() < 1e-6,
+                    "singular fallback should be identity"
+                );
+            }
+            assert!((b_hat[i] - b_id[i]).abs() < 1e-6);
+        }
+
+        // Empty input must not panic and yields an empty transform.
+        let empty: Vec<Vec<f32>> = Vec::new();
+        let (a_empty, b_empty) = estimate_affine_transform(&empty, &empty, None, None, 1e-6);
+        assert_eq!(a_empty.nrows(), 0);
+        assert_eq!(a_empty.ncols(), 0);
+        assert!(b_empty.is_empty());
+
+        // Mismatched source/target counts fall back to identity safely.
+        let src = vec![vec![1.0f32, 2.0], vec![3.0, 4.0]];
+        let tgt = vec![vec![1.0f32, 2.0]];
+        let (a_mis, b_mis) = estimate_affine_transform(&src, &tgt, None, None, 1e-6);
+        assert_eq!(a_mis.nrows(), 2);
+        assert_eq!(a_mis.ncols(), 2);
+        assert!((a_mis[[0, 0]] - 1.0).abs() < 1e-6);
+        assert!((a_mis[[1, 1]] - 1.0).abs() < 1e-6);
+        assert_eq!(b_mis, vec![0.0, 0.0]);
+    }
+
+    #[tokio::test]
+    async fn test_mllr_adaptation_endtoend() {
+        let mut adapter = SpeakerAdapter::new(AdaptationMethod::MLLR).unwrap();
+
+        // Distinct samples so the pooled per-dimension std is non-zero.
+        let mut samples = Vec::new();
+        for i in 0..6 {
+            let mut audio = vec![0.0f32; 2000];
+            for (n, x) in audio.iter_mut().enumerate() {
+                *x = 0.2 * ((i as f32 + 1.0) * 0.01 * n as f32).sin() + 0.05 * i as f32;
+            }
+            samples.push(VoiceSample::new(format!("s{i}"), audio, 16000));
+        }
+
+        let model = adapter.adapt("spk", &samples).await.unwrap();
+        assert_eq!(model.method, AdaptationMethod::MLLR);
+
+        if let AdaptationParameters::MLLR {
+            transform_matrix,
+            bias_vector,
+        } = &model.parameters
+        {
+            let dim = adapter.config.embedding_dim;
+            assert_eq!(transform_matrix.nrows(), dim);
+            assert_eq!(transform_matrix.ncols(), dim);
+            assert_eq!(bias_vector.len(), dim);
+            // A real, data-driven transform: the bias carries the feature means and is
+            // not the all-zero placeholder of the old identity-plus-noise stub.
+            let bias_energy: f32 = bias_vector.iter().map(|b| b.abs()).sum();
+            assert!(bias_energy > 0.0, "MLLR bias must be data-driven");
+            // Numerically guarded solve => every entry is finite.
+            assert!(transform_matrix.iter().all(|v| v.is_finite()));
+            assert!(bias_vector.iter().all(|v| v.is_finite()));
+        } else {
+            panic!("expected MLLR parameters");
+        }
     }
 }

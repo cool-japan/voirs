@@ -617,17 +617,100 @@ impl VoiceConverter {
         })
     }
 
-    /// Apply F0 conversion to audio
+    /// Apply an F0 (pitch) conversion to audio in place.
+    ///
+    /// This performs a genuine pitch shift that raises or lowers perceived pitch
+    /// by `f0_scale` (e.g. `1.5` => pitch up a fifth) while keeping the signal
+    /// length unchanged. It uses synchronous overlap-add (SOLA-style) granular
+    /// resampling:
+    ///
+    /// 1. The signal is divided into overlapping Hann-windowed analysis grains
+    ///    placed every `HOP` output samples.
+    /// 2. Within each grain the input is *resampled by `f0_scale`* (read with a
+    ///    fractional increment of `f0_scale`), which multiplies every frequency
+    ///    component by `f0_scale` — a true pitch shift.
+    /// 3. Each resampled grain is windowed again and overlap-added back at the
+    ///    original output hop, so the total duration (and sample count) is
+    ///    preserved while the pitch is shifted.
+    ///
+    /// Unlike a plain amplitude scale, this moves the fundamental and its
+    /// harmonics. It does not perform formant correction (formants shift with
+    /// the pitch); a formant-preserving result would require an additional
+    /// spectral-envelope re-warp on top of this shift.
     fn apply_f0_conversion(
         &self,
         audio: &mut [f32],
         f0_scale: f32,
         _sample_rate: u32,
     ) -> Result<()> {
-        // Simplified F0 modification (pitch shifting)
-        if f0_scale != 1.0 {
-            for sample in audio.iter_mut() {
-                *sample *= f0_scale.clamp(0.5, 2.0);
+        let scale = f0_scale.clamp(0.5, 2.0);
+        if (scale - 1.0).abs() < 1e-4 || audio.len() < 4 {
+            return Ok(());
+        }
+        let n = audio.len();
+
+        const FRAME: usize = 1024;
+        const HOP: usize = 256;
+        let frame = FRAME.min(n);
+
+        // Hann window of the grain length.
+        let window: Vec<f32> = (0..frame)
+            .map(|i| {
+                if frame > 1 {
+                    0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / (frame - 1) as f32).cos()
+                } else {
+                    1.0
+                }
+            })
+            .collect();
+
+        let mut output = vec![0.0f32; n];
+        let mut norm = vec![0.0f32; n];
+
+        // Linear-interpolated sample read from the original buffer.
+        let read = |buf: &[f32], pos: f32| -> f32 {
+            if pos <= 0.0 {
+                return buf[0];
+            }
+            let idx = pos.floor() as usize;
+            if idx + 1 < buf.len() {
+                let frac = pos - idx as f32;
+                buf[idx] * (1.0 - frac) + buf[idx + 1] * frac
+            } else if idx < buf.len() {
+                buf[buf.len() - 1]
+            } else {
+                0.0
+            }
+        };
+
+        // Snapshot of the source so resampling reads stay independent of writes.
+        let src = audio.to_vec();
+
+        let mut start = 0usize;
+        while start < n {
+            for (j, &w) in window.iter().enumerate() {
+                let out_idx = start + j;
+                if out_idx >= n {
+                    break;
+                }
+                // Resample within the grain: read the source at a fractional
+                // increment of `scale` relative to the grain origin. This scales
+                // all frequencies inside the grain by `scale` (the pitch shift),
+                // while the grain is still laid down over `FRAME` output samples
+                // to preserve overall duration.
+                let read_pos = start as f32 + j as f32 * scale;
+                let sample = read(&src, read_pos);
+                output[out_idx] += sample * w * w;
+                norm[out_idx] += w * w;
+            }
+            start += HOP;
+        }
+
+        for (i, s) in audio.iter_mut().enumerate() {
+            if norm[i] > 1e-8 {
+                *s = output[i] / norm[i];
+            } else {
+                *s = src[i];
             }
         }
         Ok(())
@@ -1166,5 +1249,92 @@ mod tests {
         vc.apply_spectral_transformation(&mut audio, &envelope)
             .unwrap();
         assert_eq!(audio.len(), len_before);
+    }
+
+    /// Autocorrelation-based fundamental-frequency estimate (deterministic).
+    fn detect_f0(audio: &[f32], sr: u32) -> f32 {
+        let min_period = (sr / 500).max(1) as usize; // 500 Hz max
+        let max_period = (sr / 60) as usize; // 60 Hz min
+        let mut best_period = min_period;
+        let mut best_corr = f32::MIN;
+        for period in min_period..max_period.min(audio.len() / 2) {
+            let mut corr = 0.0f32;
+            for i in 0..(audio.len() - period) {
+                corr += audio[i] * audio[i + period];
+            }
+            if corr > best_corr {
+                best_corr = corr;
+                best_period = period;
+            }
+        }
+        sr as f32 / best_period as f32
+    }
+
+    #[test]
+    fn test_f0_conversion_changes_pitch_not_just_amplitude() {
+        let config = ConversionConfig::default();
+        let vc = VoiceConverter::new(config);
+        let sr = 16000u32;
+        let base_freq = 200.0f32;
+        let make_tone = || -> Vec<f32> {
+            (0..8192)
+                .map(|i| {
+                    (2.0 * std::f32::consts::PI * base_freq * i as f32 / sr as f32).sin() * 0.5
+                })
+                .collect()
+        };
+
+        let original = make_tone();
+        let f0_before = detect_f0(&original, sr);
+
+        // Shift pitch up by 1.5x.
+        let mut shifted = make_tone();
+        vc.apply_f0_conversion(&mut shifted, 1.5, sr).unwrap();
+        let f0_after = detect_f0(&shifted, sr);
+
+        // Length must be preserved (duration restored).
+        assert_eq!(shifted.len(), original.len());
+
+        // The detected fundamental must actually rise toward ~300 Hz, proving
+        // this is a real pitch shift and not an amplitude scale.
+        assert!(
+            f0_after > f0_before * 1.2,
+            "pitch did not rise: before {f0_before} Hz, after {f0_after} Hz"
+        );
+        assert!(
+            (f0_after - base_freq * 1.5).abs() < 40.0,
+            "shifted pitch {f0_after} not near expected {} Hz",
+            base_freq * 1.5
+        );
+
+        // Regression guard against the old amplitude-scale stub: if it merely
+        // multiplied amplitude, the detected f0 would be unchanged. Confirm the
+        // waveform shape (zero-crossing rate) changed, not only its scale.
+        let zcr = |s: &[f32]| -> usize {
+            s.windows(2)
+                .filter(|w| w[0].signum() != w[1].signum())
+                .count()
+        };
+        assert_ne!(
+            zcr(&original),
+            zcr(&shifted),
+            "zero-crossing rate unchanged => amplitude-only scaling"
+        );
+    }
+
+    #[test]
+    fn test_f0_conversion_identity_is_noop() {
+        let config = ConversionConfig::default();
+        let vc = VoiceConverter::new(config);
+        let sr = 16000u32;
+        let mut audio: Vec<f32> = (0..2048)
+            .map(|i| (2.0 * std::f32::consts::PI * 220.0 * i as f32 / sr as f32).sin())
+            .collect();
+        let before = audio.clone();
+        vc.apply_f0_conversion(&mut audio, 1.0, sr).unwrap();
+        // Scale of exactly 1.0 must leave the signal untouched.
+        for (a, b) in before.iter().zip(audio.iter()) {
+            assert!((a - b).abs() < 1e-6);
+        }
     }
 }

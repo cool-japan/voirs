@@ -586,23 +586,29 @@ impl QualityAnalyzer {
     }
 
     /// Compute spectral features for a single frame
+    ///
+    /// Computes the magnitude spectrum via a real FFT (`scirs2_fft::rfft`,
+    /// O(N log N)) and derives spectral centroid, rolloff (85% energy), and
+    /// bandwidth from the magnitude bins. The math is identical to the previous
+    /// O(N²) DFT but uses the FFT for the transform. Only the first `N / 2`
+    /// positive-frequency bins are retained to preserve the original feature
+    /// shape (frequencies `k * sample_rate / N` for `k = 0..N/2`).
     fn compute_frame_spectral_features(&self, frame: &[f32], sample_rate: u32) -> (f32, f32, f32) {
-        // Simple magnitude spectrum computation
-        let mut spectrum = vec![0.0; frame.len() / 2];
+        // Number of positive-frequency bins to keep (matches the legacy DFT shape).
+        let num_bins = frame.len() / 2;
 
-        // Compute magnitude spectrum using simple DFT approximation
-        for (k, spec_val) in spectrum.iter_mut().enumerate() {
-            let mut real_sum = 0.0;
-            let mut imag_sum = 0.0;
-
-            for (n, &sample) in frame.iter().enumerate() {
-                let phase = -2.0 * std::f32::consts::PI * k as f32 * n as f32 / frame.len() as f32;
-                real_sum += sample * phase.cos();
-                imag_sum += sample * phase.sin();
-            }
-
-            *spec_val = (real_sum * real_sum + imag_sum * imag_sum).sqrt();
-        }
+        // Compute the real FFT and take magnitudes of the retained bins.
+        // `rfft` returns N/2 + 1 complex bins; we keep the first `num_bins`
+        // so the resulting frequencies are identical to the previous loop.
+        // On failure, fall back to a zeroed spectrum (silence-equivalent).
+        let spectrum: Vec<f32> = match scirs2_fft::rfft(frame, None) {
+            Ok(rfft_bins) => rfft_bins
+                .iter()
+                .take(num_bins)
+                .map(|c| ((c.re * c.re + c.im * c.im).sqrt()) as f32)
+                .collect(),
+            Err(_) => vec![0.0; num_bins],
+        };
 
         // Compute spectral centroid
         let total_magnitude: f32 = spectrum.iter().sum();
@@ -1870,5 +1876,71 @@ mod tests {
             "",    // empty text
         );
         assert!(low_quality_score < 0.3);
+    }
+
+    /// Generate a single-tone (sine) frame at `freq` Hz for `sample_rate`.
+    fn make_tone(freq: f32, sample_rate: u32, len: usize) -> Vec<f32> {
+        (0..len)
+            .map(|n| (2.0 * std::f32::consts::PI * freq * n as f32 / sample_rate as f32).sin())
+            .collect()
+    }
+
+    #[test]
+    fn test_frame_spectral_features_tone_peaks_at_expected_bin() {
+        let analyzer = QualityAnalyzer::new();
+        let sample_rate = 16_000u32;
+        let len = 1024usize;
+        // Choose a frequency aligned to bin 64: f = bin * sr / N = 64 * 16000 / 1024 = 1000 Hz.
+        let expected_bin = 64usize;
+        let freq = expected_bin as f32 * sample_rate as f32 / len as f32;
+        let frame = make_tone(freq, sample_rate, len);
+
+        // Recompute the magnitude spectrum the same way the function does and
+        // assert the peak bin matches the expected tone bin (rfft correctness).
+        let num_bins = frame.len() / 2;
+        let spectrum: Vec<f32> = scirs2_fft::rfft(&frame, None)
+            .expect("rfft should succeed")
+            .iter()
+            .take(num_bins)
+            .map(|c| ((c.re * c.re + c.im * c.im).sqrt()) as f32)
+            .collect();
+
+        let peak_bin = spectrum
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .map(|(i, _)| i)
+            .unwrap();
+        assert_eq!(
+            peak_bin, expected_bin,
+            "FFT peak should fall on the tone bin"
+        );
+
+        // The reported spectral centroid should sit near the tone frequency.
+        let (centroid, _rolloff, _bandwidth) =
+            analyzer.compute_frame_spectral_features(&frame, sample_rate);
+        let bin_hz = sample_rate as f32 / len as f32;
+        assert!(
+            (centroid - freq).abs() < 5.0 * bin_hz,
+            "centroid {centroid} should be near tone {freq}"
+        );
+    }
+
+    #[test]
+    fn test_frame_spectral_features_hf_centroid_above_lf() {
+        let analyzer = QualityAnalyzer::new();
+        let sample_rate = 16_000u32;
+        let len = 1024usize;
+
+        let lf = make_tone(500.0, sample_rate, len);
+        let hf = make_tone(6000.0, sample_rate, len);
+
+        let (lf_centroid, _, _) = analyzer.compute_frame_spectral_features(&lf, sample_rate);
+        let (hf_centroid, _, _) = analyzer.compute_frame_spectral_features(&hf, sample_rate);
+
+        assert!(
+            hf_centroid > lf_centroid,
+            "HF centroid {hf_centroid} should exceed LF centroid {lf_centroid}"
+        );
     }
 }

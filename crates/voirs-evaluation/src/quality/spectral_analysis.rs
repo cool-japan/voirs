@@ -39,6 +39,13 @@ use std::f32::consts::PI;
 use std::sync::Mutex;
 use voirs_sdk::AudioBuffer;
 
+/// Self-contained DSP helpers for spectral / temporal-envelope descriptors.
+///
+/// Kept in a sibling module so this file stays within the 2000-line limit; the
+/// pure (state-free) numerical routines live there and are unit-tested in
+/// isolation, while the FFT-dependent descriptors remain methods below.
+mod spectral_analysis_dsp;
+
 /// Advanced spectral analysis configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpectralAnalysisConfig {
@@ -276,11 +283,18 @@ struct GammatoneFilterbank {
 }
 
 /// Individual gammatone filter
+///
+/// Implemented as a Slaney (1993) 4th-order gammatone: an ERB-bandwidth-derived
+/// cascade of four biquad sections that produces a genuinely band-limited
+/// response centred on `center_freq`. See
+/// [`spectral_analysis_dsp::slaney_gammatone_coeffs`].
 struct GammatoneFilter {
     center_freq: f32,
     bandwidth: f32,
-    coefficients: [f32; 8], // 4th order filter coefficients
-    state: [f32; 8],        // Filter state variables
+    /// Slaney cascade coefficients (shared denominator + four numerator zeros).
+    coefficients: spectral_analysis_dsp::SlaneyGammatoneCoeffs,
+    /// Running per-section input/output history for streaming.
+    state: spectral_analysis_dsp::SlaneyGammatoneState,
 }
 
 /// Perceptual Linear Prediction analyzer
@@ -365,7 +379,11 @@ impl SpectralAnalyzer {
             self.analyze_spectral_complexity(samples, audio.sample_rate() as f32)?;
 
         // Temporal envelope analysis
-        let temporal_envelope = self.analyze_temporal_envelope(samples, &gammatone_responses)?;
+        let temporal_envelope = self.analyze_temporal_envelope(
+            samples,
+            audio.sample_rate() as f32,
+            &gammatone_responses,
+        )?;
 
         Ok(AdvancedSpectralAnalysis {
             gammatone_responses,
@@ -554,6 +572,7 @@ impl SpectralAnalyzer {
     fn analyze_temporal_envelope(
         &self,
         samples: &[f32],
+        sample_rate: f32,
         gammatone_responses: &[GammatoneChannelResponse],
     ) -> Result<TemporalEnvelopeAnalysis, EvaluationError> {
         // Extract overall envelope
@@ -564,11 +583,12 @@ impl SpectralAnalyzer {
 
         // AM/FM depth analysis
         let am_depth = self.calculate_am_depth(&envelope)?;
-        let fm_depth = self.calculate_fm_depth(samples)?;
+        let fm_depth = self.calculate_fm_depth(samples, sample_rate)?;
 
-        // Envelope timing analysis
-        let attack_time = self.calculate_attack_time(&envelope)?;
-        let decay_time = self.calculate_decay_time(&envelope)?;
+        // Envelope timing analysis (the running-mean envelope is sampled at the
+        // input rate, so envelope-sample times convert directly via sample_rate)
+        let attack_time = self.calculate_attack_time(&envelope, sample_rate)?;
+        let decay_time = self.calculate_decay_time(&envelope, sample_rate)?;
 
         // Periodicity analysis
         let periodicity = self.calculate_envelope_periodicity(&envelope)?;
@@ -1080,19 +1100,46 @@ impl SpectralAnalyzer {
         Ok(mfcc)
     }
 
-    // Placeholder implementations for remaining methods
-    fn calculate_spectral_irregularity(&self, _spectrum: &[f32]) -> Result<f32, EvaluationError> {
-        Ok(0.5)
+    /// Jensen spectral irregularity of a magnitude spectrum.
+    ///
+    /// Delegates to [`spectral_analysis_dsp::spectral_irregularity`], which
+    /// returns the mean absolute deviation of each magnitude bin from the local
+    /// 3-bin average, normalised by the mean magnitude (scale-invariant).
+    fn calculate_spectral_irregularity(&self, spectrum: &[f32]) -> Result<f32, EvaluationError> {
+        Ok(spectral_analysis_dsp::spectral_irregularity(spectrum))
     }
+
+    /// 85 %-cumulative-energy spectral roll-off frequency, in Hz.
+    ///
+    /// Delegates to [`spectral_analysis_dsp::spectral_rolloff`]. The magnitude
+    /// spectrum is the real-FFT half-spectrum, so the last bin maps to Nyquist
+    /// (`sample_rate / 2`).
     fn calculate_spectral_rolloff(
         &self,
-        _spectrum: &[f32],
-        _sample_rate: f32,
+        spectrum: &[f32],
+        sample_rate: f32,
     ) -> Result<f32, EvaluationError> {
-        Ok(4000.0)
+        const ROLLOFF_FRACTION: f32 = 0.85;
+        Ok(spectral_analysis_dsp::spectral_rolloff(
+            spectrum,
+            sample_rate,
+            ROLLOFF_FRACTION,
+        ))
     }
-    fn calculate_spectral_contrast(&self, _spectrum: &[f32]) -> Result<Vec<f32>, EvaluationError> {
-        Ok(vec![0.5; 7])
+
+    /// Per-octave-band spectral contrast (peak-to-valley log ratio).
+    ///
+    /// Delegates to [`spectral_analysis_dsp::spectral_contrast`] using 7
+    /// sub-bands and the loudest/quietest 20 % of bins per band, matching the
+    /// 7-element `spectral_contrast` field of [`SpectralComplexityMetrics`].
+    fn calculate_spectral_contrast(&self, spectrum: &[f32]) -> Result<Vec<f32>, EvaluationError> {
+        const NUM_CONTRAST_BANDS: usize = 7;
+        const CONTRAST_QUANTILE: f32 = 0.2;
+        Ok(spectral_analysis_dsp::spectral_contrast(
+            spectrum,
+            NUM_CONTRAST_BANDS,
+            CONTRAST_QUANTILE,
+        ))
     }
     fn calculate_mfcc(
         &self,
@@ -1202,26 +1249,150 @@ impl SpectralAnalyzer {
             .collect())
     }
 
-    fn compute_modulation_spectrum(&self, _envelope: &[f32]) -> Result<Vec<f32>, EvaluationError> {
-        Ok(vec![0.0; 64])
+    /// Modulation spectrum: magnitude FFT of the temporal envelope.
+    ///
+    /// The amplitude envelope is mean-removed (so the DC component does not
+    /// swamp the low modulation frequencies), transformed with the shared
+    /// real-FFT planner via [`Self::compute_fft`], and the resulting
+    /// magnitude bins are resized to a fixed 64-bin descriptor via
+    /// [`spectral_analysis_dsp::resize_spectrum`]. Bin `k` of the (pre-resize)
+    /// spectrum corresponds to a modulation frequency of
+    /// `k * envelope_rate / envelope_len` Hz.
+    fn compute_modulation_spectrum(&self, envelope: &[f32]) -> Result<Vec<f32>, EvaluationError> {
+        const MODULATION_BINS: usize = 64;
+
+        if envelope.is_empty() {
+            return Ok(vec![0.0; MODULATION_BINS]);
+        }
+
+        // Remove the DC offset so the modulation spectrum reflects fluctuations.
+        let mean = envelope.iter().sum::<f32>() / envelope.len() as f32;
+        let centered: Vec<f32> = envelope.iter().map(|&v| v - mean).collect();
+
+        // Magnitude spectrum of the envelope fluctuations.
+        let spectrum = self.compute_fft(&centered)?;
+
+        Ok(spectral_analysis_dsp::resize_spectrum(
+            &spectrum,
+            MODULATION_BINS,
+        ))
     }
-    fn calculate_am_depth(&self, _envelope: &[f32]) -> Result<f32, EvaluationError> {
-        Ok(0.3)
+
+    /// Amplitude-modulation depth (modulation index) of the envelope.
+    ///
+    /// Delegates to [`spectral_analysis_dsp::am_depth`], computing
+    /// `(max - min) / (max + min)` of the amplitude envelope. A 100 %
+    /// amplitude-modulated tone yields `≈ 1.0`; an unmodulated tone yields
+    /// `≈ 0.0`.
+    fn calculate_am_depth(&self, envelope: &[f32]) -> Result<f32, EvaluationError> {
+        Ok(spectral_analysis_dsp::am_depth(envelope))
     }
-    fn calculate_fm_depth(&self, _samples: &[f32]) -> Result<f32, EvaluationError> {
-        Ok(0.2)
+
+    /// Frequency-modulation depth from the spread of the spectral-centroid track.
+    ///
+    /// The signal is split into overlapping frames; for each frame the magnitude
+    /// spectrum (via [`Self::compute_fft`]) yields a spectral centroid in Hz. The
+    /// frame-to-frame variation of this instantaneous-frequency track is
+    /// summarised by [`spectral_analysis_dsp::normalized_std_of_track`]
+    /// (`std / mean`), so a steady tone gives `≈ 0.0` and a vibrato/FM tone gives
+    /// a larger value.
+    fn calculate_fm_depth(
+        &self,
+        samples: &[f32],
+        sample_rate: f32,
+    ) -> Result<f32, EvaluationError> {
+        const FRAME_SIZE: usize = 1024;
+        const HOP_SIZE: usize = 512;
+
+        if samples.len() < FRAME_SIZE {
+            return Ok(0.0);
+        }
+
+        let nyquist = sample_rate / 2.0;
+        let mut centroid_track: Vec<f32> = Vec::new();
+
+        let mut start = 0;
+        while start + FRAME_SIZE <= samples.len() {
+            let frame = &samples[start..start + FRAME_SIZE];
+            let spectrum = self.compute_fft(frame)?;
+
+            // Spectral centroid (magnitude-weighted mean frequency) in Hz.
+            let denom = (spectrum.len().saturating_sub(1)).max(1) as f32;
+            let mut weighted = 0.0_f32;
+            let mut total = 0.0_f32;
+            for (k, &magnitude) in spectrum.iter().enumerate() {
+                let freq = nyquist * (k as f32 / denom);
+                weighted += freq * magnitude;
+                total += magnitude;
+            }
+            if total > 1e-10 {
+                centroid_track.push(weighted / total);
+            }
+
+            start += HOP_SIZE;
+        }
+
+        Ok(spectral_analysis_dsp::normalized_std_of_track(
+            &centroid_track,
+        ))
     }
-    fn calculate_attack_time(&self, _envelope: &[f32]) -> Result<f32, EvaluationError> {
-        Ok(0.01)
+
+    /// 10 %→90 % attack (rise) time of the energy envelope, in seconds.
+    ///
+    /// Delegates to [`spectral_analysis_dsp::attack_time`]. The running-mean
+    /// envelope is sampled at the input rate, so `envelope_sample_rate` equals
+    /// the audio sample rate. Flat envelopes return a strictly positive
+    /// one-sample floor.
+    fn calculate_attack_time(
+        &self,
+        envelope: &[f32],
+        envelope_sample_rate: f32,
+    ) -> Result<f32, EvaluationError> {
+        Ok(spectral_analysis_dsp::attack_time(
+            envelope,
+            envelope_sample_rate,
+        ))
     }
-    fn calculate_decay_time(&self, _envelope: &[f32]) -> Result<f32, EvaluationError> {
-        Ok(0.1)
+
+    /// Peak→10 % decay (release) time of the energy envelope, in seconds.
+    ///
+    /// Delegates to [`spectral_analysis_dsp::decay_time`]. Flat / sustained
+    /// envelopes return a strictly positive one-sample floor.
+    fn calculate_decay_time(
+        &self,
+        envelope: &[f32],
+        envelope_sample_rate: f32,
+    ) -> Result<f32, EvaluationError> {
+        Ok(spectral_analysis_dsp::decay_time(
+            envelope,
+            envelope_sample_rate,
+        ))
     }
-    fn calculate_envelope_periodicity(&self, _envelope: &[f32]) -> Result<f32, EvaluationError> {
-        Ok(0.4)
+
+    /// Envelope periodicity: peak of the normalised envelope autocorrelation.
+    ///
+    /// Delegates to [`spectral_analysis_dsp::envelope_periodicity`], excluding
+    /// lag 0. A regularly pulsing envelope yields a value near `1.0`; an
+    /// aperiodic or flat envelope yields a low value.
+    fn calculate_envelope_periodicity(&self, envelope: &[f32]) -> Result<f32, EvaluationError> {
+        Ok(spectral_analysis_dsp::envelope_periodicity(envelope))
     }
-    fn find_modulation_peaks(&self, _spectrum: &[f32]) -> Result<Vec<f32>, EvaluationError> {
-        Ok(vec![4.0, 8.0, 16.0])
+
+    /// Dominant modulation-frequency peaks of the modulation spectrum.
+    ///
+    /// Delegates to [`spectral_analysis_dsp::find_modulation_peaks`], returning
+    /// the bin indices of the strongest local maxima (up to 8). The result is
+    /// never empty for a non-empty spectrum (it falls back to the global-maximum
+    /// bin), guaranteeing a usable set of modulation peaks.
+    fn find_modulation_peaks(&self, spectrum: &[f32]) -> Result<Vec<f32>, EvaluationError> {
+        const MAX_PEAKS: usize = 8;
+        const PEAK_FACTOR: f32 = 1.5;
+        Ok(spectral_analysis_dsp::find_modulation_peaks(
+            spectrum,
+            MAX_PEAKS,
+            PEAK_FACTOR,
+            None,
+        ))
     }
 
     // Hearing aid simulation methods
@@ -1341,40 +1512,23 @@ impl Clone for GammatoneFilterbank {
 
 impl GammatoneFilter {
     fn new(center_freq: f32, bandwidth: f32, sample_rate: f32) -> Self {
-        let mut filter = Self {
+        Self {
             center_freq,
             bandwidth,
-            coefficients: [0.0; 8],
-            state: [0.0; 8],
-        };
-        filter.calculate_coefficients(sample_rate);
-        filter
+            coefficients: spectral_analysis_dsp::slaney_gammatone_coeffs(center_freq, sample_rate),
+            state: spectral_analysis_dsp::SlaneyGammatoneState::default(),
+        }
     }
 
+    /// Recompute the Slaney cascade coefficients for a new sampling rate.
     fn calculate_coefficients(&mut self, sample_rate: f32) {
-        // Simplified gammatone filter coefficient calculation
-        let dt = 1.0 / sample_rate;
-        let omega = 2.0 * PI * self.center_freq * dt;
-        let alpha = self.bandwidth * dt;
-
-        // 4th order gammatone filter approximation
-        let cos_omega = omega.cos();
-        let sin_omega = omega.sin();
-        let exp_alpha = (-alpha).exp();
-
-        self.coefficients[0] = exp_alpha * cos_omega;
-        self.coefficients[1] = exp_alpha * sin_omega;
-        self.coefficients[2] = exp_alpha;
-        self.coefficients[3] = alpha;
-        // Additional coefficients for higher order terms
-        for i in 4..8 {
-            self.coefficients[i] = self.coefficients[i - 4] * 0.5;
-        }
+        self.coefficients =
+            spectral_analysis_dsp::slaney_gammatone_coeffs(self.center_freq, sample_rate);
     }
 
     fn update_sample_rate(&mut self, sample_rate: f32) {
         self.calculate_coefficients(sample_rate);
-        self.state = [0.0; 8]; // Reset filter state
+        self.state = spectral_analysis_dsp::SlaneyGammatoneState::default(); // Reset filter state
     }
 
     fn process(&mut self, samples: &[f32]) -> Result<GammatoneChannelResponse, EvaluationError> {
@@ -1383,21 +1537,28 @@ impl GammatoneFilter {
         let mut total_energy = 0.0;
         let mut peak_time = 0.0;
         let mut peak_value = 0.0;
+        let mut prev_filtered = 0.0_f32;
+
+        // Reset streaming state so each call is deterministic and independent.
+        self.state = spectral_analysis_dsp::SlaneyGammatoneState::default();
 
         for (i, &sample) in samples.iter().enumerate() {
-            // Simple gammatone filtering approximation
+            // Genuine band-limited Slaney 4th-order gammatone response.
             let filtered = self.apply_filter(sample);
             let env_val = filtered.abs();
             envelope.push(env_val);
 
-            // Instantaneous frequency approximation
+            // Instantaneous-frequency estimate from the sample-to-sample phase
+            // advance of the (real) band-limited output relative to the centre
+            // frequency: a zero crossing every half period implies f0.
             let inst_freq = if i > 0 {
-                let phase_diff = (filtered / envelope[i - 1]).atan2(1.0);
-                phase_diff / (2.0 * PI)
+                let phase_diff = (filtered - prev_filtered).atan2(filtered + prev_filtered);
+                self.center_freq + phase_diff / (2.0 * PI)
             } else {
                 self.center_freq
             };
             instantaneous_frequency.push(inst_freq);
+            prev_filtered = filtered;
 
             total_energy += env_val * env_val;
 
@@ -1417,16 +1578,9 @@ impl GammatoneFilter {
         })
     }
 
+    /// Advance the Slaney cascade by one input sample.
     fn apply_filter(&mut self, input: f32) -> f32 {
-        // Simplified 4th order filter implementation
-        let output =
-            self.coefficients[0] * self.state[0] - self.coefficients[1] * self.state[1] + input;
-
-        // Update state
-        self.state[1] = self.state[0];
-        self.state[0] = output;
-
-        output
+        spectral_analysis_dsp::slaney_gammatone_step(&self.coefficients, &mut self.state, input)
     }
 }
 
@@ -1436,7 +1590,7 @@ impl Clone for GammatoneFilter {
             center_freq: self.center_freq,
             bandwidth: self.bandwidth,
             coefficients: self.coefficients,
-            state: [0.0; 8], // Reset state for clone
+            state: spectral_analysis_dsp::SlaneyGammatoneState::default(), // Reset state for clone
         }
     }
 }
@@ -1503,10 +1657,12 @@ impl PLPAnalyzer {
     }
 
     fn compute_plp_coefficients(&self, frame: &[f32]) -> Result<Vec<f32>, EvaluationError> {
-        // Simplified PLP computation
-        let mut coefficients = vec![0.0; self.num_coefficients];
+        let order = self.num_coefficients;
+        if frame.len() < 2 || order == 0 {
+            return Ok(vec![0.0; order]);
+        }
 
-        // Window the frame
+        // Window the frame (Hamming) before autocorrelation.
         let windowed: Vec<f32> = frame
             .iter()
             .enumerate()
@@ -1517,23 +1673,20 @@ impl PLPAnalyzer {
             })
             .collect();
 
-        // Compute autocorrelation
-        for i in 0..coefficients.len() {
+        // Autocorrelation up to `order` lags (lag 0..=order needs order+1 taps).
+        let mut autocorr = vec![0.0_f32; order + 1];
+        for (lag, ac) in autocorr.iter_mut().enumerate() {
             let mut sum = 0.0;
-            for j in 0..windowed.len() - i {
-                sum += windowed[j] * windowed[j + i];
+            for j in 0..windowed.len() - lag {
+                sum += windowed[j] * windowed[j + lag];
             }
-            coefficients[i] = sum;
+            *ac = sum;
         }
 
-        // Apply Levinson-Durbin algorithm (simplified)
-        if coefficients[0] > 0.0 {
-            for i in 1..coefficients.len() {
-                coefficients[i] /= coefficients[0];
-            }
-        }
-
-        Ok(coefficients)
+        // Real Levinson-Durbin recursion -> LPC coefficients for the all-pole
+        // model. These are the PLP-style autoregressive coefficients.
+        let result = spectral_analysis_dsp::levinson_durbin(&autocorr, order);
+        Ok(result.lpc)
     }
 }
 
@@ -1670,7 +1823,18 @@ mod tests {
     #[test]
     fn test_spectral_complexity_metrics() {
         let analyzer = SpectralAnalyzer::new();
-        let samples = vec![0.1; 1024];
+        // A realistic signal with genuine spectral content. A pure-DC constant
+        // (e.g. `vec![0.1; N]`) has all energy at 0 Hz, so its spectral rolloff
+        // is legitimately 0 Hz — use real tones so the rolloff assertion below
+        // exercises the actual computation rather than a placeholder constant.
+        let sample_rate = 16000.0_f32;
+        let samples: Vec<f32> = (0..1024)
+            .map(|i| {
+                let t = i as f32 / sample_rate;
+                0.5 * (2.0 * std::f32::consts::PI * 1000.0 * t).sin()
+                    + 0.3 * (2.0 * std::f32::consts::PI * 3000.0 * t).sin()
+            })
+            .collect();
         let audio = AudioBuffer::new(samples, 16000, 1);
 
         let result = analyzer.analyze_advanced_spectral(&audio);

@@ -35,7 +35,10 @@ use crate::{
     types::Emotion,
     Error, Result,
 };
+use scirs2_core::numeric::Complex;
+use scirs2_fft::{irfft, rfft};
 use serde::{Deserialize, Serialize};
+use std::f32::consts::PI;
 
 /// Quality preset for signal processing
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -290,29 +293,120 @@ impl SignalProcessor {
         (intensity * quality_factor * emotion_factor).clamp(0.0, 1.0)
     }
 
+    /// Apply emotion-specific spectral shaping in the frequency domain.
+    ///
+    /// The audio is analyzed with a Hann-windowed Short-Time Fourier Transform
+    /// (via [`scirs2_fft::rfft`]). For every frame the magnitude spectrum is
+    /// transformed by the crate's [`SpectralProcessor`] (spectral tilt, harmonic
+    /// enhancement, high-frequency emphasis and centroid shift) while the phase
+    /// is preserved. The frame is then inverted with [`scirs2_fft::irfft`] and
+    /// summed back with weighted overlap-add, normalizing by the accumulated
+    /// squared analysis window so that constant-overlap-add (COLA) reconstruction
+    /// holds for the 75% hop used here.
     fn apply_spectral_processing(
         &mut self,
         audio: &[f32],
         emotion: &Emotion,
         intensity: f32,
     ) -> Result<Vec<f32>> {
-        let spectral = self
-            .spectral_processor
-            .as_mut()
-            .ok_or_else(|| Error::Processing("Spectral processor not initialized".to_string()))?;
-
-        // Set emotion-specific spectral configuration
+        // Build the emotion-specific, intensity-scaled configuration and load it
+        // into the persistent spectral processor.
         let mut config = SpectralConfig::from_emotion(emotion.clone());
-
-        // Scale by intensity
         config.tilt *= intensity;
-        config.harmonic_boost *= intensity;
-        config.hf_emphasis *= intensity;
+        // Interpolate the multiplicative parameters towards their neutral value
+        // of 1.0 by `intensity` so a zero intensity is a true pass-through.
+        config.harmonic_boost = 1.0 + (config.harmonic_boost - 1.0) * intensity;
+        config.hf_emphasis = 1.0 + (config.hf_emphasis - 1.0) * intensity;
+        config.centroid_shift *= intensity;
 
-        spectral.set_config(config);
+        let fft_size = {
+            let spectral = self.spectral_processor.as_mut().ok_or_else(|| {
+                Error::Processing("Spectral processor not initialized".to_string())
+            })?;
+            spectral.set_config(config);
+            spectral.fft_size()
+        };
 
-        // Return audio as-is for now (spectral processing would require FFT implementation)
-        Ok(audio.to_vec())
+        // Frames shorter than one FFT window cannot be meaningfully analyzed in
+        // the frequency domain; leave such audio untouched.
+        if audio.len() < fft_size || fft_size == 0 {
+            return Ok(audio.to_vec());
+        }
+
+        // 75% overlap (hop = N/4) gives smooth COLA reconstruction with a Hann
+        // window. A coarse fundamental estimate feeds the harmonic enhancement.
+        let hop = (fft_size / 4).max(1);
+        let f0 = estimate_fundamental(audio, self.sample_rate);
+        let window: Vec<f32> = (0..fft_size)
+            .map(|i| 0.5 * (1.0 - (2.0 * PI * i as f32 / fft_size as f32).cos()))
+            .collect();
+
+        let mut output = vec![0.0f32; audio.len()];
+        let mut window_norm = vec![0.0f32; audio.len()];
+
+        let mut pos = 0usize;
+        while pos + fft_size <= audio.len() {
+            // Analysis: window the frame and forward-transform it.
+            let frame_f64: Vec<f64> = (0..fft_size)
+                .map(|i| (audio[pos + i] * window[i]) as f64)
+                .collect();
+
+            let mut spectrum = match rfft(&frame_f64, Some(fft_size)) {
+                Ok(spec) => spec,
+                Err(e) => return Err(Error::Processing(format!("rfft failed: {e:?}"))),
+            };
+
+            // Extract magnitudes, transform them, then re-apply onto the
+            // complex spectrum keeping the original phase of each bin.
+            let mut magnitudes: Vec<f32> = spectrum
+                .iter()
+                .map(|c| ((c.re * c.re + c.im * c.im).sqrt()) as f32)
+                .collect();
+
+            {
+                let spectral = self.spectral_processor.as_ref().ok_or_else(|| {
+                    Error::Processing("Spectral processor not initialized".to_string())
+                })?;
+                spectral.process_spectrum(&mut magnitudes, f0);
+            }
+
+            for (bin, mag) in spectrum.iter_mut().zip(magnitudes.iter()) {
+                let old_mag = (bin.re * bin.re + bin.im * bin.im).sqrt();
+                if old_mag > 1e-12 {
+                    let gain = (*mag as f64) / old_mag;
+                    *bin = Complex::new(bin.re * gain, bin.im * gain);
+                } else {
+                    // Reconstruct a (zero-phase) bin where the input had no energy.
+                    *bin = Complex::new(*mag as f64, 0.0);
+                }
+            }
+
+            // Synthesis: inverse transform and weighted overlap-add.
+            let frame_out = match irfft(&spectrum, Some(fft_size)) {
+                Ok(out) => out,
+                Err(e) => return Err(Error::Processing(format!("irfft failed: {e:?}"))),
+            };
+
+            for i in 0..fft_size {
+                let w = window[i];
+                output[pos + i] += frame_out[i] as f32 * w;
+                window_norm[pos + i] += w * w;
+            }
+
+            pos += hop;
+        }
+
+        // Normalize by the accumulated squared window. Samples never covered by
+        // a full frame (the trailing tail) fall back to the dry signal.
+        for i in 0..output.len() {
+            if window_norm[i] > 1e-6 {
+                output[i] /= window_norm[i];
+            } else {
+                output[i] = audio[i];
+            }
+        }
+
+        Ok(output)
     }
 
     fn apply_breath_processing(
@@ -366,26 +460,15 @@ impl SignalProcessor {
         })
     }
 
+    /// Calculate the spectral centroid (brightness) of the audio in Hz.
+    ///
+    /// Uses a Hann-windowed real FFT ([`scirs2_fft::rfft`]) and computes
+    /// `Σ(f_k·|X_k|) / Σ|X_k|` with `f_k = k · sample_rate / N`.
     fn calculate_spectral_centroid(&self, audio: &[f32]) -> Result<f32> {
         if audio.is_empty() {
             return Ok(0.0);
         }
-
-        // Simplified spectral centroid calculation
-        let mut weighted_sum = 0.0;
-        let mut magnitude_sum = 0.0;
-
-        for (i, &sample) in audio.iter().enumerate() {
-            let magnitude = sample.abs();
-            weighted_sum += i as f32 * magnitude;
-            magnitude_sum += magnitude;
-        }
-
-        if magnitude_sum > 0.0 {
-            Ok(weighted_sum / magnitude_sum / audio.len() as f32)
-        } else {
-            Ok(0.0)
-        }
+        Ok(spectral_centroid_hz(audio, self.sample_rate))
     }
 
     fn calculate_spectral_rolloff(&self, audio: &[f32]) -> Result<f32> {
@@ -408,9 +491,12 @@ impl SignalProcessor {
     }
 
     fn estimate_emotion_from_features(&self, spectral: &SpectralFeatures) -> Emotion {
-        // Simple heuristic-based emotion estimation
+        // Simple heuristic-based emotion estimation. The centroid is expressed in
+        // Hz, so it is normalized by the Nyquist frequency to a [0, 1] brightness.
+        let nyquist = (self.sample_rate / 2.0).max(1.0);
+        let brightness = (spectral.centroid / nyquist).clamp(0.0, 1.0);
         let high_energy = spectral.energy > 0.5;
-        let high_centroid = spectral.centroid > 0.5;
+        let high_centroid = brightness > 0.25;
 
         match (high_energy, high_centroid) {
             (true, true) => Emotion::Excited,
@@ -421,9 +507,12 @@ impl SignalProcessor {
     }
 
     fn calculate_confidence(&self, spectral: &SpectralFeatures) -> f32 {
-        // Calculate confidence based on feature strength
+        // Calculate confidence based on feature strength. The centroid (Hz) is
+        // normalized to a [0, 1] brightness via the Nyquist frequency.
+        let nyquist = (self.sample_rate / 2.0).max(1.0);
+        let brightness = (spectral.centroid / nyquist).clamp(0.0, 1.0);
         let energy_confidence = spectral.energy.clamp(0.0, 1.0);
-        let spectral_confidence = (spectral.centroid * 2.0).clamp(0.0, 1.0);
+        let spectral_confidence = (brightness * 4.0).clamp(0.0, 1.0);
 
         (energy_confidence + spectral_confidence) / 2.0
     }
@@ -435,6 +524,93 @@ struct SpectralFeatures {
     energy: f32,
     centroid: f32,
     rolloff: f32,
+}
+
+/// Compute the spectral centroid of `audio` in Hz using a real FFT.
+///
+/// A Hann window is applied (over the first power-of-two-friendly span up to
+/// the whole signal) before the [`scirs2_fft::rfft`]. The centroid is the
+/// magnitude-weighted mean frequency `Σ(f_k·|X_k|) / Σ|X_k|` with
+/// `f_k = k · sample_rate / N`. Returns `0.0` for empty/silent input.
+fn spectral_centroid_hz(audio: &[f32], sample_rate: f32) -> f32 {
+    if audio.is_empty() || sample_rate <= 0.0 {
+        return 0.0;
+    }
+
+    let n = audio.len();
+    let windowed: Vec<f64> = audio
+        .iter()
+        .enumerate()
+        .map(|(i, &x)| {
+            let w = 0.5 * (1.0 - (2.0 * PI * i as f32 / n as f32).cos());
+            (x * w) as f64
+        })
+        .collect();
+
+    let spectrum = match rfft(&windowed, Some(n)) {
+        Ok(spec) => spec,
+        Err(_) => return 0.0,
+    };
+
+    let mut weighted = 0.0f64;
+    let mut magnitude = 0.0f64;
+    let bin_hz = sample_rate as f64 / n as f64;
+    for (k, c) in spectrum.iter().enumerate() {
+        let mag = (c.re * c.re + c.im * c.im).sqrt();
+        weighted += (k as f64 * bin_hz) * mag;
+        magnitude += mag;
+    }
+
+    if magnitude > 1e-12 {
+        (weighted / magnitude) as f32
+    } else {
+        0.0
+    }
+}
+
+/// Estimate the fundamental frequency (Hz) of `audio` via autocorrelation.
+///
+/// Returns `Some(f0)` when a plausible periodicity is found within the typical
+/// human voice range (60–500 Hz), otherwise `None` (harmonic enhancement is
+/// then skipped by the spectral processor).
+fn estimate_fundamental(audio: &[f32], sample_rate: f32) -> Option<f32> {
+    if audio.len() < 2 || sample_rate <= 0.0 {
+        return None;
+    }
+
+    let min_f0 = 60.0f32;
+    let max_f0 = 500.0f32;
+    let min_lag = (sample_rate / max_f0).floor() as usize;
+    let max_lag = ((sample_rate / min_f0).ceil() as usize).min(audio.len() - 1);
+    if min_lag < 1 || max_lag <= min_lag {
+        return None;
+    }
+
+    let energy: f32 = audio.iter().map(|&x| x * x).sum();
+    if energy < 1e-9 {
+        return None;
+    }
+
+    let mut best_lag = 0usize;
+    let mut best_corr = 0.0f32;
+    for lag in min_lag..=max_lag {
+        let mut corr = 0.0f32;
+        for i in 0..(audio.len() - lag) {
+            corr += audio[i] * audio[i + lag];
+        }
+        if corr > best_corr {
+            best_corr = corr;
+            best_lag = lag;
+        }
+    }
+
+    // Require the peak autocorrelation to be a reasonable fraction of the
+    // zero-lag energy to consider the signal voiced.
+    if best_lag > 0 && best_corr > 0.3 * energy {
+        Some(sample_rate / best_lag as f32)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -541,5 +717,80 @@ mod tests {
         assert!(features.energy > 0.0);
         assert!(features.centroid >= 0.0);
         assert!((0.0..=1.0).contains(&features.rolloff));
+    }
+
+    /// Build a single-frequency sine tone.
+    fn make_tone(freq: f32, sample_rate: f32, len: usize) -> Vec<f32> {
+        (0..len)
+            .map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / sample_rate).sin() * 0.5)
+            .collect()
+    }
+
+    #[test]
+    fn test_spectral_centroid_matches_tone_frequency() {
+        let sr = 44100.0;
+        let audio = make_tone(2000.0, sr, 8192);
+        let centroid = spectral_centroid_hz(&audio, sr);
+        // A pure tone's centroid should sit close to its frequency.
+        assert!(
+            (centroid - 2000.0).abs() < 200.0,
+            "centroid {centroid} not near 2000 Hz"
+        );
+    }
+
+    #[test]
+    fn test_spectral_centroid_hf_higher_than_lf() {
+        let sr = 44100.0;
+        let lf = make_tone(300.0, sr, 8192);
+        let hf = make_tone(6000.0, sr, 8192);
+        let lf_centroid = spectral_centroid_hz(&lf, sr);
+        let hf_centroid = spectral_centroid_hz(&hf, sr);
+        assert!(
+            hf_centroid > lf_centroid,
+            "hf {hf_centroid} should exceed lf {lf_centroid}"
+        );
+    }
+
+    #[test]
+    fn test_spectral_centroid_empty_is_zero() {
+        assert_eq!(spectral_centroid_hz(&[], 44100.0), 0.0);
+    }
+
+    #[test]
+    fn test_apply_spectral_processing_transforms_audio() {
+        let sr = 44100.0;
+        let config = SignalProcessingConfig::full();
+        let mut processor = SignalProcessor::new(config, sr);
+
+        // Broadband-ish signal: sum of two tones so HF emphasis has material to act on.
+        let audio: Vec<f32> = (0..8192)
+            .map(|i| {
+                let t = i as f32 / sr;
+                0.4 * (2.0 * std::f32::consts::PI * 220.0 * t).sin()
+                    + 0.2 * (2.0 * std::f32::consts::PI * 5000.0 * t).sin()
+            })
+            .collect();
+
+        let processed = processor
+            .apply_spectral_processing(&audio, &Emotion::Happy, 1.0)
+            .unwrap();
+
+        assert_eq!(processed.len(), audio.len());
+        // Output must genuinely differ from the dry input somewhere in the
+        // covered region (Happy boosts highs / harmonics).
+        let max_diff = audio
+            .iter()
+            .zip(processed.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(max_diff > 1e-3, "spectral processing did not alter audio");
+    }
+
+    #[test]
+    fn test_estimate_fundamental_recovers_tone() {
+        let sr = 16000.0;
+        let audio = make_tone(150.0, sr, 4096);
+        let f0 = estimate_fundamental(&audio, sr).expect("voiced tone should yield f0");
+        assert!((f0 - 150.0).abs() < 10.0, "f0 {f0} not near 150 Hz");
     }
 }

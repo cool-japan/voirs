@@ -6,6 +6,19 @@
 use super::{AudioEffect, EffectParameter};
 use crate::{AudioBuffer, Result};
 
+/// Generate a periodic Hann window of the given length.
+///
+/// Tapers analysis frames before the FFT so that a single tone's energy stays
+/// concentrated in a few bins instead of leaking across the spectrum.
+fn hann_window(length: usize) -> Vec<f32> {
+    if length <= 1 {
+        return vec![1.0; length];
+    }
+    (0..length)
+        .map(|i| 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (length - 1) as f32).cos()))
+        .collect()
+}
+
 /// Audio validation and quality control processor
 pub struct AudioValidator {
     enabled: bool,
@@ -227,39 +240,76 @@ impl AudioValidator {
         }
     }
 
-    /// Simplified THD+N estimation
+    /// THD+N estimation via real-FFT spectral analysis.
+    ///
+    /// Returns the total-harmonic-distortion-plus-noise ratio as a fraction (the
+    /// caller scales it to a percentage). The first 4096-sample frame (or the
+    /// whole signal if shorter) is Hann-windowed and transformed with a real FFT.
+    /// The fundamental is the strongest peak in a plausible F0 band (50 Hz –
+    /// Nyquist/4); its energy is summed over ±2 bins to recover spectral leakage.
+    /// All remaining spectral energy (harmonics + noise) forms the residual:
+    ///
+    /// `THD+N = sqrt((total − fundamental) / fundamental)`.
     fn estimate_thd_plus_n(&self, samples: &[f32]) -> f32 {
         if samples.len() < 1024 {
             return 0.0; // Not enough samples for meaningful analysis
         }
 
-        // Simple spectral analysis to estimate harmonic content
-        // This is a very simplified approach
-        let fundamental_freq = 1000.0; // Assume 1kHz test tone
-        let sample_rate = self.sample_rate as f32;
+        // Use a power-of-two analysis length capped at 4096 for an efficient FFT.
+        let fft_size = 4096.min(samples.len().next_power_of_two() / 2).max(1024);
+        let fft_size = fft_size.min(samples.len());
 
-        // Calculate energy in fundamental and harmonics vs total energy
-        let total_energy: f32 = samples.iter().map(|x| x * x).sum();
+        let window = hann_window(fft_size);
+        let input: Vec<f64> = samples
+            .iter()
+            .take(fft_size)
+            .zip(window.iter())
+            .map(|(&x, &w)| (x * w) as f64)
+            .collect();
 
-        // Very simplified harmonic detection
-        let mut harmonic_energy = 0.0;
-        let window_size = (sample_rate / fundamental_freq) as usize;
+        let spectrum = match scirs2_fft::rfft(&input, Some(fft_size)) {
+            Ok(s) => s,
+            Err(_) => return 0.0,
+        };
 
-        if window_size > 0 && window_size < samples.len() {
-            for i in (0..samples.len()).step_by(window_size) {
-                if i + window_size < samples.len() {
-                    let window_energy: f32 =
-                        samples[i..i + window_size].iter().map(|x| x * x).sum();
-                    harmonic_energy += window_energy;
-                }
+        let num_bins = fft_size / 2 + 1;
+        let mag2: Vec<f64> = spectrum
+            .iter()
+            .take(num_bins)
+            .map(|c| c.re * c.re + c.im * c.im)
+            .collect();
+
+        let total_energy: f64 = mag2.iter().skip(1).sum();
+        if total_energy <= 0.0 {
+            return 0.0;
+        }
+
+        let bin_hz = self.sample_rate as f32 / fft_size as f32;
+        let low_bin = ((50.0 / bin_hz).floor() as usize).max(1);
+        let high_bin = (num_bins / 4).max(low_bin + 1).min(num_bins - 1);
+
+        let mut fundamental_bin = low_bin;
+        let mut peak_mag2 = 0.0_f64;
+        for (bin, &m2) in mag2.iter().enumerate().take(high_bin + 1).skip(low_bin) {
+            if m2 > peak_mag2 {
+                peak_mag2 = m2;
+                fundamental_bin = bin;
             }
         }
-
-        if total_energy > 0.0 {
-            ((total_energy - harmonic_energy) / total_energy).sqrt()
-        } else {
-            0.0
+        if peak_mag2 <= 0.0 {
+            return 0.0;
         }
+
+        let leak = 2usize;
+        let f_lo = fundamental_bin.saturating_sub(leak);
+        let f_hi = (fundamental_bin + leak).min(num_bins - 1);
+        let fundamental_energy: f64 = mag2[f_lo..=f_hi].iter().sum();
+        if fundamental_energy <= 0.0 {
+            return 0.0;
+        }
+
+        let residual = (total_energy - fundamental_energy).max(0.0);
+        ((residual / fundamental_energy).sqrt() as f32).min(1.0)
     }
 
     /// Estimate noise floor energy
@@ -527,5 +577,53 @@ mod tests {
         // Check that DC was reduced
         let dc_offset = audio.samples().iter().sum::<f32>() / audio.samples().len() as f32;
         assert!(dc_offset.abs() < 0.1); // Should be much closer to zero
+    }
+
+    #[test]
+    fn test_estimate_thd_plus_n_pure_sine_near_zero() {
+        let validator = AudioValidator::new(44100);
+        let sr = 44100.0_f32;
+        let freq = 1000.0_f32;
+        let signal: Vec<f32> = (0..8192)
+            .map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / sr).sin())
+            .collect();
+
+        let thd = validator.estimate_thd_plus_n(&signal);
+        // Fraction (not percent): a clean tone should be tiny.
+        assert!(
+            thd < 0.05,
+            "pure sine THD+N fraction should be near zero, got {thd}"
+        );
+    }
+
+    #[test]
+    fn test_estimate_thd_plus_n_with_harmonics_is_larger() {
+        let validator = AudioValidator::new(44100);
+        let sr = 44100.0_f32;
+        let f0 = 1000.0_f32;
+
+        let dirty: Vec<f32> = (0..8192)
+            .map(|i| {
+                let t = i as f32 / sr;
+                (2.0 * std::f32::consts::PI * f0 * t).sin()
+                    + 0.5 * (2.0 * std::f32::consts::PI * 2.0 * f0 * t).sin()
+                    + 0.3 * (2.0 * std::f32::consts::PI * 3.0 * f0 * t).sin()
+            })
+            .collect();
+        let clean: Vec<f32> = (0..8192)
+            .map(|i| (2.0 * std::f32::consts::PI * f0 * i as f32 / sr).sin())
+            .collect();
+
+        let thd_dirty = validator.estimate_thd_plus_n(&dirty);
+        let thd_clean = validator.estimate_thd_plus_n(&clean);
+
+        assert!(
+            thd_dirty > 0.1,
+            "harmonic signal should have clearly positive THD+N, got {thd_dirty}"
+        );
+        assert!(
+            thd_dirty > thd_clean,
+            "harmonic ({thd_dirty}) must exceed clean ({thd_clean})"
+        );
     }
 }

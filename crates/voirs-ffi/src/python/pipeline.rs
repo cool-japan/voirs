@@ -706,17 +706,122 @@ impl VoirsPipeline {
         PyRuntimeError::new_err(error_info.message.clone())
     }
 
-    /// Get current memory usage in MB
+    /// Get current resident-set memory usage of this process, in megabytes.
     fn get_memory_usage_mb(&self) -> f64 {
-        // Simplified memory usage calculation
-        // In a real implementation, this would use process memory stats
-        0.0
+        current_rss_mb()
     }
 
-    /// Check if GPU is available
+    /// Check whether a GPU is (heuristically) available for synthesis.
     fn is_gpu_available(&self) -> bool {
-        // Simplified GPU check
-        // In a real implementation, this would check actual GPU availability
-        false
+        gpu_probe()
+    }
+}
+
+/// Return the current resident-set size (RSS) of this process, in megabytes.
+///
+/// On Linux this parses `VmRSS` from `/proc/self/status`, which reports the
+/// instantaneous resident set in kilobytes. On other Unix platforms it falls
+/// back to `getrusage(RUSAGE_SELF).ru_maxrss` (the *peak* RSS); the reported
+/// units differ by platform (bytes on macOS/iOS, kilobytes on the BSDs). On
+/// non-Unix platforms (e.g. Windows, wasm) no cheap portable source is used and
+/// `0.0` is returned.
+#[cfg(target_os = "linux")]
+fn current_rss_mb() -> f64 {
+    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+        for line in status.lines() {
+            if let Some(rest) = line.strip_prefix("VmRSS:") {
+                // Format: "VmRSS:\t  123456 kB"
+                if let Some(kb_str) = rest.split_whitespace().next() {
+                    if let Ok(kb) = kb_str.parse::<f64>() {
+                        return kb / 1024.0; // kB -> MB
+                    }
+                }
+            }
+        }
+    }
+    0.0
+}
+
+/// Non-Linux Unix fallback: use `getrusage(RUSAGE_SELF).ru_maxrss` (peak RSS).
+#[cfg(all(unix, not(target_os = "linux")))]
+fn current_rss_mb() -> f64 {
+    let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
+    // SAFETY: `getrusage` initializes the whole `rusage` struct for RUSAGE_SELF
+    // and returns 0 on success; we only read the result when it succeeds.
+    let ret = unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) };
+    if ret != 0 {
+        return 0.0;
+    }
+    let usage = unsafe { usage.assume_init() };
+    let max_rss = usage.ru_maxrss as f64;
+    if cfg!(any(target_os = "macos", target_os = "ios")) {
+        max_rss / (1024.0 * 1024.0) // bytes -> MB
+    } else {
+        max_rss / 1024.0 // kB -> MB
+    }
+}
+
+/// Non-Unix fallback (Windows, wasm, ...): no cheap portable RSS source.
+#[cfg(not(unix))]
+fn current_rss_mb() -> f64 {
+    0.0
+}
+
+/// Cheap, non-initializing probe for GPU availability.
+///
+/// This intentionally does **not** create a CUDA/Metal context. It reads the
+/// `CUDA_VISIBLE_DEVICES` environment variable and applies NVIDIA's convention.
+fn gpu_probe() -> bool {
+    gpu_available_from_env(std::env::var("CUDA_VISIBLE_DEVICES").ok().as_deref())
+}
+
+/// Decide GPU availability from the value of `CUDA_VISIBLE_DEVICES`.
+///
+/// Heuristic (NVIDIA convention):
+/// * unset (`None`) -> `false` (cannot confirm without initializing a device)
+/// * empty string -> `false` (all GPUs masked)
+/// * exactly `"-1"` -> `false` (all GPUs masked)
+/// * any other value (e.g. `"0"`, `"0,1"`) -> `true`
+fn gpu_available_from_env(cuda_visible_devices: Option<&str>) -> bool {
+    match cuda_visible_devices {
+        Some(value) => {
+            let trimmed = value.trim();
+            !trimmed.is_empty() && trimmed != "-1"
+        }
+        None => false,
+    }
+}
+
+#[cfg(test)]
+mod memory_gpu_tests {
+    use super::{current_rss_mb, gpu_available_from_env};
+
+    #[test]
+    fn test_current_rss_mb_is_nonnegative() {
+        assert!(current_rss_mb() >= 0.0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_current_rss_mb_positive_on_linux() {
+        // A running test process always has a non-zero resident set on Linux.
+        assert!(
+            current_rss_mb() > 0.0,
+            "expected positive RSS on Linux, got {}",
+            current_rss_mb()
+        );
+    }
+
+    #[test]
+    fn test_gpu_available_from_env_heuristic() {
+        // Visible devices -> available.
+        assert!(gpu_available_from_env(Some("0")));
+        assert!(gpu_available_from_env(Some("0,1")));
+        assert!(gpu_available_from_env(Some(" 0 ")));
+        // Masked / unset -> unavailable.
+        assert!(!gpu_available_from_env(Some("")));
+        assert!(!gpu_available_from_env(Some("-1")));
+        assert!(!gpu_available_from_env(Some(" -1 ")));
+        assert!(!gpu_available_from_env(None));
     }
 }

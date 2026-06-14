@@ -611,6 +611,56 @@ mod tests {
         assert_eq!(output.len(), input.len());
     }
 
+    /// Ratio of high-frequency to low-frequency energy of a signal via real FFT.
+    fn hf_lf_energy_ratio(signal: &[f32]) -> f32 {
+        use scirs2_fft::RealFftPlanner;
+        let n = signal.len();
+        let mut planner = RealFftPlanner::<f32>::new();
+        let fft = planner.plan_fft_forward(n);
+        let mut spectrum = vec![Complex::new(0.0_f32, 0.0_f32); n / 2 + 1];
+        fft.process(signal, &mut spectrum).unwrap();
+        let mid = spectrum.len() / 2;
+        let lf: f32 = spectrum[..mid].iter().map(|c| c.norm_sqr()).sum();
+        let hf: f32 = spectrum[mid..].iter().map(|c| c.norm_sqr()).sum();
+        hf / lf.max(1e-12)
+    }
+
+    // ── AgeTransform::apply_spectral_scaling is a real shelf, not flat gain ───
+    #[test]
+    fn test_apply_spectral_scaling_is_frequency_dependent() {
+        let transform = AgeTransform::new(30.0, 30.0);
+        // Broadband: low + high tones so both bands carry energy.
+        let signal: Vec<f32> = {
+            let low = sine_wave(2048, 0.03);
+            let high = sine_wave(2048, 0.35);
+            low.iter().zip(high.iter()).map(|(&l, &h)| l + h).collect()
+        };
+
+        let base = hf_lf_energy_ratio(&signal);
+
+        // scale_factor > 1 → brighter → boost HF band.
+        let bright = transform.apply_spectral_scaling(&signal, 1.5).unwrap();
+        let bright_ratio = hf_lf_energy_ratio(&bright);
+
+        // scale_factor < 1 → darker → cut HF band.
+        let dark = transform.apply_spectral_scaling(&signal, 0.6).unwrap();
+        let dark_ratio = hf_lf_energy_ratio(&dark);
+
+        assert_eq!(bright.len(), signal.len());
+        assert!(
+            bright_ratio > base,
+            "scale>1 must raise HF/LF: base={base}, bright={bright_ratio}"
+        );
+        assert!(
+            dark_ratio < base,
+            "scale<1 must lower HF/LF: base={base}, dark={dark_ratio}"
+        );
+
+        // Unity factor is an exact identity (not a flat multiply by 1).
+        let same = transform.apply_spectral_scaling(&signal, 1.0).unwrap();
+        assert_eq!(same, signal);
+    }
+
     // ── Gender transform: output length must equal input length ──────────────
     #[test]
     fn test_gender_transform() {
@@ -1020,12 +1070,52 @@ impl AgeTransform {
             output = self.apply_child_characteristics(&output)?;
         }
 
+        // Age modifications reshape the spectrum (a high-shelf whose gain grows with
+        // the formant-shift factor) but must not inflate the signal beyond its
+        // original peak — a large scale factor can otherwise boost the
+        // high-frequency residual past full scale. Re-normalise to the input peak so
+        // the spectral *shape* change is preserved while the level stays bounded.
+        let in_peak = input.iter().fold(0.0_f32, |m, &x| m.max(x.abs()));
+        let out_peak = output.iter().fold(0.0_f32, |m, &x| m.max(x.abs()));
+        if out_peak > in_peak && in_peak > 0.0 {
+            let scale = in_peak / out_peak;
+            for s in output.iter_mut() {
+                *s *= scale;
+            }
+        }
+
         Ok(output)
     }
 
+    /// Apply a frequency-dependent spectral shelf rather than a flat gain.
+    ///
+    /// `scale_factor` is a formant-shift multiplier centred on 1.0 (e.g. 1.05 for a
+    /// brighter child-like timbre, 0.97 for a darker elderly timbre). A flat
+    /// amplitude scale would only change loudness, so instead we apply a real
+    /// first-order high-shelf: the signal is split into a one-pole low-passed
+    /// component and its high-frequency residual, and the residual is scaled by a
+    /// tilt gain derived from `scale_factor`. `scale_factor > 1` boosts highs
+    /// (brighter), `< 1` cuts them (darker). Time-domain and stateful (no FFT).
     fn apply_spectral_scaling(&self, input: &[f32], scale_factor: f32) -> Result<Vec<f32>> {
-        // Simplified spectral scaling
-        Ok(input.iter().map(|&x| x * scale_factor).collect())
+        if input.is_empty() || (scale_factor - 1.0).abs() < f32::EPSILON {
+            return Ok(input.to_vec());
+        }
+
+        // One-pole low-pass split point (~quarter sample rate).
+        let a = 0.25_f32;
+        // Tilt: how far the formant factor deviates from unity sets the HF gain.
+        // The exponential keeps the gain positive for any deviation while leaving
+        // unity untouched (scale_factor == 1 → hf_gain == 1).
+        let hf_gain = (scale_factor - 1.0).exp();
+
+        let mut output = Vec::with_capacity(input.len());
+        let mut lp = input[0];
+        for &x in input {
+            lp = a * x + (1.0 - a) * lp;
+            let hf = x - lp;
+            output.push(lp + hf * hf_gain);
+        }
+        Ok(output)
     }
 
     fn apply_age_tremor(&self, input: &[f32]) -> Result<Vec<f32>> {

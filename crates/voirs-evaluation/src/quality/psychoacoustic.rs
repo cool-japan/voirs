@@ -256,7 +256,7 @@ impl PsychoacousticEvaluator {
             return Ok((f32::NEG_INFINITY, f32::NEG_INFINITY, 0.0));
         }
 
-        // Apply K-weighting filter (simplified implementation)
+        // Apply the ITU-R BS.1770-4 K-weighting filter chain.
         let k_weighted = self.apply_k_weighting(samples, sample_rate)?;
 
         // Gating and measurement
@@ -304,28 +304,40 @@ impl PsychoacousticEvaluator {
         Ok((integrated_loudness, integrated_loudness, loudness_range))
     }
 
-    /// Apply K-weighting filter (simplified)
+    /// Apply the ITU-R BS.1770-4 K-weighting filter to `samples`.
+    ///
+    /// K-weighting is the two-stage IIR pre-filter that precedes the gated
+    /// loudness measurement. It consists of:
+    ///
+    /// * **Stage 1 - "pre-filter" (high-shelf)** modelling the acoustic effect
+    ///   of the head: f0 ~ 1681.97 Hz, Q ~ 0.7071, gain ~ +3.999 dB.
+    /// * **Stage 2 - RLB high-pass** (revised low-frequency B-weighting):
+    ///   f0 ~ 38.135 Hz, Q ~ 0.5.
+    ///
+    /// The biquad coefficients are derived for the supplied `sample_rate` via the
+    /// bilinear transform (RBJ-cookbook high-shelf / high-pass forms), so the
+    /// filter is correct at any sample rate rather than only at the 48 kHz
+    /// reference. The two sections are applied in series using a transposed
+    /// direct-form II structure with `f64` state for numerical accuracy at the
+    /// very-low RLB corner frequency.
     fn apply_k_weighting(
         &self,
         samples: &[f32],
-        _sample_rate: u32,
+        sample_rate: u32,
     ) -> Result<Vec<f32>, EvaluationError> {
-        // Simplified K-weighting (in practice, this would be a proper filter cascade)
-        // For now, apply a simple high-pass filter to approximate the effect
         if samples.len() < 2 {
             return Ok(samples.to_vec());
         }
 
-        let mut filtered = vec![0.0; samples.len()];
-        filtered[0] = samples[0];
+        let fs = f64::from(sample_rate);
+        let pre_filter = Biquad::k_weighting_pre_filter(fs);
+        let rlb_high_pass = Biquad::k_weighting_rlb(fs);
 
-        // Simple first-order high-pass filter
-        let alpha = 0.99; // Cutoff around 38 Hz for 48kHz sample rate
-        for i in 1..samples.len() {
-            filtered[i] = alpha * (filtered[i - 1] + samples[i] - samples[i - 1]);
-        }
+        // Stage 1 (high-shelf) then stage 2 (RLB high-pass) in series.
+        let stage1 = pre_filter.filter(samples);
+        let stage2 = rlb_high_pass.filter(&stage1);
 
-        Ok(filtered)
+        Ok(stage2)
     }
 
     /// Compute bark spectrum
@@ -806,6 +818,94 @@ impl PsychoacousticEvaluator {
     }
 }
 
+/// A second-order IIR section (biquad) used to build the ITU-R BS.1770-4
+/// K-weighting cascade.
+///
+/// Coefficients are stored already normalised by `a0`, so the difference
+/// equation is `y[n] = b0*x[n] + b1*x[n-1] + b2*x[n-2] - a1*y[n-1] - a2*y[n-2]`.
+#[derive(Debug, Clone, Copy)]
+struct Biquad {
+    b0: f64,
+    b1: f64,
+    b2: f64,
+    a1: f64,
+    a2: f64,
+}
+
+impl Biquad {
+    /// Stage 1 of the K-weighting filter: the "pre-filter" high-shelf that
+    /// models the acoustic effect of the head (ITU-R BS.1770-4 Annex 1).
+    ///
+    /// Coefficients are derived for `sample_rate` (Hz) from the analogue
+    /// prototype (f0 = 1681.9744509555319 Hz, Q = 0.7071752369554193,
+    /// gain = 3.999843853973347 dB) via the bilinear transform. At 48 kHz this
+    /// reproduces the BS.1770-4 reference coefficients
+    /// `b = [1.53512485958697, -2.69169618940638, 1.19839281085285]` and
+    /// `a = [1, -1.69065929318241, 0.73248077421585]`.
+    fn k_weighting_pre_filter(sample_rate: f64) -> Self {
+        let f0 = 1_681.974_450_955_532_f64;
+        let q = 0.707_175_236_955_419_3_f64;
+        let gain_db = 3.999_843_853_973_347_f64;
+
+        let k = (std::f64::consts::PI * f0 / sample_rate).tan();
+        let k2 = k * k;
+        // High-frequency shelf gain as a (power) ratio and its companion term.
+        let vh = 10.0_f64.powf(gain_db / 20.0);
+        let vb = vh.powf(0.499_666_774_154_541_6_f64);
+
+        let denom = 1.0 + k / q + k2;
+        Self {
+            b0: (vh + vb * k / q + k2) / denom,
+            b1: 2.0 * (k2 - vh) / denom,
+            b2: (vh - vb * k / q + k2) / denom,
+            a1: 2.0 * (k2 - 1.0) / denom,
+            a2: (1.0 - k / q + k2) / denom,
+        }
+    }
+
+    /// Stage 2 of the K-weighting filter: the RLB (revised low-frequency
+    /// B-weighting) high-pass (ITU-R BS.1770-4 Annex 1).
+    ///
+    /// Coefficients are derived for `sample_rate` (Hz) from the analogue
+    /// prototype (f0 = 38.13547087613982 Hz, Q = 0.5003270373253953) via the
+    /// bilinear transform. At 48 kHz this reproduces the BS.1770-4 reference
+    /// coefficients `b = [1, -2, 1]` and
+    /// `a = [1, -1.99004745483398, 0.99007225036616]`.
+    fn k_weighting_rlb(sample_rate: f64) -> Self {
+        let f0 = 38.135_470_876_139_82_f64;
+        let q = 0.500_327_037_325_395_3_f64;
+
+        let k = (std::f64::consts::PI * f0 / sample_rate).tan();
+        let k2 = k * k;
+        let denom = 1.0 + k / q + k2;
+
+        Self {
+            b0: 1.0,
+            b1: -2.0,
+            b2: 1.0,
+            a1: 2.0 * (k2 - 1.0) / denom,
+            a2: (1.0 - k / q + k2) / denom,
+        }
+    }
+
+    /// Filter `samples` through this biquad using a transposed direct-form II
+    /// structure with `f64` state, returning the `f32` output (same length).
+    fn filter(&self, samples: &[f32]) -> Vec<f32> {
+        let mut s1 = 0.0_f64;
+        let mut s2 = 0.0_f64;
+        samples
+            .iter()
+            .map(|&sample| {
+                let x = sample as f64;
+                let y = self.b0 * x + s1;
+                s1 = self.b1 * x - self.a1 * y + s2;
+                s2 = self.b2 * x - self.a2 * y;
+                y as f32
+            })
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -976,5 +1076,163 @@ mod tests {
         assert!(!result.pre_masking.is_empty());
         assert!(!result.post_masking.is_empty());
         assert!(!result.masking_patterns.is_empty());
+    }
+
+    // ------- ITU-R BS.1770-4 K-weighting filter tests -------
+
+    /// Steady-state magnitude response (output RMS / input RMS) of the
+    /// K-weighting filter for a pure sine at `freq_hz`, measured over the
+    /// settled second half of a 1 s signal so the filter transient is ignored.
+    fn k_weighting_gain(
+        evaluator: &PsychoacousticEvaluator,
+        freq_hz: f64,
+        sample_rate: u32,
+    ) -> f64 {
+        let n = sample_rate as usize; // 1 second
+        let input: Vec<f32> = (0..n)
+            .map(|i| {
+                (0.5 * (2.0 * std::f64::consts::PI * freq_hz * i as f64 / f64::from(sample_rate))
+                    .sin()) as f32
+            })
+            .collect();
+        let output = evaluator
+            .apply_k_weighting(&input, sample_rate)
+            .expect("k-weighting must succeed");
+
+        let start = n / 2;
+        let rms = |signal: &[f32]| -> f64 {
+            let tail = &signal[start..];
+            (tail.iter().map(|&v| (v as f64) * (v as f64)).sum::<f64>() / tail.len() as f64).sqrt()
+        };
+        rms(&output) / rms(&input)
+    }
+
+    /// The derived biquad coefficients at 48 kHz must match the published
+    /// ITU-R BS.1770-4 reference values within a tight tolerance.
+    #[test]
+    fn test_k_weighting_coefficients_match_bs1770_reference_48k() {
+        let tol = 1e-4;
+
+        let pre = Biquad::k_weighting_pre_filter(48_000.0);
+        assert!(
+            (pre.b0 - 1.535_124_859_586_97).abs() < tol,
+            "pre.b0 = {}",
+            pre.b0
+        );
+        assert!(
+            (pre.b1 - (-2.691_696_189_406_38)).abs() < tol,
+            "pre.b1 = {}",
+            pre.b1
+        );
+        assert!(
+            (pre.b2 - 1.198_392_810_852_85).abs() < tol,
+            "pre.b2 = {}",
+            pre.b2
+        );
+        assert!(
+            (pre.a1 - (-1.690_659_293_182_41)).abs() < tol,
+            "pre.a1 = {}",
+            pre.a1
+        );
+        assert!(
+            (pre.a2 - 0.732_480_774_215_85).abs() < tol,
+            "pre.a2 = {}",
+            pre.a2
+        );
+
+        let rlb = Biquad::k_weighting_rlb(48_000.0);
+        assert!((rlb.b0 - 1.0).abs() < 1e-12, "rlb.b0 = {}", rlb.b0);
+        assert!((rlb.b1 - (-2.0)).abs() < 1e-12, "rlb.b1 = {}", rlb.b1);
+        assert!((rlb.b2 - 1.0).abs() < 1e-12, "rlb.b2 = {}", rlb.b2);
+        assert!(
+            (rlb.a1 - (-1.990_047_454_833_98)).abs() < tol,
+            "rlb.a1 = {}",
+            rlb.a1
+        );
+        assert!(
+            (rlb.a2 - 0.990_072_250_366_16).abs() < tol,
+            "rlb.a2 = {}",
+            rlb.a2
+        );
+    }
+
+    /// The RLB high-pass has a transmission zero at DC, so a constant input must
+    /// be reduced to essentially zero once the transient settles.
+    #[test]
+    fn test_k_weighting_strongly_attenuates_dc() {
+        let evaluator = PsychoacousticEvaluator::new();
+        let fs = 48_000u32;
+        let dc = vec![0.5f32; fs as usize]; // 1 second of DC
+        let filtered = evaluator
+            .apply_k_weighting(&dc, fs)
+            .expect("k-weighting must succeed");
+
+        let tail = &filtered[filtered.len() / 2..];
+        let residual_rms =
+            (tail.iter().map(|&v| (v as f64) * (v as f64)).sum::<f64>() / tail.len() as f64).sqrt();
+        assert!(
+            residual_rms < 1e-4,
+            "DC must be strongly attenuated, residual rms = {residual_rms}"
+        );
+    }
+
+    /// A ~2 kHz tone passes with the high-shelf boost (gain > 1), while low
+    /// frequencies are attenuated by the RLB high-pass: 100 Hz sits below the
+    /// 2 kHz level (and below unity) and 20 Hz (below the 38 Hz corner) is
+    /// attenuated even more strongly.
+    #[test]
+    fn test_k_weighting_low_freq_attenuated_relative_to_2khz() {
+        let evaluator = PsychoacousticEvaluator::new();
+        let fs = 48_000u32;
+
+        let gain_20 = k_weighting_gain(&evaluator, 20.0, fs);
+        let gain_100 = k_weighting_gain(&evaluator, 100.0, fs);
+        let gain_2k = k_weighting_gain(&evaluator, 2_000.0, fs);
+
+        assert!(
+            gain_2k > 1.0,
+            "2 kHz gain {gain_2k} should exceed unity (shelf boost)"
+        );
+        assert!(
+            gain_100 < 1.0,
+            "100 Hz gain {gain_100} should be < 1 (attenuated)"
+        );
+        assert!(
+            gain_100 < gain_2k,
+            "100 Hz gain {gain_100} should be below 2 kHz gain {gain_2k}"
+        );
+        assert!(
+            gain_20 < 0.3,
+            "20 Hz gain {gain_20} should be strongly attenuated"
+        );
+        assert!(
+            gain_20 < gain_100,
+            "20 Hz gain {gain_20} should be attenuated more than 100 Hz gain {gain_100}"
+        );
+    }
+
+    /// The coefficient derivation must adapt to the sample rate: the same
+    /// physical corner frequencies imply different normalised tap values at
+    /// 44.1 kHz than at 48 kHz, yet a 2 kHz tone is still boosted and DC removed.
+    #[test]
+    fn test_k_weighting_adapts_to_sample_rate() {
+        let pre_48 = Biquad::k_weighting_pre_filter(48_000.0);
+        let pre_44 = Biquad::k_weighting_pre_filter(44_100.0);
+        assert!(
+            (pre_48.a1 - pre_44.a1).abs() > 1e-4,
+            "coefficients must differ across sample rates"
+        );
+
+        let evaluator = PsychoacousticEvaluator::new();
+        let gain_2k = k_weighting_gain(&evaluator, 2_000.0, 44_100);
+        let gain_dc_like = k_weighting_gain(&evaluator, 5.0, 44_100);
+        assert!(
+            gain_2k > 1.0,
+            "2 kHz gain {gain_2k} should exceed unity at 44.1 kHz"
+        );
+        assert!(
+            gain_dc_like < gain_2k,
+            "near-DC gain {gain_dc_like} should be far below 2 kHz gain {gain_2k}"
+        );
     }
 }

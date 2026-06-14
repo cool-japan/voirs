@@ -676,6 +676,7 @@ pub mod advanced;
 pub mod backends;
 pub mod config;
 pub mod detection;
+pub(crate) mod duration;
 pub mod english;
 pub mod languages;
 pub mod models;

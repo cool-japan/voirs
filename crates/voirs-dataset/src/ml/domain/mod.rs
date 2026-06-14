@@ -6,6 +6,7 @@
 
 pub mod adapter;
 pub mod config;
+mod stats;
 pub mod types;
 
 // Re-export main types for convenience

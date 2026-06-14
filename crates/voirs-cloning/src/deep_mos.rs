@@ -569,21 +569,46 @@ impl FeatureExtractor {
         Ok(mel_spec)
     }
 
-    /// Compute FFT magnitude spectrum
+    /// Compute the FFT magnitude spectrum of a frame.
+    ///
+    /// A Hann window is applied to the frame before a real forward FFT is
+    /// performed. The returned vector contains the `N/2 + 1` non-redundant
+    /// magnitude bins `|X_k| = sqrt(re² + im²)` produced by the transform.
     fn compute_fft_magnitude(&self, frame: &[f32]) -> Result<Vec<f32>> {
-        // Apply Hann window
-        let windowed: Vec<f32> = frame
+        let n = frame.len();
+        if n == 0 {
+            return Ok(Vec::new());
+        }
+
+        // Apply Hann window to reduce spectral leakage, converting to f64 for
+        // the FFT routine.
+        let windowed: Vec<f64> = frame
             .iter()
             .enumerate()
             .map(|(i, &x)| {
-                let window =
-                    0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / frame.len() as f32).cos();
-                x * window
+                let window = if n > 1 {
+                    0.5 - 0.5 * (2.0 * std::f64::consts::PI * i as f64 / (n - 1) as f64).cos()
+                } else {
+                    1.0
+                };
+                x as f64 * window
             })
             .collect();
 
-        // Compute magnitude spectrum (simplified - would use scirs2-fft properly)
-        let magnitude: Vec<f32> = windowed.iter().map(|&x| x.abs()).collect();
+        let num_bins = n / 2 + 1;
+
+        // Real forward FFT. The held `fft_planner` is reserved for future
+        // plan caching; here we use the convenience `rfft` entry point which
+        // shares the same scirs2-fft backend.
+        let spectrum = scirs2_fft::rfft(&windowed, None)
+            .map_err(|e| Error::Processing(format!("FFT magnitude computation failed: {}", e)))?;
+
+        // Complex-bin magnitudes.
+        let magnitude: Vec<f32> = spectrum
+            .iter()
+            .take(num_bins)
+            .map(|c| ((c.re * c.re + c.im * c.im).sqrt()) as f32)
+            .collect();
 
         Ok(magnitude)
     }
@@ -646,5 +671,66 @@ mod tests {
     async fn test_aggregation_methods() {
         assert_eq!(AggregationMethod::Average, AggregationMethod::Average);
         assert_ne!(AggregationMethod::Average, AggregationMethod::Attention);
+    }
+
+    #[test]
+    fn test_fft_magnitude_length() {
+        let config = DeepMosConfig::default();
+        let extractor = FeatureExtractor::new(config.clone()).unwrap();
+        let frame = vec![0.5f32; config.n_fft];
+        let mag = extractor.compute_fft_magnitude(&frame).unwrap();
+        // Real FFT yields N/2 + 1 non-redundant magnitude bins.
+        assert_eq!(mag.len(), config.n_fft / 2 + 1);
+    }
+
+    #[test]
+    fn test_fft_magnitude_peaks_at_tone_bin() {
+        let config = DeepMosConfig::default();
+        let extractor = FeatureExtractor::new(config.clone()).unwrap();
+        let sr = config.sample_rate as f32;
+        let n = config.n_fft;
+        // Bin frequency resolution: sr / n. Pick a tone aligned to a bin.
+        let bin = 30usize;
+        let freq = bin as f32 * sr / n as f32;
+        let frame: Vec<f32> = (0..n)
+            .map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / sr).sin())
+            .collect();
+
+        let mag = extractor.compute_fft_magnitude(&frame).unwrap();
+        let (peak_bin, _) = mag
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .unwrap();
+        // The dominant magnitude bin should be at (or adjacent to) the tone bin.
+        assert!(
+            (peak_bin as i64 - bin as i64).abs() <= 1,
+            "peak bin {peak_bin} not near tone bin {bin}"
+        );
+    }
+
+    #[test]
+    fn test_fft_magnitude_not_absolute_value_stub() {
+        // Regression guard: the old stub returned per-sample |windowed| of
+        // length n_fft. The real FFT returns a shorter spectrum AND a true
+        // magnitude peak, so a tone must concentrate energy in few bins.
+        let config = DeepMosConfig::default();
+        let extractor = FeatureExtractor::new(config.clone()).unwrap();
+        let sr = config.sample_rate as f32;
+        let n = config.n_fft;
+        let freq = 40.0 * sr / n as f32;
+        let frame: Vec<f32> = (0..n)
+            .map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / sr).sin())
+            .collect();
+        let mag = extractor.compute_fft_magnitude(&frame).unwrap();
+        // Spectrum length must NOT equal n_fft (which the stub produced).
+        assert_ne!(mag.len(), n);
+        let total: f32 = mag.iter().sum();
+        let peak = mag.iter().copied().fold(0.0f32, f32::max);
+        // For a tone, the single peak holds a large share of total magnitude.
+        assert!(
+            peak > 0.2 * total,
+            "energy not concentrated: peak {peak}, total {total}"
+        );
     }
 }

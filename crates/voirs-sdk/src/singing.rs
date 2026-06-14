@@ -162,21 +162,20 @@ impl SingingController {
             cache.insert(text.to_string(), score.clone());
         }
 
-        // Mock implementation - in reality would use advanced singing synthesis
+        // Additive DSP synthesis of the notated score.
         let audio = self
             .synthesize_notes(&score.notes, &config.technique)
             .await?;
+
+        // Real, audio-derived quality statistics measured from the synthesized
+        // waveform (see `compute_singing_stats` for the algorithms used).
+        let stats = Self::compute_singing_stats(&audio, &score, &config.technique);
 
         Ok(SingingResult {
             audio,
             score: score.clone(),
             technique: config.technique.clone(),
-            stats: SingingStats {
-                total_notes: score.notes.len(),
-                pitch_accuracy: 0.95,
-                vibrato_consistency: 0.88,
-                breath_quality: 0.92,
-            },
+            stats,
         })
     }
 
@@ -545,6 +544,472 @@ impl SingingController {
         // Simple low-pass filter for pink-ish characteristics
         white_noise * (1.0 - technique.breath_control * 0.5)
     }
+
+    /// Compute real, audio-derived singing quality statistics from the
+    /// synthesized waveform and the notated score.
+    ///
+    /// All three metrics are measured from the actual audio buffer (which is in
+    /// scope here), not hardcoded:
+    ///
+    /// * `pitch_accuracy` — derived from a per-frame autocorrelation F0 track.
+    ///   Combines (a) the *centering* error of each note (cents distance between
+    ///   the median realized F0 and the notated pitch) and (b) *jitter* (fast
+    ///   cycle-to-cycle F0 deviation, isolated via a local second-difference that
+    ///   removes smooth vibrato). The combined cents error is mapped through a
+    ///   tolerance to `[0, 1]`. Heavy F0 jitter therefore lowers the score while
+    ///   a steady tone scores near 1.0.
+    /// * `vibrato_consistency` — **audio-derived** from the regularity of the F0
+    ///   modulation: the detrended, Hann-windowed voiced-F0 contour is run
+    ///   through an FFT (`scirs2_fft`) and the fraction of spectral energy that
+    ///   falls inside the 4–8 Hz vibrato band is taken as the consistency (a
+    ///   sharp, clean modulation peak → high score). If notes are too short for a
+    ///   reliable spectrum, it **falls back to a score-derived** estimate from the
+    ///   regularity of the notated vibrato intensities (documented as such).
+    /// * `breath_quality` — **audio-derived** from the periodicity
+    ///   (harmonic-to-noise proxy) of the *low-energy* frames (note onsets/
+    ///   offsets and transitions), which is where breath noise concentrates:
+    ///   a well-supported voice stays periodic even when quiet, whereas
+    ///   breathiness injects aperiodic noise and lowers the score.
+    fn compute_singing_stats(
+        audio: &crate::audio::AudioBuffer,
+        score: &MusicalScore,
+        technique: &SingingTechnique,
+    ) -> SingingStats {
+        let total_notes = score.notes.len();
+        let samples = audio.samples();
+        let sample_rate = audio.sample_rate();
+        if samples.is_empty() || total_notes == 0 {
+            return SingingStats {
+                total_notes,
+                pitch_accuracy: 0.0,
+                vibrato_consistency: 0.0,
+                breath_quality: 0.0,
+            };
+        }
+
+        let frame_rate = sample_rate as f32 / ANALYSIS_HOP_SIZE as f32;
+        let segments = note_segments(&score.notes, technique.legato, sample_rate);
+
+        let mut centering_cents: Vec<f32> = Vec::new();
+        let mut jitter_cents: Vec<f32> = Vec::new();
+        let mut vibrato_scores: Vec<f32> = Vec::new();
+        let mut all_frames: Vec<FrameInfo> = Vec::new();
+
+        for (idx, &(start, end)) in segments.iter().enumerate() {
+            let start = start.min(samples.len());
+            let end = end.min(samples.len());
+            if end <= start {
+                continue;
+            }
+            let note = &score.notes[idx];
+            let frames = analyze_frames(&samples[start..end], sample_rate);
+            let f0s: Vec<Option<f32>> = frames.iter().map(|f| f.f0).collect();
+
+            if let Some((centering, jitter)) = pitch_accuracy_metrics(&f0s, note.frequency) {
+                centering_cents.push(centering);
+                jitter_cents.push(jitter);
+            }
+            if let Some(consistency) = vibrato_consistency_of(&f0s, frame_rate) {
+                vibrato_scores.push(consistency);
+            }
+            all_frames.extend(frames);
+        }
+
+        // Pitch accuracy (audio-derived): mean centering error + mean jitter,
+        // mapped through a cents tolerance into [0, 1].
+        let pitch_accuracy = if centering_cents.is_empty() {
+            0.0
+        } else {
+            let combined = mean_f32(&centering_cents) + mean_f32(&jitter_cents);
+            (1.0 - combined / PITCH_TOLERANCE_CENTS).clamp(0.0, 1.0)
+        };
+
+        // Vibrato consistency: audio-derived when possible, score-derived fallback.
+        let vibrato_consistency = if vibrato_scores.is_empty() {
+            score_derived_vibrato_consistency(&score.notes)
+        } else {
+            mean_f32(&vibrato_scores).clamp(0.0, 1.0)
+        };
+
+        // Breath quality (audio-derived) from low-energy frame periodicity.
+        let breath_quality = breath_quality_of(&all_frames);
+
+        SingingStats {
+            total_notes,
+            pitch_accuracy,
+            vibrato_consistency,
+            breath_quality,
+        }
+    }
+}
+
+/// Short-time analysis frame size (samples) for F0 / energy tracking.
+const ANALYSIS_FRAME_SIZE: usize = 2048;
+/// Hop between successive analysis frames (samples).
+const ANALYSIS_HOP_SIZE: usize = 1024;
+/// Lowest fundamental frequency considered when estimating F0 (Hz).
+const ANALYSIS_MIN_F0: f32 = 55.0;
+/// Highest fundamental frequency considered when estimating F0 (Hz).
+const ANALYSIS_MAX_F0: f32 = 1100.0;
+/// Minimum normalised autocorrelation peak for a frame to be deemed voiced.
+const VOICING_THRESHOLD: f32 = 0.25;
+/// RMS below which a frame is treated as silence (no analysis performed).
+const SILENCE_RMS_EPS: f32 = 1e-4;
+/// Combined cents error (centering + jitter) that maps to zero pitch accuracy.
+const PITCH_TOLERANCE_CENTS: f32 = 100.0;
+/// Lower bound of the vibrato modulation band (Hz).
+const VIBRATO_MIN_HZ: f32 = 4.0;
+/// Upper bound of the vibrato modulation band (Hz).
+const VIBRATO_MAX_HZ: f32 = 8.0;
+/// Minimum voiced frames in a note before audio-derived vibrato analysis runs.
+const MIN_VIBRATO_FRAMES: usize = 8;
+/// Minimum F0 modulation depth (RMS, cents) for a note to count as having
+/// vibrato. Below this the F0 is essentially steady (only sub-frame estimation
+/// wobble), so there is no vibrato whose regularity could be assessed. This
+/// gate is essential because the in-band energy *ratio* is scale-invariant and
+/// would otherwise report a spurious value for an unmodulated tone.
+const MIN_VIBRATO_DEPTH_CENTS: f32 = 20.0;
+
+/// Per-frame short-time analysis used by the singing quality metrics.
+#[derive(Debug, Clone, Copy)]
+struct FrameInfo {
+    /// RMS energy of the frame.
+    rms: f32,
+    /// Estimated fundamental frequency in Hz (`None` if unvoiced/silent).
+    f0: Option<f32>,
+    /// Normalised autocorrelation peak in `[0, 1]` (periodicity / HNR proxy).
+    periodicity: f32,
+}
+
+/// Root-mean-square energy of a frame.
+fn rms_of(frame: &[f32]) -> f32 {
+    if frame.is_empty() {
+        return 0.0;
+    }
+    let sum_sq: f32 = frame.iter().map(|&x| x * x).sum();
+    (sum_sq / frame.len() as f32).sqrt()
+}
+
+/// Arithmetic mean of a slice (0.0 for an empty slice).
+fn mean_f32(values: &[f32]) -> f32 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    values.iter().sum::<f32>() / values.len() as f32
+}
+
+/// Median of a slice (0.0 for an empty slice).
+fn median_f32(values: &[f32]) -> f32 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    let mut sorted = values.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mid = sorted.len() / 2;
+    if sorted.len().is_multiple_of(2) {
+        0.5 * (sorted[mid - 1] + sorted[mid])
+    } else {
+        sorted[mid]
+    }
+}
+
+/// Estimate the fundamental frequency of a frame via normalised autocorrelation.
+///
+/// Returns `(Some(f0_hz), periodicity)` for voiced frames and
+/// `(None, periodicity)` otherwise. Uses parabolic interpolation around the
+/// autocorrelation peak for sub-sample lag precision.
+fn estimate_f0(frame: &[f32], sample_rate: u32) -> (Option<f32>, f32) {
+    let n = frame.len();
+    if n < 2 {
+        return (None, 0.0);
+    }
+    // Remove DC offset.
+    let mean = frame.iter().sum::<f32>() / n as f32;
+    let centered: Vec<f32> = frame.iter().map(|&x| x - mean).collect();
+    let energy: f32 = centered.iter().map(|&x| x * x).sum();
+    if energy <= 1e-12 {
+        return (None, 0.0);
+    }
+
+    let min_lag = ((sample_rate as f32 / ANALYSIS_MAX_F0).floor() as usize).max(1);
+    let max_lag = ((sample_rate as f32 / ANALYSIS_MIN_F0).ceil() as usize).min(n - 1);
+    if max_lag <= min_lag {
+        return (None, 0.0);
+    }
+
+    let mut corrs = vec![0.0f32; max_lag + 1];
+    let mut best_lag = 0usize;
+    let mut best_corr = 0.0f32;
+    for lag in min_lag..=max_lag {
+        let mut acc = 0.0f32;
+        for i in 0..(n - lag) {
+            acc += centered[i] * centered[i + lag];
+        }
+        let norm = acc / energy;
+        corrs[lag] = norm;
+        if norm > best_corr {
+            best_corr = norm;
+            best_lag = lag;
+        }
+    }
+
+    let periodicity = best_corr.clamp(0.0, 1.0);
+    if best_lag == 0 || best_corr < VOICING_THRESHOLD {
+        return (None, periodicity);
+    }
+
+    // Parabolic interpolation around the peak for sub-sample lag precision.
+    let refined_lag = if best_lag > min_lag && best_lag < max_lag {
+        let a = corrs[best_lag - 1];
+        let b = corrs[best_lag];
+        let c = corrs[best_lag + 1];
+        let denom = a - 2.0 * b + c;
+        if denom.abs() > 1e-9 {
+            best_lag as f32 + 0.5 * (a - c) / denom
+        } else {
+            best_lag as f32
+        }
+    } else {
+        best_lag as f32
+    };
+
+    let f0 = sample_rate as f32 / refined_lag;
+    if f0.is_finite() && (ANALYSIS_MIN_F0..=ANALYSIS_MAX_F0).contains(&f0) {
+        (Some(f0), periodicity)
+    } else {
+        (None, periodicity)
+    }
+}
+
+/// Split a contiguous signal into overlapping analysis frames and analyze each.
+fn analyze_frames(samples: &[f32], sample_rate: u32) -> Vec<FrameInfo> {
+    let mut frames = Vec::new();
+    if samples.is_empty() {
+        return frames;
+    }
+    // Signals shorter than a full frame are analyzed as a single short frame.
+    if samples.len() < ANALYSIS_FRAME_SIZE {
+        let rms = rms_of(samples);
+        let (f0, periodicity) = if rms > SILENCE_RMS_EPS {
+            estimate_f0(samples, sample_rate)
+        } else {
+            (None, 0.0)
+        };
+        frames.push(FrameInfo {
+            rms,
+            f0,
+            periodicity,
+        });
+        return frames;
+    }
+    let mut start = 0;
+    while start + ANALYSIS_FRAME_SIZE <= samples.len() {
+        let frame = &samples[start..start + ANALYSIS_FRAME_SIZE];
+        let rms = rms_of(frame);
+        let (f0, periodicity) = if rms > SILENCE_RMS_EPS {
+            estimate_f0(frame, sample_rate)
+        } else {
+            (None, 0.0)
+        };
+        frames.push(FrameInfo {
+            rms,
+            f0,
+            periodicity,
+        });
+        start += ANALYSIS_HOP_SIZE;
+    }
+    frames
+}
+
+/// Reconstruct the per-note voiced sample ranges produced by `synthesize_notes`.
+///
+/// Mirrors the exact sample layout of the synthesizer (including the silent
+/// inter-note pauses inserted when `legato < 1.0`) so that each notated note can
+/// be matched to its realized audio region.
+fn note_segments(notes: &[MusicalNote], legato: f32, sample_rate: u32) -> Vec<(usize, usize)> {
+    let mut segments = Vec::with_capacity(notes.len());
+    let mut cursor = 0usize;
+    for note in notes {
+        let samples_per_note = (note.duration * sample_rate as f32) as usize;
+        let start = cursor;
+        let end = start + samples_per_note;
+        segments.push((start, end));
+        cursor = end;
+        if legato < 1.0 {
+            let pause = ((1.0 - legato) * sample_rate as f32 * 0.05) as usize;
+            cursor += pause;
+        }
+    }
+    segments
+}
+
+/// Compute the centering and jitter cents errors for one note's F0 track.
+///
+/// * centering — `|1200·log2(median_f0 / target)|`, how far the note's central
+///   pitch sits from the notated pitch.
+/// * jitter — mean local second-difference of the F0 track (in cents), which
+///   removes smooth (locally linear) vibrato and isolates fast jitter.
+///
+/// Returns `None` when there are no voiced frames.
+fn pitch_accuracy_metrics(f0s: &[Option<f32>], target_hz: f32) -> Option<(f32, f32)> {
+    let voiced: Vec<f32> = f0s.iter().filter_map(|&x| x).collect();
+    if voiced.is_empty() || target_hz <= 0.0 {
+        return None;
+    }
+
+    let median = median_f32(&voiced);
+    let centering_cents = (1200.0 * (median / target_hz).log2()).abs();
+
+    let mut jitter_sum = 0.0f32;
+    let mut jitter_count = 0usize;
+    for i in 1..f0s.len().saturating_sub(1) {
+        if let (Some(prev), Some(curr), Some(next)) = (f0s[i - 1], f0s[i], f0s[i + 1]) {
+            let expected = 0.5 * (prev + next);
+            if expected > 0.0 && curr > 0.0 {
+                jitter_sum += (1200.0 * (curr / expected).log2()).abs();
+                jitter_count += 1;
+            }
+        }
+    }
+    let jitter_cents = if jitter_count > 0 {
+        jitter_sum / jitter_count as f32
+    } else {
+        0.0
+    };
+
+    Some((centering_cents, jitter_cents))
+}
+
+/// Audio-derived vibrato consistency for one note's F0 track.
+///
+/// The voiced-F0 contour is detrended, Hann-windowed and transformed with
+/// `scirs2_fft::rfft`; the fraction of spectral energy inside the 4–8 Hz vibrato
+/// band is returned as the consistency in `[0, 1]`. A clean, regular vibrato
+/// concentrates its energy in that band (→ near 1.0), whereas an irregular
+/// modulation smears energy across the spectrum (→ lower). Returns `None` when
+/// the note has too few voiced frames for a reliable spectrum.
+fn vibrato_consistency_of(f0s: &[Option<f32>], frame_rate: f32) -> Option<f32> {
+    // Build a continuous contour, holding the last voiced value across gaps.
+    let mut contour: Vec<f32> = Vec::with_capacity(f0s.len());
+    let mut last: Option<f32> = None;
+    let mut voiced_count = 0usize;
+    for &f in f0s {
+        match f {
+            Some(v) => {
+                last = Some(v);
+                voiced_count += 1;
+                contour.push(v);
+            }
+            None => {
+                if let Some(v) = last {
+                    contour.push(v);
+                }
+            }
+        }
+    }
+    if voiced_count < MIN_VIBRATO_FRAMES || contour.len() < MIN_VIBRATO_FRAMES {
+        return None;
+    }
+
+    let m = contour.len();
+    let mean = mean_f32(&contour);
+    if mean <= 0.0 {
+        return Some(0.0);
+    }
+
+    // Express the F0 contour as a deviation in cents from its own mean. Cents are
+    // pitch-perceptual and let us apply an absolute modulation-depth gate.
+    let cents: Vec<f32> = contour
+        .iter()
+        .map(|&v| 1200.0 * (v / mean).log2())
+        .collect();
+    let depth_rms = (cents.iter().map(|&c| c * c).sum::<f32>() / m as f32).sqrt();
+    if depth_rms < MIN_VIBRATO_DEPTH_CENTS {
+        // No musically meaningful modulation: treat as "no vibrato" (score 0).
+        return Some(0.0);
+    }
+
+    // Hann-window the cents deviation to reduce spectral leakage.
+    let mut windowed: Vec<f64> = cents
+        .iter()
+        .enumerate()
+        .map(|(i, &c)| {
+            let w = 0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / (m as f32 - 1.0)).cos();
+            (c * w) as f64
+        })
+        .collect();
+
+    // Zero-pad for finer bin spacing, then real FFT.
+    let fft_len = m.next_power_of_two().max(64);
+    windowed.resize(fft_len, 0.0);
+    let spectrum = scirs2_fft::rfft(&windowed, None).ok()?;
+
+    let bin_hz = frame_rate / fft_len as f32;
+    let mut band_energy = 0.0f64;
+    let mut total_energy = 0.0f64;
+    // Skip the DC bin (k = 0).
+    for (k, c) in spectrum.iter().enumerate().skip(1) {
+        let power = c.norm() * c.norm();
+        total_energy += power;
+        let freq = k as f32 * bin_hz;
+        if (VIBRATO_MIN_HZ..=VIBRATO_MAX_HZ).contains(&freq) {
+            band_energy += power;
+        }
+    }
+    if total_energy <= 0.0 {
+        return Some(0.0);
+    }
+    Some(((band_energy / total_energy) as f32).clamp(0.0, 1.0))
+}
+
+/// Score-derived vibrato consistency fallback.
+///
+/// Used only when no note has enough voiced audio frames for the spectral
+/// (audio-derived) analysis. Estimates regularity from the *notated* vibrato
+/// intensities: uniform vibrato markings across notes → high consistency
+/// (`1 − coefficient_of_variation`).
+fn score_derived_vibrato_consistency(notes: &[MusicalNote]) -> f32 {
+    let intensities: Vec<f32> = notes
+        .iter()
+        .map(|n| n.vibrato)
+        .filter(|&v| v > 0.0)
+        .collect();
+    if intensities.len() < 2 {
+        return 0.0;
+    }
+    let mean = mean_f32(&intensities);
+    if mean <= 0.0 {
+        return 0.0;
+    }
+    let var = intensities
+        .iter()
+        .map(|&v| (v - mean) * (v - mean))
+        .sum::<f32>()
+        / intensities.len() as f32;
+    let coefficient_of_variation = var.sqrt() / mean;
+    (1.0 - coefficient_of_variation).clamp(0.0, 1.0)
+}
+
+/// Audio-derived breath quality from the periodicity of low-energy frames.
+///
+/// Pure-silence frames (the synthesizer fills inter-note pauses with zeros) are
+/// excluded; among the remaining frames the lower-energy tier (note onsets,
+/// offsets and transitions, where breath noise concentrates) is selected and its
+/// mean periodicity returned. A clean, well-supported voice stays periodic even
+/// when quiet (→ high quality); breathiness injects aperiodic noise (→ lower).
+fn breath_quality_of(frames: &[FrameInfo]) -> f32 {
+    let mut voiced: Vec<&FrameInfo> = frames.iter().filter(|f| f.rms > SILENCE_RMS_EPS).collect();
+    if voiced.is_empty() {
+        return 0.0;
+    }
+    voiced.sort_by(|a, b| {
+        a.rms
+            .partial_cmp(&b.rms)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let tier = ((voiced.len() as f32 * 0.4).ceil() as usize).clamp(1, voiced.len());
+    let mean_periodicity = voiced[..tier].iter().map(|f| f.periodicity).sum::<f32>() / tier as f32;
+    mean_periodicity.clamp(0.0, 1.0)
 }
 
 /// Builder for singing controller configuration
@@ -978,5 +1443,280 @@ mod tests {
 
         // Staccato version should be longer due to pauses
         assert!(result_staccato.audio.duration() > result_legato.audio.duration() * 0.95);
+    }
+
+    // --- Real singing-statistics analysis tests ---------------------------------
+
+    /// Deterministic LCG (Numerical Recipes constants) for reproducible test
+    /// signals. The project policy forbids statistical RNGs in tests.
+    fn lcg_next(state: &mut u64) -> f32 {
+        *state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        // Use the high 24 bits as a uniform value in [0, 1).
+        ((*state >> 40) as f32) / ((1u64 << 24) as f32)
+    }
+
+    /// Deterministic uniform value in [-1, 1).
+    fn lcg_signed(state: &mut u64) -> f32 {
+        lcg_next(state) * 2.0 - 1.0
+    }
+
+    #[test]
+    fn test_estimate_f0_detects_known_pitch() {
+        let sample_rate = 44100u32;
+        let freq = 220.0f32;
+        let frame: Vec<f32> = (0..ANALYSIS_FRAME_SIZE)
+            .map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / sample_rate as f32).sin())
+            .collect();
+
+        let (f0, periodicity) = estimate_f0(&frame, sample_rate);
+        let f0 = f0.expect("a steady sine must be detected as voiced");
+        let cents = (1200.0 * (f0 / freq).log2()).abs();
+        assert!(cents < 20.0, "f0 = {f0} Hz is {cents} cents off 220 Hz");
+        assert!(periodicity > 0.8, "periodicity = {periodicity}");
+    }
+
+    #[test]
+    fn test_high_jitter_lowers_pitch_accuracy() {
+        let target = 220.0f32;
+        let steady: Vec<Option<f32>> = (0..24).map(|_| Some(target)).collect();
+
+        let mut state = 0x1234_5678_9abc_def0u64;
+        let jittery: Vec<Option<f32>> = (0..24)
+            .map(|_| Some(target * (1.0 + 0.05 * lcg_signed(&mut state))))
+            .collect();
+
+        let accuracy = |f0s: &[Option<f32>]| {
+            let (centering, jitter) = pitch_accuracy_metrics(f0s, target).unwrap();
+            (1.0 - (centering + jitter) / PITCH_TOLERANCE_CENTS).clamp(0.0, 1.0)
+        };
+
+        let steady_acc = accuracy(&steady);
+        let jittery_acc = accuracy(&jittery);
+
+        assert!(steady_acc > 0.95, "steady accuracy = {steady_acc}");
+        assert!(
+            steady_acc > jittery_acc,
+            "steady {steady_acc} should exceed jittery {jittery_acc}"
+        );
+        assert!((0.0..=1.0).contains(&jittery_acc));
+    }
+
+    #[test]
+    fn test_smooth_vibrato_not_counted_as_jitter() {
+        // At equal modulation amplitude, smooth vibrato must yield far less
+        // jitter than random perturbation (the second-difference removes the
+        // locally-linear vibrato trend).
+        let target = 220.0f32;
+        let frame_rate = 44100.0 / ANALYSIS_HOP_SIZE as f32;
+        let amp = 0.04f32;
+
+        let smooth: Vec<Option<f32>> = (0..40)
+            .map(|k| {
+                let t = k as f32 / frame_rate;
+                Some(target * (1.0 + amp * (2.0 * std::f32::consts::PI * 5.0 * t).sin()))
+            })
+            .collect();
+
+        let mut state = 0x0f0f_0f0f_0f0f_0f0fu64;
+        let random: Vec<Option<f32>> = (0..40)
+            .map(|_| Some(target * (1.0 + amp * lcg_signed(&mut state))))
+            .collect();
+
+        let (_, jitter_smooth) = pitch_accuracy_metrics(&smooth, target).unwrap();
+        let (_, jitter_random) = pitch_accuracy_metrics(&random, target).unwrap();
+        assert!(
+            jitter_smooth < jitter_random,
+            "smooth jitter {jitter_smooth} should be < random jitter {jitter_random}"
+        );
+    }
+
+    #[test]
+    fn test_vibrato_consistency_band_concentration() {
+        let frame_rate = 44100.0 / ANALYSIS_HOP_SIZE as f32; // ~43 Hz
+        let clean: Vec<Option<f32>> = (0..48)
+            .map(|k| {
+                let t = k as f32 / frame_rate;
+                Some(220.0 * (1.0 + 0.03 * (2.0 * std::f32::consts::PI * 5.0 * t).sin()))
+            })
+            .collect();
+
+        let mut state = 0xdead_beef_cafe_babeu64;
+        let noisy: Vec<Option<f32>> = (0..48)
+            .map(|_| Some(220.0 * (1.0 + 0.03 * lcg_signed(&mut state))))
+            .collect();
+
+        let clean_vc = vibrato_consistency_of(&clean, frame_rate).unwrap();
+        let noisy_vc = vibrato_consistency_of(&noisy, frame_rate).unwrap();
+
+        assert!((0.0..=1.0).contains(&clean_vc), "clean = {clean_vc}");
+        assert!((0.0..=1.0).contains(&noisy_vc), "noisy = {noisy_vc}");
+        assert!(
+            clean_vc > noisy_vc,
+            "clean vibrato {clean_vc} should exceed irregular {noisy_vc}"
+        );
+        assert!(
+            clean_vc > 0.4,
+            "clean 5 Hz vibrato concentration = {clean_vc}"
+        );
+    }
+
+    #[test]
+    fn test_note_segments_match_synthesis_layout() {
+        let notes = vec![
+            MusicalNote::new("A".to_string(), 4, 0.5, 0.8),
+            MusicalNote::new("C".to_string(), 4, 0.25, 0.8),
+        ];
+        // Full legato => no inter-note pause, segments are contiguous.
+        let segs = note_segments(&notes, 1.0, 44100);
+        assert_eq!(segs[0], (0, 22050));
+        assert_eq!(segs[1], (22050, 22050 + 11025));
+
+        // With legato < 1.0 a silent pause is inserted between notes.
+        let segs = note_segments(&notes, 0.5, 44100);
+        let pause = ((1.0 - 0.5) * 44100.0 * 0.05) as usize;
+        assert_eq!(segs[0], (0, 22050));
+        assert_eq!(segs[1].0, 22050 + pause);
+    }
+
+    fn deterministic_technique(vibrato_depth: f32) -> SingingTechnique {
+        SingingTechnique {
+            breath_control: 1.0, // disables stochastic breath noise -> deterministic audio
+            vocal_fry: 0.0,
+            head_voice_ratio: 0.5,
+            vibrato_speed: 5.0,
+            vibrato_depth,
+            pitch_bend: 0.0,
+            legato: 1.0,
+        }
+    }
+
+    fn two_note_score(vibrato: f32) -> MusicalScore {
+        MusicalScore {
+            notes: vec![
+                MusicalNote {
+                    note: "A".to_string(),
+                    octave: 3,
+                    frequency: 220.0,
+                    duration: 0.6,
+                    velocity: 0.8,
+                    vibrato,
+                },
+                MusicalNote {
+                    note: "C".to_string(),
+                    octave: 4,
+                    frequency: 261.63,
+                    duration: 0.6,
+                    velocity: 0.8,
+                    vibrato,
+                },
+            ],
+            tempo: 120.0,
+            time_signature_num: 4,
+            time_signature_den: 4,
+            key_signature: "C".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_singing_stats_deterministic_and_bounded() {
+        let controller = SingingControllerBuilder::new()
+            .enabled(true)
+            .technique(deterministic_technique(0.0)) // no vibrato -> stable pitch
+            .build()
+            .await
+            .unwrap();
+
+        let score = two_note_score(0.0);
+        let r1 = controller
+            .synthesize_score(score.clone(), "la la")
+            .await
+            .unwrap();
+        let r2 = controller
+            .synthesize_score(score.clone(), "la la")
+            .await
+            .unwrap();
+
+        // Deterministic audio (breath_control = 1.0) => identical stats.
+        assert_eq!(r1.stats.pitch_accuracy, r2.stats.pitch_accuracy);
+        assert_eq!(r1.stats.vibrato_consistency, r2.stats.vibrato_consistency);
+        assert_eq!(r1.stats.breath_quality, r2.stats.breath_quality);
+
+        // Every metric must lie within [0, 1].
+        assert!(
+            (0.0..=1.0).contains(&r1.stats.pitch_accuracy),
+            "pitch_accuracy = {}",
+            r1.stats.pitch_accuracy
+        );
+        assert!(
+            (0.0..=1.0).contains(&r1.stats.vibrato_consistency),
+            "vibrato_consistency = {}",
+            r1.stats.vibrato_consistency
+        );
+        assert!(
+            (0.0..=1.0).contains(&r1.stats.breath_quality),
+            "breath_quality = {}",
+            r1.stats.breath_quality
+        );
+
+        // Clean additive tones at the notated pitches should score well, and the
+        // clean low-energy regions should look well-supported (high breath quality).
+        assert!(
+            r1.stats.pitch_accuracy > 0.7,
+            "pitch_accuracy = {}",
+            r1.stats.pitch_accuracy
+        );
+        assert!(
+            r1.stats.breath_quality > 0.5,
+            "breath_quality = {}",
+            r1.stats.breath_quality
+        );
+        assert_eq!(r1.stats.total_notes, 2);
+    }
+
+    #[tokio::test]
+    async fn test_audio_derived_vibrato_consistency_responds_to_vibrato() {
+        // A score WITH vibrato should yield higher audio-derived vibrato
+        // consistency than one without (which has no modulation to be consistent).
+        let with_vibrato = SingingControllerBuilder::new()
+            .enabled(true)
+            .technique(deterministic_technique(0.3))
+            .build()
+            .await
+            .unwrap();
+        let without_vibrato = SingingControllerBuilder::new()
+            .enabled(true)
+            .technique(deterministic_technique(0.0))
+            .build()
+            .await
+            .unwrap();
+
+        // note.vibrato 0.2 x technique depth 0.3 => ~6% F0 modulation (well above
+        // the depth gate, clean enough for a sharp 5 Hz band peak).
+        let vib = with_vibrato
+            .synthesize_score(two_note_score(0.2), "ah")
+            .await
+            .unwrap();
+        let flat = without_vibrato
+            .synthesize_score(two_note_score(0.0), "ah")
+            .await
+            .unwrap();
+
+        assert!((0.0..=1.0).contains(&vib.stats.vibrato_consistency));
+        assert!((0.0..=1.0).contains(&flat.stats.vibrato_consistency));
+        // The unmodulated take has no vibrato, so the depth gate forces it to 0,
+        // while the modulated take detects a regular 5 Hz vibrato.
+        assert!(
+            vib.stats.vibrato_consistency > flat.stats.vibrato_consistency,
+            "with-vibrato {} should exceed flat {}",
+            vib.stats.vibrato_consistency,
+            flat.stats.vibrato_consistency
+        );
+        assert!(
+            vib.stats.vibrato_consistency > 0.1,
+            "audio-derived vibrato consistency too low: {}",
+            vib.stats.vibrato_consistency
+        );
     }
 }

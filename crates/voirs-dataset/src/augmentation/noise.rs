@@ -567,20 +567,35 @@ impl AdaptiveNoiseInjector {
         energy / samples.len() as f32
     }
 
-    /// Calculate spectral centroid (simplified)
+    /// Calculate the spectral centroid of a signal via a real FFT.
+    ///
+    /// The centroid is the magnitude-weighted mean frequency of the spectrum:
+    /// `centroid = Σ(f_k · |X_k|) / Σ|X_k|`, where `f_k = k · sample_rate / N`
+    /// and `|X_k|` are the magnitudes of the real-FFT bins
+    /// (`scirs2_fft::rfft`, O(N log N)). Returns `0.0` for empty input or a
+    /// spectrum with zero total magnitude (e.g. silence/DC-free constants).
     fn calculate_spectral_centroid(&self, samples: &[f32], sample_rate: u32) -> f32 {
         if samples.is_empty() {
             return 0.0;
         }
 
-        // Simple spectral centroid calculation
-        // In a real implementation, this would use FFT
-        let mut weighted_sum = 0.0;
-        let mut magnitude_sum = 0.0;
+        let n = samples.len();
 
-        for (i, &sample) in samples.iter().enumerate() {
-            let frequency = i as f32 * sample_rate as f32 / samples.len() as f32;
-            let magnitude = sample.abs();
+        // Compute the real FFT magnitude spectrum. `rfft` yields N/2 + 1 bins
+        // covering DC through Nyquist. On failure, treat as zero-energy.
+        let magnitudes: Vec<f32> = match scirs2_fft::rfft(samples, None) {
+            Ok(bins) => bins
+                .iter()
+                .map(|c| ((c.re * c.re + c.im * c.im).sqrt()) as f32)
+                .collect(),
+            Err(_) => return 0.0,
+        };
+
+        let mut weighted_sum = 0.0_f32;
+        let mut magnitude_sum = 0.0_f32;
+
+        for (k, &magnitude) in magnitudes.iter().enumerate() {
+            let frequency = k as f32 * sample_rate as f32 / n as f32;
             weighted_sum += frequency * magnitude;
             magnitude_sum += magnitude;
         }
@@ -590,5 +605,58 @@ impl AdaptiveNoiseInjector {
         } else {
             0.0
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Generate a single-tone (sine) signal at `freq` Hz for `sample_rate`.
+    fn make_tone(freq: f32, sample_rate: u32, len: usize) -> Vec<f32> {
+        (0..len)
+            .map(|n| (2.0 * PI * freq * n as f32 / sample_rate as f32).sin())
+            .collect()
+    }
+
+    #[test]
+    fn test_spectral_centroid_hf_above_lf() {
+        let injector = AdaptiveNoiseInjector::new(NoiseConfig::default());
+        let sample_rate = 16_000u32;
+        let len = 1024usize;
+
+        let lf = make_tone(400.0, sample_rate, len);
+        let hf = make_tone(6500.0, sample_rate, len);
+
+        let lf_centroid = injector.calculate_spectral_centroid(&lf, sample_rate);
+        let hf_centroid = injector.calculate_spectral_centroid(&hf, sample_rate);
+
+        assert!(
+            hf_centroid > lf_centroid,
+            "HF-dominant centroid {hf_centroid} should exceed LF-dominant centroid {lf_centroid}"
+        );
+    }
+
+    #[test]
+    fn test_spectral_centroid_near_tone_frequency() {
+        let injector = AdaptiveNoiseInjector::new(NoiseConfig::default());
+        let sample_rate = 16_000u32;
+        let len = 1024usize;
+        // Bin-aligned tone: 64 * 16000 / 1024 = 1000 Hz.
+        let freq = 64.0 * sample_rate as f32 / len as f32;
+        let tone = make_tone(freq, sample_rate, len);
+
+        let centroid = injector.calculate_spectral_centroid(&tone, sample_rate);
+        let bin_hz = sample_rate as f32 / len as f32;
+        assert!(
+            (centroid - freq).abs() < 5.0 * bin_hz,
+            "centroid {centroid} should be near tone {freq}"
+        );
+    }
+
+    #[test]
+    fn test_spectral_centroid_empty_is_zero() {
+        let injector = AdaptiveNoiseInjector::new(NoiseConfig::default());
+        assert_eq!(injector.calculate_spectral_centroid(&[], 16_000), 0.0);
     }
 }

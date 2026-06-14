@@ -892,11 +892,38 @@ impl AudioBuffer {
             freq_response[bin] = 1.0 / (real_part * real_part + imag_part * imag_part).sqrt();
         }
 
-        // Find peaks in frequency response
+        // Find peaks in frequency response and refine each peak to sub-bin
+        // precision via parabolic (quadratic) interpolation.
+        //
+        // A raw local maximum only resolves the formant to the nearest FFT
+        // bin. The true resonance peak usually lies between bins, so we fit a
+        // parabola through the three magnitudes surrounding the discrete peak
+        // (`y(k-1)`, `y(k)`, `y(k+1)`) and take the parabola's vertex as the
+        // refined location:
+        //
+        //   delta = 0.5 * (y(k-1) - y(k+1)) / (y(k-1) - 2*y(k) + y(k+1))
+        //
+        // `delta` is the fractional-bin offset of the vertex from bin `k`. The
+        // denominator is the discrete second difference (curvature) and is
+        // guarded against ~0 (a flat/degenerate triple) to avoid division
+        // blow-up. `delta` is clamped to [-0.5, +0.5] because the vertex of a
+        // genuine local maximum cannot fall outside the central bin's
+        // half-bin neighbourhood. The refined center frequency then becomes
+        // `(k + delta) * bin_spacing`. For a symmetric peak (y(k-1) == y(k+1))
+        // the offset is 0 and the result equals the plain bin-center
+        // frequency; for an asymmetric peak the frequency shifts toward the
+        // larger-magnitude neighbour.
+        let bin_spacing = self.sample_rate as f32 / fft_size as f32;
         let mut formants = Vec::new();
-        for i in 1..(num_bins - 1) {
-            if freq_response[i] > freq_response[i - 1] && freq_response[i] > freq_response[i + 1] {
-                let freq = i as f32 * self.sample_rate as f32 / fft_size as f32;
+        for k in 1..(num_bins - 1) {
+            if freq_response[k] > freq_response[k - 1] && freq_response[k] > freq_response[k + 1] {
+                let y_prev = freq_response[k - 1];
+                let y_peak = freq_response[k];
+                let y_next = freq_response[k + 1];
+
+                // Parabolic interpolation for sub-bin accuracy.
+                let delta = Self::parabolic_peak_offset(y_prev, y_peak, y_next);
+                let freq = (k as f32 + delta) * bin_spacing;
                 // Typical formant range: 200 Hz to 4000 Hz
                 if freq >= 200.0 && freq <= 4000.0 {
                     formants.push(freq);
@@ -908,6 +935,39 @@ impl AudioBuffer {
         }
 
         formants
+    }
+
+    /// Refine a discrete spectral peak to sub-bin precision via parabolic
+    /// (quadratic) interpolation.
+    ///
+    /// Given the magnitudes at a local maximum bin `k` and its two immediate
+    /// neighbours — `y_prev = y(k-1)`, `y_peak = y(k)`, `y_next = y(k+1)` —
+    /// this fits a parabola through the three points and returns the
+    /// fractional-bin offset `delta` of the parabola's vertex from bin `k`:
+    ///
+    /// ```text
+    /// delta = 0.5 * (y(k-1) - y(k+1)) / (y(k-1) - 2*y(k) + y(k+1))
+    /// ```
+    ///
+    /// The refined peak location is therefore `(k + delta)` bins. The
+    /// denominator is the discrete curvature (second difference); when it is
+    /// ~0 (a flat or degenerate triple) the offset is forced to `0.0` to avoid
+    /// a division blow-up. The result is clamped to `[-0.5, +0.5]` since the
+    /// vertex of a genuine local maximum lies within the central bin's
+    /// half-bin neighbourhood.
+    ///
+    /// Behaviour:
+    /// - Symmetric peak (`y_prev == y_next`) → `delta == 0.0`.
+    /// - Larger left neighbour (`y_prev > y_next`) → `delta < 0.0` (shift down).
+    /// - Larger right neighbour (`y_next > y_prev`) → `delta > 0.0` (shift up).
+    #[inline]
+    fn parabolic_peak_offset(y_prev: f32, y_peak: f32, y_next: f32) -> f32 {
+        let denom = y_prev - 2.0 * y_peak + y_next;
+        if denom.abs() > 1e-12 {
+            (0.5 * (y_prev - y_next) / denom).clamp(-0.5, 0.5)
+        } else {
+            0.0
+        }
     }
 
     /// Levinson-Durbin algorithm for LPC coefficient estimation

@@ -7,6 +7,8 @@ use super::config::{ContentEmbeddingConfig, ContentEmbeddingMethod};
 use crate::{DatasetSample, Result};
 use std::collections::HashMap;
 
+mod ipa_features;
+
 /// Content embedding extractor
 pub struct ContentEmbeddingExtractor {
     config: ContentEmbeddingConfig,
@@ -146,10 +148,11 @@ impl ContentEmbeddingExtractor {
                 let mut embedding = vec![0.0; *dimension];
 
                 if let Some(phonemes) = &sample.phonemes {
-                    // Convert phonemes to string representation for processing
+                    // Join the phoneme symbols (IPA / ARPAbet) with spaces so the
+                    // distinctive-feature lookup receives one symbol per token.
                     let phoneme_string = phonemes
                         .iter()
-                        .map(|p| format!("{p:?}"))
+                        .map(|p| p.symbol.clone())
                         .collect::<Vec<_>>()
                         .join(" ");
                     let phoneme_features =
@@ -242,38 +245,30 @@ impl ContentEmbeddingExtractor {
         (relative_position * dimension_weight).tanh()
     }
 
+    /// Extract a content embedding from a whitespace-separated phoneme string.
+    ///
+    /// Each token is mapped to a fixed-width IPA distinctive-feature vector (see
+    /// [`ipa_features`]; both IPA and ARPAbet spellings are recognised), the
+    /// per-phoneme vectors are averaged over the sequence, written into the
+    /// leading dimensions of a `dimension`-wide embedding, and L2-normalised.
+    /// Unknown symbols contribute the neutral (all-zero) vector.
     fn extract_phoneme_features(&self, phonemes: &str, dimension: usize) -> Vec<f32> {
-        let mut features = vec![0.0; dimension];
+        let mut features = vec![0.0f32; dimension];
 
-        // IPA phoneme feature mapping (simplified)
-        let phoneme_features = [
-            // Vowels
-            ('a', vec![1.0, 0.0, 0.5, 0.8]), // Open central
-            ('e', vec![0.8, 0.0, 0.3, 0.6]), // Close-mid front
-            ('i', vec![0.9, 0.0, 0.1, 0.2]), // Close front
-            ('o', vec![0.7, 0.0, 0.7, 0.9]), // Close-mid back
-            ('u', vec![0.9, 0.0, 0.9, 1.0]), // Close back
-            // Consonants
-            ('p', vec![0.0, 1.0, 0.0, 0.0]), // Voiceless bilabial plosive
-            ('b', vec![0.0, 1.0, 0.0, 1.0]), // Voiced bilabial plosive
-            ('t', vec![0.0, 1.0, 0.3, 0.0]), // Voiceless alveolar plosive
-            ('d', vec![0.0, 1.0, 0.3, 1.0]), // Voiced alveolar plosive
-            ('k', vec![0.0, 1.0, 0.8, 0.0]), // Voiceless velar plosive
-            ('g', vec![0.0, 1.0, 0.8, 1.0]), // Voiced velar plosive
-            ('m', vec![0.0, 0.5, 0.0, 1.0]), // Bilabial nasal
-            ('n', vec![0.0, 0.5, 0.3, 1.0]), // Alveolar nasal
-            ('s', vec![0.0, 0.3, 0.3, 0.0]), // Voiceless alveolar fricative
-            ('z', vec![0.0, 0.3, 0.3, 1.0]), // Voiced alveolar fricative
-        ];
+        let tokens: Vec<&str> = phonemes.split_whitespace().collect();
+        if tokens.is_empty() {
+            return features;
+        }
 
-        let phoneme_chars: Vec<char> = phonemes.chars().collect();
-        for &phoneme in phoneme_chars.iter() {
-            if let Some((_, feature_vec)) = phoneme_features.iter().find(|(p, _)| *p == phoneme) {
-                for (j, &feature_val) in feature_vec.iter().enumerate() {
-                    if j < dimension {
-                        features[j] += feature_val / phoneme_chars.len() as f32;
-                    }
-                }
+        // Average the distinctive-feature vectors across the phoneme sequence.
+        let inv_count = 1.0 / tokens.len() as f32;
+        for token in &tokens {
+            let phoneme_vector = ipa_features::phoneme_feature_vector(token);
+            // `zip` stops at the shorter of the two, so this also handles the
+            // case where the requested `dimension` is narrower than the feature
+            // matrix without any explicit bounds checking.
+            for (slot, &feature_val) in features.iter_mut().zip(phoneme_vector.iter()) {
+                *slot += feature_val * inv_count;
             }
         }
 
@@ -286,5 +281,95 @@ impl ContentEmbeddingExtractor {
         }
 
         features
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{AudioData, LanguageCode, Phoneme};
+
+    fn phoneme_extractor(dimension: usize) -> ContentEmbeddingExtractor {
+        let config = ContentEmbeddingConfig {
+            text_dimension: 64,
+            phoneme_dimension: dimension,
+            method: ContentEmbeddingMethod::Phoneme {
+                dimension,
+                pretrained: false,
+                phoneme_set: "ipa".to_string(),
+            },
+            use_contextual: false,
+        };
+        ContentEmbeddingExtractor::new(config).expect("extractor construction should succeed")
+    }
+
+    #[test]
+    fn real_phonemes_yield_nonzero_normalized_embedding() {
+        let extractor = phoneme_extractor(ipa_features::FEATURE_DIM);
+        // ARPAbet transcription of "hello" (with stress digits).
+        let features =
+            extractor.extract_phoneme_features("HH AH0 L OW1", ipa_features::FEATURE_DIM);
+        assert_eq!(features.len(), ipa_features::FEATURE_DIM);
+        let energy: f32 = features.iter().map(|x| x.abs()).sum();
+        assert!(
+            energy > 0.0,
+            "real phonemes should produce a non-zero vector"
+        );
+        // L2-normalised output.
+        let norm: f32 = features.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!((norm - 1.0).abs() < 1e-5, "embedding should be unit-norm");
+    }
+
+    #[test]
+    fn unknown_only_sequence_is_zero() {
+        let extractor = phoneme_extractor(ipa_features::FEATURE_DIM);
+        let features = extractor.extract_phoneme_features("QZX ### ???", ipa_features::FEATURE_DIM);
+        assert!(
+            features.iter().all(|&x| x == 0.0),
+            "a sequence of unknown symbols should stay neutral"
+        );
+    }
+
+    #[test]
+    fn empty_input_is_zero() {
+        let extractor = phoneme_extractor(8);
+        let features = extractor.extract_phoneme_features("   ", 8);
+        assert_eq!(features, vec![0.0; 8]);
+    }
+
+    #[test]
+    fn narrow_dimension_is_respected() {
+        let extractor = phoneme_extractor(4);
+        let features = extractor.extract_phoneme_features("P AA T", 4);
+        assert_eq!(features.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn extract_embedding_uses_phoneme_symbols() {
+        let extractor = phoneme_extractor(ipa_features::FEATURE_DIM);
+        let audio = AudioData::silence(0.1, 16000, 1);
+        let sample = DatasetSample::new(
+            "sample-1".to_string(),
+            "hello".to_string(),
+            audio,
+            LanguageCode::EnUs,
+        )
+        .with_phonemes(vec![
+            Phoneme::new("HH"),
+            Phoneme::new("AH0"),
+            Phoneme::new("L"),
+            Phoneme::new("OW1"),
+        ]);
+
+        let embedding = extractor
+            .extract_embedding(&sample)
+            .await
+            .expect("embedding extraction should succeed");
+        assert_eq!(embedding.len(), ipa_features::FEATURE_DIM);
+        let energy: f32 = embedding.iter().map(|x| x.abs()).sum();
+        assert!(
+            energy > 0.0,
+            "phoneme-based embedding should be non-zero for real symbols"
+        );
     }
 }

@@ -269,18 +269,32 @@ impl ExperimentTracker {
         let var2 = group2.iter().map(|x| (x - mean2).powi(2)).sum::<f64>()
             / (group2.len() - 1).max(1) as f64;
 
-        let se = ((var1 / group1.len() as f64) + (var2 / group2.len() as f64)).sqrt();
+        let n1 = group1.len() as f64;
+        let n2 = group2.len() as f64;
+
+        // Squared standard errors of each group mean.
+        let se1_sq = var1 / n1;
+        let se2_sq = var2 / n2;
+        let se = (se1_sq + se2_sq).sqrt();
 
         if se == 0.0 {
             return if mean1 == mean2 { 1.0 } else { 0.0 };
         }
 
-        let t_stat = ((mean1 - mean2) / se).abs();
+        let t_stat = (mean1 - mean2) / se;
 
-        // Approximate p-value (simplified for demonstration)
-        // In practice, would use proper t-distribution CDF
-        let p_value = (-t_stat.powi(2) / 2.0).exp();
-        p_value.clamp(0.0, 1.0)
+        // Welch-Satterthwaite approximation for the effective degrees of freedom.
+        // df = (s1^2/n1 + s2^2/n2)^2 / [ (s1^2/n1)^2/(n1-1) + (s2^2/n2)^2/(n2-1) ]
+        let denom =
+            (se1_sq * se1_sq) / (n1 - 1.0).max(1.0) + (se2_sq * se2_sq) / (n2 - 1.0).max(1.0);
+        let df = if denom > 0.0 {
+            (se1_sq + se2_sq).powi(2) / denom
+        } else {
+            (n1 + n2 - 2.0).max(1.0)
+        };
+
+        // Real two-sided Student's t p-value.
+        students_t_two_sided_p(t_stat, df).clamp(0.0, 1.0)
     }
 
     /// Advanced ranking using multiple criteria
@@ -599,4 +613,242 @@ pub struct ReproducibilityReport {
     pub has_version_pinning: bool,
     pub issues: Vec<String>,
     pub recommendations: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Student's t-distribution helpers
+//
+// The two-sided p-value of a t-statistic with `df` degrees of freedom is
+// derived from the cumulative distribution function (CDF) of Student's
+// t-distribution, which has a closed form in terms of the regularized
+// incomplete beta function `I_x(a, b)`:
+//
+//     P(|T| >= |t|) = I_x(df/2, 1/2),   with   x = df / (df + t^2)
+//
+// (see e.g. Press, Teukolsky, Vetterling & Flannery, "Numerical Recipes",
+// 3rd ed., §6.4 "Incomplete Beta Function" and §6.14 "Statistical Functions").
+//
+// We implement everything in pure Rust with no external special-function
+// dependency:
+//   * `ln_gamma`  - the natural log of the gamma function via the Lanczos
+//                   approximation (Numerical Recipes §6.1).
+//   * `betacf`    - the continued-fraction expansion of the incomplete beta
+//                   function evaluated with the modified Lentz algorithm.
+//   * `betai`     - the regularized incomplete beta function `I_x(a, b)`.
+// ---------------------------------------------------------------------------
+
+/// Natural logarithm of the gamma function, `ln(Γ(x))`, for `x > 0`.
+///
+/// Uses the Lanczos approximation with `g = 5` and 6 coefficients, which is
+/// accurate to roughly 15 significant digits over the positive real axis
+/// (Numerical Recipes, 3rd ed., §6.1).
+fn ln_gamma(x: f64) -> f64 {
+    // Lanczos coefficients (g = 5, n = 6).
+    const COEFFS: [f64; 6] = [
+        76.180_091_729_471_46,
+        -86.505_320_329_416_77,
+        24.014_098_240_830_91,
+        -1.231_739_572_450_155,
+        0.120_865_097_386_617_9e-2,
+        -0.539_523_938_495_3e-5,
+    ];
+
+    let mut y = x;
+    let tmp = x + 5.5;
+    let tmp = tmp - (x + 0.5) * tmp.ln();
+    let mut ser = 1.000_000_000_190_015;
+    for c in COEFFS.iter() {
+        y += 1.0;
+        ser += c / y;
+    }
+    -tmp + (2.506_628_274_631_000_5 * ser / x).ln()
+}
+
+/// Continued-fraction expansion used by [`betai`], evaluated with the modified
+/// Lentz algorithm (Numerical Recipes, 3rd ed., §6.4, function `betacf`).
+fn betacf(a: f64, b: f64, x: f64) -> f64 {
+    const MAX_ITER: usize = 200;
+    const EPS: f64 = 3.0e-12;
+    const FP_MIN: f64 = 1.0e-300;
+
+    let qab = a + b;
+    let qap = a + 1.0;
+    let qam = a - 1.0;
+    let mut c = 1.0;
+    let mut d = 1.0 - qab * x / qap;
+    if d.abs() < FP_MIN {
+        d = FP_MIN;
+    }
+    d = 1.0 / d;
+    let mut h = d;
+
+    for m in 1..=MAX_ITER {
+        let m_f = m as f64;
+        let m2 = 2.0 * m_f;
+
+        // Even step of the recurrence.
+        let aa = m_f * (b - m_f) * x / ((qam + m2) * (a + m2));
+        d = 1.0 + aa * d;
+        if d.abs() < FP_MIN {
+            d = FP_MIN;
+        }
+        c = 1.0 + aa / c;
+        if c.abs() < FP_MIN {
+            c = FP_MIN;
+        }
+        d = 1.0 / d;
+        h *= d * c;
+
+        // Odd step of the recurrence.
+        let aa = -(a + m_f) * (qab + m_f) * x / ((a + m2) * (qap + m2));
+        d = 1.0 + aa * d;
+        if d.abs() < FP_MIN {
+            d = FP_MIN;
+        }
+        c = 1.0 + aa / c;
+        if c.abs() < FP_MIN {
+            c = FP_MIN;
+        }
+        d = 1.0 / d;
+        let del = d * c;
+        h *= del;
+
+        if (del - 1.0).abs() <= EPS {
+            break;
+        }
+    }
+
+    h
+}
+
+/// Regularized incomplete beta function `I_x(a, b)` for `0 <= x <= 1`.
+///
+/// Implementation follows Numerical Recipes (3rd ed., §6.4, function `betai`),
+/// choosing the continued fraction that converges fastest for the given `x`.
+fn betai(a: f64, b: f64, x: f64) -> f64 {
+    if x <= 0.0 {
+        return 0.0;
+    }
+    if x >= 1.0 {
+        return 1.0;
+    }
+
+    // Prefactor `x^a (1-x)^b / B(a, b)`, evaluated in log space for stability.
+    let bt = (ln_gamma(a + b) - ln_gamma(a) - ln_gamma(b) + a * x.ln() + b * (1.0 - x).ln()).exp();
+
+    if x < (a + 1.0) / (a + b + 2.0) {
+        // Use the continued fraction directly.
+        bt * betacf(a, b, x) / a
+    } else {
+        // Use the symmetry relation `I_x(a,b) = 1 - I_{1-x}(b,a)`.
+        1.0 - bt * betacf(b, a, 1.0 - x) / b
+    }
+}
+
+/// Two-sided p-value of a Student's t-statistic with `df` degrees of freedom.
+///
+/// Returns `P(|T| >= |t|)` where `T` follows Student's t-distribution. Computed
+/// from the regularized incomplete beta function as
+/// `I_x(df/2, 1/2)` with `x = df / (df + t^2)`.
+///
+/// Degenerate inputs (`df <= 0`, or non-finite `t`) collapse to a p-value of
+/// `1.0`, i.e. "no evidence against the null hypothesis".
+fn students_t_two_sided_p(t: f64, df: f64) -> f64 {
+    if df <= 0.0 || !t.is_finite() {
+        return 1.0;
+    }
+    let x = df / (df + t * t);
+    betai(0.5 * df, 0.5, x).clamp(0.0, 1.0)
+}
+
+#[cfg(test)]
+mod stats_tests {
+    use super::*;
+
+    /// Deterministic linear-congruential generator so that the test data is
+    /// fixed and reproducible without pulling in any RNG dependency.
+    struct Lcg(u64);
+
+    impl Lcg {
+        fn next_f64(&mut self) -> f64 {
+            // Numerical Recipes LCG constants.
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            // Use the top 53 bits for a uniform value in [0, 1).
+            ((self.0 >> 11) as f64) / ((1u64 << 53) as f64)
+        }
+    }
+
+    #[test]
+    fn t_two_sided_p_matches_reference_table() {
+        // Classic t-table critical value: t(0.025, df=10) = 2.228, so the
+        // two-sided p-value should be ~0.05.
+        let p = students_t_two_sided_p(2.228, 10.0);
+        assert!(
+            (p - 0.05).abs() < 1.0e-3,
+            "expected ~0.05 for t=2.228, df=10; got {p}"
+        );
+
+        // Sign symmetry: the two-sided p-value depends only on |t|.
+        let p_neg = students_t_two_sided_p(-2.228, 10.0);
+        assert!((p - p_neg).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn t_two_sided_p_at_zero_is_one() {
+        let p = students_t_two_sided_p(0.0, 10.0);
+        assert!((p - 1.0).abs() < 1.0e-9, "expected ~1.0 for t=0; got {p}");
+    }
+
+    #[test]
+    fn t_two_sided_p_large_t_is_tiny() {
+        // A very large t-statistic yields a vanishingly small p-value.
+        let p = students_t_two_sided_p(20.0, 30.0);
+        assert!(p < 1.0e-6, "expected tiny p for t=20, df=30; got {p}");
+    }
+
+    #[test]
+    fn t_two_sided_p_normal_limit() {
+        // As df -> infinity the t-distribution approaches the standard normal,
+        // for which P(|Z| >= 1.96) ~ 0.05.
+        let p = students_t_two_sided_p(1.96, 1_000_000.0);
+        assert!(
+            (p - 0.05).abs() < 5.0e-3,
+            "expected ~0.05 in the normal limit; got {p}"
+        );
+    }
+
+    #[test]
+    fn significance_helper_separates_distinct_groups() {
+        // Build two clearly-separated groups with a deterministic LCG so that
+        // the Welch t-test reports strong significance (small p-value).
+        let mut rng = Lcg(0x1234_5678_9abc_def0);
+        let mut values = Vec::new();
+        for _ in 0..20 {
+            values.push(1.0 + 0.01 * rng.next_f64()); // group 1 ~ 1.0
+        }
+        for _ in 0..20 {
+            values.push(5.0 + 0.01 * rng.next_f64()); // group 2 ~ 5.0
+        }
+        let tracker = ExperimentTracker::new();
+        let p = tracker.calculate_statistical_significance(&values);
+        assert!(
+            p < 0.01,
+            "well-separated groups should be significant; got {p}"
+        );
+    }
+
+    #[test]
+    fn significance_helper_identical_groups_not_significant() {
+        // Identical halves => zero standard error, equal means => p = 1.0.
+        let values = vec![2.0; 20];
+        let tracker = ExperimentTracker::new();
+        let p = tracker.calculate_statistical_significance(&values);
+        assert!(
+            (p - 1.0).abs() < 1.0e-12,
+            "identical data => p=1.0; got {p}"
+        );
+    }
 }

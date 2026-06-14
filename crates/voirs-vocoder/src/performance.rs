@@ -186,6 +186,11 @@ pub struct PerformanceMonitor {
     buffer_underrun_count: u32,
     cache_hits: u64,
     cache_accesses: u64,
+
+    /// Last CPU probe `(wall_clock, cumulative_process_cpu_ticks)` used for
+    /// delta-based CPU% measurement (Linux only).
+    #[cfg(target_os = "linux")]
+    last_cpu_probe: Option<(Instant, u64)>,
 }
 
 impl PerformanceMonitor {
@@ -203,6 +208,8 @@ impl PerformanceMonitor {
             buffer_underrun_count: 0,
             cache_hits: 0,
             cache_accesses: 0,
+            #[cfg(target_os = "linux")]
+            last_cpu_probe: None,
         }
     }
 
@@ -438,19 +445,43 @@ impl PerformanceMonitor {
         }
     }
 
-    /// Estimate CPU usage based on real-time factor
-    fn estimate_cpu_usage(&self, rtf: f32) -> f32 {
-        // Simple heuristic: higher RTF generally means higher CPU usage
-        (rtf * 100.0).clamp(0.0, 100.0)
+    /// Measure current CPU usage as a percentage in `[0, 100]`.
+    ///
+    /// On Linux this is a real measurement: cumulative process CPU time
+    /// (`utime + stime`) is read from `/proc/self/stat` and the delta since the
+    /// previous call is divided by the elapsed wall-clock time. The first call
+    /// (no prior sample) seeds the probe and falls back to a real-time-factor
+    /// heuristic; on non-Linux platforms the real-time factor is used directly
+    /// (no randomness).
+    fn estimate_cpu_usage(&mut self, rtf: f32) -> f32 {
+        #[cfg(target_os = "linux")]
+        {
+            let now = Instant::now();
+            if let Some(ticks) = read_process_cpu_ticks() {
+                if let Some((prev_time, prev_ticks)) = self.last_cpu_probe.replace((now, ticks)) {
+                    let elapsed = now.duration_since(prev_time).as_secs_f64();
+                    if elapsed > f64::EPSILON {
+                        let delta_ticks = ticks.saturating_sub(prev_ticks) as f64;
+                        let usage = 100.0 * (delta_ticks / CLOCK_TICKS_PER_SEC) / elapsed;
+                        return (usage as f32).clamp(0.0, 100.0);
+                    }
+                }
+            }
+            // First sample or unreadable /proc: fall back to the RTF heuristic.
+            (rtf * 100.0).clamp(0.0, 100.0)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            (rtf * 100.0).clamp(0.0, 100.0)
+        }
     }
 
-    /// Estimate current memory usage (simplified)
+    /// Measure current process memory usage (resident set size) in megabytes.
+    ///
+    /// On Linux this reads `VmRSS` from `/proc/self/status`; other platforms
+    /// return a fixed, conservative fallback (no randomness).
     fn estimate_memory_usage(&self) -> f32 {
-        // In a real implementation, this would query actual memory usage
-        // For now, provide a reasonable estimate based on processing activity
-        let base_usage = 100.0; // Base 100MB
-        let processing_overhead = (self.total_samples_processed as f32 / 1_000_000.0) * 10.0;
-        (base_usage + processing_overhead).min(2048.0) // Cap at 2GB
+        read_process_rss_mb()
     }
 
     /// Estimate quality without reference audio
@@ -570,6 +601,50 @@ pub struct PerformanceStatistics {
     pub history_size: usize,
 }
 
+/// Clock ticks per second (`USER_HZ`, i.e. `sysconf(_SC_CLK_TCK)`), which is
+/// 100 on virtually all Linux configurations.
+#[cfg(target_os = "linux")]
+const CLOCK_TICKS_PER_SEC: f64 = 100.0;
+
+/// Read cumulative process CPU time (`utime + stime`) in clock ticks from
+/// `/proc/self/stat`.
+///
+/// The parser scans past the final `)` so it is robust to executable names that
+/// contain spaces or parentheses. After that delimiter, field index 0 is
+/// `state`, so `utime`/`stime` are at indices 11/12.
+#[cfg(target_os = "linux")]
+fn read_process_cpu_ticks() -> Option<u64> {
+    let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
+    let comm_end = stat.rfind(')')?;
+    let fields: Vec<&str> = stat[comm_end + 1..].split_whitespace().collect();
+    let utime: u64 = fields.get(11)?.parse().ok()?;
+    let stime: u64 = fields.get(12)?.parse().ok()?;
+    Some(utime + stime)
+}
+
+/// Read process resident set size (`VmRSS`) from `/proc/self/status`, in MB.
+#[cfg(target_os = "linux")]
+fn read_process_rss_mb() -> f32 {
+    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+        for line in status.lines() {
+            if let Some(rest) = line.strip_prefix("VmRSS:") {
+                if let Some(kb_field) = rest.split_whitespace().next() {
+                    if let Ok(kb) = kb_field.parse::<f64>() {
+                        return (kb / 1024.0) as f32; // kB → MB
+                    }
+                }
+            }
+        }
+    }
+    100.0 // Fallback when VmRSS is unavailable.
+}
+
+/// Non-Linux fallback: a fixed, conservative RSS estimate in MB (no rand).
+#[cfg(not(target_os = "linux"))]
+fn read_process_rss_mb() -> f32 {
+    100.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -662,5 +737,33 @@ mod tests {
         let history = monitor.get_history(Some(1));
         assert_eq!(history.len(), 1);
         assert!(history[0].latency_ms > 0.0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_real_system_metrics_linux() {
+        let mut monitor =
+            PerformanceMonitor::new(QualityConfig::default(), PerformanceThresholds::default());
+
+        // Memory: real RSS read from /proc/self/status must be positive/finite.
+        let memory_mb = monitor.estimate_memory_usage();
+        assert!(memory_mb.is_finite());
+        assert!(memory_mb > 0.0, "RSS should be > 0 MB, got {memory_mb}");
+
+        // CPU: seed the probe, burn a little CPU, then take a real measurement.
+        let _seed = monitor.estimate_cpu_usage(0.1);
+        let start = Instant::now();
+        let mut acc: u64 = 0;
+        while start.elapsed() < Duration::from_millis(25) {
+            acc = acc.wrapping_add(u64::from(start.elapsed().subsec_nanos()));
+        }
+        std::hint::black_box(acc);
+
+        let cpu = monitor.estimate_cpu_usage(0.1);
+        assert!(cpu.is_finite());
+        assert!(
+            (0.0..=100.0).contains(&cpu),
+            "CPU% must be within [0, 100], got {cpu}"
+        );
     }
 }

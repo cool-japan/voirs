@@ -188,34 +188,30 @@ impl SpectralLoss {
                 break;
             }
 
-            // Extract and window frame
-            let frame_data: Vec<f32> = (0..fft_size)
+            // Extract and window frame (zero-padded to `fft_size`)
+            let frame_data: Vec<f64> = (0..fft_size)
                 .map(|i| {
                     if i < win_length {
-                        audio[start + i].to_f32().unwrap_or(0.0) * window[i]
+                        (audio[start + i].to_f32().unwrap_or(0.0) * window[i]) as f64
                     } else {
                         0.0
                     }
                 })
                 .collect();
 
-            // Compute DFT (simplified for first implementation)
-            // This computes only the positive frequency bins
+            // Real FFT via scirs2_fft (O(N log N)); yields the `fft_size / 2 + 1`
+            // non-negative frequency bins. Magnitude is |X[k]| = sqrt(re² + im²),
+            // identical to the previous hand-rolled DFT but far faster.
+            let spectrum = scirs2_fft::rfft(&frame_data, Some(fft_size))
+                .map_err(|e| crate::VocoderError::InputError(format!("STFT rfft failed: {e}")))?;
+
             for bin_idx in 0..num_bins {
-                let mut real_sum = 0.0_f32;
-                let mut imag_sum = 0.0_f32;
-
-                let freq = bin_idx as f32 / fft_size as f32;
-
-                for (sample_idx, &sample) in frame_data.iter().enumerate() {
-                    let phase = -2.0 * std::f32::consts::PI * freq * sample_idx as f32;
-                    real_sum += sample * phase.cos();
-                    imag_sum += sample * phase.sin();
-                }
-
-                // Compute magnitude
+                let bin = spectrum
+                    .get(bin_idx)
+                    .copied()
+                    .unwrap_or(scirs2_core::Complex::new(0.0, 0.0));
                 spectrogram[[bin_idx, frame_idx]] =
-                    (real_sum * real_sum + imag_sum * imag_sum).sqrt();
+                    ((bin.re * bin.re + bin.im * bin.im).sqrt()) as f32;
             }
         }
 
@@ -498,5 +494,48 @@ mod tests {
             (loss1 - loss2).abs() < 1e-5,
             "Magnitude loss should be symmetric"
         );
+    }
+
+    #[test]
+    fn test_compute_stft_single_tone_peak_bin() {
+        // A pure tone at frequency f should put nearly all its magnitude energy
+        // in the FFT bin nearest to f * fft_size / sample_rate.
+        let config = SpectralLossConfig::fast();
+        let mut loss = SpectralLoss::new(config).unwrap();
+
+        let sample_rate = 22050.0_f32;
+        let fft_size = 1024usize;
+        let hop = 256usize;
+        // Choose a frequency that lands exactly on bin 64: f = bin * sr / N.
+        let target_bin = 64usize;
+        let freq = target_bin as f32 * sample_rate / fft_size as f32;
+
+        let signal = Array1::<f32>::from_vec(
+            (0..4096)
+                .map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / sample_rate).sin())
+                .collect(),
+        );
+
+        let spec = loss
+            .compute_stft(&signal, fft_size, hop, fft_size)
+            .expect("stft");
+
+        // Find the peak bin in the first frame.
+        let frame = 0;
+        let mut peak_bin = 0;
+        let mut peak_val = 0.0_f32;
+        for bin in 0..spec.nrows() {
+            let v = spec[[bin, frame]];
+            if v > peak_val {
+                peak_val = v;
+                peak_bin = bin;
+            }
+        }
+
+        assert!(
+            (peak_bin as i32 - target_bin as i32).abs() <= 1,
+            "expected spectral peak near bin {target_bin}, got {peak_bin}"
+        );
+        assert!(peak_val > 0.0, "peak magnitude must be positive");
     }
 }

@@ -12,6 +12,7 @@ use crate::traits::QualityScore;
 use crate::VoirsError;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use statrs::distribution::{ContinuousCDF, Normal, StudentsT};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
@@ -879,11 +880,23 @@ impl CommercialToolComparator {
                 .pearson_correlation(&voirs_scores_f32, &commercial_scores_f32)
                 .map_err(|e| CommercialComparisonError::MetricAlignmentFailed(e.to_string()))?;
 
-            // Calculate Spearman correlation (simplified)
-            let spearman_correlation = pearson_result.coefficient as f64 * 0.95; // Approximation
+            // Spearman rank correlation: Pearson correlation computed on the
+            // ranks of the same aligned paired data. Falls back to the
+            // Pearson coefficient only if the rank computation is undefined
+            // (e.g. degenerate sample), never a magic constant.
+            let spearman_correlation = self
+                .correlation_analyzer
+                .spearman_correlation(&voirs_scores_f32, &commercial_scores_f32)
+                .map(|r| r.coefficient as f64)
+                .unwrap_or(pearson_result.coefficient as f64);
 
-            // Calculate Kendall's tau (simplified)
-            let kendall_tau = pearson_result.coefficient as f64 * 0.9; // Approximation
+            // Kendall's tau-b: concordant/discordant pair counting with tie
+            // correction on the same aligned paired data.
+            let kendall_tau = self
+                .correlation_analyzer
+                .kendall_correlation(&voirs_scores_f32, &commercial_scores_f32)
+                .map(|r| r.coefficient as f64)
+                .unwrap_or(pearson_result.coefficient as f64);
 
             let correlation_results = CorrelationResults {
                 pearson_correlation: pearson_result.coefficient as f64,
@@ -1178,8 +1191,12 @@ impl CommercialToolComparator {
 
             let degrees_of_freedom = voirs_scores.len() + commercial_scores.len() - 2;
 
-            // Simplified p-value estimation
-            let p_value = if t_statistic.abs() > 2.0 { 0.05 } else { 0.1 };
+            // Exact two-sided p-value from the pooled-variance Student's t
+            // with `degrees_of_freedom` df: p = 2 * (1 - F(|t|)).
+            let p_value = match StudentsT::new(0.0, 1.0, degrees_of_freedom as f64) {
+                Ok(dist) => (2.0 * (1.0 - dist.cdf(t_statistic.abs()))).clamp(0.0, 1.0),
+                Err(_) => 1.0,
+            };
 
             let confidence_interval = (
                 (voirs_mean - commercial_mean) - 1.96 * standard_error,
@@ -1200,15 +1217,22 @@ impl CommercialToolComparator {
                 0.0
             };
 
-            // Mann-Whitney U test (simplified)
+            // Mann-Whitney U test computed on the actual paired data
+            // (non-parametric rank test, independent of the t-test p-value).
+            let (u_statistic, mw_p_value, mw_effect_size) =
+                Self::mann_whitney_u(&voirs_scores, &commercial_scores);
             let mann_whitney_result = MannWhitneyResult {
-                u_statistic: (voirs_scores.len() * commercial_scores.len()) as f64 / 2.0,
-                p_value,
-                effect_size: effect_size * 0.8, // Approximation
+                u_statistic,
+                p_value: mw_p_value,
+                effect_size: mw_effect_size,
             };
 
-            // Power analysis (simplified)
-            let power = if effect_size.abs() > 0.5 { 0.8 } else { 0.6 };
+            // Statistical power of the two-sample two-sided t-test, derived
+            // from the observed effect size (Cohen's d) and per-group sample
+            // size via the non-centrality parameter and the noncentral-by-
+            // shift approximation of the central t-distribution.
+            let n_per_group = (voirs_scores.len() + commercial_scores.len()) as f64 / 2.0;
+            let power = Self::approximate_t_test_power(effect_size, n_per_group, 0.05);
 
             t_test_results.insert(tool_type.clone(), t_test_result);
             mann_whitney_results.insert(tool_type.clone(), mann_whitney_result);
@@ -1222,6 +1246,118 @@ impl CommercialToolComparator {
             effect_sizes,
             power_analysis,
         })
+    }
+
+    /// Compute the Mann-Whitney U test for two independent samples.
+    ///
+    /// Pools both samples, assigns average (mid-) ranks to tied values, and
+    /// forms `U1 = R1 - n1(n1+1)/2`, `U2 = n1*n2 - U1`, returning the smaller
+    /// `U = min(U1, U2)`. The two-sided p-value uses the normal approximation
+    /// with the tie-corrected variance
+    /// `Var(U) = n1*n2/12 * ((N+1) - sum(t^3 - t)/(N(N-1)))` and a 0.5
+    /// continuity correction. The effect size is the rank-biserial
+    /// correlation `r = 1 - 2U / (n1*n2)`.
+    ///
+    /// Returns `(u_statistic, p_value, effect_size)`.
+    fn mann_whitney_u(group1: &[f64], group2: &[f64]) -> (f64, f64, f64) {
+        let n1 = group1.len();
+        let n2 = group2.len();
+        if n1 == 0 || n2 == 0 {
+            return (0.0, 1.0, 0.0);
+        }
+
+        // Pool the samples, tagging group membership (0 = group1, 1 = group2).
+        let mut combined: Vec<(f64, u8)> = group1
+            .iter()
+            .map(|&x| (x, 0u8))
+            .chain(group2.iter().map(|&x| (x, 1u8)))
+            .collect();
+        combined.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Average ranks for ties; accumulate the tie correction sum(t^3 - t).
+        let total = combined.len();
+        let mut ranks = vec![0.0_f64; total];
+        let mut tie_correction = 0.0_f64;
+        let mut i = 0;
+        while i < total {
+            let mut j = i + 1;
+            while j < total && combined[j].0 == combined[i].0 {
+                j += 1;
+            }
+            let avg_rank = ((i + 1 + j) as f64) / 2.0;
+            for r in ranks.iter_mut().take(j).skip(i) {
+                *r = avg_rank;
+            }
+            let t = (j - i) as f64;
+            if t > 1.0 {
+                tie_correction += t * t * t - t;
+            }
+            i = j;
+        }
+
+        // Rank sum for group 1.
+        let r1: f64 = combined
+            .iter()
+            .zip(ranks.iter())
+            .filter(|((_, g), _)| *g == 0)
+            .map(|(_, r)| *r)
+            .sum();
+
+        let n1_f = n1 as f64;
+        let n2_f = n2 as f64;
+        let u1 = r1 - n1_f * (n1_f + 1.0) / 2.0;
+        let u2 = n1_f * n2_f - u1;
+        let u = u1.min(u2);
+
+        // Tie-corrected normal approximation for the p-value.
+        let n = n1_f + n2_f;
+        let mean_u = n1_f * n2_f / 2.0;
+        let var_u = if n > 1.0 {
+            (n1_f * n2_f / 12.0) * ((n + 1.0) - tie_correction / (n * (n - 1.0)))
+        } else {
+            0.0
+        };
+        let p_value = if var_u > 0.0 {
+            let std_u = var_u.sqrt();
+            // Continuity correction of 0.5 toward the mean.
+            let z = ((u - mean_u).abs() - 0.5).max(0.0) / std_u;
+            match Normal::new(0.0, 1.0) {
+                Ok(normal) => (2.0 * (1.0 - normal.cdf(z))).clamp(0.0, 1.0),
+                Err(_) => 1.0,
+            }
+        } else {
+            1.0
+        };
+
+        // Rank-biserial correlation effect size.
+        let effect_size = 1.0 - (2.0 * u) / (n1_f * n2_f);
+
+        (u, p_value, effect_size)
+    }
+
+    /// Approximate the power of a two-sample, two-sided t-test.
+    ///
+    /// Given the observed standardized mean difference `effect_size`
+    /// (Cohen's d), the per-group sample size `n`, and the significance
+    /// level `alpha`, the power is derived from the non-centrality parameter
+    /// `ncp = d * sqrt(n / 2)` using the noncentral-by-shift approximation of
+    /// the central Student's t: `power = (1 - F(t_crit - ncp)) + F(-t_crit - ncp)`,
+    /// where `t_crit` is the two-sided `1 - alpha/2` critical value with
+    /// `2n - 2` degrees of freedom.
+    fn approximate_t_test_power(effect_size: f64, n: f64, alpha: f64) -> f64 {
+        if n < 1.0 {
+            return 0.0;
+        }
+        let df = (2.0 * n - 2.0).max(1.0);
+        let dist = match StudentsT::new(0.0, 1.0, df) {
+            Ok(d) => d,
+            Err(_) => return 0.0,
+        };
+        let ncp = effect_size * (n / 2.0).sqrt();
+        let t_crit = dist.inverse_cdf(1.0 - alpha / 2.0);
+        let upper = 1.0 - dist.cdf(t_crit - ncp);
+        let lower = dist.cdf(-t_crit - ncp);
+        (upper + lower).clamp(0.0, 1.0)
     }
 
     /// Generate comparison report
@@ -1383,5 +1519,74 @@ mod tests {
 
         assert!(agreement.mean_absolute_error < 0.2);
         assert!(agreement.intraclass_correlation > 0.8);
+    }
+
+    /// Mann-Whitney U on a textbook example from Mann & Whitney (1947)-style
+    /// data: group1 = {1,2,3,4}, group2 = {5,6,7,8} are perfectly separated.
+    /// The smaller U is 0 and the rank-biserial effect size is 1.0.
+    #[test]
+    fn test_mann_whitney_u_no_overlap() {
+        let g1 = [1.0, 2.0, 3.0, 4.0];
+        let g2 = [5.0, 6.0, 7.0, 8.0];
+        let (u, p, effect) = CommercialToolComparator::mann_whitney_u(&g1, &g2);
+        assert!((u - 0.0).abs() < 1e-9, "U should be 0, got {u}");
+        assert!(
+            (effect.abs() - 1.0).abs() < 1e-9,
+            "|r| should be 1, got {effect}"
+        );
+        assert!(
+            p < 0.05,
+            "well-separated groups should be significant, p = {p}"
+        );
+    }
+
+    /// Two identical samples have maximal overlap: U = n1*n2/2, rank-biserial
+    /// effect size 0, and a non-significant p-value (~1.0).
+    #[test]
+    fn test_mann_whitney_u_identical_samples() {
+        let g1 = [2.0, 4.0, 6.0, 8.0, 10.0];
+        let g2 = [2.0, 4.0, 6.0, 8.0, 10.0];
+        let (u, p, effect) = CommercialToolComparator::mann_whitney_u(&g1, &g2);
+        assert!(
+            (u - 12.5).abs() < 1e-9,
+            "U should be n1*n2/2 = 12.5, got {u}"
+        );
+        assert!(effect.abs() < 1e-9, "effect should be 0, got {effect}");
+        assert!(
+            p > 0.5,
+            "identical groups should not be significant, p = {p}"
+        );
+    }
+
+    /// A known small example with one swap: group1 = {1,2,3,5},
+    /// group2 = {4,6,7,8}. Ranks: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7,
+    /// 8->8. R1 = 1+2+3+5 = 11, U1 = 11 - 4*5/2 = 1, U2 = 16 - 1 = 15,
+    /// U = 1, effect = 1 - 2*1/16 = 0.875.
+    #[test]
+    fn test_mann_whitney_u_known_partial() {
+        let g1 = [1.0, 2.0, 3.0, 5.0];
+        let g2 = [4.0, 6.0, 7.0, 8.0];
+        let (u, _p, effect) = CommercialToolComparator::mann_whitney_u(&g1, &g2);
+        assert!((u - 1.0).abs() < 1e-9, "U should be 1, got {u}");
+        assert!(
+            (effect - 0.875).abs() < 1e-9,
+            "effect should be 0.875, got {effect}"
+        );
+    }
+
+    /// Power is bounded in [0, 1] and increases with the effect size.
+    #[test]
+    fn test_approximate_t_test_power_monotonic() {
+        let p_small = CommercialToolComparator::approximate_t_test_power(0.2, 30.0, 0.05);
+        let p_large = CommercialToolComparator::approximate_t_test_power(1.0, 30.0, 0.05);
+        assert!((0.0..=1.0).contains(&p_small));
+        assert!((0.0..=1.0).contains(&p_large));
+        assert!(p_large > p_small, "larger effect must have higher power");
+        // A zero effect gives power approximately equal to alpha.
+        let p_null = CommercialToolComparator::approximate_t_test_power(0.0, 30.0, 0.05);
+        assert!(
+            (p_null - 0.05).abs() < 1e-2,
+            "null power ~= alpha, got {p_null}"
+        );
     }
 }

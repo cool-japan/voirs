@@ -530,96 +530,111 @@ impl SpatialVocoder {
         phase_spec
     }
 
-    /// Inverse STFT (simplified implementation)
+    /// Inverse STFT via real inverse FFT with window-sum normalized overlap-add.
+    ///
+    /// Each frame's half-spectrum is rebuilt from magnitude and phase as
+    /// `X[k] = mag · e^{iφ}`, transformed back to the time domain with
+    /// [`scirs2_fft::irfft`], multiplied by the synthesis (Hann) window, and
+    /// overlap-added. The accumulated `window²` envelope is divided out so that an
+    /// analysis → synthesis round-trip reconstructs the original windowed signal
+    /// (the COLA / Griffin-Lim normalization) instead of relying on a peak-scaling
+    /// hack.
     fn istft(&self, magnitude: &[Vec<f32>], phase: &[Vec<f32>]) -> Result<Vec<f32>> {
         let frames = magnitude.len();
-        let fft_size = (magnitude[0].len() - 1) * 2; // Assuming N/2+1 bins
+        if frames == 0 {
+            return Ok(Vec::new());
+        }
+        let num_bins = magnitude[0].len();
+        let fft_size = (num_bins - 1) * 2; // N/2+1 bins -> N
         let hop_length = self.config.hop_size;
         let audio_length = (frames - 1) * hop_length + fft_size;
 
-        let mut audio = vec![0.0; audio_length];
+        let mut audio = vec![0.0f32; audio_length];
+        let mut window_sum = vec![0.0f32; audio_length];
         let window = self.hann_window(fft_size);
 
         for frame_idx in 0..frames {
             let start_idx = frame_idx * hop_length;
 
-            // Create complex spectrum from magnitude and phase
-            let mut time_frame = vec![0.0; fft_size];
+            // Rebuild the complex half-spectrum: X[k] = mag · (cos φ + i sin φ).
+            let spectrum: Vec<scirs2_core::Complex<f64>> = (0..num_bins)
+                .map(|bin| {
+                    let mag = magnitude[frame_idx][bin] as f64;
+                    let ph = phase[frame_idx][bin] as f64;
+                    scirs2_core::Complex::new(mag * ph.cos(), mag * ph.sin())
+                })
+                .collect();
 
-            // Simple inverse FFT approximation using cosine synthesis
-            for sample_idx in 0..fft_size {
-                let mut sample_value = 0.0;
+            let time_frame = scirs2_fft::irfft(&spectrum, Some(fft_size))
+                .map_err(|e| anyhow::anyhow!("ISTFT irfft failed: {e}"))?;
 
-                for bin_idx in 0..magnitude[frame_idx].len() {
-                    let mag = magnitude[frame_idx][bin_idx];
-                    let phase_val = phase[frame_idx][bin_idx];
-                    let freq = bin_idx as f32 * 2.0 * std::f32::consts::PI / fft_size as f32;
-
-                    sample_value += mag * (freq * sample_idx as f32 + phase_val).cos();
-                }
-
-                time_frame[sample_idx] = sample_value * window[sample_idx];
-            }
-
-            // Overlap-add
-            for (i, &sample) in time_frame.iter().enumerate() {
+            // Windowed overlap-add, accumulating the squared-window envelope.
+            for i in 0..fft_size {
                 let audio_idx = start_idx + i;
-                if audio_idx < audio.len() {
-                    audio[audio_idx] += sample;
+                if audio_idx < audio.len() && i < time_frame.len() {
+                    let w = window[i];
+                    audio[audio_idx] += time_frame[i] as f32 * w;
+                    window_sum[audio_idx] += w * w;
                 }
             }
         }
 
-        // Normalize
-        let max_val = audio.iter().map(|x| x.abs()).fold(0.0f32, f32::max);
-        if max_val > 0.0 {
-            for sample in audio.iter_mut() {
-                *sample /= max_val * 2.0; // Extra headroom
+        // Normalize by the window-sum envelope (COLA) to undo the analysis and
+        // synthesis windows; guard against division by ~0 in the tapered edges.
+        for (sample, &wsum) in audio.iter_mut().zip(window_sum.iter()) {
+            if wsum > 1e-8 {
+                *sample /= wsum;
             }
         }
 
         Ok(audio)
     }
 
-    /// Forward STFT (simplified implementation)
+    /// Forward STFT via real FFT, returning per-frame magnitude and phase.
+    ///
+    /// Frames are Hann-windowed then transformed with [`scirs2_fft::rfft`];
+    /// magnitude is `|X[k]|` (`Complex::norm`) and phase is `arg X[k]`
+    /// (`Complex::arg`). This pairs with [`Self::istft`] for a round-trip-faithful
+    /// analysis/synthesis cycle, replacing the previous O(N²) hand-rolled DFT.
     #[allow(clippy::type_complexity)]
     fn stft(&self, audio: &[f32]) -> Result<(Vec<Vec<f32>>, Vec<Vec<f32>>)> {
         let fft_size = 2048;
         let hop_length = self.config.hop_size;
+        if audio.len() < fft_size {
+            return Ok((Vec::new(), Vec::new()));
+        }
         let frames = (audio.len() - fft_size) / hop_length + 1;
         let bins = fft_size / 2 + 1;
 
-        let mut magnitude = vec![vec![0.0; bins]; frames];
-        let mut phase = vec![vec![0.0; bins]; frames];
+        let mut magnitude = vec![vec![0.0f32; bins]; frames];
+        let mut phase = vec![vec![0.0f32; bins]; frames];
         let window = self.hann_window(fft_size);
 
         for frame_idx in 0..frames {
             let start_idx = frame_idx * hop_length;
 
-            // Apply window
-            let mut windowed_frame = vec![0.0; fft_size];
-            for i in 0..fft_size {
-                let audio_idx = start_idx + i;
-                if audio_idx < audio.len() {
-                    windowed_frame[i] = audio[audio_idx] * window[i];
-                }
-            }
+            // Apply analysis window (zero-padded if the tail runs past the signal).
+            let windowed_frame: Vec<f64> = (0..fft_size)
+                .map(|i| {
+                    let audio_idx = start_idx + i;
+                    if audio_idx < audio.len() {
+                        (audio[audio_idx] * window[i]) as f64
+                    } else {
+                        0.0
+                    }
+                })
+                .collect();
 
-            // Simple DFT for magnitude and phase extraction
+            let spectrum = scirs2_fft::rfft(&windowed_frame, Some(fft_size))
+                .map_err(|e| anyhow::anyhow!("STFT rfft failed: {e}"))?;
+
             for bin_idx in 0..bins {
-                let mut real = 0.0;
-                let mut imag = 0.0;
-
-                for (sample_idx, &window_sample) in windowed_frame.iter().enumerate().take(fft_size)
-                {
-                    let angle = -2.0 * std::f32::consts::PI * bin_idx as f32 * sample_idx as f32
-                        / fft_size as f32;
-                    real += window_sample * angle.cos();
-                    imag += window_sample * angle.sin();
-                }
-
-                magnitude[frame_idx][bin_idx] = (real * real + imag * imag).sqrt();
-                phase[frame_idx][bin_idx] = imag.atan2(real);
+                let c = spectrum
+                    .get(bin_idx)
+                    .copied()
+                    .unwrap_or(scirs2_core::Complex::new(0.0, 0.0));
+                magnitude[frame_idx][bin_idx] = c.norm() as f32;
+                phase[frame_idx][bin_idx] = c.arg() as f32;
             }
         }
 
@@ -811,5 +826,50 @@ mod tests {
         let result = vocoder.update_config(new_config);
         assert!(result.is_ok());
         assert_eq!(vocoder.config.sample_rate, 48000);
+    }
+
+    #[test]
+    fn test_stft_istft_round_trip_reconstructs_tone() {
+        // 50% overlap (hop = fft_size / 2 = 1024) with a Hann window satisfies the
+        // constant-overlap-add condition, so a forward STFT followed by an inverse
+        // STFT must reconstruct the interior of the signal with small error.
+        let config = SpatialVocoderConfig::default();
+        let vocoder = SpatialVocoder::new(config).unwrap();
+
+        let fft_size = 2048usize;
+        let sample_rate = vocoder.config.sample_rate as f32;
+        let freq = 440.0_f32;
+        let n = 8192usize;
+        let original: Vec<f32> = (0..n)
+            .map(|i| 0.5 * (2.0 * std::f32::consts::PI * freq * i as f32 / sample_rate).sin())
+            .collect();
+
+        let (magnitude, phase) = vocoder.stft(&original).expect("stft");
+        assert!(!magnitude.is_empty(), "expected at least one STFT frame");
+
+        let reconstructed = vocoder.istft(&magnitude, &phase).expect("istft");
+
+        // Compare only the interior region where overlap-add is complete (skip the
+        // first and last full frame, where the window envelope is not yet unity).
+        let start = fft_size;
+        let end = original
+            .len()
+            .min(reconstructed.len())
+            .saturating_sub(fft_size);
+        assert!(end > start, "interior region must be non-empty");
+
+        let mut max_err = 0.0_f32;
+        let mut energy = 0.0_f64;
+        for i in start..end {
+            let err = (reconstructed[i] - original[i]).abs();
+            max_err = max_err.max(err);
+            energy += (original[i] as f64).powi(2);
+        }
+        let rms = (energy / (end - start) as f64).sqrt() as f32;
+
+        assert!(
+            max_err < 0.05 * rms.max(1e-3) + 1e-3,
+            "round-trip interior error too large: max_err {max_err}, signal rms {rms}"
+        );
     }
 }

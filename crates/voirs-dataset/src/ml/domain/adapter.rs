@@ -10,6 +10,7 @@ use super::config::{
     AdaptationStrategy, DataMixingConfig, DistanceMetric, DomainAdaptationConfig, DomainConfig,
     ShiftDetectionConfig, ShiftDetectionMethod, StatisticalTest, TransferLearningConfig,
 };
+use super::stats;
 use super::types::{
     AdaptationRecommendation, AdaptationResult, AudioStatistics, CompatibilityReport,
     DomainAdapter, DomainShift, DomainStatistics, Priority, RecommendationType, SpeakerStatistics,
@@ -167,6 +168,14 @@ impl ShiftDetector {
         Ok(features)
     }
 
+    /// Run a real two-sample test and return its result mapped onto a shift
+    /// magnitude in `[0, 1]` (0 = indistinguishable distributions).
+    ///
+    /// The genuine statistics live in [`super::stats`]; this dispatcher converts
+    /// each one into the caller's magnitude contract (compared against
+    /// [`DomainShift::is_significant`]). `alpha` is accepted for interface
+    /// compatibility — significance is applied downstream via the magnitude
+    /// threshold rather than here.
     async fn statistical_test(
         &self,
         source_features: &[f32],
@@ -174,62 +183,54 @@ impl ShiftDetector {
         test_type: &StatisticalTest,
         _alpha: f64,
     ) -> Result<f32> {
-        match test_type {
+        let magnitude = match test_type {
             StatisticalTest::KolmogorovSmirnov => {
-                // Simplified KS test implementation
-                let source_mean: f32 =
-                    source_features.iter().sum::<f32>() / source_features.len() as f32;
-                let target_mean: f32 =
-                    target_features.iter().sum::<f32>() / target_features.len() as f32;
-                Ok((source_mean - target_mean).abs() / source_mean.max(target_mean))
+                // The KS statistic D is already a shift magnitude in [0, 1].
+                stats::ks_statistic(source_features, target_features) as f32
             }
             StatisticalTest::MannWhitneyU => {
-                // Simplified Mann-Whitney U test
                 self.mann_whitney_u_test(source_features, target_features)
-                    .await
+                    .await?
             }
             StatisticalTest::ChiSquare => {
-                // Simplified Chi-square test
-                self.chi_square_test(source_features, target_features).await
+                self.chi_square_test(source_features, target_features)
+                    .await?
             }
             StatisticalTest::AndersonDarling => {
-                // Simplified Anderson-Darling test
                 self.anderson_darling_test(source_features, target_features)
-                    .await
+                    .await?
             }
-        }
+        };
+
+        Ok(magnitude.clamp(0.0, 1.0))
     }
 
+    /// Mann–Whitney U mapped to the rank-biserial correlation `|1 − 2U/(n·m)|`
+    /// (0 = identical, 1 = fully separated).
     async fn mann_whitney_u_test(&self, source: &[f32], target: &[f32]) -> Result<f32> {
-        // Simplified implementation
-        let source_median = self.calculate_median(source);
-        let target_median = self.calculate_median(target);
-        Ok((source_median - target_median).abs() / source_median.max(target_median))
-    }
-
-    async fn chi_square_test(&self, source: &[f32], target: &[f32]) -> Result<f32> {
-        // Simplified implementation
-        let source_var = self.calculate_variance(source);
-        let target_var = self.calculate_variance(target);
-        Ok((source_var - target_var).abs() / source_var.max(target_var))
-    }
-
-    async fn anderson_darling_test(&self, source: &[f32], target: &[f32]) -> Result<f32> {
-        // Simplified implementation
-        let source_skew = self.calculate_skewness(source);
-        let target_skew = self.calculate_skewness(target);
-        Ok((source_skew - target_skew).abs())
-    }
-
-    fn calculate_median(&self, data: &[f32]) -> f32 {
-        let mut sorted = data.to_vec();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let len = sorted.len();
-        if len.is_multiple_of(2) {
-            (sorted[len / 2 - 1] + sorted[len / 2]) / 2.0
-        } else {
-            sorted[len / 2]
+        let na = source.len() as f64;
+        let nb = target.len() as f64;
+        if na == 0.0 || nb == 0.0 {
+            return Ok(0.0);
         }
+        let u = stats::mann_whitney_u(source, target);
+        let rank_biserial = (1.0 - 2.0 * u / (na * nb)).abs();
+        Ok(rank_biserial as f32)
+    }
+
+    /// Chi-square homogeneity test mapped to its CDF value (`1 − p_value`):
+    /// small when the binned distributions agree, approaching 1 as they diverge.
+    async fn chi_square_test(&self, source: &[f32], target: &[f32]) -> Result<f32> {
+        let bins = stats::default_bins(source, target);
+        let (chi2, dof) = stats::chi_square_statistic(source, target, bins);
+        Ok(stats::chi_square_cdf(chi2, dof) as f32)
+    }
+
+    /// Standardized two-sample Anderson–Darling statistic, saturated into
+    /// `[0, 1)` via `t / (1 + t)` so it can serve as a shift magnitude.
+    async fn anderson_darling_test(&self, source: &[f32], target: &[f32]) -> Result<f32> {
+        let t = stats::anderson_darling_2sample(source, target).max(0.0);
+        Ok((t / (1.0 + t)) as f32)
     }
 
     fn calculate_variance(&self, data: &[f32]) -> f32 {
@@ -277,42 +278,31 @@ impl ShiftDetector {
         }
     }
 
+    /// True 1-D Wasserstein-1 (earth-mover) distance between the empirical
+    /// distributions — the L1 area between their CDFs.
     async fn wasserstein_distance(&self, source: &[f32], target: &[f32]) -> Result<f32> {
-        // Simplified 1D Wasserstein distance
-        let mut source_sorted = source.to_vec();
-        let mut target_sorted = target.to_vec();
-        source_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        target_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-
-        let min_len = source_sorted.len().min(target_sorted.len());
-        let distance = (0..min_len)
-            .map(|i| (source_sorted[i] - target_sorted[i]).abs())
-            .sum::<f32>()
-            / min_len as f32;
-
-        Ok(distance)
+        Ok(stats::wasserstein1(source, target) as f32)
     }
 
+    /// Jensen–Shannon divergence (base 2, range `[0, 1]`) of shared-support
+    /// histograms.
     async fn jensen_shannon_divergence(&self, source: &[f32], target: &[f32]) -> Result<f32> {
-        // Simplified JS divergence
-        let source_mean = source.iter().sum::<f32>() / source.len() as f32;
-        let target_mean = target.iter().sum::<f32>() / target.len() as f32;
-        Ok((source_mean - target_mean).abs() / (source_mean + target_mean).max(1e-8))
+        let bins = stats::default_bins(source, target);
+        Ok(stats::jensen_shannon_divergence(source, target, bins) as f32)
     }
 
+    /// Epsilon-smoothed empirical Kullback–Leibler divergence `KL(source‖target)`
+    /// in nats.
     async fn kl_divergence(&self, source: &[f32], target: &[f32]) -> Result<f32> {
-        // Simplified KL divergence
-        let source_var = self.calculate_variance(source);
-        let target_var = self.calculate_variance(target);
-        Ok((source_var / target_var.max(1e-8)).ln().abs())
+        let bins = stats::default_bins(source, target);
+        Ok(stats::kl_divergence(source, target, bins, 1e-9) as f32)
     }
 
+    /// Unbiased Maximum Mean Discrepancy (squared) with a median-heuristic RBF
+    /// kernel. Tiny negative estimates from the unbiased correction are clamped
+    /// to zero.
     async fn mmd_distance(&self, source: &[f32], target: &[f32]) -> Result<f32> {
-        // Simplified MMD with RBF kernel
-        let source_mean = source.iter().sum::<f32>() / source.len() as f32;
-        let target_mean = target.iter().sum::<f32>() / target.len() as f32;
-        let gamma = 1.0;
-        Ok((-gamma * (source_mean - target_mean).powi(2)).exp())
+        Ok(stats::mmd_rbf(source, target).max(0.0) as f32)
     }
 
     async fn density_based_detection(
@@ -940,5 +930,103 @@ impl DomainAdapterImpl {
                 - target.speaker_characteristics.gender_distribution.female)
                 .abs())
             / 2.0
+    }
+}
+
+#[cfg(test)]
+mod shift_detection_tests {
+    use super::*;
+
+    fn detector() -> ShiftDetector {
+        ShiftDetector::new(&ShiftDetectionConfig::default()).expect("detector construction")
+    }
+
+    /// Strictly increasing ramp of `n` values in `[offset, offset + scale)`.
+    fn ramp(n: usize, offset: f32, scale: f32) -> Vec<f32> {
+        (0..n)
+            .map(|i| offset + scale * i as f32 / n as f32)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn test_statistical_tests_detect_shift_and_stay_bounded() {
+        let det = detector();
+        let a = ramp(200, 0.0, 1.0);
+        let same = ramp(200, 0.0, 1.0);
+        let shifted = ramp(200, 5.0, 1.0); // disjoint support from `a`
+
+        for test in [
+            StatisticalTest::KolmogorovSmirnov,
+            StatisticalTest::MannWhitneyU,
+            StatisticalTest::ChiSquare,
+            StatisticalTest::AndersonDarling,
+        ] {
+            let m_same = det.statistical_test(&a, &same, &test, 0.05).await.unwrap();
+            let m_shift = det
+                .statistical_test(&a, &shifted, &test, 0.05)
+                .await
+                .unwrap();
+            assert!(
+                (0.0..=1.0).contains(&m_same) && (0.0..=1.0).contains(&m_shift),
+                "{test:?}: magnitudes out of range ({m_same}, {m_shift})"
+            );
+            assert!(
+                m_shift > m_same,
+                "{test:?}: shifted magnitude {m_shift} should exceed identical {m_same}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ks_identical_is_negligible() {
+        let det = detector();
+        let a = ramp(256, 0.0, 1.0);
+        let m = det
+            .statistical_test(&a, &a, &StatisticalTest::KolmogorovSmirnov, 0.05)
+            .await
+            .unwrap();
+        assert!(m < 1e-4, "identical KS magnitude should be ~0, got {m}");
+    }
+
+    #[tokio::test]
+    async fn test_wasserstein_constant_shift_equals_offset() {
+        let det = detector();
+        let a = vec![2.0f32; 16];
+        let b = vec![5.0f32; 16];
+        let d = det
+            .distance_based_detection(&a, &b, &DistanceMetric::Wasserstein)
+            .await
+            .unwrap();
+        assert!(
+            (d - 3.0).abs() < 1e-4,
+            "Wasserstein should equal shift, got {d}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_divergences_vanish_for_identical_and_grow_for_shift() {
+        let det = detector();
+        let a = ramp(200, 0.0, 1.0);
+        let shifted = ramp(200, 5.0, 1.0);
+
+        for metric in [
+            DistanceMetric::JensenShannon,
+            DistanceMetric::KLDivergence,
+            DistanceMetric::MMD,
+        ] {
+            let d_same = det.distance_based_detection(&a, &a, &metric).await.unwrap();
+            let d_shift = det
+                .distance_based_detection(&a, &shifted, &metric)
+                .await
+                .unwrap();
+            assert!(
+                d_same < 1e-3,
+                "{metric:?}: identical divergence should be ~0, got {d_same}"
+            );
+            assert!(
+                d_shift > d_same,
+                "{metric:?}: shifted divergence {d_shift} should exceed identical {d_same}"
+            );
+        }
     }
 }

@@ -596,32 +596,58 @@ impl StatisticalAnalyzer {
         }
     }
 
-    /// Approximate normality test
+    /// Normality test based on the Jarque-Bera statistic.
+    ///
+    /// The Jarque-Bera (JB) test measures departure from normality through the
+    /// sample skewness `S` and the sample *excess* kurtosis `K`:
+    ///
+    /// ```text
+    /// JB = n * ( S^2 / 6 + K^2 / 24 )
+    /// ```
+    ///
+    /// Under the null hypothesis of normality, `JB` is asymptotically
+    /// chi-squared distributed with 2 degrees of freedom. The survival function
+    /// of the chi-squared distribution with 2 d.o.f. has the closed form
+    /// `P(X >= x) = exp(-x / 2)`, so the p-value is simply `exp(-JB / 2)`.
+    ///
+    /// Reference: Jarque, C. M. & Bera, A. K. (1980), "Efficient tests for
+    /// normality, homoscedasticity and serial independence of regression
+    /// residuals", *Economics Letters*, 6(3), 255-259.
     fn approximate_normality_test(&self, data: &[f64]) -> f64 {
-        // Simplified normality test based on skewness and kurtosis
-        let mean = data.iter().sum::<f64>() / data.len() as f64;
-        let variance = data.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / data.len() as f64;
+        let n = data.len();
+        if n < 2 {
+            return 0.0; // Not enough data to assess normality.
+        }
+
+        let mean = data.iter().sum::<f64>() / n as f64;
+        let variance = data.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n as f64;
         let std_dev = variance.sqrt();
 
         if std_dev == 0.0 {
-            return 0.0; // Constant data is not normal
+            return 0.0; // Constant data is degenerate / not normal.
         }
 
+        // Sample skewness `S`.
         let skewness = data
             .iter()
             .map(|x| ((x - mean) / std_dev).powi(3))
             .sum::<f64>()
-            / data.len() as f64;
-        let kurtosis = data
+            / n as f64;
+
+        // Sample *excess* kurtosis `K` (the trailing `- 3.0` makes it excess,
+        // i.e. zero for a normal distribution).
+        let excess_kurtosis = data
             .iter()
             .map(|x| ((x - mean) / std_dev).powi(4))
             .sum::<f64>()
-            / data.len() as f64
+            / n as f64
             - 3.0;
 
-        // Approximate p-value based on deviation from normal distribution characteristics
-        let deviation = (skewness.abs() + kurtosis.abs()) / 2.0;
-        (1.0 - deviation).clamp(0.0, 1.0)
+        // Jarque-Bera statistic ~ chi^2(2) under H0.
+        let jb = (n as f64) * (skewness.powi(2) / 6.0 + excess_kurtosis.powi(2) / 24.0);
+
+        // p-value = survival function of chi^2(2) = exp(-JB / 2).
+        (-jb / 2.0).exp().clamp(0.0, 1.0)
     }
 
     /// Classify distribution type
@@ -1118,5 +1144,69 @@ impl Default for VisualizationConfig {
             include_title: true,
             include_grid: true,
         }
+    }
+}
+
+#[cfg(test)]
+mod normality_tests {
+    use super::*;
+
+    /// Deterministic linear-congruential generator (Numerical Recipes
+    /// constants) producing reproducible uniform samples in `[0, 1)` without
+    /// any external RNG dependency.
+    struct Lcg(u64);
+
+    impl Lcg {
+        fn next_f64(&mut self) -> f64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ((self.0 >> 11) as f64) / ((1u64 << 53) as f64)
+        }
+    }
+
+    #[test]
+    fn jarque_bera_symmetric_data_is_normal_like() {
+        // A symmetric, low-(excess-)kurtosis sample should yield a small
+        // Jarque-Bera statistic and therefore a p-value close to 1.0.
+        // Symmetric +/- pairs make skewness exactly zero.
+        let data = vec![
+            -3.0, -2.0, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0, 3.0, -3.0, -2.0, -1.0, -0.5, 0.0, 0.5, 1.0,
+            2.0, 3.0,
+        ];
+        let analyzer = StatisticalAnalyzer::new();
+        let p = analyzer.approximate_normality_test(&data);
+        assert!(
+            p > 0.5,
+            "symmetric low-kurtosis data should look normal (p high); got {p}"
+        );
+    }
+
+    #[test]
+    fn jarque_bera_strongly_skewed_data_rejects_normality() {
+        // A strongly right-skewed sample should produce a large Jarque-Bera
+        // statistic and therefore a p-value close to 0.
+        let mut rng = Lcg(0x0bad_c0ff_ee00_1dd5_u64);
+        let mut data = Vec::new();
+        for _ in 0..200 {
+            // Cubing a uniform in [0,1) heavily skews the distribution.
+            let u = rng.next_f64();
+            data.push(u * u * u * 100.0);
+        }
+        let analyzer = StatisticalAnalyzer::new();
+        let p = analyzer.approximate_normality_test(&data);
+        assert!(
+            p < 0.05,
+            "strongly skewed data should reject normality (p low); got {p}"
+        );
+    }
+
+    #[test]
+    fn jarque_bera_constant_data_is_degenerate() {
+        let data = vec![7.0; 32];
+        let analyzer = StatisticalAnalyzer::new();
+        let p = analyzer.approximate_normality_test(&data);
+        assert_eq!(p, 0.0, "constant data must be flagged as non-normal");
     }
 }

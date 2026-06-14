@@ -220,7 +220,14 @@ impl PyAudioBuffer {
         Ok(())
     }
 
-    /// Get spectral analysis using NumPy FFT integration
+    /// Get spectral analysis using a real FFT.
+    ///
+    /// Computes the one-sided magnitude spectrum `|X_k|` of the first
+    /// `window_size` samples (Hann-windowed to reduce spectral leakage) via
+    /// `scirs2_fft::rfft`. The returned NumPy array contains `window_size / 2`
+    /// magnitudes, where bin `k` corresponds to frequency
+    /// `k · sample_rate / window_size`. A pure tone therefore peaks at the bin
+    /// nearest its frequency.
     #[cfg(feature = "numpy")]
     fn get_spectrum<'py>(
         &self,
@@ -230,18 +237,8 @@ impl PyAudioBuffer {
         let samples = self.inner.samples();
         let window_size = window_size.unwrap_or(1024.min(samples.len()));
 
-        // For simplicity, return magnitude spectrum of first window
-        // In a real implementation, this would use proper FFT
-        let window: Vec<f32> = samples.iter().take(window_size).cloned().collect();
-
-        // Simple magnitude calculation (placeholder for real FFT)
-        let mut spectrum = Vec::with_capacity(window_size / 2);
-        for i in 0..window_size / 2 {
-            let real = window[i];
-            let imag = window.get(i + window_size / 2).copied().unwrap_or(0.0);
-            let magnitude = (real * real + imag * imag).sqrt();
-            spectrum.push(magnitude);
-        }
+        let spectrum = magnitude_spectrum_core(samples, window_size)
+            .map_err(|e| PyRuntimeError::new_err(format!("RFFT failed: {}", e)))?;
 
         let array = PyArray::from_vec(py, spectrum);
         Ok(array.into_any())
@@ -735,5 +732,95 @@ impl PyAudioBuffer {
         let end = start + signal_len;
 
         full_conv[start..end.min(full_conv.len())].to_vec()
+    }
+}
+
+/// Pure-numeric one-sided magnitude spectrum, independent of the Python runtime.
+///
+/// Hann-windows the first `window_size` samples (padding with silence if the
+/// buffer is shorter), takes the real FFT (`scirs2_fft::rfft`), and returns the
+/// magnitudes `|X_k|` truncated/zero-padded to `window_size / 2` entries so the
+/// public output shape is fixed. Bin `k` corresponds to frequency
+/// `k · sample_rate / window_size`.
+#[cfg(feature = "numpy")]
+fn magnitude_spectrum_core(samples: &[f32], window_size: usize) -> scirs2_fft::FFTResult<Vec<f32>> {
+    // Number of one-sided magnitude bins exposed by this API.
+    let out_len = window_size / 2;
+    if out_len == 0 {
+        return Ok(Vec::new());
+    }
+
+    // Hann-window the first `window_size` samples (computed in f64 for
+    // precision). If the buffer is shorter than `window_size`, the missing tail
+    // is treated as silence so the FFT length stays `window_size`.
+    let denom = (window_size - 1).max(1) as f64;
+    let windowed: Vec<f64> = (0..window_size)
+        .map(|i| {
+            let sample = samples.get(i).copied().unwrap_or(0.0) as f64;
+            let hann = 0.5 - 0.5 * (2.0 * std::f64::consts::PI * i as f64 / denom).cos();
+            sample * hann
+        })
+        .collect();
+
+    // Real FFT: one-sided spectrum with `window_size / 2 + 1` complex bins.
+    let bins = scirs2_fft::rfft(&windowed, Some(window_size))?;
+
+    // Project to magnitudes and fit the fixed public output length.
+    let mut spectrum: Vec<f32> = bins.iter().map(|bin| bin.norm() as f32).collect();
+    spectrum.resize(out_len, 0.0);
+    Ok(spectrum)
+}
+
+#[cfg(all(test, feature = "numpy"))]
+mod tests {
+    use super::*;
+
+    /// Generate `n` samples of a sine wave at `freq` Hz sampled at `sample_rate`.
+    fn sine(freq: f32, sample_rate: u32, n: usize) -> Vec<f32> {
+        (0..n)
+            .map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / sample_rate as f32).sin())
+            .collect()
+    }
+
+    #[test]
+    fn test_get_spectrum_peaks_at_tone_bin() {
+        let sample_rate = 16_000u32;
+        let window_size = 1024usize;
+        // Choose a tone landing exactly on a bin: f = bin * sample_rate / window.
+        let target_bin = 128usize;
+        let freq = target_bin as f32 * sample_rate as f32 / window_size as f32; // 2000 Hz
+        let samples = sine(freq, sample_rate, window_size);
+
+        let spectrum = magnitude_spectrum_core(&samples, window_size).expect("spectrum");
+        assert_eq!(spectrum.len(), window_size / 2);
+
+        // The peak magnitude bin should be the nearest bin to the tone.
+        let (peak_bin, _) = spectrum
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .expect("non-empty spectrum");
+        let diff = (peak_bin as isize - target_bin as isize).abs();
+        assert!(
+            diff <= 1,
+            "peak bin {peak_bin} should be within 1 of target bin {target_bin}"
+        );
+    }
+
+    #[test]
+    fn test_get_spectrum_output_shape_and_degenerate() {
+        // Fixed output length is window_size / 2.
+        let samples = sine(1000.0, 16_000, 256);
+        let spectrum = magnitude_spectrum_core(&samples, 256).expect("spectrum");
+        assert_eq!(spectrum.len(), 128);
+
+        // Shorter buffer than window is zero-padded, still fixed length.
+        let short = sine(1000.0, 16_000, 64);
+        let padded = magnitude_spectrum_core(&short, 256).expect("padded spectrum");
+        assert_eq!(padded.len(), 128);
+
+        // window_size of 0 or 1 yields an empty spectrum.
+        assert!(magnitude_spectrum_core(&samples, 0).unwrap().is_empty());
+        assert!(magnitude_spectrum_core(&samples, 1).unwrap().is_empty());
     }
 }

@@ -562,6 +562,7 @@ pub mod quantization;
 pub mod scirs2_ops;
 pub mod simd;
 pub mod singing;
+pub mod singing_g2p;
 pub mod speaker;
 pub mod streaming;
 pub mod synthesis_cache;

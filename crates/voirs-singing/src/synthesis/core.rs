@@ -10,7 +10,12 @@ use scirs2_fft::{FftPlanner, RealFftPlanner};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use super::quality_dsp;
 use super::results::{QualityMetrics, SynthesisResult, SynthesisStats};
+
+/// Cent deviation from the target pitch that maps the cents component of
+/// pitch accuracy to `0.0` (one equal-tempered semitone).
+const PITCH_CENTS_TOLERANCE: f32 = 100.0;
 
 /// Synthesis engine for singing voice with thread safety
 ///
@@ -329,18 +334,71 @@ impl SynthesisEngine {
         Ok(expression)
     }
 
-    /// Calculate quality metrics for synthesized audio
+    /// Calculate quality metrics for synthesized audio.
+    ///
+    /// Performs real signal analysis on the synthesized `audio` buffer (rather
+    /// than returning fixed constants):
+    ///
+    /// * `pitch_accuracy` - autocorrelation F0 tracking compared, in cents,
+    ///   against the intended note pitches in `params.pitch_contour`; when no
+    ///   target pitches are present (or none can be matched) it falls back to raw
+    ///   F0 stability.
+    /// * `harmonic_quality` - harmonic-to-noise ratio (HNR) mapped to `[0, 1]`.
+    /// * `noise_level` - aperiodic fraction (`1 - harmonic ratio`).
+    /// * `spectral_quality` - spectral-envelope tonality and centroid
+    ///   plausibility.
+    /// * `formant_quality` - LPC all-pole envelope prominence / clarity.
     fn calculate_quality_metrics(
         &mut self,
         audio: &[f32],
         params: &SynthesisParams,
     ) -> crate::Result<QualityMetrics> {
-        // Calculate basic quality metrics (placeholder implementations)
-        let pitch_accuracy = if !audio.is_empty() { 0.85 } else { 0.0 };
-        let spectral_quality = 0.8;
-        let harmonic_quality = 0.75;
-        let noise_level = 0.1;
-        let formant_quality = 0.85;
+        // Empty audio carries no measurable quality.
+        if audio.is_empty() {
+            return Ok(QualityMetrics::default());
+        }
+
+        let sample_rate = params.sample_rate;
+
+        // Pitch accuracy: prefer target note pitches, fall back to F0 stability.
+        let pitch_accuracy = if params.pitch_contour.f0_values.is_empty() {
+            quality_dsp::f0_stability_score(audio, sample_rate)
+        } else {
+            let report = self.precision_analyzer.calculate_precision_pitch_accuracy(
+                audio,
+                &params.pitch_contour,
+                sample_rate,
+            )?;
+            if report.total_notes == 0 {
+                // No measured F0 matched a target pitch (e.g. unvoiced/noisy
+                // output); score raw stability instead.
+                quality_dsp::f0_stability_score(audio, sample_rate)
+            } else {
+                let cents_score =
+                    1.0 - (report.mean_cent_deviation / PITCH_CENTS_TOLERANCE).clamp(0.0, 1.0);
+                (0.6 * cents_score + 0.4 * report.pitch_stability).clamp(0.0, 1.0)
+            }
+        };
+
+        // Harmonicity drives both harmonic quality (HNR in dB) and noise level
+        // (the complementary aperiodic energy fraction).
+        let harmonicity = quality_dsp::estimate_harmonicity(audio, sample_rate);
+        let harmonic_quality = quality_dsp::harmonic_quality_from_hnr(harmonicity.hnr_db);
+        let noise_level = (1.0 - harmonicity.harmonic_ratio).clamp(0.0, 1.0);
+
+        // Spectral-envelope tonality / centroid plausibility.
+        let spectral_quality = quality_dsp::spectral_quality_score(audio, sample_rate);
+
+        // LPC-based formant prominence / clarity.
+        let formant_quality = quality_dsp::formant_clarity_score(audio, sample_rate);
+
+        // Weighted blend across all measured dimensions.
+        let overall_quality = (0.30 * pitch_accuracy
+            + 0.20 * harmonic_quality
+            + 0.20 * spectral_quality
+            + 0.15 * formant_quality
+            + 0.15 * (1.0 - noise_level))
+            .clamp(0.0, 1.0);
 
         Ok(QualityMetrics {
             pitch_accuracy,
@@ -348,7 +406,7 @@ impl SynthesisEngine {
             harmonic_quality,
             noise_level,
             formant_quality,
-            overall_quality: pitch_accuracy * 0.8, // Weighted average
+            overall_quality,
         })
     }
 
@@ -370,5 +428,129 @@ impl SynthesisEngine {
 impl Default for SynthesisEngine {
     fn default() -> Self {
         Self::new(SingingConfig::default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SAMPLE_RATE: f32 = 22_050.0;
+    const LEN: usize = 11_025; // 0.5 s
+
+    /// Build synthesis parameters carrying a constant target pitch contour.
+    fn params_with_target(target_hz: f32) -> SynthesisParams {
+        SynthesisParams {
+            pitch_contour: PitchContour::new(vec![0.0; 10], vec![target_hz; 10]),
+            voice_characteristics: VoiceCharacteristics::default(),
+            technique: SingingTechnique::classical(),
+            duration: LEN as f32 / SAMPLE_RATE,
+            sample_rate: SAMPLE_RATE,
+            phonemes: Vec::new(),
+            timing: Vec::new(),
+            dynamics: Vec::new(),
+            expression: Vec::new(),
+        }
+    }
+
+    /// Generate a pure sine tone.
+    fn sine(freq: f32, amplitude: f32) -> Vec<f32> {
+        (0..LEN)
+            .map(|i| {
+                let t = i as f32 / SAMPLE_RATE;
+                amplitude * (2.0 * std::f32::consts::PI * freq * t).sin()
+            })
+            .collect()
+    }
+
+    /// Deterministic zero-mean pseudo-random noise (LCG, no `rand` crate).
+    fn lcg_noise(seed: u64) -> Vec<f32> {
+        let mut state = seed;
+        (0..LEN)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1);
+                let unit = (state >> 33) as f32 / (1u64 << 31) as f32;
+                0.8 * (2.0 * unit - 1.0)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_clean_tone_scores_high_pitch_and_harmonic_low_noise() {
+        let mut engine = SynthesisEngine::default();
+        let audio = sine(440.0, 1.0);
+        let params = params_with_target(440.0);
+
+        let metrics = engine
+            .calculate_quality_metrics(&audio, &params)
+            .expect("quality metrics");
+
+        assert!(
+            metrics.pitch_accuracy > 0.8,
+            "pitch accuracy {}",
+            metrics.pitch_accuracy
+        );
+        assert!(
+            metrics.harmonic_quality > 0.7,
+            "harmonic quality {}",
+            metrics.harmonic_quality
+        );
+        assert!(
+            metrics.noise_level < 0.2,
+            "noise level {}",
+            metrics.noise_level
+        );
+        assert!(
+            metrics.spectral_quality > 0.5,
+            "spectral quality {}",
+            metrics.spectral_quality
+        );
+        assert!(metrics.overall_quality > 0.6);
+        assert!((0.0..=1.0).contains(&metrics.formant_quality));
+    }
+
+    #[test]
+    fn test_white_noise_scores_low_harmonic_high_noise() {
+        let mut engine = SynthesisEngine::default();
+        let audio = lcg_noise(0x1234_5678);
+        let params = params_with_target(440.0);
+
+        let metrics = engine
+            .calculate_quality_metrics(&audio, &params)
+            .expect("quality metrics");
+
+        assert!(
+            metrics.harmonic_quality < 0.2,
+            "harmonic quality {}",
+            metrics.harmonic_quality
+        );
+        assert!(
+            metrics.noise_level > 0.5,
+            "noise level {}",
+            metrics.noise_level
+        );
+        // A clean tone must out-score noise on pitch accuracy.
+        let tone_metrics = SynthesisEngine::default()
+            .calculate_quality_metrics(&sine(440.0, 1.0), &params)
+            .expect("tone metrics");
+        assert!(
+            tone_metrics.pitch_accuracy > metrics.pitch_accuracy,
+            "tone {} should beat noise {}",
+            tone_metrics.pitch_accuracy,
+            metrics.pitch_accuracy
+        );
+    }
+
+    #[test]
+    fn test_empty_audio_returns_default_metrics() {
+        let mut engine = SynthesisEngine::default();
+        let params = params_with_target(440.0);
+        let metrics = engine
+            .calculate_quality_metrics(&[], &params)
+            .expect("quality metrics");
+        assert_eq!(metrics.overall_quality, 0.0);
+        assert_eq!(metrics.pitch_accuracy, 0.0);
     }
 }

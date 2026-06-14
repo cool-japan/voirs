@@ -610,17 +610,25 @@ impl Default for PerformanceMonitor {
 /// Utility functions for audio quality analysis
 impl AudioQualityMetrics {
     /// Calculate audio quality metrics
+    ///
+    /// `audio` is a single-channel (mono) signal. SNR, THD, dynamic range and
+    /// spectral flatness are all derived directly from it. `stereo_imaging`
+    /// cannot be measured from a mono signal — see
+    /// [`calculate_stereo_imaging`](Self::calculate_stereo_imaging) for the
+    /// real proxy used and its limitation.
     pub fn analyze(audio: &Array1<f32>, sample_rate: u32) -> Self {
         let snr_db = Self::calculate_snr(audio);
         let thd_percent = Self::calculate_thd(audio, sample_rate);
         let dynamic_range_db = Self::calculate_dynamic_range(audio);
+        let frequency_flatness = Self::calculate_spectral_flatness(audio);
+        let stereo_imaging = Self::calculate_stereo_imaging(audio);
 
         Self {
             snr_db,
             thd_percent,
             dynamic_range_db,
-            frequency_flatness: 0.9, // Placeholder
-            stereo_imaging: 0.8,     // Placeholder
+            frequency_flatness,
+            stereo_imaging,
         }
     }
 
@@ -743,6 +751,121 @@ impl AudioQualityMetrics {
         } else {
             120.0 // Very high dynamic range
         }
+    }
+
+    /// Calculate the spectral flatness (Wiener entropy) of the signal.
+    ///
+    /// Spectral flatness is the ratio of the geometric mean to the arithmetic
+    /// mean of the power spectrum:
+    ///
+    /// ```text
+    /// flatness = geometric_mean(P) / arithmetic_mean(P)
+    ///          = exp( mean(ln P) ) / mean(P)
+    /// ```
+    ///
+    /// It quantifies how *noise-like* (flat, broadband) versus *tonal* (peaky)
+    /// a spectrum is. The result lies in `[0, 1]`: a value near `1.0` indicates
+    /// a flat, white-noise-like spectrum, while a value near `0.0` indicates a
+    /// concentrated, tonal spectrum (e.g. a pure sine).
+    ///
+    /// The signal is Hann-windowed and transformed with a real FFT
+    /// (`scirs2_fft::rfft`), matching the convention used elsewhere in this
+    /// module. DC (bin 0) is excluded so a non-zero signal mean does not bias
+    /// the estimate, and only strictly-positive bins contribute to the
+    /// geometric mean (zero-power bins would otherwise collapse it to `0`).
+    fn calculate_spectral_flatness(audio: &Array1<f32>) -> f32 {
+        let n = audio.len();
+        if n < 4 {
+            return 0.0;
+        }
+
+        // Hann-window in f64 to reduce spectral leakage, then take the real FFT.
+        let denom = (n - 1) as f64;
+        let windowed: Vec<f64> = audio
+            .iter()
+            .enumerate()
+            .map(|(i, &sample)| {
+                let hann = 0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / denom).cos());
+                f64::from(sample) * hann
+            })
+            .collect();
+
+        let spectrum = match scirs2_fft::rfft(&windowed, Some(n)) {
+            Ok(spectrum) => spectrum,
+            Err(_) => return 0.0,
+        };
+        // Skip DC (bin 0): a constant offset is not part of the spectral shape.
+        if spectrum.len() <= 1 {
+            return 0.0;
+        }
+
+        // Accumulate the arithmetic mean over all bins and the log-sum over the
+        // strictly-positive bins (for the geometric mean).
+        let mut sum_power = 0.0_f64;
+        let mut log_sum = 0.0_f64;
+        let mut positive_bins = 0usize;
+        for c in spectrum.iter().skip(1) {
+            let power = c.norm_sqr();
+            sum_power += power;
+            if power > 0.0 {
+                log_sum += power.ln();
+                positive_bins += 1;
+            }
+        }
+
+        if positive_bins == 0 {
+            return 0.0;
+        }
+        // Arithmetic mean is taken over the same set of bins used for the
+        // geometric mean, keeping the ratio in [0, 1].
+        let arithmetic_mean = sum_power / positive_bins as f64;
+        if arithmetic_mean <= 0.0 {
+            return 0.0;
+        }
+        let geometric_mean = (log_sum / positive_bins as f64).exp();
+
+        (geometric_mean / arithmetic_mean).clamp(0.0, 1.0) as f32
+    }
+
+    /// Estimate a stereo-imaging quality proxy for a single-channel signal.
+    ///
+    /// # Limitation
+    ///
+    /// True stereo imaging is an *inter-channel* property (e.g. L/R
+    /// correlation or the mid/side energy ratio) and therefore **cannot** be
+    /// measured from the mono signal that [`analyze`](Self::analyze) receives —
+    /// no left/right channels are reachable on this code path. This function
+    /// instead returns a defensible real proxy derived from the signal's own
+    /// dynamics rather than a hardcoded constant.
+    ///
+    /// The proxy is the normalized crest factor (peak-to-RMS ratio): signals
+    /// with greater dynamic spread between their peak and RMS energy tend to
+    /// carry stronger transient/spatial cues. The crest factor (in dB) is
+    /// mapped onto `[0, 1]` against a 20 dB reference span. A digitally silent
+    /// signal yields `0.0`.
+    ///
+    /// To measure genuine stereo imaging, call this with access to both
+    /// channels and compute the inter-channel correlation instead; the mono
+    /// path here can only approximate it.
+    fn calculate_stereo_imaging(audio: &Array1<f32>) -> f32 {
+        /// Crest factor (dB) mapped to the top of the `[0, 1]` range.
+        const CREST_REFERENCE_DB: f32 = 20.0;
+
+        let n = audio.len();
+        if n == 0 {
+            return 0.0;
+        }
+
+        let peak = audio.iter().map(|&x| x.abs()).fold(0.0_f32, f32::max);
+        let mean_square: f32 = audio.iter().map(|&x| x * x).sum::<f32>() / n as f32;
+        let rms = mean_square.sqrt();
+
+        if rms <= 0.0 || peak <= 0.0 {
+            return 0.0;
+        }
+
+        let crest_db = 20.0 * (peak / rms).log10();
+        (crest_db / CREST_REFERENCE_DB).clamp(0.0, 1.0)
     }
 }
 
@@ -925,6 +1048,81 @@ mod tests {
         assert!(
             (thd_loud - thd_quiet / 2.0).abs() < 0.5,
             "loud THD ({thd_loud}%) should be ~half of quiet THD ({thd_quiet}%)"
+        );
+    }
+
+    /// Deterministic pseudo-white-noise generator (no external RNG): a linear
+    /// congruential sequence mapped to `[-1, 1]`. Its flat broadband spectrum
+    /// makes it suitable for exercising the spectral-flatness metric.
+    fn deterministic_white_noise(len: usize) -> Array1<f32> {
+        let mut state: u64 = 0x1234_5678_9abc_def0;
+        Array1::from_iter((0..len).map(|_| {
+            // 64-bit LCG (Numerical Recipes constants).
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            // Use the top 24 bits for a uniform value, then center to [-1, 1).
+            let bits = (state >> 40) as f32 / (1u32 << 24) as f32;
+            bits * 2.0 - 1.0
+        }))
+    }
+
+    #[test]
+    fn test_spectral_flatness_white_noise_is_near_one() {
+        // Broadband noise → geometric mean ≈ arithmetic mean → flatness ≈ 1.
+        let noise = deterministic_white_noise(4096);
+        let flatness = AudioQualityMetrics::calculate_spectral_flatness(&noise);
+        assert!(
+            (0.0..=1.0).contains(&flatness),
+            "flatness must be in [0,1], got {flatness}"
+        );
+        assert!(
+            flatness > 0.5,
+            "white noise spectral flatness should be high (≈1), got {flatness}"
+        );
+    }
+
+    #[test]
+    fn test_spectral_flatness_pure_tone_is_near_zero() {
+        // A single bin-aligned sine concentrates all power in one bin →
+        // geometric mean ≪ arithmetic mean → flatness ≈ 0.
+        let tone = harmonic_signal(&[1.0], 1000.0, 48000, 4800);
+        let flatness = AudioQualityMetrics::calculate_spectral_flatness(&tone);
+        assert!(
+            (0.0..=1.0).contains(&flatness),
+            "flatness must be in [0,1], got {flatness}"
+        );
+        assert!(
+            flatness < 0.05,
+            "pure tone spectral flatness should be ≈0, got {flatness}"
+        );
+    }
+
+    #[test]
+    fn test_spectral_flatness_noise_exceeds_tone() {
+        // Noise is strictly flatter than a single tone.
+        let noise = deterministic_white_noise(4096);
+        let tone = harmonic_signal(&[1.0], 1000.0, 48000, 4096);
+        let noise_flatness = AudioQualityMetrics::calculate_spectral_flatness(&noise);
+        let tone_flatness = AudioQualityMetrics::calculate_spectral_flatness(&tone);
+        assert!(
+            noise_flatness > tone_flatness,
+            "noise flatness ({noise_flatness}) should exceed tone flatness ({tone_flatness})"
+        );
+    }
+
+    #[test]
+    fn test_stereo_imaging_proxy_bounds_and_silence() {
+        // Silence has no dynamics → proxy is exactly 0.
+        let silence = Array1::from_vec(vec![0.0_f32; 256]);
+        assert_eq!(AudioQualityMetrics::calculate_stereo_imaging(&silence), 0.0);
+
+        // A real signal yields a value within [0, 1].
+        let tone = harmonic_signal(&[1.0], 1000.0, 48000, 4800);
+        let imaging = AudioQualityMetrics::calculate_stereo_imaging(&tone);
+        assert!(
+            (0.0..=1.0).contains(&imaging),
+            "stereo imaging proxy must be in [0,1], got {imaging}"
         );
     }
 }

@@ -687,6 +687,85 @@ pub mod utils {
         stress_patterns
     }
 
+    /// Detect stress patterns using the source signal for real F0 prominence.
+    ///
+    /// Like [`detect_stress_patterns`], but additionally slices `samples` (the
+    /// full waveform at `sample_rate` Hz) to the time window of each syllable
+    /// (using the constituent phonemes' `start_time`/`end_time`) and computes a
+    /// signal-derived `pitch_prominence` via [`calculate_pitch_prominence`]
+    /// instead of the duration-based estimate.
+    #[must_use]
+    /// detect stress patterns with signal
+    pub fn detect_stress_patterns_with_signal(
+        phonemes: &[AlignedPhoneme],
+        syllable_boundaries: &[SyllableBoundary],
+        samples: &[f32],
+        sample_rate: u32,
+    ) -> Vec<StressPattern> {
+        let mut stress_patterns = Vec::new();
+        let syllables = extract_syllables(phonemes, syllable_boundaries);
+
+        for (i, syllable) in syllables.iter().enumerate() {
+            let syllable_audio = slice_syllable_audio(syllable, samples, sample_rate);
+            let stress_features = calculate_stress_features_with_signal(
+                syllable,
+                &syllables,
+                &syllable_audio,
+                sample_rate,
+            );
+            let stress_level = classify_stress_level(&stress_features);
+
+            stress_patterns.push(StressPattern {
+                stress_level,
+                syllable_index: i,
+                acoustic_features: stress_features,
+            });
+        }
+
+        stress_patterns
+    }
+
+    /// Extract the waveform window spanning a syllable from the full signal.
+    ///
+    /// The window runs from the first phoneme's `start_time` to the last
+    /// phoneme's `end_time`, converted to sample indices at `sample_rate`. Returns
+    /// an empty slice view (as an owned `Vec`) when the syllable is empty or the
+    /// computed range is degenerate / out of bounds.
+    fn slice_syllable_audio(
+        syllable: &[AlignedPhoneme],
+        samples: &[f32],
+        sample_rate: u32,
+    ) -> Vec<f32> {
+        if syllable.is_empty() || samples.is_empty() || sample_rate == 0 {
+            return Vec::new();
+        }
+
+        let start_time = syllable
+            .iter()
+            .map(|p| p.start_time)
+            .fold(f32::INFINITY, f32::min)
+            .max(0.0);
+        let end_time = syllable
+            .iter()
+            .map(|p| p.end_time)
+            .fold(f32::NEG_INFINITY, f32::max);
+
+        // Reject degenerate or non-finite spans. NaN comparisons are false, so the
+        // positive `end_time > start_time` check also rules out NaN endpoints.
+        let valid_span = start_time.is_finite() && end_time.is_finite() && end_time > start_time;
+        if !valid_span {
+            return Vec::new();
+        }
+
+        let start_idx = (start_time * sample_rate as f32).floor() as usize;
+        let end_idx = ((end_time * sample_rate as f32).ceil() as usize).min(samples.len());
+        if start_idx >= end_idx {
+            return Vec::new();
+        }
+
+        samples[start_idx..end_idx].to_vec()
+    }
+
     /// Extract syllables from phoneme sequence using boundaries
     #[must_use]
     /// extract syllables
@@ -712,12 +791,51 @@ pub mod utils {
         syllables
     }
 
-    /// Calculate acoustic stress features for a syllable
+    /// Calculate acoustic stress features for a syllable (timing only).
+    ///
+    /// This variant has no access to the underlying waveform, so the
+    /// `pitch_prominence` field is filled with a neutral, signal-free estimate
+    /// (see [`estimate_pitch_prominence_from_duration`]). When the audio samples
+    /// are available, prefer [`calculate_stress_features_with_signal`], which
+    /// derives a *real* prominence from the signal via
+    /// [`calculate_pitch_prominence`].
     #[must_use]
     /// calculate stress features
     pub fn calculate_stress_features(
         syllable: &[AlignedPhoneme],
         all_syllables: &[Vec<AlignedPhoneme>],
+    ) -> StressFeatures {
+        calculate_stress_features_impl(syllable, all_syllables, None, 0)
+    }
+
+    /// Calculate acoustic stress features for a syllable using the source signal.
+    ///
+    /// Identical to [`calculate_stress_features`] except that `pitch_prominence`
+    /// is computed from the actual `samples` covering this syllable via
+    /// [`calculate_pitch_prominence`] (normalized-autocorrelation peak strength),
+    /// rather than estimated from duration alone.
+    ///
+    /// `samples` should be the portion of the waveform (at `sample_rate` Hz) that
+    /// corresponds to `syllable`; callers can obtain it by slicing the full audio
+    /// with the syllable's phoneme start/end times (see
+    /// [`detect_stress_patterns_with_signal`]).
+    #[must_use]
+    /// calculate stress features with signal
+    pub fn calculate_stress_features_with_signal(
+        syllable: &[AlignedPhoneme],
+        all_syllables: &[Vec<AlignedPhoneme>],
+        samples: &[f32],
+        sample_rate: u32,
+    ) -> StressFeatures {
+        calculate_stress_features_impl(syllable, all_syllables, Some(samples), sample_rate)
+    }
+
+    /// Shared implementation backing both stress-feature entry points.
+    fn calculate_stress_features_impl(
+        syllable: &[AlignedPhoneme],
+        all_syllables: &[Vec<AlignedPhoneme>],
+        samples: Option<&[f32]>,
+        sample_rate: u32,
     ) -> StressFeatures {
         let syllable_duration: f32 = syllable.iter().map(super::AlignedPhoneme::duration).sum();
         let avg_confidence =
@@ -744,12 +862,103 @@ pub mod utils {
             .next()
             .unwrap_or(avg_confidence);
 
+        // Prefer a real, signal-derived F0 prominence; fall back to the
+        // duration-based estimate only when no audio is supplied.
+        let pitch_prominence = match samples {
+            Some(sig) if !sig.is_empty() && sample_rate > 0 => {
+                calculate_pitch_prominence(sig, sample_rate)
+            }
+            _ => estimate_pitch_prominence_from_duration(duration_ratio),
+        };
+
         StressFeatures {
             duration_ratio,
-            intensity_ratio: avg_confidence, // Simplified - using confidence as proxy
-            pitch_prominence: if duration_ratio > 1.2 { 0.8 } else { 0.3 }, // Simplified
+            intensity_ratio: avg_confidence, // confidence used as an intensity proxy
+            pitch_prominence,
             vowel_clarity,
         }
+    }
+
+    /// Signal-free fallback estimate of F0 prominence in `[0, 1]`.
+    ///
+    /// Used only when the waveform is unavailable. Longer-than-average syllables
+    /// (`duration_ratio > 1`) are weakly correlated with pitch accent, so this
+    /// maps the duration ratio through a smooth, bounded curve instead of the
+    /// previous hard `0.8`/`0.3` ternary.
+    #[must_use]
+    fn estimate_pitch_prominence_from_duration(duration_ratio: f32) -> f32 {
+        // Logistic-style squashing centered at the average duration: ratios well
+        // below 1 → ~0.3, ratios well above 1 → ~0.8, monotonic in between.
+        let centered = duration_ratio - 1.0;
+        let logistic = 1.0 / (1.0 + (-3.0 * centered).exp());
+        (0.3 + 0.5 * logistic).clamp(0.0, 1.0)
+    }
+
+    /// Compute a real F0 prominence in `[0, 1]` from a signal segment.
+    ///
+    /// The prominence is the strength of the dominant pitch peak measured by the
+    /// peak of the *normalized* autocorrelation function (NACF) searched over the
+    /// human-voice F0 range (50–800 Hz). For a clean periodic/harmonic signal the
+    /// NACF peak approaches 1.0; for broadband noise (no consistent period) it
+    /// stays near 0. This reuses the same normalized-autocorrelation pitch
+    /// detection approach already used elsewhere in this crate
+    /// (`analysis::prosody`, `preprocessing::adaptive_algorithms`).
+    ///
+    /// A Hann window is applied first to suppress edge discontinuities, matching
+    /// the windowed-autocorrelation convention used by the prosody analyzer.
+    #[must_use]
+    /// calculate pitch prominence
+    pub fn calculate_pitch_prominence(samples: &[f32], sample_rate: u32) -> f32 {
+        const MIN_F0_HZ: f32 = 50.0;
+        const MAX_F0_HZ: f32 = 800.0;
+
+        let n = samples.len();
+        if n < 4 || sample_rate == 0 {
+            return 0.0;
+        }
+
+        // Apply a Hann window to reduce spectral/edge leakage before correlating.
+        let windowed: Vec<f32> = samples
+            .iter()
+            .enumerate()
+            .map(|(i, &x)| {
+                let w =
+                    0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (n - 1) as f32).cos());
+                x * w
+            })
+            .collect();
+
+        let min_lag = ((sample_rate as f32) / MAX_F0_HZ).floor().max(1.0) as usize;
+        let max_lag = (((sample_rate as f32) / MIN_F0_HZ).ceil() as usize).min(n / 2);
+        if max_lag <= min_lag {
+            return 0.0;
+        }
+
+        // Normalized autocorrelation peak over the F0 lag range. The normalized
+        // form `Σ x[i]x[i+lag] / sqrt(Σ x[i]² · Σ x[i+lag]²)` is bounded to
+        // [-1, 1] (Cauchy–Schwarz); its maximum is a direct [0, 1] periodicity
+        // (harmonic-strength) measure.
+        let mut max_corr: f32 = 0.0;
+        for lag in min_lag..max_lag {
+            let mut correlation = 0.0f32;
+            let mut norm1 = 0.0f32;
+            let mut norm2 = 0.0f32;
+
+            for i in 0..(n - lag) {
+                correlation += windowed[i] * windowed[i + lag];
+                norm1 += windowed[i] * windowed[i];
+                norm2 += windowed[i + lag] * windowed[i + lag];
+            }
+
+            if norm1 > 0.0 && norm2 > 0.0 {
+                let normalized = correlation / (norm1 * norm2).sqrt();
+                if normalized > max_corr {
+                    max_corr = normalized;
+                }
+            }
+        }
+
+        max_corr.clamp(0.0, 1.0)
     }
 
     /// Classify stress level based on acoustic features
@@ -1230,6 +1439,157 @@ mod tests {
         assert!(features.duration_ratio > 0.0);
         assert!(features.intensity_ratio >= 0.0 && features.intensity_ratio <= 1.0);
         assert!(features.vowel_clarity >= 0.0 && features.vowel_clarity <= 1.0);
+        // Signal-free fallback prominence must still be a bounded [0, 1] value.
+        assert!(features.pitch_prominence >= 0.0 && features.pitch_prominence <= 1.0);
+    }
+
+    /// Deterministic pseudo-noise via a fixed LCG (no RNG crate; reproducible).
+    fn lcg_noise(n: usize, sample_rate: u32) -> Vec<f32> {
+        let mut state: u64 = 0x2545_F491_4F6C_DD1D;
+        let _ = sample_rate;
+        (0..n)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                // Map top 24 bits to [-1, 1).
+                let u = (state >> 40) as f32 / (1u64 << 24) as f32;
+                2.0 * u - 1.0
+            })
+            .collect()
+    }
+
+    /// `calculate_pitch_prominence` must be markedly higher for a clean periodic
+    /// (harmonic) tone than for broadband noise, and stay within [0, 1].
+    #[test]
+    fn test_pitch_prominence_harmonic_vs_noise() {
+        let sample_rate = 16000u32;
+        let n = 2048usize;
+        let f0 = 150.0f32; // within the 50-800 Hz search range
+
+        // Harmonic signal: fundamental + a couple of harmonics (clearly periodic).
+        let harmonic: Vec<f32> = (0..n)
+            .map(|i| {
+                let t = i as f32 / sample_rate as f32;
+                let w = 2.0 * std::f32::consts::PI * f0 * t;
+                0.6 * w.sin() + 0.3 * (2.0 * w).sin() + 0.1 * (3.0 * w).sin()
+            })
+            .collect();
+
+        let noise = lcg_noise(n, sample_rate);
+
+        let prom_harmonic = utils::calculate_pitch_prominence(&harmonic, sample_rate);
+        let prom_noise = utils::calculate_pitch_prominence(&noise, sample_rate);
+
+        // Bounds.
+        assert!((0.0..=1.0).contains(&prom_harmonic));
+        assert!((0.0..=1.0).contains(&prom_noise));
+
+        // A clean harmonic tone is strongly periodic -> NACF peak near 1.
+        assert!(
+            prom_harmonic > 0.8,
+            "harmonic prominence too low: {prom_harmonic}"
+        );
+        // Broadband noise has no consistent period -> low NACF peak.
+        assert!(
+            prom_noise < 0.5,
+            "noise prominence unexpectedly high: {prom_noise}"
+        );
+        // The ordering is the core property under test.
+        assert!(
+            prom_harmonic > prom_noise + 0.3,
+            "expected harmonic ({prom_harmonic}) >> noise ({prom_noise})"
+        );
+    }
+
+    /// The signal-aware stress-feature path must carry the real prominence
+    /// through, yielding higher `pitch_prominence` for a harmonic syllable than a
+    /// noisy one with identical timing.
+    #[test]
+    fn test_stress_features_with_signal_uses_real_prominence() {
+        let sample_rate = 16000u32;
+        let syllable = vec![
+            create_test_phoneme("h", 0.0, 0.02),
+            create_test_phoneme("ɛ", 0.02, 0.13),
+        ];
+        let all_syllables = vec![syllable.clone()];
+
+        let n = 2080usize; // ~0.13 s at 16 kHz
+        let f0 = 180.0f32;
+        let harmonic: Vec<f32> = (0..n)
+            .map(|i| {
+                let t = i as f32 / sample_rate as f32;
+                let w = 2.0 * std::f32::consts::PI * f0 * t;
+                0.7 * w.sin() + 0.3 * (2.0 * w).sin()
+            })
+            .collect();
+        let noise = lcg_noise(n, sample_rate);
+
+        let feat_harmonic = utils::calculate_stress_features_with_signal(
+            &syllable,
+            &all_syllables,
+            &harmonic,
+            sample_rate,
+        );
+        let feat_noise = utils::calculate_stress_features_with_signal(
+            &syllable,
+            &all_syllables,
+            &noise,
+            sample_rate,
+        );
+
+        assert!((0.0..=1.0).contains(&feat_harmonic.pitch_prominence));
+        assert!((0.0..=1.0).contains(&feat_noise.pitch_prominence));
+        assert!(
+            feat_harmonic.pitch_prominence > feat_noise.pitch_prominence,
+            "harmonic prominence {} should exceed noise {}",
+            feat_harmonic.pitch_prominence,
+            feat_noise.pitch_prominence
+        );
+    }
+
+    /// `detect_stress_patterns_with_signal` slices the per-syllable audio window
+    /// and produces a real, bounded prominence for each pattern.
+    #[test]
+    fn test_detect_stress_patterns_with_signal() {
+        let sample_rate = 16000u32;
+        let phonemes = vec![
+            create_test_phoneme("h", 0.0, 0.02),
+            create_test_phoneme("ɛ", 0.02, 0.13),
+            create_test_phoneme("l", 0.13, 0.16),
+            create_test_phoneme("oʊ", 0.16, 0.27),
+        ];
+        let boundaries = vec![SyllableBoundary {
+            position: 2,
+            confidence: 0.8,
+            boundary_type: BoundaryType::Strong,
+        }];
+
+        // 0.27 s of a harmonic signal.
+        let total = (0.27 * sample_rate as f32).ceil() as usize;
+        let f0 = 160.0f32;
+        let samples: Vec<f32> = (0..total)
+            .map(|i| {
+                let t = i as f32 / sample_rate as f32;
+                let w = 2.0 * std::f32::consts::PI * f0 * t;
+                0.6 * w.sin() + 0.4 * (2.0 * w).sin()
+            })
+            .collect();
+
+        let patterns = utils::detect_stress_patterns_with_signal(
+            &phonemes,
+            &boundaries,
+            &samples,
+            sample_rate,
+        );
+
+        assert!(!patterns.is_empty());
+        for pattern in &patterns {
+            let prom = pattern.acoustic_features.pitch_prominence;
+            assert!((0.0..=1.0).contains(&prom));
+            // Each syllable spans a clearly periodic window -> high prominence.
+            assert!(prom > 0.7, "syllable prominence too low: {prom}");
+        }
     }
 
     #[test]

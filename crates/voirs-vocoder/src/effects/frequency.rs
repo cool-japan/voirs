@@ -128,6 +128,26 @@ impl BiquadFilter {
         self.a1 = -2.0 * cos_w;
         self.a2 = 1.0 - alpha;
     }
+
+    /// Design a low-pass filter
+    ///
+    /// Implements the RBJ Audio EQ Cookbook second-order low-pass response:
+    /// `b0 = (1 - cos ω) / 2`, `b1 = 1 - cos ω`, `b2 = (1 - cos ω) / 2`, with the
+    /// same denominator (`a`) coefficients as the high-pass design. This passes
+    /// low frequencies and attenuates content above the cutoff at -12 dB/octave.
+    pub fn design_lowpass(&mut self, sample_rate: f32, frequency: f32, q: f32) {
+        let w = 2.0 * PI * frequency / sample_rate;
+        let cos_w = w.cos();
+        let sin_w = w.sin();
+        let alpha = sin_w / (2.0 * q);
+
+        self.b0 = (1.0 - cos_w) / 2.0;
+        self.b1 = 1.0 - cos_w;
+        self.b2 = (1.0 - cos_w) / 2.0;
+        self.a0 = 1.0 + alpha;
+        self.a1 = -2.0 * cos_w;
+        self.a2 = 1.0 - alpha;
+    }
 }
 
 /// Parametric equalizer with multiple bands
@@ -223,8 +243,7 @@ impl ParametricEQ {
                         filter.design_highpass(sample_rate, band.frequency.value, band.q.value);
                     }
                     EQFilterType::LowPass => {
-                        // For simplicity, use high-pass with inverted frequency response
-                        filter.design_highpass(sample_rate, band.frequency.value, band.q.value);
+                        filter.design_lowpass(sample_rate, band.frequency.value, band.q.value);
                     }
                 }
             }
@@ -599,5 +618,83 @@ impl AudioEffect for WarmthPresence {
 
     fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
+    }
+}
+
+#[cfg(test)]
+mod frequency_tests {
+    use super::*;
+    use crate::AudioBuffer;
+
+    fn rms(samples: &[f32]) -> f32 {
+        (samples.iter().map(|x| x * x).sum::<f32>() / samples.len().max(1) as f32).sqrt()
+    }
+
+    fn tone(freq: f32, sample_rate: u32, n: usize) -> Vec<f32> {
+        (0..n)
+            .map(|i| (2.0 * PI * freq * i as f32 / sample_rate as f32).sin())
+            .collect()
+    }
+
+    /// A low-pass band should pass a low-frequency tone roughly intact while
+    /// strongly attenuating a high-frequency tone.
+    #[test]
+    fn test_parametric_eq_lowpass_attenuates_hf_passes_lf() {
+        let sample_rate = 44100u32;
+        let cutoff = 1000.0_f32;
+
+        // Build an EQ whose default bands sit at 0 dB (transparent) and add a
+        // low-pass band at the cutoff.
+        let make_eq = || {
+            let mut eq = ParametricEQ::new(sample_rate);
+            eq.add_band(EQFilterType::LowPass, cutoff, 0.0, 0.707);
+            eq.update_filters();
+            eq
+        };
+
+        // Low-frequency tone (well below cutoff) should be largely preserved.
+        let lf_in = tone(200.0, sample_rate, 8192);
+        let mut lf_buf = AudioBuffer::new(lf_in.clone(), sample_rate, 1);
+        let mut eq_lf = make_eq();
+        eq_lf.process(&mut lf_buf).unwrap();
+        let lf_ratio = rms(lf_buf.samples()) / rms(&lf_in);
+
+        // High-frequency tone (well above cutoff) should be heavily attenuated.
+        let hf_in = tone(8000.0, sample_rate, 8192);
+        let mut hf_buf = AudioBuffer::new(hf_in.clone(), sample_rate, 1);
+        let mut eq_hf = make_eq();
+        eq_hf.process(&mut hf_buf).unwrap();
+        let hf_ratio = rms(hf_buf.samples()) / rms(&hf_in);
+
+        assert!(
+            lf_ratio > 0.7,
+            "low-frequency tone should pass through low-pass (ratio {lf_ratio})"
+        );
+        assert!(
+            hf_ratio < 0.3,
+            "high-frequency tone should be attenuated by low-pass (ratio {hf_ratio})"
+        );
+        assert!(
+            lf_ratio > hf_ratio,
+            "low-pass must favour LF ({lf_ratio}) over HF ({hf_ratio})"
+        );
+    }
+
+    /// Sanity check that the new low-pass design differs from the high-pass:
+    /// at DC (cos ω → 1) the LPF numerator sums to ~unity gain while the HPF
+    /// numerator cancels to ~zero.
+    #[test]
+    fn test_lowpass_vs_highpass_dc_gain() {
+        let mut lp = BiquadFilter::new();
+        lp.design_lowpass(44100.0, 1000.0, 0.707);
+        let mut hp = BiquadFilter::new();
+        hp.design_highpass(44100.0, 1000.0, 0.707);
+
+        // DC gain = (b0 + b1 + b2) / (a0 + a1 + a2).
+        let lp_dc = (lp.b0 + lp.b1 + lp.b2) / (lp.a0 + lp.a1 + lp.a2);
+        let hp_dc = (hp.b0 + hp.b1 + hp.b2) / (hp.a0 + hp.a1 + hp.a2);
+
+        assert!((lp_dc - 1.0).abs() < 1e-3, "LPF DC gain ~1, got {lp_dc}");
+        assert!(hp_dc.abs() < 1e-3, "HPF DC gain ~0, got {hp_dc}");
     }
 }

@@ -506,10 +506,34 @@ impl RoomSimulator {
             && point.z <= depth
     }
 
-    /// Calculate frequency-dependent attenuation based on material
+    /// Calculate a perceptually frequency-weighted reflection attenuation for a
+    /// material.
+    ///
+    /// The reflection coefficient of each frequency band is `1 - α(f)` where
+    /// `α(f)` is the band's absorption coefficient. Rather than collapsing the
+    /// bands with a flat (unweighted) average — which discards the perceptual
+    /// importance of the spectrum — the per-band reflection coefficients are
+    /// combined with an **A-weighting** profile. A-weighting approximates the
+    /// relative loudness the human ear assigns across frequency, so bands the
+    /// listener perceives more strongly contribute proportionally more to the
+    /// resulting scalar.
+    ///
+    /// For a frequency-dependent material (e.g. a heavy low-frequency absorber
+    /// whose `α` differs sharply across bands) this yields a different,
+    /// perceptually grounded value than the flat average; for a spectrally flat
+    /// material the two coincide.
+    ///
+    /// # Limitation
+    ///
+    /// The downstream image-source / ray-tracing pipeline propagates a single
+    /// scalar attenuation per reflection (`ReflectionPath::attenuation`) and a
+    /// mono impulse response, so it cannot carry the full per-band reflection
+    /// vector. This function therefore returns the best perceptually-weighted
+    /// *scalar* reduction of the band data rather than a band-wise filter. The
+    /// underlying `Material::band_reflection_weighted`/`a_weighting` helpers
+    /// preserve the per-band structure for callers that can use it.
     fn calculate_frequency_attenuation(&self, material: &Material) -> f32 {
-        // Simplified frequency attenuation - average across all bands
-        1.0 - material.average_absorption()
+        material.band_reflection_weighted()
     }
 
     /// Calculate incident angle between ray and surface normal
@@ -735,6 +759,63 @@ impl Material {
             .sum();
 
         sum / self.absorption_coefficients.len() as f32
+    }
+
+    /// A-weighting gain (linear, not dB) at frequency `f` Hz.
+    ///
+    /// Implements the IEC 61672-1 A-weighting transfer function `R_A(f)`,
+    /// which approximates the relative loudness sensitivity of human hearing.
+    /// The returned value is the linear amplitude gain (normalized to ≈1.0 at
+    /// 1 kHz), suitable as a perceptual weight for per-band quantities.
+    fn a_weighting(frequency: f32) -> f32 {
+        // IEC 61672-1 pole frequencies (Hz).
+        const F1_SQ: f32 = 20.598_997 * 20.598_997;
+        const F2_SQ: f32 = 107.652_65 * 107.652_65;
+        const F3_SQ: f32 = 737.862_2 * 737.862_2;
+        const F4_SQ: f32 = 12_194.217 * 12_194.217;
+        // Normalization so that R_A(1 kHz) = 1 (the standard +2 dB offset).
+        const NORM: f32 = 1.258_925_4; // 10^(2.0/20)
+
+        let f_sq = frequency * frequency;
+        let numerator = F4_SQ * f_sq * f_sq;
+        let denominator =
+            (f_sq + F1_SQ) * ((f_sq + F2_SQ) * (f_sq + F3_SQ)).sqrt() * (f_sq + F4_SQ);
+        if denominator <= 0.0 {
+            return 0.0;
+        }
+        NORM * numerator / denominator
+    }
+
+    /// Perceptually A-weighted reflection coefficient across the material's
+    /// frequency bands.
+    ///
+    /// Each band contributes a reflection coefficient `1 - α(f)` weighted by
+    /// the A-weighting gain at that band's center frequency, so perceptually
+    /// salient bands dominate the resulting scalar:
+    ///
+    /// ```text
+    /// reflection = Σ_b w(f_b) · (1 − α_b) / Σ_b w(f_b),  w = A-weighting
+    /// ```
+    ///
+    /// Falls back to `1 − average_absorption()` when band data is missing or
+    /// the weights vanish, and the result is clamped to `[0, 1]`.
+    pub fn band_reflection_weighted(&self) -> f32 {
+        if self.absorption_coefficients.is_empty() {
+            return (1.0 - self.average_absorption()).clamp(0.0, 1.0);
+        }
+
+        let mut weighted_sum = 0.0_f32;
+        let mut weight_total = 0.0_f32;
+        for band in &self.absorption_coefficients {
+            let weight = Self::a_weighting(band.frequency);
+            weighted_sum += weight * (1.0 - band.coefficient);
+            weight_total += weight;
+        }
+
+        if weight_total <= 0.0 {
+            return (1.0 - self.average_absorption()).clamp(0.0, 1.0);
+        }
+        (weighted_sum / weight_total).clamp(0.0, 1.0)
     }
 
     /// Create concrete material
@@ -1338,6 +1419,130 @@ mod tests {
         let carpet = Material::carpet();
 
         assert!(carpet.average_absorption() > concrete.average_absorption());
+    }
+
+    /// Build a material with explicit per-band absorption coefficients.
+    fn material_with_bands(name: &str, bands: &[(f32, f32)]) -> Material {
+        Material {
+            name: name.to_string(),
+            absorption_coefficients: bands
+                .iter()
+                .map(|&(frequency, coefficient)| FrequencyBandAbsorption {
+                    frequency,
+                    coefficient,
+                })
+                .collect(),
+            scattering_coefficient: 0.1,
+            transmission_coefficient: 0.01,
+        }
+    }
+
+    #[test]
+    fn test_a_weighting_peaks_in_midrange() {
+        // A-weighting attenuates the extremes far more than the ~1-4 kHz region.
+        let low = Material::a_weighting(125.0);
+        let mid = Material::a_weighting(2000.0);
+        let high = Material::a_weighting(16000.0);
+        assert!(mid > low, "mid ({mid}) should exceed low ({low})");
+        assert!(mid > high, "mid ({mid}) should exceed high ({high})");
+        // Normalized to ≈1.0 at 1 kHz.
+        let one_khz = Material::a_weighting(1000.0);
+        assert!(
+            (one_khz - 1.0).abs() < 0.05,
+            "A-weighting at 1 kHz should be ≈1.0, got {one_khz}"
+        );
+    }
+
+    #[test]
+    fn test_band_reflection_weighted_differs_from_flat_average() {
+        // Heavy low-frequency absorber: high absorption in the low bands (which
+        // A-weighting de-emphasizes), low absorption in the perceptually
+        // dominant mid bands. The weighted reflection must therefore differ
+        // from the flat (1 - average_absorption) value.
+        let lf_absorber = material_with_bands(
+            "heavy_lf_absorber",
+            &[
+                (125.0, 0.90),
+                (250.0, 0.80),
+                (500.0, 0.40),
+                (1000.0, 0.10),
+                (2000.0, 0.05),
+                (4000.0, 0.05),
+            ],
+        );
+
+        let flat_average_reflection = 1.0 - lf_absorber.average_absorption();
+        let weighted = lf_absorber.band_reflection_weighted();
+
+        assert!(
+            (weighted - flat_average_reflection).abs() > 0.05,
+            "perceptual weighting ({weighted}) should differ from flat average \
+             ({flat_average_reflection}) for a frequency-dependent material"
+        );
+        // Because the absorbed energy sits in the de-emphasized low bands, the
+        // perceived reflection should be *higher* than the flat average.
+        assert!(
+            weighted > flat_average_reflection,
+            "LF-absorbed energy is perceptually de-weighted → weighted reflection \
+             ({weighted}) should exceed flat average ({flat_average_reflection})"
+        );
+    }
+
+    #[test]
+    fn test_band_reflection_weighted_matches_flat_for_flat_material() {
+        // A spectrally flat material has the same coefficient in every band, so
+        // any weighting scheme collapses to the same scalar.
+        let flat = material_with_bands(
+            "flat",
+            &[
+                (125.0, 0.30),
+                (250.0, 0.30),
+                (500.0, 0.30),
+                (1000.0, 0.30),
+                (2000.0, 0.30),
+                (4000.0, 0.30),
+            ],
+        );
+        let weighted = flat.band_reflection_weighted();
+        let flat_average = 1.0 - flat.average_absorption();
+        assert!(
+            (weighted - flat_average).abs() < 1e-4,
+            "flat material weighted reflection ({weighted}) should equal flat \
+             average ({flat_average})"
+        );
+    }
+
+    #[test]
+    fn test_band_reflection_distinguishes_spectral_distribution() {
+        // Two materials with the SAME mean absorption but opposite spectral
+        // tilt. A flat average cannot tell them apart; the A-weighted measure
+        // must, proving frequency dependence is preserved.
+        let low_absorbing =
+            material_with_bands("low_tilt", &[(125.0, 0.70), (1000.0, 0.30), (4000.0, 0.10)]);
+        let high_absorbing = material_with_bands(
+            "high_tilt",
+            &[(125.0, 0.10), (1000.0, 0.30), (4000.0, 0.70)],
+        );
+
+        // Identical flat averages.
+        assert!(
+            (low_absorbing.average_absorption() - high_absorbing.average_absorption()).abs() < 1e-6,
+            "the two materials must share the same mean absorption"
+        );
+
+        let low_reflection = low_absorbing.band_reflection_weighted();
+        let high_reflection = high_absorbing.band_reflection_weighted();
+        assert!(
+            (low_reflection - high_reflection).abs() > 0.02,
+            "A-weighted reflection should distinguish spectral distribution: \
+             low_tilt={low_reflection}, high_tilt={high_reflection}"
+        );
+        // The material absorbing more in the perceptually-weighted high/mid
+        // region reflects less.
+        assert!(
+            high_reflection < low_reflection,
+            "more absorption in perceptually-salient bands → lower reflection"
+        );
     }
 
     #[test]

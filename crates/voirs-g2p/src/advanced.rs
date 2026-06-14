@@ -3,6 +3,7 @@
 //! This module provides cutting-edge features for G2P conversion including
 //! real-time adaptation, multilingual support, and emotion-aware processing.
 
+use crate::duration::{estimate_phoneme_duration_ms, BoundaryContext};
 use crate::{LanguageCode, Phoneme, PhoneticFeatures, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -797,18 +798,43 @@ impl StreamingG2pProcessor {
         // Simple processing - in practice would use sophisticated streaming algorithms
         let mut time_offset = 0.0f32;
 
-        for word in text_to_process.split_whitespace() {
-            // Mock phoneme generation for each character
-            for (i, char) in word.chars().enumerate() {
-                let phoneme = Phoneme::new(char.to_string());
-                let duration = 100.0; // 100ms per phoneme
+        let words: Vec<&str> = text_to_process.split_whitespace().collect();
+        let word_count = words.len();
+
+        for (word_index, word) in words.iter().enumerate() {
+            let chars: Vec<char> = word.chars().collect();
+            let char_count = chars.len();
+            let is_last_word = word_index + 1 == word_count;
+
+            for (char_index, character) in chars.iter().enumerate() {
+                let is_last_char = char_index + 1 == char_count;
+
+                // Determine prosodic boundary context for phrase-final
+                // (pre-pausal) lengthening at the end of the utterance chunk.
+                let boundary = if is_last_word && is_last_char {
+                    BoundaryContext::PhraseFinal
+                } else if is_last_word && char_index + 2 == char_count {
+                    BoundaryContext::PreFinal
+                } else {
+                    BoundaryContext::Medial
+                };
+
+                let mut phoneme = Phoneme::new(character.to_string());
+                phoneme.is_word_boundary = is_last_char;
+
+                // Rule-based (Klatt-style) duration: per-class base duration with
+                // stress, phrase-final and speaking-rate adjustments, clamped to
+                // a perceptually sane range. Normal speaking rate (1.0) is used
+                // for the streaming path.
+                let duration = estimate_phoneme_duration_ms(&phoneme, boundary, 1.0);
+                phoneme.duration_ms = Some(duration);
 
                 let streaming_phoneme = StreamingPhoneme {
                     phoneme,
                     start_time_ms: time_offset,
                     duration_ms: duration,
                     streaming_confidence: 0.8,
-                    is_word_boundary: i == word.len() - 1,
+                    is_word_boundary: is_last_char,
                 };
 
                 if self.phoneme_sender.send(streaming_phoneme).is_err() {

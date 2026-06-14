@@ -129,6 +129,11 @@ impl SpectralProcessor {
         self.config = config;
     }
 
+    /// FFT size used for spectral analysis/synthesis.
+    pub fn fft_size(&self) -> usize {
+        self.fft_size
+    }
+
     /// Apply spectral tilt to magnitude spectrum
     ///
     /// Spectral tilt modifies the spectral envelope slope, making the voice

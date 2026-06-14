@@ -520,31 +520,50 @@ impl TransformerASR {
         }
     }
 
-    /// Extract audio features (mel-spectrogram)
+    /// Extract audio features (log-magnitude spectrogram).
+    ///
+    /// Each frame is transformed with `scirs2_fft::rfft` (O(N log N)) and the
+    /// first `feature_dim` non-negative-frequency magnitudes are kept as
+    /// log-magnitude features. This replaces the previous O(N²) per-bin DFT
+    /// while preserving the framing (window/hop), the feature dimension and the
+    /// `ln(|X|).max(-10)` log compression the downstream projection expects.
     fn extract_features(&self, audio: &AudioBuffer) -> Vec<Vec<f32>> {
         let samples = audio.samples();
-        let sample_rate = audio.sample_rate() as f32;
 
-        // Simplified mel-spectrogram extraction
         let frame_length = self.config.window_size;
         let hop_length = self.config.hop_length;
+
+        // Guard against frames longer than the signal (avoids underflow) and
+        // degenerate configurations; the caller treats an empty result as an error.
+        if frame_length == 0 || hop_length == 0 || samples.len() < frame_length {
+            return Vec::new();
+        }
+
         let n_frames = (samples.len() - frame_length) / hop_length + 1;
+        let num_bins = frame_length / 2 + 1;
 
         let mut features = vec![vec![0.0; self.config.feature_dim]; n_frames];
 
-        for frame_idx in 0..n_frames {
+        for (frame_idx, frame_features) in features.iter_mut().enumerate() {
             let start = frame_idx * hop_length;
             let end = (start + frame_length).min(samples.len());
 
-            // Simple FFT-based feature extraction (simplified)
-            for (feat_idx, feature) in features[frame_idx].iter_mut().enumerate() {
-                let mut magnitude = 0.0;
-                for i in start..end {
-                    let angle = 2.0 * std::f32::consts::PI * (feat_idx as f32) * (i - start) as f32
-                        / frame_length as f32;
-                    magnitude += samples[i] * angle.cos();
-                }
-                *feature = magnitude.abs().ln().max(-10.0); // Log mel features
+            // Copy the frame into an f64 buffer (zero-padded if it runs past the
+            // end of the signal) for the real FFT.
+            let mut buf_f64 = vec![0.0_f64; frame_length];
+            for (dst, &sample) in buf_f64.iter_mut().zip(&samples[start..end]) {
+                *dst = f64::from(sample);
+            }
+
+            // O(N log N) real-FFT magnitudes via the SciRS2 abstraction.
+            let magnitudes: Vec<f32> = match scirs2_fft::rfft(&buf_f64, Some(frame_length)) {
+                Ok(spectrum) => spectrum.iter().map(|c| c.norm() as f32).collect(),
+                Err(_) => vec![0.0; num_bins],
+            };
+
+            for (feat_idx, feature) in frame_features.iter_mut().enumerate() {
+                let magnitude = magnitudes.get(feat_idx).copied().unwrap_or(0.0);
+                *feature = magnitude.abs().ln().max(-10.0); // Log-magnitude features
             }
         }
 
@@ -800,5 +819,39 @@ mod tests {
         let features = model.extract_features(&audio);
         assert!(!features.is_empty());
         assert_eq!(features[0].len(), 80); // Feature dimension
+    }
+
+    /// The log-magnitude features must peak at the input tone's frequency bin.
+    #[test]
+    fn test_feature_extraction_energy_at_tone_bin() {
+        let n = 64usize;
+        let k0 = 8usize; // tone frequency in cycles-per-frame == rfft bin index
+        let config = TransformerConfig {
+            window_size: n,
+            hop_length: n,
+            feature_dim: n / 2 + 1, // one feature per non-negative-frequency bin
+            ..Default::default()
+        };
+        let model = TransformerASR::new(config);
+
+        // A pure tone at exactly bin k0 over a single frame.
+        let samples: Vec<f32> = (0..n)
+            .map(|i| (2.0 * std::f32::consts::PI * k0 as f32 * i as f32 / n as f32).sin())
+            .collect();
+        let audio = AudioBuffer::new(samples, 16000, 1);
+
+        let features = model.extract_features(&audio);
+        assert_eq!(features.len(), 1, "expected a single frame");
+
+        let peak_bin = features[0]
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).expect("features are finite"))
+            .map(|(idx, _)| idx)
+            .expect("feature vector is non-empty");
+        assert_eq!(
+            peak_bin, k0,
+            "spectral energy should concentrate at bin {k0}"
+        );
     }
 }

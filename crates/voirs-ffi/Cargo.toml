@@ -29,6 +29,9 @@ voirs-recognizer = { workspace = true, optional = true }
 oxitls-adapter-rustls-rustcrypto.workspace = true
 rustls.workspace = true
 
+# SciRS2 DSP (FFT for spectral analysis)
+scirs2-fft.workspace = true
+
 # FFI utilities
 libc.workspace = true
 

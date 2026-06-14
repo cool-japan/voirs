@@ -277,16 +277,106 @@ impl PitchContour {
         f1 * (2.0 * alpha3 - 3.0 * alpha2 + 1.0) + f2 * (-2.0 * alpha3 + 3.0 * alpha2)
     }
 
-    /// Hermite interpolation
+    /// Cubic Hermite (Catmull-Rom) interpolation.
+    ///
+    /// Interpolates the F0 value at `time` within the segment
+    /// `[left_idx, right_idx]` using a cubic Hermite spline with Catmull-Rom
+    /// tangents. The tangent at each endpoint is estimated from its neighbouring
+    /// samples as `m_k = (p_{k+1} - p_{k-1}) / 2`; neighbour indices are clamped
+    /// at the contour boundaries so the spline degrades gracefully to a one-sided
+    /// difference at the first and last points.
+    ///
+    /// The interpolant is the standard cubic Hermite basis evaluated on the
+    /// normalized parameter `s ∈ [0, 1]`:
+    ///
+    /// * `h00 =  2s³ - 3s² + 1` (weights left value `p0`)
+    /// * `h10 =      s³ - 2s² + s` (weights left tangent `m0`)
+    /// * `h01 = -2s³ + 3s²` (weights right value `p1`)
+    /// * `h11 =      s³ -  s²` (weights right tangent `m1`)
+    ///
+    /// Because `h00(0) = 1`, `h01(1) = 1` and all other bases vanish at the
+    /// endpoints, the curve passes through `p0` at `s = 0` and `p1` at `s = 1`
+    /// exactly. Unlike linear interpolation it produces a C¹-continuous,
+    /// tangent-aware curve that generally differs from the straight-line value at
+    /// the segment midpoint.
     fn hermite_interpolation(&self, time: f32, left_idx: usize, right_idx: usize) -> f32 {
-        // Simplified Hermite interpolation
-        self.cubic_interpolation(time, left_idx, right_idx)
+        let last = self.f0_values.len().saturating_sub(1);
+
+        let t1 = self.time_points[left_idx];
+        let t2 = self.time_points[right_idx];
+        let p0 = self.f0_values[left_idx];
+        let p1 = self.f0_values[right_idx];
+
+        // Neighbour samples with boundary clamping for Catmull-Rom tangents.
+        let prev = self.f0_values[left_idx.saturating_sub(1)];
+        let next = self.f0_values[(right_idx + 1).min(last)];
+
+        // Catmull-Rom tangents: m_k = (p_{k+1} - p_{k-1}) / 2.
+        let m0 = (p1 - prev) * 0.5;
+        let m1 = (next - p0) * 0.5;
+
+        let s = (time - t1) / (t2 - t1);
+        let s2 = s * s;
+        let s3 = s2 * s;
+
+        // Cubic Hermite basis functions.
+        let h00 = 2.0 * s3 - 3.0 * s2 + 1.0;
+        let h10 = s3 - 2.0 * s2 + s;
+        let h01 = -2.0 * s3 + 3.0 * s2;
+        let h11 = s3 - s2;
+
+        h00 * p0 + h10 * m0 + h01 * p1 + h11 * m1
     }
 
-    /// Bezier interpolation
+    /// Cubic Bézier interpolation.
+    ///
+    /// Interpolates the F0 value at `time` within the segment
+    /// `[left_idx, right_idx]` using a cubic Bézier curve whose interior control
+    /// points are derived from the same Catmull-Rom tangents used by
+    /// [`Self::hermite_interpolation`]. With endpoint values `P0` and `P3` and
+    /// endpoint tangents `m0`, `m1`, the control points are:
+    ///
+    /// * `P1 = P0 + m0 / 3`
+    /// * `P2 = P3 - m1 / 3`
+    ///
+    /// This is the exact Hermite-to-Bézier conversion, so the curve is geometry-
+    /// identical to the Hermite form while being expressed in the Bernstein
+    /// basis. It is evaluated as:
+    ///
+    /// `B(s) = (1-s)³ P0 + 3(1-s)² s P1 + 3(1-s) s² P2 + s³ P3`
+    ///
+    /// At `s = 0` only the `P0` term survives and at `s = 1` only the `P3` term
+    /// survives, so the curve passes through the segment endpoints exactly while
+    /// differing from linear interpolation in between.
     fn bezier_interpolation(&self, time: f32, left_idx: usize, right_idx: usize) -> f32 {
-        // Simplified Bezier interpolation
-        self.cubic_interpolation(time, left_idx, right_idx)
+        let last = self.f0_values.len().saturating_sub(1);
+
+        let t1 = self.time_points[left_idx];
+        let t2 = self.time_points[right_idx];
+        let p0 = self.f0_values[left_idx];
+        let p3 = self.f0_values[right_idx];
+
+        // Neighbour samples with boundary clamping for Catmull-Rom tangents.
+        let prev = self.f0_values[left_idx.saturating_sub(1)];
+        let next = self.f0_values[(right_idx + 1).min(last)];
+
+        // Catmull-Rom tangents: m_k = (p_{k+1} - p_{k-1}) / 2.
+        let m0 = (p3 - prev) * 0.5;
+        let m1 = (next - p0) * 0.5;
+
+        // Hermite-to-Bézier control point conversion.
+        let p1 = p0 + m0 / 3.0;
+        let p2 = p3 - m1 / 3.0;
+
+        let s = (time - t1) / (t2 - t1);
+        let one_minus = 1.0 - s;
+        let one_minus2 = one_minus * one_minus;
+        let one_minus3 = one_minus2 * one_minus;
+        let s2 = s * s;
+        let s3 = s2 * s;
+
+        // Bernstein cubic basis.
+        one_minus3 * p0 + 3.0 * one_minus2 * s * p1 + 3.0 * one_minus * s2 * p2 + s3 * p3
     }
 
     /// Smooth pitch contour using moving average
@@ -987,6 +1077,81 @@ mod tests {
         assert!(
             found_changed,
             "Vibrato should change at least one f0 value after onset time"
+        );
+    }
+
+    #[test]
+    fn test_hermite_interpolation_endpoints_exact() {
+        let time_points = vec![0.0, 1.0, 2.0, 3.0];
+        let f0_values = vec![200.0, 300.0, 250.0, 400.0];
+        let mut contour = PitchContour::new(time_points, f0_values.clone());
+        contour.interpolation = InterpolationMethod::Hermite;
+
+        // Endpoints must be hit exactly (within float tolerance).
+        for (i, &t) in [0.0_f32, 1.0, 2.0, 3.0].iter().enumerate() {
+            let got = contour.f0_at_time(t);
+            assert!(
+                (got - f0_values[i]).abs() < 1e-3,
+                "Hermite endpoint at t={t} expected {} got {got}",
+                f0_values[i]
+            );
+        }
+    }
+
+    #[test]
+    fn test_bezier_interpolation_endpoints_exact() {
+        let time_points = vec![0.0, 1.0, 2.0, 3.0];
+        let f0_values = vec![200.0, 300.0, 250.0, 400.0];
+        let mut contour = PitchContour::new(time_points, f0_values.clone());
+        contour.interpolation = InterpolationMethod::Bezier;
+
+        for (i, &t) in [0.0_f32, 1.0, 2.0, 3.0].iter().enumerate() {
+            let got = contour.f0_at_time(t);
+            assert!(
+                (got - f0_values[i]).abs() < 1e-3,
+                "Bezier endpoint at t={t} expected {} got {got}",
+                f0_values[i]
+            );
+        }
+    }
+
+    #[test]
+    fn test_hermite_differs_from_linear_at_midpoint() {
+        // A non-collinear contour so the spline curves away from the straight line.
+        let time_points = vec![0.0, 1.0, 2.0, 3.0];
+        let f0_values = vec![200.0, 300.0, 250.0, 400.0];
+
+        // Linear reference value over the middle segment [1.0, 2.0].
+        let mut linear = PitchContour::new(time_points.clone(), f0_values.clone());
+        linear.interpolation = InterpolationMethod::Linear;
+        let linear_mid = linear.f0_at_time(1.5);
+
+        let mut hermite = PitchContour::new(time_points, f0_values);
+        hermite.interpolation = InterpolationMethod::Hermite;
+        let hermite_mid = hermite.f0_at_time(1.5);
+
+        assert!(
+            (hermite_mid - linear_mid).abs() > 1e-2,
+            "Hermite midpoint {hermite_mid} should differ from linear {linear_mid}"
+        );
+    }
+
+    #[test]
+    fn test_bezier_differs_from_linear_at_midpoint() {
+        let time_points = vec![0.0, 1.0, 2.0, 3.0];
+        let f0_values = vec![200.0, 300.0, 250.0, 400.0];
+
+        let mut linear = PitchContour::new(time_points.clone(), f0_values.clone());
+        linear.interpolation = InterpolationMethod::Linear;
+        let linear_mid = linear.f0_at_time(1.5);
+
+        let mut bezier = PitchContour::new(time_points, f0_values);
+        bezier.interpolation = InterpolationMethod::Bezier;
+        let bezier_mid = bezier.f0_at_time(1.5);
+
+        assert!(
+            (bezier_mid - linear_mid).abs() > 1e-2,
+            "Bezier midpoint {bezier_mid} should differ from linear {linear_mid}"
         );
     }
 }
