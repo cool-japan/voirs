@@ -4,9 +4,9 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
 };
 use anyhow::Result;
+use hex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use hex;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::fs;

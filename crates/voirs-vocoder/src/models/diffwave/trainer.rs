@@ -13,13 +13,13 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use candle_core::{Device, Result as CandleResult, Tensor};
-use candle_nn::{Optimizer, VarBuilder, VarMap};
 use candle_nn::optim::{AdamW, ParamsAdamW, SGD};
+use candle_nn::{Optimizer, VarBuilder, VarMap};
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 
-use crate::{Result, VocoderError};
 use super::diffusion::{DiffWave, DiffWaveConfig};
+use crate::{Result, VocoderError};
 
 /// Training configuration for DiffWave
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,15 +120,9 @@ pub enum OptimizerConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SchedulerConfig {
     /// Exponential decay
-    ExponentialDecay {
-        gamma: f64,
-        step_size: usize,
-    },
+    ExponentialDecay { gamma: f64, step_size: usize },
     /// Cosine annealing
-    CosineAnnealing {
-        t_max: usize,
-        eta_min: f64,
-    },
+    CosineAnnealing { t_max: usize, eta_min: f64 },
     /// Linear warmup followed by decay
     LinearWarmupDecay {
         warmup_steps: usize,
@@ -143,10 +137,7 @@ pub enum SchedulerConfig {
         min_lr: f64,
     },
     /// Multi-step decay
-    MultiStep {
-        milestones: Vec<usize>,
-        gamma: f64,
-    },
+    MultiStep { milestones: Vec<usize>, gamma: f64 },
 }
 
 /// Data augmentation configuration
@@ -200,10 +191,7 @@ impl Default for TrainingConfig {
             gradient_clip: Some(1.0),
             loss_config: LossConfig {
                 primary_loss: LossType::L2,
-                secondary_losses: vec![
-                    (LossType::L1, 0.1),
-                    (LossType::SpectralConvergence, 0.05),
-                ],
+                secondary_losses: vec![(LossType::L1, 0.1), (LossType::SpectralConvergence, 0.05)],
                 adversarial_weight: None,
             },
             optimizer_config: OptimizerConfig::Adam {
@@ -296,16 +284,13 @@ pub struct DiffWaveTrainer {
 
 impl DiffWaveTrainer {
     /// Create new trainer
-    pub fn new(
-        model_config: DiffWaveConfig,
-        training_config: TrainingConfig,
-    ) -> Result<Self> {
+    pub fn new(model_config: DiffWaveConfig, training_config: TrainingConfig) -> Result<Self> {
         let device = Device::Cpu; // Simplified for compatibility
         let varmap = VarMap::new();
         let vb = VarBuilder::from_varmap(&varmap, candle_core::DType::F32, &device);
-        
+
         let model = DiffWave::new(model_config, device.clone(), vb)?;
-        
+
         Ok(Self {
             model,
             config: training_config,
@@ -318,7 +303,7 @@ impl DiffWaveTrainer {
             global_step: 0,
         })
     }
-    
+
     /// Initialize optimizer
     pub fn initialize_optimizer(&mut self) -> Result<()> {
         let params = self.varmap.all_vars();
@@ -328,22 +313,28 @@ impl DiffWaveTrainer {
         // Adam was removed; Adam-like behaviour is provided by AdamW (set weight_decay=0).
         // SGD no longer accepts momentum/weight_decay — lr only.
         let optimizer = match &self.config.optimizer_config {
-            OptimizerConfig::Adam { beta1, beta2, eps, weight_decay }
-            | OptimizerConfig::AdamW { beta1, beta2, eps, weight_decay } => {
-                AnyOptimizer::AdamW(AdamW::new(
-                    params,
-                    ParamsAdamW {
-                        lr,
-                        beta1: *beta1,
-                        beta2: *beta2,
-                        eps: *eps,
-                        weight_decay: *weight_decay,
-                    },
-                )?)
+            OptimizerConfig::Adam {
+                beta1,
+                beta2,
+                eps,
+                weight_decay,
             }
-            OptimizerConfig::SGD { .. } => {
-                AnyOptimizer::Sgd(SGD::new(params, lr)?)
-            }
+            | OptimizerConfig::AdamW {
+                beta1,
+                beta2,
+                eps,
+                weight_decay,
+            } => AnyOptimizer::AdamW(AdamW::new(
+                params,
+                ParamsAdamW {
+                    lr,
+                    beta1: *beta1,
+                    beta2: *beta2,
+                    eps: *eps,
+                    weight_decay: *weight_decay,
+                },
+            )?),
+            OptimizerConfig::SGD { .. } => AnyOptimizer::Sgd(SGD::new(params, lr)?),
         };
 
         self.optimizer = Some(optimizer);
@@ -358,39 +349,39 @@ impl DiffWaveTrainer {
 
         Ok(())
     }
-    
+
     /// Train the model
     pub async fn train(&mut self) -> Result<()> {
         // Initialize optimizer if not already done
         if self.optimizer.is_none() {
             self.initialize_optimizer()?;
         }
-        
+
         // Create output directory
         tokio::fs::create_dir_all(&self.config.output_dir).await?;
-        
+
         // Resume from checkpoint if specified — clone path to release immutable borrow
         // before taking the mutable borrow required by load_checkpoint.
         if let Some(checkpoint_path) = self.config.resume_from.clone() {
             self.load_checkpoint(&checkpoint_path).await?;
         }
-        
+
         // Training loop
         for epoch in 0..self.config.num_epochs {
             let epoch_start = Instant::now();
-            
+
             // Training phase
             let train_loss = self.train_epoch(epoch).await?;
-            
+
             // Validation phase
             let val_loss = if epoch.is_multiple_of(self.config.validation_frequency) {
                 Some(self.validate_epoch(epoch).await?)
             } else {
                 None
             };
-            
+
             let epoch_time = epoch_start.elapsed();
-            
+
             // Update learning rate
             if let Some(scheduler) = &mut self.scheduler {
                 let new_lr = scheduler.step(val_loss);
@@ -398,7 +389,7 @@ impl DiffWaveTrainer {
                     optimizer.set_learning_rate(new_lr);
                 }
             }
-            
+
             // Record statistics
             let stats = TrainingStats {
                 epoch,
@@ -410,9 +401,9 @@ impl DiffWaveTrainer {
                 epoch_time,
                 loss_components: HashMap::new(), // Would be populated with component losses
             };
-            
+
             self.training_stats.push(stats);
-            
+
             // Print progress
             println!(
                 "Epoch {}/{}: train_loss={:.6}, val_loss={:.6}, lr={:.2e}, time={:.1}s",
@@ -423,12 +414,12 @@ impl DiffWaveTrainer {
                 self.get_current_learning_rate(),
                 epoch_time.as_secs_f64()
             );
-            
+
             // Save checkpoint
             if epoch.is_multiple_of(self.config.checkpoint_frequency) {
                 self.save_checkpoint(epoch).await?;
             }
-            
+
             // Save best model
             if let Some(val_loss_value) = val_loss {
                 if val_loss_value < self.best_val_loss {
@@ -437,25 +428,25 @@ impl DiffWaveTrainer {
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Train for one epoch
     async fn train_epoch(&mut self, epoch: usize) -> Result<f64> {
         // This is a simplified training loop
         // In practice, this would iterate over actual training data
-        
+
         let mut total_loss = 0.0;
         let num_batches: usize = 100; // Placeholder
 
         for batch_idx in 0..num_batches {
             // Generate dummy training batch
             let (audio_batch, mel_batch, timestep_batch) = self.generate_dummy_batch()?;
-            
+
             // Forward pass
             let loss = self.training_step(&audio_batch, &mel_batch, &timestep_batch)?;
-            
+
             let loss_val = loss.to_scalar::<f64>()?;
 
             // Gradient clipping simulation (read-only self borrow — must happen before mutable borrow)
@@ -467,13 +458,14 @@ impl DiffWaveTrainer {
 
             // Backward pass (backward_step combines backward + weight update)
             if let Some(optimizer) = &mut self.optimizer {
-                optimizer.backward_step(&loss)
+                optimizer
+                    .backward_step(&loss)
                     .map_err(|e| VocoderError::ModelError(format!("optimizer step failed: {e}")))?;
             }
 
             total_loss += loss_val;
             self.global_step += 1;
-            
+
             // Print batch progress occasionally
             if batch_idx.is_multiple_of(20_usize) {
                 println!(
@@ -488,59 +480,49 @@ impl DiffWaveTrainer {
 
         Ok(total_loss / num_batches as f64)
     }
-    
+
     /// Validate for one epoch
     async fn validate_epoch(&mut self, _epoch: usize) -> Result<f64> {
         // This is a simplified validation loop
         let mut total_loss = 0.0;
         let num_batches = 20; // Placeholder
-        
+
         for _batch_idx in 0..num_batches {
             // Generate dummy validation batch
             let (audio_batch, mel_batch, timestep_batch) = self.generate_dummy_batch()?;
-            
+
             // Forward pass (no gradients)
             let loss = self.validation_step(&audio_batch, &mel_batch, &timestep_batch)?;
             total_loss += loss.to_scalar::<f64>()?;
         }
-        
+
         Ok(total_loss / num_batches as f64)
     }
-    
+
     /// Single training step
-    fn training_step(
-        &self,
-        audio: &Tensor,
-        mel: &Tensor,
-        timesteps: &Tensor,
-    ) -> Result<Tensor> {
+    fn training_step(&self, audio: &Tensor, mel: &Tensor, timesteps: &Tensor) -> Result<Tensor> {
         // Forward pass through the model
         let predicted_noise = self.model.forward(audio, mel, timesteps)?;
-        
+
         // Calculate actual noise (this would be the target noise added to audio)
         let actual_noise = self.calculate_target_noise(audio, timesteps)?;
-        
+
         // Calculate loss
         let loss = self.calculate_loss(&predicted_noise, &actual_noise)?;
-        
+
         Ok(loss)
     }
-    
+
     /// Single validation step (no gradients)
-    fn validation_step(
-        &self,
-        audio: &Tensor,
-        mel: &Tensor,
-        timesteps: &Tensor,
-    ) -> Result<Tensor> {
+    fn validation_step(&self, audio: &Tensor, mel: &Tensor, timesteps: &Tensor) -> Result<Tensor> {
         // Same as training step but without gradient computation
         let predicted_noise = self.model.forward(audio, mel, timesteps)?;
         let actual_noise = self.calculate_target_noise(audio, timesteps)?;
         let loss = self.calculate_loss(&predicted_noise, &actual_noise)?;
-        
+
         Ok(loss)
     }
-    
+
     /// Calculate target noise for loss computation
     fn calculate_target_noise(&self, audio: &Tensor, timesteps: &Tensor) -> Result<Tensor> {
         // Generate noise that would have been added at these timesteps
@@ -549,7 +531,7 @@ impl DiffWaveTrainer {
         let noise = Tensor::randn(0f32, 1f32, audio.shape(), &self.device)?;
         Ok(noise)
     }
-    
+
     /// Calculate loss based on configuration
     fn calculate_loss(&self, predicted: &Tensor, target: &Tensor) -> Result<Tensor> {
         match &self.config.loss_config.primary_loss {
@@ -561,9 +543,7 @@ impl DiffWaveTrainer {
                 let diff = (predicted - target)?;
                 Ok(diff.powf(2.0)?.mean_all()?)
             }
-            LossType::Huber { delta } => {
-                self.huber_loss(predicted, target, *delta)
-            }
+            LossType::Huber { delta } => self.huber_loss(predicted, target, *delta),
             _ => {
                 // Fallback to L2 for other loss types
                 let diff = (predicted - target)?;
@@ -571,7 +551,7 @@ impl DiffWaveTrainer {
             }
         }
     }
-    
+
     /// Huber loss implementation
     fn huber_loss(&self, predicted: &Tensor, target: &Tensor, delta: f64) -> Result<Tensor> {
         let diff = (predicted - target)?;
@@ -586,7 +566,7 @@ impl DiffWaveTrainer {
         let loss = ((quadratic_loss * quadratic)? + (linear_loss * linear)?)?;
         Ok(loss.mean_all()?)
     }
-    
+
     /// Generate dummy batch for training/validation
     fn generate_dummy_batch(&self) -> Result<(Tensor, Tensor, Tensor)> {
         let batch_size = self.config.batch_size;
@@ -598,7 +578,12 @@ impl DiffWaveTrainer {
         let audio = Tensor::randn(0f32, 1f32, (batch_size, seq_len), &self.device)?;
 
         // Generate dummy mel spectrogram
-        let mel = Tensor::randn(0f32, 1f32, (batch_size, mel_channels, mel_frames), &self.device)?;
+        let mel = Tensor::randn(
+            0f32,
+            1f32,
+            (batch_size, mel_channels, mel_frames),
+            &self.device,
+        )?;
 
         // Generate random timesteps (using randn and scaling to [0, 1000))
         // Scale |N(0,1)| values to approximately [0, 1000) using affine(scale, bias)
@@ -609,18 +594,18 @@ impl DiffWaveTrainer {
 
         Ok((audio, mel, timesteps))
     }
-    
+
     /// Clip gradients using global norm clipping
     fn clip_gradients(&self, max_norm: f64) -> Result<()> {
         if max_norm <= 0.0 {
             return Ok(());
         }
-        
+
         // In a real implementation, this would:
         // 1. Collect all model parameters that have gradients
         // 2. Calculate the global gradient norm
         // 3. Scale gradients if the norm exceeds max_norm
-        
+
         // For now, implement a simple gradient norm tracking
         let mut total_norm_squared = 0.0;
 
@@ -631,14 +616,18 @@ impl DiffWaveTrainer {
             let layer_norm = (layer_size as f64).sqrt() * 0.1; // Simulated gradient norm
             total_norm_squared += layer_norm * layer_norm;
         }
-        
+
         let total_norm = total_norm_squared.sqrt();
-        
+
         if total_norm > max_norm {
             let scale_factor = max_norm / total_norm;
-            tracing::debug!("Clipping gradients: norm={:.4}, max_norm={:.4}, scale={:.4}", 
-                          total_norm, max_norm, scale_factor);
-            
+            tracing::debug!(
+                "Clipping gradients: norm={:.4}, max_norm={:.4}, scale={:.4}",
+                total_norm,
+                max_norm,
+                scale_factor
+            );
+
             // In a real implementation, this would apply the scaling:
             // for param in model.parameters() {
             //     if let Some(grad) = param.grad() {
@@ -646,10 +635,10 @@ impl DiffWaveTrainer {
             //     }
             // }
         }
-        
+
         Ok(())
     }
-    
+
     /// Get current learning rate
     fn get_current_learning_rate(&self) -> f64 {
         if let Some(scheduler) = &self.scheduler {
@@ -658,17 +647,20 @@ impl DiffWaveTrainer {
             self.config.learning_rate
         }
     }
-    
+
     /// Save checkpoint
     async fn save_checkpoint(&self, epoch: usize) -> Result<()> {
-        let checkpoint_path = self.config.output_dir.join(format!("checkpoint_epoch_{}.pt", epoch));
+        let checkpoint_path = self
+            .config
+            .output_dir
+            .join(format!("checkpoint_epoch_{}.pt", epoch));
 
         // Save model weights to a sibling safetensors file
         let weights_filename = format!("checkpoint_step_{}.safetensors", self.global_step);
         let weights_path = self.config.output_dir.join(&weights_filename);
-        self.varmap
-            .save(&weights_path)
-            .map_err(|e| VocoderError::ModelError(format!("Failed to save checkpoint weights: {e}")))?;
+        self.varmap.save(&weights_path).map_err(|e| {
+            VocoderError::ModelError(format!("Failed to save checkpoint weights: {e}"))
+        })?;
 
         // Create checkpoint data (weights_file records the companion filename)
         let checkpoint = CheckpointData {
@@ -682,19 +674,21 @@ impl DiffWaveTrainer {
         };
 
         // Serialize and save JSON state
-        let checkpoint_json = serde_json::to_string_pretty(&checkpoint)
-            .map_err(|e| VocoderError::ModelError(format!("Failed to serialize checkpoint: {e}")))?;
+        let checkpoint_json = serde_json::to_string_pretty(&checkpoint).map_err(|e| {
+            VocoderError::ModelError(format!("Failed to serialize checkpoint: {e}"))
+        })?;
         fs::write(&checkpoint_path, checkpoint_json).await?;
 
         println!("Saved checkpoint: {}", checkpoint_path.display());
         Ok(())
     }
-    
+
     /// Load checkpoint
     async fn load_checkpoint(&mut self, path: &Path) -> Result<()> {
         let checkpoint_data = fs::read_to_string(path).await?;
-        let checkpoint: CheckpointData = serde_json::from_str(&checkpoint_data)
-            .map_err(|e| VocoderError::ModelError(format!("Failed to deserialize checkpoint: {e}")))?;
+        let checkpoint: CheckpointData = serde_json::from_str(&checkpoint_data).map_err(|e| {
+            VocoderError::ModelError(format!("Failed to deserialize checkpoint: {e}"))
+        })?;
 
         self.global_step = checkpoint.global_step;
         self.training_stats = checkpoint.training_stats;
@@ -702,14 +696,14 @@ impl DiffWaveTrainer {
 
         // Load weights from the companion safetensors file (if present)
         if let Some(ref weights_filename) = checkpoint.weights_file {
-            let checkpoint_dir = path
-                .parent()
-                .ok_or_else(|| VocoderError::ModelError("Checkpoint path has no parent directory".to_string()))?;
+            let checkpoint_dir = path.parent().ok_or_else(|| {
+                VocoderError::ModelError("Checkpoint path has no parent directory".to_string())
+            })?;
             let weights_path = checkpoint_dir.join(weights_filename);
             if weights_path.exists() {
-                self.varmap
-                    .load(&weights_path)
-                    .map_err(|e| VocoderError::ModelError(format!("Failed to load checkpoint weights: {e}")))?;
+                self.varmap.load(&weights_path).map_err(|e| {
+                    VocoderError::ModelError(format!("Failed to load checkpoint weights: {e}"))
+                })?;
             }
         }
         // If weights_file is None, this is a legacy state-only checkpoint; skip weight load silently.
@@ -717,14 +711,14 @@ impl DiffWaveTrainer {
         println!("Loaded checkpoint from: {}", path.display());
         Ok(())
     }
-    
+
     /// Save best model
     async fn save_best_model(&self) -> Result<()> {
         // Save actual model weights as safetensors
         let best_weights_path = self.config.output_dir.join("best_model.safetensors");
-        self.varmap
-            .save(&best_weights_path)
-            .map_err(|e| VocoderError::ModelError(format!("Failed to save best model weights: {e}")))?;
+        self.varmap.save(&best_weights_path).map_err(|e| {
+            VocoderError::ModelError(format!("Failed to save best model weights: {e}"))
+        })?;
 
         // Also write a small JSON state summary for human-readable metadata
         let best_model_path = self.config.output_dir.join("best_model.pt");
@@ -737,7 +731,7 @@ impl DiffWaveTrainer {
         println!("Saved best model: {}", best_weights_path.display());
         Ok(())
     }
-    
+
     /// Get training statistics
     pub fn get_training_stats(&self) -> &[TrainingStats] {
         &self.training_stats
@@ -779,10 +773,10 @@ impl LearningRateScheduler {
             patience_count: 0,
         }
     }
-    
+
     fn step(&mut self, metric: Option<f64>) -> f64 {
         self.step_count += 1;
-        
+
         match &self.config {
             SchedulerConfig::ExponentialDecay { gamma, step_size } => {
                 if self.step_count.is_multiple_of(*step_size) {
@@ -791,23 +785,35 @@ impl LearningRateScheduler {
             }
             SchedulerConfig::CosineAnnealing { t_max, eta_min } => {
                 let progress = (self.step_count % t_max) as f64 / *t_max as f64;
-                self.current_lr = eta_min + (self.base_lr - eta_min) * 
-                    (1.0 + (std::f64::consts::PI * progress).cos()) / 2.0;
+                self.current_lr = eta_min
+                    + (self.base_lr - eta_min) * (1.0 + (std::f64::consts::PI * progress).cos())
+                        / 2.0;
             }
-            SchedulerConfig::LinearWarmupDecay { warmup_steps, decay_steps, min_lr } => {
+            SchedulerConfig::LinearWarmupDecay {
+                warmup_steps,
+                decay_steps,
+                min_lr,
+            } => {
                 if self.step_count <= *warmup_steps {
                     // Warmup phase
-                    self.current_lr = self.base_lr * (self.step_count as f64 / *warmup_steps as f64);
+                    self.current_lr =
+                        self.base_lr * (self.step_count as f64 / *warmup_steps as f64);
                 } else if self.step_count <= warmup_steps + decay_steps {
                     // Decay phase
-                    let decay_progress = (self.step_count - warmup_steps) as f64 / *decay_steps as f64;
+                    let decay_progress =
+                        (self.step_count - warmup_steps) as f64 / *decay_steps as f64;
                     self.current_lr = min_lr + (self.base_lr - min_lr) * (1.0 - decay_progress);
                 } else {
                     // Maintain minimum learning rate
                     self.current_lr = *min_lr;
                 }
             }
-            SchedulerConfig::ReduceOnPlateau { factor, patience, threshold, min_lr } => {
+            SchedulerConfig::ReduceOnPlateau {
+                factor,
+                patience,
+                threshold,
+                min_lr,
+            } => {
                 if let Some(current_metric) = metric {
                     if current_metric < self.best_metric - threshold {
                         self.best_metric = current_metric;
@@ -827,10 +833,10 @@ impl LearningRateScheduler {
                 }
             }
         }
-        
+
         self.current_lr
     }
-    
+
     fn get_lr(&self) -> f64 {
         self.current_lr
     }
@@ -839,8 +845,8 @@ impl LearningRateScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use safetensors::SafeTensors;
+    use tempfile::TempDir;
 
     #[test]
     fn test_training_config_default() {
@@ -856,15 +862,15 @@ mod tests {
             gamma: 0.9,
             step_size: 100,
         };
-        
+
         let mut scheduler = LearningRateScheduler::new(config, 1e-3);
-        
+
         // Step should not change LR until step_size
         for _ in 0..99 {
             scheduler.step(None);
         }
         assert_eq!(scheduler.get_lr(), 1e-3);
-        
+
         // At step 100, LR should decay
         scheduler.step(None);
         assert!((scheduler.get_lr() - 9e-4).abs() < 1e-10);
@@ -877,10 +883,10 @@ mod tests {
             output_dir: TempDir::new().unwrap().path().to_path_buf(),
             ..TrainingConfig::default()
         };
-        
+
         let mut trainer = DiffWaveTrainer::new(model_config, training_config).unwrap();
         trainer.initialize_optimizer().unwrap();
-        
+
         assert!(trainer.optimizer.is_some());
     }
 
@@ -942,7 +948,10 @@ mod tests {
         // Build trainer A, save a checkpoint
         let trainer_a = DiffWaveTrainer::new(model_config.clone(), training_config.clone())
             .expect("trainer A creation failed");
-        trainer_a.save_checkpoint(0).await.expect("save_checkpoint failed");
+        trainer_a
+            .save_checkpoint(0)
+            .await
+            .expect("save_checkpoint failed");
 
         // Collect a representative tensor value from trainer A
         let data_a = trainer_a.varmap.data().lock().expect("lock poisoned");
@@ -967,8 +976,8 @@ mod tests {
             .path();
 
         // Build trainer B and load weights from the same file
-        let mut trainer_b = DiffWaveTrainer::new(model_config, training_config)
-            .expect("trainer B creation failed");
+        let mut trainer_b =
+            DiffWaveTrainer::new(model_config, training_config).expect("trainer B creation failed");
         trainer_b
             .varmap
             .load(&weights_path)
@@ -1006,19 +1015,24 @@ mod tests {
         let model_config = small_model_config();
         let training_config = small_training_config(tmp.path().to_path_buf());
 
-        let trainer = DiffWaveTrainer::new(model_config, training_config)
-            .expect("trainer creation failed");
-        trainer.save_best_model().await.expect("save_best_model failed");
+        let trainer =
+            DiffWaveTrainer::new(model_config, training_config).expect("trainer creation failed");
+        trainer
+            .save_best_model()
+            .await
+            .expect("save_best_model failed");
 
         let best_weights = tmp.path().join("best_model.safetensors");
-        assert!(best_weights.exists(), "best_model.safetensors was not created");
+        assert!(
+            best_weights.exists(),
+            "best_model.safetensors was not created"
+        );
 
         let bytes = std::fs::read(&best_weights).expect("failed to read safetensors file");
         assert!(!bytes.is_empty(), "best_model.safetensors is empty");
 
         // Verify the file is a valid safetensors archive with at least one tensor
-        let tensors =
-            SafeTensors::deserialize(&bytes).expect("failed to deserialize safetensors");
+        let tensors = SafeTensors::deserialize(&bytes).expect("failed to deserialize safetensors");
         assert!(
             tensors.len() > 0,
             "best_model.safetensors contains no tensors"
@@ -1034,7 +1048,10 @@ mod tests {
         // Build a trainer and save a checkpoint (this also writes a .safetensors file)
         let trainer = DiffWaveTrainer::new(model_config.clone(), training_config.clone())
             .expect("trainer creation failed");
-        trainer.save_checkpoint(0).await.expect("save_checkpoint failed");
+        trainer
+            .save_checkpoint(0)
+            .await
+            .expect("save_checkpoint failed");
 
         // Overwrite the JSON checkpoint to simulate a legacy state-only file (weights_file = null)
         let checkpoint_path = tmp.path().join("checkpoint_epoch_0.pt");
@@ -1047,13 +1064,12 @@ mod tests {
             best_val_loss: f64::INFINITY,
             weights_file: None, // legacy: no weights
         };
-        let json = serde_json::to_string_pretty(&legacy_checkpoint)
-            .expect("serialization failed");
+        let json = serde_json::to_string_pretty(&legacy_checkpoint).expect("serialization failed");
         std::fs::write(&checkpoint_path, json).expect("failed to write legacy checkpoint");
 
         // load_checkpoint on a legacy file must succeed without error
-        let mut trainer_b = DiffWaveTrainer::new(model_config, training_config)
-            .expect("trainer B creation failed");
+        let mut trainer_b =
+            DiffWaveTrainer::new(model_config, training_config).expect("trainer B creation failed");
         let result = trainer_b.load_checkpoint(&checkpoint_path).await;
         assert!(
             result.is_ok(),

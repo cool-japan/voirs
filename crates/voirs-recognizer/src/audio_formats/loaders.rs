@@ -12,8 +12,8 @@ use symphonia::core::audio::{Audio, GenericAudioBufferRef};
 use symphonia::core::codecs::audio::{AudioDecoderOptions, CODEC_ID_NULL_AUDIO};
 use symphonia::core::codecs::CodecParameters;
 use symphonia::core::errors::Error as SymphoniaError;
-use symphonia::core::formats::FormatOptions;
 use symphonia::core::formats::probe::Hint;
+use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use voirs_sdk::AudioBuffer;
@@ -476,9 +476,11 @@ impl M4aLoader {
         // Create a decoder for the track
         let audio_params = match &track.codec_params {
             Some(CodecParameters::Audio(params)) => params.clone(),
-            _ => return Err(RecognitionError::InvalidFormat(
-                "Track has no audio codec parameters".to_string()
-            )),
+            _ => {
+                return Err(RecognitionError::InvalidFormat(
+                    "Track has no audio codec parameters".to_string(),
+                ))
+            }
         };
         let mut decoder = symphonia::default::get_codecs()
             .make_audio_decoder(&audio_params, &decoder_opts)
@@ -568,16 +570,28 @@ impl M4aLoader {
         // In symphonia 0.6.0, iter_interleaved() yields S by value.
         match audio_buf {
             GenericAudioBufferRef::U8(buf) => {
-                samples.extend(buf.iter_interleaved().map(|s| (f32::from(s) - 128.0) / 128.0));
+                samples.extend(
+                    buf.iter_interleaved()
+                        .map(|s| (f32::from(s) - 128.0) / 128.0),
+                );
             }
             GenericAudioBufferRef::U16(buf) => {
-                samples.extend(buf.iter_interleaved().map(|s| (f32::from(s) - 32768.0) / 32768.0));
+                samples.extend(
+                    buf.iter_interleaved()
+                        .map(|s| (f32::from(s) - 32768.0) / 32768.0),
+                );
             }
             GenericAudioBufferRef::U24(buf) => {
-                samples.extend(buf.iter_interleaved().map(|s| (s.inner() as f32 - 8_388_608.0) / 8_388_608.0));
+                samples.extend(
+                    buf.iter_interleaved()
+                        .map(|s| (s.inner() as f32 - 8_388_608.0) / 8_388_608.0),
+                );
             }
             GenericAudioBufferRef::U32(buf) => {
-                samples.extend(buf.iter_interleaved().map(|s| (s as f64 / 2_147_483_648.0 - 1.0) as f32));
+                samples.extend(
+                    buf.iter_interleaved()
+                        .map(|s| (s as f64 / 2_147_483_648.0 - 1.0) as f32),
+                );
             }
             GenericAudioBufferRef::S8(buf) => {
                 samples.extend(buf.iter_interleaved().map(|s| f32::from(s) / 128.0));
@@ -586,7 +600,10 @@ impl M4aLoader {
                 samples.extend(buf.iter_interleaved().map(|s| f32::from(s) / 32768.0));
             }
             GenericAudioBufferRef::S24(buf) => {
-                samples.extend(buf.iter_interleaved().map(|s| s.inner() as f32 / 8_388_608.0));
+                samples.extend(
+                    buf.iter_interleaved()
+                        .map(|s| s.inner() as f32 / 8_388_608.0),
+                );
             }
             GenericAudioBufferRef::S32(buf) => {
                 samples.extend(buf.iter_interleaved().map(|s| s as f32 / 2_147_483_648.0));

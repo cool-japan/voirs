@@ -1,8 +1,8 @@
 //! Voice management command implementations.
 
 use chrono::Utc;
-use indicatif::{ProgressBar, ProgressStyle};
 use hex;
+use indicatif::{ProgressBar, ProgressStyle};
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use voirs_sdk::{config::AppConfig, error::Result, VoiceConfig, VoirsPipeline};

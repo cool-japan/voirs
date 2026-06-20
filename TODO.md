@@ -525,8 +525,8 @@ VoiRS has achieved production readiness with comprehensive neural speech synthes
 - [ ] UnivNet integration
 - [ ] Real-time vocoding optimization
 - [ ] Multi-resolution synthesis
-- [ ] DiffWave checkpoint loading for inference
-- [ ] Resume training from checkpoint
+- [x] DiffWave checkpoint loading for inference
+- [x] Resume training from checkpoint
 
 ### voirs-emotion
 - [x] **ONNX Emotion Classifier** - 7-emotion classification from mel spectrograms via OxiONNX

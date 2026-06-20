@@ -45,9 +45,12 @@ impl AsioDriver {
 
     /// Convert cpal device to our AudioDeviceInfo
     fn device_to_info(&self, device: &Device) -> DriverResult<AudioDeviceInfo> {
-        let name = device.description().map(|d| d.name().to_string()).map_err(|e| {
-            AudioDriverError::InternalError(format!("Failed to get device name: {e}"))
-        })?;
+        let name = device
+            .description()
+            .map(|d| d.name().to_string())
+            .map_err(|e| {
+                AudioDriverError::InternalError(format!("Failed to get device name: {e}"))
+            })?;
 
         // Get supported output configurations
         let mut supported_configs = device
@@ -178,7 +181,11 @@ impl AudioDriver for AsioDriver {
             })?;
 
             devices
-                .find(|d| d.description().map(|desc| desc.name() == id).unwrap_or(false))
+                .find(|d| {
+                    d.description()
+                        .map(|desc| desc.name() == id)
+                        .unwrap_or(false)
+                })
                 .ok_or_else(|| AudioDriverError::DeviceNotFound(id.to_string()))?
         } else {
             // Use default device

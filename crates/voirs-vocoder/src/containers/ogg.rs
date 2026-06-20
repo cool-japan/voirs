@@ -8,10 +8,10 @@ use symphonia::core::audio::GenericAudioBufferRef;
 use symphonia::core::codecs::audio::{AudioDecoderOptions, CODEC_ID_NULL_AUDIO};
 use symphonia::core::codecs::registry::CodecRegistry;
 use symphonia::core::errors::Error as SymphoniaError;
+use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
-use symphonia::core::formats::probe::Hint;
 
 use super::ContainerConfig;
 
@@ -233,9 +233,7 @@ pub fn read_ogg_container<P: AsRef<Path>>(path: P) -> Result<AudioBuffer> {
         .codec_params
         .as_ref()
         .and_then(|p| p.audio())
-        .ok_or_else(|| {
-            VocoderError::InputError("Track has no audio codec params".to_string())
-        })?;
+        .ok_or_else(|| VocoderError::InputError("Track has no audio codec params".to_string()))?;
     let mut decoder = codec_registry
         .make_audio_decoder(audio_params, &decoder_opts)
         .map_err(|e| VocoderError::InputError(format!("Failed to create decoder: {e}")))?;
@@ -248,7 +246,7 @@ pub fn read_ogg_container<P: AsRef<Path>>(path: P) -> Result<AudioBuffer> {
     loop {
         let packet = match format_reader.next_packet() {
             Ok(Some(packet)) => packet,
-            Ok(None) => break, // End of stream (0.6.0 API)
+            Ok(None) => break,                        // End of stream (0.6.0 API)
             Err(SymphoniaError::IoError(_)) => break, // I/O end of stream
             Err(e) => {
                 return Err(VocoderError::InputError(format!(

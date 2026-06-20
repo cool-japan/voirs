@@ -5,14 +5,13 @@ use clap::{Args, Subcommand};
 use std::path::{Path, PathBuf};
 #[cfg(feature = "singing")]
 use voirs_singing::{
-    EffectChain, MidiParser, MusicalIntelligence, MusicXmlParser, PitchContour, SingingConfig,
-    SingingEngine, SingingTechnique, VoiceCharacteristics, VoiceType,
     formats::FormatParser,
     techniques::{
         ArticulationSettings, DynamicsSettings, ExpressionSettings, FormantSettings,
         LegatoSettings, PortamentoSettings, ResonanceSettings, VibratoSettings,
     },
-    BreathControl, VocalFry,
+    BreathControl, EffectChain, MidiParser, MusicXmlParser, MusicalIntelligence, PitchContour,
+    SingingConfig, SingingEngine, SingingTechnique, VocalFry, VoiceCharacteristics, VoiceType,
 };
 
 use hound;
@@ -448,9 +447,8 @@ async fn execute_analyze_command(
 
     let analysis = analyze_singing_audio(&samples, sample_rate, &args).await?;
 
-    let report_json = serde_json::to_string_pretty(&analysis).map_err(|e| {
-        CliError::InvalidArgument(format!("Failed to serialize analysis: {}", e))
-    })?;
+    let report_json = serde_json::to_string_pretty(&analysis)
+        .map_err(|e| CliError::InvalidArgument(format!("Failed to serialize analysis: {}", e)))?;
 
     std::fs::write(&args.report, report_json)
         .map_err(|e| CliError::IoError(format!("failed to write report: {e}")))?;
@@ -540,9 +538,7 @@ fn create_singing_technique(technique: &str) -> Result<SingingTechnique, CliErro
 }
 
 #[cfg(feature = "singing")]
-async fn load_musical_score(
-    path: &Path,
-) -> Result<voirs_singing::MusicalScore, CliError> {
+async fn load_musical_score(path: &Path) -> Result<voirs_singing::MusicalScore, CliError> {
     let path_str = path
         .to_str()
         .ok_or_else(|| CliError::InvalidArgument("path contains invalid UTF-8".into()))?;
@@ -587,23 +583,16 @@ fn validate_voice_compatibility(
     let in_range = score
         .notes
         .iter()
-        .filter(|n| {
-            n.event.frequency >= voice_range.0 && n.event.frequency <= voice_range.1
-        })
+        .filter(|n| n.event.frequency >= voice_range.0 && n.event.frequency <= voice_range.1)
         .count();
 
     Ok(in_range as f64 / total as f64 > 0.5)
 }
 
 #[cfg(feature = "singing")]
-fn analyze_note_range(
-    notes: &[voirs_singing::MusicalNote],
-) -> (f32, f32) {
+fn analyze_note_range(notes: &[voirs_singing::MusicalNote]) -> (f32, f32) {
     let frequencies: Vec<f32> = notes.iter().map(|n| n.event.frequency).collect();
-    let min_freq = frequencies
-        .iter()
-        .copied()
-        .fold(f32::INFINITY, f32::min);
+    let min_freq = frequencies.iter().copied().fold(f32::INFINITY, f32::min);
     let max_freq = frequencies
         .iter()
         .copied()

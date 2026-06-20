@@ -42,9 +42,12 @@ impl CoreAudioDriver {
 
     /// Convert cpal device to our AudioDeviceInfo
     fn device_info_from_cpal(device: &Device) -> DriverResult<AudioDeviceInfo> {
-        let name = device.description().map(|d| d.name().to_string()).map_err(|e| {
-            AudioDriverError::InternalError(format!("Failed to get device name: {e}"))
-        })?;
+        let name = device
+            .description()
+            .map(|d| d.name().to_string())
+            .map_err(|e| {
+                AudioDriverError::InternalError(format!("Failed to get device name: {e}"))
+            })?;
 
         // Get supported configurations
         let mut supported_sample_rates = Vec::new();

@@ -8,8 +8,8 @@ use voirs_spatial::{
     position::{AttenuationModel, AttenuationParams, DirectivityPattern, SourceType},
     room::{RoomConfig, WallMaterials},
     types::BinauraAudio,
-    HrtfDatabase, Listener, Position3D, RoomSimulator, SoundSource, SpatialConfig,
-    SpatialEffect, SpatialProcessor, SpatialRequest, SpatialResult,
+    HrtfDatabase, Listener, Position3D, RoomSimulator, SoundSource, SpatialConfig, SpatialEffect,
+    SpatialProcessor, SpatialRequest, SpatialResult,
 };
 
 #[cfg(feature = "spatial")]
@@ -226,13 +226,7 @@ async fn execute_synth_command(
         .await
         .map_err(|e| CliError::spatial_error(format!("processor init failed: {e}")))?;
 
-    let request = SpatialRequest::new(
-        "synth".to_string(),
-        mono,
-        sr,
-        source_pos,
-        listener_pos,
-    );
+    let request = SpatialRequest::new("synth".to_string(), mono, sr, source_pos, listener_pos);
     let result = processor
         .process_request(request)
         .await
@@ -272,7 +266,10 @@ async fn execute_hrtf_command(
     args: HrtfArgs,
     output_formatter: &OutputFormatter,
 ) -> Result<(), CliError> {
-    output_formatter.info(&format!("Applying HRTF processing to: {}", args.input.display()));
+    output_formatter.info(&format!(
+        "Applying HRTF processing to: {}",
+        args.input.display()
+    ));
 
     // Load input audio with sample rate
     let (mono, sr) = load_mono_audio_with_sr(&args.input)?;
@@ -301,7 +298,10 @@ async fn execute_hrtf_command(
     }
     save_stereo_audio(&stereo, &args.output, result.audio.sample_rate)?;
 
-    output_formatter.success(&format!("HRTF processing completed: {}", args.output.display()));
+    output_formatter.success(&format!(
+        "HRTF processing completed: {}",
+        args.output.display()
+    ));
     output_formatter.info(&format!(
         "Position: ({:.1}, {:.1}, {:.1})",
         args.position.x, args.position.y, args.position.z
@@ -317,7 +317,11 @@ async fn execute_hrtf_command(
     ));
     output_formatter.info(&format!(
         "Crossfeed: {}",
-        if args.crossfeed { "enabled" } else { "disabled" }
+        if args.crossfeed {
+            "enabled"
+        } else {
+            "disabled"
+        }
     ));
 
     Ok(())
@@ -328,7 +332,10 @@ async fn execute_room_command(
     args: RoomArgs,
     output_formatter: &OutputFormatter,
 ) -> Result<(), CliError> {
-    output_formatter.info(&format!("Applying room acoustics to: {}", args.input.display()));
+    output_formatter.info(&format!(
+        "Applying room acoustics to: {}",
+        args.input.display()
+    ));
 
     // Load room configuration from JSON
     let room_config = load_room_config(&args.room_config)?;
@@ -363,7 +370,10 @@ async fn execute_room_command(
     }
     save_stereo_audio(&stereo, &args.output, result.audio.sample_rate)?;
 
-    output_formatter.success(&format!("Room acoustics applied: {}", args.output.display()));
+    output_formatter.success(&format!(
+        "Room acoustics applied: {}",
+        args.output.display()
+    ));
     output_formatter.info(&format!(
         "Room dimensions: ({:.1}, {:.1}, {:.1})",
         room_config.dimensions.0, room_config.dimensions.1, room_config.dimensions.2
@@ -514,7 +524,11 @@ async fn execute_calibrate_command(
         version: "1.0",
         created_at,
         headphone_model: &args.headphone_model,
-        calibration_mode: if args.interactive { "interactive" } else { "automatic" },
+        calibration_mode: if args.interactive {
+            "interactive"
+        } else {
+            "automatic"
+        },
     };
 
     let json = serde_json::to_string_pretty(&profile)
@@ -523,15 +537,25 @@ async fn execute_calibrate_command(
     std::fs::write(&args.output_profile, json)
         .map_err(|e| CliError::IoError(format!("failed to write calibration profile: {e}")))?;
 
-    output_formatter.success(&format!("Calibration completed: {}", args.output_profile.display()));
+    output_formatter.success(&format!(
+        "Calibration completed: {}",
+        args.output_profile.display()
+    ));
     output_formatter.info(&format!("Headphone model: {}", args.headphone_model));
     output_formatter.info(&format!(
         "Calibration mode: {}",
-        if args.interactive { "interactive" } else { "automatic" }
+        if args.interactive {
+            "interactive"
+        } else {
+            "automatic"
+        }
     ));
 
     if let Some(calibration_audio) = &args.calibration_audio {
-        output_formatter.info(&format!("Used calibration audio: {}", calibration_audio.display()));
+        output_formatter.info(&format!(
+            "Used calibration audio: {}",
+            calibration_audio.display()
+        ));
     }
 
     Ok(())
@@ -820,7 +844,11 @@ fn load_movement_path(path: &Path) -> Result<Vec<MovementPoint>, CliError> {
         Ok(points
             .into_iter()
             .map(|p| MovementPoint {
-                position: Position3D { x: p.x, y: p.y, z: p.z },
+                position: Position3D {
+                    x: p.x,
+                    y: p.y,
+                    z: p.z,
+                },
                 time: p.t,
             })
             .collect())
@@ -828,15 +856,27 @@ fn load_movement_path(path: &Path) -> Result<Vec<MovementPoint>, CliError> {
         // Default linear sweep from left to right when no file is present
         Ok(vec![
             MovementPoint {
-                position: Position3D { x: -5.0, y: 0.0, z: 0.0 },
+                position: Position3D {
+                    x: -5.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
                 time: 0.0,
             },
             MovementPoint {
-                position: Position3D { x: 0.0, y: 0.0, z: 0.0 },
+                position: Position3D {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
                 time: 1.0,
             },
             MovementPoint {
-                position: Position3D { x: 5.0, y: 0.0, z: 0.0 },
+                position: Position3D {
+                    x: 5.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
                 time: 2.0,
             },
         ])

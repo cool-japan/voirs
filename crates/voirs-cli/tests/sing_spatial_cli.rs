@@ -30,9 +30,7 @@ fn test_sing_from_midi_alias_resolves() {
         .args(["sing", "from-midi", "--help"])
         .assert()
         .success()
-        .stdout(
-            predicate::str::contains("midi").or(predicate::str::contains("MIDI")),
-        );
+        .stdout(predicate::str::contains("midi").or(predicate::str::contains("MIDI")));
 }
 
 #[cfg(feature = "singing")]

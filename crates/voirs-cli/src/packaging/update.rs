@@ -1,10 +1,10 @@
 use crate::error::VoirsCLIError;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use hex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use hex;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;

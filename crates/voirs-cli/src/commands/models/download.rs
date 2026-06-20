@@ -4,8 +4,8 @@ use crate::commands::models::safetensors_support::{
     check_production_requirements, SafeTensorsLoader,
 };
 use crate::GlobalOptions;
-use indicatif::{ProgressBar, ProgressStyle};
 use hex;
+use indicatif::{ProgressBar, ProgressStyle};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use voirs_sdk::config::AppConfig;

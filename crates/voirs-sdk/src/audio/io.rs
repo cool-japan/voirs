@@ -309,8 +309,13 @@ impl AudioBuffer {
             }
         };
 
-        if !matches!(sample_format, SampleFormat::F32 | SampleFormat::I16 | SampleFormat::U16) {
-            return Err(VoirsError::audio_error(format!("Unsupported sample format: {sample_format:?}")));
+        if !matches!(
+            sample_format,
+            SampleFormat::F32 | SampleFormat::I16 | SampleFormat::U16
+        ) {
+            return Err(VoirsError::audio_error(format!(
+                "Unsupported sample format: {sample_format:?}"
+            )));
         }
         let stream = build_stream(&device, &stream_config, sample_format)
             .map_err(|e| VoirsError::audio_error(format!("Failed to build audio stream: {e}")))?;
@@ -481,8 +486,13 @@ impl AudioBuffer {
             }
         };
 
-        if !matches!(sample_format, SampleFormat::F32 | SampleFormat::I16 | SampleFormat::U16) {
-            return Err(VoirsError::audio_error(format!("Unsupported sample format: {sample_format:?}")));
+        if !matches!(
+            sample_format,
+            SampleFormat::F32 | SampleFormat::I16 | SampleFormat::U16
+        ) {
+            return Err(VoirsError::audio_error(format!(
+                "Unsupported sample format: {sample_format:?}"
+            )));
         }
         let stream = build_stream(&device, &stream_config, sample_format)
             .map_err(|e| VoirsError::audio_error(format!("Failed to build audio stream: {e}")))?;

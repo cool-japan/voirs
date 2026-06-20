@@ -9,8 +9,8 @@ use std::fs::File;
 use std::path::Path;
 use symphonia::core::audio::{Audio, GenericAudioBufferRef};
 use symphonia::core::codecs::CodecParameters;
-use symphonia::core::formats::FormatOptions;
 use symphonia::core::formats::probe::Hint;
+use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use voirs_sdk::AudioBuffer;
@@ -170,15 +170,21 @@ fn load_with_symphonia(
     let track_id = track.id;
     let audio_codec_params = match &track.codec_params {
         Some(CodecParameters::Audio(p)) => p.clone(),
-        _ => return Err(AudioIoError::IoError {
-            message: "Track has no audio codec params".to_string(),
-            source: None,
-        }),
+        _ => {
+            return Err(AudioIoError::IoError {
+                message: "Track has no audio codec params".to_string(),
+                source: None,
+            })
+        }
     };
 
     // Get basic audio info
     let sample_rate = audio_codec_params.sample_rate.unwrap_or(44100);
-    let channels = audio_codec_params.channels.as_ref().map(|c| c.count()).unwrap_or(2) as u32;
+    let channels = audio_codec_params
+        .channels
+        .as_ref()
+        .map(|c| c.count())
+        .unwrap_or(2) as u32;
 
     // Create decoder
     let mut decoder = symphonia::default::get_codecs()
@@ -236,12 +242,18 @@ fn load_with_symphonia(
                         samples.extend(tmp.into_iter().map(|s| (s as f32 - 32768.0) / 32768.0));
                     }
                     GenericAudioBufferRef::U24(buf) => {
-                        samples.extend(buf.iter_interleaved().map(|s| (s.inner() as f32 - 8_388_608.0) / 8_388_608.0));
+                        samples.extend(
+                            buf.iter_interleaved()
+                                .map(|s| (s.inner() as f32 - 8_388_608.0) / 8_388_608.0),
+                        );
                     }
                     GenericAudioBufferRef::U32(buf) => {
                         let mut tmp: Vec<u32> = Vec::new();
                         buf.copy_to_vec_interleaved(&mut tmp);
-                        samples.extend(tmp.into_iter().map(|s| (s as f64 / 2_147_483_648.0 - 1.0) as f32));
+                        samples.extend(
+                            tmp.into_iter()
+                                .map(|s| (s as f64 / 2_147_483_648.0 - 1.0) as f32),
+                        );
                     }
                     GenericAudioBufferRef::S8(buf) => {
                         let mut tmp: Vec<i8> = Vec::new();
@@ -254,7 +266,10 @@ fn load_with_symphonia(
                         samples.extend(tmp.into_iter().map(|s| s as f32 / 32768.0));
                     }
                     GenericAudioBufferRef::S24(buf) => {
-                        samples.extend(buf.iter_interleaved().map(|s| s.inner() as f32 / 8_388_608.0));
+                        samples.extend(
+                            buf.iter_interleaved()
+                                .map(|s| s.inner() as f32 / 8_388_608.0),
+                        );
                     }
                     GenericAudioBufferRef::S32(buf) => {
                         let mut tmp: Vec<i32> = Vec::new();
@@ -301,42 +316,41 @@ fn load_with_symphonia(
     let audio = AudioBuffer::new(final_samples, final_sample_rate, final_channels);
 
     // Extract metadata
-    let metadata =
-        if let Some(metadata_rev) = format.metadata().current().cloned() {
-            let mut meta = AudioMetadata::default();
+    let metadata = if let Some(metadata_rev) = format.metadata().current().cloned() {
+        let mut meta = AudioMetadata::default();
 
-            for tag in &metadata_rev.media.tags {
-                match tag.raw.key.as_str() {
-                    "TITLE" => meta.title = Some(tag.raw.value.to_string()),
-                    "ARTIST" => meta.artist = Some(tag.raw.value.to_string()),
-                    "ALBUM" => meta.album = Some(tag.raw.value.to_string()),
-                    "GENRE" => meta.genre = Some(tag.raw.value.to_string()),
-                    "DATE" | "YEAR" => {
-                        if let Ok(year) = tag.raw.value.to_string().parse::<u32>() {
-                            meta.year = Some(year);
-                        }
+        for tag in &metadata_rev.media.tags {
+            match tag.raw.key.as_str() {
+                "TITLE" => meta.title = Some(tag.raw.value.to_string()),
+                "ARTIST" => meta.artist = Some(tag.raw.value.to_string()),
+                "ALBUM" => meta.album = Some(tag.raw.value.to_string()),
+                "GENRE" => meta.genre = Some(tag.raw.value.to_string()),
+                "DATE" | "YEAR" => {
+                    if let Ok(year) = tag.raw.value.to_string().parse::<u32>() {
+                        meta.year = Some(year);
                     }
-                    "TRACKNUMBER" => {
-                        if let Ok(track) = tag.raw.value.to_string().parse::<u32>() {
-                            meta.track = Some(track);
-                        }
-                    }
-                    _ => {}
                 }
+                "TRACKNUMBER" => {
+                    if let Ok(track) = tag.raw.value.to_string().parse::<u32>() {
+                        meta.track = Some(track);
+                    }
+                }
+                _ => {}
             }
+        }
 
-            meta.duration = Some(duration);
-            meta
-        } else {
-            AudioMetadata {
-                title: path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .map(|s| s.to_string()),
-                duration: Some(duration),
-                ..Default::default()
-            }
-        };
+        meta.duration = Some(duration);
+        meta
+    } else {
+        AudioMetadata {
+            title: path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(|s| s.to_string()),
+            duration: Some(duration),
+            ..Default::default()
+        }
+    };
 
     Ok((audio, metadata))
 }
