@@ -4,7 +4,6 @@
 //! for use with VoiRS.
 
 use crate::GlobalOptions;
-use bytemuck;
 use safetensors;
 use safetensors::tensor::{Dtype, TensorView};
 use std::collections::HashMap;
@@ -212,19 +211,12 @@ fn tract_tensor_to_safetensors<'a>(tensor: &'a Tensor, name: &str) -> Result<Ten
     // Convert based on datum type
     let datum_type = tensor.datum_type();
 
-    // SafeTensors TensorView expects raw bytes, so we need to convert typed slices to &[u8]
-    // For now, we'll support common types used in neural networks
+    // SafeTensors TensorView expects raw bytes. In tract-core 0.23.x, `as_slice::<T>()`
+    // was removed; use `as_bytes()` directly since datum_type is already validated above.
+    // `as_bytes()` returns the contiguous raw memory of the tensor as &[u8], which is
+    // equivalent to the old bytemuck::cast_slice approach.
     if datum_type == f32::datum_type() {
-        let data = tensor.as_slice::<f32>().map_err(|e| {
-            voirs_sdk::VoirsError::config_error(format!(
-                "Failed to get f32 slice for tensor '{}': {}",
-                name, e
-            ))
-        })?;
-
-        // Convert to bytes using bytemuck
-        let bytes = bytemuck::cast_slice::<f32, u8>(data);
-
+        let bytes = tensor.as_bytes();
         Ok(TensorView::new(Dtype::F32, shape, bytes).map_err(|e| {
             voirs_sdk::VoirsError::config_error(format!(
                 "Failed to create TensorView for '{}': {}",
@@ -232,15 +224,7 @@ fn tract_tensor_to_safetensors<'a>(tensor: &'a Tensor, name: &str) -> Result<Ten
             ))
         })?)
     } else if datum_type == f64::datum_type() {
-        let data = tensor.as_slice::<f64>().map_err(|e| {
-            voirs_sdk::VoirsError::config_error(format!(
-                "Failed to get f64 slice for tensor '{}': {}",
-                name, e
-            ))
-        })?;
-
-        let bytes = bytemuck::cast_slice::<f64, u8>(data);
-
+        let bytes = tensor.as_bytes();
         Ok(TensorView::new(Dtype::F64, shape, bytes).map_err(|e| {
             voirs_sdk::VoirsError::config_error(format!(
                 "Failed to create TensorView for '{}': {}",
@@ -248,15 +232,7 @@ fn tract_tensor_to_safetensors<'a>(tensor: &'a Tensor, name: &str) -> Result<Ten
             ))
         })?)
     } else if datum_type == i64::datum_type() {
-        let data = tensor.as_slice::<i64>().map_err(|e| {
-            voirs_sdk::VoirsError::config_error(format!(
-                "Failed to get i64 slice for tensor '{}': {}",
-                name, e
-            ))
-        })?;
-
-        let bytes = bytemuck::cast_slice::<i64, u8>(data);
-
+        let bytes = tensor.as_bytes();
         Ok(TensorView::new(Dtype::I64, shape, bytes).map_err(|e| {
             voirs_sdk::VoirsError::config_error(format!(
                 "Failed to create TensorView for '{}': {}",
@@ -264,15 +240,7 @@ fn tract_tensor_to_safetensors<'a>(tensor: &'a Tensor, name: &str) -> Result<Ten
             ))
         })?)
     } else if datum_type == i32::datum_type() {
-        let data = tensor.as_slice::<i32>().map_err(|e| {
-            voirs_sdk::VoirsError::config_error(format!(
-                "Failed to get i32 slice for tensor '{}': {}",
-                name, e
-            ))
-        })?;
-
-        let bytes = bytemuck::cast_slice::<i32, u8>(data);
-
+        let bytes = tensor.as_bytes();
         Ok(TensorView::new(Dtype::I32, shape, bytes).map_err(|e| {
             voirs_sdk::VoirsError::config_error(format!(
                 "Failed to create TensorView for '{}': {}",

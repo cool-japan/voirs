@@ -3,6 +3,7 @@
 //! Provides tools to inspect model architecture, verify integrity, and analyze checkpoints.
 
 use crate::GlobalOptions;
+use hex;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -532,7 +533,7 @@ fn calculate_file_checksum(path: &Path) -> Result<String> {
     }
 
     let result = hasher.finalize();
-    Ok(format!("{:x}", result))
+    Ok(hex::encode(result))
 }
 
 /// Export architecture to file

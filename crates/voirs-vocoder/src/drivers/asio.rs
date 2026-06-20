@@ -11,7 +11,7 @@ use super::{
 };
 use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{BuildStreamError, Device, Host, Stream, StreamConfig};
+use cpal::{Device, DeviceDescription, Host, Stream, StreamConfig};
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -45,7 +45,7 @@ impl AsioDriver {
 
     /// Convert cpal device to our AudioDeviceInfo
     fn device_to_info(&self, device: &Device) -> DriverResult<AudioDeviceInfo> {
-        let name = device.name().map_err(|e| {
+        let name = device.description().map(|d| d.name().to_string()).map_err(|e| {
             AudioDriverError::InternalError(format!("Failed to get device name: {e}"))
         })?;
 
@@ -178,7 +178,7 @@ impl AudioDriver for AsioDriver {
             })?;
 
             devices
-                .find(|d| d.name().map(|name| name == id).unwrap_or(false))
+                .find(|d| d.description().map(|desc| desc.name() == id).unwrap_or(false))
                 .ok_or_else(|| AudioDriverError::DeviceNotFound(id.to_string()))?
         } else {
             // Use default device
@@ -239,16 +239,16 @@ impl AudioDriver for AsioDriver {
         // Build the stream
         let stream = device
             .build_output_stream(
-                &stream_config,
+                stream_config.clone(),
                 stream_callback,
                 error_callback,
                 None, // timeout
             )
-            .map_err(|e| match e {
-                BuildStreamError::DeviceNotAvailable => {
+            .map_err(|e| match e.kind() {
+                cpal::ErrorKind::DeviceNotAvailable => {
                     AudioDriverError::DeviceNotFound("Device not available".to_string())
                 }
-                BuildStreamError::InvalidArgument => AudioDriverError::UnsupportedSampleRate {
+                cpal::ErrorKind::InvalidInput => AudioDriverError::UnsupportedSampleRate {
                     rate: config.sample_rate,
                 },
                 _ => AudioDriverError::StreamInitFailed(format!("Failed to build stream: {e}")),

@@ -16,7 +16,7 @@ use aes_gcm::{
 };
 use base64::{engine::general_purpose, Engine as _};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit as HmacKeyInit, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -140,7 +140,7 @@ impl CryptoConsentVerifier {
             .as_ref()
             .ok_or_else(|| Error::Verification("HMAC key not configured".to_string()))?;
 
-        let mut mac = <HmacSha256 as Mac>::new_from_slice(hmac_key)
+        let mut mac = <HmacSha256 as HmacKeyInit>::new_from_slice(hmac_key)
             .map_err(|e| Error::Verification(format!("Invalid HMAC key: {}", e)))?;
         mac.update(serialized.as_bytes());
         let signature = mac.finalize().into_bytes();
@@ -180,7 +180,7 @@ impl CryptoConsentVerifier {
             .as_ref()
             .ok_or_else(|| Error::Verification("HMAC key not configured".to_string()))?;
 
-        let mut mac = <HmacSha256 as Mac>::new_from_slice(hmac_key)
+        let mut mac = <HmacSha256 as HmacKeyInit>::new_from_slice(hmac_key)
             .map_err(|e| Error::Verification(format!("Invalid HMAC key: {}", e)))?;
         mac.update(serialized.as_bytes());
 

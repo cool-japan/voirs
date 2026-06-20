@@ -449,4 +449,59 @@ All examples are licensed under the Apache License, Version 2.0, consistent with
 
 ---
 
+## 🔗 Related Examples (Cross-Reference Index)
+
+The table below groups examples by topic so you can quickly find related files.
+
+| Topic | Examples |
+|-------|---------|
+| Getting Started | `hello_world.rs`, `hello_world_tts.rs`, `hello_world_real_tts.rs`, `basic_configuration.rs`, `simple_synthesis.rs` |
+| Core TTS Pipeline | `ssml_synthesis.rs`, `batch_synthesis.rs`, `complete_pipeline.rs`, `complete_voice_pipeline.rs` |
+| Streaming / Real-time | `streaming_synthesis.rs`, `streaming_synthesis_optimization.rs`, `realtime_voice_coach.rs` |
+| Emotion and Prosody | `emotion_control_example.rs`, `emotion_control_example_fixed.rs` |
+| Voice Cloning | `voice_cloning_example.rs`, `voice_cloning_example_fixed.rs` |
+| Voice Conversion | `voice_conversion_example.rs` |
+| Singing Synthesis | `singing_synthesis_example.rs` |
+| Spatial Audio | `spatial_audio_example.rs`, `vr_ar_immersive_example.rs` |
+| Multilingual / Kokoro | `chinese_tts_demo.rs`, `kokoro_chinese_demo.rs`, `kokoro_japanese_demo.rs`, `kokoro_multilingual_demo.rs`, `kokoro_espeak_auto_demo.rs` |
+| Speech Recognition | `production_whisper_example.rs` |
+| Performance Optimisation | `performance_benchmarking.rs`, `performance_optimization_techniques.rs`, `low_latency_optimization.rs`, `profiling_optimization_example.rs` |
+| Benchmarking | `comprehensive_benchmark_suite.rs`, `ab_testing_quality_comparison.rs`, `batch_evaluation_comparison.rs` |
+| Memory and Profiling | `memory_profiling_analysis.rs` |
+| Quality Assessment | `audio_quality_assessment.rs` |
+| Production / Monitoring | `production_pipeline_example.rs`, `production_monitoring_example.rs` |
+| Debugging and Error Handling | `debug_troubleshooting_example.rs`, `robust_error_handling_patterns.rs` |
+| Platform: Desktop | `desktop_integration_example.rs` |
+| Platform: Mobile | `mobile_integration_example.rs` |
+| Platform: WebAssembly | `wasm_integration_example.rs` |
+| Platform: Cloud | `cloud_deployment_example.rs` |
+| Platform: IoT / Edge | `iot_edge_synthesis_example.rs` |
+| Platform: Games | `game_integration_example.rs` |
+| AI and Multimodal | `ai_integration_example.rs`, `multimodal_integration_example.rs` |
+| Educational Tools | `educational_tools_example.rs` |
+| Creative Applications | `creative_applications_example.rs` |
+| Testing and Validation | `comprehensive_testing_framework.rs`, `examples_testing_framework.rs`, `testing_framework_example.rs`, `documentation_testing_example.rs`, `test_audio_demo.rs` |
+| Community and Reference | `community_contributions_gallery.rs`, `use_case_gallery.rs`, `best_practices_guide.rs`, `faq_examples.rs` |
+
+---
+
+## 🏷️ Version Compatibility
+
+These examples target **VoiRS 0.1.0**.
+
+| Requirement | Minimum version |
+|-------------|----------------|
+| Rust toolchain | 1.89 |
+| VoiRS | 0.1.0 |
+
+A full record of which examples were added, changed, or removed in each release is kept in [`CHANGELOG.md`](CHANGELOG.md).
+
+---
+
+## 🗑️ Deprecation Policy
+
+When an example is superseded or the API it demonstrates is removed, it is marked `[DEPRECATED]` in the top-level doc comment of the `.rs` file and an entry is added to `CHANGELOG.md` under the relevant release. Deprecated examples are retained for one major version cycle to give users time to migrate, then removed. The `CHANGELOG.md` entry for a removed example records the recommended replacement.
+
+---
+
 *Part of the [VoiRS](../README.md) neural speech synthesis ecosystem.*

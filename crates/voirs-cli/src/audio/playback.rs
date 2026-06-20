@@ -2,7 +2,7 @@
 
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
-    ChannelCount, Device, Host, SampleFormat, Stream, StreamConfig, StreamError,
+    ChannelCount, Device, Host, SampleFormat, Stream, StreamConfig,
 };
 use hound::{WavReader, WavSpec};
 use std::collections::VecDeque;
@@ -216,7 +216,9 @@ impl AudioPlayer {
         let mut devices = Vec::new();
 
         let default_device = host.default_output_device();
-        let default_device_name = default_device.as_ref().and_then(|d| d.name().ok());
+        let default_device_name = default_device
+            .as_ref()
+            .and_then(|d| d.description().ok().map(|desc| desc.name().to_string()));
 
         for device in host.output_devices().map_err(|e| {
             VoirsError::device_error(
@@ -224,7 +226,8 @@ impl AudioPlayer {
                 format!("Failed to enumerate devices: {}", e),
             )
         })? {
-            if let Ok(name) = device.name() {
+            if let Ok(desc) = device.description() {
+                let name = desc.name().to_string();
                 let is_default = default_device_name
                     .as_ref()
                     .map(|default| default == &name)
@@ -276,8 +279,8 @@ impl AudioPlayer {
                 format!("Failed to enumerate devices: {}", e),
             )
         })? {
-            if let Ok(name) = device.name() {
-                if name == device_name {
+            if let Ok(desc) = device.description() {
+                if desc.name() == device_name {
                     return Ok(Some(device));
                 }
             }
@@ -339,7 +342,7 @@ impl AudioPlayer {
         let stream = self
             .device
             .build_output_stream(
-                &stream_config,
+                stream_config,
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                     // Fill buffer with audio data
                     for sample in data.iter_mut() {

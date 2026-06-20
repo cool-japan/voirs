@@ -55,12 +55,7 @@ tempfile = { workspace = true }
 walkdir = { workspace = true }
 
 # VR/AR Platform Integration Dependencies
-openvr = { version = "0.8", optional = true }
-# Pin openvr_sys to 2.1.3: the 2.1.4 patch renamed Prop_PreviousUniverseId_Uint64 →
-# Prop_PreviousUniverseId_Uint64_deprecated in its vendored OpenVR header, which breaks
-# openvr 0.8.1 (it targets openvr_sys 2.1.3). Constraint-only dep (not referenced in code);
-# activated together with `openvr` via the `steamvr` feature.
-openvr_sys = { version = "=2.1.3", optional = true }
+openvr = { version = "0.9", optional = true }
 wasm-bindgen = { workspace = true, optional = true }
 web-sys = { workspace = true, optional = true }
 js-sys = { workspace = true, optional = true }
@@ -93,7 +88,7 @@ cuda = ["candle-core/cuda"]
 metal = ["dep:metal-rs"]
 
 # VR/AR Platform Features
-steamvr = ["openvr", "dep:openvr_sys"]
+steamvr = ["dep:openvr"]
 webxr = ["wasm-bindgen", "web-sys", "js-sys"]
 windows_mr = ["winapi"]
 arcore = ["ndk", "ndk-sys"]

@@ -2,6 +2,7 @@
 
 use chrono::Utc;
 use indicatif::{ProgressBar, ProgressStyle};
+use hex;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use voirs_sdk::{config::AppConfig, error::Result, VoiceConfig, VoirsPipeline};
@@ -574,7 +575,7 @@ fn calculate_file_sha256(file_path: &std::path::Path) -> Result<String> {
     }
 
     let hash = hasher.finalize();
-    Ok(format!("{:x}", hash))
+    Ok(hex::encode(hash))
 }
 
 /// Compare multiple voices side by side

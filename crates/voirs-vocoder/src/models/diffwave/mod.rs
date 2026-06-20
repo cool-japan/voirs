@@ -11,7 +11,7 @@ pub mod legacy;
 pub mod sampling;
 pub mod sampling_utils;
 pub mod schedule;
-// pub mod trainer;  // Has Candle API compatibility issues, implementing simplified training directly
+pub mod trainer;
 pub mod unet;
 
 use async_trait::async_trait;

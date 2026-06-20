@@ -261,7 +261,7 @@ impl AudioBuffer {
             let samples = samples.clone();
             match format {
                 SampleFormat::F32 => device.build_output_stream(
-                    config,
+                    *config,
                     move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                         let mut samples_lock = samples.lock().expect("lock should not be poisoned");
                         for frame in data.chunks_mut(channels as usize) {
@@ -275,7 +275,7 @@ impl AudioBuffer {
                     None,
                 ),
                 SampleFormat::I16 => device.build_output_stream(
-                    config,
+                    *config,
                     move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
                         let mut samples_lock = samples.lock().expect("lock should not be poisoned");
                         for frame in data.chunks_mut(channels as usize) {
@@ -290,7 +290,7 @@ impl AudioBuffer {
                     None,
                 ),
                 SampleFormat::U16 => device.build_output_stream(
-                    config,
+                    *config,
                     move |data: &mut [u16], _: &cpal::OutputCallbackInfo| {
                         let mut samples_lock = samples.lock().expect("lock should not be poisoned");
                         for frame in data.chunks_mut(channels as usize) {
@@ -305,10 +305,13 @@ impl AudioBuffer {
                     move |err| eprintln!("Audio stream error: {err}"),
                     None,
                 ),
-                _ => Err(cpal::BuildStreamError::StreamConfigNotSupported),
+                _ => unreachable!("format pre-checked"),
             }
         };
 
+        if !matches!(sample_format, SampleFormat::F32 | SampleFormat::I16 | SampleFormat::U16) {
+            return Err(VoirsError::audio_error(format!("Unsupported sample format: {sample_format:?}")));
+        }
         let stream = build_stream(&device, &stream_config, sample_format)
             .map_err(|e| VoirsError::audio_error(format!("Failed to build audio stream: {e}")))?;
 
@@ -373,7 +376,7 @@ impl AudioBuffer {
 
             match format {
                 SampleFormat::F32 => device.build_output_stream(
-                    config,
+                    *config,
                     move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                         let mut samples_lock = samples.lock().expect("lock should not be poisoned");
                         for frame in data.chunks_mut(channels as usize) {
@@ -406,7 +409,7 @@ impl AudioBuffer {
                     None,
                 ),
                 SampleFormat::I16 => device.build_output_stream(
-                    config,
+                    *config,
                     move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
                         let mut samples_lock = samples.lock().expect("lock should not be poisoned");
                         for frame in data.chunks_mut(channels as usize) {
@@ -440,7 +443,7 @@ impl AudioBuffer {
                     None,
                 ),
                 SampleFormat::U16 => device.build_output_stream(
-                    config,
+                    *config,
                     move |data: &mut [u16], _: &cpal::OutputCallbackInfo| {
                         let mut samples_lock = samples.lock().expect("lock should not be poisoned");
                         for frame in data.chunks_mut(channels as usize) {
@@ -474,10 +477,13 @@ impl AudioBuffer {
                     move |err| eprintln!("Audio stream error: {err}"),
                     None,
                 ),
-                _ => Err(cpal::BuildStreamError::StreamConfigNotSupported),
+                _ => unreachable!("format pre-checked"),
             }
         };
 
+        if !matches!(sample_format, SampleFormat::F32 | SampleFormat::I16 | SampleFormat::U16) {
+            return Err(VoirsError::audio_error(format!("Unsupported sample format: {sample_format:?}")));
+        }
         let stream = build_stream(&device, &stream_config, sample_format)
             .map_err(|e| VoirsError::audio_error(format!("Failed to build audio stream: {e}")))?;
 

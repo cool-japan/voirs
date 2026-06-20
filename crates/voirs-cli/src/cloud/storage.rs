@@ -6,6 +6,7 @@ use aes_gcm::{
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use hex;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::fs;
@@ -389,7 +390,7 @@ impl CloudStorageManager {
         let mut hasher = Sha256::new();
         hasher.update(&content);
         let result = hasher.finalize();
-        Ok(format!("{:x}", result))
+        Ok(hex::encode(result))
     }
 
     /// Save the sync manifest to disk
@@ -846,7 +847,7 @@ fn calculate_file_checksum(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(data);
     let result = hasher.finalize();
-    format!("{:x}", result)
+    hex::encode(result)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

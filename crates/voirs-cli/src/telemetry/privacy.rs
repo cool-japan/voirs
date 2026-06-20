@@ -1,5 +1,6 @@
 //! Privacy controls for telemetry system
 
+use hex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -101,7 +102,7 @@ impl PrivacyControl {
         let mut hasher = Sha256::new();
         hasher.update(input.as_bytes());
         hasher.update(self.salt.as_bytes());
-        format!("{:x}", hasher.finalize())
+        hex::encode(hasher.finalize())
     }
 
     /// Sanitize file paths in metadata

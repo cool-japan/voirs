@@ -7,11 +7,12 @@
 use super::{AudioFormat, AudioIoError, AudioIoResult, AudioMetadata, LoadOptions};
 use std::fs::File;
 use std::path::Path;
-use symphonia::core::audio::{AudioBufferRef, Signal};
+use symphonia::core::audio::{Audio, GenericAudioBufferRef};
+use symphonia::core::codecs::CodecParameters;
 use symphonia::core::formats::FormatOptions;
+use symphonia::core::formats::probe::Hint;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
-use symphonia::core::probe::Hint;
 use voirs_sdk::AudioBuffer;
 
 /// Apply audio conversion (sample rate and channel conversion) if needed
@@ -149,35 +150,39 @@ fn load_with_symphonia(
     let meta_opts = MetadataOptions::default();
     let fmt_opts = FormatOptions::default();
 
-    let mut probed = symphonia::default::get_probe()
-        .format(&hint, mss, &fmt_opts, &meta_opts)
+    let mut format = symphonia::default::get_probe()
+        .probe(&hint, mss, fmt_opts, meta_opts)
         .map_err(|e| AudioIoError::IoError {
             message: format!("Symphonia error: {}", e),
             source: Some(Box::new(e)),
         })?;
 
-    let mut format = probed.format;
-
     // Find the default track
     let track = format
         .tracks()
         .iter()
-        .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
+        .find(|t| matches!(&t.codec_params, Some(CodecParameters::Audio(_))))
         .ok_or_else(|| AudioIoError::IoError {
             message: "No audio track found".to_string(),
             source: None,
         })?;
 
     let track_id = track.id;
-    let codec_params = &track.codec_params;
+    let audio_codec_params = match &track.codec_params {
+        Some(CodecParameters::Audio(p)) => p.clone(),
+        _ => return Err(AudioIoError::IoError {
+            message: "Track has no audio codec params".to_string(),
+            source: None,
+        }),
+    };
 
     // Get basic audio info
-    let sample_rate = codec_params.sample_rate.unwrap_or(44100);
-    let channels = codec_params.channels.map(|c| c.count()).unwrap_or(2) as u32;
+    let sample_rate = audio_codec_params.sample_rate.unwrap_or(44100);
+    let channels = audio_codec_params.channels.as_ref().map(|c| c.count()).unwrap_or(2) as u32;
 
     // Create decoder
     let mut decoder = symphonia::default::get_codecs()
-        .make(&codec_params, &Default::default())
+        .make_audio_decoder(&audio_codec_params, &Default::default())
         .map_err(|e| AudioIoError::IoError {
             message: format!("Symphonia error: {}", e),
             source: Some(Box::new(e)),
@@ -188,7 +193,8 @@ fn load_with_symphonia(
     // Decode audio
     loop {
         let packet = match format.next_packet() {
-            Ok(packet) => packet,
+            Ok(Some(packet)) => packet,
+            Ok(None) => break, // End of stream (0.6.0 API)
             Err(symphonia::core::errors::Error::ResetRequired) => {
                 // Reset decoder
                 decoder.reset();
@@ -207,135 +213,58 @@ fn load_with_symphonia(
             }
         };
 
-        if packet.track_id() != track_id {
+        if packet.track_id != track_id {
             continue;
         }
 
         match decoder.decode(&packet) {
             Ok(audio_buffer) => {
-                // Convert to f32 samples
+                // Convert to f32 samples using interleaved iteration (symphonia 0.6.0).
+                // copy_to_vec_interleaved appends interleaved f32 samples.
                 match audio_buffer {
-                    AudioBufferRef::F32(buf) => {
-                        for ch in 0..buf.spec().channels.count() {
-                            let channel_samples = buf.chan(ch);
-                            for (i, &sample) in channel_samples.iter().enumerate() {
-                                let sample_index = i * channels as usize + ch;
-                                if sample_index >= samples.len() {
-                                    samples.resize(sample_index + 1, 0.0);
-                                }
-                                samples[sample_index] = sample;
-                            }
-                        }
+                    GenericAudioBufferRef::F32(buf) => {
+                        buf.copy_to_vec_interleaved(&mut samples);
                     }
-                    AudioBufferRef::U8(buf) => {
-                        for ch in 0..buf.spec().channels.count() {
-                            let channel_samples = buf.chan(ch);
-                            for (i, &sample) in channel_samples.iter().enumerate() {
-                                let sample_index = i * channels as usize + ch;
-                                if sample_index >= samples.len() {
-                                    samples.resize(sample_index + 1, 0.0);
-                                }
-                                samples[sample_index] = (sample as f32 - 128.0) / 128.0;
-                            }
-                        }
+                    GenericAudioBufferRef::U8(buf) => {
+                        let mut tmp: Vec<u8> = Vec::new();
+                        buf.copy_to_vec_interleaved(&mut tmp);
+                        samples.extend(tmp.into_iter().map(|s| (s as f32 - 128.0) / 128.0));
                     }
-                    AudioBufferRef::U16(buf) => {
-                        for ch in 0..buf.spec().channels.count() {
-                            let channel_samples = buf.chan(ch);
-                            for (i, &sample) in channel_samples.iter().enumerate() {
-                                let sample_index = i * channels as usize + ch;
-                                if sample_index >= samples.len() {
-                                    samples.resize(sample_index + 1, 0.0);
-                                }
-                                samples[sample_index] = (sample as f32 - 32768.0) / 32768.0;
-                            }
-                        }
+                    GenericAudioBufferRef::U16(buf) => {
+                        let mut tmp: Vec<u16> = Vec::new();
+                        buf.copy_to_vec_interleaved(&mut tmp);
+                        samples.extend(tmp.into_iter().map(|s| (s as f32 - 32768.0) / 32768.0));
                     }
-                    AudioBufferRef::U24(buf) => {
-                        for ch in 0..buf.spec().channels.count() {
-                            let channel_samples = buf.chan(ch);
-                            for (i, &sample) in channel_samples.iter().enumerate() {
-                                let sample_index = i * channels as usize + ch;
-                                if sample_index >= samples.len() {
-                                    samples.resize(sample_index + 1, 0.0);
-                                }
-                                samples[sample_index] =
-                                    (sample.inner() as f32 - 8_388_608.0) / 8_388_608.0;
-                            }
-                        }
+                    GenericAudioBufferRef::U24(buf) => {
+                        samples.extend(buf.iter_interleaved().map(|s| (s.inner() as f32 - 8_388_608.0) / 8_388_608.0));
                     }
-                    AudioBufferRef::U32(buf) => {
-                        for ch in 0..buf.spec().channels.count() {
-                            let channel_samples = buf.chan(ch);
-                            for (i, &sample) in channel_samples.iter().enumerate() {
-                                let sample_index = i * channels as usize + ch;
-                                if sample_index >= samples.len() {
-                                    samples.resize(sample_index + 1, 0.0);
-                                }
-                                samples[sample_index] =
-                                    (sample as f32 - 2_147_483_648.0) / 2_147_483_648.0;
-                            }
-                        }
+                    GenericAudioBufferRef::U32(buf) => {
+                        let mut tmp: Vec<u32> = Vec::new();
+                        buf.copy_to_vec_interleaved(&mut tmp);
+                        samples.extend(tmp.into_iter().map(|s| (s as f64 / 2_147_483_648.0 - 1.0) as f32));
                     }
-                    AudioBufferRef::S8(buf) => {
-                        for ch in 0..buf.spec().channels.count() {
-                            let channel_samples = buf.chan(ch);
-                            for (i, &sample) in channel_samples.iter().enumerate() {
-                                let sample_index = i * channels as usize + ch;
-                                if sample_index >= samples.len() {
-                                    samples.resize(sample_index + 1, 0.0);
-                                }
-                                samples[sample_index] = sample as f32 / 128.0;
-                            }
-                        }
+                    GenericAudioBufferRef::S8(buf) => {
+                        let mut tmp: Vec<i8> = Vec::new();
+                        buf.copy_to_vec_interleaved(&mut tmp);
+                        samples.extend(tmp.into_iter().map(|s| s as f32 / 128.0));
                     }
-                    AudioBufferRef::S16(buf) => {
-                        for ch in 0..buf.spec().channels.count() {
-                            let channel_samples = buf.chan(ch);
-                            for (i, &sample) in channel_samples.iter().enumerate() {
-                                let sample_index = i * channels as usize + ch;
-                                if sample_index >= samples.len() {
-                                    samples.resize(sample_index + 1, 0.0);
-                                }
-                                samples[sample_index] = sample as f32 / 32768.0;
-                            }
-                        }
+                    GenericAudioBufferRef::S16(buf) => {
+                        let mut tmp: Vec<i16> = Vec::new();
+                        buf.copy_to_vec_interleaved(&mut tmp);
+                        samples.extend(tmp.into_iter().map(|s| s as f32 / 32768.0));
                     }
-                    AudioBufferRef::S24(buf) => {
-                        for ch in 0..buf.spec().channels.count() {
-                            let channel_samples = buf.chan(ch);
-                            for (i, &sample) in channel_samples.iter().enumerate() {
-                                let sample_index = i * channels as usize + ch;
-                                if sample_index >= samples.len() {
-                                    samples.resize(sample_index + 1, 0.0);
-                                }
-                                samples[sample_index] = sample.inner() as f32 / 8_388_608.0;
-                            }
-                        }
+                    GenericAudioBufferRef::S24(buf) => {
+                        samples.extend(buf.iter_interleaved().map(|s| s.inner() as f32 / 8_388_608.0));
                     }
-                    AudioBufferRef::S32(buf) => {
-                        for ch in 0..buf.spec().channels.count() {
-                            let channel_samples = buf.chan(ch);
-                            for (i, &sample) in channel_samples.iter().enumerate() {
-                                let sample_index = i * channels as usize + ch;
-                                if sample_index >= samples.len() {
-                                    samples.resize(sample_index + 1, 0.0);
-                                }
-                                samples[sample_index] = sample as f32 / 2_147_483_648.0;
-                            }
-                        }
+                    GenericAudioBufferRef::S32(buf) => {
+                        let mut tmp: Vec<i32> = Vec::new();
+                        buf.copy_to_vec_interleaved(&mut tmp);
+                        samples.extend(tmp.into_iter().map(|s| s as f32 / 2_147_483_648.0));
                     }
-                    AudioBufferRef::F64(buf) => {
-                        for ch in 0..buf.spec().channels.count() {
-                            let channel_samples = buf.chan(ch);
-                            for (i, &sample) in channel_samples.iter().enumerate() {
-                                let sample_index = i * channels as usize + ch;
-                                if sample_index >= samples.len() {
-                                    samples.resize(sample_index + 1, 0.0);
-                                }
-                                samples[sample_index] = sample as f32;
-                            }
-                        }
+                    GenericAudioBufferRef::F64(buf) => {
+                        let mut tmp: Vec<f64> = Vec::new();
+                        buf.copy_to_vec_interleaved(&mut tmp);
+                        samples.extend(tmp.into_iter().map(|s| s as f32));
                     }
                 }
             }
@@ -373,22 +302,22 @@ fn load_with_symphonia(
 
     // Extract metadata
     let metadata =
-        if let Some(metadata_rev) = probed.metadata.get().as_ref().and_then(|m| m.current()) {
+        if let Some(metadata_rev) = format.metadata().current().cloned() {
             let mut meta = AudioMetadata::default();
 
-            for tag in metadata_rev.tags() {
-                match tag.key.as_str() {
-                    "TITLE" => meta.title = Some(tag.value.to_string()),
-                    "ARTIST" => meta.artist = Some(tag.value.to_string()),
-                    "ALBUM" => meta.album = Some(tag.value.to_string()),
-                    "GENRE" => meta.genre = Some(tag.value.to_string()),
+            for tag in &metadata_rev.media.tags {
+                match tag.raw.key.as_str() {
+                    "TITLE" => meta.title = Some(tag.raw.value.to_string()),
+                    "ARTIST" => meta.artist = Some(tag.raw.value.to_string()),
+                    "ALBUM" => meta.album = Some(tag.raw.value.to_string()),
+                    "GENRE" => meta.genre = Some(tag.raw.value.to_string()),
                     "DATE" | "YEAR" => {
-                        if let Ok(year) = tag.value.to_string().parse::<u32>() {
+                        if let Ok(year) = tag.raw.value.to_string().parse::<u32>() {
                             meta.year = Some(year);
                         }
                     }
                     "TRACKNUMBER" => {
-                        if let Ok(track) = tag.value.to_string().parse::<u32>() {
+                        if let Ok(track) = tag.raw.value.to_string().parse::<u32>() {
                             meta.track = Some(track);
                         }
                     }
@@ -432,14 +361,13 @@ fn validate_with_symphonia(path: &Path) -> bool {
     let meta_opts = MetadataOptions::default();
     let fmt_opts = FormatOptions::default();
 
-    match symphonia::default::get_probe().format(&hint, mss, &fmt_opts, &meta_opts) {
-        Ok(probed) => {
+    match symphonia::default::get_probe().probe(&hint, mss, fmt_opts, meta_opts) {
+        Ok(format_reader) => {
             // Check if there's at least one valid audio track
-            probed
-                .format
+            format_reader
                 .tracks()
                 .iter()
-                .any(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
+                .any(|t| matches!(&t.codec_params, Some(CodecParameters::Audio(_))))
         }
         Err(_) => false,
     }

@@ -5,6 +5,7 @@ use crate::commands::models::safetensors_support::{
 };
 use crate::GlobalOptions;
 use indicatif::{ProgressBar, ProgressStyle};
+use hex;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use voirs_sdk::config::AppConfig;
@@ -516,7 +517,7 @@ fn verify_file_checksum(file_path: &PathBuf, expected_hash: &str) -> Result<()> 
     }
 
     let result = hasher.finalize();
-    let actual_hash = format!("{:x}", result);
+    let actual_hash = hex::encode(result);
 
     if actual_hash != expected_hash {
         return Err(voirs_sdk::VoirsError::config_error(format!(

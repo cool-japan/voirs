@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{BuildStreamError, Device, Host, SampleFormat, StreamConfig};
+use cpal::{Device, DeviceDescription, Host, SampleFormat, StreamConfig};
 use parking_lot::Mutex;
 use std::sync::Arc;
 
@@ -42,7 +42,7 @@ impl CoreAudioDriver {
 
     /// Convert cpal device to our AudioDeviceInfo
     fn device_info_from_cpal(device: &Device) -> DriverResult<AudioDeviceInfo> {
-        let name = device.name().map_err(|e| {
+        let name = device.description().map(|d| d.name().to_string()).map_err(|e| {
             AudioDriverError::InternalError(format!("Failed to get device name: {e}"))
         })?;
 
@@ -174,8 +174,8 @@ impl AudioDriver for CoreAudioDriver {
 
             devices
                 .find(|d| {
-                    d.name()
-                        .is_ok_and(|name| format!("core_audio_{name}") == id)
+                    d.description()
+                        .is_ok_and(|desc| format!("core_audio_{}", desc.name()) == id)
                 })
                 .ok_or_else(|| {
                     AudioDriverError::DeviceNotFound(format!("Device not found: {id}"))
@@ -220,7 +220,7 @@ impl AudioDriver for CoreAudioDriver {
             SampleFormat::F32 => {
                 let callback_clone = Arc::clone(&callback);
                 device.build_output_stream(
-                    &cpal_config,
+                    cpal_config,
                     move |data: &mut [f32], _info: &cpal::OutputCallbackInfo| {
                         // Call our callback
                         if let Err(e) = callback_clone(data) {
@@ -241,7 +241,7 @@ impl AudioDriver for CoreAudioDriver {
             SampleFormat::I16 => {
                 let callback_clone = Arc::clone(&callback);
                 device.build_output_stream(
-                    &cpal_config,
+                    cpal_config,
                     move |data: &mut [i16], _info: &cpal::OutputCallbackInfo| {
                         // Convert to f32, call callback, then convert back
                         let mut f32_data: Vec<f32> = data
@@ -272,7 +272,7 @@ impl AudioDriver for CoreAudioDriver {
             SampleFormat::U16 => {
                 let callback_clone = Arc::clone(&callback);
                 device.build_output_stream(
-                    &cpal_config,
+                    cpal_config,
                     move |data: &mut [u16], _info: &cpal::OutputCallbackInfo| {
                         // Convert to f32, call callback, then convert back
                         let mut f32_data: Vec<f32> = data
@@ -309,11 +309,11 @@ impl AudioDriver for CoreAudioDriver {
                 )));
             }
         }
-        .map_err(|e| match e {
-            BuildStreamError::DeviceNotAvailable => {
+        .map_err(|e| match e.kind() {
+            cpal::ErrorKind::DeviceNotAvailable => {
                 AudioDriverError::DeviceNotFound("Device not available".to_string())
             }
-            BuildStreamError::InvalidArgument => {
+            cpal::ErrorKind::InvalidInput => {
                 AudioDriverError::InternalError("Invalid stream configuration".to_string())
             }
             _ => AudioDriverError::StreamInitFailed(format!("Failed to build stream: {e}")),

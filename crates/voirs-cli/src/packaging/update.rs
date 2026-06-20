@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use hex;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -370,7 +371,7 @@ impl UpdateManager {
         let content = fs::read(binary_path)?;
         let mut hasher = Sha256::new();
         hasher.update(&content);
-        let actual_checksum = format!("{:x}", hasher.finalize());
+        let actual_checksum = hex::encode(hasher.finalize());
 
         let matches = actual_checksum == expected_checksum;
         if matches {

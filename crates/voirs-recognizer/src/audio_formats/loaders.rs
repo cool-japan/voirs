@@ -8,13 +8,14 @@ use super::{AudioLoadConfig, AudioResampler, ResamplingQuality};
 use crate::RecognitionError;
 use std::io::{Cursor, Read};
 use std::path::Path;
-use symphonia::core::audio::AudioBufferRef;
-use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
+use symphonia::core::audio::{Audio, GenericAudioBufferRef};
+use symphonia::core::codecs::audio::{AudioDecoderOptions, CODEC_ID_NULL_AUDIO};
+use symphonia::core::codecs::CodecParameters;
 use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::FormatOptions;
+use symphonia::core::formats::probe::Hint;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
-use symphonia::core::probe::Hint;
 use voirs_sdk::AudioBuffer;
 
 /// WAV file loader using hound crate
@@ -453,21 +454,19 @@ impl M4aLoader {
         // Probe the media source
         let format_opts = FormatOptions::default();
         let metadata_opts = MetadataOptions::default();
-        let decoder_opts = DecoderOptions::default();
+        let decoder_opts = AudioDecoderOptions::default();
 
-        let probed = symphonia::default::get_probe()
-            .format(&hint, media_source, &format_opts, &metadata_opts)
+        let mut format = symphonia::default::get_probe()
+            .probe(&hint, media_source, format_opts, metadata_opts)
             .map_err(|e| {
                 RecognitionError::InvalidFormat(format!("Failed to probe M4A file: {e}"))
             })?;
-
-        let mut format = probed.format;
 
         // Find the default audio track
         let track = format
             .tracks()
             .iter()
-            .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+            .find(|t| matches!(&t.codec_params, Some(CodecParameters::Audio(_))))
             .ok_or_else(|| {
                 RecognitionError::InvalidFormat("No audio track found in M4A file".to_string())
             })?;
@@ -475,8 +474,14 @@ impl M4aLoader {
         let track_id = track.id;
 
         // Create a decoder for the track
+        let audio_params = match &track.codec_params {
+            Some(CodecParameters::Audio(params)) => params.clone(),
+            _ => return Err(RecognitionError::InvalidFormat(
+                "Track has no audio codec parameters".to_string()
+            )),
+        };
         let mut decoder = symphonia::default::get_codecs()
-            .make(&track.codec_params, &decoder_opts)
+            .make_audio_decoder(&audio_params, &decoder_opts)
             .map_err(|e| {
                 RecognitionError::InvalidFormat(format!("Failed to create M4A decoder: {e}"))
             })?;
@@ -489,7 +494,8 @@ impl M4aLoader {
         // Decode audio packets
         loop {
             let packet = match format.next_packet() {
-                Ok(packet) => packet,
+                Ok(Some(packet)) => packet,
+                Ok(None) => break, // End of stream (0.6.0 API)
                 Err(SymphoniaError::ResetRequired) => {
                     // The track list has been changed. Re-examine it and create a new set of decoders,
                     // then restart the decode loop. This is an advanced feature, so for now just break.
@@ -509,7 +515,7 @@ impl M4aLoader {
             };
 
             // Only process packets for our selected track
-            if packet.track_id() != track_id {
+            if packet.track_id != track_id {
                 continue;
             }
 
@@ -518,8 +524,8 @@ impl M4aLoader {
                 Ok(audio_buf) => {
                     // Update sample rate and channel info from the first decoded buffer
                     if audio_samples.is_empty() {
-                        sample_rate = audio_buf.spec().rate;
-                        channels = audio_buf.spec().channels.count() as u32;
+                        sample_rate = audio_buf.spec().rate();
+                        channels = audio_buf.spec().channels().count() as u32;
                     }
 
                     // Convert the audio buffer to f32 samples
@@ -556,78 +562,40 @@ impl M4aLoader {
     /// Extract samples from symphonia `AudioBufferRef` and convert to f32
     fn extract_samples_from_audio_buffer(
         &self,
-        audio_buf: AudioBufferRef,
+        audio_buf: GenericAudioBufferRef<'_>,
         samples: &mut Vec<f32>,
     ) -> Result<(), RecognitionError> {
+        // In symphonia 0.6.0, iter_interleaved() yields S by value.
         match audio_buf {
-            AudioBufferRef::U8(buf) => {
-                for plane in buf.planes().planes() {
-                    for &sample in *plane {
-                        samples.push((f32::from(sample) - 128.0) / 128.0);
-                    }
-                }
+            GenericAudioBufferRef::U8(buf) => {
+                samples.extend(buf.iter_interleaved().map(|s| (f32::from(s) - 128.0) / 128.0));
             }
-            AudioBufferRef::U16(buf) => {
-                for plane in buf.planes().planes() {
-                    for &sample in *plane {
-                        samples.push((f32::from(sample) - 32768.0) / 32768.0);
-                    }
-                }
+            GenericAudioBufferRef::U16(buf) => {
+                samples.extend(buf.iter_interleaved().map(|s| (f32::from(s) - 32768.0) / 32768.0));
             }
-            AudioBufferRef::U24(buf) => {
-                for plane in buf.planes().planes() {
-                    for &sample in *plane {
-                        samples.push((sample.inner() as f32 - 8_388_608.0) / 8_388_608.0);
-                    }
-                }
+            GenericAudioBufferRef::U24(buf) => {
+                samples.extend(buf.iter_interleaved().map(|s| (s.inner() as f32 - 8_388_608.0) / 8_388_608.0));
             }
-            AudioBufferRef::U32(buf) => {
-                for plane in buf.planes().planes() {
-                    for &sample in *plane {
-                        samples
-                            .push((f64::from(sample) - 2_147_483_648.0) as f32 / 2_147_483_648.0);
-                    }
-                }
+            GenericAudioBufferRef::U32(buf) => {
+                samples.extend(buf.iter_interleaved().map(|s| (s as f64 / 2_147_483_648.0 - 1.0) as f32));
             }
-            AudioBufferRef::S8(buf) => {
-                for plane in buf.planes().planes() {
-                    for &sample in *plane {
-                        samples.push(f32::from(sample) / 128.0);
-                    }
-                }
+            GenericAudioBufferRef::S8(buf) => {
+                samples.extend(buf.iter_interleaved().map(|s| f32::from(s) / 128.0));
             }
-            AudioBufferRef::S16(buf) => {
-                for plane in buf.planes().planes() {
-                    for &sample in *plane {
-                        samples.push(f32::from(sample) / 32768.0);
-                    }
-                }
+            GenericAudioBufferRef::S16(buf) => {
+                samples.extend(buf.iter_interleaved().map(|s| f32::from(s) / 32768.0));
             }
-            AudioBufferRef::S24(buf) => {
-                for plane in buf.planes().planes() {
-                    for &sample in *plane {
-                        samples.push(sample.inner() as f32 / 8_388_608.0);
-                    }
-                }
+            GenericAudioBufferRef::S24(buf) => {
+                samples.extend(buf.iter_interleaved().map(|s| s.inner() as f32 / 8_388_608.0));
             }
-            AudioBufferRef::S32(buf) => {
-                for plane in buf.planes().planes() {
-                    for &sample in *plane {
-                        samples.push(sample as f32 / 2_147_483_648.0);
-                    }
-                }
+            GenericAudioBufferRef::S32(buf) => {
+                samples.extend(buf.iter_interleaved().map(|s| s as f32 / 2_147_483_648.0));
             }
-            AudioBufferRef::F32(buf) => {
-                for plane in buf.planes().planes() {
-                    samples.extend_from_slice(plane);
-                }
+            GenericAudioBufferRef::F32(buf) => {
+                samples.extend(buf.iter_interleaved());
             }
-            AudioBufferRef::F64(buf) => {
-                for plane in buf.planes().planes() {
-                    for &sample in *plane {
-                        samples.push(sample as f32);
-                    }
-                }
+            GenericAudioBufferRef::F64(buf) => {
+                samples.extend(buf.iter_interleaved().map(|s| s as f32));
             }
         }
         Ok(())

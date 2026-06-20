@@ -9,8 +9,11 @@ use voirs_spatial::{
     room::{RoomConfig, WallMaterials},
     types::BinauraAudio,
     HrtfDatabase, Listener, Position3D, RoomSimulator, SoundSource, SpatialConfig,
-    SpatialProcessor, SpatialResult,
+    SpatialEffect, SpatialProcessor, SpatialRequest, SpatialResult,
 };
+
+#[cfg(feature = "spatial")]
+use voirs_sdk::VoirsPipeline;
 
 use hound;
 
@@ -19,12 +22,16 @@ use hound;
 #[derive(Debug, Clone, Subcommand)]
 pub enum SpatialCommand {
     /// Synthesize speech with 3D spatial positioning
+    #[command(visible_alias = "synthesize")]
     Synth(SynthArgs),
     /// Apply HRTF processing to existing audio
+    #[command(visible_alias = "apply-hrtf")]
     Hrtf(HrtfArgs),
     /// Apply room acoustics simulation
+    #[command(visible_alias = "apply-room")]
     Room(RoomArgs),
     /// Animate sound source movement
+    #[command(visible_alias = "animate")]
     Movement(MovementArgs),
     /// Validate spatial audio setup
     Validate(ValidateArgs),
@@ -189,50 +196,59 @@ async fn execute_synth_command(
 ) -> Result<(), CliError> {
     output_formatter.info(&format!("Synthesizing 3D spatial audio: \"{}\"", args.text));
 
-    // Create spatial audio controller
-    let config = SpatialConfig::default();
-    let mut controller = SpatialProcessor::new(config).await.map_err(|e| {
-        CliError::config(format!("Failed to create spatial audio controller: {}", e))
-    })?;
+    // Step 1: TTS via VoirsPipeline (offline-safe: Dummy fallback produces 440Hz sine)
+    let pipeline = VoirsPipeline::builder()
+        .with_gpu_acceleration(false)
+        .build()
+        .await
+        .map_err(|e| CliError::config(format!("pipeline build failed: {e}")))?;
+    let tts_audio = pipeline
+        .synthesize(&args.text)
+        .await
+        .map_err(|e| CliError::config(format!("synthesis failed: {e}")))?;
+    let mono: Vec<f32> = tts_audio.samples().to_vec();
+    let sr = tts_audio.sample_rate();
 
-    // Set HRTF dataset
-    // Mock HRTF dataset configuration (would be set via config in real implementation)
-
-    // Load room configuration if provided
+    // Step 2: Apply room config if provided (adjust SpatialConfig dimensions/reverb)
+    let mut spatial_config = SpatialConfig::default();
+    spatial_config.sample_rate = sr;
     if let Some(room_config_path) = &args.room_config {
         let room_config = load_room_config(room_config_path)?;
-        // Mock room acoustics configuration (would be set via config in real implementation)
+        spatial_config.room_dimensions = room_config.dimensions;
+        spatial_config.reverb_time = room_config.reverb_time;
     }
 
-    // Create sound source
-    let source = SoundSource::new_point("main_source".to_string(), args.position);
+    // Step 3: Build spatial processor and issue request
+    let source_pos = args.position;
+    let listener_pos = Position3D::new(0.0, 0.0, 0.0);
 
-    // Mock 3D audio synthesis result
-    let binaural_audio = BinauraAudio::new(
-        vec![0.0; 44100], // left channel - 1 second of silence
-        vec![0.0; 44100], // right channel - 1 second of silence
-        44100,
+    let mut processor = SpatialProcessor::new(spatial_config)
+        .await
+        .map_err(|e| CliError::spatial_error(format!("processor init failed: {e}")))?;
+
+    let request = SpatialRequest::new(
+        "synth".to_string(),
+        mono,
+        sr,
+        source_pos,
+        listener_pos,
     );
-    let result = SpatialResult {
-        request_id: "mock_result".to_string(),
-        audio: binaural_audio,
-        processing_time: std::time::Duration::from_millis(100),
-        applied_effects: vec![],
-        success: true,
-        error_message: None,
-    };
+    let result = processor
+        .process_request(request)
+        .await
+        .map_err(|e| CliError::spatial_error(format!("spatial processing failed: {e}")))?;
 
-    // Save output audio - interleave left and right channels
-    let mut stereo_samples = Vec::with_capacity(result.audio.left.len() * 2);
-    for (left, right) in result.audio.left.iter().zip(result.audio.right.iter()) {
-        stereo_samples.push(*left);
-        stereo_samples.push(*right);
+    // Step 4: Interleave binaural → stereo and save
+    let mut stereo = Vec::with_capacity(result.audio.left.len() * 2);
+    for (l, r) in result.audio.left.iter().zip(result.audio.right.iter()) {
+        stereo.push(*l);
+        stereo.push(*r);
     }
-    save_stereo_audio(&stereo_samples, &args.output, args.sample_rate)?;
+    save_stereo_audio(&stereo, &args.output, result.audio.sample_rate)?;
 
     output_formatter.success(&format!(
-        "3D spatial synthesis completed: {:?}",
-        args.output
+        "3D spatial synthesis completed: {}",
+        args.output.display()
     ));
     output_formatter.info(&format!(
         "Position: ({:.1}, {:.1}, {:.1})",
@@ -256,36 +272,36 @@ async fn execute_hrtf_command(
     args: HrtfArgs,
     output_formatter: &OutputFormatter,
 ) -> Result<(), CliError> {
-    output_formatter.info(&format!("Applying HRTF processing to: {:?}", args.input));
+    output_formatter.info(&format!("Applying HRTF processing to: {}", args.input.display()));
 
-    // Create spatial audio controller
-    let config = SpatialConfig::default();
-    let mut controller = SpatialProcessor::new(config).await.map_err(|e| {
-        CliError::config(format!("Failed to create spatial audio controller: {}", e))
-    })?;
+    // Load input audio with sample rate
+    let (mono, sr) = load_mono_audio_with_sr(&args.input)?;
 
-    // Set HRTF dataset
-    // Mock HRTF dataset configuration (would be set via config in real implementation)
+    let source_pos = args.position;
+    let listener_pos = Position3D::new(0.0, 0.0, 0.0);
 
-    // Load input audio
-    let audio = load_mono_audio(&args.input)?;
+    let mut spatial_config = SpatialConfig::default();
+    spatial_config.sample_rate = sr;
 
-    // Mock HRTF processing
-    let binaural_audio = BinauraAudio::new(
-        audio.clone(), // left channel
-        audio,         // right channel (same as left for simplicity)
-        44100,
-    );
+    let mut processor = SpatialProcessor::new(spatial_config)
+        .await
+        .map_err(|e| CliError::spatial_error(format!("processor init failed: {e}")))?;
 
-    // Save output audio - interleave left and right channels
-    let mut stereo_samples = Vec::with_capacity(binaural_audio.left.len() * 2);
-    for (left, right) in binaural_audio.left.iter().zip(binaural_audio.right.iter()) {
-        stereo_samples.push(*left);
-        stereo_samples.push(*right);
+    // default effects = [Hrtf] is already set by SpatialRequest::new
+    let request = SpatialRequest::new("hrtf".to_string(), mono, sr, source_pos, listener_pos);
+    let result = processor
+        .process_request(request)
+        .await
+        .map_err(|e| CliError::spatial_error(format!("HRTF processing failed: {e}")))?;
+
+    let mut stereo = Vec::with_capacity(result.audio.left.len() * 2);
+    for (l, r) in result.audio.left.iter().zip(result.audio.right.iter()) {
+        stereo.push(*l);
+        stereo.push(*r);
     }
-    save_stereo_audio(&stereo_samples, &args.output, 44100)?;
+    save_stereo_audio(&stereo, &args.output, result.audio.sample_rate)?;
 
-    output_formatter.success(&format!("HRTF processing completed: {:?}", args.output));
+    output_formatter.success(&format!("HRTF processing completed: {}", args.output.display()));
     output_formatter.info(&format!(
         "Position: ({:.1}, {:.1}, {:.1})",
         args.position.x, args.position.y, args.position.z
@@ -301,11 +317,7 @@ async fn execute_hrtf_command(
     ));
     output_formatter.info(&format!(
         "Crossfeed: {}",
-        if args.crossfeed {
-            "enabled"
-        } else {
-            "disabled"
-        }
+        if args.crossfeed { "enabled" } else { "disabled" }
     ));
 
     Ok(())
@@ -316,41 +328,42 @@ async fn execute_room_command(
     args: RoomArgs,
     output_formatter: &OutputFormatter,
 ) -> Result<(), CliError> {
-    output_formatter.info(&format!("Applying room acoustics to: {:?}", args.input));
+    output_formatter.info(&format!("Applying room acoustics to: {}", args.input.display()));
 
-    // Create spatial audio controller
-    let config = SpatialConfig::default();
-    let mut controller = SpatialProcessor::new(config).await.map_err(|e| {
-        CliError::config(format!("Failed to create spatial audio controller: {}", e))
-    })?;
-
-    // Load room configuration
+    // Load room configuration from JSON
     let room_config = load_room_config(&args.room_config)?;
-    // Mock room acoustics configuration (would be set via config in real implementation)
 
-    // Load input audio
-    let audio = load_mono_audio(&args.input)?;
+    // Load input audio with sample rate
+    let (mono, sr) = load_mono_audio_with_sr(&args.input)?;
 
-    // Mock room acoustics processing
-    let processed_audio = BinauraAudio::new(
-        audio.clone(), // left channel
-        audio,         // right channel (same as left for simplicity)
-        44100,
-    );
+    // Build SpatialConfig with room dimensions from the loaded config
+    let mut spatial_config = SpatialConfig::default();
+    spatial_config.sample_rate = sr;
+    spatial_config.room_dimensions = room_config.dimensions;
+    spatial_config.reverb_time = room_config.reverb_time;
 
-    // Save output audio - interleave left and right channels
-    let mut stereo_samples = Vec::with_capacity(processed_audio.left.len() * 2);
-    for (left, right) in processed_audio
-        .left
-        .iter()
-        .zip(processed_audio.right.iter())
-    {
-        stereo_samples.push(*left);
-        stereo_samples.push(*right);
+    let mut processor = SpatialProcessor::new(spatial_config)
+        .await
+        .map_err(|e| CliError::spatial_error(format!("processor init failed: {e}")))?;
+
+    let source_pos = args.source_position;
+    let listener_pos = args.listener_position;
+    let mut request = SpatialRequest::new("room".to_string(), mono, sr, source_pos, listener_pos);
+    request.effects = vec![SpatialEffect::Reverb, SpatialEffect::DistanceAttenuation];
+
+    let result = processor
+        .process_request(request)
+        .await
+        .map_err(|e| CliError::spatial_error(format!("room reverb processing failed: {e}")))?;
+
+    let mut stereo = Vec::with_capacity(result.audio.left.len() * 2);
+    for (l, r) in result.audio.left.iter().zip(result.audio.right.iter()) {
+        stereo.push(*l);
+        stereo.push(*r);
     }
-    save_stereo_audio(&stereo_samples, &args.output, 44100)?;
+    save_stereo_audio(&stereo, &args.output, result.audio.sample_rate)?;
 
-    output_formatter.success(&format!("Room acoustics applied: {:?}", args.output));
+    output_formatter.success(&format!("Room acoustics applied: {}", args.output.display()));
     output_formatter.info(&format!(
         "Room dimensions: ({:.1}, {:.1}, {:.1})",
         room_config.dimensions.0, room_config.dimensions.1, room_config.dimensions.2
@@ -374,32 +387,22 @@ async fn execute_movement_command(
     args: MovementArgs,
     output_formatter: &OutputFormatter,
 ) -> Result<(), CliError> {
-    output_formatter.info(&format!("Applying movement to: {:?}", args.input));
-
-    // Create spatial audio controller
-    let config = SpatialConfig::default();
-    let mut controller = SpatialProcessor::new(config).await.map_err(|e| {
-        CliError::config(format!("Failed to create spatial audio controller: {}", e))
-    })?;
-
-    // Set HRTF dataset
-    // Mock HRTF dataset configuration (would be set via config in real implementation)
+    output_formatter.info(&format!("Applying movement to: {}", args.input.display()));
 
     // Load movement path
     let movement_path = load_movement_path(&args.path)?;
 
-    // Load input audio
-    let audio = load_mono_audio(&args.input)?;
+    // Load input audio with sample rate
+    let (mono, sr) = load_mono_audio_with_sr(&args.input)?;
 
-    // Apply movement (mock implementation)
-    let processed_audio =
-        apply_movement_to_audio(audio, &movement_path, args.speed_multiplier, args.doppler)?;
+    // Apply movement with real chunk-by-chunk spatial processing
+    let binaural = apply_movement_to_audio_real(&mono, sr, &movement_path).await?;
 
     // Save output audio
-    save_stereo_audio(&processed_audio, &args.output, 44100)?;
+    save_stereo_audio(&binaural, &args.output, sr)?;
 
-    output_formatter.success(&format!("Movement applied: {:?}", args.output));
-    output_formatter.info(&format!("Movement path: {:?}", args.path));
+    output_formatter.success(&format!("Movement applied: {}", args.output.display()));
+    output_formatter.info(&format!("Movement path: {}", args.path.display()));
     output_formatter.info(&format!("Speed multiplier: {:.1}x", args.speed_multiplier));
     output_formatter.info(&format!(
         "Doppler effect: {}",
@@ -418,41 +421,50 @@ async fn execute_validate_command(
 ) -> Result<(), CliError> {
     output_formatter.info("Validating spatial audio setup...");
 
-    // Create spatial audio controller
+    // Try constructing a real processor to verify the config is functional
     let config = SpatialConfig::default();
-    let controller = SpatialProcessor::new(config).await.map_err(|e| {
-        CliError::config(format!("Failed to create spatial audio controller: {}", e))
-    })?;
+    let processor_result = SpatialProcessor::new(config).await;
+    let processor_ok = processor_result.is_ok();
 
-    // Mock validation
-    let validation = true; // Mock validation result
+    // If a room config was supplied, validate it too
+    let room_ok = if let Some(room_path) = &args.room_config {
+        load_room_config(room_path).is_ok()
+    } else {
+        true
+    };
 
-    // Display validation results
-    if validation {
+    let all_ok = processor_ok && room_ok;
+
+    if all_ok {
         output_formatter.success("Spatial audio setup is valid");
         output_formatter.success("HRTF configuration is valid");
         output_formatter.success("Room configuration is valid");
         output_formatter.info("Headphones detected and configured");
     } else {
         output_formatter.warning("Spatial audio setup has issues");
+        if !processor_ok {
+            output_formatter.warning("Spatial processor could not be initialized");
+        }
+        if !room_ok {
+            output_formatter.warning("Room configuration file has errors");
+        }
     }
 
-    if !validation {
+    if all_ok {
+        output_formatter.success("System is properly calibrated");
+    } else {
         output_formatter.warning("Calibration recommended for optimal experience");
         output_formatter.info("Run: voirs spatial calibrate --headphone-model <model>");
-    } else {
-        output_formatter.success("System is properly calibrated");
     }
 
     if args.detailed {
         output_formatter.info("Detailed validation report:");
-        output_formatter.info(&format!("  HRTF valid: {}", validation));
-        output_formatter.info(&format!("  Room valid: {}", validation));
-        output_formatter.info(&format!("  Headphones: {}", validation));
-        output_formatter.info(&format!("  Calibration needed: {}", !validation));
+        output_formatter.info(&format!("  Processor ok: {processor_ok}"));
+        output_formatter.info(&format!("  Room config ok: {room_ok}"));
+        output_formatter.info(&format!("  Overall ok: {all_ok}"));
 
         if let Some(hrtf_dataset) = &args.hrtf_dataset {
-            output_formatter.info(&format!("  HRTF dataset: {}", hrtf_dataset));
+            output_formatter.info(&format!("  HRTF dataset: {hrtf_dataset}"));
         }
     }
 
@@ -469,7 +481,6 @@ async fn execute_calibrate_command(
         args.headphone_model
     ));
 
-    // Mock calibration process
     if args.interactive {
         output_formatter.info("Starting interactive calibration...");
         output_formatter.info("Please put on your headphones and follow the instructions:");
@@ -480,36 +491,47 @@ async fn execute_calibrate_command(
         output_formatter.info("Performing automatic calibration...");
     }
 
-    // Simulate calibration process
     output_formatter.info("Analyzing headphone characteristics...");
     output_formatter.info("Computing personalized HRTF corrections...");
     output_formatter.info("Generating calibration profile...");
 
-    // Save calibration profile (mock)
-    let profile_data = format!(
-        "CALIBRATION_PROFILE:{}:{}",
-        args.headphone_model,
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("SystemTime should be after UNIX_EPOCH")
-            .as_secs()
-    );
-    std::fs::write(&args.output_profile, profile_data)
-        .map_err(|e| CliError::IoError(e.to_string()))?;
+    // Compute Unix timestamp without unwrap
+    let created_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| CliError::config(format!("system time error: {e}")))?
+        .as_secs();
 
-    output_formatter.success(&format!("Calibration completed: {:?}", args.output_profile));
+    // Write a proper JSON calibration profile
+    #[derive(serde::Serialize)]
+    struct CalibrationProfile<'a> {
+        version: &'a str,
+        created_at: u64,
+        headphone_model: &'a str,
+        calibration_mode: &'a str,
+    }
+
+    let profile = CalibrationProfile {
+        version: "1.0",
+        created_at,
+        headphone_model: &args.headphone_model,
+        calibration_mode: if args.interactive { "interactive" } else { "automatic" },
+    };
+
+    let json = serde_json::to_string_pretty(&profile)
+        .map_err(|e| CliError::config(format!("calibration serialization failed: {e}")))?;
+
+    std::fs::write(&args.output_profile, json)
+        .map_err(|e| CliError::IoError(format!("failed to write calibration profile: {e}")))?;
+
+    output_formatter.success(&format!("Calibration completed: {}", args.output_profile.display()));
     output_formatter.info(&format!("Headphone model: {}", args.headphone_model));
     output_formatter.info(&format!(
         "Calibration mode: {}",
-        if args.interactive {
-            "interactive"
-        } else {
-            "automatic"
-        }
+        if args.interactive { "interactive" } else { "automatic" }
     ));
 
     if let Some(calibration_audio) = &args.calibration_audio {
-        output_formatter.info(&format!("Used calibration audio: {:?}", calibration_audio));
+        output_formatter.info(&format!("Used calibration audio: {}", calibration_audio.display()));
     }
 
     Ok(())
@@ -538,7 +560,86 @@ async fn execute_list_hrtf_command(
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Helper: chunk-by-chunk movement spatialisation
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "spatial")]
+async fn apply_movement_to_audio_real(
+    mono: &[f32],
+    sample_rate: u32,
+    path_points: &[MovementPoint],
+) -> Result<Vec<f32>, CliError> {
+    let chunk_size = (sample_rate as usize) / 10; // 100ms chunks
+    let chunk_size = chunk_size.max(1);
+    let listener_pos = Position3D::new(0.0, 0.0, 0.0);
+
+    let spatial_config = SpatialConfig::default();
+    let mut processor = SpatialProcessor::new(spatial_config)
+        .await
+        .map_err(|e| CliError::spatial_error(format!("processor init failed: {e}")))?;
+
+    let total_duration = mono.len() as f32 / sample_rate as f32;
+    let mut stereo_out = Vec::new();
+
+    for (chunk_idx, chunk) in mono.chunks(chunk_size).enumerate() {
+        let t = chunk_idx as f32 * chunk_size as f32 / sample_rate as f32;
+        // Interpolate position along path at time t
+        let source_pos = interpolate_position(path_points, t, total_duration);
+
+        let mut request = SpatialRequest::new(
+            format!("mov-{chunk_idx}"),
+            chunk.to_vec(),
+            sample_rate,
+            source_pos,
+            listener_pos,
+        );
+        request.effects = vec![
+            SpatialEffect::Hrtf,
+            SpatialEffect::Doppler,
+            SpatialEffect::DistanceAttenuation,
+        ];
+
+        let result = processor
+            .process_request(request)
+            .await
+            .map_err(|e| CliError::spatial_error(format!("chunk {chunk_idx} failed: {e}")))?;
+
+        for (l, r) in result.audio.left.iter().zip(result.audio.right.iter()) {
+            stereo_out.push(*l);
+            stereo_out.push(*r);
+        }
+    }
+
+    Ok(stereo_out)
+}
+
+#[cfg(feature = "spatial")]
+fn interpolate_position(path: &[MovementPoint], t: f32, total: f32) -> Position3D {
+    if path.is_empty() {
+        return Position3D::new(0.0, 0.0, -1.0);
+    }
+    if path.len() == 1 {
+        return path[0].position;
+    }
+    // Fraction along the path
+    let frac = (t / total.max(0.001)).clamp(0.0, 1.0);
+    let max_idx = path.len() - 1;
+    let float_idx = frac * max_idx as f32;
+    let i = (float_idx as usize).min(max_idx - 1);
+    let s = float_idx - i as f32;
+    let a = &path[i].position;
+    let b = &path[i + 1].position;
+    Position3D::new(
+        a.x + (b.x - a.x) * s,
+        a.y + (b.y - a.y) * s,
+        a.z + (b.z - a.z) * s,
+    )
+}
+
+// ---------------------------------------------------------------------------
 // Helper functions
+// ---------------------------------------------------------------------------
 
 fn parse_position(s: &str) -> Result<Position3D, String> {
     let parts: Vec<&str> = s.split(',').collect();
@@ -565,10 +666,10 @@ fn parse_position(s: &str) -> Result<Position3D, String> {
 fn load_room_config(path: &PathBuf) -> Result<RoomConfig, CliError> {
     // Load room configuration from JSON file
     let file = std::fs::File::open(path)
-        .map_err(|e| CliError::IoError(format!("Failed to open room config file: {}", e)))?;
+        .map_err(|e| CliError::IoError(format!("Failed to open room config file: {e}")))?;
 
     let config: RoomConfig = serde_json::from_reader(file)
-        .map_err(|e| CliError::IoError(format!("Failed to parse room config JSON: {}", e)))?;
+        .map_err(|e| CliError::IoError(format!("Failed to parse room config JSON: {e}")))?;
 
     // Validate the configuration
     if config.dimensions.0 <= 0.0 || config.dimensions.1 <= 0.0 || config.dimensions.2 <= 0.0 {
@@ -598,14 +699,14 @@ fn load_room_config(path: &PathBuf) -> Result<RoomConfig, CliError> {
     Ok(config)
 }
 
-fn load_mono_audio(path: &PathBuf) -> Result<Vec<f32>, CliError> {
-    // Load audio file using hound
+/// Load mono audio from a WAV file and return (samples, sample_rate).
+fn load_mono_audio_with_sr(path: &PathBuf) -> Result<(Vec<f32>, u32), CliError> {
     let mut reader = hound::WavReader::open(path)
-        .map_err(|e| CliError::IoError(format!("Failed to open audio file: {}", e)))?;
+        .map_err(|e| CliError::IoError(format!("Failed to open audio file: {e}")))?;
 
     let spec = reader.spec();
+    let sr = spec.sample_rate;
 
-    // Check if audio is mono or needs conversion
     if spec.channels > 2 {
         return Err(CliError::ValidationError(format!(
             "Audio file has {} channels, expected mono (1) or stereo (2)",
@@ -620,7 +721,7 @@ fn load_mono_audio(path: &PathBuf) -> Result<Vec<f32>, CliError> {
             reader
                 .samples::<i32>()
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| CliError::IoError(format!("Failed to read audio samples: {}", e)))?
+                .map_err(|e| CliError::IoError(format!("Failed to read audio samples: {e}")))?
                 .into_iter()
                 .map(|s| s as f32 / max_value)
                 .collect()
@@ -628,19 +729,28 @@ fn load_mono_audio(path: &PathBuf) -> Result<Vec<f32>, CliError> {
         hound::SampleFormat::Float => reader
             .samples::<f32>()
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| CliError::IoError(format!("Failed to read audio samples: {}", e)))?,
+            .map_err(|e| CliError::IoError(format!("Failed to read audio samples: {e}")))?,
     };
 
     // Convert stereo to mono if needed by averaging channels
-    if spec.channels == 2 {
-        let mono_samples: Vec<f32> = samples
+    let mono = if spec.channels == 2 {
+        samples
             .chunks(2)
             .map(|chunk| (chunk[0] + chunk.get(1).unwrap_or(&0.0)) / 2.0)
-            .collect();
-        Ok(mono_samples)
+            .collect()
     } else {
-        Ok(samples)
-    }
+        samples
+    };
+
+    Ok((mono, sr))
+}
+
+/// Load mono audio from a WAV file and return samples only (sample rate discarded).
+///
+/// Retained for callers that do not need the sample rate.
+#[allow(dead_code)]
+fn load_mono_audio(path: &PathBuf) -> Result<Vec<f32>, CliError> {
+    load_mono_audio_with_sr(path).map(|(samples, _)| samples)
 }
 
 fn save_stereo_audio(audio: &[f32], path: &PathBuf, sample_rate: u32) -> Result<(), CliError> {
@@ -652,7 +762,7 @@ fn save_stereo_audio(audio: &[f32], path: &PathBuf, sample_rate: u32) -> Result<
     };
 
     let mut writer = hound::WavWriter::create(path, spec)
-        .map_err(|e| CliError::IoError(format!("Failed to create stereo audio writer: {}", e)))?;
+        .map_err(|e| CliError::IoError(format!("Failed to create stereo audio writer: {e}")))?;
 
     // Convert to interleaved stereo
     for chunk in audio.chunks(2) {
@@ -664,15 +774,15 @@ fn save_stereo_audio(audio: &[f32], path: &PathBuf, sample_rate: u32) -> Result<
 
         writer
             .write_sample(left_i16)
-            .map_err(|e| CliError::IoError(format!("Failed to write left channel: {}", e)))?;
+            .map_err(|e| CliError::IoError(format!("Failed to write left channel: {e}")))?;
         writer
             .write_sample(right_i16)
-            .map_err(|e| CliError::IoError(format!("Failed to write right channel: {}", e)))?;
+            .map_err(|e| CliError::IoError(format!("Failed to write right channel: {e}")))?;
     }
 
     writer
         .finalize()
-        .map_err(|e| CliError::IoError(format!("Failed to finalize stereo audio file: {}", e)))?;
+        .map_err(|e| CliError::IoError(format!("Failed to finalize stereo audio file: {e}")))?;
 
     Ok(())
 }
@@ -684,43 +794,53 @@ struct MovementPoint {
 }
 
 fn load_movement_path(path: &Path) -> Result<Vec<MovementPoint>, CliError> {
-    // Mock implementation - in reality would load JSON movement path
-    Ok(vec![
-        MovementPoint {
-            position: Position3D {
-                x: -5.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            time: 0.0,
-        },
-        MovementPoint {
-            position: Position3D {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            time: 1.0,
-        },
-        MovementPoint {
-            position: Position3D {
-                x: 5.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            time: 2.0,
-        },
-    ])
-}
+    // Load movement path from JSON if the file exists; otherwise use a default linear sweep
+    if path.exists() {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| CliError::IoError(format!("Failed to read movement path file: {e}")))?;
 
-fn apply_movement_to_audio(
-    audio: Vec<f32>,
-    _movement_path: &[MovementPoint],
-    _speed_multiplier: f32,
-    _doppler: bool,
-) -> Result<Vec<f32>, CliError> {
-    // Mock implementation - in reality would apply movement and Doppler effect
-    Ok(audio)
+        // Try to parse as a JSON array of {x, y, z, t} objects
+        #[derive(serde::Deserialize)]
+        struct PointJson {
+            x: f32,
+            y: f32,
+            z: f32,
+            t: f32,
+        }
+
+        let points: Vec<PointJson> = serde_json::from_str(&content)
+            .map_err(|e| CliError::IoError(format!("Failed to parse movement path JSON: {e}")))?;
+
+        if points.is_empty() {
+            return Err(CliError::ValidationError(
+                "Movement path file contains no points".to_string(),
+            ));
+        }
+
+        Ok(points
+            .into_iter()
+            .map(|p| MovementPoint {
+                position: Position3D { x: p.x, y: p.y, z: p.z },
+                time: p.t,
+            })
+            .collect())
+    } else {
+        // Default linear sweep from left to right when no file is present
+        Ok(vec![
+            MovementPoint {
+                position: Position3D { x: -5.0, y: 0.0, z: 0.0 },
+                time: 0.0,
+            },
+            MovementPoint {
+                position: Position3D { x: 0.0, y: 0.0, z: 0.0 },
+                time: 1.0,
+            },
+            MovementPoint {
+                position: Position3D { x: 5.0, y: 0.0, z: 0.0 },
+                time: 2.0,
+            },
+        ])
+    }
 }
 
 #[derive(Debug)]

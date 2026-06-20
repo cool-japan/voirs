@@ -128,11 +128,11 @@ pub fn metaphone(word: &str) -> String {
         }
 
         match c {
-            b'B' => {
+            b'B'
                 // Silent 'B' in a terminal "MB" (e.g. "dumb").
-                if !(i as usize == n - 1 && prev == b'M') {
-                    out.push(b'B');
-                }
+                if !(i as usize == n - 1 && prev == b'M') =>
+            {
+                out.push(b'B');
             }
             b'C' => {
                 if next == b'I' && at(i + 2) == b'A' {
@@ -207,11 +207,11 @@ pub fn metaphone(word: &str) -> String {
             }
             b'F' => out.push(b'F'),
             b'J' => out.push(b'J'),
-            b'K' => {
+            b'K'
                 // Silent 'K' when preceded by 'C'.
-                if prev != b'C' {
-                    out.push(b'K');
-                }
+                if prev != b'C' =>
+            {
+                out.push(b'K');
             }
             b'L' => out.push(b'L'),
             b'M' => out.push(b'M'),
@@ -252,11 +252,11 @@ pub fn metaphone(word: &str) -> String {
                 }
             }
             b'V' => out.push(b'F'),
-            b'W' | b'Y' => {
+            b'W' | b'Y'
                 // 'W'/'Y' only sound when followed by a vowel.
-                if is_vowel(next) {
-                    out.push(c);
-                }
+                if is_vowel(next) =>
+            {
+                out.push(c);
             }
             b'X' => {
                 // Non-initial 'X' -> KS.

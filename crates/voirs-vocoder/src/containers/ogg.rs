@@ -4,13 +4,14 @@ use crate::{AudioBuffer, Result, VocoderError};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
-use symphonia::core::audio::{AudioBufferRef, SampleBuffer, Signal};
-use symphonia::core::codecs::{CodecRegistry, DecoderOptions};
+use symphonia::core::audio::GenericAudioBufferRef;
+use symphonia::core::codecs::audio::{AudioDecoderOptions, CODEC_ID_NULL_AUDIO};
+use symphonia::core::codecs::registry::CodecRegistry;
 use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
-use symphonia::core::probe::Hint;
+use symphonia::core::formats::probe::Hint;
 
 use super::ContainerConfig;
 
@@ -207,25 +208,36 @@ pub fn read_ogg_container<P: AsRef<Path>>(path: P) -> Result<AudioBuffer> {
     let metadata_opts = MetadataOptions::default();
     let codec_registry = CodecRegistry::new();
 
-    let probed = symphonia::default::get_probe()
-        .format(&hint, media_source, &format_opts, &metadata_opts)
+    let mut format_reader = symphonia::default::get_probe()
+        .probe(&hint, media_source, format_opts, metadata_opts)
         .map_err(|e| VocoderError::InputError(format!("Failed to probe OGG format: {e}")))?;
-
-    let mut format_reader = probed.format;
 
     // Get the default audio track
     let track = format_reader
         .tracks()
         .iter()
-        .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
+        .find(|t| {
+            t.codec_params
+                .as_ref()
+                .and_then(|p| p.audio())
+                .map(|a| a.codec != CODEC_ID_NULL_AUDIO)
+                .unwrap_or(false)
+        })
         .ok_or_else(|| VocoderError::InputError("No audio track found in OGG file".to_string()))?;
 
     let track_id = track.id;
 
     // Create decoder
-    let decoder_opts = DecoderOptions::default();
+    let decoder_opts = AudioDecoderOptions::default();
+    let audio_params = track
+        .codec_params
+        .as_ref()
+        .and_then(|p| p.audio())
+        .ok_or_else(|| {
+            VocoderError::InputError("Track has no audio codec params".to_string())
+        })?;
     let mut decoder = codec_registry
-        .make(&track.codec_params, &decoder_opts)
+        .make_audio_decoder(audio_params, &decoder_opts)
         .map_err(|e| VocoderError::InputError(format!("Failed to create decoder: {e}")))?;
 
     // Decode audio packets
@@ -235,8 +247,9 @@ pub fn read_ogg_container<P: AsRef<Path>>(path: P) -> Result<AudioBuffer> {
 
     loop {
         let packet = match format_reader.next_packet() {
-            Ok(packet) => packet,
-            Err(SymphoniaError::IoError(_)) => break, // End of stream
+            Ok(Some(packet)) => packet,
+            Ok(None) => break, // End of stream (0.6.0 API)
+            Err(SymphoniaError::IoError(_)) => break, // I/O end of stream
             Err(e) => {
                 return Err(VocoderError::InputError(format!(
                     "Error reading packet: {e}"
@@ -244,7 +257,7 @@ pub fn read_ogg_container<P: AsRef<Path>>(path: P) -> Result<AudioBuffer> {
             }
         };
 
-        if packet.track_id() != track_id {
+        if packet.track_id != track_id {
             continue;
         }
 
@@ -253,35 +266,17 @@ pub fn read_ogg_container<P: AsRef<Path>>(path: P) -> Result<AudioBuffer> {
             .map_err(|e| VocoderError::InputError(format!("Failed to decode packet: {e}")))?;
 
         // Extract audio information
-        let spec = *audio_buf.spec();
-        sample_rate = spec.rate;
-        channels = spec.channels.count() as u32;
+        let spec = audio_buf.spec();
+        sample_rate = spec.rate();
+        channels = spec.channels().count() as u32;
 
-        // Convert to f32 samples
-        match audio_buf {
-            AudioBufferRef::F32(buf) => {
-                // Interleave channels if needed
-                if channels == 1 {
-                    samples.extend_from_slice(buf.chan(0));
-                } else {
-                    // Interleave stereo channels
-                    let chan0 = buf.chan(0);
-                    let chan1 = buf.chan(1);
-                    for i in 0..chan0.len() {
-                        samples.push(chan0[i]);
-                        if i < chan1.len() {
-                            samples.push(chan1[i]);
-                        }
-                    }
-                }
-            }
-            _ => {
-                // Convert other formats to f32
-                let mut sample_buf = SampleBuffer::<f32>::new(audio_buf.capacity() as u64, spec);
-                sample_buf.copy_interleaved_ref(audio_buf);
-                samples.extend_from_slice(sample_buf.samples());
-            }
-        }
+        // Convert to f32 samples (interleaved) — works for all sample formats.
+        // copy_to_vec_interleaved resizes the destination vector to exactly the
+        // number of samples in this packet, so we collect into a temporary vec
+        // and then extend the accumulator.
+        let mut packet_samples: Vec<f32> = Vec::new();
+        audio_buf.copy_to_vec_interleaved(&mut packet_samples);
+        samples.extend_from_slice(&packet_samples);
     }
 
     if samples.is_empty() {

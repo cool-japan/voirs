@@ -1,6 +1,7 @@
 //! Plugin registry for managing installed plugins.
 
 use super::{Plugin, PluginError, PluginManager, PluginManifest, PluginResult, PluginType};
+use hex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -358,7 +359,7 @@ impl PluginRegistry {
         let mut hasher = Sha256::new();
         hasher.update(&content);
         let result = hasher.finalize();
-        Ok(format!("{:x}", result))
+        Ok(hex::encode(result))
     }
 
     pub async fn discover_and_register(&self) -> PluginResult<usize> {

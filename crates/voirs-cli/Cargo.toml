@@ -96,6 +96,7 @@ base64.workspace = true
 # Model management
 reqwest.workspace = true
 sha2.workspace = true
+hex.workspace = true
 futures-util.workspace = true
 
 # Pure-Rust TLS provider (rustls + RustCrypto) — installed as process default in main()
@@ -134,7 +135,7 @@ onnx = ["voirs-acoustic/onnx", "voirs-vocoder/onnx", "voirs-sdk/onnx", "dep:oxio
 emotion = ["dep:voirs-emotion"]
 cloning = ["dep:voirs-cloning"]
 conversion = ["dep:voirs-conversion"]
-singing = ["dep:voirs-singing"]
+singing = ["dep:voirs-singing", "voirs-singing/musicxml-support", "voirs-singing/midi-support"]
 spatial = ["dep:voirs-spatial"]
 cloud = []
 [lints]

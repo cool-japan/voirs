@@ -180,8 +180,8 @@ impl RealTimeAudioStream {
                 format!("Failed to enumerate devices: {}", e),
             )
         })? {
-            if let Ok(name) = device.name() {
-                if name == device_name {
+            if let Ok(desc) = device.description() {
+                if desc.name() == device_name {
                     return Ok(Some(device));
                 }
             }
@@ -209,7 +209,7 @@ impl RealTimeAudioStream {
         let stream = self
             .device
             .build_output_stream(
-                &stream_config,
+                stream_config,
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                     // Check if stream is active
                     let active = if let Ok(guard) = is_active.lock() {
