@@ -1936,17 +1936,30 @@ mod tests {
         let optimizer = QueryOptimizer::new(QueryOptimizerConfig::default());
 
         // Manually cache a value and confirm it can be retrieved
-        let test_data = serde_json::json!({"col1": 42, "col2": "hello", "cached_at": "2025-01-01T00:00:00Z"});
+        let test_data =
+            serde_json::json!({"col1": 42, "col2": "hello", "cached_at": "2025-01-01T00:00:00Z"});
         optimizer.cache_result("warmup:test_stmt", &test_data).await;
 
         let cached: Option<serde_json::Value> = optimizer.get_from_cache("warmup:test_stmt").await;
         assert!(cached.is_some());
         let cached_val = cached.unwrap();
         // Real data (not just the old placeholder) should be present
-        assert!(cached_val.get("col1").is_some(), "real column data should be cached");
-        assert!(cached_val.get("col2").is_some(), "real column data should be cached");
-        assert!(cached_val.get("cached_at").is_some(), "cached_at metadata should be present");
+        assert!(
+            cached_val.get("col1").is_some(),
+            "real column data should be cached"
+        );
+        assert!(
+            cached_val.get("col2").is_some(),
+            "real column data should be cached"
+        );
+        assert!(
+            cached_val.get("cached_at").is_some(),
+            "cached_at metadata should be present"
+        );
         // The old placeholder would ONLY have warmed_at; real data has actual columns too
-        assert!(cached_val.get("warmed_at").is_none(), "old placeholder key should not be present");
+        assert!(
+            cached_val.get("warmed_at").is_none(),
+            "old placeholder key should not be present"
+        );
     }
 }

@@ -388,11 +388,9 @@ impl ApiManager for FeedbackApiManager {
                 let token = auth_header.trim_start_matches("Bearer ").trim();
                 match &self.auth_config.jwt_secret {
                     Some(secret) => {
-                        let key =
-                            jsonwebtoken::DecodingKey::from_secret(secret.as_bytes());
-                        let mut validation = jsonwebtoken::Validation::new(
-                            jsonwebtoken::Algorithm::HS256,
-                        );
+                        let key = jsonwebtoken::DecodingKey::from_secret(secret.as_bytes());
+                        let mut validation =
+                            jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
                         validation.validate_exp = true;
                         match jsonwebtoken::decode::<Claims>(token, &key, &validation) {
                             Ok(_) => Ok(true),
@@ -403,22 +401,17 @@ impl ApiManager for FeedbackApiManager {
                 }
             }
             crate::integration::AuthType::Custom => {
-                if let Some(expected) =
-                    self.auth_config.custom_headers.get("x-custom-auth-token")
-                {
+                if let Some(expected) = self.auth_config.custom_headers.get("x-custom-auth-token") {
                     let provided = auth_header.trim_start_matches("Custom ").trim();
                     Ok(provided == expected.as_str())
                 } else {
                     Ok(false)
                 }
             }
-            crate::integration::AuthType::OAuth => {
-                Err(IntegrationError::AuthenticationError {
-                    message:
-                        "OAuth authentication requires an external authorization server"
-                            .to_string(),
-                })
-            }
+            crate::integration::AuthType::OAuth => Err(IntegrationError::AuthenticationError {
+                message: "OAuth authentication requires an external authorization server"
+                    .to_string(),
+            }),
         }
     }
 
@@ -991,9 +984,7 @@ mod tests {
 
         // Tampered token → Ok(false), not Err
         let tampered = format!("{valid_token}TAMPERED");
-        let result = manager
-            .validate_auth(&format!("Bearer {tampered}"))
-            .await;
+        let result = manager.validate_auth(&format!("Bearer {tampered}")).await;
         assert!(!result.unwrap(), "tampered JWT should be rejected");
 
         // JWT with no secret configured → Ok(false)
@@ -1011,7 +1002,10 @@ mod tests {
         let result = manager_no_secret
             .validate_auth(&format!("Bearer {valid_token}"))
             .await;
-        assert!(!result.unwrap(), "JWT without configured secret should be rejected");
+        assert!(
+            !result.unwrap(),
+            "JWT without configured secret should be rejected"
+        );
 
         // Test OAuth authentication (still deferred)
         let auth_config = AuthConfig {
@@ -1026,7 +1020,10 @@ mod tests {
         let manager = FeedbackApiManager::new(auth_config, RateLimitConfig::default());
 
         let result = manager.validate_auth("Bearer oauth_token").await;
-        assert!(result.is_err(), "OAuth should return error (requires external server)");
+        assert!(
+            result.is_err(),
+            "OAuth should return error (requires external server)"
+        );
     }
 
     #[tokio::test]
@@ -1067,10 +1064,12 @@ mod tests {
             basic_auth: None,
             custom_headers: HashMap::new(),
         };
-        let manager_empty =
-            FeedbackApiManager::new(auth_config_empty, RateLimitConfig::default());
+        let manager_empty = FeedbackApiManager::new(auth_config_empty, RateLimitConfig::default());
         assert!(
-            !manager_empty.validate_auth("Custom anything").await.unwrap(),
+            !manager_empty
+                .validate_auth("Custom anything")
+                .await
+                .unwrap(),
             "custom auth without headers configured should be rejected"
         );
     }

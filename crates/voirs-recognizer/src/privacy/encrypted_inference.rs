@@ -559,8 +559,8 @@ mod paillier {
     use super::{
         Ciphertext, EncryptionError, EncryptionScheme, HomomorphicEncryption, PrivateKey, PublicKey,
     };
-    use num_bigint_dig::{BigInt, BigUint, RandPrime, ToBigUint};
     use num_bigint_dig::traits::ModInverse;
+    use num_bigint_dig::{BigInt, BigUint, RandPrime, ToBigUint};
 
     pub fn gcd(a: &BigUint, b: &BigUint) -> BigUint {
         let mut a = a.clone();
@@ -605,13 +605,13 @@ mod paillier {
         let l_val = l_func(&g_lambda, &n);
         // mod_inverse returns Option<BigInt> (signed). Normalise to positive residue mod n.
         use num_bigint_dig::Sign;
-        let mu_big: BigInt = l_val
-            .mod_inverse(&n)
-            .unwrap_or_else(|| BigInt::from(1u32));
+        let mu_big: BigInt = l_val.mod_inverse(&n).unwrap_or_else(|| BigInt::from(1u32));
         let mu = if mu_big.sign() == Sign::Minus {
             // negative residue: add n to get canonical positive representative
             let n_big = BigInt::from(n.clone());
-            (mu_big + n_big).to_biguint().unwrap_or_else(|| BigUint::from(1u32))
+            (mu_big + n_big)
+                .to_biguint()
+                .unwrap_or_else(|| BigUint::from(1u32))
         } else {
             mu_big.to_biguint().unwrap_or_else(|| BigUint::from(1u32))
         };
@@ -692,9 +692,7 @@ mod paillier {
 
             let n_bytes = n.to_bytes_be();
             let r = loop {
-                let rand_bytes: Vec<u8> = (0..n_bytes.len())
-                    .map(|_| fastrand::u8(..))
-                    .collect();
+                let rand_bytes: Vec<u8> = (0..n_bytes.len()).map(|_| fastrand::u8(..)).collect();
                 let candidate = BigUint::from_bytes_be(&rand_bytes) % &n;
                 if candidate > BigUint::from(0u32) {
                     break candidate;
@@ -807,13 +805,12 @@ mod elgamal {
             .filter(|c| c.is_ascii_hexdigit())
             .collect();
         // The RFC 3526 hex constant is always valid; the fallback is a large odd number.
-        BigUint::parse_bytes(hex_clean.as_bytes(), 16)
-            .unwrap_or_else(|| {
-                // Fallback: construct 2^511 - 1 via byte manipulation.
-                let mut bytes = vec![0xFFu8; 64];
-                bytes[0] &= 0x7F; // clear top bit → 2^511 - 1
-                BigUint::from_bytes_be(&bytes)
-            })
+        BigUint::parse_bytes(hex_clean.as_bytes(), 16).unwrap_or_else(|| {
+            // Fallback: construct 2^511 - 1 via byte manipulation.
+            let mut bytes = vec![0xFFu8; 64];
+            bytes[0] &= 0x7F; // clear top bit → 2^511 - 1
+            BigUint::from_bytes_be(&bytes)
+        })
     }
 
     /// Returns (PublicKey, PrivateKey) where priv_key.lambda = raw x bytes.
@@ -824,9 +821,7 @@ mod elgamal {
 
         let p_bytes = p.to_bytes_be();
         let x = loop {
-            let rand_bytes: Vec<u8> = (0..p_bytes.len())
-                .map(|_| fastrand::u8(..))
-                .collect();
+            let rand_bytes: Vec<u8> = (0..p_bytes.len()).map(|_| fastrand::u8(..)).collect();
             let candidate = BigUint::from_bytes_be(&rand_bytes) % (&p - 2u32) + 2u32;
             if candidate > BigUint::from(1u32) && candidate < p {
                 break candidate;
@@ -886,8 +881,7 @@ mod elgamal {
                 "ElGamal ciphertext too short".to_string(),
             ));
         }
-        let c1_len =
-            u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+        let c1_len = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
         if data.len() < 4 + c1_len {
             return Err(EncryptionError::DecryptionFailed(
                 "ElGamal ciphertext truncated".to_string(),
@@ -923,11 +917,8 @@ mod elgamal {
 
             let p_bytes = p.to_bytes_be();
             let k = loop {
-                let rand_bytes: Vec<u8> = (0..p_bytes.len())
-                    .map(|_| fastrand::u8(..))
-                    .collect();
-                let candidate =
-                    BigUint::from_bytes_be(&rand_bytes) % (&p - 2u32) + 2u32;
+                let rand_bytes: Vec<u8> = (0..p_bytes.len()).map(|_| fastrand::u8(..)).collect();
+                let candidate = BigUint::from_bytes_be(&rand_bytes) % (&p - 2u32) + 2u32;
                 if candidate > BigUint::from(1u32) {
                     break candidate;
                 }
@@ -991,9 +982,7 @@ mod elgamal {
                     }
                 })
                 .ok_or_else(|| {
-                    EncryptionError::DecryptionFailed(
-                        "ElGamal: s has no inverse mod p".to_string(),
-                    )
+                    EncryptionError::DecryptionFailed("ElGamal: s has no inverse mod p".to_string())
                 })?;
             let m = (&c2 * &s_inv) % &p;
 
@@ -1001,11 +990,7 @@ mod elgamal {
             Ok(int_to_f32(m_u64, self.precision_bits))
         }
 
-        fn add(
-            &self,
-            _c1: &Ciphertext,
-            _c2: &Ciphertext,
-        ) -> Result<Ciphertext, EncryptionError> {
+        fn add(&self, _c1: &Ciphertext, _c2: &Ciphertext) -> Result<Ciphertext, EncryptionError> {
             Err(EncryptionError::IncompatibleCiphertext(
                 "ElGamal is multiplicatively homomorphic only; addition is not supported"
                     .to_string(),
@@ -1017,9 +1002,7 @@ mod elgamal {
             c1: &Ciphertext,
             c2: &Ciphertext,
         ) -> Result<Ciphertext, EncryptionError> {
-            if c1.scheme != EncryptionScheme::ElGamal
-                || c2.scheme != EncryptionScheme::ElGamal
-            {
+            if c1.scheme != EncryptionScheme::ElGamal || c2.scheme != EncryptionScheme::ElGamal {
                 return Err(EncryptionError::IncompatibleCiphertext(
                     "Both ciphertexts must use ElGamal scheme".to_string(),
                 ));
@@ -1202,7 +1185,9 @@ mod tests {
             let (pub_key, priv_key) = paillier_keygen_real(512);
             let enc = paillier::PaillierEncryption::new(16);
             let plaintext = 3.5_f32;
-            let ct = enc.encrypt(plaintext, &pub_key).expect("encrypt must succeed");
+            let ct = enc
+                .encrypt(plaintext, &pub_key)
+                .expect("encrypt must succeed");
             let decrypted = enc.decrypt(&ct, &priv_key).expect("decrypt must succeed");
             let err = (decrypted - plaintext).abs();
             assert!(
@@ -1246,7 +1231,9 @@ mod tests {
             let (pub_key, priv_key) = elgamal_keygen_real(2048);
             let enc = elgamal::ElGamalEncryption::new(16);
             let plaintext = 2.5_f32;
-            let ct = enc.encrypt(plaintext, &pub_key).expect("encrypt must succeed");
+            let ct = enc
+                .encrypt(plaintext, &pub_key)
+                .expect("encrypt must succeed");
             let decrypted = enc.decrypt(&ct, &priv_key).expect("decrypt must succeed");
             let err = (decrypted - plaintext).abs();
             assert!(

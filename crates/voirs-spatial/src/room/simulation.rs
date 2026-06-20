@@ -5,10 +5,10 @@
 
 use crate::types::Position3D;
 use crate::{Error, Result};
+use fastrand;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use fastrand;
 
 /// Advanced Room Simulator
 pub struct AdvancedRoomSimulator {
@@ -695,11 +695,8 @@ impl AdvancedRoomSimulator {
                     };
                     let phi = cos_phi.acos();
 
-                    let direction = Position3D::new(
-                        phi.sin() * theta.cos(),
-                        cos_phi,
-                        phi.sin() * theta.sin(),
-                    );
+                    let direction =
+                        Position3D::new(phi.sin() * theta.cos(), cos_phi, phi.sin() * theta.sin());
 
                     rays.push(AcousticRay {
                         position: *source,
@@ -750,11 +747,9 @@ impl AdvancedRoomSimulator {
 
                 let mut candidates: Vec<(f32, Position3D)> = (0..oversample)
                     .map(|i| {
-                        let theta =
-                            2.0 * std::f32::consts::PI * (i as f32) / golden_ratio;
+                        let theta = 2.0 * std::f32::consts::PI * (i as f32) / golden_ratio;
                         let cos_phi = if oversample > 1 {
-                            (1.0 - 2.0 * i as f32 / (oversample - 1) as f32)
-                                .clamp(-1.0, 1.0)
+                            (1.0 - 2.0 * i as f32 / (oversample - 1) as f32).clamp(-1.0, 1.0)
                         } else {
                             0.0
                         };
@@ -769,9 +764,8 @@ impl AdvancedRoomSimulator {
                     .collect();
 
                 // Sort by y-component descending (upper hemisphere bias)
-                candidates.sort_by(|a, b| {
-                    b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)
-                });
+                candidates
+                    .sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
                 candidates.truncate(ray_count as usize);
 
                 for (i, (_, dir)) in candidates.into_iter().enumerate() {
@@ -794,21 +788,16 @@ impl AdvancedRoomSimulator {
                 let golden_ratio = (1.0_f32 + 5.0_f32.sqrt()) / 2.0;
 
                 for i in 0..base_count {
-                    let theta =
-                        2.0 * std::f32::consts::PI * (i as f32) / golden_ratio;
+                    let theta = 2.0 * std::f32::consts::PI * (i as f32) / golden_ratio;
                     let cos_phi = if base_count > 1 {
-                        (1.0 - 2.0 * i as f32 / (base_count - 1) as f32)
-                            .clamp(-1.0, 1.0)
+                        (1.0 - 2.0 * i as f32 / (base_count - 1) as f32).clamp(-1.0, 1.0)
                     } else {
                         0.0
                     };
                     let phi = cos_phi.acos();
 
-                    let direction = Position3D::new(
-                        phi.sin() * theta.cos(),
-                        cos_phi,
-                        phi.sin() * theta.sin(),
-                    );
+                    let direction =
+                        Position3D::new(phi.sin() * theta.cos(), cos_phi, phi.sin() * theta.sin());
 
                     rays.push(AcousticRay {
                         position: *source,
@@ -832,20 +821,13 @@ impl AdvancedRoomSimulator {
                     Position3D::new(0.0, 0.0, -1.0),
                 ];
 
-                for (j, dir) in cardinals
-                    .iter()
-                    .enumerate()
-                    .take(cardinal_count as usize)
-                {
+                for (j, dir) in cardinals.iter().enumerate().take(cardinal_count as usize) {
                     rays.push(AcousticRay {
                         position: *source,
                         direction: *dir,
                         energy: 1.0 / ray_count as f32,
                         time: 0.0,
-                        frequency_spectrum: vec![
-                            1.0;
-                            self.config.frequency_bands.len()
-                        ],
+                        frequency_spectrum: vec![1.0; self.config.frequency_bands.len()],
                         phase: 0.0,
                         generation: 0,
                         id: (base_count + j as u32) as u64,
@@ -1275,10 +1257,8 @@ mod tests {
 
         // All directions should be approximately unit vectors
         for ray in &rays {
-            let len = (ray.direction.x.powi(2)
-                + ray.direction.y.powi(2)
-                + ray.direction.z.powi(2))
-            .sqrt();
+            let len = (ray.direction.x.powi(2) + ray.direction.y.powi(2) + ray.direction.z.powi(2))
+                .sqrt();
             assert!(
                 (len - 1.0).abs() < 1e-3,
                 "Direction should be approximately unit length, got {}",
@@ -1320,8 +1300,7 @@ mod tests {
 
         if !dots.is_empty() {
             let mean = dots.iter().sum::<f32>() / dots.len() as f32;
-            let variance =
-                dots.iter().map(|d| (d - mean).powi(2)).sum::<f32>() / dots.len() as f32;
+            let variance = dots.iter().map(|d| (d - mean).powi(2)).sum::<f32>() / dots.len() as f32;
             assert!(
                 variance < 1.0,
                 "Fibonacci distribution should have low dot-product variance, got {}",

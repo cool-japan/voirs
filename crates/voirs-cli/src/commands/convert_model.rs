@@ -163,7 +163,10 @@ async fn convert_onnx_to_safetensors(
     }
 
     if !global.quiet {
-        println!("📊 Extracting {} constant tensors from model graph...", owned_tensors.len());
+        println!(
+            "📊 Extracting {} constant tensors from model graph...",
+            owned_tensors.len()
+        );
     }
 
     // Build TensorView map (views borrow from owned_tensors)
@@ -475,7 +478,10 @@ mod tests {
 
         assert!(!owned_tensors.is_empty(), "Expected at least one tensor");
         let names: Vec<&str> = owned_tensors.iter().map(|(n, _)| n.as_str()).collect();
-        assert!(names.contains(&"test_weight"), "Expected tensor named 'test_weight'");
+        assert!(
+            names.contains(&"test_weight"),
+            "Expected tensor named 'test_weight'"
+        );
     }
 
     #[test]
@@ -519,7 +525,11 @@ mod tests {
         let reloaded_names: Vec<_> = reloaded.names();
 
         for (name, _) in &owned_tensors {
-            assert!(reloaded_names.contains(&name.as_str()), "Missing tensor: {}", name);
+            assert!(
+                reloaded_names.contains(&name.as_str()),
+                "Missing tensor: {}",
+                name
+            );
         }
 
         // Cleanup

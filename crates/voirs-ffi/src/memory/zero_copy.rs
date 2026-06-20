@@ -361,17 +361,15 @@ impl MemoryMappedFile {
     /// Windows implementation of read-only memory mapping
     #[cfg(windows)]
     pub fn open_read_only(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        use windows::core::PCWSTR;
         use windows::Win32::{
             Foundation::{CloseHandle, HANDLE},
             Storage::FileSystem::{
                 CreateFileW, GetFileSize, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, GENERIC_READ,
                 OPEN_EXISTING,
             },
-            System::Memory::{
-                CreateFileMappingW, FILE_MAP_READ, MapViewOfFile, PAGE_READONLY,
-            },
+            System::Memory::{CreateFileMappingW, MapViewOfFile, FILE_MAP_READ, PAGE_READONLY},
         };
-        use windows::core::PCWSTR;
         let wide_path: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
 
         unsafe {
@@ -402,14 +400,8 @@ impl MemoryMappedFile {
                 return Err("Cannot map empty file".into());
             }
 
-            let mapping_handle = CreateFileMappingW(
-                file_handle,
-                None,
-                PAGE_READONLY,
-                0,
-                0,
-                PCWSTR::null(),
-            )?;
+            let mapping_handle =
+                CreateFileMappingW(file_handle, None, PAGE_READONLY, 0, 0, PCWSTR::null())?;
 
             if mapping_handle.is_invalid() {
                 let _ = CloseHandle(file_handle);
@@ -436,17 +428,15 @@ impl MemoryMappedFile {
     /// Windows implementation of read-write memory mapping
     #[cfg(windows)]
     pub fn open_read_write(path: &str, size: usize) -> Result<Self, Box<dyn std::error::Error>> {
+        use windows::core::PCWSTR;
         use windows::Win32::{
             Foundation::{CloseHandle, HANDLE},
             Storage::FileSystem::{
-                CreateFileW, SetEndOfFile, SetFilePointerEx, FILE_ATTRIBUTE_NORMAL,
-                FILE_BEGIN, FILE_SHARE_READ, GENERIC_READ, GENERIC_WRITE, OPEN_ALWAYS,
+                CreateFileW, SetEndOfFile, SetFilePointerEx, FILE_ATTRIBUTE_NORMAL, FILE_BEGIN,
+                FILE_SHARE_READ, GENERIC_READ, GENERIC_WRITE, OPEN_ALWAYS,
             },
-            System::Memory::{
-                CreateFileMappingW, FILE_MAP_WRITE, MapViewOfFile, PAGE_READWRITE,
-            },
+            System::Memory::{CreateFileMappingW, MapViewOfFile, FILE_MAP_WRITE, PAGE_READWRITE},
         };
-        use windows::core::PCWSTR;
         let wide_path: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
 
         unsafe {
@@ -559,8 +549,8 @@ impl MemoryMappedFile {
     pub fn sync(&self) -> Result<(), &'static str> {
         use windows::Win32::{
             Foundation::{CloseHandle, HANDLE},
-            System::Memory::{FlushViewOfFile, MEMORY_MAPPED_VIEW_ADDRESS},
             Storage::FileSystem::FlushFileBuffers,
+            System::Memory::{FlushViewOfFile, MEMORY_MAPPED_VIEW_ADDRESS},
         };
         unsafe {
             let view_ok = FlushViewOfFile(
@@ -750,13 +740,11 @@ impl SharedMemorySegment {
 
     #[cfg(windows)]
     pub fn create(name: &str, size: usize) -> Result<Self, Box<dyn std::error::Error>> {
+        use windows::core::PCWSTR;
         use windows::Win32::{
             Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
-            System::Memory::{
-                CreateFileMappingW, FILE_MAP_WRITE, MapViewOfFile, PAGE_READWRITE,
-            },
+            System::Memory::{CreateFileMappingW, MapViewOfFile, FILE_MAP_WRITE, PAGE_READWRITE},
         };
-        use windows::core::PCWSTR;
         let wide_name: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
         let size_hi = (size >> 32) as u32;
         let size_lo = (size & 0xFFFF_FFFF) as u32;
@@ -792,21 +780,16 @@ impl SharedMemorySegment {
 
     #[cfg(windows)]
     pub fn open(name: &str, size: usize) -> Result<Self, Box<dyn std::error::Error>> {
-        use windows::Win32::{
-            System::Memory::{
-                FILE_MAP_WRITE, MapViewOfFile, OpenFileMappingW,
-            },
-            Foundation::CloseHandle,
-        };
         use windows::core::PCWSTR;
+        use windows::Win32::{
+            Foundation::CloseHandle,
+            System::Memory::{MapViewOfFile, OpenFileMappingW, FILE_MAP_WRITE},
+        };
         let wide_name: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
 
         unsafe {
-            let mapping_handle = OpenFileMappingW(
-                FILE_MAP_WRITE.0,
-                false,
-                PCWSTR(wide_name.as_ptr()),
-            )?;
+            let mapping_handle =
+                OpenFileMappingW(FILE_MAP_WRITE.0, false, PCWSTR(wide_name.as_ptr()))?;
 
             if mapping_handle.is_invalid() {
                 return Err("Failed to open shared memory mapping".into());
@@ -1157,7 +1140,8 @@ mod tests {
 
         {
             let mut file = std::fs::File::create(&test_path).expect("create test file");
-            file.write_all(b"Windows memory mapping test data!").expect("write test data");
+            file.write_all(b"Windows memory mapping test data!")
+                .expect("write test data");
         }
 
         let size = 33usize;
@@ -1170,7 +1154,8 @@ mod tests {
         mmap_rw.sync().expect("sync should succeed");
         drop(mmap_rw);
 
-        let mmap_ro = MemoryMappedFile::open_read_only(path_str).expect("open_read_only should succeed");
+        let mmap_ro =
+            MemoryMappedFile::open_read_only(path_str).expect("open_read_only should succeed");
         assert_eq!(mmap_ro.len(), size);
         assert_eq!(mmap_ro.as_slice()[0], b'X');
         assert_eq!(&mmap_ro.as_slice()[1..5], b"indo");
@@ -1185,8 +1170,8 @@ mod tests {
         let name = "test_voirs_shm_roundtrip";
         let size = 4096usize;
 
-        let mut seg1 = SharedMemorySegment::create(name, size)
-            .expect("create shared memory should succeed");
+        let mut seg1 =
+            SharedMemorySegment::create(name, size).expect("create shared memory should succeed");
         {
             let slice = seg1.as_mut_slice();
             slice[0] = 0xDE;
@@ -1194,8 +1179,8 @@ mod tests {
             slice[4095] = 0xBE;
         }
 
-        let seg2 = SharedMemorySegment::open(name, size)
-            .expect("open shared memory should succeed");
+        let seg2 =
+            SharedMemorySegment::open(name, size).expect("open shared memory should succeed");
         assert_eq!(seg2.as_slice()[0], 0xDE);
         assert_eq!(seg2.as_slice()[1], 0xAD);
         assert_eq!(seg2.as_slice()[4095], 0xBE);

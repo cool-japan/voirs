@@ -920,7 +920,7 @@ impl ZoomClient {
         timestamp: &str,
         signature: &str,
     ) -> Result<(), ZoomError> {
-        use hmac::{Hmac, Mac};
+        use hmac::{Hmac, KeyInit, Mac};
         use sha2::Sha256;
 
         if self.config.mock_mode {

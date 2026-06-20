@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 #[cfg(feature = "cloud")]
 use {
-    base64::{Engine as _, engine::general_purpose::STANDARD},
+    base64::{engine::general_purpose::STANDARD, Engine as _},
     hmac::{Hmac, Mac},
     sha2::{Digest, Sha256},
     url::Url,
@@ -18,8 +18,7 @@ type HmacSha256 = Hmac<Sha256>;
 
 #[cfg(feature = "cloud")]
 fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
-    let mut mac = HmacSha256::new_from_slice(key)
-        .expect("HMAC accepts any key length");
+    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC accepts any key length");
     mac.update(data);
     mac.finalize().into_bytes().to_vec()
 }
@@ -58,8 +57,8 @@ pub fn sign_s3_request(
     service: &str,
     timestamp: &str,
 ) -> Result<HashMap<String, String>, CloudStorageError> {
-    let parsed = Url::parse(url_str)
-        .map_err(|e| CloudStorageError::InvalidConfiguration(e.to_string()))?;
+    let parsed =
+        Url::parse(url_str).map_err(|e| CloudStorageError::InvalidConfiguration(e.to_string()))?;
     let host = parsed.host_str().unwrap_or("").to_string();
     let path = parsed.path().to_string();
     let query_string = parsed.query().unwrap_or("").to_string();
@@ -85,7 +84,10 @@ pub fn sign_s3_request(
     );
 
     let signing_key = {
-        let k1 = hmac_sha256(format!("AWS4{}", secret_key).as_bytes(), datestamp.as_bytes());
+        let k1 = hmac_sha256(
+            format!("AWS4{}", secret_key).as_bytes(),
+            datestamp.as_bytes(),
+        );
         let k2 = hmac_sha256(&k1, region.as_bytes());
         let k3 = hmac_sha256(&k2, service.as_bytes());
         hmac_sha256(&k3, b"aws4_request")
@@ -144,13 +146,11 @@ pub fn sign_azure_request(
         method, content_length_str, content_type, canon_headers, canon_resource
     );
 
-    let key_bytes = STANDARD
-        .decode(account_key_b64)
-        .map_err(|_| {
-            CloudStorageError::AuthenticationFailed(
-                "Invalid Azure account key (base64 decode failed)".into(),
-            )
-        })?;
+    let key_bytes = STANDARD.decode(account_key_b64).map_err(|_| {
+        CloudStorageError::AuthenticationFailed(
+            "Invalid Azure account key (base64 decode failed)".into(),
+        )
+    })?;
 
     let sig_bytes = hmac_sha256(&key_bytes, string_to_sign.as_bytes());
     let signature = STANDARD.encode(sig_bytes);

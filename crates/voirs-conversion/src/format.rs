@@ -924,11 +924,7 @@ impl AudioReader {
                     "Track has non-audio codec parameters".to_string(),
                 ))
             }
-            None => {
-                return Err(Error::audio(
-                    "Track has no codec parameters".to_string(),
-                ))
-            }
+            None => return Err(Error::audio("Track has no codec parameters".to_string())),
         };
 
         let sample_rate = audio_params.sample_rate.unwrap_or(44100);
@@ -949,9 +945,7 @@ impl AudioReader {
                 Ok(Some(p)) => p,
                 Ok(None) => break,
                 Err(symphonia::core::errors::Error::IoError(_)) => break,
-                Err(e) => {
-                    return Err(Error::audio(format!("Symphonia packet error: {e}")))
-                }
+                Err(e) => return Err(Error::audio(format!("Symphonia packet error: {e}"))),
             };
             if packet.track_id != track_id {
                 continue;
@@ -992,9 +986,7 @@ impl AudioReader {
                 }
                 Err(symphonia::core::errors::Error::IoError(_)) => break,
                 Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
-                Err(e) => {
-                    return Err(Error::audio(format!("Symphonia decode error: {e}")))
-                }
+                Err(e) => return Err(Error::audio(format!("Symphonia decode error: {e}"))),
             }
         }
 
@@ -1336,8 +1328,7 @@ impl AudioWriter {
         let file = std::fs::File::create(path.as_ref())
             .map_err(|e| Error::audio(format!("Failed to create OGG file: {e}")))?;
         let writer = std::io::BufWriter::new(file);
-        encode_vorbis(&buf, writer)
-            .map_err(|e| Error::audio(format!("OGG encode error: {e}")))
+        encode_vorbis(&buf, writer).map_err(|e| Error::audio(format!("OGG encode error: {e}")))
     }
 
     fn write_ogg_buffer(audio: &AudioData) -> Result<Vec<u8>> {
@@ -1367,8 +1358,7 @@ impl AudioWriter {
         let file = std::fs::File::create(path.as_ref())
             .map_err(|e| Error::audio(format!("Failed to create AIFF file: {e}")))?;
         let mut writer = std::io::BufWriter::new(file);
-        write_aiff(&buf, &mut writer)
-            .map_err(|e| Error::audio(format!("AIFF encode error: {e}")))
+        write_aiff(&buf, &mut writer).map_err(|e| Error::audio(format!("AIFF encode error: {e}")))
     }
 
     fn write_aiff_buffer(audio: &AudioData) -> Result<Vec<u8>> {
@@ -1576,8 +1566,7 @@ mod tests {
         let format = AudioFormat::new(AudioFormatType::Flac, sample_rate, channels);
         let audio = AudioData::new(samples.clone(), format);
         let tmp = std::env::temp_dir().join("voirs_test_flac_roundtrip.flac");
-        AudioWriter::write_file(&audio, &tmp, Some(AudioFormatType::Flac))
-            .expect("write flac");
+        AudioWriter::write_file(&audio, &tmp, Some(AudioFormatType::Flac)).expect("write flac");
         let read_back = AudioReader::read_file(&tmp).expect("read flac");
         let _ = std::fs::remove_file(&tmp);
         assert_eq!(read_back.format.sample_rate, sample_rate);
@@ -1628,8 +1617,7 @@ mod tests {
         let samples: Vec<f32> = (0..1000).map(|i| (i as f32 * 0.01).sin() * 0.5).collect();
         let format = AudioFormat::new(AudioFormatType::Ogg, 44100, 1);
         let audio = AudioData::new(samples, format);
-        let buf =
-            AudioWriter::write_buffer(&audio, AudioFormatType::Ogg).expect("encode ogg");
+        let buf = AudioWriter::write_buffer(&audio, AudioFormatType::Ogg).expect("encode ogg");
         assert!(!buf.is_empty(), "OGG buffer should not be empty");
         assert_eq!(&buf[0..4], b"OggS", "OGG output should start with OggS");
         // Decode is best-effort: oxiaudio-encode produces standard OGG container
@@ -1644,9 +1632,8 @@ mod tests {
 
     #[test]
     fn test_aac_decode_returns_err_for_missing_file() {
-        let result = AudioReader::read_file(
-            std::env::temp_dir().join("nonexistent_file_voirs_12345.aac"),
-        );
+        let result =
+            AudioReader::read_file(std::env::temp_dir().join("nonexistent_file_voirs_12345.aac"));
         assert!(result.is_err(), "reading nonexistent AAC file should fail");
     }
 
@@ -1678,8 +1665,7 @@ mod tests {
         let format = AudioFormat::new(AudioFormatType::Aiff, 44100, 1);
         let audio = AudioData::new(samples.clone(), format);
         let tmp = std::env::temp_dir().join("voirs_test_aiff_roundtrip.aiff");
-        AudioWriter::write_file(&audio, &tmp, Some(AudioFormatType::Aiff))
-            .expect("write aiff");
+        AudioWriter::write_file(&audio, &tmp, Some(AudioFormatType::Aiff)).expect("write aiff");
         let read_back = AudioReader::read_file(&tmp).expect("read aiff");
         let _ = std::fs::remove_file(&tmp);
         assert_eq!(read_back.format.sample_rate, 44100);

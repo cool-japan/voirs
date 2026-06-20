@@ -399,19 +399,35 @@ mod tests {
         };
 
         // Save both records for the test user
-        manager.save_feedback("test_user", &old_feedback).await.unwrap();
-        manager.save_feedback("test_user", &fresh_feedback).await.unwrap();
+        manager
+            .save_feedback("test_user", &old_feedback)
+            .await
+            .unwrap();
+        manager
+            .save_feedback("test_user", &fresh_feedback)
+            .await
+            .unwrap();
 
         // Verify both are present
-        let history_before = manager.load_feedback_history("test_user", None, None).await.unwrap();
-        assert_eq!(history_before.len(), 2, "should have 2 records before cleanup");
+        let history_before = manager
+            .load_feedback_history("test_user", None, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            history_before.len(),
+            2,
+            "should have 2 records before cleanup"
+        );
 
         // Run cleanup with threshold of 1 day ago (removes the 5-day-old record)
         let threshold = Utc::now() - chrono::Duration::days(1);
         let result = manager.cleanup(threshold).await.unwrap();
 
         // Verify old record is gone, fresh remains
-        let history_after = manager.load_feedback_history("test_user", None, None).await.unwrap();
+        let history_after = manager
+            .load_feedback_history("test_user", None, None)
+            .await
+            .unwrap();
         assert_eq!(history_after.len(), 1, "should have 1 record after cleanup");
         assert!(
             (history_after[0].overall_score - 0.8f32).abs() < 1e-6,
@@ -419,6 +435,9 @@ mod tests {
         );
 
         // Verify feedback_records_cleaned count
-        assert_eq!(result.feedback_records_cleaned, 1, "should report 1 cleaned feedback record");
+        assert_eq!(
+            result.feedback_records_cleaned, 1,
+            "should report 1 cleaned feedback record"
+        );
     }
 }

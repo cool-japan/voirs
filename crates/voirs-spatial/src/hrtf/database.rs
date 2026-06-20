@@ -1138,17 +1138,33 @@ mod tests {
             interpolation_method: InterpolationMethod::Barycentric,
             ..Default::default()
         };
-        let manager = HrtfDatabaseManager::new(config)
-            .expect("Failed to create HRTF database manager");
+        let manager =
+            HrtfDatabaseManager::new(config).expect("Failed to create HRTF database manager");
 
         let mut db = HrtfDatabase::new();
         let ir_len = 32usize;
 
         let positions = [
-            HrtfPosition { azimuth: 0, elevation: 0, distance_cm: 100 },
-            HrtfPosition { azimuth: 90, elevation: 0, distance_cm: 100 },
-            HrtfPosition { azimuth: -90, elevation: 0, distance_cm: 100 },
-            HrtfPosition { azimuth: 0, elevation: 45, distance_cm: 100 },
+            HrtfPosition {
+                azimuth: 0,
+                elevation: 0,
+                distance_cm: 100,
+            },
+            HrtfPosition {
+                azimuth: 90,
+                elevation: 0,
+                distance_cm: 100,
+            },
+            HrtfPosition {
+                azimuth: -90,
+                elevation: 0,
+                distance_cm: 100,
+            },
+            HrtfPosition {
+                azimuth: 0,
+                elevation: 45,
+                distance_cm: 100,
+            },
         ];
         let values = [1.0f32, 2.0, 3.0, 4.0];
 
@@ -1175,20 +1191,28 @@ mod tests {
             interpolation_method: InterpolationMethod::RadialBasisFunction,
             ..Default::default()
         };
-        let manager = HrtfDatabaseManager::new(config)
-            .expect("Failed to create HRTF database manager");
+        let manager =
+            HrtfDatabaseManager::new(config).expect("Failed to create HRTF database manager");
 
         let mut db = HrtfDatabase::new();
         let ir_len = 16usize;
 
         for az in (-90..=90i32).step_by(30) {
             for el in (-60..=60i32).step_by(30) {
-                let pos = HrtfPosition { azimuth: az as i16, elevation: el as i16, distance_cm: 100 };
+                let pos = HrtfPosition {
+                    azimuth: az as i16,
+                    elevation: el as i16,
+                    distance_cm: 100,
+                };
                 db.measurements.insert(pos, make_measurement(1.0, ir_len));
             }
         }
 
-        let target = HrtfPosition { azimuth: 15, elevation: 15, distance_cm: 100 };
+        let target = HrtfPosition {
+            azimuth: 15,
+            elevation: 15,
+            distance_cm: 100,
+        };
         let result = manager
             .rbf_interpolation(&target, &db)
             .expect("RBF interpolation should succeed");
@@ -1209,21 +1233,34 @@ mod tests {
             interpolation_method: InterpolationMethod::SphericalSpline,
             ..Default::default()
         };
-        let manager = HrtfDatabaseManager::new(config)
-            .expect("Failed to create HRTF database manager");
+        let manager =
+            HrtfDatabaseManager::new(config).expect("Failed to create HRTF database manager");
 
         let mut db = HrtfDatabase::new();
         let ir_len = 32usize;
         let ir_val = 0.5f32;
 
-        let pos_left = HrtfPosition { azimuth: -45, elevation: 0, distance_cm: 100 };
-        let pos_right = HrtfPosition { azimuth: 45, elevation: 0, distance_cm: 100 };
+        let pos_left = HrtfPosition {
+            azimuth: -45,
+            elevation: 0,
+            distance_cm: 100,
+        };
+        let pos_right = HrtfPosition {
+            azimuth: 45,
+            elevation: 0,
+            distance_cm: 100,
+        };
 
         for pos in [pos_left, pos_right] {
-            db.measurements.insert(pos, make_measurement(ir_val, ir_len));
+            db.measurements
+                .insert(pos, make_measurement(ir_val, ir_len));
         }
 
-        let midpoint = HrtfPosition { azimuth: 0, elevation: 0, distance_cm: 100 };
+        let midpoint = HrtfPosition {
+            azimuth: 0,
+            elevation: 0,
+            distance_cm: 100,
+        };
         let result = manager
             .spherical_spline_interpolation(&midpoint, &db)
             .expect("Spherical spline interpolation should succeed");

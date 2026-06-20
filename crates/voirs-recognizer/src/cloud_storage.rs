@@ -400,8 +400,7 @@ impl CloudStorageManager {
         let timeout = Duration::from_secs(config.download_timeout_secs);
         drop(config);
 
-        let empty_hash =
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        let empty_hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
         let url_str = format!(
             "https://{}.s3.{}.amazonaws.com/{}",
             bucket, region, model_name
@@ -516,12 +515,8 @@ impl CloudStorageManager {
         let timeout = Duration::from_secs(config.download_timeout_secs);
         drop(config);
 
-        let empty_hash =
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-        let url_str = format!(
-            "https://storage.googleapis.com/{}/{}",
-            bucket, model_name
-        );
+        let empty_hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        let url_str = format!("https://storage.googleapis.com/{}/{}", bucket, model_name);
         let timestamp = cloud_auth::current_timestamp();
 
         voirs_sdk::ensure_crypto_provider();
@@ -608,12 +603,9 @@ impl CloudStorageManager {
         use tokio::io::AsyncWriteExt;
 
         let config = self.config.read();
-        let conn_str = config
-            .azure_connection_string
-            .clone()
-            .ok_or_else(|| {
-                CloudStorageError::AuthenticationFailed("Missing azure_connection_string".into())
-            })?;
+        let conn_str = config.azure_connection_string.clone().ok_or_else(|| {
+            CloudStorageError::AuthenticationFailed("Missing azure_connection_string".into())
+        })?;
         let container = config.bucket_name.clone();
         let timeout = Duration::from_secs(config.download_timeout_secs);
         drop(config);
@@ -737,9 +729,7 @@ impl CloudStorageManager {
         let access_key = config
             .access_key_id
             .as_deref()
-            .ok_or_else(|| {
-                CloudStorageError::AuthenticationFailed("Missing access_key_id".into())
-            })?
+            .ok_or_else(|| CloudStorageError::AuthenticationFailed("Missing access_key_id".into()))?
             .to_owned();
         let secret_key = config
             .secret_access_key
@@ -937,12 +927,9 @@ impl CloudStorageManager {
         use crate::cloud_auth;
 
         let config = self.config.read();
-        let conn_str = config
-            .azure_connection_string
-            .clone()
-            .ok_or_else(|| {
-                CloudStorageError::AuthenticationFailed("Missing azure_connection_string".into())
-            })?;
+        let conn_str = config.azure_connection_string.clone().ok_or_else(|| {
+            CloudStorageError::AuthenticationFailed("Missing azure_connection_string".into())
+        })?;
         let container = config.bucket_name.clone();
         let timeout = Duration::from_secs(config.download_timeout_secs);
         drop(config);
@@ -1047,9 +1034,7 @@ impl CloudStorageManager {
         let access_key = config
             .access_key_id
             .as_deref()
-            .ok_or_else(|| {
-                CloudStorageError::AuthenticationFailed("Missing access_key_id".into())
-            })?
+            .ok_or_else(|| CloudStorageError::AuthenticationFailed("Missing access_key_id".into()))?
             .to_owned();
         let secret_key = config
             .secret_access_key
@@ -1062,8 +1047,7 @@ impl CloudStorageManager {
         let timeout = Duration::from_secs(config.download_timeout_secs);
         drop(config);
 
-        let empty_hash =
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        let empty_hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
         let url_str = format!(
             "https://{}.s3.{}.amazonaws.com/?list-type=2",
             bucket, region
@@ -1153,8 +1137,7 @@ impl CloudStorageManager {
         let timeout = Duration::from_secs(config.download_timeout_secs);
         drop(config);
 
-        let empty_hash =
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        let empty_hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
         let url_str = format!("https://storage.googleapis.com/{}?list-type=2", bucket);
         let timestamp = cloud_auth::current_timestamp();
 
@@ -1215,12 +1198,9 @@ impl CloudStorageManager {
         use crate::cloud_auth;
 
         let config = self.config.read();
-        let conn_str = config
-            .azure_connection_string
-            .clone()
-            .ok_or_else(|| {
-                CloudStorageError::AuthenticationFailed("Missing azure_connection_string".into())
-            })?;
+        let conn_str = config.azure_connection_string.clone().ok_or_else(|| {
+            CloudStorageError::AuthenticationFailed("Missing azure_connection_string".into())
+        })?;
         let container = config.bucket_name.clone();
         let timeout = Duration::from_secs(config.download_timeout_secs);
         drop(config);
@@ -1375,7 +1355,10 @@ impl CloudStorageManager {
         };
 
         if expected.is_empty() {
-            tracing::debug!("No checksum metadata for {}, skipping verification", model_name);
+            tracing::debug!(
+                "No checksum metadata for {}, skipping verification",
+                model_name
+            );
             return Ok(());
         }
 
@@ -1509,7 +1492,7 @@ impl CloudStorageManager {
 
 #[cfg(feature = "cloud")]
 fn parse_s3_list_xml(xml: &str) -> Result<Vec<ModelMetadata>, CloudStorageError> {
-    use quick_xml::{Reader, events::Event};
+    use quick_xml::{events::Event, Reader};
 
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
@@ -1586,7 +1569,7 @@ fn parse_s3_list_xml(xml: &str) -> Result<Vec<ModelMetadata>, CloudStorageError>
 
 #[cfg(feature = "cloud")]
 fn parse_azure_list_xml(xml: &str) -> Result<Vec<ModelMetadata>, CloudStorageError> {
-    use quick_xml::{Reader, events::Event};
+    use quick_xml::{events::Event, Reader};
 
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
@@ -1840,7 +1823,11 @@ mod cloud_auth_tests {
             "s3",
             "20130524T000000Z",
         );
-        assert!(result.is_ok(), "SigV4 signing should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "SigV4 signing should succeed: {:?}",
+            result.err()
+        );
         let headers = result.unwrap();
         assert!(
             headers.contains_key("Authorization"),
@@ -1852,9 +1839,7 @@ mod cloud_auth_tests {
             "Should use AWS4-HMAC-SHA256"
         );
         assert!(
-            auth.contains(
-                "Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request"
-            ),
+            auth.contains("Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request"),
             "Credential scope must match: {}",
             auth
         );
@@ -1977,13 +1962,11 @@ mod checksum_tests {
     #[tokio::test]
     #[ignore = "Requires AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, TEST_BUCKET, TEST_AWS_REGION env vars"]
     async fn test_s3_roundtrip() {
-        let access_key =
-            std::env::var("AWS_ACCESS_KEY_ID").expect("AWS_ACCESS_KEY_ID must be set");
+        let access_key = std::env::var("AWS_ACCESS_KEY_ID").expect("AWS_ACCESS_KEY_ID must be set");
         let secret_key =
             std::env::var("AWS_SECRET_ACCESS_KEY").expect("AWS_SECRET_ACCESS_KEY must be set");
         let bucket = std::env::var("TEST_BUCKET").expect("TEST_BUCKET must be set");
-        let region =
-            std::env::var("TEST_AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string());
+        let region = std::env::var("TEST_AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string());
 
         let temp_dir = std::env::temp_dir().join("voirs_s3_roundtrip");
         std::fs::create_dir_all(&temp_dir).ok();
