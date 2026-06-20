@@ -94,7 +94,7 @@ claxon = "0.4"  # FLAC decoding
 # C-FFI `flac-bound` (libFLAC). Used (optionally) under the `ffi-codecs` feature.
 oxiaudio-core = "0.1.3"    # OxiAudio core types (AudioBuffer, ChannelLayout, SampleFormat)
 oxiaudio-encode = "0.1.3"  # OxiAudio Pure-Rust encoders (FLAC via flacenc)
-symphonia = "0.6.0"  # Comprehensive audio codec support
+symphonia = { version = "0.6.0", features = ["aiff", "aac", "mp3"] }  # Comprehensive audio codec support
 opus = "0.3"  # Opus audio codec
 lewton = "0.10"  # OGG Vorbis decoding
 ogg = "0.9"       # OGG container parsing (used with opus crate for Ogg-Opus support)
@@ -108,6 +108,7 @@ oxifft = "0.3.2"
 # NOTE: wide and simba kept for direct SIMD in specific optimized paths (non-array operations)
 wide = "1.5.0"  # SIMD processing
 simba = "0.10"  # SIMD abstractions
+num-bigint-dig = "0.8"
 
 # Text processing
 unicode-normalization = "0.1"

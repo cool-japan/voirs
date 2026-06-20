@@ -141,6 +141,7 @@ impl Default for IntegrationConfig {
                 api_key: None,
                 oauth_token: None,
                 jwt_token: None,
+                jwt_secret: None,
                 basic_auth: None,
                 custom_headers: HashMap::new(),
             },
@@ -163,8 +164,10 @@ pub struct AuthConfig {
     pub api_key: Option<String>,
     /// OAuth token
     pub oauth_token: Option<String>,
-    /// JWT token
+    /// JWT token (the token to validate, not the signing key)
     pub jwt_token: Option<String>,
+    /// JWT signing secret (HMAC-SHA256 key used to verify JWT signatures)
+    pub jwt_secret: Option<String>,
     /// Basic auth credentials
     pub basic_auth: Option<BasicAuth>,
     /// Custom headers

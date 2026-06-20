@@ -8,6 +8,18 @@ use std::collections::HashMap;
 use super::{AuthConfig, IntegrationError, IntegrationResult, RateLimitConfig};
 use crate::traits::{FeedbackResponse, SessionState, UserPreferences, UserProgress};
 
+/// JWT claims structure for token validation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Claims {
+    /// Subject (user identifier)
+    sub: String,
+    /// Expiration time (Unix timestamp)
+    exp: usize,
+    /// Issued at time (Unix timestamp)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    iat: Option<usize>,
+}
+
 /// API request model
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiRequest<T> {
@@ -372,13 +384,39 @@ impl ApiManager for FeedbackApiManager {
                 // Basic auth validation would be implemented here
                 Ok(auth_header.starts_with("Basic "))
             }
-            _ => {
-                log::warn!(
-                    "Auth type {:?} not yet implemented",
-                    self.auth_config.auth_type
-                );
+            crate::integration::AuthType::Jwt => {
+                let token = auth_header.trim_start_matches("Bearer ").trim();
+                match &self.auth_config.jwt_secret {
+                    Some(secret) => {
+                        let key =
+                            jsonwebtoken::DecodingKey::from_secret(secret.as_bytes());
+                        let mut validation = jsonwebtoken::Validation::new(
+                            jsonwebtoken::Algorithm::HS256,
+                        );
+                        validation.validate_exp = true;
+                        match jsonwebtoken::decode::<Claims>(token, &key, &validation) {
+                            Ok(_) => Ok(true),
+                            Err(_) => Ok(false),
+                        }
+                    }
+                    None => Ok(false), // no secret configured → reject
+                }
+            }
+            crate::integration::AuthType::Custom => {
+                if let Some(expected) =
+                    self.auth_config.custom_headers.get("x-custom-auth-token")
+                {
+                    let provided = auth_header.trim_start_matches("Custom ").trim();
+                    Ok(provided == expected.as_str())
+                } else {
+                    Ok(false)
+                }
+            }
+            crate::integration::AuthType::OAuth => {
                 Err(IntegrationError::AuthenticationError {
-                    message: "Authentication method not implemented".to_string(),
+                    message:
+                        "OAuth authentication requires an external authorization server"
+                            .to_string(),
                 })
             }
         }
@@ -527,6 +565,7 @@ mod tests {
             api_key: Some("test_key".to_string()),
             oauth_token: None,
             jwt_token: None,
+            jwt_secret: None,
             basic_auth: None,
             custom_headers: HashMap::new(),
         };
@@ -546,6 +585,7 @@ mod tests {
             api_key: Some("test_key".to_string()),
             oauth_token: None,
             jwt_token: None,
+            jwt_secret: None,
             basic_auth: None,
             custom_headers: HashMap::new(),
         };
@@ -583,6 +623,7 @@ mod tests {
             api_key: None,
             oauth_token: None,
             jwt_token: None,
+            jwt_secret: None,
             basic_auth: None,
             custom_headers: HashMap::new(),
         };
@@ -609,6 +650,7 @@ mod tests {
             api_key: None,
             oauth_token: None,
             jwt_token: None,
+            jwt_secret: None,
             basic_auth: None,
             custom_headers: HashMap::new(),
         };
@@ -621,6 +663,7 @@ mod tests {
             api_key: None,
             oauth_token: None,
             jwt_token: None,
+            jwt_secret: None,
             basic_auth: Some(crate::integration::BasicAuth {
                 username: "user".to_string(),
                 password: "pass".to_string(),
@@ -639,6 +682,7 @@ mod tests {
             api_key: None,
             oauth_token: None,
             jwt_token: None,
+            jwt_secret: None,
             basic_auth: None,
             custom_headers: HashMap::new(),
         };
@@ -671,6 +715,7 @@ mod tests {
             api_key: None,
             oauth_token: None,
             jwt_token: None,
+            jwt_secret: None,
             basic_auth: None,
             custom_headers: HashMap::new(),
         };
@@ -706,6 +751,7 @@ mod tests {
             api_key: None,
             oauth_token: None,
             jwt_token: None,
+            jwt_secret: None,
             basic_auth: None,
             custom_headers: HashMap::new(),
         };
@@ -734,6 +780,7 @@ mod tests {
             api_key: None,
             oauth_token: None,
             jwt_token: None,
+            jwt_secret: None,
             basic_auth: None,
             custom_headers: HashMap::new(),
         };
@@ -909,33 +956,123 @@ mod tests {
 
     #[tokio::test]
     async fn test_auth_validation_edge_cases() {
-        // Test JWT authentication (not implemented)
+        // Test JWT authentication (now implemented)
+        let secret = "test-jwt-secret-key";
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as usize)
+            .unwrap_or(0);
+        let claims = Claims {
+            sub: "test-user".to_string(),
+            exp: now + 3600,
+            iat: Some(now),
+        };
+        let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
+        let encoding_key = jsonwebtoken::EncodingKey::from_secret(secret.as_bytes());
+        let valid_token = jsonwebtoken::encode(&header, &claims, &encoding_key)
+            .expect("failed to encode JWT in test");
+
         let auth_config = AuthConfig {
             auth_type: AuthType::Jwt,
             api_key: None,
             oauth_token: None,
-            jwt_token: Some("jwt_token".to_string()),
+            jwt_token: None,
+            jwt_secret: Some(secret.to_string()),
             basic_auth: None,
             custom_headers: HashMap::new(),
         };
         let manager = FeedbackApiManager::new(auth_config, RateLimitConfig::default());
 
-        let result = manager.validate_auth("Bearer jwt_token").await;
-        assert!(result.is_err()); // Should return error for unimplemented auth type
+        // Valid token → Ok(true)
+        let result = manager
+            .validate_auth(&format!("Bearer {valid_token}"))
+            .await;
+        assert!(result.unwrap(), "valid JWT should be accepted");
 
-        // Test OAuth authentication (not implemented)
+        // Tampered token → Ok(false), not Err
+        let tampered = format!("{valid_token}TAMPERED");
+        let result = manager
+            .validate_auth(&format!("Bearer {tampered}"))
+            .await;
+        assert!(!result.unwrap(), "tampered JWT should be rejected");
+
+        // JWT with no secret configured → Ok(false)
+        let auth_config_no_secret = AuthConfig {
+            auth_type: AuthType::Jwt,
+            api_key: None,
+            oauth_token: None,
+            jwt_token: None,
+            jwt_secret: None,
+            basic_auth: None,
+            custom_headers: HashMap::new(),
+        };
+        let manager_no_secret =
+            FeedbackApiManager::new(auth_config_no_secret, RateLimitConfig::default());
+        let result = manager_no_secret
+            .validate_auth(&format!("Bearer {valid_token}"))
+            .await;
+        assert!(!result.unwrap(), "JWT without configured secret should be rejected");
+
+        // Test OAuth authentication (still deferred)
         let auth_config = AuthConfig {
             auth_type: AuthType::OAuth,
             api_key: None,
             oauth_token: Some("oauth_token".to_string()),
             jwt_token: None,
+            jwt_secret: None,
             basic_auth: None,
             custom_headers: HashMap::new(),
         };
         let manager = FeedbackApiManager::new(auth_config, RateLimitConfig::default());
 
         let result = manager.validate_auth("Bearer oauth_token").await;
-        assert!(result.is_err()); // Should return error for unimplemented auth type
+        assert!(result.is_err(), "OAuth should return error (requires external server)");
+    }
+
+    #[tokio::test]
+    async fn test_custom_auth_validation() {
+        // Custom auth with x-custom-auth-token configured
+        let mut custom_headers = HashMap::new();
+        custom_headers.insert("x-custom-auth-token".to_string(), "my-secret".to_string());
+        let auth_config = AuthConfig {
+            auth_type: AuthType::Custom,
+            api_key: None,
+            oauth_token: None,
+            jwt_token: None,
+            jwt_secret: None,
+            basic_auth: None,
+            custom_headers,
+        };
+        let manager = FeedbackApiManager::new(auth_config, RateLimitConfig::default());
+
+        // Correct token → Ok(true)
+        assert!(
+            manager.validate_auth("Custom my-secret").await.unwrap(),
+            "correct custom token should be accepted"
+        );
+
+        // Wrong token → Ok(false)
+        assert!(
+            !manager.validate_auth("Custom wrong").await.unwrap(),
+            "wrong custom token should be rejected"
+        );
+
+        // No custom_headers configured → Ok(false)
+        let auth_config_empty = AuthConfig {
+            auth_type: AuthType::Custom,
+            api_key: None,
+            oauth_token: None,
+            jwt_token: None,
+            jwt_secret: None,
+            basic_auth: None,
+            custom_headers: HashMap::new(),
+        };
+        let manager_empty =
+            FeedbackApiManager::new(auth_config_empty, RateLimitConfig::default());
+        assert!(
+            !manager_empty.validate_auth("Custom anything").await.unwrap(),
+            "custom auth without headers configured should be rejected"
+        );
     }
 
     #[tokio::test]
@@ -946,6 +1083,7 @@ mod tests {
             api_key: None, // No key configured
             oauth_token: None,
             jwt_token: None,
+            jwt_secret: None,
             basic_auth: None,
             custom_headers: HashMap::new(),
         };
@@ -959,6 +1097,7 @@ mod tests {
             api_key: Some("test_key".to_string()),
             oauth_token: None,
             jwt_token: None,
+            jwt_secret: None,
             basic_auth: None,
             custom_headers: HashMap::new(),
         };

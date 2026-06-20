@@ -266,6 +266,7 @@ pub mod asr;
 pub mod audio_formats;
 pub mod audio_utilities;
 pub mod caching;
+pub mod cloud_auth;
 pub mod cloud_storage;
 pub mod config;
 pub mod disaster_recovery;

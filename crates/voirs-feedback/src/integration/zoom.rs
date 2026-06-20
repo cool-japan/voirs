@@ -928,7 +928,7 @@ impl ZoomClient {
         }
 
         let message = format!("v0:{timestamp}:{payload}");
-        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(self.config.client_secret.as_bytes())
+        let mut mac = Hmac::<Sha256>::new_from_slice(self.config.client_secret.as_bytes())
             .map_err(|_| ZoomError::WebhookVerificationFailed)?;
         mac.update(message.as_bytes());
         let expected_signature = mac.finalize().into_bytes();

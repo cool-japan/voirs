@@ -358,13 +358,160 @@ impl MemoryMappedFile {
         }
     }
 
-    /// Stub implementation for non-Unix platforms
-    #[cfg(not(unix))]
+    /// Windows implementation of read-only memory mapping
+    #[cfg(windows)]
+    pub fn open_read_only(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        use windows::Win32::{
+            Foundation::{CloseHandle, HANDLE},
+            Storage::FileSystem::{
+                CreateFileW, GetFileSize, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, GENERIC_READ,
+                OPEN_EXISTING,
+            },
+            System::Memory::{
+                CreateFileMappingW, FILE_MAP_READ, MapViewOfFile, PAGE_READONLY,
+            },
+        };
+        use windows::core::PCWSTR;
+        let wide_path: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+
+        unsafe {
+            let file_handle = CreateFileW(
+                PCWSTR(wide_path.as_ptr()),
+                GENERIC_READ,
+                FILE_SHARE_READ,
+                None,
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL,
+                None,
+            )?;
+
+            if file_handle.is_invalid() {
+                return Err("Failed to open file".into());
+            }
+
+            let mut file_size_high: u32 = 0;
+            let file_size_low = GetFileSize(file_handle, Some(&mut file_size_high));
+            if file_size_low == u32::MAX {
+                let _ = CloseHandle(file_handle);
+                return Err("Failed to get file size".into());
+            }
+            let len = ((file_size_high as usize) << 32) | (file_size_low as usize);
+
+            if len == 0 {
+                let _ = CloseHandle(file_handle);
+                return Err("Cannot map empty file".into());
+            }
+
+            let mapping_handle = CreateFileMappingW(
+                file_handle,
+                None,
+                PAGE_READONLY,
+                0,
+                0,
+                PCWSTR::null(),
+            )?;
+
+            if mapping_handle.is_invalid() {
+                let _ = CloseHandle(file_handle);
+                return Err("Failed to create file mapping".into());
+            }
+
+            let view = MapViewOfFile(mapping_handle, FILE_MAP_READ, 0, 0, 0);
+            if view.Value.is_null() {
+                let _ = CloseHandle(mapping_handle);
+                let _ = CloseHandle(file_handle);
+                return Err("Failed to map view of file".into());
+            }
+
+            Ok(Self {
+                ptr: NonNull::new_unchecked(view.Value as *mut u8),
+                len,
+                read_only: true,
+                file_handle: file_handle.0 as std::os::windows::io::RawHandle,
+                mapping_handle: mapping_handle.0 as std::os::windows::io::RawHandle,
+            })
+        }
+    }
+
+    /// Windows implementation of read-write memory mapping
+    #[cfg(windows)]
+    pub fn open_read_write(path: &str, size: usize) -> Result<Self, Box<dyn std::error::Error>> {
+        use windows::Win32::{
+            Foundation::{CloseHandle, HANDLE},
+            Storage::FileSystem::{
+                CreateFileW, SetEndOfFile, SetFilePointerEx, FILE_ATTRIBUTE_NORMAL,
+                FILE_BEGIN, FILE_SHARE_READ, GENERIC_READ, GENERIC_WRITE, OPEN_ALWAYS,
+            },
+            System::Memory::{
+                CreateFileMappingW, FILE_MAP_WRITE, MapViewOfFile, PAGE_READWRITE,
+            },
+        };
+        use windows::core::PCWSTR;
+        let wide_path: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+
+        unsafe {
+            let file_handle = CreateFileW(
+                PCWSTR(wide_path.as_ptr()),
+                GENERIC_READ | GENERIC_WRITE,
+                FILE_SHARE_READ,
+                None,
+                OPEN_ALWAYS,
+                FILE_ATTRIBUTE_NORMAL,
+                None,
+            )?;
+
+            if file_handle.is_invalid() {
+                return Err("Failed to open/create file".into());
+            }
+
+            if size > 0 {
+                let size_i64 = size as i64;
+                let mut new_pos: i64 = 0;
+                SetFilePointerEx(file_handle, size_i64, Some(&mut new_pos), FILE_BEGIN)?;
+                SetEndOfFile(file_handle)?;
+                SetFilePointerEx(file_handle, 0, None, FILE_BEGIN)?;
+            }
+
+            let size_hi = (size >> 32) as u32;
+            let size_lo = (size & 0xFFFF_FFFF) as u32;
+            let mapping_handle = CreateFileMappingW(
+                file_handle,
+                None,
+                PAGE_READWRITE,
+                size_hi,
+                size_lo,
+                PCWSTR::null(),
+            )?;
+
+            if mapping_handle.is_invalid() {
+                let _ = CloseHandle(file_handle);
+                return Err("Failed to create file mapping".into());
+            }
+
+            let view = MapViewOfFile(mapping_handle, FILE_MAP_WRITE, 0, 0, size);
+            if view.Value.is_null() {
+                let _ = CloseHandle(mapping_handle);
+                let _ = CloseHandle(file_handle);
+                return Err("Failed to map view of file".into());
+            }
+
+            Ok(Self {
+                ptr: NonNull::new_unchecked(view.Value as *mut u8),
+                len: size,
+                read_only: false,
+                file_handle: file_handle.0 as std::os::windows::io::RawHandle,
+                mapping_handle: mapping_handle.0 as std::os::windows::io::RawHandle,
+            })
+        }
+    }
+
+    /// Non-Windows, non-Unix stub (e.g., WASM)
+    #[cfg(not(any(unix, windows)))]
     pub fn open_read_only(_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         Err("Memory mapping not implemented for this platform".into())
     }
 
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     pub fn open_read_write(_path: &str, _size: usize) -> Result<Self, Box<dyn std::error::Error>> {
         Err("Memory mapping not implemented for this platform".into())
     }
@@ -408,7 +555,32 @@ impl MemoryMappedFile {
         Ok(())
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    pub fn sync(&self) -> Result<(), &'static str> {
+        use windows::Win32::{
+            Foundation::{CloseHandle, HANDLE},
+            System::Memory::{FlushViewOfFile, MEMORY_MAPPED_VIEW_ADDRESS},
+            Storage::FileSystem::FlushFileBuffers,
+        };
+        unsafe {
+            let view_ok = FlushViewOfFile(
+                MEMORY_MAPPED_VIEW_ADDRESS {
+                    Value: self.ptr.as_ptr() as *mut std::ffi::c_void,
+                },
+                self.len,
+            );
+            if !view_ok.as_bool() {
+                return Err("Failed to flush view of file");
+            }
+            let fh = HANDLE(self.file_handle as isize);
+            if FlushFileBuffers(fh).is_err() {
+                return Err("Failed to flush file buffers");
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(not(any(unix, windows)))]
     pub fn sync(&self) -> Result<(), &'static str> {
         Err("Sync not implemented for this platform")
     }
@@ -462,6 +634,18 @@ impl Drop for MemoryMappedFile {
             libc::munmap(self.ptr.as_ptr() as *mut libc::c_void, self.len);
             libc::close(self.file_descriptor);
         }
+        #[cfg(windows)]
+        unsafe {
+            use windows::Win32::{
+                Foundation::{CloseHandle, HANDLE},
+                System::Memory::{UnmapViewOfFile, MEMORY_MAPPED_VIEW_ADDRESS},
+            };
+            let _ = UnmapViewOfFile(MEMORY_MAPPED_VIEW_ADDRESS {
+                Value: self.ptr.as_ptr() as *mut std::ffi::c_void,
+            });
+            let _ = CloseHandle(HANDLE(self.mapping_handle as isize));
+            let _ = CloseHandle(HANDLE(self.file_handle as isize));
+        }
     }
 }
 
@@ -472,6 +656,8 @@ pub struct SharedMemorySegment {
     name: String,
     #[cfg(unix)]
     shm_fd: std::os::unix::io::RawFd,
+    #[cfg(windows)]
+    mapping_handle: std::os::windows::io::RawHandle,
 }
 
 impl SharedMemorySegment {
@@ -562,13 +748,93 @@ impl SharedMemorySegment {
         }
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    pub fn create(name: &str, size: usize) -> Result<Self, Box<dyn std::error::Error>> {
+        use windows::Win32::{
+            Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
+            System::Memory::{
+                CreateFileMappingW, FILE_MAP_WRITE, MapViewOfFile, PAGE_READWRITE,
+            },
+        };
+        use windows::core::PCWSTR;
+        let wide_name: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+        let size_hi = (size >> 32) as u32;
+        let size_lo = (size & 0xFFFF_FFFF) as u32;
+
+        unsafe {
+            let mapping_handle = CreateFileMappingW(
+                INVALID_HANDLE_VALUE,
+                None,
+                PAGE_READWRITE,
+                size_hi,
+                size_lo,
+                PCWSTR(wide_name.as_ptr()),
+            )?;
+
+            if mapping_handle.is_invalid() {
+                return Err("Failed to create shared memory mapping".into());
+            }
+
+            let view = MapViewOfFile(mapping_handle, FILE_MAP_WRITE, 0, 0, size);
+            if view.Value.is_null() {
+                let _ = CloseHandle(mapping_handle);
+                return Err("Failed to map shared memory view".into());
+            }
+
+            Ok(Self {
+                ptr: NonNull::new_unchecked(view.Value as *mut u8),
+                size,
+                name: name.to_string(),
+                mapping_handle: mapping_handle.0 as std::os::windows::io::RawHandle,
+            })
+        }
+    }
+
+    #[cfg(windows)]
+    pub fn open(name: &str, size: usize) -> Result<Self, Box<dyn std::error::Error>> {
+        use windows::Win32::{
+            System::Memory::{
+                FILE_MAP_WRITE, MapViewOfFile, OpenFileMappingW,
+            },
+            Foundation::CloseHandle,
+        };
+        use windows::core::PCWSTR;
+        let wide_name: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+
+        unsafe {
+            let mapping_handle = OpenFileMappingW(
+                FILE_MAP_WRITE.0,
+                false,
+                PCWSTR(wide_name.as_ptr()),
+            )?;
+
+            if mapping_handle.is_invalid() {
+                return Err("Failed to open shared memory mapping".into());
+            }
+
+            let map_size = if size == 0 { 0 } else { size };
+            let view = MapViewOfFile(mapping_handle, FILE_MAP_WRITE, 0, 0, map_size);
+            if view.Value.is_null() {
+                let _ = CloseHandle(mapping_handle);
+                return Err("Failed to map shared memory view".into());
+            }
+
+            Ok(Self {
+                ptr: NonNull::new_unchecked(view.Value as *mut u8),
+                size,
+                name: name.to_string(),
+                mapping_handle: mapping_handle.0 as std::os::windows::io::RawHandle,
+            })
+        }
+    }
+
+    #[cfg(not(any(unix, windows)))]
     pub fn create(_name: &str, _size: usize) -> Result<Self, Box<dyn std::error::Error>> {
         Err("Shared memory not implemented for this platform".into())
     }
 
-    #[cfg(not(unix))]
-    pub fn open(_name: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    #[cfg(not(any(unix, windows)))]
+    pub fn open(_name: &str, _size: usize) -> Result<Self, Box<dyn std::error::Error>> {
         Err("Shared memory not implemented for this platform".into())
     }
 
@@ -595,6 +861,18 @@ impl Drop for SharedMemorySegment {
             libc::munmap(self.ptr.as_ptr() as *mut libc::c_void, self.size);
             libc::close(self.shm_fd);
             // Note: We don't unlink here as other processes might still be using it
+        }
+        #[cfg(windows)]
+        unsafe {
+            use windows::Win32::{
+                Foundation::{CloseHandle, HANDLE},
+                System::Memory::{UnmapViewOfFile, MEMORY_MAPPED_VIEW_ADDRESS},
+            };
+            let _ = UnmapViewOfFile(MEMORY_MAPPED_VIEW_ADDRESS {
+                Value: self.ptr.as_ptr() as *mut std::ffi::c_void,
+            });
+            let _ = CloseHandle(HANDLE(self.mapping_handle as isize));
+            // Do NOT unlink — mirrors unix behavior (other processes may still be using it)
         }
     }
 }
@@ -863,5 +1141,66 @@ mod tests {
             let c_name = std::ffi::CString::new(shm_name).unwrap();
             libc::shm_unlink(c_name.as_ptr());
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_windows_mmap_roundtrip() {
+        use std::io::Write;
+
+        let test_path = {
+            let mut p = std::env::temp_dir();
+            p.push("voirs_test_windows_mmap.dat");
+            p
+        };
+        let path_str = test_path.to_str().expect("temp path is valid UTF-8");
+
+        {
+            let mut file = std::fs::File::create(&test_path).expect("create test file");
+            file.write_all(b"Windows memory mapping test data!").expect("write test data");
+        }
+
+        let size = 33usize;
+        let mut mmap_rw = MemoryMappedFile::open_read_write(path_str, size)
+            .expect("open_read_write should succeed");
+        {
+            let slice = mmap_rw.as_mut_slice().expect("mutable slice");
+            slice[0] = b'X';
+        }
+        mmap_rw.sync().expect("sync should succeed");
+        drop(mmap_rw);
+
+        let mmap_ro = MemoryMappedFile::open_read_only(path_str).expect("open_read_only should succeed");
+        assert_eq!(mmap_ro.len(), size);
+        assert_eq!(mmap_ro.as_slice()[0], b'X');
+        assert_eq!(&mmap_ro.as_slice()[1..5], b"indo");
+        drop(mmap_ro);
+
+        std::fs::remove_file(&test_path).ok();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_windows_shared_memory_roundtrip() {
+        let name = "test_voirs_shm_roundtrip";
+        let size = 4096usize;
+
+        let mut seg1 = SharedMemorySegment::create(name, size)
+            .expect("create shared memory should succeed");
+        {
+            let slice = seg1.as_mut_slice();
+            slice[0] = 0xDE;
+            slice[1] = 0xAD;
+            slice[4095] = 0xBE;
+        }
+
+        let seg2 = SharedMemorySegment::open(name, size)
+            .expect("open shared memory should succeed");
+        assert_eq!(seg2.as_slice()[0], 0xDE);
+        assert_eq!(seg2.as_slice()[1], 0xAD);
+        assert_eq!(seg2.as_slice()[4095], 0xBE);
+
+        drop(seg1);
+        drop(seg2);
     }
 }

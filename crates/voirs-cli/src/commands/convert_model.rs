@@ -132,9 +132,6 @@ async fn convert_onnx_to_safetensors(
         println!("🔍 Extracting weights from model graph...");
     }
 
-    // Note: Full ONNX weight extraction through tract requires additional implementation
-    // For now, we provide model validation and structure analysis
-
     let node_count = model.nodes().len();
     let input_count = model
         .input_outlets()
@@ -152,25 +149,34 @@ async fn convert_onnx_to_safetensors(
         println!("   - Inputs: {}", input_count);
         println!("   - Outputs: {}", output_count);
         println!();
-        println!("⚠️  Note: Full tensor weight extraction not yet implemented");
-        println!("   For complete ONNX → SafeTensors conversion, use:");
-        println!();
-        println!("   Python method (recommended):");
-        println!("   ```python");
-        println!("   import onnx, numpy as np");
-        println!("   from safetensors import serialize_to_file");
-        println!();
-        println!("   model = onnx.load('{}')", input.display());
-        println!("   tensors = {{}}");
-        println!("   for init in model.graph.initializer:");
-        println!("       tensors[init.name] = numpy_helper.to_array(init)");
-        println!("   serialize_to_file(tensors, '{}')", output.display());
-        println!("   ```");
     }
 
-    // Create placeholder tensors_map (empty for now)
-    let tensors_map: HashMap<String, TensorView<'_>> = HashMap::new();
-    let tensor_count = 0;
+    // Collect owned tensors to keep data alive
+    let mut owned_tensors: Vec<(String, std::sync::Arc<Tensor>)> = Vec::new();
+    for node in model.nodes() {
+        if let Some(konst) = node.op_as::<Const>() {
+            if !node.name.is_empty() {
+                let arc_tensor = std::sync::Arc::clone(konst.val());
+                owned_tensors.push((node.name.clone(), arc_tensor));
+            }
+        }
+    }
+
+    if !global.quiet {
+        println!("📊 Extracting {} constant tensors from model graph...", owned_tensors.len());
+    }
+
+    // Build TensorView map (views borrow from owned_tensors)
+    let mut tensors_map: HashMap<String, TensorView<'_>> = HashMap::new();
+    for (name, tensor) in &owned_tensors {
+        match tract_tensor_to_safetensors(tensor.as_ref(), name) {
+            Ok(view) => {
+                tensors_map.entry(name.clone()).or_insert(view);
+            }
+            Err(_) => { /* skip unsupported dtype */ }
+        }
+    }
+    let tensor_count = tensors_map.len();
 
     // Create metadata
     let mut metadata = HashMap::new();
@@ -444,5 +450,79 @@ mod tests {
         assert_eq!(detect_format(Path::new("model.pt")), "pt");
         assert_eq!(detect_format(Path::new("model.pth")), "pth");
         assert_eq!(detect_format(Path::new("model")), "unknown");
+    }
+
+    #[test]
+    fn test_onnx_tensor_extraction_non_empty() {
+        // Create a minimal ONNX model with a constant tensor using tract
+        use std::sync::Arc;
+        use tract_core::ops::konst::Const;
+        use tract_onnx::prelude::*;
+
+        let mut model = InferenceModel::default();
+        let tensor = tract_ndarray::arr1(&[1.0f32, 2.0, 3.0]).into_tensor();
+        model.add_const("test_weight", tensor).unwrap();
+        let model = model.into_optimized().unwrap();
+
+        let mut owned_tensors: Vec<(String, Arc<Tensor>)> = Vec::new();
+        for node in model.nodes() {
+            if let Some(konst) = node.op_as::<Const>() {
+                if !node.name.is_empty() {
+                    owned_tensors.push((node.name.clone(), Arc::clone(konst.val())));
+                }
+            }
+        }
+
+        assert!(!owned_tensors.is_empty(), "Expected at least one tensor");
+        let names: Vec<&str> = owned_tensors.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(names.contains(&"test_weight"), "Expected tensor named 'test_weight'");
+    }
+
+    #[test]
+    fn test_onnx_roundtrip_tensor_names() {
+        use std::collections::HashMap;
+        use std::sync::Arc;
+        use tract_core::ops::konst::Const;
+        use tract_onnx::prelude::*;
+
+        let mut model = InferenceModel::default();
+        let t1 = tract_ndarray::arr1(&[1.0f32, 2.0]).into_tensor();
+        let t2 = tract_ndarray::arr1(&[3.0f32, 4.0]).into_tensor();
+        model.add_const("weight_a", t1).unwrap();
+        model.add_const("weight_b", t2).unwrap();
+        let model = model.into_optimized().unwrap();
+
+        let mut owned_tensors: Vec<(String, Arc<Tensor>)> = Vec::new();
+        for node in model.nodes() {
+            if let Some(konst) = node.op_as::<Const>() {
+                if !node.name.is_empty() {
+                    owned_tensors.push((node.name.clone(), Arc::clone(konst.val())));
+                }
+            }
+        }
+
+        let mut tensors_map: HashMap<String, safetensors::tensor::TensorView<'_>> = HashMap::new();
+        for (name, tensor) in &owned_tensors {
+            if let Ok(view) = tract_tensor_to_safetensors(tensor.as_ref(), name) {
+                tensors_map.entry(name.clone()).or_insert(view);
+            }
+        }
+        assert!(!tensors_map.is_empty());
+
+        // Write to temp file
+        let tmp = std::env::temp_dir().join("voirs_test_roundtrip.safetensors");
+        safetensors::serialize_to_file(&tensors_map, None, &tmp).unwrap();
+
+        // Reload and check names
+        let bytes = std::fs::read(&tmp).unwrap();
+        let reloaded = safetensors::SafeTensors::deserialize(&bytes).unwrap();
+        let reloaded_names: Vec<_> = reloaded.names();
+
+        for (name, _) in &owned_tensors {
+            assert!(reloaded_names.contains(&name.as_str()), "Missing tensor: {}", name);
+        }
+
+        // Cleanup
+        let _ = std::fs::remove_file(&tmp);
     }
 }

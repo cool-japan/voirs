@@ -254,7 +254,7 @@ impl AuditEntry {
             hasher.update(new.as_bytes());
         }
 
-        format!("{:x}", hasher.finalize())
+        hex::encode(hasher.finalize().as_slice())
     }
 }
 

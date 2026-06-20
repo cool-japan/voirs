@@ -240,25 +240,35 @@ impl PersistenceManager for MemoryPersistenceManager {
 
     async fn cleanup(&self, older_than: DateTime<Utc>) -> PersistenceResult<CleanupResult> {
         let start_time = std::time::Instant::now();
-        let mut storage = self.storage.write().await;
 
-        let initial_sessions = storage.sessions.len();
+        let initial_sessions = {
+            let storage = self.storage.read().await;
+            storage.sessions.len()
+        };
+
         let (_, initial_feedback_records) = self.feedback_storage.get_stats().await;
+        let _ = initial_feedback_records; // tracked for logging parity but not needed in math
 
-        // Clean up old sessions
-        storage
-            .sessions
-            .retain(|_, session| session.start_time > older_than);
+        // Clean up old sessions under write lock, then release
+        {
+            let mut storage = self.storage.write().await;
+            storage
+                .sessions
+                .retain(|_, session| session.start_time > older_than);
+        }
 
-        // Note: Feedback cleanup not implemented in atomic storage to maintain consistency
-        // This would require adding a cleanup method to AtomicFeedbackStorage
+        // Clean up old feedback records (outside the sessions write lock)
+        let feedback_records_cleaned = self.feedback_storage.cleanup_older_than(older_than).await;
 
-        let final_sessions = storage.sessions.len();
-        let (_, final_feedback_records) = self.feedback_storage.get_stats().await;
+        let (final_sessions, final_feedback_records) = {
+            let storage = self.storage.read().await;
+            let sessions = storage.sessions.len();
+            let (_, feedback) = self.feedback_storage.get_stats().await;
+            (sessions, feedback)
+        };
+        let _ = final_feedback_records; // available for future use
 
         let sessions_cleaned = initial_sessions - final_sessions;
-        let feedback_records_cleaned = 0; // Not implemented yet for atomic storage
-
         let cleanup_duration = start_time.elapsed();
 
         log::info!(
@@ -268,7 +278,7 @@ impl PersistenceManager for MemoryPersistenceManager {
         Ok(CleanupResult {
             sessions_cleaned,
             feedback_records_cleaned,
-            bytes_reclaimed: 0, // Memory doesn't track actual bytes
+            bytes_reclaimed: 0,
             cleanup_duration,
         })
     }
@@ -351,5 +361,64 @@ mod tests {
         let result = manager.cleanup(cleanup_threshold).await.unwrap();
 
         assert_eq!(result.sessions_cleaned, 1);
+    }
+
+    #[tokio::test]
+    async fn test_feedback_cleanup_removes_old_records() {
+        use crate::traits::{FeedbackResponse, FeedbackType, ProgressIndicators};
+
+        let config = PersistenceConfig::default();
+        let mut manager = MemoryPersistenceManager::new(config).await.unwrap();
+        manager.initialize().await.unwrap();
+
+        let old_time = Utc::now() - chrono::Duration::days(5);
+        let fresh_time = Utc::now();
+
+        // Create an old feedback record
+        let old_feedback = FeedbackResponse {
+            feedback_items: vec![],
+            overall_score: 0.5,
+            immediate_actions: vec![],
+            long_term_goals: vec![],
+            progress_indicators: ProgressIndicators::default(),
+            timestamp: old_time,
+            processing_time: std::time::Duration::from_millis(10),
+            feedback_type: FeedbackType::Quality,
+        };
+
+        // Create a fresh feedback record
+        let fresh_feedback = FeedbackResponse {
+            feedback_items: vec![],
+            overall_score: 0.8,
+            immediate_actions: vec![],
+            long_term_goals: vec![],
+            progress_indicators: ProgressIndicators::default(),
+            timestamp: fresh_time,
+            processing_time: std::time::Duration::from_millis(10),
+            feedback_type: FeedbackType::Quality,
+        };
+
+        // Save both records for the test user
+        manager.save_feedback("test_user", &old_feedback).await.unwrap();
+        manager.save_feedback("test_user", &fresh_feedback).await.unwrap();
+
+        // Verify both are present
+        let history_before = manager.load_feedback_history("test_user", None, None).await.unwrap();
+        assert_eq!(history_before.len(), 2, "should have 2 records before cleanup");
+
+        // Run cleanup with threshold of 1 day ago (removes the 5-day-old record)
+        let threshold = Utc::now() - chrono::Duration::days(1);
+        let result = manager.cleanup(threshold).await.unwrap();
+
+        // Verify old record is gone, fresh remains
+        let history_after = manager.load_feedback_history("test_user", None, None).await.unwrap();
+        assert_eq!(history_after.len(), 1, "should have 1 record after cleanup");
+        assert!(
+            (history_after[0].overall_score - 0.8f32).abs() < 1e-6,
+            "the fresh record should remain"
+        );
+
+        // Verify feedback_records_cleaned count
+        assert_eq!(result.feedback_records_cleaned, 1, "should report 1 cleaned feedback record");
     }
 }

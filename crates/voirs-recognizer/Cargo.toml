@@ -42,6 +42,9 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 hex = "0.4"
+sha2.workspace = true
+hmac = { version = "0.12", optional = true }
+quick-xml = { version = "0.37", optional = true }
 oxicode.workspace = true
 
 # Error handling
@@ -89,6 +92,11 @@ oxiarc-deflate.workspace = true
 # Configuration
 toml = "1.1"
 
+# Homomorphic encryption (optional)
+num-bigint-dig = { workspace = true, features = ["rand", "prime"], optional = true }
+rand = { version = "0.8", optional = true }
+fastrand.workspace = true
+
 # Python bindings (optional)
 pyo3 = { workspace = true, features = ["auto-initialize"], optional = true }
 numpy = { workspace = true, optional = true }
@@ -133,10 +141,12 @@ mfa = []
 python = ["pyo3", "numpy", "pyo3-async-runtimes"]  # Python bindings with async support
 wasm = ["wasm-bindgen", "wasm-bindgen-futures", "js-sys", "web-sys", "console_error_panic_hook", "wasm-logger"]  # WASM bindings for browser/Node.js
 c-api = []  # C/C++ API bindings
-rest-api = ["axum", "tower", "tower-http", "hyper", "tokio-tungstenite", "base64", "mime", "reqwest", "url"]  # REST API and microservice support
+rest-api = ["axum", "tower", "tower-http", "hyper", "tokio-tungstenite", "dep:base64", "dep:mime", "dep:reqwest", "dep:url"]  # REST API and microservice support
+cloud = ["dep:hmac", "dep:quick-xml", "dep:reqwest", "dep:url", "dep:base64"]
 all-models = ["whisper", "whisper-pure", "deepspeech", "wav2vec2", "transformer", "conformer", "forced-align", "mfa"]
 onnx = ["dep:oxionnx"]
 gpu = ["oxionnx?/gpu"]
+homomorphic = ["dep:num-bigint-dig", "dep:rand"]
 # C-FFI audio codecs (minimp3 MP3 decoder). Default-OFF to keep the default build
 # Pure Rust (COOLJAPAN policy). Enable to decode MP3 input via Mp3Loader.
 ffi-codecs = ["dep:minimp3"]

@@ -501,7 +501,7 @@ impl DataAnonymizer {
     fn hash_value(&self, value: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(value.as_bytes());
-        format!("{:x}", hasher.finalize())
+        hex::encode(hasher.finalize().as_slice())
     }
 
     async fn tokenize(&self, value: &str) -> String {

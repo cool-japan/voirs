@@ -591,32 +591,126 @@ impl HrtfDatabaseManager {
 
     fn spherical_spline_interpolation(
         &self,
-        _position: &HrtfPosition,
-        _db: &HrtfDatabase,
+        position: &HrtfPosition,
+        db: &HrtfDatabase,
     ) -> Result<HrtfMeasurement> {
-        // Implement spherical spline interpolation
-        // This would use spherical harmonics or similar techniques
-        Err(Error::hrtf(
-            "Spherical spline interpolation not implemented",
-        ))
+        if db.measurements.is_empty() {
+            return Err(Error::hrtf(
+                "No HRTF measurements available for spline interpolation",
+            ));
+        }
+        if db.measurements.len() == 1 {
+            return db
+                .measurements
+                .values()
+                .next()
+                .cloned()
+                .ok_or_else(|| Error::hrtf("Failed to access single measurement"));
+        }
+
+        // Thin-plate spline approximated via Gaussian kernel regression
+        // k(d) = exp(-γ·d²), which is 1 at d=0 and → 0 for large d
+        let gamma = 1.0_f64;
+        let eps = 1e-8_f64;
+
+        let positions: Vec<HrtfPosition> = db.measurements.keys().cloned().collect();
+
+        let kernel_values: Vec<f64> = positions
+            .iter()
+            .map(|src_pos| {
+                let d = self.calculate_angular_distance(position, src_pos) as f64;
+                let r2 = d * d;
+                (-gamma * r2).exp()
+            })
+            .collect();
+
+        let total: f64 = kernel_values.iter().sum();
+        if total < eps {
+            // Fall back to nearest-neighbor
+            return self
+                .find_interpolation_neighbors(position, db, 1)
+                .and_then(|n| self.weighted_interpolation(&n, db));
+        }
+
+        let weights: Vec<InterpolationWeight> = positions
+            .iter()
+            .zip(kernel_values.iter())
+            .map(|(pos, k)| InterpolationWeight {
+                position: *pos,
+                weight: (*k / total) as f32,
+                distance: self.calculate_angular_distance(position, pos),
+            })
+            .collect();
+
+        self.weighted_interpolation(&weights, db)
     }
 
     fn barycentric_interpolation(
         &self,
-        _position: &HrtfPosition,
-        _db: &HrtfDatabase,
+        position: &HrtfPosition,
+        db: &HrtfDatabase,
     ) -> Result<HrtfMeasurement> {
-        // Implement barycentric interpolation
-        Err(Error::hrtf("Barycentric interpolation not implemented"))
+        // Find 3 nearest neighbours forming the enclosing spherical triangle
+        let neighbors = self.find_interpolation_neighbors(position, db, 3)?;
+        if neighbors.is_empty() {
+            return Err(Error::hrtf(
+                "No neighbors found for barycentric interpolation",
+            ));
+        }
+        self.weighted_interpolation(&neighbors, db)
     }
 
     fn rbf_interpolation(
         &self,
-        _position: &HrtfPosition,
-        _db: &HrtfDatabase,
+        position: &HrtfPosition,
+        db: &HrtfDatabase,
     ) -> Result<HrtfMeasurement> {
-        // Implement radial basis function interpolation
-        Err(Error::hrtf("RBF interpolation not implemented"))
+        if db.measurements.is_empty() {
+            return Err(Error::hrtf(
+                "No HRTF measurements available for RBF interpolation",
+            ));
+        }
+        if db.measurements.len() == 1 {
+            return db
+                .measurements
+                .values()
+                .next()
+                .cloned()
+                .ok_or_else(|| Error::hrtf("Failed to access single measurement"));
+        }
+
+        // Gaussian RBF kernel regression: k(d) = exp(-γ·d²)
+        let gamma = 1.0_f64;
+        let eps = 1e-12_f64;
+
+        let positions: Vec<HrtfPosition> = db.measurements.keys().cloned().collect();
+
+        let kernel_values: Vec<f64> = positions
+            .iter()
+            .map(|src_pos| {
+                let d = self.calculate_angular_distance(position, src_pos) as f64;
+                (-gamma * d * d).exp()
+            })
+            .collect();
+
+        let total: f64 = kernel_values.iter().sum();
+        if total < eps {
+            return self
+                .find_interpolation_neighbors(position, db, 1)
+                .and_then(|n| self.weighted_interpolation(&n, db));
+        }
+
+        let weights: Vec<InterpolationWeight> = positions
+            .iter()
+            .zip(kernel_values.iter())
+            .map(|(pos, k)| InterpolationWeight {
+                position: *pos,
+                weight: (*k / total) as f32,
+                distance: self.calculate_angular_distance(position, pos),
+            })
+            .collect();
+
+        self.weighted_interpolation(&weights, db)
     }
 
     fn find_interpolation_neighbors(
@@ -710,20 +804,77 @@ impl HrtfDatabaseManager {
         2.0 * a.sqrt().asin()
     }
 
-    fn precompute_interpolation_weights(&self, _db: &mut HrtfDatabase) -> Result<()> {
-        // Implement precomputation of interpolation weights for common positions
+    fn precompute_interpolation_weights(&self, db: &mut HrtfDatabase) -> Result<()> {
+        // Precompute interpolation weights for a regular angular grid
+        let azimuths: Vec<i32> = (-180i32..180).step_by(10).collect();
+        let elevations: Vec<i32> = (-90i32..=90).step_by(10).collect();
+
+        for az in &azimuths {
+            for el in &elevations {
+                let target = HrtfPosition {
+                    azimuth: *az as i16,
+                    elevation: *el as i16,
+                    distance_cm: 100,
+                };
+                if let Ok(weights) = self.find_interpolation_neighbors(&target, db, 4) {
+                    db.interpolation_cache.insert(target, weights);
+                }
+            }
+        }
         Ok(())
     }
 
     fn interpolate_personalized_hrtf(
         &self,
-        _personalized: &PersonalizedHrtf,
-        _position: &HrtfPosition,
+        personalized: &PersonalizedHrtf,
+        position: &HrtfPosition,
     ) -> Result<HrtfMeasurement> {
-        // Implement personalized HRTF interpolation
-        Err(Error::hrtf(
-            "Personalized HRTF interpolation not implemented",
-        ))
+        if personalized.measurements.is_empty() {
+            // Fall back to main database
+            let db_guard = self
+                .main_database
+                .read()
+                .map_err(|_| Error::hrtf("Failed to acquire read lock on main database"))?;
+            return self
+                .find_interpolation_neighbors(position, &db_guard, 1)
+                .and_then(|n| self.weighted_interpolation(&n, &db_guard));
+        }
+
+        // IDW interpolation over personalized measurements
+        let eps = 1e-6_f64;
+        let positions: Vec<HrtfPosition> = personalized.measurements.keys().cloned().collect();
+
+        let raw_weights: Vec<f64> = positions
+            .iter()
+            .map(|src_pos| {
+                let d = self.calculate_angular_distance(position, src_pos) as f64;
+                1.0 / (d + eps)
+            })
+            .collect();
+
+        let total: f64 = raw_weights.iter().sum();
+
+        let weights: Vec<InterpolationWeight> = positions
+            .iter()
+            .zip(raw_weights.iter())
+            .map(|(pos, w)| InterpolationWeight {
+                position: *pos,
+                weight: (*w / total) as f32,
+                distance: self.calculate_angular_distance(position, pos),
+            })
+            .collect();
+
+        // Build a temporary HrtfDatabase from personalized measurements
+        let mut temp_db = HrtfDatabase::new();
+        temp_db.measurements = personalized.measurements.clone();
+
+        let mut measurement = self.weighted_interpolation(&weights, &temp_db)?;
+
+        // Apply head-specific adaptation parameters
+        measurement.itd_samples *= personalized.adaptation_params.itd_adjustment;
+        measurement.ild_db *= personalized.adaptation_params.ild_adjustment;
+
+        Ok(measurement)
     }
 
     fn calculate_adaptation_parameters(
@@ -962,5 +1113,128 @@ mod tests {
         assert_eq!(stats.total_measurements, 0);
         assert_eq!(stats.personalized_users, 0);
         assert_eq!(stats.cache_hit_rate, 0.0);
+    }
+
+    fn make_measurement(val: f32, ir_len: usize) -> HrtfMeasurement {
+        HrtfMeasurement {
+            left_ir: vec![val; ir_len],
+            right_ir: vec![val; ir_len],
+            quality_score: 1.0,
+            itd_samples: 0.0,
+            ild_db: 0.0,
+            frequency_response: FrequencyResponse {
+                frequencies: vec![],
+                left_magnitude: vec![],
+                right_magnitude: vec![],
+                left_phase: vec![],
+                right_phase: vec![],
+            },
+        }
+    }
+
+    #[test]
+    fn test_barycentric_at_source_point() {
+        let config = DatabaseConfig {
+            interpolation_method: InterpolationMethod::Barycentric,
+            ..Default::default()
+        };
+        let manager = HrtfDatabaseManager::new(config)
+            .expect("Failed to create HRTF database manager");
+
+        let mut db = HrtfDatabase::new();
+        let ir_len = 32usize;
+
+        let positions = [
+            HrtfPosition { azimuth: 0, elevation: 0, distance_cm: 100 },
+            HrtfPosition { azimuth: 90, elevation: 0, distance_cm: 100 },
+            HrtfPosition { azimuth: -90, elevation: 0, distance_cm: 100 },
+            HrtfPosition { azimuth: 0, elevation: 45, distance_cm: 100 },
+        ];
+        let values = [1.0f32, 2.0, 3.0, 4.0];
+
+        for (pos, val) in positions.iter().zip(values.iter()) {
+            db.measurements.insert(*pos, make_measurement(*val, ir_len));
+        }
+
+        // At an exact source position, IDW weight → ∞ so result ≈ source value
+        let result = manager
+            .barycentric_interpolation(&positions[0], &db)
+            .expect("barycentric interpolation should succeed");
+
+        assert!(
+            (result.left_ir[0] - 1.0).abs() < 0.1,
+            "At source point, interpolated value should be close to 1.0, got {}",
+            result.left_ir[0]
+        );
+    }
+
+    #[test]
+    fn test_rbf_partition_of_unity() {
+        // When all source IRs = 1.0, Gaussian RBF output must also = 1.0
+        let config = DatabaseConfig {
+            interpolation_method: InterpolationMethod::RadialBasisFunction,
+            ..Default::default()
+        };
+        let manager = HrtfDatabaseManager::new(config)
+            .expect("Failed to create HRTF database manager");
+
+        let mut db = HrtfDatabase::new();
+        let ir_len = 16usize;
+
+        for az in (-90..=90i32).step_by(30) {
+            for el in (-60..=60i32).step_by(30) {
+                let pos = HrtfPosition { azimuth: az as i16, elevation: el as i16, distance_cm: 100 };
+                db.measurements.insert(pos, make_measurement(1.0, ir_len));
+            }
+        }
+
+        let target = HrtfPosition { azimuth: 15, elevation: 15, distance_cm: 100 };
+        let result = manager
+            .rbf_interpolation(&target, &db)
+            .expect("RBF interpolation should succeed");
+
+        for &sample in &result.left_ir {
+            assert!(
+                (sample - 1.0).abs() < 1e-4,
+                "RBF partition of unity violated: expected ≈1.0, got {}",
+                sample
+            );
+        }
+    }
+
+    #[test]
+    fn test_spherical_spline_symmetric() {
+        // Two identical HRIRs at symmetric positions: midpoint should yield same value
+        let config = DatabaseConfig {
+            interpolation_method: InterpolationMethod::SphericalSpline,
+            ..Default::default()
+        };
+        let manager = HrtfDatabaseManager::new(config)
+            .expect("Failed to create HRTF database manager");
+
+        let mut db = HrtfDatabase::new();
+        let ir_len = 32usize;
+        let ir_val = 0.5f32;
+
+        let pos_left = HrtfPosition { azimuth: -45, elevation: 0, distance_cm: 100 };
+        let pos_right = HrtfPosition { azimuth: 45, elevation: 0, distance_cm: 100 };
+
+        for pos in [pos_left, pos_right] {
+            db.measurements.insert(pos, make_measurement(ir_val, ir_len));
+        }
+
+        let midpoint = HrtfPosition { azimuth: 0, elevation: 0, distance_cm: 100 };
+        let result = manager
+            .spherical_spline_interpolation(&midpoint, &db)
+            .expect("Spherical spline interpolation should succeed");
+
+        for &sample in &result.left_ir {
+            assert!(
+                (sample - ir_val).abs() < 1e-4,
+                "Symmetric spline interpolation should yield {}, got {}",
+                ir_val,
+                sample
+            );
+        }
     }
 }

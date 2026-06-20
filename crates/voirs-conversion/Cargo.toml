@@ -60,6 +60,19 @@ oxiarc-deflate = { workspace = true }
 # Audio file I/O
 hound = { workspace = true }
 
+# Multi-format audio codec support (pure Rust)
+claxon = { workspace = true }
+symphonia = { workspace = true }
+lewton = { workspace = true }
+ogg = { workspace = true }
+oxiaudio-core = { workspace = true }
+oxiaudio-encode = { workspace = true }
+
+# C-backed codecs (optional, not in default features)
+minimp3 = { workspace = true, optional = true }
+mp3lame-encoder = { workspace = true, optional = true }
+opus = { workspace = true, optional = true }
+
 # HTTP client for IoT cloud connectivity
 reqwest = { workspace = true, features = ["json", "rustls-no-provider"], optional = true }
 # Pure-Rust TLS provider (rustls + RustCrypto) — installed before IoT TLS handshakes
@@ -123,6 +136,7 @@ streaming = ["real-time"]
 wasm = ["wasm-bindgen", "wasm-bindgen-futures", "serde-wasm-bindgen", "js-sys", "web-sys", "getrandom", "getrandom_v2"]
 iot = ["reqwest", "dep:oxitls-adapter-rustls-rustcrypto", "dep:rustls"]
 all-integrations = ["acoustic-integration", "cloning-integration", "emotion-integration", "spatial-integration"]
+ffi-codecs = ["dep:minimp3", "dep:mp3lame-encoder", "dep:opus"]
 
 
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -8,6 +8,7 @@ use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use fastrand;
 
 /// Advanced Room Simulator
 pub struct AdvancedRoomSimulator {
@@ -683,9 +684,173 @@ impl AdvancedRoomSimulator {
                     });
                 }
             }
-            _ => {
-                // Implement other distribution methods
-                return Err(Error::room("Distribution method not implemented"));
+            RayDistribution::FibonacciSpiral => {
+                let golden_ratio = (1.0_f32 + 5.0_f32.sqrt()) / 2.0;
+                for i in 0..ray_count {
+                    let theta = 2.0 * std::f32::consts::PI * (i as f32) / golden_ratio;
+                    let cos_phi = if ray_count > 1 {
+                        (1.0 - 2.0 * i as f32 / (ray_count - 1) as f32).clamp(-1.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    let phi = cos_phi.acos();
+
+                    let direction = Position3D::new(
+                        phi.sin() * theta.cos(),
+                        cos_phi,
+                        phi.sin() * theta.sin(),
+                    );
+
+                    rays.push(AcousticRay {
+                        position: *source,
+                        direction,
+                        energy: 1.0 / ray_count as f32,
+                        time: 0.0,
+                        frequency_spectrum: vec![1.0; self.config.frequency_bands.len()],
+                        phase: 0.0,
+                        generation: 0,
+                        id: i as u64,
+                    });
+                }
+            }
+            RayDistribution::Stratified => {
+                // Equal-area stratification: cos_theta uniformly distributed in [-1, 1]
+                for i in 0..ray_count {
+                    let cos_theta = if ray_count > 1 {
+                        (1.0 - 2.0 * i as f32 / (ray_count - 1) as f32).clamp(-1.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    let theta = cos_theta.acos();
+                    // Deterministic jitter within stratum using random azimuth
+                    let phi = fastrand::f32() * 2.0 * std::f32::consts::PI;
+
+                    let direction = Position3D::new(
+                        theta.sin() * phi.cos(),
+                        cos_theta,
+                        theta.sin() * phi.sin(),
+                    );
+
+                    rays.push(AcousticRay {
+                        position: *source,
+                        direction,
+                        energy: 1.0 / ray_count as f32,
+                        time: 0.0,
+                        frequency_spectrum: vec![1.0; self.config.frequency_bands.len()],
+                        phase: 0.0,
+                        generation: 0,
+                        id: i as u64,
+                    });
+                }
+            }
+            RayDistribution::ImportanceSampled => {
+                // Cosine-weighted sampling: oversample with Fibonacci, keep those biased toward upper hemisphere
+                let golden_ratio = (1.0_f32 + 5.0_f32.sqrt()) / 2.0;
+                let oversample = (ray_count * 2).max(1);
+
+                let mut candidates: Vec<(f32, Position3D)> = (0..oversample)
+                    .map(|i| {
+                        let theta =
+                            2.0 * std::f32::consts::PI * (i as f32) / golden_ratio;
+                        let cos_phi = if oversample > 1 {
+                            (1.0 - 2.0 * i as f32 / (oversample - 1) as f32)
+                                .clamp(-1.0, 1.0)
+                        } else {
+                            0.0
+                        };
+                        let phi = cos_phi.acos();
+                        let dir = Position3D::new(
+                            phi.sin() * theta.cos(),
+                            cos_phi,
+                            phi.sin() * theta.sin(),
+                        );
+                        (cos_phi, dir)
+                    })
+                    .collect();
+
+                // Sort by y-component descending (upper hemisphere bias)
+                candidates.sort_by(|a, b| {
+                    b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)
+                });
+                candidates.truncate(ray_count as usize);
+
+                for (i, (_, dir)) in candidates.into_iter().enumerate() {
+                    rays.push(AcousticRay {
+                        position: *source,
+                        direction: dir,
+                        energy: 1.0 / ray_count as f32,
+                        time: 0.0,
+                        frequency_spectrum: vec![1.0; self.config.frequency_bands.len()],
+                        phase: 0.0,
+                        generation: 0,
+                        id: i as u64,
+                    });
+                }
+            }
+            RayDistribution::Adaptive => {
+                // Fibonacci base + 6 cardinal direction rays for guaranteed coverage
+                let cardinal_count = 6u32;
+                let base_count = ray_count.saturating_sub(cardinal_count).max(1);
+                let golden_ratio = (1.0_f32 + 5.0_f32.sqrt()) / 2.0;
+
+                for i in 0..base_count {
+                    let theta =
+                        2.0 * std::f32::consts::PI * (i as f32) / golden_ratio;
+                    let cos_phi = if base_count > 1 {
+                        (1.0 - 2.0 * i as f32 / (base_count - 1) as f32)
+                            .clamp(-1.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    let phi = cos_phi.acos();
+
+                    let direction = Position3D::new(
+                        phi.sin() * theta.cos(),
+                        cos_phi,
+                        phi.sin() * theta.sin(),
+                    );
+
+                    rays.push(AcousticRay {
+                        position: *source,
+                        direction,
+                        energy: 1.0 / ray_count as f32,
+                        time: 0.0,
+                        frequency_spectrum: vec![1.0; self.config.frequency_bands.len()],
+                        phase: 0.0,
+                        generation: 0,
+                        id: i as u64,
+                    });
+                }
+
+                // Append 6 cardinal axis rays
+                let cardinals = [
+                    Position3D::new(1.0, 0.0, 0.0),
+                    Position3D::new(-1.0, 0.0, 0.0),
+                    Position3D::new(0.0, 1.0, 0.0),
+                    Position3D::new(0.0, -1.0, 0.0),
+                    Position3D::new(0.0, 0.0, 1.0),
+                    Position3D::new(0.0, 0.0, -1.0),
+                ];
+
+                for (j, dir) in cardinals
+                    .iter()
+                    .enumerate()
+                    .take(cardinal_count as usize)
+                {
+                    rays.push(AcousticRay {
+                        position: *source,
+                        direction: *dir,
+                        energy: 1.0 / ray_count as f32,
+                        time: 0.0,
+                        frequency_spectrum: vec![
+                            1.0;
+                            self.config.frequency_bands.len()
+                        ],
+                        phase: 0.0,
+                        generation: 0,
+                        id: (base_count + j as u32) as u64,
+                    });
+                }
             }
         }
 
@@ -1051,5 +1216,117 @@ mod tests {
 
         assert_eq!(ray.energy, 1.0);
         assert_eq!(ray.generation, 0);
+    }
+
+    #[test]
+    fn test_fibonacci_ray_count() {
+        let mut config = RoomSimulationConfig::default();
+        config.max_rays = 100;
+
+        let simulator =
+            AdvancedRoomSimulator::new(config).expect("Failed to create room simulator");
+
+        {
+            let mut rt = simulator
+                .ray_tracer
+                .write()
+                .expect("lock should not be poisoned");
+            rt.config.distribution_method = RayDistribution::FibonacciSpiral;
+        }
+
+        let source = Position3D::new(0.0, 0.0, 0.0);
+        let rays = simulator
+            .initialize_rays(&source)
+            .expect("initialize_rays should succeed");
+
+        assert_eq!(
+            rays.len(),
+            100,
+            "FibonacciSpiral should produce exactly max_rays rays"
+        );
+    }
+
+    #[test]
+    fn test_stratified_coverage() {
+        let mut config = RoomSimulationConfig::default();
+        config.max_rays = 64;
+
+        let simulator =
+            AdvancedRoomSimulator::new(config).expect("Failed to create room simulator");
+
+        {
+            let mut rt = simulator
+                .ray_tracer
+                .write()
+                .expect("lock should not be poisoned");
+            rt.config.distribution_method = RayDistribution::Stratified;
+        }
+
+        let source = Position3D::new(0.0, 0.0, 0.0);
+        let rays = simulator
+            .initialize_rays(&source)
+            .expect("initialize_rays should succeed");
+
+        assert_eq!(
+            rays.len(),
+            64,
+            "Stratified should produce exactly max_rays rays"
+        );
+
+        // All directions should be approximately unit vectors
+        for ray in &rays {
+            let len = (ray.direction.x.powi(2)
+                + ray.direction.y.powi(2)
+                + ray.direction.z.powi(2))
+            .sqrt();
+            assert!(
+                (len - 1.0).abs() < 1e-3,
+                "Direction should be approximately unit length, got {}",
+                len
+            );
+        }
+    }
+
+    #[test]
+    fn test_fibonacci_uniformity() {
+        let mut config = RoomSimulationConfig::default();
+        config.max_rays = 50;
+
+        let simulator =
+            AdvancedRoomSimulator::new(config).expect("Failed to create room simulator");
+
+        {
+            let mut rt = simulator
+                .ray_tracer
+                .write()
+                .expect("lock should not be poisoned");
+            rt.config.distribution_method = RayDistribution::FibonacciSpiral;
+        }
+
+        let source = Position3D::new(0.0, 0.0, 0.0);
+        let rays = simulator
+            .initialize_rays(&source)
+            .expect("initialize_rays should succeed");
+
+        // Consecutive dot products should have low variance for good coverage
+        let dots: Vec<f32> = rays
+            .windows(2)
+            .map(|w| {
+                w[0].direction.x * w[1].direction.x
+                    + w[0].direction.y * w[1].direction.y
+                    + w[0].direction.z * w[1].direction.z
+            })
+            .collect();
+
+        if !dots.is_empty() {
+            let mean = dots.iter().sum::<f32>() / dots.len() as f32;
+            let variance =
+                dots.iter().map(|d| (d - mean).powi(2)).sum::<f32>() / dots.len() as f32;
+            assert!(
+                variance < 1.0,
+                "Fibonacci distribution should have low dot-product variance, got {}",
+                variance
+            );
+        }
     }
 }

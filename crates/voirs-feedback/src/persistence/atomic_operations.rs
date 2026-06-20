@@ -197,6 +197,43 @@ impl AtomicFeedbackStorage {
         let total_feedback = storage.values().map(std::vec::Vec::len).sum();
         (user_count, total_feedback)
     }
+
+    /// Remove feedback records older than the given timestamp for all users.
+    /// Returns the total number of records removed.
+    pub async fn cleanup_older_than(&self, older_than: chrono::DateTime<chrono::Utc>) -> usize {
+        // We iterate all users but use per-user atomic guards for each removal.
+        // To avoid deadlocking the global write lock by also acquiring per-user
+        // AtomicContext locks inside it, we do this in two steps:
+        // Step 1: collect user_ids under a brief read lock.
+        let user_ids: Vec<String> = {
+            let storage = self.storage.read().await;
+            storage.keys().cloned().collect()
+        };
+
+        let mut total_removed = 0usize;
+
+        for user_id in &user_ids {
+            // Begin atomic operation for this user (best-effort; skip if one is active)
+            let op_id = match self.context.begin_operation(user_id).await {
+                Ok(id) => id,
+                Err(_) => continue, // skip users with an active write in progress
+            };
+
+            {
+                let mut storage = self.storage.write().await;
+                if let Some(records) = storage.get_mut(user_id) {
+                    let before = records.len();
+                    records.retain(|r| r.timestamp > older_than);
+                    total_removed += before - records.len();
+                }
+            }
+
+            // End atomic operation; ignore error if user_id was removed
+            let _ = self.context.end_operation(user_id, op_id).await;
+        }
+
+        total_removed
+    }
 }
 
 impl Default for AtomicFeedbackStorage {
