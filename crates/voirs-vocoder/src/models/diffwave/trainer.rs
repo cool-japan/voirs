@@ -669,7 +669,11 @@ impl DiffWaveTrainer {
             model_config: self.model.config().clone(),
             training_config: self.config.clone(),
             training_stats: self.training_stats.clone(),
-            best_val_loss: if self.best_val_loss.is_finite() { self.best_val_loss } else { f64::MAX },
+            best_val_loss: if self.best_val_loss.is_finite() {
+                self.best_val_loss
+            } else {
+                f64::MAX
+            },
             weights_file: Some(weights_filename),
         };
 
@@ -903,7 +907,11 @@ mod tests {
         // Test L2 loss
         let loss = trainer.calculate_loss(&predicted, &target).unwrap();
         let loss_value = loss.to_scalar::<f32>().unwrap();
-        assert!((loss_value - 1.0f32).abs() < 1e-5, "Expected loss ~1.0, got {}", loss_value);
+        assert!(
+            (loss_value - 1.0f32).abs() < 1e-5,
+            "Expected loss ~1.0, got {}",
+            loss_value
+        );
 
         // Test Huber loss
         let huber_loss = trainer.huber_loss(&predicted, &target, 1.0).unwrap();
