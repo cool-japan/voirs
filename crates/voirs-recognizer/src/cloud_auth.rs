@@ -8,7 +8,7 @@ use std::collections::HashMap;
 #[cfg(feature = "cloud")]
 use {
     base64::{engine::general_purpose::STANDARD, Engine as _},
-    hmac::{Hmac, Mac},
+    hmac::{Hmac, KeyInit, Mac},
     sha2::{Digest, Sha256},
     url::Url,
 };
@@ -17,10 +17,11 @@ use {
 type HmacSha256 = Hmac<Sha256>;
 
 #[cfg(feature = "cloud")]
-fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
-    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC accepts any key length");
+fn hmac_sha256(key: &[u8], data: &[u8]) -> Result<Vec<u8>, CloudStorageError> {
+    let mut mac: HmacSha256 = KeyInit::new_from_slice(key)
+        .map_err(|e| CloudStorageError::AuthenticationFailed(format!("HMAC key error: {e}")))?;
     mac.update(data);
-    mac.finalize().into_bytes().to_vec()
+    Ok(mac.finalize().into_bytes().to_vec())
 }
 
 #[cfg(feature = "cloud")]
@@ -87,13 +88,13 @@ pub fn sign_s3_request(
         let k1 = hmac_sha256(
             format!("AWS4{}", secret_key).as_bytes(),
             datestamp.as_bytes(),
-        );
-        let k2 = hmac_sha256(&k1, region.as_bytes());
-        let k3 = hmac_sha256(&k2, service.as_bytes());
-        hmac_sha256(&k3, b"aws4_request")
+        )?;
+        let k2 = hmac_sha256(&k1, region.as_bytes())?;
+        let k3 = hmac_sha256(&k2, service.as_bytes())?;
+        hmac_sha256(&k3, b"aws4_request")?
     };
 
-    let signature = hex::encode(hmac_sha256(&signing_key, string_to_sign.as_bytes()));
+    let signature = hex::encode(hmac_sha256(&signing_key, string_to_sign.as_bytes())?);
 
     let auth_header = format!(
         "AWS4-HMAC-SHA256 Credential={}/{}, SignedHeaders={}, Signature={}",
@@ -152,7 +153,7 @@ pub fn sign_azure_request(
         )
     })?;
 
-    let sig_bytes = hmac_sha256(&key_bytes, string_to_sign.as_bytes());
+    let sig_bytes = hmac_sha256(&key_bytes, string_to_sign.as_bytes())?;
     let signature = STANDARD.encode(sig_bytes);
 
     Ok(format!("SharedKey {}:{}", account_name, signature))

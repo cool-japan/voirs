@@ -669,7 +669,7 @@ impl DiffWaveTrainer {
             model_config: self.model.config().clone(),
             training_config: self.config.clone(),
             training_stats: self.training_stats.clone(),
-            best_val_loss: self.best_val_loss,
+            best_val_loss: if self.best_val_loss.is_finite() { self.best_val_loss } else { f64::MAX },
             weights_file: Some(weights_filename),
         };
 
@@ -896,19 +896,19 @@ mod tests {
         let predicted = Tensor::ones((2, 10), candle_core::DType::F32, &device).unwrap();
         let target = Tensor::zeros((2, 10), candle_core::DType::F32, &device).unwrap();
 
-        let model_config = DiffWaveConfig::default();
+        let model_config = small_model_config();
         let training_config = TrainingConfig::default();
         let trainer = DiffWaveTrainer::new(model_config, training_config).unwrap();
 
         // Test L2 loss
         let loss = trainer.calculate_loss(&predicted, &target).unwrap();
-        let loss_value = loss.to_scalar::<f64>().unwrap();
-        assert!((loss_value - 1.0).abs() < 1e-6); // Should be 1.0 for unit difference
+        let loss_value = loss.to_scalar::<f32>().unwrap();
+        assert!((loss_value - 1.0f32).abs() < 1e-5, "Expected loss ~1.0, got {}", loss_value);
 
         // Test Huber loss
         let huber_loss = trainer.huber_loss(&predicted, &target, 1.0).unwrap();
-        let huber_value = huber_loss.to_scalar::<f64>().unwrap();
-        assert!(huber_value > 0.0);
+        let huber_value = huber_loss.to_scalar::<f32>().unwrap();
+        assert!(huber_value > 0.0f32);
     }
 
     /// Build a minimal DiffWaveConfig for fast tests (small model, quick to instantiate).
@@ -1061,7 +1061,7 @@ mod tests {
             model_config: model_config.clone(),
             training_config: training_config.clone(),
             training_stats: Vec::new(),
-            best_val_loss: f64::INFINITY,
+            best_val_loss: f64::MAX,
             weights_file: None, // legacy: no weights
         };
         let json = serde_json::to_string_pretty(&legacy_checkpoint).expect("serialization failed");

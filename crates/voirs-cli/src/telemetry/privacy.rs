@@ -250,7 +250,7 @@ mod tests {
         let control = PrivacyControl::new(AnonymizationLevel::Medium);
 
         // Test with a path containing the actual HOME directory
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".to_string());
+        let home = std::env::var("HOME").unwrap_or_default();
         let path = format!("{}/documents/file.txt", home);
         let sanitized = control.sanitize_path(&path);
 

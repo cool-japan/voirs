@@ -1,6 +1,6 @@
 [package]
 name = "voirs-conversion"
-version = { workspace = true }
+version.workspace = true
 edition = { workspace = true }
 authors = { workspace = true }
 license = { workspace = true }
@@ -9,7 +9,7 @@ homepage = { workspace = true }
 documentation = "https://docs.rs/voirs-conversion"
 keywords = ["voirs", "conversion", "voice-conversion", "real-time", "audio"]
 categories = ["multimedia::audio", "science", "asynchronous"]
-rust-version = { workspace = true }
+rust-version.workspace = true
 description = "Real-time voice conversion system for VoiRS"
 readme = "README.md"
 

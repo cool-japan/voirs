@@ -1,6 +1,6 @@
 [package]
 name = "voirs-emotion"
-version = { workspace = true }
+version.workspace = true
 edition = { workspace = true }
 authors = { workspace = true }
 license = { workspace = true }
@@ -9,7 +9,7 @@ homepage = { workspace = true }
 documentation = "https://docs.rs/voirs-emotion"
 keywords = ["voirs", "emotion", "prosody", "expression", "voice"]
 categories = ["science", "multimedia::audio", "algorithms"]
-rust-version = { workspace = true }
+rust-version.workspace = true
 description = "Emotion expression control system for VoiRS voice synthesis"
 readme = "README.md"
 

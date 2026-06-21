@@ -1,6 +1,6 @@
 [package]
 name = "voirs-cloning"
-version = { workspace = true }
+version.workspace = true
 edition = { workspace = true }
 authors = { workspace = true }
 license = { workspace = true }
@@ -9,7 +9,7 @@ homepage = { workspace = true }
 documentation = "https://docs.rs/voirs-cloning"
 keywords = ["voirs", "cloning", "voice-cloning", "speaker", "adaptation"]
 categories = ["multimedia::audio", "science", "algorithms"]
-rust-version = { workspace = true }
+rust-version.workspace = true
 description = "Voice cloning and speaker adaptation system for VoiRS"
 readme = "README.md"
 

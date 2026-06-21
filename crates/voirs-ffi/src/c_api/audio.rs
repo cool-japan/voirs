@@ -832,7 +832,6 @@ mod tests {
     fn test_mp3_save_function() {
         use std::ffi::CString;
 
-        // Create test audio data
         let samples = Box::new([0.1f32, 0.2, -0.1, -0.2, 0.0]);
         let buffer = VoirsAudioBuffer {
             samples: samples.as_ptr() as *mut f32,
@@ -842,15 +841,17 @@ mod tests {
             duration: samples.len() as f32 / 44100.0,
         };
 
-        let filename = CString::new("/tmp/test_audio.mp3").unwrap();
+        let tmp_path =
+            std::env::temp_dir().join(format!("voirs_test_audio_{}.mp3", std::process::id()));
+        let filename = CString::new(tmp_path.to_str().unwrap()).unwrap();
 
         unsafe {
             let result = voirs_audio_save_mp3(&buffer, filename.as_ptr(), 192, 2);
-            // Should succeed in creating the file (even if using WAV fallback for now)
-            assert_eq!(result, VoirsErrorCode::Success);
+            // MP3 encoding is not yet implemented; always returns InternalError.
+            assert_eq!(result, VoirsErrorCode::InternalError);
         }
 
-        // Test invalid parameters
+        // Test invalid parameters — always works regardless of feature
         unsafe {
             let result = voirs_audio_save_mp3(ptr::null(), filename.as_ptr(), 192, 2);
             assert_eq!(result, VoirsErrorCode::InvalidParameter);
@@ -858,6 +859,8 @@ mod tests {
             let result = voirs_audio_save_mp3(&buffer, ptr::null(), 192, 2);
             assert_eq!(result, VoirsErrorCode::InvalidParameter);
         }
+
+        let _ = std::fs::remove_file(&tmp_path);
     }
 
     #[test]

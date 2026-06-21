@@ -2,6 +2,7 @@
 //! transformation routines. These tests are deterministic and use no RNG.
 
 use super::*;
+use scirs2_core::ndarray::{Array1, Array2};
 
 /// Sum of pure sine tones at the given frequencies (deterministic, no RNG).
 fn multi_tone(freqs: &[f32], sample_rate: u32, n: usize) -> Vec<f32> {

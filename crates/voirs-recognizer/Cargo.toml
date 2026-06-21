@@ -43,7 +43,7 @@ serde_json.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 hex = "0.4"
 sha2.workspace = true
-hmac = { version = "0.12", optional = true }
+hmac = { version = "0.13", optional = true }
 quick-xml = { version = "0.37", optional = true }
 oxicode.workspace = true
 
@@ -94,6 +94,7 @@ toml = "1.1"
 
 # Homomorphic encryption (optional)
 num-bigint-dig = { workspace = true, features = ["rand", "prime"], optional = true }
+# Required by num-bigint-dig's RandPrime trait API for prime generation (cannot use fastrand here)
 rand = { version = "0.8", optional = true }
 fastrand.workspace = true
 

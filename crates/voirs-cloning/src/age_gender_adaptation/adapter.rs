@@ -1,288 +1,10 @@
-//! Age and Gender Adaptation for Voice Cloning
-//!
-//! This module provides capabilities for modifying the apparent age and gender characteristics
-//! of cloned voices through acoustic parameter manipulation and voice characteristic transformation.
-
 use crate::{types::VoiceSample, Error, Result};
 use scirs2_core::ndarray::{Array1, Array2};
 use scirs2_core::Complex;
 use scirs2_fft::RealFftPlanner;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Age categories for voice adaptation
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum AgeCategory {
-    /// Child voice (5-12 years)
-    Child,
-    /// Teenager voice (13-18 years)
-    Teenager,
-    /// Young adult voice (19-30 years)
-    YoungAdult,
-    /// Adult voice (31-50 years)
-    Adult,
-    /// Middle-aged voice (51-65 years)
-    MiddleAged,
-    /// Senior voice (65+ years)
-    Senior,
-}
-
-/// Gender categories for voice adaptation
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum GenderCategory {
-    /// Masculine voice characteristics
-    Masculine,
-    /// Feminine voice characteristics
-    Feminine,
-    /// Neutral/androgynous voice characteristics
-    Neutral,
-}
-
-/// Voice adaptation target combining age and gender
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VoiceAdaptationTarget {
-    /// Target age category
-    pub age: AgeCategory,
-    /// Target gender category
-    pub gender: GenderCategory,
-    /// Age intensity (0.0 = minimal change, 1.0 = maximum change)
-    pub age_intensity: f32,
-    /// Gender intensity (0.0 = minimal change, 1.0 = maximum change)
-    pub gender_intensity: f32,
-    /// Preserve speaker identity (0.0 = no preservation, 1.0 = maximum preservation)
-    pub identity_preservation: f32,
-}
-
-/// Age and Gender adaptation configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgeGenderAdaptationConfig {
-    /// Fundamental frequency (F0) modification parameters
-    pub f0_adaptation: F0AdaptationConfig,
-    /// Formant frequency modification parameters  
-    pub formant_adaptation: FormantAdaptationConfig,
-    /// Voice quality modification parameters
-    pub quality_adaptation: QualityAdaptationConfig,
-    /// Spectral adaptation parameters
-    pub spectral_adaptation: SpectralAdaptationConfig,
-    /// Temporal adaptation parameters
-    pub temporal_adaptation: TemporalAdaptationConfig,
-    /// Enable real-time adaptation
-    pub real_time_enabled: bool,
-    /// Adaptation smoothness factor (0.0-1.0)
-    pub smoothness_factor: f32,
-}
-
-/// Fundamental frequency adaptation configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct F0AdaptationConfig {
-    /// Base F0 shift in semitones for age adaptation
-    pub age_f0_shift_range: (f32, f32), // (min, max) semitones
-    /// Base F0 shift in semitones for gender adaptation
-    pub gender_f0_shift_range: (f32, f32), // (min, max) semitones
-    /// F0 variation adaptation (affects prosody)
-    pub f0_variation_factor: f32,
-    /// Jitter adaptation for voice quality
-    pub jitter_adaptation: f32,
-}
-
-/// Formant frequency adaptation configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FormantAdaptationConfig {
-    /// Formant frequency shifts for age (F1, F2, F3, F4)
-    pub age_formant_shifts: [f32; 4],
-    /// Formant frequency shifts for gender (F1, F2, F3, F4)  
-    pub gender_formant_shifts: [f32; 4],
-    /// Formant bandwidth adaptation factors
-    pub bandwidth_factors: [f32; 4],
-    /// Vocal tract length simulation factor
-    pub vocal_tract_length_factor: f32,
-}
-
-/// Voice quality adaptation configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QualityAdaptationConfig {
-    /// Breathiness adaptation (0.0-1.0)
-    pub breathiness_range: (f32, f32),
-    /// Roughness adaptation (0.0-1.0)
-    pub roughness_range: (f32, f32),
-    /// Harmonics-to-noise ratio adaptation
-    pub hnr_adaptation: f32,
-    /// Spectral tilt adaptation (dB/octave)
-    pub spectral_tilt_range: (f32, f32),
-}
-
-/// Spectral adaptation configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SpectralAdaptationConfig {
-    /// Spectral envelope warping factor
-    pub envelope_warping: f32,
-    /// High frequency emphasis/de-emphasis (dB)
-    pub high_freq_emphasis: f32,
-    /// Spectral smoothing factor
-    pub smoothing_factor: f32,
-    /// Noise floor adaptation (dB)
-    pub noise_floor_adaptation: f32,
-}
-
-/// Temporal adaptation configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TemporalAdaptationConfig {
-    /// Speech rate adaptation factor
-    pub speech_rate_factor: f32,
-    /// Pause duration adaptation factor
-    pub pause_duration_factor: f32,
-    /// Articulation precision adaptation
-    pub articulation_precision: f32,
-    /// Rhythm adaptation intensity
-    pub rhythm_adaptation: f32,
-}
-
-/// Age and Gender adaptation result
-#[derive(Debug, Clone)]
-pub struct AgeGenderAdaptationResult {
-    /// Adaptation success status
-    pub success: bool,
-    /// Adapted voice characteristics
-    pub adapted_characteristics: VoiceCharacteristics,
-    /// Adaptation confidence score (0.0-1.0)
-    pub confidence: f32,
-    /// Quality metrics of adapted voice
-    pub quality_metrics: AdaptationQualityMetrics,
-    /// Processing statistics
-    pub processing_stats: AdaptationProcessingStats,
-}
-
-/// Adapted voice characteristics
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VoiceCharacteristics {
-    /// Estimated apparent age
-    pub apparent_age: f32,
-    /// Estimated gender score (-1.0 = masculine, +1.0 = feminine)
-    pub gender_score: f32,
-    /// Fundamental frequency statistics
-    pub f0_statistics: F0Statistics,
-    /// Formant frequencies (F1, F2, F3, F4)
-    pub formant_frequencies: [f32; 4],
-    /// Voice quality metrics
-    pub voice_quality: VoiceQualityMetrics,
-    /// Spectral characteristics
-    pub spectral_characteristics: SpectralCharacteristics,
-}
-
-/// F0 statistics
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct F0Statistics {
-    /// Mean F0 in Hz
-    pub mean_f0: f32,
-    /// F0 standard deviation
-    pub f0_std: f32,
-    /// F0 range (max - min)
-    pub f0_range: f32,
-    /// Jitter percentage
-    pub jitter: f32,
-}
-
-/// Voice quality metrics
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VoiceQualityMetrics {
-    /// Breathiness level (0.0-1.0)
-    pub breathiness: f32,
-    /// Roughness level (0.0-1.0)
-    pub roughness: f32,
-    /// Harmonics-to-noise ratio (dB)
-    pub hnr: f32,
-    /// Spectral tilt (dB/octave)
-    pub spectral_tilt: f32,
-}
-
-/// Spectral characteristics
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SpectralCharacteristics {
-    /// Spectral centroid (Hz)
-    pub spectral_centroid: f32,
-    /// Spectral rolloff (Hz)
-    pub spectral_rolloff: f32,
-    /// Spectral flux
-    pub spectral_flux: f32,
-    /// High frequency energy ratio
-    pub high_freq_ratio: f32,
-}
-
-/// Adaptation quality metrics
-#[derive(Debug, Clone)]
-pub struct AdaptationQualityMetrics {
-    /// Naturalness score (0.0-1.0)
-    pub naturalness: f32,
-    /// Identity preservation score (0.0-1.0)
-    pub identity_preservation: f32,
-    /// Target achievement score (0.0-1.0)
-    pub target_achievement: f32,
-    /// Audio quality score (0.0-1.0)
-    pub audio_quality: f32,
-}
-
-/// Adaptation processing statistics
-#[derive(Debug, Clone)]
-pub struct AdaptationProcessingStats {
-    /// Processing time
-    pub processing_time: std::time::Duration,
-    /// Number of frames processed
-    pub frames_processed: usize,
-    /// Memory usage (bytes)
-    pub memory_usage: usize,
-    /// Adaptation convergence achieved
-    pub converged: bool,
-}
-
-/// Main Age/Gender adaptation processor
-#[derive(Debug)]
-pub struct AgeGenderAdapter {
-    /// Adaptation configuration
-    config: AgeGenderAdaptationConfig,
-    /// Adaptation models cache
-    model_cache: HashMap<String, AgeGenderModel>,
-    /// Voice analysis cache
-    analysis_cache: HashMap<String, VoiceCharacteristics>,
-}
-
-/// Age/Gender adaptation model
-#[derive(Debug, Clone)]
-pub struct AgeGenderModel {
-    /// Source voice characteristics
-    pub source_characteristics: VoiceCharacteristics,
-    /// Target adaptation parameters
-    pub target: VoiceAdaptationTarget,
-    /// Adaptation transformation matrices
-    pub transformation_matrices: TransformationMatrices,
-    /// Model training statistics
-    pub training_stats: ModelTrainingStats,
-}
-
-/// Transformation matrices for adaptation
-#[derive(Debug, Clone)]
-pub struct TransformationMatrices {
-    /// F0 transformation curve
-    pub f0_transform: Array1<f32>,
-    /// Formant transformation matrix (4x4 for F1-F4)
-    pub formant_transform: Array2<f32>,
-    /// Spectral envelope transformation
-    pub spectral_transform: Array1<f32>,
-    /// Quality parameters transformation
-    pub quality_transform: Array1<f32>,
-}
-
-/// Model training statistics
-#[derive(Debug, Clone)]
-pub struct ModelTrainingStats {
-    /// Training samples used
-    pub training_samples: usize,
-    /// Training accuracy achieved
-    pub training_accuracy: f32,
-    /// Cross-validation score
-    pub cv_score: f32,
-    /// Model complexity score
-    pub complexity_score: f32,
-}
+use super::types::*;
 
 impl Default for AgeGenderAdapter {
     fn default() -> Self {
@@ -424,7 +146,7 @@ impl AgeGenderAdapter {
     }
 
     /// Analyze voice characteristics from samples
-    async fn analyze_voice_characteristics(
+    pub(super) async fn analyze_voice_characteristics(
         &self,
         samples: &[VoiceSample],
     ) -> Result<VoiceCharacteristics> {
@@ -553,7 +275,11 @@ impl AgeGenderAdapter {
     }
 
     /// Extract F0 statistics from audio
-    fn extract_f0_statistics(&self, audio: &[f32], sample_rate: u32) -> Result<F0Statistics> {
+    pub(super) fn extract_f0_statistics(
+        &self,
+        audio: &[f32],
+        sample_rate: u32,
+    ) -> Result<F0Statistics> {
         if audio.len() < sample_rate as usize / 10 {
             return Err(Error::Processing(
                 "Audio too short for F0 analysis".to_string(),
@@ -660,7 +386,11 @@ impl AgeGenderAdapter {
     /// ordered by ascending frequency and assigned to F1-F4. Bands for which no
     /// peak is found fall back to canonical average-adult-voice values so that
     /// downstream ratio computations remain well-defined.
-    fn extract_formant_frequencies(&self, audio: &[f32], sample_rate: u32) -> Result<[f32; 4]> {
+    pub(super) fn extract_formant_frequencies(
+        &self,
+        audio: &[f32],
+        sample_rate: u32,
+    ) -> Result<[f32; 4]> {
         // Canonical default formant values for an average adult voice.
         let mut formants = [500.0, 1500.0, 2500.0, 3500.0];
 
@@ -679,7 +409,7 @@ impl AgeGenderAdapter {
     ///
     /// Returns the `N/2 + 1` non-redundant magnitude bins, where `N` is the
     /// next power of two at least as large as the input length (zero-padded).
-    fn rfft_magnitude_spectrum(audio: &[f32]) -> (Vec<f32>, usize) {
+    pub(super) fn rfft_magnitude_spectrum(audio: &[f32]) -> (Vec<f32>, usize) {
         if audio.is_empty() {
             return (Vec::new(), 0);
         }
@@ -711,7 +441,7 @@ impl AgeGenderAdapter {
     /// A peak is a local maximum of the magnitude spectrum whose value exceeds
     /// a fraction of the in-band maximum (an adaptive noise floor). At most
     /// `max_peaks` peaks are returned, ordered by ascending frequency.
-    fn find_spectral_peaks(
+    pub(super) fn find_spectral_peaks(
         &self,
         audio: &[f32],
         sample_rate: u32,
@@ -763,7 +493,7 @@ impl AgeGenderAdapter {
     }
 
     /// Extract voice quality metrics
-    fn extract_voice_quality_metrics(
+    pub(super) fn extract_voice_quality_metrics(
         &self,
         audio: &[f32],
         sample_rate: u32,
@@ -870,7 +600,7 @@ impl AgeGenderAdapter {
     }
 
     /// Extract spectral characteristics
-    fn extract_spectral_characteristics(
+    pub(super) fn extract_spectral_characteristics(
         &self,
         audio: &[f32],
         sample_rate: u32,
@@ -899,7 +629,7 @@ impl AgeGenderAdapter {
     /// frequency of bin `k` and `|X_k|` is its magnitude. This is the
     /// "brightness" of the signal and is a perceptually meaningful frequency,
     /// unlike a sample-index average.
-    fn calculate_spectral_centroid(&self, audio: &[f32], sample_rate: u32) -> f32 {
+    pub(super) fn calculate_spectral_centroid(&self, audio: &[f32], sample_rate: u32) -> f32 {
         let (mags, n) = Self::rfft_magnitude_spectrum(audio);
         if mags.is_empty() || n == 0 {
             return 0.0;
@@ -928,7 +658,7 @@ impl AgeGenderAdapter {
     /// DC upward and stopping once the running magnitude-energy reaches the
     /// threshold yields a frequency strictly below Nyquist for band-limited
     /// signals.
-    fn calculate_spectral_rolloff(&self, audio: &[f32], sample_rate: u32) -> f32 {
+    pub(super) fn calculate_spectral_rolloff(&self, audio: &[f32], sample_rate: u32) -> f32 {
         let (mags, n) = Self::rfft_magnitude_spectrum(audio);
         if mags.is_empty() || n == 0 {
             return 0.0;
@@ -961,7 +691,7 @@ impl AgeGenderAdapter {
     /// accumulated, then averaged over the frame transitions. A spectrally
     /// stationary tone yields near-zero flux, whereas a signal whose spectrum
     /// evolves over time yields a larger value.
-    fn calculate_spectral_flux(&self, audio: &[f32], sample_rate: u32) -> f32 {
+    pub(super) fn calculate_spectral_flux(&self, audio: &[f32], sample_rate: u32) -> f32 {
         let frame_mags = Self::stft_frame_magnitudes(audio, sample_rate);
         if frame_mags.len() < 2 {
             return 0.0;
@@ -991,7 +721,7 @@ impl AgeGenderAdapter {
     /// Each frame is Hann-windowed and transformed with `scirs2_fft::rfft`,
     /// mirroring [`rfft_magnitude_spectrum`]. Returns one magnitude vector per
     /// frame; an empty result indicates the signal was too short for a frame.
-    fn stft_frame_magnitudes(audio: &[f32], sample_rate: u32) -> Vec<Vec<f32>> {
+    pub(super) fn stft_frame_magnitudes(audio: &[f32], sample_rate: u32) -> Vec<Vec<f32>> {
         if audio.is_empty() {
             return Vec::new();
         }
@@ -1054,7 +784,7 @@ impl AgeGenderAdapter {
     }
 
     /// Estimate apparent age from voice characteristics
-    fn estimate_apparent_age(
+    pub(super) fn estimate_apparent_age(
         &self,
         f0_stats: &F0Statistics,
         formants: &[f32; 4],
@@ -1101,7 +831,11 @@ impl AgeGenderAdapter {
     }
 
     /// Estimate gender score from voice characteristics
-    fn estimate_gender_score(&self, f0_stats: &F0Statistics, formants: &[f32; 4]) -> Result<f32> {
+    pub(super) fn estimate_gender_score(
+        &self,
+        f0_stats: &F0Statistics,
+        formants: &[f32; 4],
+    ) -> Result<f32> {
         let mut gender_score = 0.0;
         let mut weight_sum = 0.0;
 
@@ -1137,7 +871,7 @@ impl AgeGenderAdapter {
     }
 
     /// Calculate target F0 based on adaptation parameters
-    fn calculate_target_f0(
+    pub(super) fn calculate_target_f0(
         &self,
         source_f0: &F0Statistics,
         target: &VoiceAdaptationTarget,
@@ -1260,7 +994,7 @@ impl AgeGenderAdapter {
     ///
     /// The intensities scale the magnitude of the effect; an intensity of zero
     /// yields a flat (unity) envelope.
-    fn generate_spectral_transformation(
+    pub(super) fn generate_spectral_transformation(
         &self,
         source_spectral: &SpectralCharacteristics,
         target: &VoiceAdaptationTarget,
@@ -1369,7 +1103,7 @@ impl AgeGenderAdapter {
     /// frequency band is relocated to `bin / ratio` (a formant shift), the
     /// warped spectrum is inverted, and the frames are recombined with
     /// overlap-add.
-    fn apply_formant_transformation(
+    pub(super) fn apply_formant_transformation(
         &self,
         audio: &[f32],
         formant_transform: &Array2<f32>,
@@ -1463,7 +1197,7 @@ impl AgeGenderAdapter {
     /// interpolated to the FFT bin count; each analysis frame's magnitudes are
     /// scaled by the envelope (preserving phase) and recombined with
     /// overlap-add.
-    fn apply_spectral_transformation(
+    pub(super) fn apply_spectral_transformation(
         &self,
         audio: &[f32],
         spectral_transform: &Array1<f32>,
@@ -1538,7 +1272,7 @@ impl AgeGenderAdapter {
     }
 
     /// Construct a periodic Hann analysis/synthesis window of length `size`.
-    fn hann_window(size: usize) -> Vec<f32> {
+    pub(super) fn hann_window(size: usize) -> Vec<f32> {
         (0..size)
             .map(|i| {
                 if size > 1 {
@@ -1755,306 +1489,5 @@ impl AgeGenderAdapter {
     pub fn clear_cache(&mut self) {
         self.model_cache.clear();
         self.analysis_cache.clear();
-    }
-}
-
-impl Default for AgeGenderAdaptationConfig {
-    fn default() -> Self {
-        Self {
-            f0_adaptation: F0AdaptationConfig::default(),
-            formant_adaptation: FormantAdaptationConfig::default(),
-            quality_adaptation: QualityAdaptationConfig::default(),
-            spectral_adaptation: SpectralAdaptationConfig::default(),
-            temporal_adaptation: TemporalAdaptationConfig::default(),
-            real_time_enabled: false,
-            smoothness_factor: 0.3,
-        }
-    }
-}
-
-impl Default for F0AdaptationConfig {
-    fn default() -> Self {
-        Self {
-            age_f0_shift_range: (-24.0, 24.0),
-            gender_f0_shift_range: (-12.0, 12.0),
-            f0_variation_factor: 1.0,
-            jitter_adaptation: 0.1,
-        }
-    }
-}
-
-impl Default for FormantAdaptationConfig {
-    fn default() -> Self {
-        Self {
-            age_formant_shifts: [0.0, 0.0, 0.0, 0.0],
-            gender_formant_shifts: [0.0, 0.0, 0.0, 0.0],
-            bandwidth_factors: [1.0, 1.0, 1.0, 1.0],
-            vocal_tract_length_factor: 1.0,
-        }
-    }
-}
-
-impl Default for QualityAdaptationConfig {
-    fn default() -> Self {
-        Self {
-            breathiness_range: (0.0, 0.5),
-            roughness_range: (0.0, 0.3),
-            hnr_adaptation: 0.0,
-            spectral_tilt_range: (-5.0, 5.0),
-        }
-    }
-}
-
-impl Default for SpectralAdaptationConfig {
-    fn default() -> Self {
-        Self {
-            envelope_warping: 0.0,
-            high_freq_emphasis: 0.0,
-            smoothing_factor: 0.1,
-            noise_floor_adaptation: 0.0,
-        }
-    }
-}
-
-impl Default for TemporalAdaptationConfig {
-    fn default() -> Self {
-        Self {
-            speech_rate_factor: 1.0,
-            pause_duration_factor: 1.0,
-            articulation_precision: 1.0,
-            rhythm_adaptation: 0.0,
-        }
-    }
-}
-
-impl Default for VoiceAdaptationTarget {
-    fn default() -> Self {
-        Self {
-            age: AgeCategory::Adult,
-            gender: GenderCategory::Neutral,
-            age_intensity: 0.5,
-            gender_intensity: 0.5,
-            identity_preservation: 0.7,
-        }
-    }
-}
-
-/// DSP-focused unit tests for the FFT-based formant and spectral routines.
-/// Kept in a sibling file to keep this module under the 2000-line limit.
-#[cfg(test)]
-#[path = "age_gender_adaptation_dsp_tests.rs"]
-mod dsp_tests;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::types::VoiceSample;
-
-    #[tokio::test]
-    async fn test_age_gender_adapter_creation() {
-        let adapter = AgeGenderAdapter::new();
-        assert!(adapter.model_cache.is_empty());
-        assert!(adapter.analysis_cache.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_voice_characteristics_analysis() {
-        let adapter = AgeGenderAdapter::new();
-
-        // Create test voice samples
-        let samples = vec![
-            VoiceSample::new("test1".to_string(), vec![0.1; 8000], 16000),
-            VoiceSample::new("test2".to_string(), vec![0.2; 8000], 16000),
-        ];
-
-        let characteristics = adapter
-            .analyze_voice_characteristics(&samples)
-            .await
-            .unwrap();
-        assert!(characteristics.apparent_age > 0.0);
-        assert!(characteristics.f0_statistics.mean_f0 >= 0.0);
-        assert_eq!(characteristics.formant_frequencies.len(), 4);
-    }
-
-    #[tokio::test]
-    async fn test_adaptation_model_training() {
-        let mut adapter = AgeGenderAdapter::new();
-
-        let samples = vec![
-            VoiceSample::new("train1".to_string(), vec![0.1; 16000], 16000),
-            VoiceSample::new("train2".to_string(), vec![0.2; 16000], 16000),
-        ];
-
-        let target = VoiceAdaptationTarget {
-            age: AgeCategory::Child,
-            gender: GenderCategory::Feminine,
-            age_intensity: 0.8,
-            gender_intensity: 0.6,
-            identity_preservation: 0.7,
-        };
-
-        let model = adapter
-            .train_adaptation_model("test_speaker", &samples, target)
-            .await
-            .unwrap();
-        assert_eq!(model.target.age, AgeCategory::Child);
-        assert_eq!(model.target.gender, GenderCategory::Feminine);
-        assert!(model.training_stats.training_samples > 0);
-    }
-
-    #[tokio::test]
-    async fn test_voice_adaptation() {
-        let mut adapter = AgeGenderAdapter::new();
-
-        let training_samples = vec![VoiceSample::new(
-            "train1".to_string(),
-            vec![0.1; 16000],
-            16000,
-        )];
-
-        let target = VoiceAdaptationTarget::default();
-        let model = adapter
-            .train_adaptation_model("speaker", &training_samples, target)
-            .await
-            .unwrap();
-
-        let input_samples = vec![VoiceSample::new(
-            "input".to_string(),
-            vec![0.3; 8000],
-            16000,
-        )];
-
-        let result = adapter.adapt_voice(&model, &input_samples).await.unwrap();
-        assert!(result.confidence >= 0.0 && result.confidence <= 1.0);
-        assert!(result.processing_stats.frames_processed > 0);
-    }
-
-    #[tokio::test]
-    async fn test_f0_statistics_extraction() {
-        let adapter = AgeGenderAdapter::new();
-
-        // Create simple sine wave for F0 testing with higher amplitude and frequency
-        let mut audio = vec![0.0; 16000];
-        for (i, sample) in audio.iter_mut().enumerate() {
-            // Make amplitude higher and add some harmonics for better detection
-            let fundamental = (2.0 * std::f32::consts::PI * 150.0 * i as f32 / 16000.0).sin();
-            let harmonic = 0.3 * (2.0 * std::f32::consts::PI * 300.0 * i as f32 / 16000.0).sin();
-            *sample = (fundamental + harmonic) * 0.8;
-        }
-
-        let f0_stats = adapter.extract_f0_statistics(&audio, 16000).unwrap();
-
-        // Accept wider range or zero F0 as the simple autocorrelation might not be perfect
-        assert!(
-            f0_stats.mean_f0 >= 0.0,
-            "F0 should be non-negative, got {}",
-            f0_stats.mean_f0
-        );
-        assert!(f0_stats.jitter >= 0.0, "Jitter should be non-negative");
-        assert!(f0_stats.f0_std >= 0.0, "F0 std should be non-negative");
-        assert!(f0_stats.f0_range >= 0.0, "F0 range should be non-negative");
-    }
-
-    #[tokio::test]
-    async fn test_formant_extraction() {
-        let adapter = AgeGenderAdapter::new();
-
-        let audio = vec![0.1; 16000];
-        let formants = adapter.extract_formant_frequencies(&audio, 16000).unwrap();
-
-        assert_eq!(formants.len(), 4);
-        for formant in formants.iter() {
-            assert!(*formant > 0.0);
-        }
-    }
-
-    #[tokio::test]
-    async fn test_voice_quality_extraction() {
-        let adapter = AgeGenderAdapter::new();
-
-        let audio = vec![0.1; 16000];
-        let quality = adapter
-            .extract_voice_quality_metrics(&audio, 16000)
-            .unwrap();
-
-        assert!(quality.breathiness >= 0.0 && quality.breathiness <= 1.0);
-        assert!(quality.roughness >= 0.0 && quality.roughness <= 1.0);
-        assert!(quality.hnr >= 0.0);
-    }
-
-    #[test]
-    fn test_age_estimation() {
-        let adapter = AgeGenderAdapter::new();
-
-        let f0_stats = F0Statistics {
-            mean_f0: 220.0,
-            f0_std: 15.0,
-            f0_range: 50.0,
-            jitter: 1.5,
-        };
-
-        let formants = [600.0, 1700.0, 2500.0, 3500.0];
-        let quality = VoiceQualityMetrics {
-            breathiness: 0.2,
-            roughness: 0.1,
-            hnr: 15.0,
-            spectral_tilt: -8.0,
-        };
-
-        let age = adapter
-            .estimate_apparent_age(&f0_stats, &formants, &quality)
-            .unwrap();
-        assert!(age >= 5.0 && age <= 80.0);
-    }
-
-    #[test]
-    fn test_gender_estimation() {
-        let adapter = AgeGenderAdapter::new();
-
-        let f0_stats = F0Statistics {
-            mean_f0: 180.0,
-            f0_std: 12.0,
-            f0_range: 40.0,
-            jitter: 1.0,
-        };
-
-        let formants = [700.0, 1500.0, 2600.0, 3500.0];
-        let gender = adapter.estimate_gender_score(&f0_stats, &formants).unwrap();
-
-        assert!(gender >= -1.0 && gender <= 1.0);
-    }
-
-    #[test]
-    fn test_target_f0_calculation() {
-        let adapter = AgeGenderAdapter::new();
-
-        let source_f0 = F0Statistics {
-            mean_f0: 150.0,
-            f0_std: 10.0,
-            f0_range: 30.0,
-            jitter: 1.0,
-        };
-
-        let target = VoiceAdaptationTarget {
-            age: AgeCategory::Child,
-            gender: GenderCategory::Feminine,
-            age_intensity: 1.0,
-            gender_intensity: 1.0,
-            identity_preservation: 0.5,
-        };
-
-        let target_f0 = adapter.calculate_target_f0(&source_f0, &target).unwrap();
-        assert!(target_f0 > source_f0.mean_f0); // Should be higher for child + feminine
-    }
-
-    #[test]
-    fn test_config_defaults() {
-        let config = AgeGenderAdaptationConfig::default();
-        assert!(!config.real_time_enabled);
-        assert!(config.smoothness_factor > 0.0 && config.smoothness_factor < 1.0);
-
-        let target = VoiceAdaptationTarget::default();
-        assert_eq!(target.age, AgeCategory::Adult);
-        assert_eq!(target.gender, GenderCategory::Neutral);
     }
 }

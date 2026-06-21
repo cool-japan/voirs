@@ -1,6 +1,6 @@
 [package]
 name = "voirs-spatial"
-version = { workspace = true }
+version.workspace = true
 edition = { workspace = true }
 authors = { workspace = true }
 license = { workspace = true }
@@ -9,7 +9,7 @@ homepage = { workspace = true }
 documentation = "https://docs.rs/voirs-spatial"
 keywords = ["voirs", "spatial", "3d-audio", "hrtf", "binaural"]
 categories = ["multimedia::audio", "science", "simulation"]
-rust-version = { workspace = true }
+rust-version.workspace = true
 description = "3D spatial audio and HRTF processing for VoiRS"
 readme = "README.md"
 

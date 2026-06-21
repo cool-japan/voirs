@@ -1,228 +1,8 @@
-//! # Cloud Storage Integration
-//!
-//! Provides unified cloud storage integration for model management across
-//! AWS S3, Google Cloud Storage, and Azure Blob Storage.
-//!
-//! Features:
-//! - Multi-cloud model storage and retrieval
-//! - Automatic caching and version management
-//! - Parallel download optimization
-//! - Checksum verification
-//! - Retry logic with exponential backoff
-
-use crate::RecognitionError;
-use parking_lot::RwLock;
-use serde::{Deserialize, Serialize};
+use super::types::*;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::Duration;
-use thiserror::Error;
-
-/// Cloud storage errors
-#[derive(Debug, Error)]
-pub enum CloudStorageError {
-    /// Download failed
-    #[error("Download failed: {0}")]
-    DownloadFailed(String),
-
-    /// Upload failed
-    #[error("Upload failed: {0}")]
-    UploadFailed(String),
-
-    /// Authentication failed
-    #[error("Authentication failed: {0}")]
-    AuthenticationFailed(String),
-
-    /// Invalid configuration
-    #[error("Invalid configuration: {0}")]
-    InvalidConfiguration(String),
-
-    /// Checksum mismatch
-    #[error("Checksum mismatch: expected {expected}, got {actual}")]
-    ChecksumMismatch {
-        /// Expected checksum
-        expected: String,
-        /// Actual checksum
-        actual: String,
-    },
-
-    /// Model not found
-    #[error("Model not found: {0}")]
-    ModelNotFound(String),
-
-    /// IO error
-    #[error("IO error: {0}")]
-    IoError(#[from] std::io::Error),
-
-    /// Network error
-    #[error("Network error: {0}")]
-    NetworkError(String),
-}
-
-/// Cloud storage provider
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CloudProvider {
-    /// AWS S3
-    AwsS3,
-    /// Google Cloud Storage
-    GoogleCloudStorage,
-    /// Azure Blob Storage
-    AzureBlobStorage,
-    /// Local filesystem (for testing)
-    LocalFilesystem,
-}
-
-/// Cloud storage configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CloudStorageConfig {
-    /// Provider to use
-    pub provider: CloudProvider,
-
-    /// Bucket/container name
-    pub bucket_name: String,
-
-    /// Region (for AWS/GCP)
-    pub region: Option<String>,
-
-    /// Access key ID (for AWS)
-    pub access_key_id: Option<String>,
-
-    /// Secret access key (for AWS)
-    pub secret_access_key: Option<String>,
-
-    /// Service account key path (for GCP)
-    pub service_account_key_path: Option<PathBuf>,
-
-    /// Azure connection string
-    pub azure_connection_string: Option<String>,
-
-    /// Local cache directory
-    pub cache_dir: PathBuf,
-
-    /// Maximum cache size in MB
-    pub max_cache_size_mb: u64,
-
-    /// Enable checksum verification
-    pub verify_checksums: bool,
-
-    /// Download timeout in seconds
-    pub download_timeout_secs: u64,
-
-    /// Maximum retry attempts
-    pub max_retry_attempts: u32,
-
-    /// Retry delay in milliseconds
-    pub retry_delay_ms: u64,
-}
-
-impl Default for CloudStorageConfig {
-    fn default() -> Self {
-        Self {
-            provider: CloudProvider::LocalFilesystem,
-            bucket_name: "voirs-models".to_string(),
-            region: None,
-            access_key_id: None,
-            secret_access_key: None,
-            service_account_key_path: None,
-            azure_connection_string: None,
-            cache_dir: std::env::temp_dir().join("voirs_cloud_cache"),
-            max_cache_size_mb: 2048,
-            verify_checksums: true,
-            download_timeout_secs: 300,
-            max_retry_attempts: 3,
-            retry_delay_ms: 1000,
-        }
-    }
-}
-
-/// Model metadata for cloud storage
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModelMetadata {
-    /// Model name
-    pub name: String,
-
-    /// Model version
-    pub version: String,
-
-    /// Model size in bytes
-    pub size_bytes: u64,
-
-    /// SHA256 checksum
-    pub checksum: String,
-
-    /// Last modified timestamp
-    pub last_modified: chrono::DateTime<chrono::Utc>,
-
-    /// Model type (whisper, deepspeech, etc.)
-    pub model_type: String,
-
-    /// Cloud storage path
-    pub storage_path: String,
-
-    /// Tags for categorization
-    pub tags: HashMap<String, String>,
-}
-
-/// Cloud storage manager
-pub struct CloudStorageManager {
-    /// Configuration
-    config: Arc<RwLock<CloudStorageConfig>>,
-
-    /// Model metadata cache
-    metadata_cache: Arc<RwLock<HashMap<String, ModelMetadata>>>,
-
-    /// Download statistics
-    download_stats: Arc<RwLock<DownloadStatistics>>,
-
-    /// Active downloads
-    active_downloads: Arc<RwLock<HashMap<String, DownloadProgress>>>,
-}
-
-/// Download statistics
-#[derive(Debug, Default, Clone)]
-pub struct DownloadStatistics {
-    /// Total downloads
-    pub total_downloads: u64,
-
-    /// Successful downloads
-    pub successful_downloads: u64,
-
-    /// Failed downloads
-    pub failed_downloads: u64,
-
-    /// Total bytes downloaded
-    pub total_bytes_downloaded: u64,
-
-    /// Average download speed in bytes/sec
-    pub average_download_speed: f64,
-
-    /// Cache hit rate
-    pub cache_hit_rate: f64,
-}
-
-/// Download progress
-#[derive(Debug, Clone)]
-pub struct DownloadProgress {
-    /// Model name
-    pub model_name: String,
-
-    /// Total bytes
-    pub total_bytes: u64,
-
-    /// Downloaded bytes
-    pub downloaded_bytes: u64,
-
-    /// Download speed in bytes/sec
-    pub download_speed: f64,
-
-    /// Started at
-    pub started_at: std::time::Instant,
-
-    /// ETA in seconds
-    pub eta_seconds: Option<f64>,
-}
 
 impl CloudStorageManager {
     /// Create a new cloud storage manager
@@ -233,10 +13,12 @@ impl CloudStorageManager {
         }
 
         Ok(Self {
-            config: Arc::new(RwLock::new(config)),
-            metadata_cache: Arc::new(RwLock::new(HashMap::new())),
-            download_stats: Arc::new(RwLock::new(DownloadStatistics::default())),
-            active_downloads: Arc::new(RwLock::new(HashMap::new())),
+            config: std::sync::Arc::new(parking_lot::RwLock::new(config)),
+            metadata_cache: std::sync::Arc::new(parking_lot::RwLock::new(HashMap::new())),
+            download_stats: std::sync::Arc::new(parking_lot::RwLock::new(
+                DownloadStatistics::default(),
+            )),
+            active_downloads: std::sync::Arc::new(parking_lot::RwLock::new(HashMap::new())),
         })
     }
 
@@ -1008,7 +790,7 @@ impl CloudStorageManager {
         &self,
         model_path: &Path,
         model_name: &str,
-        metadata: &ModelMetadata,
+        _metadata: &ModelMetadata,
     ) -> Result<(), CloudStorageError> {
         let config = self.config.read();
         let dest_path = PathBuf::from(&config.bucket_name).join(model_name);
@@ -1345,7 +1127,11 @@ impl CloudStorageManager {
         Ok(true)
     }
 
-    fn verify_checksum(&self, file_path: &Path, model_name: &str) -> Result<(), CloudStorageError> {
+    pub(super) fn verify_checksum(
+        &self,
+        file_path: &Path,
+        model_name: &str,
+    ) -> Result<(), CloudStorageError> {
         let expected = {
             let cache = self.metadata_cache.read();
             cache
@@ -1389,7 +1175,7 @@ impl CloudStorageManager {
             .insert(model_name.to_string(), progress);
     }
 
-    fn update_download_stats(&self, success: bool, elapsed: Duration) {
+    pub(super) fn update_download_stats(&self, success: bool, elapsed: Duration) {
         let mut stats = self.download_stats.write();
         stats.total_downloads += 1;
 
@@ -1415,7 +1201,7 @@ impl CloudStorageManager {
         stats.cache_hit_rate = stats.successful_downloads as f64 / stats.total_downloads as f64;
     }
 
-    fn cleanup_cache(&self) -> Result<(), CloudStorageError> {
+    pub(super) fn cleanup_cache(&self) -> Result<(), CloudStorageError> {
         let config = self.config.read();
 
         // Calculate current cache size
@@ -1491,7 +1277,7 @@ impl CloudStorageManager {
 }
 
 #[cfg(feature = "cloud")]
-fn parse_s3_list_xml(xml: &str) -> Result<Vec<ModelMetadata>, CloudStorageError> {
+pub(super) fn parse_s3_list_xml(xml: &str) -> Result<Vec<ModelMetadata>, CloudStorageError> {
     use quick_xml::{events::Event, Reader};
 
     let mut reader = Reader::from_str(xml);
@@ -1568,7 +1354,7 @@ fn parse_s3_list_xml(xml: &str) -> Result<Vec<ModelMetadata>, CloudStorageError>
 }
 
 #[cfg(feature = "cloud")]
-fn parse_azure_list_xml(xml: &str) -> Result<Vec<ModelMetadata>, CloudStorageError> {
+pub(super) fn parse_azure_list_xml(xml: &str) -> Result<Vec<ModelMetadata>, CloudStorageError> {
     use quick_xml::{events::Event, Reader};
 
     let mut reader = Reader::from_str(xml);
@@ -1651,370 +1437,4 @@ fn parse_azure_list_xml(xml: &str) -> Result<Vec<ModelMetadata>, CloudStorageErr
         }
     }
     Ok(models)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::TempDir;
-
-    #[test]
-    fn test_cloud_storage_manager_creation() {
-        let temp_dir = TempDir::new().unwrap();
-        let config = CloudStorageConfig {
-            cache_dir: temp_dir.path().to_path_buf(),
-            ..CloudStorageConfig::default()
-        };
-
-        let manager = CloudStorageManager::new(config);
-        assert!(manager.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_local_filesystem_download() {
-        let temp_cache = TempDir::new().unwrap();
-        let temp_bucket = TempDir::new().unwrap();
-
-        // Create a test model file
-        let model_path = temp_bucket.path().join("test_model.bin");
-        std::fs::write(&model_path, b"test model data").unwrap();
-
-        let config = CloudStorageConfig {
-            provider: CloudProvider::LocalFilesystem,
-            bucket_name: temp_bucket.path().to_string_lossy().to_string(),
-            cache_dir: temp_cache.path().to_path_buf(),
-            ..CloudStorageConfig::default()
-        };
-
-        let manager = CloudStorageManager::new(config).unwrap();
-
-        let result = manager.download_model("test_model.bin").await;
-        assert!(result.is_ok());
-
-        let downloaded_path = result.unwrap();
-        assert!(downloaded_path.exists());
-        assert_eq!(
-            std::fs::read_to_string(downloaded_path).unwrap(),
-            "test model data"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_local_filesystem_upload() {
-        let temp_cache = TempDir::new().unwrap();
-        let temp_bucket = TempDir::new().unwrap();
-
-        // Create source model file
-        let source_model = temp_cache.path().join("source_model.bin");
-        std::fs::write(&source_model, b"upload test data").unwrap();
-
-        let config = CloudStorageConfig {
-            provider: CloudProvider::LocalFilesystem,
-            bucket_name: temp_bucket.path().to_string_lossy().to_string(),
-            cache_dir: temp_cache.path().to_path_buf(),
-            ..CloudStorageConfig::default()
-        };
-
-        let manager = CloudStorageManager::new(config).unwrap();
-
-        let metadata = ModelMetadata {
-            name: "test_upload.bin".to_string(),
-            version: "1.0.0".to_string(),
-            size_bytes: 16,
-            checksum: "test_checksum".to_string(),
-            last_modified: chrono::Utc::now(),
-            model_type: "test".to_string(),
-            storage_path: "test_upload.bin".to_string(),
-            tags: HashMap::new(),
-        };
-
-        let result = manager
-            .upload_model(&source_model, "test_upload.bin", metadata)
-            .await;
-        assert!(result.is_ok());
-
-        // Verify uploaded file
-        let uploaded_path = temp_bucket.path().join("test_upload.bin");
-        assert!(uploaded_path.exists());
-    }
-
-    #[tokio::test]
-    async fn test_list_local_models() {
-        let temp_bucket = TempDir::new().unwrap();
-
-        // Create test model files
-        std::fs::write(temp_bucket.path().join("model1.bin"), b"model1").unwrap();
-        std::fs::write(temp_bucket.path().join("model2.bin"), b"model2").unwrap();
-
-        let config = CloudStorageConfig {
-            provider: CloudProvider::LocalFilesystem,
-            bucket_name: temp_bucket.path().to_string_lossy().to_string(),
-            ..CloudStorageConfig::default()
-        };
-
-        let manager = CloudStorageManager::new(config).unwrap();
-
-        let models = manager.list_models().await.unwrap();
-        assert_eq!(models.len(), 2);
-    }
-
-    #[test]
-    fn test_download_statistics() {
-        let temp_dir = TempDir::new().unwrap();
-        let config = CloudStorageConfig {
-            cache_dir: temp_dir.path().to_path_buf(),
-            ..CloudStorageConfig::default()
-        };
-
-        let manager = CloudStorageManager::new(config).unwrap();
-
-        manager.update_download_stats(true, Duration::from_secs(10));
-        manager.update_download_stats(true, Duration::from_secs(5));
-        manager.update_download_stats(false, Duration::from_secs(1));
-
-        let stats = manager.get_download_stats();
-        assert_eq!(stats.total_downloads, 3);
-        assert_eq!(stats.successful_downloads, 2);
-        assert_eq!(stats.failed_downloads, 1);
-    }
-
-    #[test]
-    fn test_cache_cleanup() {
-        let temp_dir = TempDir::new().unwrap();
-
-        // Create test files
-        let file1 = temp_dir.path().join("file1.bin");
-        let file2 = temp_dir.path().join("file2.bin");
-
-        std::fs::write(&file1, vec![0u8; 1024 * 1024]).unwrap(); // 1MB
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        std::fs::write(&file2, vec![0u8; 1024 * 1024]).unwrap(); // 1MB
-
-        let config = CloudStorageConfig {
-            cache_dir: temp_dir.path().to_path_buf(),
-            max_cache_size_mb: 1, // 1MB limit
-            ..CloudStorageConfig::default()
-        };
-
-        let manager = CloudStorageManager::new(config).unwrap();
-
-        // Cleanup should remove the oldest file
-        manager.cleanup_cache().unwrap();
-
-        // file1 should be removed, file2 should exist
-        assert!(!file1.exists());
-        assert!(file2.exists());
-    }
-}
-
-#[cfg(all(test, feature = "cloud"))]
-mod cloud_auth_tests {
-    use super::*;
-
-    #[test]
-    fn test_sigv4_canonical_request() {
-        let result = crate::cloud_auth::sign_s3_request(
-            "GET",
-            "https://examplebucket.s3.amazonaws.com/?list-type=2",
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-            "AKIAIOSFODNN7EXAMPLE",
-            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-            "us-east-1",
-            "s3",
-            "20130524T000000Z",
-        );
-        assert!(
-            result.is_ok(),
-            "SigV4 signing should succeed: {:?}",
-            result.err()
-        );
-        let headers = result.unwrap();
-        assert!(
-            headers.contains_key("Authorization"),
-            "Should have Authorization header"
-        );
-        let auth = &headers["Authorization"];
-        assert!(
-            auth.starts_with("AWS4-HMAC-SHA256"),
-            "Should use AWS4-HMAC-SHA256"
-        );
-        assert!(
-            auth.contains("Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request"),
-            "Credential scope must match: {}",
-            auth
-        );
-        assert!(
-            auth.contains("SignedHeaders=host;x-amz-content-sha256;x-amz-date"),
-            "Signed headers must be canonical: {}",
-            auth
-        );
-    }
-
-    #[test]
-    fn test_azure_shared_key_signing() {
-        let result = crate::cloud_auth::sign_azure_request(
-            "GET",
-            "devstoreaccount1",
-            "models",
-            "",
-            0,
-            "",
-            "Thu, 19 Jun 2025 12:00:00 GMT",
-            "2020-10-02",
-            "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==",
-        );
-        assert!(
-            result.is_ok(),
-            "Azure signing should succeed: {:?}",
-            result.err()
-        );
-        let auth = result.unwrap();
-        assert!(
-            auth.starts_with("SharedKey devstoreaccount1:"),
-            "Should use SharedKey scheme: {}",
-            auth
-        );
-    }
-}
-
-#[cfg(test)]
-mod checksum_tests {
-    use super::*;
-    use std::collections::HashMap;
-
-    #[test]
-    fn test_verify_checksum_correct() {
-        use sha2::{Digest, Sha256};
-        let temp_dir = std::env::temp_dir().join("voirs_checksum_test");
-        std::fs::create_dir_all(&temp_dir).ok();
-        let file_path = temp_dir.join("test_model.bin");
-        let test_data = b"Hello, VoiRS checksum test!";
-        std::fs::write(&file_path, test_data).expect("write test file");
-
-        let mut hasher = Sha256::new();
-        hasher.update(test_data);
-        let expected = hex::encode(hasher.finalize());
-
-        let config = CloudStorageConfig {
-            cache_dir: temp_dir.clone(),
-            ..CloudStorageConfig::default()
-        };
-        let manager = CloudStorageManager::new(config).expect("create manager");
-        manager.metadata_cache.write().insert(
-            "test_model.bin".to_string(),
-            ModelMetadata {
-                name: "test_model.bin".to_string(),
-                version: "1.0.0".to_string(),
-                size_bytes: test_data.len() as u64,
-                checksum: expected.clone(),
-                last_modified: chrono::Utc::now(),
-                model_type: "test".to_string(),
-                storage_path: file_path.to_string_lossy().to_string(),
-                tags: HashMap::new(),
-            },
-        );
-
-        let result = manager.verify_checksum(&file_path, "test_model.bin");
-        assert!(
-            result.is_ok(),
-            "Correct checksum should pass: {:?}",
-            result.err()
-        );
-        std::fs::remove_dir_all(&temp_dir).ok();
-    }
-
-    #[test]
-    fn test_verify_checksum_mismatch() {
-        let temp_dir = std::env::temp_dir().join("voirs_checksum_mismatch_test");
-        std::fs::create_dir_all(&temp_dir).ok();
-        let file_path = temp_dir.join("bad_model.bin");
-        std::fs::write(&file_path, b"tampered data").expect("write file");
-
-        let config = CloudStorageConfig {
-            cache_dir: temp_dir.clone(),
-            ..CloudStorageConfig::default()
-        };
-        let manager = CloudStorageManager::new(config).expect("create manager");
-        manager.metadata_cache.write().insert(
-            "bad_model.bin".to_string(),
-            ModelMetadata {
-                name: "bad_model.bin".to_string(),
-                version: "1.0.0".to_string(),
-                size_bytes: 13,
-                checksum: "0000000000000000000000000000000000000000000000000000000000000000"
-                    .to_string(),
-                last_modified: chrono::Utc::now(),
-                model_type: "test".to_string(),
-                storage_path: file_path.to_string_lossy().to_string(),
-                tags: HashMap::new(),
-            },
-        );
-
-        let result = manager.verify_checksum(&file_path, "bad_model.bin");
-        assert!(
-            matches!(result, Err(CloudStorageError::ChecksumMismatch { .. })),
-            "Mismatched checksum should return ChecksumMismatch error, got: {:?}",
-            result
-        );
-        std::fs::remove_dir_all(&temp_dir).ok();
-    }
-
-    #[tokio::test]
-    #[ignore = "Requires AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, TEST_BUCKET, TEST_AWS_REGION env vars"]
-    async fn test_s3_roundtrip() {
-        let access_key = std::env::var("AWS_ACCESS_KEY_ID").expect("AWS_ACCESS_KEY_ID must be set");
-        let secret_key =
-            std::env::var("AWS_SECRET_ACCESS_KEY").expect("AWS_SECRET_ACCESS_KEY must be set");
-        let bucket = std::env::var("TEST_BUCKET").expect("TEST_BUCKET must be set");
-        let region = std::env::var("TEST_AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string());
-
-        let temp_dir = std::env::temp_dir().join("voirs_s3_roundtrip");
-        std::fs::create_dir_all(&temp_dir).ok();
-        let test_model = temp_dir.join("s3_test_model.bin");
-        std::fs::write(&test_model, b"VoiRS S3 roundtrip test data").expect("write test model");
-
-        let config = CloudStorageConfig {
-            provider: CloudProvider::AwsS3,
-            bucket_name: bucket,
-            region: Some(region),
-            access_key_id: Some(access_key),
-            secret_access_key: Some(secret_key),
-            cache_dir: temp_dir.clone(),
-            ..CloudStorageConfig::default()
-        };
-        let manager = CloudStorageManager::new(config).expect("create manager");
-
-        let meta = ModelMetadata {
-            name: "s3_test_model.bin".to_string(),
-            version: "1.0.0".to_string(),
-            size_bytes: 28,
-            checksum: String::new(),
-            last_modified: chrono::Utc::now(),
-            model_type: "test".to_string(),
-            storage_path: "s3_test_model.bin".to_string(),
-            tags: HashMap::new(),
-        };
-
-        manager
-            .upload_model(&test_model, "s3_test_model.bin", meta)
-            .await
-            .expect("upload should succeed");
-
-        let models = manager.list_models().await.expect("list should succeed");
-        assert!(
-            models.iter().any(|m| m.name.contains("s3_test_model")),
-            "Uploaded model should appear in listing"
-        );
-
-        std::fs::remove_file(&test_model).ok();
-        let downloaded = manager
-            .download_model("s3_test_model.bin")
-            .await
-            .expect("download should succeed");
-        assert!(downloaded.exists(), "Downloaded file should exist");
-        let content = std::fs::read(&downloaded).expect("read downloaded file");
-        assert_eq!(content, b"VoiRS S3 roundtrip test data");
-
-        std::fs::remove_dir_all(&temp_dir).ok();
-    }
 }

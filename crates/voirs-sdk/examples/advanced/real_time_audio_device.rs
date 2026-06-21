@@ -95,9 +95,7 @@ async fn audio_device_discovery_demo() -> Result<()> {
 
     let mut device_list = Vec::new();
     for (i, device) in devices.enumerate() {
-        let name = device
-            .name()
-            .unwrap_or_else(|_| format!("Unknown Device {}", i));
+        let name = device.to_string();
 
         println!("  {}. {}", i + 1, name);
 
@@ -513,7 +511,7 @@ impl AudioDeviceManager {
         })?;
 
         let device_config = AudioDeviceConfig {
-            device_name: device.name().unwrap_or_else(|_| "Unknown".to_string()),
+            device_name: device.to_string(),
             sample_rate: config.sample_rate(),
             channels: config.channels(),
             buffer_size: 1024, // Default buffer size
@@ -556,7 +554,7 @@ impl AudioDeviceManager {
 
             let stream = device
                 .build_output_stream(
-                    &config,
+                    config,
                     move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                         if let Ok(mut queue) = audio_queue.lock() {
                             for sample in data.iter_mut() {
