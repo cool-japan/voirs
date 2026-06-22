@@ -795,7 +795,7 @@ pub mod utils {
     ///
     /// This variant has no access to the underlying waveform, so the
     /// `pitch_prominence` field is filled with a neutral, signal-free estimate
-    /// (see [`estimate_pitch_prominence_from_duration`]). When the audio samples
+    /// (see `estimate_pitch_prominence_from_duration`). When the audio samples
     /// are available, prefer [`calculate_stress_features_with_signal`], which
     /// derives a *real* prominence from the signal via
     /// [`calculate_pitch_prominence`].

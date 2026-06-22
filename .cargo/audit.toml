@@ -1,0 +1,37 @@
+# Cargo audit configuration for VoiRS
+# All entries below are transitive dependencies with no upstream fix available.
+# Each entry is documented with the responsible dependency chain.
+
+[advisories]
+ignore = [
+    # RUSTSEC-2023-0071: Marvin Attack timing side-channel in rsa 0.9.x
+    # Chain: voirs-feedback → sea-orm → sqlx-mysql → rsa
+    # No upstream fix available as of 2026-06-22
+    "RUSTSEC-2023-0071",
+
+    # RUSTSEC-2026-0104: Reachable panic in CRL parsing (rustls-webpki 0.102.x)
+    # Chain: rustls-rustcrypto 0.0.2-alpha → rustls-webpki 0.102.8
+    # Blocked on rustls-rustcrypto publishing a new release
+    "RUSTSEC-2026-0104",
+
+    # RUSTSEC-2026-0098: URI name constraints bypass (rustls-webpki 0.102.x)
+    # Chain: same as RUSTSEC-2026-0104
+    "RUSTSEC-2026-0098",
+
+    # RUSTSEC-2026-0099: Wildcard name constraint bypass (rustls-webpki 0.102.x)
+    # Chain: same as RUSTSEC-2026-0104
+    "RUSTSEC-2026-0099",
+
+    # RUSTSEC-2026-0049: CRL distribution point faulty matching (rustls-webpki 0.102.x)
+    # Chain: same as RUSTSEC-2026-0104
+    "RUSTSEC-2026-0049",
+
+    # RUSTSEC-2025-0044: Double-free in slice-ring-buffer 0.3.x
+    # Chain: minimp3 → slice-ring-buffer (only active under ffi-codecs feature, default-OFF)
+    "RUSTSEC-2025-0044",
+
+    # RUSTSEC-2020-0071: Potential segfault in time 0.1.x
+    # Chain: pulp-wasm-simd-flag → pulp → gemm-common → candle-core
+    # No upstream fix available
+    "RUSTSEC-2020-0071",
+]

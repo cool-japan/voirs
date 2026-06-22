@@ -674,7 +674,7 @@ impl SpectralEnhancer {
     /// bin is scaled by a zero-phase target magnitude curve, and the result is
     /// transformed back with the inverse real FFT.
     ///
-    /// The target magnitude curve (see [`Self::target_gain`]) is the product of
+    /// The target magnitude curve (see `target_gain`) is the product of
     /// two classic broadcast EQ shapes derived from the documented bands:
     /// * a **presence peaking bell** centred on the speech-clarity band
     ///   (3-5 kHz), reaching `self.presence_boost` dB at its centre, and

@@ -85,7 +85,7 @@ pub struct RealTimeFactorStats {
     pub rtf_violations: u64,
 
     /// Bounded ring buffer of the most recent RTF samples (capped at
-    /// [`MAX_RTF_SAMPLES`]).
+    /// `MAX_RTF_SAMPLES`).
     ///
     /// Retained so that the distributional statistics above can be computed
     /// exactly (true nearest-rank percentile) instead of approximated. Kept

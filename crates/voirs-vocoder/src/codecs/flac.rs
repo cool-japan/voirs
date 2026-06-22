@@ -1,7 +1,7 @@
 //! FLAC encoding implementation.
 //!
 //! When the `ffi-codecs` feature is enabled, FLAC encoding is performed by the
-//! COOLJAPAN [`oxiaudio-encode`] crate, a Pure-Rust FLAC encoder backed by
+//! COOLJAPAN `oxiaudio-encode` crate, a Pure-Rust FLAC encoder backed by
 //! `flacenc`. (The crate is named `ffi-codecs` for historical reasons — it
 //! groups the optional codecs alongside the genuinely C-FFI ones such as Opus
 //! and LAME — but FLAC encoding here is 100% Pure Rust.)

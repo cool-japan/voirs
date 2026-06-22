@@ -231,7 +231,7 @@ fn hann_window_audio(n: usize) -> Vec<f32> {
 ///
 /// Unlike a per-time-segment energy profile, this computes a genuine spectral
 /// envelope: the signal is Hann-windowed, transformed to the frequency domain
-/// with the real-input FFT ([`scirs2_fft::rfft`]), reduced to its magnitude
+/// with the real-input FFT ([`scirs2_fft::rfft()`]), reduced to its magnitude
 /// spectrum `|X[k]|`, smoothed with a moving-average (cepstral-style) lifter to
 /// strip the fine harmonic ripple, and finally resampled onto exactly `bins`
 /// output points spanning `[0, Nyquist]`.

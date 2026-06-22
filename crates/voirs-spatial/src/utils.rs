@@ -614,7 +614,7 @@ impl AudioQualityMetrics {
     /// `audio` is a single-channel (mono) signal. SNR, THD, dynamic range and
     /// spectral flatness are all derived directly from it. `stereo_imaging`
     /// cannot be measured from a mono signal — see
-    /// [`calculate_stereo_imaging`](Self::calculate_stereo_imaging) for the
+    /// `calculate_stereo_imaging` for the
     /// real proxy used and its limitation.
     pub fn analyze(audio: &Array1<f32>, sample_rate: u32) -> Self {
         let snr_db = Self::calculate_snr(audio);

@@ -16,9 +16,9 @@
 //! ## Module Organization
 //!
 //! - [`c_api`]: Core C API functions for synthesis, audio, and voice management
-//! - [`python`]: PyO3 bindings for Python integration (requires `python` feature)
-//! - [`nodejs`]: N-API bindings for Node.js (requires `nodejs` feature)
-//! - [`wasm`]: WebAssembly bindings (requires `wasm` feature)
+//! - `python`: PyO3 bindings for Python integration (requires `python` feature)
+//! - `nodejs`: N-API bindings for Node.js (requires `nodejs` feature)
+//! - `wasm`: WebAssembly bindings (requires `wasm` feature)
 //! - [`memory`]: Advanced memory management with custom allocators and zero-copy operations
 //! - [`threading`]: Thread pools, synchronization primitives, and callback management
 //! - [`error`]: Comprehensive error handling with i18n support
