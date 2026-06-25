@@ -53,8 +53,8 @@ rust-version = "1.89"
 [workspace.dependencies]
 # SciRS2 Ecosystem - Scientific computing abstractions
 # POLICY: All VoiRS crates MUST use scirs2-core abstractions (see SCIRS2_INTEGRATION_POLICY.md)
-scirs2-core = { version = "0.5.0", features = ["array", "random", "simd", "parallel"] }
-scirs2-fft = { version = "0.5.0", features = ["oxifft"] }
+scirs2-core = { version = "0.5.1", features = ["array", "random", "simd", "parallel"] }
+scirs2-fft = { version = "0.5.1", features = ["oxifft"] }
 
 # NumRS2 - NumPy-like numerical computing (for numpy .npz file support)
 numrs2 = "0.4.0"
