@@ -149,8 +149,16 @@ pub struct QueryStats {
 pub struct PreparedStatementInfo {
     /// Description
     pub statement_id: String,
-    /// Description
-    pub query_template: String,
+    /// Query template text.
+    ///
+    /// This is `&'static str` (rather than `String`) by design: it is only ever
+    /// populated from the `query_template` argument of
+    /// [`QueryOptimizer::execute_prepared_statement`], which itself requires a
+    /// `&'static str`. That constraint guarantees the SQL text can only ever be a
+    /// compile-time literal written by a developer in this codebase, never data
+    /// built at runtime from user/network input, which is what makes it safe to
+    /// pass straight into `sqlx::query` without an `AssertSqlSafe` escape hatch.
+    pub query_template: &'static str,
     /// Description
     pub parameter_count: usize,
     /// Description
@@ -450,9 +458,17 @@ impl QueryOptimizer {
         let cache = self.query_cache.read().await;
         if let Some(cached) = cache.get(key) {
             if !cached.is_expired() {
-                if let Ok((data, _)) =
-                    oxicode::serde::decode_from_slice(&cached.data, oxicode::config::standard())
-                {
+                // Cached payloads are serialized as JSON (see `cache_result` below)
+                // rather than with a bincode-style codec, because cached values
+                // include genuinely self-describing types such as
+                // `serde_json::Value` (e.g. in `warmup_cache_adaptive` and
+                // `preload_cache_intelligent`). Bincode-family formats cannot
+                // deserialize those: their `Deserializer::deserialize_any` is
+                // unimplemented, which `serde_json::Value`'s `Deserialize` impl
+                // requires. JSON supports self-describing deserialization for any
+                // `Deserialize` type, so it works uniformly for every `T` cached
+                // here.
+                if let Ok(data) = serde_json::from_slice(&cached.data) {
                     return Some(data);
                 }
             }
@@ -465,7 +481,7 @@ impl QueryOptimizer {
     where
         T: Serialize,
     {
-        if let Ok(serialized) = oxicode::serde::encode_to_vec(data, oxicode::config::standard()) {
+        if let Ok(serialized) = serde_json::to_vec(data) {
             let cached = CachedResult::new(
                 serialized,
                 Duration::from_secs(self.config.cache_ttl_seconds),
@@ -534,10 +550,16 @@ impl QueryOptimizer {
     }
 
     /// Optimized large result streaming query with cursor-based pagination
+    ///
+    /// `base_query` is required to be `&'static str`: this method appends its own
+    /// `LIMIT`/`OFFSET` pagination clause and, optionally, a fixed optimizer-hint
+    /// prefix, so the compiler must be able to guarantee that the query text itself
+    /// is a fixed literal written by a developer, never data assembled at runtime
+    /// from user/network input.
     pub async fn stream_large_results<T>(
         &self,
         pool: &Pool<Postgres>,
-        base_query: &str,
+        base_query: &'static str,
         page_size: Option<usize>,
     ) -> PersistenceResult<impl futures::Stream<Item = PersistenceResult<T>>>
     where
@@ -547,7 +569,10 @@ impl QueryOptimizer {
 
         let page_size = page_size.unwrap_or(1000).min(5000); // Cap at 5k for memory efficiency
 
-        // Add streaming optimization hints if enabled
+        // Add streaming optimization hints if enabled. Both operands here are
+        // compile-time literals (`base_query` is `&'static str`; the hint prefix is
+        // a string literal), so `optimized_query` never contains runtime/user data
+        // even though it is an owned `String`.
         let optimized_query = if self.config.enable_query_hints {
             format!("/*+ USE_HASH_JOIN CURSOR_SHARING=EXACT */ {base_query}")
         } else {
@@ -567,7 +592,16 @@ impl QueryOptimizer {
 
                     let paginated_query = format!("{query} LIMIT {page_size} OFFSET {offset}");
 
-                    match sqlx::query(&paginated_query).fetch_all(&pool).await {
+                    // SAFETY: `paginated_query` is built entirely from `query`
+                    // (always static/trusted text, see above) plus `page_size` and
+                    // `offset`, which are plain `usize` values whose `Display`
+                    // output can only ever be ASCII digits. No externally
+                    // controlled data can reach this string, so it cannot carry an
+                    // injection payload even though its type is `String`.
+                    match sqlx::query(sqlx::AssertSqlSafe(paginated_query))
+                        .fetch_all(&pool)
+                        .await
+                    {
                         Ok(rows) => {
                             let is_last_page = rows.len() < page_size;
                             let results: Vec<PersistenceResult<T>> = rows
@@ -602,16 +636,27 @@ impl QueryOptimizer {
     }
 
     /// Index usage optimization analyzer
+    ///
+    /// `query` is required to be `&'static str`: it is wrapped in an `EXPLAIN`
+    /// clause and executed as-is, so the compiler must be able to guarantee it is a
+    /// fixed literal written by a developer, never a string built at runtime from
+    /// user/network input. There is no way to bind an entire SQL statement as a
+    /// parameter, so this compile-time literal requirement is the only structural
+    /// mitigation available for a "run EXPLAIN on this query" style API.
     pub async fn analyze_query_performance(
         &self,
         pool: &Pool<Postgres>,
-        query: &str,
+        query: &'static str,
     ) -> PersistenceResult<QueryPerformanceAnalysis> {
         let start_time = Instant::now();
 
-        // Get query execution plan
+        // Get query execution plan.
+        // SAFETY: `query` is `&'static str` (compile-time literal only, enforced by
+        // the function signature above) and the `EXPLAIN (...)` prefix is a fixed
+        // literal, so `explain_query` never contains runtime/user-controlled data
+        // even though its type is `String`.
         let explain_query = format!("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {query}");
-        let row = sqlx::query(&explain_query)
+        let row = sqlx::query(sqlx::AssertSqlSafe(explain_query))
             .fetch_one(pool)
             .await
             .map_err(|e| PersistenceError::ConnectionError {
@@ -794,10 +839,18 @@ impl QueryOptimizer {
     }
 
     /// Enhanced prepared statement execution with caching
-    pub async fn execute_prepared_statement<'q>(
+    ///
+    /// `query_template` is required to be `&'static str` rather than `&str`: this
+    /// method executes the text directly via `sqlx::query`, so the compiler must be
+    /// able to guarantee the SQL text is a fixed literal written by a developer and
+    /// never a string built at runtime from user/network input. Callers that need
+    /// to vary the query at runtime should bind parameters (`.bind(..)`) against a
+    /// literal template, or use `sqlx::QueryBuilder`, rather than passing a
+    /// dynamically constructed string here.
+    pub async fn execute_prepared_statement(
         &self,
         pool: &Pool<Postgres>,
-        query_template: &str,
+        query_template: &'static str,
         // Simplified parameter handling - in practice would use proper query builder
     ) -> PersistenceResult<sqlx::postgres::PgQueryResult> {
         let start_time = Instant::now();
@@ -811,7 +864,7 @@ impl QueryOptimizer {
                 .or_insert_with(|| {
                     PreparedStatementInfo {
                         statement_id: statement_signature.clone(),
-                        query_template: query_template.to_string(),
+                        query_template,
                         parameter_count: 0, // Simplified for now
                         last_used: Instant::now(),
                         usage_count: 0,
@@ -823,7 +876,9 @@ impl QueryOptimizer {
             info.usage_count += 1;
         }
 
-        // Execute the prepared statement (simplified version)
+        // Execute the prepared statement (simplified version). `query_template` is
+        // `&'static str`, so it satisfies `sqlx::SqlSafeStr` directly - no dynamic-
+        // SQL audit escape hatch is needed here.
         let query = sqlx::query(query_template);
 
         let result = query
@@ -1162,7 +1217,7 @@ impl QueryOptimizer {
                 .to_lowercase()
                 .starts_with("select")
             {
-                match sqlx::query(&statement.query_template)
+                match sqlx::query(statement.query_template)
                     .fetch_optional(pool)
                     .await
                 {
@@ -1360,7 +1415,7 @@ impl QueryOptimizer {
             // Execute preload query with timeout
             let query_result = tokio::time::timeout(
                 Duration::from_millis(1000), // 1 second timeout for preloading
-                sqlx::query(&predicted_query.query)
+                sqlx::query(predicted_query.query)
                     .bind(&user_context.user_id)
                     .fetch_optional(pool),
             )
@@ -1395,13 +1450,13 @@ impl QueryOptimizer {
 
         // Common user data queries
         predictions.push(PredictedQuery {
-            query: String::from("SELECT progress_data FROM user_progress WHERE user_id = $1"),
+            query: "SELECT progress_data FROM user_progress WHERE user_id = $1",
             query_hash: String::from("user_progress"),
             probability: 0.9,
         });
 
         predictions.push(PredictedQuery {
-            query: String::from("SELECT preferences_data FROM user_preferences WHERE user_id = $1"),
+            query: "SELECT preferences_data FROM user_preferences WHERE user_id = $1",
             query_hash: String::from("user_preferences"),
             probability: 0.8,
         });
@@ -1411,7 +1466,7 @@ impl QueryOptimizer {
         if (9..=17).contains(&current_hour) {
             // Business hours - likely to access recent feedback
             predictions.push(PredictedQuery {
-                query: String::from("SELECT feedback_data FROM feedback_history WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10"),
+                query: "SELECT feedback_data FROM feedback_history WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10",
                 query_hash: String::from("recent_feedback"),
                 probability: 0.7,
             });
@@ -1616,8 +1671,14 @@ pub struct UserCacheContext {
 /// Predicted query for cache preloading
 #[derive(Debug, Clone)]
 pub struct PredictedQuery {
-    /// SQL query
-    pub query: String,
+    /// SQL query text.
+    ///
+    /// `&'static str` rather than `String`: every [`PredictedQuery`] is produced by
+    /// [`QueryOptimizer::predict_likely_queries`], which only ever builds these
+    /// from hardcoded literals. Keeping the field `&'static str` lets the compiler
+    /// enforce that guarantee permanently and lets the query text flow straight
+    /// into `sqlx::query` without needing an `AssertSqlSafe` escape hatch.
+    pub query: &'static str,
     /// Query hash/identifier
     pub query_hash: String,
     /// Prediction probability (0.0-1.0)
@@ -1763,7 +1824,7 @@ mod tests {
                 String::from("old_statement"),
                 PreparedStatementInfo {
                     statement_id: String::from("old_statement"),
-                    query_template: String::from("SELECT * FROM old_table"),
+                    query_template: "SELECT * FROM old_table",
                     parameter_count: 0,
                     last_used: Instant::now() - Duration::from_secs(3600), // 1 hour ago
                     usage_count: 1,
@@ -1775,7 +1836,7 @@ mod tests {
                 String::from("recent_statement"),
                 PreparedStatementInfo {
                     statement_id: String::from("recent_statement"),
-                    query_template: String::from("SELECT * FROM recent_table"),
+                    query_template: "SELECT * FROM recent_table",
                     parameter_count: 0,
                     last_used: Instant::now(),
                     usage_count: 1,

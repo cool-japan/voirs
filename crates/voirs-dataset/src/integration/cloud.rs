@@ -843,7 +843,7 @@ impl CloudStorageImpl {
 
         // Write operation metadata
         std::fs::write(
-            format!("/tmp/s3_operation_{operation_id}.json"),
+            std::env::temp_dir().join(format!("s3_operation_{operation_id}.json")),
             serde_json::to_string_pretty(&metadata)?,
         )?;
 
@@ -898,12 +898,12 @@ impl CloudStorageImpl {
         );
 
         std::fs::write(
-            format!(
-                "/tmp/{}_upload_{}_{}.log",
+            std::env::temp_dir().join(format!(
+                "{}_upload_{}_{}.log",
                 provider.to_lowercase().replace(' ', "_"),
                 dataset_name,
                 operation_id
-            ),
+            )),
             log_content,
         )?;
 
@@ -1154,7 +1154,7 @@ impl CloudStorageImpl {
 
         // Write operation metadata
         std::fs::write(
-            format!("/tmp/gcs_operation_{operation_id}.json"),
+            std::env::temp_dir().join(format!("gcs_operation_{operation_id}.json")),
             serde_json::to_string_pretty(&metadata)?,
         )?;
 
@@ -1239,7 +1239,7 @@ impl CloudStorageImpl {
 
         // Write detailed operation log
         std::fs::write(
-            format!("/tmp/azure_blob_upload_{operation_id}.json"),
+            std::env::temp_dir().join(format!("azure_blob_upload_{operation_id}.json")),
             serde_json::to_string_pretty(&upload_result)?,
         )?;
 

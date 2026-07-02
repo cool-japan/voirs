@@ -111,6 +111,12 @@ oxionnx = { workspace = true, optional = true }
 # Cloud storage encryption
 aes-gcm.workspace = true
 
+# Real asymmetric signature verification for the self-updater
+# (crates::packaging::update / packaging::signature)
+ed25519-dalek.workspace = true
+rsa.workspace = true
+p256.workspace = true
+
 # HTTP server
 axum.workspace = true
 tower.workspace = true
@@ -125,6 +131,9 @@ wasmtime.workspace = true
 assert_cmd = "2.2"
 predicates = "3.1"
 tempfile = "3.27"
+# Real OS-backed CSPRNG, used only to generate ephemeral test keypairs for
+# packaging::signature's unit tests (see doc-comment there for why 0.6.4).
+rand_core = { workspace = true, features = ["getrandom"] }
 
 [features]
 default = ["emotion", "cloning", "conversion", "singing", "spatial", "cloud"]

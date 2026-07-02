@@ -385,25 +385,26 @@ impl PersistenceManager for PostgresPersistenceManager {
         limit: Option<usize>,
         offset: Option<usize>,
     ) -> PersistenceResult<Vec<FeedbackResponse>> {
-        let mut query = String::from(
-            "SELECT feedback_data FROM feedback_history WHERE user_id = $1 ORDER BY created_at DESC",
-        );
+        // LIMIT/OFFSET are passed as bind parameters instead of being spliced into
+        // the SQL text. An absent limit is represented by the sentinel `i64::MAX`
+        // (i.e. "no upper bound") and an absent offset by `0`, so the query text
+        // itself stays a fixed `&'static str` literal regardless of what the
+        // caller passed in.
+        let limit_value = limit.map_or(i64::MAX, |limit| limit as i64);
+        let offset_value = offset.map_or(0_i64, |offset| offset as i64);
 
-        if let Some(limit) = limit {
-            query.push_str(&format!(" LIMIT {limit}"));
-        }
-
-        if let Some(offset) = offset {
-            query.push_str(&format!(" OFFSET {offset}"));
-        }
-
-        let rows = sqlx::query(&query)
-            .bind(user_id)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| PersistenceError::ConnectionError {
-                message: format!("Failed to load feedback history: {e}"),
-            })?;
+        let rows = sqlx::query(
+            "SELECT feedback_data FROM feedback_history WHERE user_id = $1 \
+             ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+        )
+        .bind(user_id)
+        .bind(limit_value)
+        .bind(offset_value)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| PersistenceError::ConnectionError {
+            message: format!("Failed to load feedback history: {e}"),
+        })?;
 
         let mut feedback_history = Vec::new();
         for row in rows {
@@ -847,6 +848,12 @@ impl PostgresPersistenceManager {
     }
 
     /// Optimized user feedback history with pagination
+    ///
+    /// Both the `min_score` filter and the `LIMIT`/`OFFSET` pagination are applied
+    /// entirely through bind parameters. The optional filter is handled by
+    /// selecting between two fixed `&'static str` query literals (with vs. without
+    /// the score predicate) rather than concatenating a conditional clause into the
+    /// SQL text, so no dynamic SQL string is ever constructed here.
     pub async fn load_user_feedback_paginated(
         &self,
         user_id: &str,
@@ -854,45 +861,61 @@ impl PostgresPersistenceManager {
         limit: i64,
         min_score: Option<f32>,
     ) -> PersistenceResult<(Vec<FeedbackResponse>, i64)> {
-        // Build dynamic WHERE clause for filtering
-        let mut where_clause = String::from("WHERE user_id = $1");
-        let mut param_count = 1;
-
-        if min_score.is_some() {
-            param_count += 1;
-            where_clause += &format!(" AND (feedback_data->>'score')::numeric >= ${param_count}");
-        }
-
         // Count query for pagination
-        let count_query = format!("SELECT COUNT(*) FROM feedback_history {where_clause}");
-        let mut count_query_builder = sqlx::query(&count_query).bind(user_id);
-        if let Some(score) = min_score {
-            count_query_builder = count_query_builder.bind(score);
-        }
-
-        let total_count: i64 = count_query_builder
+        let total_count: i64 = if let Some(score) = min_score {
+            sqlx::query(
+                "SELECT COUNT(*) FROM feedback_history \
+                 WHERE user_id = $1 AND (feedback_data->>'score')::numeric >= $2",
+            )
+            .bind(user_id)
+            .bind(score)
             .fetch_one(&self.pool)
             .await
             .map_err(|e| PersistenceError::ConnectionError {
                 message: format!("Failed to count feedback history: {e}"),
             })?
-            .get(0);
+            .get(0)
+        } else {
+            sqlx::query("SELECT COUNT(*) FROM feedback_history WHERE user_id = $1")
+                .bind(user_id)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| PersistenceError::ConnectionError {
+                    message: format!("Failed to count feedback history: {e}"),
+                })?
+                .get(0)
+        };
 
         // Data query with pagination and ordering
-        let data_query = format!(
-            "SELECT feedback_data FROM feedback_history {where_clause} ORDER BY created_at DESC LIMIT {limit} OFFSET {offset}"
-        );
-        let mut data_query_builder = sqlx::query(&data_query).bind(user_id);
-        if let Some(score) = min_score {
-            data_query_builder = data_query_builder.bind(score);
-        }
-
-        let rows = data_query_builder
+        let rows = if let Some(score) = min_score {
+            sqlx::query(
+                "SELECT feedback_data FROM feedback_history \
+                 WHERE user_id = $1 AND (feedback_data->>'score')::numeric >= $2 \
+                 ORDER BY created_at DESC LIMIT $3 OFFSET $4",
+            )
+            .bind(user_id)
+            .bind(score)
+            .bind(limit)
+            .bind(offset)
             .fetch_all(&self.pool)
             .await
             .map_err(|e| PersistenceError::ConnectionError {
                 message: format!("Failed to load feedback history: {e}"),
-            })?;
+            })?
+        } else {
+            sqlx::query(
+                "SELECT feedback_data FROM feedback_history \
+                 WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+            )
+            .bind(user_id)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| PersistenceError::ConnectionError {
+                message: format!("Failed to load feedback history: {e}"),
+            })?
+        };
 
         let mut feedback_history = Vec::new();
         for row in rows {
@@ -905,26 +928,32 @@ impl PostgresPersistenceManager {
     }
 
     /// Optimized analytics query for user skill progression
+    ///
+    /// `days_back` used to be spliced into the SQL text with `str::replace`. It is
+    /// now passed as a genuine bind parameter via Postgres's `make_interval()`
+    /// function, which accepts an integer day count directly, so the query text is
+    /// a fixed `&'static str` literal with no string interpolation at all.
     pub async fn get_user_skill_analytics(
         &self,
         user_id: &str,
         days_back: i32,
     ) -> PersistenceResult<SkillProgressionAnalytics> {
-        let query = r"
+        let rows = sqlx::query(
+            r"
             WITH skill_progression AS (
-                SELECT 
+                SELECT
                     DATE_TRUNC('day', created_at) as day,
                     AVG((feedback_data->>'score')::numeric) as avg_score,
                     COUNT(*) as session_count,
                     MIN((feedback_data->>'score')::numeric) as min_score,
                     MAX((feedback_data->>'score')::numeric) as max_score
-                FROM feedback_history 
-                WHERE user_id = $1 
-                    AND created_at >= NOW() - INTERVAL '%d days'
+                FROM feedback_history
+                WHERE user_id = $1
+                    AND created_at >= NOW() - make_interval(days => $2)
                 GROUP BY DATE_TRUNC('day', created_at)
                 ORDER BY day DESC
             )
-            SELECT 
+            SELECT
                 day,
                 avg_score,
                 session_count,
@@ -932,16 +961,15 @@ impl PostgresPersistenceManager {
                 max_score,
                 LAG(avg_score) OVER (ORDER BY day) as prev_avg_score
             FROM skill_progression
-        ";
-
-        let formatted_query = query.replace("%d", &days_back.to_string());
-        let rows = sqlx::query(&formatted_query)
-            .bind(user_id)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| PersistenceError::ConnectionError {
-                message: format!("Failed to load skill analytics: {e}"),
-            })?;
+            ",
+        )
+        .bind(user_id)
+        .bind(days_back)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| PersistenceError::ConnectionError {
+            message: format!("Failed to load skill analytics: {e}"),
+        })?;
 
         let mut daily_stats = Vec::new();
         for row in rows {
@@ -1043,8 +1071,13 @@ impl PostgresPersistenceManager {
     pub async fn optimize_database(&self) -> PersistenceResult<DatabaseOptimizationResult> {
         let start_time = std::time::Instant::now();
 
-        // Analyze table statistics for query planner
-        let tables = vec![
+        // Analyze table statistics for query planner.
+        //
+        // Table/relation names can never be bind parameters in SQL (only values
+        // can be bound; identifiers cannot), so `ANALYZE <table>` cannot be made
+        // static by parameterization the way a `WHERE` value could be. Instead we
+        // constrain `table` to come only from this fixed, hardcoded allowlist.
+        const TABLES: [&str; 5] = [
             "sessions",
             "user_progress",
             "user_preferences",
@@ -1052,8 +1085,12 @@ impl PostgresPersistenceManager {
             "metadata",
         ];
 
-        for table in &tables {
-            sqlx::query(&format!("ANALYZE {table}"))
+        for table in TABLES {
+            // SAFETY: `table` is drawn exclusively from the `TABLES` allowlist
+            // above, a fixed, hardcoded compile-time literal list defined in this
+            // function; it never carries user/network-supplied data. `format!`
+            // only ever substitutes one of those five literals here.
+            sqlx::query(sqlx::AssertSqlSafe(format!("ANALYZE {table}")))
                 .execute(&self.pool)
                 .await
                 .map_err(|e| PersistenceError::ConnectionError {
@@ -1099,7 +1136,7 @@ impl PostgresPersistenceManager {
         Ok(DatabaseOptimizationResult {
             optimization_duration,
             table_stats,
-            tables_analyzed: tables.len(),
+            tables_analyzed: TABLES.len(),
             recommendations,
         })
     }

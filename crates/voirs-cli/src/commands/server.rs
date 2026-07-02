@@ -1285,12 +1285,14 @@ fn check_auth_health(state: &AppState) -> (String, String) {
 
 /// Check filesystem health
 fn check_filesystem_health() -> (String, String) {
-    // Check if we can write to temp directory
-    let temp_file = "/tmp/voirs_health_check";
-    match std::fs::write(temp_file, "health check") {
+    // Check if we can write to the platform's temp directory
+    // (std::env::temp_dir() resolves correctly on both Unix and Windows,
+    // unlike a hardcoded "/tmp/..." path which does not exist on Windows).
+    let temp_file = std::env::temp_dir().join("voirs_health_check");
+    match std::fs::write(&temp_file, "health check") {
         Ok(_) => {
             // Clean up the test file
-            let _ = std::fs::remove_file(temp_file);
+            let _ = std::fs::remove_file(&temp_file);
             ("healthy".to_string(), "Filesystem is writable".to_string())
         }
         Err(e) => ("unhealthy".to_string(), format!("Filesystem error: {}", e)),

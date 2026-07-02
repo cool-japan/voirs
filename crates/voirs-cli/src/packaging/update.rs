@@ -1,3 +1,4 @@
+use super::signature;
 use crate::error::VoirsCLIError;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -162,13 +163,14 @@ impl UpdateManager {
             return Ok(false);
         }
 
-        // Verify signature if enabled
-        if self.config.verify_signatures {
-            if let Some(signature) = &version_info.signature {
-                if !self.verify_signature(&temp_binary, signature).await? {
-                    error!("Binary signature verification failed");
-                    return Ok(false);
-                }
+        // Verify signature if enabled. `require_signature_for_update` is the
+        // fail-closed gate: it returns `Err` when verification is required
+        // but no signature was supplied, instead of silently skipping
+        // straight through to `fs::rename` over the live binary.
+        if let Some(signature) = self.require_signature_for_update(version_info)? {
+            if !self.verify_signature(&temp_binary, signature).await? {
+                error!("Binary signature verification failed");
+                return Ok(false);
             }
         }
 
@@ -266,6 +268,20 @@ impl UpdateManager {
 
         let download_url = self.get_download_url_for_platform(&release_info)?;
 
+        // KNOWN GAP (out of scope for the signature-verification fix in
+        // `packaging::signature`): this does not yet fetch the real
+        // checksum/signature files published alongside a GitHub release
+        // asset. Wiring that up requires deciding on a concrete naming
+        // convention for the checksum/signature assets and is left for a
+        // follow-up change rather than being fabricated here. A direct,
+        // intentional consequence: with `UpdateConfig::verify_signatures =
+        // true` (the default), `UpdateManager::perform_update` will now
+        // correctly refuse (fail closed) to apply any update fetched via
+        // this method, because `signature` below is always `None`. That is
+        // safe-by-default behavior, not a bug — self-update is not
+        // end-to-end functional until both this fetch and a real embedded
+        // public key (see `packaging::signature::embedded_public_key`) are
+        // provisioned.
         Ok(VersionInfo {
             version,
             release_date,
@@ -386,6 +402,50 @@ impl UpdateManager {
         Ok(matches)
     }
 
+    /// Decide what, if anything, must be checked against `version_info`'s
+    /// signature before an update is allowed to proceed.
+    ///
+    /// - Returns `Ok(None)` when `UpdateConfig::verify_signatures` is
+    ///   disabled (nothing to check).
+    /// - Returns `Ok(Some(signature))` when verification is enabled and a
+    ///   signature was supplied — the caller must then actually verify it.
+    /// - Returns `Err` when verification is enabled but no signature was
+    ///   supplied at all.
+    ///
+    /// SECURITY: that last case is the fail-closed fix for a real bypass —
+    /// the original code only ever invoked signature verification inside an
+    /// `if let Some(signature) = &version_info.signature`, so a
+    /// server-controlled `VersionInfo` with `signature: None` (which is
+    /// exactly what `fetch_latest_version` produces today — see the KNOWN
+    /// GAP comment there) silently skipped verification entirely and fell
+    /// through to `fs::rename` over the live binary. Extracted into its own
+    /// method so this decision can be unit-tested directly without needing
+    /// to drive the network- and filesystem-heavy rest of the update
+    /// pipeline.
+    fn require_signature_for_update<'a>(
+        &self,
+        version_info: &'a VersionInfo,
+    ) -> Result<Option<&'a str>> {
+        if !self.config.verify_signatures {
+            return Ok(None);
+        }
+
+        match &version_info.signature {
+            Some(signature) => Ok(Some(signature.as_str())),
+            None => {
+                error!(
+                    "verify_signatures is enabled but no signature was provided for this \
+                     update; refusing to apply it"
+                );
+                Err(anyhow::anyhow!(
+                    "update rejected: signature verification is required \
+                     (UpdateConfig::verify_signatures = true) but VersionInfo contained no \
+                     signature"
+                ))
+            }
+        }
+    }
+
     async fn verify_signature(&self, binary_path: &PathBuf, signature: &str) -> Result<bool> {
         info!("Verifying signature for binary: {:?}", binary_path);
 
@@ -444,10 +504,18 @@ impl UpdateManager {
         Ok(signature_bytes)
     }
 
-    /// Get the public key for signature verification
+    /// Get the public key for signature verification.
+    ///
+    /// Tries, in order: the `VOIRS_PUBLIC_KEY` environment variable, the
+    /// configured `public_key_path`, and finally a compiled-in embedded key
+    /// (see [`signature::embedded_public_key`]).
+    ///
+    /// SECURITY: if none of these sources yields a key, this returns `Err`
+    /// rather than falling back to any default. A missing key must never be
+    /// treated as "verification passed" — see the module-level doc comment
+    /// on `packaging::signature` for the full rationale and for what a
+    /// maintainer needs to do to provision a real key.
     fn get_verification_public_key(&self) -> Result<Vec<u8>> {
-        // Try to get public key from multiple sources
-
         // 1. Check environment variable
         if let Ok(key_env) = std::env::var("VOIRS_PUBLIC_KEY") {
             return self.parse_public_key(&key_env);
@@ -461,9 +529,20 @@ impl UpdateManager {
             }
         }
 
-        // 3. Use embedded public key (hardcoded for security)
-        let embedded_key = self.get_embedded_public_key();
-        Ok(embedded_key)
+        // 3. Use embedded public key, if one has been provisioned.
+        if let Some(embedded_key) = signature::embedded_public_key(&self.config.signature_algorithm)
+        {
+            return Ok(embedded_key.to_vec());
+        }
+
+        // 4. Fail closed: no real key configured anywhere.
+        Err(anyhow::anyhow!(
+            "no update-signing public key configured for algorithm '{}': set the \
+             VOIRS_PUBLIC_KEY environment variable, configure UpdateConfig::public_key_path, \
+             or embed a real key in packaging::signature::embedded_public_key. Refusing to \
+             treat an unverifiable update as trusted.",
+            self.config.signature_algorithm
+        ))
     }
 
     /// Parse public key from string (supports PEM and raw hex)
@@ -494,127 +573,46 @@ impl UpdateManager {
         }
     }
 
-    /// Get embedded public key (hardcoded for security)
-    fn get_embedded_public_key(&self) -> Vec<u8> {
-        // In a real implementation, this would be the actual public key
-        // For now, we'll use a placeholder key
-        match self.config.signature_algorithm.as_str() {
-            "ed25519" => {
-                // Ed25519 public key (32 bytes)
-                vec![
-                    0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD,
-                    0xEE, 0xFF, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA,
-                    0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00,
-                ]
-            }
-            "rsa" => {
-                // RSA public key (DER encoded, simplified)
-                vec![
-                    0x30, 0x82, 0x01, 0x22, 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7,
-                    0x0d, 0x01, 0x01,
-                    // ... RSA public key continues (truncated for brevity)
-                ]
-            }
-            "ecdsa" => {
-                // ECDSA public key (33 bytes compressed)
-                vec![
-                    0x02, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC,
-                    0xDD, 0xEE, 0xFF, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99,
-                    0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00,
-                ]
-            }
-            _ => vec![],
-        }
-    }
-
-    /// Verify Ed25519 signature
+    /// Verify a real Ed25519 signature.
+    ///
+    /// Delegates to [`signature::verify_ed25519`], which performs genuine
+    /// asymmetric cryptographic verification via `ed25519-dalek`. See that
+    /// module's doc comment for the message convention (the signature
+    /// covers the raw update-package bytes, not a pre-hashed digest).
     fn verify_ed25519_signature(
         &self,
         data: &[u8],
-        signature: &[u8],
+        signature_bytes: &[u8],
         public_key: &[u8],
     ) -> Result<bool> {
-        if signature.len() != 64 {
-            return Err(anyhow::anyhow!("Invalid Ed25519 signature length"));
-        }
-
-        if public_key.len() != 32 {
-            return Err(anyhow::anyhow!("Invalid Ed25519 public key length"));
-        }
-
-        // Calculate SHA-256 hash of the data
-        let hash = sha2::Sha256::digest(data);
-
-        // Simulate Ed25519 signature verification
-        // In a real implementation, this would use the `ed25519-dalek` crate
-        let is_valid = self.simulate_signature_verification(&hash, signature, public_key);
-
-        Ok(is_valid)
+        signature::verify_ed25519(data, signature_bytes, public_key)
     }
 
-    /// Verify RSA signature
+    /// Verify a real RSASSA-PKCS1-v1_5 (SHA-256) signature.
+    ///
+    /// Delegates to [`signature::verify_rsa_pkcs1v15_sha256`], which
+    /// performs genuine asymmetric cryptographic verification via the `rsa`
+    /// crate.
     fn verify_rsa_signature(
         &self,
         data: &[u8],
-        signature: &[u8],
+        signature_bytes: &[u8],
         public_key: &[u8],
     ) -> Result<bool> {
-        // Calculate SHA-256 hash of the data
-        let hash = sha2::Sha256::digest(data);
-
-        // Simulate RSA signature verification
-        // In a real implementation, this would use the `rsa` crate
-        let is_valid = self.simulate_signature_verification(&hash, signature, public_key);
-
-        Ok(is_valid)
+        signature::verify_rsa_pkcs1v15_sha256(data, signature_bytes, public_key)
     }
 
-    /// Verify ECDSA signature
+    /// Verify a real ECDSA P-256 (SHA-256) signature.
+    ///
+    /// Delegates to [`signature::verify_ecdsa_p256_sha256`], which performs
+    /// genuine asymmetric cryptographic verification via the `p256` crate.
     fn verify_ecdsa_signature(
         &self,
         data: &[u8],
-        signature: &[u8],
+        signature_bytes: &[u8],
         public_key: &[u8],
     ) -> Result<bool> {
-        // Calculate SHA-256 hash of the data
-        let hash = sha2::Sha256::digest(data);
-
-        // Simulate ECDSA signature verification
-        // In a real implementation, this would use the `p256` or `secp256k1` crate
-        let is_valid = self.simulate_signature_verification(&hash, signature, public_key);
-
-        Ok(is_valid)
-    }
-
-    /// Simulate signature verification (for demonstration purposes)
-    fn simulate_signature_verification(
-        &self,
-        hash: &[u8],
-        signature: &[u8],
-        public_key: &[u8],
-    ) -> bool {
-        // This is a simplified simulation for demonstration
-        // In a real implementation, this would use proper cryptographic verification
-
-        // Check basic length requirements
-        if signature.is_empty() || public_key.is_empty() || hash.is_empty() {
-            return false;
-        }
-
-        // Simulate verification by checking if signature matches a pattern
-        // This is NOT secure and is only for demonstration
-        let mut verification_hash = Vec::new();
-        verification_hash.extend_from_slice(hash);
-        verification_hash.extend_from_slice(public_key);
-
-        let computed_hash = sha2::Sha256::digest(&verification_hash);
-
-        // Check if first 16 bytes of signature match first 16 bytes of computed hash
-        if signature.len() >= 16 && computed_hash.len() >= 16 {
-            signature[0..16] == computed_hash[0..16]
-        } else {
-            false
-        }
+        signature::verify_ecdsa_p256_sha256(data, signature_bytes, public_key)
     }
 
     fn get_current_binary_path(&self) -> Result<PathBuf> {
@@ -689,5 +687,190 @@ mod tests {
         let serialized = serde_json::to_string(&channel).unwrap();
         let deserialized: UpdateChannel = serde_json::from_str(&serialized).unwrap();
         assert!(matches!(deserialized, UpdateChannel::Stable));
+    }
+
+    /// Builds an `UpdateManager` directly (bypassing `UpdateManager::new`'s
+    /// state-file I/O), mirroring the existing `test_version_comparison`
+    /// pattern above.
+    fn test_manager(config: UpdateConfig) -> UpdateManager {
+        voirs_acoustic::hub::ensure_crypto_provider();
+        UpdateManager {
+            config,
+            state: UpdateState::default(),
+            client: Client::new(),
+            state_file: PathBuf::from("test.json"),
+        }
+    }
+
+    #[test]
+    fn test_get_verification_public_key_fails_closed_with_no_key_source() {
+        // Guard against leftover state from another test in this same
+        // process (nextest runs each test in its own process by default,
+        // but this keeps the test correct under `cargo test` too).
+        std::env::remove_var("VOIRS_PUBLIC_KEY");
+
+        let manager = test_manager(UpdateConfig::default());
+
+        let result = manager.get_verification_public_key();
+        assert!(
+            result.is_err(),
+            "with no VOIRS_PUBLIC_KEY env var, no public_key_path, and no embedded key, \
+             the lookup must fail closed instead of returning a fabricated default key"
+        );
+    }
+
+    #[test]
+    fn test_get_verification_public_key_uses_env_var_when_present() {
+        std::env::remove_var("VOIRS_PUBLIC_KEY");
+        std::env::set_var("VOIRS_PUBLIC_KEY", "aabbccdd");
+
+        let manager = test_manager(UpdateConfig::default());
+        let key = manager
+            .get_verification_public_key()
+            .expect("a hex-encoded VOIRS_PUBLIC_KEY must be usable as a key source");
+        assert_eq!(key, vec![0xAA, 0xBB, 0xCC, 0xDD]);
+
+        std::env::remove_var("VOIRS_PUBLIC_KEY");
+    }
+
+    #[tokio::test]
+    async fn test_verify_signature_end_to_end_accepts_genuine_ed25519_signature() {
+        use ed25519_dalek::{Signer, SigningKey};
+        use rand_core::{OsRng, RngCore};
+
+        std::env::remove_var("VOIRS_PUBLIC_KEY");
+
+        let mut seed = [0_u8; 32];
+        OsRng.fill_bytes(&mut seed);
+        let signing_key = SigningKey::from_bytes(&seed);
+        let verifying_key = signing_key.verifying_key();
+
+        // Stand-in for a downloaded update package.
+        let temp_dir = TempDir::new().expect("failed to create temp dir for test");
+        let binary_path = temp_dir.path().join("fake-update-binary");
+        let binary_content = b"pretend-this-is-a-real-voirs-cli-binary".to_vec();
+        fs::write(&binary_path, &binary_content).expect("failed to write fake binary");
+
+        let signature_hex = hex::encode(signing_key.sign(&binary_content).to_bytes());
+        std::env::set_var("VOIRS_PUBLIC_KEY", hex::encode(verifying_key.as_bytes()));
+
+        let manager = test_manager(UpdateConfig::default()); // signature_algorithm = "ed25519"
+
+        let is_valid = manager
+            .verify_signature(&binary_path, &signature_hex)
+            .await
+            .expect("verification with a well-formed real key/signature must not error");
+        assert!(
+            is_valid,
+            "a genuine end-to-end Ed25519 signature must verify through UpdateManager::verify_signature"
+        );
+
+        std::env::remove_var("VOIRS_PUBLIC_KEY");
+    }
+
+    #[tokio::test]
+    async fn test_verify_signature_end_to_end_rejects_tampered_signature() {
+        use ed25519_dalek::{Signer, SigningKey};
+        use rand_core::{OsRng, RngCore};
+
+        std::env::remove_var("VOIRS_PUBLIC_KEY");
+
+        let mut seed = [0_u8; 32];
+        OsRng.fill_bytes(&mut seed);
+        let signing_key = SigningKey::from_bytes(&seed);
+        let verifying_key = signing_key.verifying_key();
+
+        let temp_dir = TempDir::new().expect("failed to create temp dir for test");
+        let binary_path = temp_dir.path().join("fake-update-binary");
+        let binary_content = b"pretend-this-is-a-real-voirs-cli-binary".to_vec();
+        fs::write(&binary_path, &binary_content).expect("failed to write fake binary");
+
+        let mut forged_signature_bytes = signing_key.sign(&binary_content).to_bytes().to_vec();
+        let last = forged_signature_bytes.len() - 1;
+        forged_signature_bytes[last] ^= 0xFF;
+        let forged_signature_hex = hex::encode(forged_signature_bytes);
+
+        std::env::set_var("VOIRS_PUBLIC_KEY", hex::encode(verifying_key.as_bytes()));
+
+        let manager = test_manager(UpdateConfig::default());
+
+        let is_valid = manager
+            .verify_signature(&binary_path, &forged_signature_hex)
+            .await
+            .expect("verification with a well-formed but wrong signature must not error");
+        assert!(
+            !is_valid,
+            "a tampered signature must be rejected end-to-end through UpdateManager::verify_signature"
+        );
+
+        std::env::remove_var("VOIRS_PUBLIC_KEY");
+    }
+
+    fn version_info_with_signature(signature: Option<String>) -> VersionInfo {
+        VersionInfo {
+            version: "9.9.9".to_string(),
+            release_date: Utc::now(),
+            download_url: "https://example.invalid/voirs-update".to_string(),
+            checksum: String::new(),
+            signature,
+            changelog: String::new(),
+            is_security_update: false,
+        }
+    }
+
+    #[test]
+    fn test_require_signature_for_update_fails_closed_when_missing() {
+        // This is the exact security-critical branch that `perform_update`
+        // relies on: `verify_signatures = true` (the default) combined with
+        // a `VersionInfo` that carries no signature at all — precisely what
+        // `fetch_latest_version` produces today — must be a hard error, not
+        // a silent "nothing to verify, proceed".
+        let manager = test_manager(UpdateConfig::default());
+        assert!(
+            manager.config.verify_signatures,
+            "test assumes the default has verification enabled"
+        );
+
+        let version_info = version_info_with_signature(None);
+        let result = manager.require_signature_for_update(&version_info);
+
+        assert!(
+            result.is_err(),
+            "verify_signatures=true with no signature present must fail closed"
+        );
+    }
+
+    #[test]
+    fn test_require_signature_for_update_passes_through_when_present() {
+        let manager = test_manager(UpdateConfig::default());
+        let version_info = version_info_with_signature(Some("deadbeef".to_string()));
+
+        let result = manager
+            .require_signature_for_update(&version_info)
+            .expect("a present signature must not itself be treated as an error");
+
+        assert_eq!(
+            result,
+            Some("deadbeef"),
+            "the supplied signature must be passed through unchanged for actual verification"
+        );
+    }
+
+    #[test]
+    fn test_require_signature_for_update_skips_when_verification_disabled() {
+        let manager = test_manager(UpdateConfig {
+            verify_signatures: false,
+            ..UpdateConfig::default()
+        });
+        let version_info = version_info_with_signature(None);
+
+        let result = manager
+            .require_signature_for_update(&version_info)
+            .expect("disabling verification must never itself be an error");
+
+        assert_eq!(
+            result, None,
+            "with verify_signatures=false there is nothing to check, regardless of signature presence"
+        );
     }
 }

@@ -32,6 +32,7 @@
 
 pub mod binary;
 pub mod managers;
+pub mod signature;
 pub mod update;
 
 pub use binary::{BinaryPackager, BinaryPackagingConfig};

@@ -304,8 +304,19 @@ impl ConfigPresets {
                 default_language: LanguageCode::EnUs,
                 log_level: "debug".to_string(),
                 debug: true,
-                temp_dir: Some("/tmp/voirs".to_string()),
-                cache_dir: Some("/tmp/voirs/cache".to_string()),
+                temp_dir: Some(
+                    std::env::temp_dir()
+                        .join("voirs")
+                        .to_string_lossy()
+                        .to_string(),
+                ),
+                cache_dir: Some(
+                    std::env::temp_dir()
+                        .join("voirs")
+                        .join("cache")
+                        .to_string_lossy()
+                        .to_string(),
+                ),
             })
             .with_performance(PerformanceConfig {
                 max_memory_mb: 2048.0,
@@ -505,8 +516,13 @@ mod tests {
                 default_language: LanguageCode::EnUs,
                 log_level: "debug".to_string(),
                 debug: true,
-                temp_dir: Some("/tmp".to_string()),
-                cache_dir: Some("/cache".to_string()),
+                temp_dir: Some(std::env::temp_dir().to_string_lossy().to_string()),
+                cache_dir: Some(
+                    std::env::temp_dir()
+                        .join("cache")
+                        .to_string_lossy()
+                        .to_string(),
+                ),
             })
             .build();
 

@@ -281,7 +281,7 @@ impl VoirsCloudStorage {
     fn calculate_checksum(data: &[u8]) -> String {
         let mut hasher = Sha256::new();
         hasher.update(data);
-        format!("{:x}", hasher.finalize())
+        hex::encode(hasher.finalize())
     }
 
     /// Get preferred compression type based on configuration and features
@@ -1044,7 +1044,7 @@ impl LocalBackupStorage {
     fn calculate_backup_checksum(data: &[u8]) -> String {
         let mut hasher = Sha256::new();
         hasher.update(data);
-        format!("{:x}", hasher.finalize())
+        hex::encode(hasher.finalize())
     }
 }
 

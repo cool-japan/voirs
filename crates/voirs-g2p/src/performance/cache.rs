@@ -370,16 +370,13 @@ where
 
     /// Evict least recently used entries
     fn evict_lru(&self, cache: &mut HashMap<K, CacheEntry<V>>, stats: &mut CacheStats) {
-        // Find the least recently used entry
-        let mut oldest_key = None;
-        let mut oldest_time = Instant::now();
-
-        for (key, entry) in cache.iter() {
-            if entry.timestamp < oldest_time {
-                oldest_time = entry.timestamp;
-                oldest_key = Some(key.clone());
-            }
-        }
+        // Find the least recently used entry by comparing entries against each
+        // other only (no externally-seeded "now" sentinel), so a minimum is
+        // always found whenever the cache is non-empty.
+        let oldest_key = cache
+            .iter()
+            .min_by_key(|(_, entry)| entry.timestamp)
+            .map(|(key, _)| key.clone());
 
         if let Some(key) = oldest_key {
             cache.remove(&key);

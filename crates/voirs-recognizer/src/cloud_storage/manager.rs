@@ -1055,10 +1055,10 @@ impl CloudStorageManager {
         let mut account_name = String::new();
         let mut account_key = String::new();
         for part in conn_str.split(';') {
-            if part.starts_with("AccountName=") {
-                account_name = part["AccountName=".len()..].to_string();
-            } else if part.starts_with("AccountKey=") {
-                account_key = part["AccountKey=".len()..].to_string();
+            if let Some(stripped) = part.strip_prefix("AccountName=") {
+                account_name = stripped.to_string();
+            } else if let Some(stripped) = part.strip_prefix("AccountKey=") {
+                account_key = stripped.to_string();
             }
         }
         if account_name.is_empty() || account_key.is_empty() {

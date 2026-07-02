@@ -844,7 +844,7 @@ impl AdvancedModelCache {
             let mut hasher = Sha256::new();
             hasher.update(&data);
             let result = hasher.finalize();
-            Ok(format!("{:x}", result))
+            Ok(hex::encode(result))
         }
 
         #[cfg(not(feature = "cloud"))]

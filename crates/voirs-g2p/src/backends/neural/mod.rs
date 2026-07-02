@@ -31,35 +31,44 @@ impl NeuralG2pBackend {
         // Create a dummy trainer to get access to model loading
         let trainer = LstmTrainer::new(device.clone(), config.clone());
 
+        // Default location to look for a previously-trained model. Uses the
+        // platform-appropriate temporary directory instead of a hardcoded
+        // Unix-only path so this also works on Windows.
+        let default_model_path = std::env::temp_dir().join("neural_g2p_model.bin");
+
         // Load or create models (for now, create new ones)
-        let (encoder, decoder) = trainer
-            .load_model(std::path::Path::new("/tmp/neural_g2p_model.bin"))
-            .or_else(|_| {
-                debug!("Model not found, creating new neural network models");
-                // Create new models with default parameters
-                let varmap = candle_nn::VarMap::new();
-                let vb =
-                    candle_nn::VarBuilder::from_varmap(&varmap, candle_core::DType::F32, &device);
+        let (encoder, decoder) =
+            trainer
+                .load_model(default_model_path.as_path())
+                .or_else(|_| {
+                    debug!("Model not found, creating new neural network models");
+                    // Create new models with default parameters
+                    let varmap = candle_nn::VarMap::new();
+                    let vb = candle_nn::VarBuilder::from_varmap(
+                        &varmap,
+                        candle_core::DType::F32,
+                        &device,
+                    );
 
-                let encoder = SimpleEncoder::new(
-                    config.vocab_size,
-                    128,
-                    config.hidden_size,
-                    vb.pp("encoder"),
-                )
-                .map_err(|e| G2pError::ModelError(format!("Failed to create encoder: {e}")))?;
+                    let encoder = SimpleEncoder::new(
+                        config.vocab_size,
+                        128,
+                        config.hidden_size,
+                        vb.pp("encoder"),
+                    )
+                    .map_err(|e| G2pError::ModelError(format!("Failed to create encoder: {e}")))?;
 
-                let decoder = SimpleDecoder::new(
-                    config.phoneme_vocab_size,
-                    128,
-                    config.hidden_size,
-                    config.phoneme_vocab_size,
-                    vb.pp("decoder"),
-                )
-                .map_err(|e| G2pError::ModelError(format!("Failed to create decoder: {e}")))?;
+                    let decoder = SimpleDecoder::new(
+                        config.phoneme_vocab_size,
+                        128,
+                        config.hidden_size,
+                        config.phoneme_vocab_size,
+                        vb.pp("decoder"),
+                    )
+                    .map_err(|e| G2pError::ModelError(format!("Failed to create decoder: {e}")))?;
 
-                Ok::<(SimpleEncoder, SimpleDecoder), G2pError>((encoder, decoder))
-            })?;
+                    Ok::<(SimpleEncoder, SimpleDecoder), G2pError>((encoder, decoder))
+                })?;
 
         Ok(Self {
             encoder,

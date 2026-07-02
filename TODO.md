@@ -1,8 +1,66 @@
 # VoiRS Development Roadmap & TODO
 
-> **Status**: Current Version 0.1.0 - **PRODUCTION READY**
-> **Last Updated**: 2026-06-20
+> **Status**: Current Version 0.1.0 - core TTS pipeline is real and tested, but see the
+> **Silent Fabrication Audit (2026-07-02)** below before calling anything beyond it "production ready" —
+> several advertised features (self-update, cloud storage, LMS/social integrations, the SDK's *default*
+> pipeline builder) were found to be non-functional facades.
+> **Last Updated**: 2026-07-02
 > **Next Milestone**: Version 0.2.0 - Advanced Neural Features & Production Optimization
+
+## ⚠️ Silent Fabrication Audit (2026-07-02) — dedicated remediation sprint needed
+
+A `/ucont` due-diligence sweep (4 parallel read-only survey agents, one per crate not deeply covered by
+the prior 18-batch mock→real DSP sprint: `voirs-cli`, `voirs-ffi`, `voirs-sdk`, `voirs-feedback`) found
+this workspace's fabrication problem extends well beyond DSP/signal-processing code into whole
+**advertised product features that are non-functional facades** — code that compiles clean, looks
+legitimate, and reports fabricated success, but does no real work. This is a *much* larger and more
+consequential class of finding than the DSP stubs (batches 1-18) and was judged too large (needs real
+cloud SDK credentials, a provisioned crypto signing key, real third-party API integrations, real ML
+models) to fix in the same session that found it. Filing here for a dedicated future sprint, worst
+severity first. One item (the self-updater's fake signature check) was fixed immediately as a security
+exception — see the checked item below.
+
+### 🔴 CRITICAL — security
+
+- [x] **`voirs-cli` self-updater fake signature verification (supply-chain hole)** — `crates/voirs-cli/src/packaging/update.rs`: `simulate_signature_verification` was fake crypto (hashed public/attacker-derivable data, not a real asymmetric signature check); `verify_ed25519/rsa/ecdsa_signature` all routed through it; `get_embedded_public_key` returned hardcoded filler bytes. This fake "pass" gated `fs::rename` over the running binary. **FIXED (2026-07-02, same session)**: real Ed25519/RSA/ECDSA verification via RustCrypto crates + fail-closed behavior when no real signing key is configured (there is still no real project signing keypair provisioned — see the fix's own doc comments for what a maintainer must still do before self-update is safe to enable for end users).
+
+### 🟠 SEVERE — advertised features are non-functional facades
+
+- [ ] **`voirs-sdk`: the default, publicly-exported `VoirsPipelineBuilder` always synthesizes a canned 440Hz sine tone**, regardless of voice/model/quality config. `lib.rs:292` re-exports `builder::VoirsPipelineBuilder`, whose `build()` path (`builder/async_init.rs`) discards resolved model paths and always instantiates `DummyG2p`/`DummyAcoustic`/`DummyVocoder`. A **second, differently-behaved type of the same name** — `pipeline::VoirsPipelineBuilder` (reachable only via `prelude`) — actually wires real components (`voirs_g2p::RuleBasedG2p`, Candle acoustic backend, `HiFiGanVocoder`) through `pipeline/init.rs`'s `PipelineInitializer`. Every doc example in `lib.rs` uses the fake one. Needs a design decision: collapse to one real implementation, or fix `async_init.rs`'s loaders to actually use resolved models. Even the "real" path has 2 more fabrications: `download_model()` writes literal text `"Dummy {name} model data"` instead of networking, and `verify_model_checksum()` never hashes anything.
+  - Priority: P0 | Scope: large (architectural — two builders sharing a name) | Files: `crates/voirs-sdk/src/lib.rs:292`, `builder/async_init.rs:283-651`, `pipeline/init.rs:309-347`
+- [ ] **`voirs-cli` self-updater / cloud / training / ONNX-tools / workflow / plugin commands report fabricated success with zero real work**:
+  - `commands/train/{acoustic,vocoder}.rs` — never reads `--data`; feeds constant/empty tensors; on step failure silently swaps to a fake closed-form decaying-loss curve; prints "Real VITS/FastSpeech2 training completed!" and saves an untrained checkpoint.
+  - `cloud/storage.rs` + `commands/cloud.rs:749` — AWS/Azure/GCP/S3 client creation, upload, download are `sleep()` + `Ok(())`; downloads return literal `"AWS content for {path}"`; hardcoded fake credentials (`"default_key"`). Reports "Successfully uploaded" with zero network I/O.
+  - `commands/models/optimize.rs:841-1339` — "quantization"/"graph optimization" byte-samples and zero-pads the raw file (not the model structure) — **produces corrupted, unloadable model files** while printing fabricated `quality_preservation`/`nodes_removed`/`performance_gain` metrics.
+  - `workflow/executor.rs:400-483` — synthesize/validate/file-op/command/script/branch/loop/subworkflow/notify step types all ignore their params and unconditionally return `Ok("...completed")`; only `wait` does real work.
+  - `plugins/mod.rs:348-357` — production `load_plugin_from_path` always returns `MockPlugin` regardless of the requested plugin; the plugin system doesn't load anything.
+  - `commands/interactive/synthesis.rs:130-172` — on synthesis failure, silently substitutes a 440Hz "beep" for real speech (warn-logged only, not shown in console).
+  - `commands/accuracy.rs:270-278,386-392,810-853` — accuracy benchmarks always run in "simulation mode" against never-instantiated `DummyG2p/Tts/AsrSystem`; fabricated pass/fail still drives `std::process::exit(0/1)`.
+  - `commands/performance.rs:696-815` — `profile` subcommand's G2P/acoustic/vocoder timings are pure `tokio::time::sleep(2/5/3ms)` independent of `--text`; memory/IO are formula-fabricated.
+  - `commands/cross_lang_test.rs`, `commands/dashboard.rs`, `commands/capabilities.rs` (`test` subcommand + GPU detection), `platform/hardware.rs` (memory speed / CPU frequency hardcoded on all platforms), `commands/voices.rs:259-281` (fake placeholder voice model file on repo failure, still reports "downloaded successfully!"), `commands/monitoring/functions.rs:1223-1298` (config/dependency validation ignores its arguments), `commands/server.rs:1149-1152` (readiness probe hardcodes `auth_ready = true`) — same pattern, see full agent report in session transcript for exact line ranges.
+  - Moderate: `commands/models/benchmark.rs`, `safetensors_support.rs` (dead code, all-zero tensor conversion), `train/g2p.rs`+`progress.rs` (fake CPU%/metrics under `--quiet`), `ssml.rs` (linear not logarithmic Hz→semitone), `config.rs::migrate_config` (drops all fields but `output_format`, still returns `Ok`).
+  - Confirmed clean/honest (spot-checked): `download.rs`, `convert_model.rs`, `checkpoint.rs`, `onnx_tools.rs`, `vocoder_inference.rs`, `kokoro/*`, `data_loader.rs`, `audio/effects.rs`, `audio/metadata.rs`, `telemetry/privacy.rs`, `dataset.rs`, `conversion.rs` (clearly labeled demo).
+  - Priority: P1 (each item independently shippable) | Scope: large per-item (real cloud SDKs, real training loop, real ONNX quantization library, real workflow step handlers)
+- [ ] **`voirs-feedback`: dense cluster of fabricated features** (4-agent full-crate sweep, ~140 files):
+  - `gamification/social.rs` — "peer comparison"/leaderboard/mentor-matching is invented: clones the querying user's own progress, perturbs it by a hash of the peer's UUID, presents it as a real peer; `calculate_mentor_compatibility` always 0.8. (Currently orphaned/no external callers.)
+  - `deep_learning_feedback.rs` — entire `DeepLearningFeedbackSystem` is fake: `MockFeatureExtractor` fills MFCC/F0/embeddings with `random()` (audio never read); `TransformerFeedbackModel::load()` never reads the model file; non-Transformer paths route to a mock returning literal `0.8`. (Orphaned even if wired up.)
+  - `realtime/performance.rs` — all 7 `get_*()` system-metric functions (CPU/memory/latency/throughput/error-rate/buffer/network) are zero-arg hardcoded constants shown to users.
+  - `realtime/phoneme.rs` — `detect_phonemes` never reads its `audio_data` argument; confidence/formants are `random()`.
+  - `ai_coaching.rs::conduct_skill_assessment` — never reads the real `user_model` it's given; all skill metrics are `random()`.
+  - `platform/offline.rs` — offline mode is fake end-to-end: `is_offline()` hardcoded `false`, "cached models" are literal `b"mock_..._data"` bytes.
+  - `platform/notifications.rs` + `reliable_notifications.rs` — no real delivery path exists anywhere (desktop/web/mobile "notify" just `println!`s); reliability layer injects *fake random failures* instead of using a real channel.
+  - `cloud_deployment.rs` — "Kubernetes" deploy builds a manifest, discards it, sleeps 5s, flips an in-memory status flag; no cluster SDK dependency exists at all.
+  - `persistence/backends/memory.rs::delete_user_data` — **GDPR-relevant**: silently skips deleting feedback history while logging success (sqlite/postgres/json_file backends delete correctly — only the in-memory backend is broken).
+  - `integration/lms.rs` — no HTTP client exists; every grade/progress submission to Canvas/Blackboard/Moodle is a no-op `Ok(())`.
+  - `integration/graphql.rs` — production `QueryRoot::user` returns hardcoded `"John Doe"` for any user ID.
+  - `secure_sharing.rs` — real token/IP/access-count checks gate access to a hardcoded `vec![1,2,3,4,5]` "Mock data" payload, genuinely AES-encrypted and delivered as if real — i.e. real security wrapping fake data.
+  - `data_retention.rs` (fabricated `deleted=50/75` compliance-cleanup counts, no real deletion), `data_management.rs` (export/backup returns empty data + literal `"placeholder_checksum"`), `voice_control.rs` (commands always report success, no real dispatch), `progress/analytics.rs`+`core.rs` (hardcoded `p=0.05`/`is_significant=true`), `platform/sync.rs` (merge conflict resolution discards all but first change), `platform/web.rs` (real `web_sys` calls commented out, both cfg branches return identical hardcoded values), `platform/mod.rs` (CPU/memory/battery/network hardcoded 0.0), `google_classroom.rs` (real HTTP POST sent, response discarded, returns `"mock-assignment-id"` regardless), `load_balancer.rs` (`requests_per_second` hardcoded 0.0), `persistence/sharding.rs` (geographic routing ignores key, always first shard), `gamification/challenges.rs` (streak challenge has no date checks, +1 per call), `tts_integration.rs` (`MockTtsEngine` silently default, emits silence).
+  - Confirmed genuinely real (do not re-flag): `quality_monitor.rs` SMTP+webhook alerting (real `lettre`/`reqwest`), `performance_monitoring.rs` (`/proc/*` parsing), `integration/zoom.rs` (honestly `cfg`-gated), `visualization/*` (honestly `cfg`-gated empty shims), `data_quality.rs`/`data_anonymization.rs`.
+  - Priority: P1 | Scope: large (most items need a real backing service/ML model; some — GDPR delete gap, hardcoded metrics — are quick, honest, self-contained fixes)
+- [ ] **`voirs-ffi` platform-detection layer: 9 confirmed hardcoded/fake values** — `platform/mod.rs:137-142` (Windows `get_total_memory()` always 8GB, never queries OS), `platform/mod.rs:187-211` (`supports_hardware_acceleration()` always `true` on macOS/Windows, no query), `{macos,windows,linux}.rs` `PerformanceMonitor::get_metrics()` (all 3 platforms hardcoded constants, comments admit "for now return placeholder" — Linux sibling code in the same file proves real `/proc` checks were feasible), `linux.rs:260-302` (`LinuxALSA::enumerate_cards()` fabricates a fake "HDA Intel PCH"+"USB Audio" pair instead of reading `/proc/asound/cards`, unconditional on any real Linux box), `linux.rs:315-349` (`LinuxALSA::test_device()` fixed fake capability lists, args unused), `macos.rs:61-161` (real cpal enumeration exists but is gated behind non-default `macos-platform` feature — default builds silently fall through to a hardcoded 2-device list), `macos.rs:197-217` (`get_system_volume()` always `0.8`), `macos.rs:325-354` (`get_system_language()`/`get_system_appearance()` always `"en-US"`/`"light"` despite doc comments naming real NSLocale/NSApp APIs). NUMA-topology code (`voirs-ffi/src/perf/{threading,memory}.rs`) was flagged as **unaudited, not cleared** — out of scope for this pass. `c_api/`/`python/`/`node/` FFI binding layers (pass-through-vs-dummy-data risk) were also not covered by this pass — only `platform/*.rs` got a full sweep.
+  - Priority: P2 | Scope: medium (mostly real syscalls/API calls that were simply never wired up)
+
+**Recommendation for the future remediation sprint**: triage by "is this reachable from a documented, advertised user-facing command/API" — several items above are already dead/orphaned code (no callers) and are lower urgency than e.g. the SDK's default builder or the CLI's cloud/training commands, which users are actively documented to be able to invoke today.
 
 ## Stubs to implement (added 2026-06-12 by /cooljapan-stub-check)
 
@@ -984,28 +1042,28 @@ For detailed development history, see git commit log and release notes.
   - This is **Cargo.toml feature surgery ONLY — no Rust source changes** (0 call sites).
   - **Acceptance**: `cargo tree -i openssl-sys` empty; `cargo build` green; HuggingFace model-download + any HTTPS paths still work; default build is C-free on the TLS axis.
 
-### Policy-Check Findings — Pure Rust / COOLJAPAN default-build audit (2026-06-05)
+### Policy-Check Findings — Pure Rust / COOLJAPAN default-build audit (2026-06-05, reconciled 2026-07-02)
 
-`/policy-check` found the default `cargo build` still links C/C++/asm (Tier A). The narrow openssl→rustls migration is DONE (`openssl-sys`/`openssl-src`/`native-tls` gone), BUT:
+`/policy-check` originally found the default `cargo build` still linking C/C++/asm (Tier A). **Re-verified 2026-07-02 directly against the current `Cargo.lock`/`Cargo.toml` state — every P0/P1 item below is now confirmed resolved.** `cargo tree -i <crate>` (default features, no `--all-features`) returns "did not match any packages" for `openssl-sys`, `native-tls`, `aws-lc-sys`, `zstd-sys`, and `libsqlite3-sys`; `ring` likewise resolves to nothing under default features (see residual note below).
 
-**⚠️ Correction to the migration record:** removing vendored OpenSSL did NOT make TLS pure-Rust. `reqwest 0.12.28` (pulled by `hf-hub`'s async API) selects rustls's **`aws-lc-rs`** provider → **`aws-lc-sys` (C/asm)** is in the default closure, plus **`ring` (C/asm)**. So the crypto layer is rustls-with-C-providers, not pure-Rust.
+#### P0 — Tier A C/FFI in the DEFAULT closure — ✅ ALL RESOLVED (verified 2026-07-02)
+- [x] **Audio C codecs** (opus/flac-bound/mp3lame-encoder/minimp3) — confirmed `optional = true` behind the default-OFF `ffi-codecs` feature in voirs-vocoder, voirs-dataset, and voirs-sdk `Cargo.toml`. `flac-bound` itself is gone entirely — FLAC encode is now pure-Rust via `oxiaudio-encode`/flacenc.
+- [x] **libsqlite3-sys (C SQLite)** — `sqlx`/`sea-orm` in voirs-feedback are `optional = true`; `default = ["realtime", "adaptive", "progress-tracking", "privacy", "microservices"]` does not include `persistence`/`orm`, so sqlite is not in the default closure.
+- [x] **aws-lc-sys (AWS-LC C/asm)** — `cargo tree -i aws-lc-sys` (default features) returns no match. The workspace's `oxitls-adapter-rustls-rustcrypto` stack is now the active rustls `CryptoProvider` path.
+- [x] **ring (C/asm) direct dep in voirs-cloning** — `crates/voirs-cloning/Cargo.toml` no longer has a `ring` line; `consent_crypto.rs` now implements HMAC-SHA256 via pure-Rust RustCrypto (`sha2`/`hmac`), with an explicit doc comment marking it as the `ring::hmac` replacement. **Residual (informational, not a policy violation):** `ring` still appears transitively under `--all-features` only, pulled in by the `rustls-webpki`/`tokio-rustls` stack alongside the `oxitls-*` crates — a fallback dependency of the TLS stack itself, not a direct VoiRS call site, and outside the DEFAULT closure this P0 rule targets. Worth another look if `oxitls` ever offers a `ring`-free webpki path, but not a regression of this item.
+- [x] **zstd-sys (C, COOLJAPAN-banned)** — `cargo tree -i zstd-sys` (default features) returns no match; parquet's `zstd` feature / wasmtime's `cache` feature are not active in the default closure.
 
-#### P0 — Tier A C/FFI in the DEFAULT closure (feature-gate out of default, or migrate to oxi*)
-- [ ] **Audio C codecs** — `opus`(libopus→audiopus_sys), `flac-bound`(libFLAC→flac-sys), `mp3lame-encoder`(LAME→mp3lame-sys), `minimp3`(→minimp3-sys). Non-optional at voirs-vocoder/Cargo.toml:38-40, voirs-dataset:37-40, voirs-sdk:69-75. Make optional + cfg-gate code; default decode via pure-Rust symphonia/claxon; MP3/Opus/FLAC **encode** becomes opt-in. → `oxiaudio-*`.
-- [ ] **libsqlite3-sys (C SQLite)** — via `sqlx[sqlite]` + `sea-orm[sqlx-sqlite]` (voirs-feedback/Cargo.toml:91-92), turned ON by `default=[…"sqlx"…]` (:104). Drop `sqlx`/`privacy` from default (persistence/privacy opt-in), or migrate to `oxisql-*` (sqlite-compat is Alpha).
-- [ ] **aws-lc-sys (AWS-LC C/asm)** — rustls default provider via reqwest 0.12.28 / hf-hub (possibly also sqlx/sea-orm). Hard: hf-hub does not expose a ring variant. Options: pin reqwest provider to ring, move hf-hub HTTP to ureq-only/oxihttp, or accept (still better than vendored OpenSSL). → `oxitls-*` when production-ready.
-- [ ] **ring (C/asm)** non-optional DIRECT dep — voirs-cloning/Cargo.toml:49 (used in src/consent_crypto.rs, src/privacy_protection.rs). Replace with pure-Rust RustCrypto (sha2 + hmac) + `scirs2_core::random`. **[IN PROGRESS]**
-- [ ] **zstd-sys (C, COOLJAPAN-banned)** — transitive via `parquet 58` (voirs-dataset) + `wasmtime` cache (voirs-cli). Disable parquet's `zstd` feature + wasmtime `cache` feature (loses zstd-parquet read + wasm module cache). parquet/wasmtime hardcode the `zstd` crate, so no clean oxiarc-zstd swap.
-
-#### P1 — Workspace hygiene (inline deps that exist in workspace → `.workspace = true`)
-- [ ] voirs-evaluation/Cargo.toml: symphonia (**0.5↔0.5.5 mismatch**), ogg, lewton, uuid, base64, md5, futures-util, tokio-tungstenite, clap, tokio-test (:37-101). **[IN PROGRESS]**
-- [ ] voirs-cloning/Cargo.toml:52-54: aes-gcm, sha2, base64 → workspace. **[IN PROGRESS]**
-- [ ] voirs-conversion / voirs-spatial: wasm-bindgen/web-sys/js-sys inline → `{ workspace = true, optional = true }`.
-- [ ] examples/Cargo.toml: thiserror/num_cpus/md5/regex → workspace; internal voirs-* deps pinned at **0.1.0** (:162-166).
+#### P1 — Workspace hygiene — ✅ ALL RESOLVED (verified 2026-07-02)
+- [x] voirs-evaluation/Cargo.toml: symphonia, ogg, lewton, uuid, base64, md5, futures-util, tokio-tungstenite, clap, tokio-test all confirmed `.workspace = true`.
+- [x] voirs-cloning/Cargo.toml:52-54: aes-gcm, sha2, base64 all confirmed `.workspace = true`.
+- [x] voirs-conversion / voirs-spatial: wasm-bindgen/web-sys/js-sys confirmed `{ workspace = true, optional = true }`.
+- [x] examples/Cargo.toml: thiserror/num_cpus/md5/regex confirmed `.workspace = true`; all internal `voirs-*` deps (including `voirs-integration-tests`, fixed 2026-07-02) confirmed `{ workspace = true, ... }` with zero inline version pins.
 
 #### P2 — Refactor (>2000 lines) & temp-path hygiene
-- [ ] splitrs: voirs-singing/src/precision_quality.rs (2070, production); examples cloud_deployment(2895)/educational_tools(2643)/ai_integration(2282).
-- [ ] Production-src `/tmp` hardcodes → `std::env::temp_dir()`: voirs-singing/src/backends/onnx.rs:848-849; voirs-dataset/src/integration/cloud.rs:846,902,1157,1242; voirs-cli commands accuracy/performance/server; voirs-g2p/src/backends/neural/mod.rs:36; voirs-recognizer/src/integration/config.rs:307-308.
+- [x] splitrs: voirs-singing/src/precision_quality.rs — already split into a `precision_quality/` module directory (pre-existing, predates this session). Examples split 2026-07-02 via splitrs: cloud_deployment_example.rs (2895→79 lines + module dir), educational_tools_example.rs (2643→215 lines + module dir), ai_integration_example.rs (2282→459 lines + module dir).
+- [x] Production-src `/tmp` hardcodes, fixed 2026-07-02 → `std::env::temp_dir()`: voirs-dataset/src/integration/cloud.rs (4 sites), voirs-cli commands accuracy/performance/server, voirs-g2p/src/backends/neural/mod.rs:36, voirs-recognizer/src/integration/config.rs.
+  - **Correction**: voirs-singing/src/backends/onnx.rs:848-849 was re-examined and is a **false positive** — a `#[cfg(test)]`-only struct literal used purely for equality assertions, no real filesystem I/O. No fix needed; removed from this list.
+  - **New residual tail found during 2026-07-02 reconciliation (not yet fixed — small, same one-line pattern already applied elsewhere, good first task for the next sprint):** voirs-evaluation/src/accuracy_benchmarks.rs:51, voirs-evaluation/src/benchmark_runner.rs:44 (both production `Default` impls), voirs-recognizer/src/monitoring/performance_profiling.rs:69 (production `Default` impl), voirs-cli/src/commands/models/list.rs:108 (lower severity — only a fallback when `$HOME` is unset). Confirmed test-only / false-positive and excluded from this list: voirs-dataset/src/datasets/ljspeech.rs:806,883,967; voirs-recognizer/src/wake_word/training.rs:613,625; voirs-cli/src/commands/batch/parallel.rs:367; voirs-cli/src/commands/performance.rs:1027; voirs-sdk/src/plugins.rs:669; voirs-vocoder/src/containers/{mp4,ogg}.rs (error-path tests using a deliberately nonexistent path).
 
 #### PASS / clean
 openssl-sys/openssl-src/native-tls removed; no banned *direct* foundation crates (oxiarc/oxicode/oxifft used); no `default-features ignored` warnings; **0** hardcoded `/kitasan/` or `/notebooks/` paths.

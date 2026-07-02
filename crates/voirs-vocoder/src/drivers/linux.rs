@@ -47,9 +47,13 @@ impl LinuxAudioDriver {
 
     /// Convert cpal device to our AudioDeviceInfo
     fn device_info_from_cpal(device: &Device, is_default: bool) -> DriverResult<AudioDeviceInfo> {
-        let name = device.name().map_err(|e| {
-            AudioDriverError::InternalError(format!("Failed to get device name: {e}"))
-        })?;
+        let name = device
+            .description()
+            .map_err(|e| {
+                AudioDriverError::InternalError(format!("Failed to get device name: {e}"))
+            })?
+            .name()
+            .to_string();
 
         // Get supported configurations
         let mut supported_sample_rates = Vec::new();
@@ -119,7 +123,10 @@ impl LinuxAudioDriver {
         })?;
 
         for device in output_devices {
-            let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+            let device_name = device
+                .description()
+                .map(|desc| desc.name().to_string())
+                .unwrap_or_else(|_| "Unknown".to_string());
 
             // Skip if we already have this device as default
             if devices
@@ -187,8 +194,8 @@ impl super::AudioDriver for LinuxAudioDriver {
             devices
                 .find(|device| {
                     device
-                        .name()
-                        .map(|name| format!("linux_{}", name.replace(' ', "_")) == device_id)
+                        .description()
+                        .map(|desc| format!("linux_{}", desc.name().replace(' ', "_")) == device_id)
                         .unwrap_or(false)
                 })
                 .ok_or_else(|| AudioDriverError::DeviceNotFound(device_id.to_string()))?
@@ -270,7 +277,7 @@ impl super::AudioDriver for LinuxAudioDriver {
         let stream = match sample_format {
             SampleFormat::F32 => {
                 device.build_output_stream(
-                    &config,
+                    config,
                     move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                         // Call our callback to get audio data
                         if callback_clone(data).is_err() {
@@ -291,7 +298,7 @@ impl super::AudioDriver for LinuxAudioDriver {
             }
             SampleFormat::I16 => {
                 device.build_output_stream(
-                    &config,
+                    config,
                     move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
                         // Create a temporary f32 buffer for our callback
                         let mut f32_buffer = vec![0.0f32; data.len()];
@@ -319,7 +326,7 @@ impl super::AudioDriver for LinuxAudioDriver {
             }
             SampleFormat::U16 => {
                 device.build_output_stream(
-                    &config,
+                    config,
                     move |data: &mut [u16], _: &cpal::OutputCallbackInfo| {
                         // Create a temporary f32 buffer for our callback
                         let mut f32_buffer = vec![0.0f32; data.len()];

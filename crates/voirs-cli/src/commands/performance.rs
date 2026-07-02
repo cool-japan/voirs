@@ -1,7 +1,7 @@
 //! Performance targets testing and monitoring commands for VoiRS CLI.
 
 use clap::{Args, Subcommand};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 use voirs_acoustic::performance_targets::{PerformanceTargets, PerformanceTargetsMonitor};
 
@@ -46,9 +46,10 @@ pub struct TestPerformanceArgs {
     #[arg(long, default_value = "1000.0")]
     pub min_throughput_sps: f32,
 
-    /// Output directory for test results
-    #[arg(short, long, default_value = "/tmp/voirs_performance_test")]
-    pub output_dir: PathBuf,
+    /// Output directory for test results (if omitted, results are printed
+    /// to stdout only and not saved to disk)
+    #[arg(short, long)]
+    pub output_dir: Option<PathBuf>,
 
     /// Enable verbose output
     #[arg(short, long)]
@@ -171,7 +172,13 @@ async fn run_performance_test(args: TestPerformanceArgs) -> Result<(), Box<dyn s
             "  • Min batch throughput: {:.0} sentences/sec",
             args.min_throughput_sps
         );
-        println!("  • Output directory: {}", args.output_dir.display());
+        println!(
+            "  • Output directory: {}",
+            args.output_dir
+                .as_deref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "(not saved to disk)".to_string())
+        );
         println!();
     }
 
@@ -257,10 +264,10 @@ async fn run_performance_test(args: TestPerformanceArgs) -> Result<(), Box<dyn s
                 println!();
             }
 
-            // Save results if output directory specified
-            if args.output_dir.as_path() != Path::new("/tmp/voirs_performance_test") {
-                std::fs::create_dir_all(&args.output_dir)?;
-                let results_file = args.output_dir.join("performance_test_results.json");
+            // Save results only if the user explicitly requested an output directory.
+            if let Some(output_dir) = &args.output_dir {
+                std::fs::create_dir_all(output_dir)?;
+                let results_file = output_dir.join("performance_test_results.json");
                 let json_content = serde_json::to_string_pretty(&test_result)?;
                 std::fs::write(&results_file, json_content)?;
                 println!("📁 Results saved to: {}", results_file.display());

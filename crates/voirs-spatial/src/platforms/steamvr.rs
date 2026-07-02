@@ -120,11 +120,12 @@ impl SteamVRPlatform {
         // Check all possible device indices
         for device_index_usize in 0..openvr::MAX_TRACKED_DEVICE_COUNT {
             let device_index = device_index_usize as u32;
-            if !system.is_tracked_device_connected(device_index) {
+            if !system.is_tracked_device_connected(openvr::TrackedDeviceIndex(device_index)) {
                 continue;
             }
 
-            let device_class = system.tracked_device_class(device_index);
+            let device_class =
+                system.tracked_device_class(openvr::TrackedDeviceIndex(device_index));
             match device_class {
                 TrackedDeviceClass::HMD => {
                     self.hmd_index = Some(device_index);
@@ -160,27 +161,29 @@ impl SteamVRPlatform {
         if let Some(hmd_index) = self.hmd_index {
             // Get HMD information
             if let Ok(manufacturer) = system.string_tracked_device_property(
-                hmd_index,
+                openvr::TrackedDeviceIndex(hmd_index),
                 openvr::property::TrackingSystemName_String,
             ) {
                 self.device_info.manufacturer =
                     manufacturer.to_str().unwrap_or("Unknown").to_string();
             }
 
-            if let Ok(model) = system
-                .string_tracked_device_property(hmd_index, openvr::property::ModelNumber_String)
-            {
+            if let Ok(model) = system.string_tracked_device_property(
+                openvr::TrackedDeviceIndex(hmd_index),
+                openvr::property::ModelNumber_String,
+            ) {
                 self.device_info.model = model.to_str().unwrap_or("Unknown").to_string();
             }
 
-            if let Ok(serial) = system
-                .string_tracked_device_property(hmd_index, openvr::property::SerialNumber_String)
-            {
+            if let Ok(serial) = system.string_tracked_device_property(
+                openvr::TrackedDeviceIndex(hmd_index),
+                openvr::property::SerialNumber_String,
+            ) {
                 self.device_info.serial_number = serial.to_str().unwrap_or("Unknown").to_string();
             }
 
             if let Ok(firmware) = system.string_tracked_device_property(
-                hmd_index,
+                openvr::TrackedDeviceIndex(hmd_index),
                 openvr::property::TrackingFirmwareVersion_String,
             ) {
                 self.device_info.firmware_version =
@@ -188,9 +191,10 @@ impl SteamVRPlatform {
             }
 
             // Update capabilities based on actual device
-            if let Ok(display_frequency) = system
-                .float_tracked_device_property(hmd_index, openvr::property::DisplayFrequency_Float)
-            {
+            if let Ok(display_frequency) = system.float_tracked_device_property(
+                openvr::TrackedDeviceIndex(hmd_index),
+                openvr::property::DisplayFrequency_Float,
+            ) {
                 self.capabilities.refresh_rates = vec![display_frequency];
             }
         }
@@ -611,7 +615,8 @@ impl PlatformIntegration for SteamVRPlatform {
                     // 4. Convert bone transforms to HandTrackingData format
 
                     // For now, detect capability but don't implement full tracking
-                    let _has_skeletal = system.is_tracked_device_connected(controller_index);
+                    let _has_skeletal = system
+                        .is_tracked_device_connected(openvr::TrackedDeviceIndex(controller_index));
 
                     tracing::debug!(
                         "Hand tracking detection for controller {}: capable but not fully implemented",
@@ -639,7 +644,7 @@ impl PlatformIntegration for SteamVRPlatform {
                     // The HMD should support IVREyeTracking interface
                     // Devices like Vive Pro Eye, HP Reverb G2 Omnicept support this
 
-                    if system.is_tracked_device_connected(hmd_index) {
+                    if system.is_tracked_device_connected(openvr::TrackedDeviceIndex(hmd_index)) {
                         // In a full implementation, we would:
                         // 1. Query device properties for eye tracking support
                         // 2. Use IVREyeTracking interface to get gaze data

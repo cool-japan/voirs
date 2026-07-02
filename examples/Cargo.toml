@@ -57,6 +57,10 @@ name = "production_monitoring_example"
 path = "production_monitoring_example.rs"
 
 [[example]]
+name = "cloud_deployment_example"
+path = "cloud_deployment_example.rs"
+
+[[example]]
 name = "multimodal_integration_example"
 path = "multimodal_integration_example.rs"
 
@@ -157,7 +161,7 @@ name = "kokoro_espeak_auto_demo"
 path = "kokoro_espeak_auto_demo.rs"
 
 [dependencies]
-voirs-integration-tests = { version = "0.1.0", path = "../crates/voirs-integration-tests" }
+voirs-integration-tests = { workspace = true }
 voirs-g2p = { workspace = true }
 voirs-acoustic = { workspace = true, features = ["onnx"] }
 voirs-vocoder = { workspace = true }

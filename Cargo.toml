@@ -75,6 +75,7 @@ voirs-cloning = { version = "0.1.0", path = "crates/voirs-cloning" }
 voirs-conversion = { version = "0.1.0", path = "crates/voirs-conversion" }
 voirs-singing = { version = "0.1.0", path = "crates/voirs-singing" }
 voirs-spatial = { version = "0.1.0", path = "crates/voirs-spatial" }
+voirs-integration-tests = { version = "0.1.0", path = "crates/voirs-integration-tests" }
 
 # Core tensor/ML libraries
 candle-core = "0.10.2"
@@ -182,6 +183,17 @@ windows-sys = { version = "0.61", features = ["Win32_System_ProcessStatus", "Win
 sha2 = "0.11"
 hex = "0.4"
 aes-gcm = "0.10"
+# Pure-Rust RustCrypto asymmetric-signature crates for real (non-simulated)
+# update-package signature verification (voirs-cli self-updater).
+ed25519-dalek = "2.2"
+rsa = "0.9"
+p256 = "0.13"
+# rand_core 0.6.x is the CSPRNG trait generation actually required by the
+# RustCrypto crates above (ed25519-dalek 2.x / rsa 0.9.x / p256 0.13.x /
+# ecdsa 0.16.x); it is intentionally NOT the newest rand_core major line
+# (0.9/0.10 exist on crates.io but are API-incompatible with these crates).
+# Used as a dev-dependency only, to generate real keypairs in tests.
+rand_core = "0.6.4"
 regex = "1.12"
 memmap2 = "0.9"
 thread_local = "1.1"

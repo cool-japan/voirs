@@ -543,7 +543,7 @@ impl ModelValidator {
             hasher.update(&content);
             let result = hasher.finalize();
 
-            Ok(format!("{:x}", result))
+            Ok(hex::encode(result))
         }
         #[cfg(not(feature = "cloud"))]
         {

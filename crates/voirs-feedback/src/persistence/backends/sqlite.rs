@@ -311,25 +311,26 @@ impl PersistenceManager for SQLitePersistenceManager {
         limit: Option<usize>,
         offset: Option<usize>,
     ) -> PersistenceResult<Vec<FeedbackResponse>> {
-        let mut query = String::from(
-            "SELECT feedback_data FROM feedback_history WHERE user_id = ?1 ORDER BY created_at DESC",
-        );
+        // LIMIT/OFFSET are passed as bind parameters instead of being spliced into
+        // the SQL text. An absent limit is represented by the sentinel `i64::MAX`
+        // (i.e. "no upper bound") and an absent offset by `0`, so the query text
+        // itself stays a fixed `&'static str` literal regardless of what the
+        // caller passed in.
+        let limit_value = limit.map_or(i64::MAX, |limit| limit as i64);
+        let offset_value = offset.map_or(0_i64, |offset| offset as i64);
 
-        if let Some(limit) = limit {
-            query.push_str(&format!(" LIMIT {limit}"));
-        }
-
-        if let Some(offset) = offset {
-            query.push_str(&format!(" OFFSET {offset}"));
-        }
-
-        let rows = sqlx::query(&query)
-            .bind(user_id)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| PersistenceError::ConnectionError {
-                message: format!("Failed to load feedback history: {e}"),
-            })?;
+        let rows = sqlx::query(
+            "SELECT feedback_data FROM feedback_history WHERE user_id = ?1 \
+             ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
+        )
+        .bind(user_id)
+        .bind(limit_value)
+        .bind(offset_value)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| PersistenceError::ConnectionError {
+            message: format!("Failed to load feedback history: {e}"),
+        })?;
 
         let mut feedback_history = Vec::new();
         for row in rows {

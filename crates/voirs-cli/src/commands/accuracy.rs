@@ -40,8 +40,9 @@ pub enum AccuracySubcommand {
 #[derive(Debug, Clone, Args)]
 pub struct RunAccuracyArgs {
     /// Output directory for benchmark results
-    #[arg(short, long, default_value = "/tmp/voirs_accuracy_benchmarks")]
-    pub output_dir: PathBuf,
+    /// (defaults to a platform-appropriate temp directory when omitted)
+    #[arg(short, long)]
+    pub output_dir: Option<PathBuf>,
 
     /// Enable detailed per-case reporting
     #[arg(long, default_value = "true")]
@@ -197,9 +198,17 @@ async fn run_comprehensive_benchmarks(
 
     let start_time = Instant::now();
 
+    // Resolve the output directory: use the user-supplied path if given,
+    // otherwise fall back to a platform-appropriate temp directory
+    // (std::env::temp_dir() works cross-platform, unlike a hardcoded "/tmp/...").
+    let output_dir = args
+        .output_dir
+        .clone()
+        .unwrap_or_else(|| std::env::temp_dir().join("voirs_accuracy_benchmarks"));
+
     // Configure benchmark
     let mut config = AccuracyBenchmarkConfig::default();
-    config.output_dir = args.output_dir.to_string_lossy().to_string();
+    config.output_dir = output_dir.to_string_lossy().to_string();
     config.detailed_reporting = args.detailed;
     config.max_processing_time = args.max_time;
 
@@ -333,7 +342,7 @@ async fn run_comprehensive_benchmarks(
         results.performance_stats.peak_memory_mb
     );
 
-    println!("\nResults saved to: {}", args.output_dir.display());
+    println!("\nResults saved to: {}", output_dir.display());
 
     // Exit with appropriate code
     if results.overall_metrics.pass_rate >= 80.0 {
