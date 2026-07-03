@@ -14,7 +14,7 @@ use crate::FeedbackError;
 #[cfg(feature = "ui")]
 use chrono::{DateTime, Utc};
 #[cfg(feature = "ui")]
-use egui::{Color32, Pos2, Rect, Stroke, Ui, Vec2};
+use egui::{Color32, Pos2, Rect, Stroke, Ui, UiBuilder, Vec2};
 use std::collections::HashMap;
 
 #[cfg(feature = "ui")]
@@ -341,11 +341,11 @@ impl EnhancedRadarChart {
 
     /// Draw legend
     fn draw_legend(&self, ui: &mut Ui, rect: Rect) {
-        ui.allocate_ui_at_rect(
-            Rect::from_min_size(
+        ui.scope_builder(
+            UiBuilder::new().max_rect(Rect::from_min_size(
                 Pos2::new(rect.max.x - 120.0, rect.min.y),
                 Vec2::new(120.0, 60.0),
-            ),
+            )),
             |ui| {
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {

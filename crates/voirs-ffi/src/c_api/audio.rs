@@ -847,9 +847,21 @@ mod tests {
 
         unsafe {
             let result = voirs_audio_save_mp3(&buffer, filename.as_ptr(), 192, 2);
-            // MP3 encoding is not yet implemented; always returns InternalError.
-            assert_eq!(result, VoirsErrorCode::InternalError);
+            // MP3 encoding is backed by voirs_vocoder's real codecs::AudioCodecEncoder
+            // (AudioCodec::Mp3), so this now succeeds and writes a real file.
+            assert_eq!(result, VoirsErrorCode::Success);
         }
+        assert!(
+            tmp_path.exists(),
+            "expected voirs_audio_save_mp3 to create {}",
+            tmp_path.display()
+        );
+        assert!(
+            std::fs::metadata(&tmp_path)
+                .map(|meta| meta.len() > 0)
+                .unwrap_or(false),
+            "expected the saved MP3 file to be non-empty"
+        );
 
         // Test invalid parameters — always works regardless of feature
         unsafe {

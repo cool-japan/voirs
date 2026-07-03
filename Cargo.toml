@@ -78,13 +78,13 @@ voirs-spatial = { version = "0.1.0", path = "crates/voirs-spatial" }
 voirs-integration-tests = { version = "0.1.0", path = "crates/voirs-integration-tests" }
 
 # Core tensor/ML libraries
-candle-core = "0.10.2"
-candle-nn = "0.10.2"
-candle-transformers = "0.10.2"
+candle-core = "0.11.0"
+candle-nn = "0.11.0"
+candle-transformers = "0.11.0"
 oxionnx = "0.1.4"
 safetensors = "0.8.0"
-tract-onnx = "0.23.2"  # ONNX model loading and inference
-tract-core = "0.23.2"  # Core tract functionality for ONNX conversion
+tract-onnx = "0.23.3"  # ONNX model loading and inference
+tract-core = "0.23.3"  # Core tract functionality for ONNX conversion
 
 # Audio processing
 hound = "3.5.1"
@@ -109,7 +109,7 @@ oxifft = "0.3.2"
 # NOTE: wide and simba kept for direct SIMD in specific optimized paths (non-array operations)
 wide = "1.5.0"  # SIMD processing
 simba = "0.10"  # SIMD abstractions
-num-bigint-dig = "0.8"
+num-bigint-dig = "0.9"
 
 # Text processing
 unicode-normalization = "0.1"
@@ -129,9 +129,9 @@ ordered-float = "5.3"
 
 # CLI and utilities
 clap = { version = "4.6.1", features = ["derive"] }
-anyhow = "1.0.102"
+anyhow = "1.0.103"
 thiserror = "2.0.18"
-log = "0.4.32"
+log = "0.4.33"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
@@ -154,7 +154,7 @@ clap_complete = "4.6"
 lru = "0.18.0"
 
 # Terminal UI dependencies
-ratatui = "0.30.1"
+ratatui = "0.30.2"
 crossterm = "0.29.0"
 
 reqwest = { version = "0.13", default-features = false, features = ["json", "form", "rustls-no-provider", "stream"] }
@@ -182,7 +182,7 @@ num_cpus = "1.17"
 windows-sys = { version = "0.61", features = ["Win32_System_ProcessStatus", "Win32_System_Threading", "Win32_Foundation"] }
 sha2 = "0.11"
 hex = "0.4"
-aes-gcm = "0.10"
+aes-gcm = "0.11"
 # Pure-Rust RustCrypto asymmetric-signature crates for real (non-simulated)
 # update-package signature verification (voirs-cli self-updater).
 ed25519-dalek = "2.2"
@@ -202,10 +202,10 @@ criterion = { version = "0.8", features = ["html_reports", "async_tokio"] }
 fst = "0.4"
 
 # WebAssembly dependencies
-wasm-bindgen = { version = "0.2.125", features = ["serde-serialize"] }
-wasm-bindgen-futures = "0.4.75"
-web-sys = { version = "0.3.102", features = ["console", "AudioContext", "AudioBuffer", "AudioBufferOptions", "AudioBufferSourceNode", "AudioDestinationNode"] }
-js-sys = "0.3.102"
+wasm-bindgen = { version = "0.2.126", features = ["serde-serialize"] }
+wasm-bindgen-futures = "0.4.76"
+web-sys = { version = "0.3.103", features = ["console", "AudioContext", "AudioBuffer", "AudioBufferOptions", "AudioBufferSourceNode", "AudioDestinationNode"] }
+js-sys = "0.3.103"
 console_error_panic_hook = "0.1"
 wasm-logger = "0.2"
 getrandom = { version = "0.4", features = ["js"] }  # Required for WASM support (transitive dependency from scirs2-core)
@@ -228,14 +228,14 @@ dirs = "6.0"
 
 # Test dependencies
 tokio-test = "0.4"
-wasm-bindgen-test = "0.3.75"
+wasm-bindgen-test = "0.3.76"
 
 # File system watching
 notify = "8.2.0"
 
 # Dynamic loading and plugin support
 libloading = "0.9"
-wasmtime = { version = "45.0.2", default-features = false, features = ["anyhow", "async", "backtrace", "gc", "gc-drc", "gc-null", "wat", "profiling", "parallel-compilation", "cranelift", "pooling-allocator", "demangle", "addr2line", "coredump", "debug-builtins", "runtime", "component-model", "component-model-async", "threads", "stack-switching", "std", "debug", "compile-time-builtins"] }
+wasmtime = { version = "46.0.1", default-features = false, features = ["anyhow", "async", "backtrace", "gc", "gc-drc", "gc-null", "wat", "profiling", "parallel-compilation", "cranelift", "pooling-allocator", "demangle", "addr2line", "coredump", "debug-builtins", "runtime", "component-model", "component-model-async", "threads", "stack-switching", "std", "debug", "compile-time-builtins"] }
 
 # Data format support
 parquet = { version = "59.0.0", default-features = false, features = ["arrow", "snap", "brotli", "flate2-zlib-rs", "lz4", "base64", "simdutf8"] }

@@ -1,6 +1,6 @@
 // Cloud storage integration for VoiRS model and data synchronization
 use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng},
+    aead::{Aead, Generate, KeyInit},
     Aes256Gcm, Nonce,
 };
 use anyhow::Result;
@@ -609,8 +609,6 @@ impl CloudStorageManager {
 
     /// Encrypt data using AES-256-GCM
     async fn encrypt_data(&self, data: &[u8]) -> Result<Vec<u8>> {
-        use aes_gcm::aead::rand_core::RngCore;
-
         // Get 256-bit encryption key
         let key = self.get_encryption_key().await?;
 
@@ -630,9 +628,8 @@ impl CloudStorageManager {
         let cipher = Aes256Gcm::new(&key_bytes.into());
 
         // Generate random 96-bit nonce (12 bytes)
-        let mut nonce_bytes = [0u8; 12];
-        OsRng.fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        let nonce_bytes = <[u8; 12]>::generate();
+        let nonce: &Nonce<_> = (&nonce_bytes).into();
 
         // Encrypt data (GCM automatically adds authentication tag)
         let ciphertext = cipher
@@ -682,7 +679,9 @@ impl CloudStorageManager {
         let cipher = Aes256Gcm::new(&key_bytes.into());
 
         // Extract nonce (first 12 bytes)
-        let nonce = Nonce::from_slice(&data[..12]);
+        let nonce: &Nonce<_> = data[..12]
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("Invalid nonce length"))?;
 
         // Extract ciphertext (remaining bytes include authentication tag)
         let ciphertext = &data[12..];

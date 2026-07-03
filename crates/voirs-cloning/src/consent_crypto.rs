@@ -11,7 +11,7 @@ use crate::consent::{
 use crate::{Error, Result};
 
 use aes_gcm::{
-    aead::{Aead, AeadCore, KeyInit, OsRng},
+    aead::{Aead, Generate, KeyInit},
     Aes256Gcm, Key, Nonce,
 };
 use base64::{engine::general_purpose, Engine as _};
@@ -454,7 +454,9 @@ impl SecureAuditLogger {
             ));
         }
 
-        let aes_key = Key::<Aes256Gcm>::from_slice(key);
+        let aes_key: &Key<Aes256Gcm> = key
+            .try_into()
+            .map_err(|_| Error::Validation("Encryption key must be 32 bytes".to_string()))?;
         let mut key_guard = self
             .log_encryption_key
             .write()
@@ -467,7 +469,7 @@ impl SecureAuditLogger {
 
     /// Generate a new encryption key
     pub fn generate_key(&self) -> Result<Vec<u8>> {
-        let key = Aes256Gcm::generate_key(&mut OsRng);
+        let key = Key::<Aes256Gcm>::generate();
         self.initialize_with_key(&key)?;
         Ok(key.to_vec())
     }
@@ -482,7 +484,7 @@ impl SecureAuditLogger {
             .ok_or_else(|| Error::Verification("Encryption key not initialized".to_string()))?;
 
         let cipher = Aes256Gcm::new(key);
-        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+        let nonce = Nonce::generate();
 
         let plaintext = serde_json::to_vec(entry).map_err(Error::Serialization)?;
 

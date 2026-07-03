@@ -7,10 +7,9 @@ use serde::{Deserialize, Serialize};
 mod encryption_impl {
     use super::*;
     use crate::error::{Result, VoirsError};
-    use aes_gcm::aead::generic_array::GenericArray;
     use aes_gcm::{
-        aead::{Aead, AeadCore, KeyInit, OsRng},
-        Aes256Gcm, Key,
+        aead::{Aead, Generate, KeyInit},
+        Aes256Gcm, Key, Nonce,
     };
     use std::convert::TryInto;
 
@@ -23,7 +22,7 @@ mod encryption_impl {
     impl CacheEncryption {
         /// Create new encryption manager with random key
         pub fn new() -> Self {
-            let key = Aes256Gcm::generate_key(&mut OsRng);
+            let key = Key::<Aes256Gcm>::generate();
             let cipher = Aes256Gcm::new(&key);
 
             Self { cipher }
@@ -37,7 +36,9 @@ mod encryption_impl {
                 ));
             }
 
-            let key: &Key<Aes256Gcm> = key.into();
+            let key: &Key<Aes256Gcm> = key.try_into().map_err(|_| {
+                VoirsError::config_error("Encryption key must be exactly 32 bytes")
+            })?;
             let cipher = Aes256Gcm::new(key);
 
             Ok(Self { cipher })
@@ -45,7 +46,7 @@ mod encryption_impl {
 
         /// Encrypt data
         pub fn encrypt(&self, data: &[u8]) -> Result<EncryptedData> {
-            let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+            let nonce = Nonce::generate();
 
             let encrypted_data = self
                 .cipher
@@ -71,7 +72,10 @@ mod encryption_impl {
 
         /// Decrypt data
         pub fn decrypt(&self, encrypted_data: &EncryptedData) -> Result<Vec<u8>> {
-            let nonce = GenericArray::from_slice(&encrypted_data.nonce[..12]); // AES-GCM typically uses 12-byte nonces
+            // AES-GCM typically uses 12-byte nonces
+            let nonce: &Nonce<_> = encrypted_data.nonce[..12]
+                .try_into()
+                .map_err(|_| VoirsError::cache_error("Invalid nonce length"))?;
 
             let decrypted_data = self
                 .cipher

@@ -77,52 +77,57 @@ impl MacOSCoreAudio {
                     // Get output devices
                     if let Ok(output_devices) = host.output_devices() {
                         for (index, device) in output_devices.enumerate() {
-                            if let Ok(device_name) = device.name() {
-                                let sample_rate = device
-                                    .default_output_config()
-                                    .map(|config| config.sample_rate() as f64)
-                                    .unwrap_or(44100.0);
+                            // cpal 0.18 removed `DeviceTrait::name()`; the device
+                            // name is now obtained via `Display` (`to_string()`),
+                            // which is infallible (see cpal's `DeviceTrait::description`
+                            // doc comment for the migration guidance).
+                            let device_name = device.to_string();
+                            let sample_rate = device
+                                .default_output_config()
+                                .map(|config| config.sample_rate() as f64)
+                                .unwrap_or(44100.0);
 
-                                let channels = device
-                                    .default_output_config()
-                                    .map(|config| config.channels() as u32)
-                                    .unwrap_or(2);
+                            let channels = device
+                                .default_output_config()
+                                .map(|config| config.channels() as u32)
+                                .unwrap_or(2);
 
-                                devices.push(AudioDevice {
-                                    id: index as u32 + 1,
-                                    name: device_name,
-                                    is_default: index == 0,
-                                    sample_rate,
-                                    channels,
-                                    is_input: false,
-                                });
-                            }
+                            devices.push(AudioDevice {
+                                id: index as u32 + 1,
+                                name: device_name,
+                                is_default: index == 0,
+                                sample_rate,
+                                channels,
+                                is_input: false,
+                            });
                         }
                     }
 
                     // Get input devices
                     if let Ok(input_devices) = host.input_devices() {
                         for (index, device) in input_devices.enumerate() {
-                            if let Ok(device_name) = device.name() {
-                                let sample_rate = device
-                                    .default_input_config()
-                                    .map(|config| config.sample_rate() as f64)
-                                    .unwrap_or(44100.0);
+                            // See the matching comment in the output-devices loop
+                            // above: cpal 0.18 requires `to_string()` (via `Display`)
+                            // instead of the removed `DeviceTrait::name()`.
+                            let device_name = device.to_string();
+                            let sample_rate = device
+                                .default_input_config()
+                                .map(|config| config.sample_rate() as f64)
+                                .unwrap_or(44100.0);
 
-                                let channels = device
-                                    .default_input_config()
-                                    .map(|config| config.channels() as u32)
-                                    .unwrap_or(1);
+                            let channels = device
+                                .default_input_config()
+                                .map(|config| config.channels() as u32)
+                                .unwrap_or(1);
 
-                                devices.push(AudioDevice {
-                                    id: (index + 1000) as u32, // Offset input device IDs
-                                    name: device_name,
-                                    is_default: index == 0,
-                                    sample_rate,
-                                    channels,
-                                    is_input: true,
-                                });
-                            }
+                            devices.push(AudioDevice {
+                                id: (index + 1000) as u32, // Offset input device IDs
+                                name: device_name,
+                                is_default: index == 0,
+                                sample_rate,
+                                channels,
+                                is_input: true,
+                            });
                         }
                     }
                 }

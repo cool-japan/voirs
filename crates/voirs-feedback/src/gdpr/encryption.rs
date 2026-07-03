@@ -3,7 +3,7 @@
 //! This module provides encryption, anonymization, and differential privacy
 //! functionality for GDPR compliance.
 
-use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit};
+use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit, Nonce};
 use scirs2_core::random::{thread_rng, Rng};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -85,7 +85,12 @@ impl GdprEncryption {
 
         let (nonce_bytes, ciphertext) = encrypted_data.split_at(12);
         let cipher = Aes256Gcm::new(&self.master_key.into());
-        let nonce = nonce_bytes.into();
+        let nonce: &Nonce<_> =
+            nonce_bytes
+                .try_into()
+                .map_err(|_| GdprError::AnonymizationFailed {
+                    message: "Invalid nonce length".to_string(),
+                })?;
 
         let plaintext =
             cipher

@@ -12,7 +12,7 @@
 [package]
 edition = "2021"
 name = "cudarc"
-version = "0.19.3"
+version = "0.19.8"
 authors = ["Chelsea Lowman <clowman1993@gmail.com>"]
 build = "build.rs"
 autolib = false

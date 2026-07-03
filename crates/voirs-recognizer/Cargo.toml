@@ -44,7 +44,7 @@ uuid = { workspace = true, features = ["v4"] }
 hex = "0.4"
 sha2.workspace = true
 hmac = { version = "0.13", optional = true }
-quick-xml = { version = "0.37", optional = true }
+quick-xml = { version = "0.41", optional = true }
 oxicode.workspace = true
 
 # Error handling
@@ -94,8 +94,15 @@ toml = "1.1"
 
 # Homomorphic encryption (optional)
 num-bigint-dig = { workspace = true, features = ["rand", "prime"], optional = true }
-# Required by num-bigint-dig's RandPrime trait API for prime generation (cannot use fastrand here)
-rand = { version = "0.8", optional = true }
+# Required by num-bigint-dig's RandPrime trait API for prime generation (cannot use fastrand here).
+# Pinned to the 0.9 line (not the newest 0.10) because num-bigint-dig 0.9.x's own
+# optional "rand" feature depends on `rand ^0.9` internally; its RandPrime trait
+# (see encrypted_inference.rs's `rng.gen_prime(..)` call) is generic over that
+# exact rand-0.9 RngCore/Rng trait identity. A direct dep on rand 0.10 here would
+# resolve a *different*, incompatible rand major for this crate's own `rand::`
+# call sites than the one num-bigint-dig's trait bound is implemented against,
+# which cannot type-check across the crate-version boundary.
+rand = { version = "0.9", optional = true }
 fastrand.workspace = true
 
 # Python bindings (optional)

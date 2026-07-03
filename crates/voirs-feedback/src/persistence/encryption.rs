@@ -143,11 +143,9 @@ pub struct EncryptionService {
 impl EncryptionService {
     /// Create a new encryption service with a generated key
     pub fn new() -> PersistenceResult<Self> {
-        use aes_gcm::aead::rand_core::RngCore;
-        use aes_gcm::aead::OsRng;
+        use aes_gcm::aead::Generate;
 
-        let mut key = [0u8; 32];
-        OsRng.fill_bytes(&mut key);
+        let key = <[u8; 32]>::generate();
 
         Ok(Self { key })
     }
@@ -160,7 +158,7 @@ impl EncryptionService {
 
     /// Encrypt data
     pub fn encrypt(&self, data: &[u8]) -> PersistenceResult<Vec<u8>> {
-        use aes_gcm::aead::{Aead, AeadCore, OsRng};
+        use aes_gcm::aead::{Aead, Generate};
         use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 
         let cipher = Aes256Gcm::new_from_slice(&self.key).map_err(|e| {
@@ -169,7 +167,7 @@ impl EncryptionService {
             }
         })?;
 
-        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+        let nonce = Nonce::generate();
         let ciphertext =
             cipher
                 .encrypt(&nonce, data)
@@ -201,7 +199,12 @@ impl EncryptionService {
         })?;
 
         let (nonce_bytes, ciphertext) = encrypted_data.split_at(12);
-        let nonce = Nonce::from_slice(nonce_bytes);
+        let nonce: &Nonce<_> =
+            nonce_bytes
+                .try_into()
+                .map_err(|_| PersistenceError::EncryptionError {
+                    message: "Invalid nonce length".to_string(),
+                })?;
 
         cipher
             .decrypt(nonce, ciphertext)

@@ -7,7 +7,7 @@
 
 use crate::{Error, Result};
 use aes_gcm::{
-    aead::{Aead, AeadCore, KeyInit, OsRng},
+    aead::{Aead, Generate, KeyInit},
     Aes256Gcm, Key, Nonce,
 };
 use base64::{engine::general_purpose, Engine as _};
@@ -91,10 +91,13 @@ impl PrivacyProtectionManager {
             }
             key
         } else {
-            Aes256Gcm::generate_key(&mut OsRng).to_vec()
+            Key::<Aes256Gcm>::generate().to_vec()
         };
 
-        let aes_key = Key::<Aes256Gcm>::from_slice(&key_bytes);
+        let aes_key: &Key<Aes256Gcm> = key_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| Error::Validation("Encryption key must be 32 bytes".to_string()))?;
         let mut key_guard = self
             .encryption_key
             .write()
@@ -122,7 +125,7 @@ impl PrivacyProtectionManager {
             .ok_or_else(|| Error::Validation("Encryption key not initialized".to_string()))?;
 
         let cipher = Aes256Gcm::new(key);
-        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+        let nonce = Nonce::generate();
 
         // Serialize voice data
         let plaintext = serde_json::to_vec(voice_data).map_err(Error::Serialization)?;
@@ -169,7 +172,11 @@ impl PrivacyProtectionManager {
             .ok_or_else(|| Error::Validation("Encryption key not initialized".to_string()))?;
 
         let cipher = Aes256Gcm::new(key);
-        let nonce = Nonce::from_slice(&encrypted_data.nonce);
+        let nonce: &Nonce<_> = encrypted_data
+            .nonce
+            .as_slice()
+            .try_into()
+            .map_err(|_| Error::Validation("Invalid nonce length".to_string()))?;
 
         // Decrypt data
         let plaintext = cipher

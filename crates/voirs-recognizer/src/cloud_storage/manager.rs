@@ -1326,8 +1326,10 @@ pub(super) fn parse_s3_list_xml(xml: &str) -> Result<Vec<ModelMetadata>, CloudSt
                 }
             }
             Ok(Event::Text(e)) if in_contents => {
-                let text = e
-                    .unescape()
+                let decoded = e.decode().map_err(|e| {
+                    CloudStorageError::DownloadFailed(format!("XML parse error: {}", e))
+                })?;
+                let text = quick_xml::escape::unescape(&decoded)
                     .map_err(|e| {
                         CloudStorageError::DownloadFailed(format!("XML parse error: {}", e))
                     })?
@@ -1408,8 +1410,10 @@ pub(super) fn parse_azure_list_xml(xml: &str) -> Result<Vec<ModelMetadata>, Clou
                 }
             }
             Ok(Event::Text(e)) if in_blob => {
-                let text = e
-                    .unescape()
+                let decoded = e.decode().map_err(|e| {
+                    CloudStorageError::DownloadFailed(format!("XML parse error: {}", e))
+                })?;
+                let text = quick_xml::escape::unescape(&decoded)
                     .map_err(|e| {
                         CloudStorageError::DownloadFailed(format!("XML parse error: {}", e))
                     })?
