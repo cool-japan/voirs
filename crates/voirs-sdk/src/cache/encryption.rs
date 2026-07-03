@@ -36,9 +36,9 @@ mod encryption_impl {
                 ));
             }
 
-            let key: &Key<Aes256Gcm> = key.try_into().map_err(|_| {
-                VoirsError::config_error("Encryption key must be exactly 32 bytes")
-            })?;
+            let key: &Key<Aes256Gcm> = key
+                .try_into()
+                .map_err(|_| VoirsError::config_error("Encryption key must be exactly 32 bytes"))?;
             let cipher = Aes256Gcm::new(key);
 
             Ok(Self { cipher })
