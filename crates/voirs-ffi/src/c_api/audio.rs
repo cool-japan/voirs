@@ -845,23 +845,33 @@ mod tests {
             std::env::temp_dir().join(format!("voirs_test_audio_{}.mp3", std::process::id()));
         let filename = CString::new(tmp_path.to_str().unwrap()).unwrap();
 
+        // MP3 encoding is backed by voirs-vocoder's real codecs::AudioCodecEncoder
+        // (AudioCodec::Mp3), which relies on the LAME C library and is therefore
+        // gated behind voirs-ffi's `codecs` feature (→ voirs-vocoder/ffi-codecs).
+        // With `codecs` enabled the call succeeds and writes a real file; without it
+        // the FFI degrades honestly and reports InternalError instead of fabricating
+        // success or crashing.
         unsafe {
             let result = voirs_audio_save_mp3(&buffer, filename.as_ptr(), 192, 2);
-            // MP3 encoding is backed by voirs_vocoder's real codecs::AudioCodecEncoder
-            // (AudioCodec::Mp3), so this now succeeds and writes a real file.
+            #[cfg(feature = "codecs")]
             assert_eq!(result, VoirsErrorCode::Success);
+            #[cfg(not(feature = "codecs"))]
+            assert_eq!(result, VoirsErrorCode::InternalError);
         }
-        assert!(
-            tmp_path.exists(),
-            "expected voirs_audio_save_mp3 to create {}",
-            tmp_path.display()
-        );
-        assert!(
-            std::fs::metadata(&tmp_path)
-                .map(|meta| meta.len() > 0)
-                .unwrap_or(false),
-            "expected the saved MP3 file to be non-empty"
-        );
+        #[cfg(feature = "codecs")]
+        {
+            assert!(
+                tmp_path.exists(),
+                "expected voirs_audio_save_mp3 to create {}",
+                tmp_path.display()
+            );
+            assert!(
+                std::fs::metadata(&tmp_path)
+                    .map(|meta| meta.len() > 0)
+                    .unwrap_or(false),
+                "expected the saved MP3 file to be non-empty"
+            );
+        }
 
         // Test invalid parameters — always works regardless of feature
         unsafe {

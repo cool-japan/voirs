@@ -8,7 +8,11 @@
 
 use crate::error::VoirsFFIError;
 use std::ffi::{CStr, CString};
+use std::process::Command;
 use std::ptr;
+use std::sync::OnceLock;
+
+use super::parsers;
 
 #[cfg(feature = "macos-platform")]
 use cpal::{
@@ -57,7 +61,14 @@ impl MacOSCoreAudio {
         }
     }
 
-    /// Get available audio devices
+    /// Get available audio devices.
+    ///
+    /// With the `macos-platform` feature enabled, this enumerates devices via
+    /// `cpal` (richer: exposes cpal's own default-config heuristics). In the
+    /// Pure-Rust default build (no `macos-platform`), and as a fallback if
+    /// cpal's enumeration comes back empty, devices are parsed from
+    /// `system_profiler SPAudioDataType -json` -- a real OS query, never a
+    /// fabricated device list.
     pub fn get_audio_devices(&self) -> Result<Vec<AudioDevice>, VoirsFFIError> {
         #[cfg(target_os = "macos")]
         {
@@ -67,95 +78,77 @@ impl MacOSCoreAudio {
                 ));
             }
 
-            // Use cpal for cross-platform audio device enumeration
-            let mut devices = Vec::new();
-
             #[cfg(feature = "macos-platform")]
             {
-                {
-                    let host = cpal::default_host();
-                    // Get output devices
-                    if let Ok(output_devices) = host.output_devices() {
-                        for (index, device) in output_devices.enumerate() {
-                            // cpal 0.18 removed `DeviceTrait::name()`; the device
-                            // name is now obtained via `Display` (`to_string()`),
-                            // which is infallible (see cpal's `DeviceTrait::description`
-                            // doc comment for the migration guidance).
-                            let device_name = device.to_string();
-                            let sample_rate = device
-                                .default_output_config()
-                                .map(|config| config.sample_rate() as f64)
-                                .unwrap_or(44100.0);
+                let mut devices = Vec::new();
+                let host = cpal::default_host();
+                // Get output devices
+                if let Ok(output_devices) = host.output_devices() {
+                    for (index, device) in output_devices.enumerate() {
+                        // cpal 0.18 removed `DeviceTrait::name()`; the device
+                        // name is now obtained via `Display` (`to_string()`),
+                        // which is infallible (see cpal's `DeviceTrait::description`
+                        // doc comment for the migration guidance).
+                        let device_name = device.to_string();
+                        let sample_rate = device
+                            .default_output_config()
+                            .map(|config| config.sample_rate() as f64)
+                            .unwrap_or(44100.0);
 
-                            let channels = device
-                                .default_output_config()
-                                .map(|config| config.channels() as u32)
-                                .unwrap_or(2);
+                        let channels = device
+                            .default_output_config()
+                            .map(|config| config.channels() as u32)
+                            .unwrap_or(2);
 
-                            devices.push(AudioDevice {
-                                id: index as u32 + 1,
-                                name: device_name,
-                                is_default: index == 0,
-                                sample_rate,
-                                channels,
-                                is_input: false,
-                            });
-                        }
-                    }
-
-                    // Get input devices
-                    if let Ok(input_devices) = host.input_devices() {
-                        for (index, device) in input_devices.enumerate() {
-                            // See the matching comment in the output-devices loop
-                            // above: cpal 0.18 requires `to_string()` (via `Display`)
-                            // instead of the removed `DeviceTrait::name()`.
-                            let device_name = device.to_string();
-                            let sample_rate = device
-                                .default_input_config()
-                                .map(|config| config.sample_rate() as f64)
-                                .unwrap_or(44100.0);
-
-                            let channels = device
-                                .default_input_config()
-                                .map(|config| config.channels() as u32)
-                                .unwrap_or(1);
-
-                            devices.push(AudioDevice {
-                                id: (index + 1000) as u32, // Offset input device IDs
-                                name: device_name,
-                                is_default: index == 0,
-                                sample_rate,
-                                channels,
-                                is_input: true,
-                            });
-                        }
+                        devices.push(AudioDevice {
+                            id: index as u32 + 1,
+                            name: device_name,
+                            is_default: index == 0,
+                            sample_rate,
+                            channels,
+                            is_input: false,
+                        });
                     }
                 }
+
+                // Get input devices
+                if let Ok(input_devices) = host.input_devices() {
+                    for (index, device) in input_devices.enumerate() {
+                        // See the matching comment in the output-devices loop
+                        // above: cpal 0.18 requires `to_string()` (via `Display`)
+                        // instead of the removed `DeviceTrait::name()`.
+                        let device_name = device.to_string();
+                        let sample_rate = device
+                            .default_input_config()
+                            .map(|config| config.sample_rate() as f64)
+                            .unwrap_or(44100.0);
+
+                        let channels = device
+                            .default_input_config()
+                            .map(|config| config.channels() as u32)
+                            .unwrap_or(1);
+
+                        devices.push(AudioDevice {
+                            id: (index + 1000) as u32, // Offset input device IDs
+                            name: device_name,
+                            is_default: index == 0,
+                            sample_rate,
+                            channels,
+                            is_input: true,
+                        });
+                    }
+                }
+
+                if !devices.is_empty() {
+                    return Ok(devices);
+                }
+                // cpal enumeration came back empty (unusual, e.g. sandboxed CI
+                // without audio hardware) -- fall through to the pure
+                // `system_profiler` query below as a secondary *real* source
+                // rather than fabricating a device list.
             }
 
-            if devices.is_empty() {
-                // Fallback to placeholder devices if enumeration fails
-                Ok(vec![
-                    AudioDevice {
-                        id: 1,
-                        name: "Built-in Output".to_string(),
-                        is_default: true,
-                        sample_rate: 44100.0,
-                        channels: 2,
-                        is_input: false,
-                    },
-                    AudioDevice {
-                        id: 2,
-                        name: "Built-in Microphone".to_string(),
-                        is_default: true,
-                        sample_rate: 44100.0,
-                        channels: 1,
-                        is_input: true,
-                    },
-                ])
-            } else {
-                Ok(devices)
-            }
+            Self::query_system_profiler_audio_devices()
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -163,6 +156,56 @@ impl MacOSCoreAudio {
                 "Core Audio not available".to_string(),
             ))
         }
+    }
+
+    /// Query `system_profiler SPAudioDataType -json` for the real audio
+    /// device list. The result is cached process-wide after the first
+    /// (relatively slow, ~1s) call.
+    #[cfg(target_os = "macos")]
+    fn query_system_profiler_audio_devices() -> Result<Vec<AudioDevice>, VoirsFFIError> {
+        static CACHE: OnceLock<Vec<AudioDevice>> = OnceLock::new();
+
+        if let Some(cached) = CACHE.get() {
+            return Ok(cached.clone());
+        }
+
+        let output = Command::new("system_profiler")
+            .args(["SPAudioDataType", "-json"])
+            .output()
+            .map_err(|e| {
+                VoirsFFIError::PlatformError(format!("Failed to run system_profiler: {e}"))
+            })?;
+
+        if !output.status.success() {
+            return Err(VoirsFFIError::PlatformError(
+                "system_profiler exited with a non-zero status".to_string(),
+            ));
+        }
+
+        let json_str = String::from_utf8_lossy(&output.stdout);
+        let parsed = parsers::parse_system_profiler_audio(&json_str);
+        if parsed.is_empty() {
+            return Err(VoirsFFIError::PlatformError(
+                "system_profiler reported no audio devices".to_string(),
+            ));
+        }
+
+        let devices: Vec<AudioDevice> = parsed
+            .into_iter()
+            .map(|d| AudioDevice {
+                id: d.index + 1,
+                name: d.name,
+                is_default: d.is_default,
+                sample_rate: d.sample_rate,
+                channels: d.channels,
+                is_input: d.is_input,
+            })
+            .collect();
+
+        // Best-effort cache: if another thread raced us and populated it
+        // first, keep that value rather than erroring.
+        let _ = CACHE.set(devices.clone());
+        Ok(devices)
     }
 
     /// Set audio device sample rate
@@ -199,7 +242,9 @@ impl MacOSCoreAudio {
         }
     }
 
-    /// Get system volume using Core Audio
+    /// Get system volume using Core Audio (via `osascript`, a Pure-Rust
+    /// shell-out in the same spirit as this crate's `sysctl`/`pmset` usage
+    /// elsewhere in the `platform` module).
     pub fn get_system_volume(&self) -> Result<f32, VoirsFFIError> {
         #[cfg(target_os = "macos")]
         {
@@ -209,9 +254,21 @@ impl MacOSCoreAudio {
                 ));
             }
 
-            // Implementation would use Core Audio volume APIs
-            // For now, return placeholder volume
-            Ok(0.8) // 80% volume as placeholder
+            let output = Command::new("osascript")
+                .args(["-e", "output volume of (get volume settings)"])
+                .output()
+                .map_err(|e| {
+                    VoirsFFIError::PlatformError(format!("Failed to run osascript: {e}"))
+                })?;
+
+            if !output.status.success() {
+                return Err(VoirsFFIError::PlatformError(
+                    "osascript failed to read the system volume".to_string(),
+                ));
+            }
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            Ok(parsers::parse_volume_output(&stdout))
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -326,13 +383,29 @@ impl MacOSAVFoundation {
 pub struct MacOSObjectiveC;
 
 impl MacOSObjectiveC {
-    /// Get system language preference
+    /// Get system language preference via `defaults read -g AppleLocale`
+    /// (equivalent in effect to `NSLocale.current.identifier`, without
+    /// requiring an Objective-C runtime bridge).
     pub fn get_system_language() -> Result<String, VoirsFFIError> {
         #[cfg(target_os = "macos")]
         {
-            // Implementation would use NSLocale.preferredLanguages
-            // For now, return English as placeholder
-            Ok("en-US".to_string())
+            let output = Command::new("defaults")
+                .args(["read", "-g", "AppleLocale"])
+                .output()
+                .map_err(|e| {
+                    VoirsFFIError::PlatformError(format!("Failed to run defaults: {e}"))
+                })?;
+
+            if !output.status.success() {
+                return Err(VoirsFFIError::PlatformError(
+                    "defaults read -g AppleLocale failed".to_string(),
+                ));
+            }
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            parsers::parse_locale(&stdout).ok_or_else(|| {
+                VoirsFFIError::PlatformError("AppleLocale value was empty".to_string())
+            })
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -342,13 +415,25 @@ impl MacOSObjectiveC {
         }
     }
 
-    /// Get system appearance (light/dark mode)
+    /// Get system appearance (light/dark mode) via
+    /// `defaults read -g AppleInterfaceStyle`. macOS represents "Light mode"
+    /// by *leaving this key unset* (so the command exits non-zero), and
+    /// "Dark mode" by setting it to `"Dark"` -- so a failed command here is
+    /// the normal, expected signal for light mode, not an error.
     pub fn get_system_appearance() -> Result<String, VoirsFFIError> {
         #[cfg(target_os = "macos")]
         {
-            // Implementation would use NSApp.effectiveAppearance
-            // For now, return light as placeholder
-            Ok("light".to_string())
+            let output = Command::new("defaults")
+                .args(["read", "-g", "AppleInterfaceStyle"])
+                .output()
+                .map_err(|e| {
+                    VoirsFFIError::PlatformError(format!("Failed to run defaults: {e}"))
+                })?;
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let raw = output.status.success().then_some(stdout.as_ref());
+
+            Ok(parsers::parse_appearance(raw).to_string())
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -381,19 +466,63 @@ impl MacOSObjectiveC {
 pub struct MacOSPerformanceMonitor;
 
 impl MacOSPerformanceMonitor {
-    /// Get macOS-specific performance metrics
+    /// Get macOS-specific performance metrics.
+    ///
+    /// Sources (all real OS queries, zero fabricated values):
+    /// - `cpu_usage`: sum of `ps -A -o %cpu=` normalized by core count.
+    /// - `memory_pressure`: `sysctl kern.memorystatus_vm_pressure_level`,
+    ///   normalized from XNU's 1/2/4 (normal/warn/critical) levels to 0.0-1.0.
+    /// - `thermal_state` / `power_state`: `pmset -g therm` / `pmset -g batt`.
+    /// - `audio_latency_ms` / `core_audio_overruns`: macOS exposes no
+    ///   portable, always-available query for per-process Core Audio
+    ///   latency/xrun counts outside of an active `AudioUnit` render
+    ///   callback, so these honestly report `0.0`/`0` rather than a
+    ///   fabricated reading.
     pub fn get_metrics() -> Result<MacOSMetrics, VoirsFFIError> {
         #[cfg(target_os = "macos")]
         {
-            // Implementation would use mach APIs, sysctl, etc.
-            // For now, return placeholder metrics
+            let cpu_output = Command::new("ps")
+                .args(["-A", "-o", "%cpu="])
+                .output()
+                .map_err(|e| VoirsFFIError::PlatformError(format!("Failed to run ps: {e}")))?;
+            let cpu_str = String::from_utf8_lossy(&cpu_output.stdout);
+            let core_count = num_cpus::get().max(1) as f32;
+            let cpu_usage = (parsers::parse_ps_cpu_output(&cpu_str) / core_count).clamp(0.0, 100.0);
+
+            let pressure_output = Command::new("sysctl")
+                .args(["-n", "kern.memorystatus_vm_pressure_level"])
+                .output()
+                .map_err(|e| VoirsFFIError::PlatformError(format!("Failed to run sysctl: {e}")))?;
+            // Default to "1" (normal) only when the sysctl's own output is
+            // unparseable -- this is a parse fallback, not a fabricated
+            // pressure reading; the sysctl call itself is still real.
+            let pressure_raw: u32 = String::from_utf8_lossy(&pressure_output.stdout)
+                .trim()
+                .parse()
+                .unwrap_or(1);
+            let memory_pressure = parsers::normalize_memory_pressure_level(pressure_raw);
+
+            let therm_output = Command::new("pmset")
+                .args(["-g", "therm"])
+                .output()
+                .map_err(|e| VoirsFFIError::PlatformError(format!("Failed to run pmset: {e}")))?;
+            let thermal_state =
+                parsers::parse_thermal_state(&String::from_utf8_lossy(&therm_output.stdout));
+
+            let batt_output = Command::new("pmset")
+                .args(["-g", "batt"])
+                .output()
+                .map_err(|e| VoirsFFIError::PlatformError(format!("Failed to run pmset: {e}")))?;
+            let power_state =
+                parsers::parse_power_state(&String::from_utf8_lossy(&batt_output.stdout));
+
             Ok(MacOSMetrics {
-                cpu_usage: 20.0,
-                memory_pressure: 0.4,
-                audio_latency_ms: 8.0,
-                core_audio_overruns: 0,
-                thermal_state: "nominal".to_string(),
-                power_state: "ac_power".to_string(),
+                cpu_usage,
+                memory_pressure,
+                audio_latency_ms: 0.0,  // no portable query available
+                core_audio_overruns: 0, // no portable query available
+                thermal_state,
+                power_state,
             })
         }
         #[cfg(not(target_os = "macos"))]
@@ -593,15 +722,25 @@ mod tests {
 
         #[cfg(target_os = "macos")]
         {
+            // `defaults read -g AppleLocale` is a fundamental system default
+            // set during initial macOS setup, so it is expected to succeed on
+            // any real host (this is a stronger check than the old fabricated
+            // "en-US" constant, which would trivially pass any such test).
             assert!(language.is_ok());
             assert!(appearance.is_ok());
 
             if let Ok(lang) = language {
                 assert!(!lang.is_empty());
+                // Locale-shaped: ASCII letters and hyphens only (e.g. "ja-JP",
+                // "en-US"), and normalized to hyphens (never a stray "_").
+                assert!(lang.chars().all(|c| c.is_ascii_alphabetic() || c == '-'));
+                assert!(!lang.contains('_'));
             }
 
             if let Ok(app) = appearance {
-                assert!(app == "light" || app == "dark" || app == "auto");
+                // Contract is exactly {"light", "dark"} -- no more fabricated
+                // "auto" fallback.
+                assert!(app == "light" || app == "dark");
             }
         }
 
@@ -621,8 +760,25 @@ mod tests {
             assert!(metrics.is_ok());
             if let Ok(metrics) = metrics {
                 assert!(metrics.cpu_usage >= 0.0);
-                assert!(metrics.memory_pressure >= 0.0);
+                assert!(metrics.cpu_usage <= 100.0);
+                assert!((0.0..=1.0).contains(&metrics.memory_pressure));
                 assert!(metrics.audio_latency_ms >= 0.0);
+                assert!(
+                    matches!(
+                        metrics.thermal_state.as_str(),
+                        "nominal" | "throttled" | "critical"
+                    ),
+                    "unexpected thermal_state: {}",
+                    metrics.thermal_state
+                );
+                assert!(
+                    matches!(
+                        metrics.power_state.as_str(),
+                        "ac_power" | "battery" | "unknown"
+                    ),
+                    "unexpected power_state: {}",
+                    metrics.power_state
+                );
             }
         }
 
@@ -648,6 +804,55 @@ mod tests {
             // Test valid sample rate
             let result = ca.set_device_sample_rate(1, 44100.0);
             assert!(result.is_ok());
+        }
+    }
+
+    /// The `osascript`-based volume query is tolerant of headless/CI
+    /// environments that may lack an active Core Audio session: a failure is
+    /// an acceptable, honest outcome, but a *successful* result must be a
+    /// real 0.0-1.0 fraction (never the old hardcoded `0.8`).
+    #[test]
+    fn test_get_system_volume_live() {
+        let core_audio = MacOSCoreAudio::new();
+
+        #[cfg(target_os = "macos")]
+        if let Ok(ca) = core_audio {
+            match ca.get_system_volume() {
+                Ok(volume) => assert!((0.0..=1.0).contains(&volume)),
+                Err(_) => {
+                    // Acceptable in a sandboxed/headless test environment.
+                }
+            }
+        }
+    }
+
+    /// `get_audio_devices()` must return either a real (non-empty) device
+    /// list or an honest error -- never the old hardcoded
+    /// "Built-in Output"/"Built-in Microphone" pair produced unconditionally.
+    ///
+    /// Ignored under `macos-platform` for the same reason as
+    /// `test_core_audio_creation`: with that feature on, this method drives
+    /// `cpal`'s device enumeration, which can segfault in headless test
+    /// environments lacking audio hardware. In the Pure-Rust default build
+    /// (the path this batch adds) it drives the safe `system_profiler`
+    /// query, which is exactly what we want to exercise here.
+    #[test]
+    #[cfg_attr(feature = "macos-platform", ignore = "Requires audio hardware access")]
+    fn test_get_audio_devices_live() {
+        let core_audio = MacOSCoreAudio::new();
+
+        #[cfg(target_os = "macos")]
+        if let Ok(ca) = core_audio {
+            match ca.get_audio_devices() {
+                Ok(devices) => assert!(
+                    !devices.is_empty(),
+                    "Ok(..) result must contain at least one real device"
+                ),
+                Err(_) => {
+                    // Acceptable if system_profiler is unavailable in this
+                    // environment.
+                }
+            }
         }
     }
 }

@@ -12,6 +12,13 @@ pub mod macos;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
+// Pure, platform-independent parsing helpers shared by the OS-specific
+// modules above. Unlike those modules, this one is *not* gated by
+// `target_os`, so its parsers can be unit-tested against fixed sample
+// strings on any host (see `parsers::tests` for Linux/macOS/Windows
+// fixtures that all run regardless of which OS is executing the suite).
+pub mod parsers;
+
 // Mobile platform support
 #[cfg(target_os = "android")]
 pub mod android;
@@ -136,12 +143,55 @@ impl PlatformInfo {
 
         #[cfg(target_os = "windows")]
         {
-            // Windows memory detection would require windows-specific crates
-            // For now, return a reasonable default
-            return 8 * 1024 * 1024 * 1024; // 8 GB default
+            // Query `GlobalMemoryStatusEx` (kernel32) directly via a hand-rolled
+            // `extern "system"` declaration. This is a zero-dependency approach
+            // (mirrors `voirs-cli/src/performance/profiler.rs`) that keeps the
+            // *default* build Pure-Rust regardless of which optional
+            // FFI-related features happen to be enabled: `GlobalMemoryStatusEx`
+            // has been part of the stable Win32 ABI since Windows 2000 and is
+            // always linkable via kernel32 (the standard library already links
+            // against it), so no `windows`/`winapi` crate dependency is needed.
+            #[repr(C)]
+            struct MemoryStatusEx {
+                dw_length: u32,
+                dw_memory_load: u32,
+                ull_total_phys: u64,
+                ull_avail_phys: u64,
+                ull_total_page_file: u64,
+                ull_avail_page_file: u64,
+                ull_total_virtual: u64,
+                ull_avail_virtual: u64,
+                ull_avail_extended_virtual: u64,
+            }
+
+            extern "system" {
+                fn GlobalMemoryStatusEx(lpbuffer: *mut MemoryStatusEx) -> i32;
+            }
+
+            let mut memory_status = MemoryStatusEx {
+                dw_length: std::mem::size_of::<MemoryStatusEx>() as u32,
+                dw_memory_load: 0,
+                ull_total_phys: 0,
+                ull_avail_phys: 0,
+                ull_total_page_file: 0,
+                ull_avail_page_file: 0,
+                ull_total_virtual: 0,
+                ull_avail_virtual: 0,
+                ull_avail_extended_virtual: 0,
+            };
+
+            let succeeded = unsafe { GlobalMemoryStatusEx(&mut memory_status) } != 0;
+            if succeeded && memory_status.ull_total_phys > 0 {
+                return memory_status.ull_total_phys;
+            }
+            // Extremely rare: the syscall itself failed. Fall through to the
+            // documented fallback below rather than fabricating a Windows-only
+            // constant here.
         }
 
-        // Default fallback
+        // Default fallback: only reached if every platform-specific query
+        // above failed to produce a real value (or on platforms with no
+        // implemented query at all).
         4 * 1024 * 1024 * 1024 // 4 GB default
     }
 
@@ -184,30 +234,19 @@ impl PlatformInfo {
         }
     }
 
-    /// Check if platform supports hardware acceleration
+    /// Check whether the current CPU exposes SIMD-based acceleration.
+    ///
+    /// **Contract**: this reports CPU SIMD feature availability (AVX2/SSE2 on
+    /// x86_64, NEON on aarch64) via `has_avx2 || has_sse2 || has_neon` --
+    /// computed uniformly the same way on every platform. It does **not**
+    /// probe for GPU/ML-accelerator availability (Metal, DirectML, CUDA);
+    /// earlier versions of this function unconditionally returned `true` on
+    /// macOS/Windows regardless of the actual hardware, which was a
+    /// fabricated result. Callers that need GPU acceleration detection
+    /// should consult the `gpu` feature / `voirs-acoustic`'s device-hub
+    /// detection instead.
     pub fn supports_hardware_acceleration(&self) -> bool {
-        #[cfg(target_os = "macos")]
-        {
-            // macOS has Metal Performance Shaders and Accelerate framework
-            true
-        }
-
-        #[cfg(target_os = "windows")]
-        {
-            // Windows has DirectML and similar technologies
-            return true;
-        }
-
-        #[cfg(target_os = "linux")]
-        {
-            // Linux might have OpenCL or CUDA available
-            self.has_avx2 || self.has_sse2
-        }
-
-        #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-        {
-            return false;
-        }
+        self.has_avx2 || self.has_sse2 || self.has_neon
     }
 }
 
@@ -322,5 +361,41 @@ mod tests {
 
         assert!(config.buffer_size <= optimal.buffer_size);
         assert!(config.sample_rate >= optimal.sample_rate);
+    }
+
+    /// Cross-check `get_total_memory()` against a direct `sysctl` call so a
+    /// regression back to a hardcoded constant (e.g. the old Windows "8 GB
+    /// default") would be caught: a fabricated constant would not match this
+    /// host's actual physical memory.
+    #[test]
+    fn test_total_memory_matches_sysctl_on_macos() {
+        #[cfg(target_os = "macos")]
+        {
+            let Ok(output) = std::process::Command::new("sysctl")
+                .args(["-n", "hw.memsize"])
+                .output()
+            else {
+                return; // sysctl unavailable in this environment; nothing to compare.
+            };
+            let Ok(expected) = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse::<u64>()
+            else {
+                return;
+            };
+            assert_eq!(PlatformInfo::current().total_memory, expected);
+        }
+    }
+
+    /// `supports_hardware_acceleration()` must be exactly the SIMD-flag OR --
+    /// uniformly on every platform -- never a fabricated `true` regardless of
+    /// hardware (the previous macOS/Windows behavior).
+    #[test]
+    fn test_supports_hardware_acceleration_matches_simd_flags() {
+        let info = PlatformInfo::current();
+        assert_eq!(
+            info.supports_hardware_acceleration(),
+            info.has_avx2 || info.has_sse2 || info.has_neon
+        );
     }
 }

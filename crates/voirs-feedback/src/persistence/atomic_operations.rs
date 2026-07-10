@@ -190,6 +190,22 @@ impl AtomicFeedbackStorage {
         result
     }
 
+    /// Atomically delete all feedback history for a user (GDPR right-to-erasure).
+    pub async fn delete_user_feedback(&self, user_id: &str) -> PersistenceResult<()> {
+        // Begin atomic operation
+        let operation_id = self.context.begin_operation(user_id).await?;
+
+        let result = {
+            let mut storage = self.storage.write().await;
+            storage.remove(user_id);
+            Ok(())
+        };
+
+        // End atomic operation
+        self.context.end_operation(user_id, operation_id).await?;
+        result
+    }
+
     /// Get storage statistics
     pub async fn get_stats(&self) -> (usize, usize) {
         let storage = self.storage.read().await;

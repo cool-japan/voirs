@@ -153,22 +153,25 @@ impl PersistenceManager for MemoryPersistenceManager {
     }
 
     async fn delete_user_data(&self, user_id: &str) -> PersistenceResult<()> {
-        let mut storage = self.storage.write().await;
+        {
+            let mut storage = self.storage.write().await;
 
-        // Remove user progress
-        storage.user_progress.remove(user_id);
+            // Remove user progress
+            storage.user_progress.remove(user_id);
 
-        // Remove user preferences
-        storage.user_preferences.remove(user_id);
+            // Remove user preferences
+            storage.user_preferences.remove(user_id);
 
-        // Note: Feedback history is handled by atomic storage -
-        // we could implement deletion there but for now we'll leave it
-        // as atomic storage doesn't expose deletion to maintain consistency
+            // Remove sessions for this user
+            storage
+                .sessions
+                .retain(|_, session| session.user_id != user_id);
+        }
 
-        // Remove sessions for this user
-        storage
-            .sessions
-            .retain(|_, session| session.user_id != user_id);
+        // Remove feedback history via the atomic feedback storage. This is done
+        // sequentially, after releasing the `storage` write lock above, to avoid
+        // holding two independently-locked structures at once (lock-ordering hazard).
+        self.feedback_storage.delete_user_feedback(user_id).await?;
 
         log::info!("Deleted all data for user: {user_id}");
         Ok(())
@@ -438,6 +441,110 @@ mod tests {
         assert_eq!(
             result.feedback_records_cleaned, 1,
             "should report 1 cleaned feedback record"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_delete_user_data_removes_feedback_history() {
+        use crate::traits::{FeedbackResponse, FeedbackType, ProgressIndicators};
+
+        let config = PersistenceConfig::default();
+        let mut manager = MemoryPersistenceManager::new(config).await.unwrap();
+        manager.initialize().await.unwrap();
+
+        let user_id = "gdpr_test_user";
+
+        // Save user progress
+        let progress = UserProgress {
+            user_id: user_id.to_string(),
+            ..UserProgress::default()
+        };
+        manager
+            .save_user_progress(user_id, &progress)
+            .await
+            .unwrap();
+
+        // Save user preferences
+        let preferences = UserPreferences::default();
+        manager
+            .save_preferences(user_id, &preferences)
+            .await
+            .unwrap();
+
+        // Save a session for this user
+        let session_id = Uuid::new_v4();
+        let session = SessionState {
+            session_id,
+            user_id: user_id.to_string(),
+            start_time: Utc::now(),
+            last_activity: Utc::now(),
+            current_task: None,
+            stats: SessionStats::default(),
+            preferences: UserPreferences::default(),
+            adaptive_state: crate::traits::AdaptiveState::default(),
+            current_exercise: None,
+            session_stats: crate::traits::SessionStatistics::default(),
+        };
+        manager.save_session(&session).await.unwrap();
+
+        // Save feedback history for this user
+        let feedback = FeedbackResponse {
+            feedback_items: vec![],
+            overall_score: 0.7,
+            immediate_actions: vec![],
+            long_term_goals: vec![],
+            progress_indicators: ProgressIndicators::default(),
+            timestamp: Utc::now(),
+            processing_time: std::time::Duration::from_millis(10),
+            feedback_type: FeedbackType::Quality,
+        };
+        manager.save_feedback(user_id, &feedback).await.unwrap();
+
+        // Sanity check: everything is present before deletion
+        assert!(manager.load_user_progress(user_id).await.is_ok());
+        assert!(manager.load_preferences(user_id).await.is_ok());
+        assert_eq!(
+            manager.load_session(&session_id).await.unwrap().user_id,
+            user_id
+        );
+        let history_before = manager
+            .load_feedback_history(user_id, None, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            history_before.len(),
+            1,
+            "feedback history should be present before deletion"
+        );
+
+        // Perform GDPR erasure
+        manager.delete_user_data(user_id).await.unwrap();
+
+        // Progress and preferences must be gone
+        assert!(
+            manager.load_user_progress(user_id).await.is_err(),
+            "user progress should be deleted"
+        );
+        assert!(
+            manager.load_preferences(user_id).await.is_err(),
+            "user preferences should be deleted"
+        );
+
+        // Sessions for this user must be gone
+        assert!(
+            manager.load_session(&session_id).await.is_err(),
+            "session should be deleted"
+        );
+
+        // Feedback history must be empty (this is the GDPR gap being closed)
+        let history_after = manager
+            .load_feedback_history(user_id, None, None)
+            .await
+            .unwrap();
+        assert!(
+            history_after.is_empty(),
+            "feedback history must be empty after right-to-erasure deletion, got {} records",
+            history_after.len()
         );
     }
 }

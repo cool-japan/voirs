@@ -11,6 +11,8 @@ use std::ffi::{CString, OsStr};
 use std::os::windows::ffi::OsStrExt;
 use std::ptr;
 
+use super::parsers;
+
 #[cfg(target_os = "windows")]
 use winapi::um::{
     audiopolicy::{IAudioSessionControl2, IAudioSessionManager2},
@@ -533,18 +535,110 @@ impl WindowsRegistry {
 pub struct WindowsPerformanceMonitor;
 
 impl WindowsPerformanceMonitor {
-    /// Get Windows-specific performance metrics
+    /// Get Windows-specific performance metrics.
+    ///
+    /// `cpu_usage` comes from a short two-sample `GetSystemTimes` delta
+    /// (idle/kernel/user tick counts); `memory_usage` is read directly from
+    /// `GlobalMemoryStatusEx`'s `dwMemoryLoad` field (already a 0-100
+    /// percentage supplied by the OS). Both are queried via hand-rolled
+    /// `extern "system"` declarations -- zero dependencies, mirroring
+    /// `voirs-ffi/src/platform/mod.rs`'s `get_total_memory` -- so this stays
+    /// Pure-Rust-compilable regardless of which optional Windows-specific
+    /// crate features (`windows`/`winapi`) happen to be enabled.
+    ///
+    /// `audio_latency_ms`, `audio_dropouts`, and `com_objects_active` have no
+    /// portable, always-available system-wide query (per-process COM object
+    /// counts in particular would require this crate to track its own COM
+    /// object lifecycle explicitly), so they honestly report `0.0`/`0`
+    /// rather than a fabricated reading.
     pub fn get_metrics() -> Result<WindowsMetrics, VoirsFFIError> {
         #[cfg(target_os = "windows")]
         {
-            // Implementation would use Windows Performance Counters
-            // For now, return placeholder metrics
+            #[repr(C)]
+            struct MemoryStatusEx {
+                dw_length: u32,
+                dw_memory_load: u32,
+                ull_total_phys: u64,
+                ull_avail_phys: u64,
+                ull_total_page_file: u64,
+                ull_avail_page_file: u64,
+                ull_total_virtual: u64,
+                ull_avail_virtual: u64,
+                ull_avail_extended_virtual: u64,
+            }
+
+            #[repr(C)]
+            #[derive(Clone, Copy, Default)]
+            struct RawFileTime {
+                dw_low_date_time: u32,
+                dw_high_date_time: u32,
+            }
+
+            impl RawFileTime {
+                fn to_u64(self) -> u64 {
+                    ((self.dw_high_date_time as u64) << 32) | self.dw_low_date_time as u64
+                }
+            }
+
+            extern "system" {
+                fn GlobalMemoryStatusEx(lpbuffer: *mut MemoryStatusEx) -> i32;
+                fn GetSystemTimes(
+                    lp_idle_time: *mut RawFileTime,
+                    lp_kernel_time: *mut RawFileTime,
+                    lp_user_time: *mut RawFileTime,
+                ) -> i32;
+            }
+
+            let mut memory_status = MemoryStatusEx {
+                dw_length: std::mem::size_of::<MemoryStatusEx>() as u32,
+                dw_memory_load: 0,
+                ull_total_phys: 0,
+                ull_avail_phys: 0,
+                ull_total_page_file: 0,
+                ull_avail_page_file: 0,
+                ull_total_virtual: 0,
+                ull_avail_virtual: 0,
+                ull_avail_extended_virtual: 0,
+            };
+            if unsafe { GlobalMemoryStatusEx(&mut memory_status) } == 0 {
+                return Err(VoirsFFIError::PlatformError(
+                    "GlobalMemoryStatusEx failed".to_string(),
+                ));
+            }
+            let memory_usage = memory_status.dw_memory_load as f32;
+
+            let mut idle_before = RawFileTime::default();
+            let mut kernel_before = RawFileTime::default();
+            let mut user_before = RawFileTime::default();
+            let sampled_before =
+                unsafe { GetSystemTimes(&mut idle_before, &mut kernel_before, &mut user_before) }
+                    != 0;
+
+            std::thread::sleep(std::time::Duration::from_millis(100));
+
+            let mut idle_after = RawFileTime::default();
+            let mut kernel_after = RawFileTime::default();
+            let mut user_after = RawFileTime::default();
+            let sampled_after =
+                unsafe { GetSystemTimes(&mut idle_after, &mut kernel_after, &mut user_after) } != 0;
+
+            let cpu_usage = if sampled_before && sampled_after {
+                let idle_delta = idle_after.to_u64().saturating_sub(idle_before.to_u64());
+                let kernel_delta = kernel_after.to_u64().saturating_sub(kernel_before.to_u64());
+                let user_delta = user_after.to_u64().saturating_sub(user_before.to_u64());
+                parsers::cpu_usage_from_ticks(idle_delta, kernel_delta, user_delta)
+            } else {
+                0.0 // GetSystemTimes unavailable -- honest zero, not fabricated
+            };
+
             Ok(WindowsMetrics {
-                cpu_usage: 25.0,
-                memory_usage: 60.0,
-                audio_latency_ms: 12.0,
-                audio_dropouts: 0,
-                com_objects_active: 5,
+                cpu_usage,
+                memory_usage,
+                audio_latency_ms: 0.0, // no portable query available
+                audio_dropouts: 0,     // no portable query available
+                // no portable query available (would require in-process COM
+                // object lifecycle tracking)
+                com_objects_active: 0,
             })
         }
         #[cfg(not(target_os = "windows"))]
@@ -736,8 +830,14 @@ mod tests {
             assert!(metrics.is_ok());
             if let Ok(metrics) = metrics {
                 assert!(metrics.cpu_usage >= 0.0);
+                assert!(metrics.cpu_usage <= 100.0);
                 assert!(metrics.memory_usage >= 0.0);
+                assert!(metrics.memory_usage <= 100.0);
                 assert!(metrics.audio_latency_ms >= 0.0);
+                // No portable queries exist for these; must be honestly zero
+                // rather than fabricated nonzero placeholders.
+                assert_eq!(metrics.audio_dropouts, 0);
+                assert_eq!(metrics.com_objects_active, 0);
             }
         }
 

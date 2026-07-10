@@ -5,7 +5,7 @@ All notable changes to VoiRS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] - 2026-06-22
+## [0.1.0] - 2026-07-08
 
 First public release of VoiRS, a pure-Rust neural speech-synthesis (TTS) framework with a modular, pipeline-based architecture.
 
@@ -98,6 +98,12 @@ First public release of VoiRS, a pure-Rust neural speech-synthesis (TTS) framewo
 - `voirs-cli` update manager: `voirs_acoustic::hub::ensure_crypto_provider()` called at the top of the version-comparison test to prevent a panic from `reqwest::Client::new()` when no `rustls` `CryptoProvider` is installed
 - `voirs-recognizer` encrypted inference: Paillier and ElGamal schemes no longer unconditionally return `UnsupportedScheme`; they dispatch to real implementations under `feature = "homomorphic"` and return a descriptive error on stable builds
 - `voirs-feedback` API: `validate_auth` for `AuthType::Jwt` now performs real HS256 JWT validation instead of always returning `Err("Authentication method not implemented")`
+- `voirs-ffi` platform detection: replaced 8 hardcoded/fabricated OS values in `platform/{mod,linux,macos,windows}.rs` with real queries (Pure-Rust by default) — Windows total memory via `GlobalMemoryStatusEx`, `supports_hardware_acceleration` now reports real SIMD availability (AVX2/SSE2/NEON) instead of unconditional `true`, `PerformanceMonitor::get_metrics` reads real per-OS metrics, ALSA card enumeration/`test_device` parse `/proc/asound` (full query behind `linux-platform`), macOS audio devices via `system_profiler`, system volume via `osascript`, locale/appearance via `defaults read`. Added a pure-parser module (`platform/parsers.rs`) with ~40 unit tests
+- `voirs-feedback` GDPR right-to-erasure: `MemoryPersistenceManager::delete_user_data` now also deletes feedback history (previously skipped) — added `AtomicFeedbackStorage::delete_user_feedback` and call it with correct sequential lock ordering; regression test verifies progress, preferences, sessions, and feedback history are all erased
+- `voirs-cli` `config::migrate_config`: now deserializes the whole config, preserving every field (previously discarded all but `output_format`); also fixed a latent `CliConfig` serialization bug where `#[serde(flatten)] core: AppConfig` collided with the outer `cli` field to emit two `[cli]` tables (invalid, non-round-trippable TOML) — resolved by nesting `core` under its own `[core]` table
+- `voirs-cli` SSML `parse_pitch_value`: Hz→semitone conversion is now logarithmic (`12 · log2(hz / 200)`) instead of a linear approximation, so `400Hz` correctly maps to +12 semitones and `100Hz` to −12
+- `voirs-cli` workflow engine: the file-op / command / script / branch / loop step handlers in `workflow/executor.rs` now perform real work (thread `&mut ExecutionContext`, run processes via `tokio::process`, execute temp-file scripts, evaluate branch conditions, run bounded loops) instead of returning unconditional success; each handler has a test
+- `voirs-ffi` MP3 codec test-gating: added an opt-in `codecs` feature (forwards to `voirs-vocoder/ffi-codecs`; NOT default, since MP3/LAME is a C library) so `test_mp3_save_function` passes both with the codec (asserts success + file written) and without it (asserts an honest `InternalError`) instead of only passing under whole-workspace `--all-features`
 - Lock-poisoning handled gracefully across multiple modules: `unwrap_or_else(|e| e.into_inner())` replaces panicking `unwrap()` on `Mutex`/`RwLock` in audio processing and model-loading paths
 - Conformer CTC decoding: integer overflow in `tokens_to_text` fixed — `token_id as u8` could wrap for IDs > 255; corrected to `(token_id - 2) % 26` in `usize` arithmetic
 - Timing-sensitive tests hardened across `voirs-evaluation`, `voirs-conversion`, `voirs-cli`, `voirs-feedback`, and `voirs-g2p`: time budgets increased 4–10× and throughput minimums decreased proportionally to eliminate flakiness under parallel CI load

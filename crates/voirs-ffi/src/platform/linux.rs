@@ -12,6 +12,8 @@ use std::ffi::{CStr, CString};
 use std::process::Command;
 use std::ptr;
 
+use super::parsers;
+
 #[cfg(feature = "linux-platform")]
 use alsa;
 
@@ -236,8 +238,12 @@ impl LinuxALSA {
 
             match alsa_check {
                 Ok(_) => {
-                    // ALSA is available
-                    let cards = Self::enumerate_cards()?;
+                    // ALSA core is loaded (`/proc/asound` exists). Enumerating
+                    // zero cards -- or hitting a transient parse failure -- is
+                    // an honest outcome, not a reason to fail initialization
+                    // entirely, so degrade to an empty card list rather than
+                    // propagating the error.
+                    let cards = Self::enumerate_cards().unwrap_or_default();
                     Ok(LinuxALSA {
                         initialized: true,
                         cards,
@@ -257,41 +263,36 @@ impl LinuxALSA {
         }
     }
 
-    /// Enumerate ALSA sound cards
+    /// Enumerate ALSA sound cards by parsing `/proc/asound/cards` (Pure Rust,
+    /// zero dependencies -- no `libasound` linkage required just to see what
+    /// hardware exists).
     fn enumerate_cards() -> Result<Vec<ALSACard>, VoirsFFIError> {
         #[cfg(target_os = "linux")]
         {
-            // Implementation would read /proc/asound/cards
-            // For now, return placeholder cards
-            Ok(vec![
-                ALSACard {
-                    id: 0,
-                    name: "HDA Intel PCH".to_string(),
-                    driver: "HDA-Intel".to_string(),
-                    devices: vec![
-                        ALSADevice {
-                            id: 0,
-                            name: "ALC295 Analog".to_string(),
-                            device_type: "playback".to_string(),
-                        },
-                        ALSADevice {
-                            id: 1,
-                            name: "ALC295 Digital".to_string(),
-                            device_type: "playback".to_string(),
-                        },
-                    ],
-                },
-                ALSACard {
-                    id: 1,
-                    name: "USB Audio".to_string(),
-                    driver: "USB-Audio".to_string(),
-                    devices: vec![ALSADevice {
-                        id: 0,
-                        name: "USB Audio Device".to_string(),
-                        device_type: "playback".to_string(),
-                    }],
-                },
-            ])
+            let contents = std::fs::read_to_string("/proc/asound/cards").map_err(|e| {
+                VoirsFFIError::PlatformError(format!("Failed to read /proc/asound/cards: {e}"))
+            })?;
+
+            let entries = parsers::parse_asound_cards(&contents);
+            if entries.is_empty() {
+                return Err(VoirsFFIError::PlatformError(
+                    "No sound cards found in /proc/asound/cards".to_string(),
+                ));
+            }
+
+            Ok(entries
+                .into_iter()
+                .map(|entry| ALSACard {
+                    id: entry.index,
+                    name: if entry.long_name.is_empty() {
+                        entry.id
+                    } else {
+                        entry.long_name
+                    },
+                    driver: entry.driver,
+                    devices: Self::enumerate_pcm_devices(entry.index),
+                })
+                .collect())
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -299,6 +300,56 @@ impl LinuxALSA {
                 "ALSA not available".to_string(),
             ))
         }
+    }
+
+    /// List the PCM playback/capture device nodes for one card by reading
+    /// the `/proc/asound/card{N}` directory: each `pcm{M}p`/`pcm{M}c` entry
+    /// is a device node whose `info` file (`parsers::parse_pcm_info_name`)
+    /// gives its human-readable name.
+    #[cfg(target_os = "linux")]
+    fn enumerate_pcm_devices(card_index: u32) -> Vec<ALSADevice> {
+        let dir = format!("/proc/asound/card{card_index}");
+        let Ok(read_dir) = std::fs::read_dir(&dir) else {
+            return Vec::new();
+        };
+
+        let mut devices: Vec<ALSADevice> = read_dir
+            .filter_map(|entry| {
+                let entry = entry.ok()?;
+                let file_name = entry.file_name();
+                let name = file_name.to_string_lossy();
+
+                let after_pcm = name.strip_prefix("pcm")?;
+                let device_type = if after_pcm.ends_with('p') {
+                    "playback"
+                } else if after_pcm.ends_with('c') {
+                    "capture"
+                } else {
+                    return None;
+                };
+
+                let digits: String = after_pcm
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect();
+                let device_id: u32 = digits.parse().ok()?;
+
+                let info_path = entry.path().join("info");
+                let device_name = std::fs::read_to_string(&info_path)
+                    .ok()
+                    .and_then(|info| parsers::parse_pcm_info_name(&info))
+                    .unwrap_or_else(|| format!("PCM {device_id}"));
+
+                Some(ALSADevice {
+                    id: device_id,
+                    name: device_name,
+                    device_type: device_type.to_string(),
+                })
+            })
+            .collect();
+
+        devices.sort_by_key(|d| d.id);
+        devices
     }
 
     /// Get ALSA cards
@@ -312,13 +363,34 @@ impl LinuxALSA {
         Ok(&self.cards)
     }
 
-    /// Test ALSA device capability
+    /// Test ALSA device capability.
+    ///
+    /// With the (non-default) `linux-platform` feature enabled, this
+    /// performs a real `snd_pcm_hw_params`-based query via the `alsa` crate
+    /// (C-FFI, policy-acceptable because it is feature-gated rather than a
+    /// default dependency). In the Pure-Rust default build, this instead
+    /// reports whatever can be honestly determined from `/proc/asound`
+    /// alone: `/proc` only exposes the hw_params of a PCM substream that is
+    /// *currently open*, not the full supported range, so the result may be
+    /// a partially/fully empty (but never fabricated) snapshot; a
+    /// completely nonexistent card/device is reported as `Err` rather than a
+    /// fabricated capability.
     pub fn test_device(
         &self,
         card_id: u32,
         device_id: u32,
     ) -> Result<ALSADeviceCapability, VoirsFFIError> {
-        #[cfg(target_os = "linux")]
+        #[cfg(all(target_os = "linux", feature = "linux-platform"))]
+        {
+            if !self.initialized {
+                return Err(VoirsFFIError::PlatformError(
+                    "ALSA not initialized".to_string(),
+                ));
+            }
+            return Self::test_device_via_alsa_lib(card_id, device_id);
+        }
+
+        #[cfg(all(target_os = "linux", not(feature = "linux-platform")))]
         {
             if !self.initialized {
                 return Err(VoirsFFIError::PlatformError(
@@ -326,19 +398,35 @@ impl LinuxALSA {
                 ));
             }
 
-            // Implementation would use ALSA APIs to test device
-            // For now, return placeholder capability
+            let playback_path = format!("/proc/asound/card{card_id}/pcm{device_id}p");
+            let capture_path = format!("/proc/asound/card{card_id}/pcm{device_id}c");
+
+            let hw_params_path = if std::fs::metadata(&playback_path).is_ok() {
+                format!("{playback_path}/sub0/hw_params")
+            } else if std::fs::metadata(&capture_path).is_ok() {
+                format!("{capture_path}/sub0/hw_params")
+            } else {
+                return Err(VoirsFFIError::PlatformError(format!(
+                    "ALSA device card{card_id}/pcm{device_id} not found under /proc/asound"
+                )));
+            };
+
+            // Honest partial result: only a currently-open stream's
+            // negotiated params are visible this way, so an inactive device
+            // legitimately yields an empty (not fabricated) snapshot.
+            let snapshot = std::fs::read_to_string(&hw_params_path)
+                .ok()
+                .map(|contents| parsers::parse_alsa_hw_params(&contents))
+                .unwrap_or_default();
+
             Ok(ALSADeviceCapability {
-                sample_rates: vec![44100, 48000, 96000],
-                formats: vec![
-                    "S16_LE".to_string(),
-                    "S24_LE".to_string(),
-                    "S32_LE".to_string(),
-                ],
-                channels: vec![1, 2, 6, 8],
-                buffer_sizes: vec![64, 128, 256, 512, 1024],
+                sample_rates: snapshot.sample_rates,
+                formats: snapshot.formats,
+                channels: snapshot.channels,
+                buffer_sizes: snapshot.buffer_sizes,
             })
         }
+
         #[cfg(not(target_os = "linux"))]
         {
             let _ = (card_id, device_id);
@@ -346,6 +434,76 @@ impl LinuxALSA {
                 "ALSA not available".to_string(),
             ))
         }
+    }
+
+    /// Real ALSA hardware-parameter capability query via `libasound` (the
+    /// `alsa` crate's safe wrapper). Only compiled when the `linux-platform`
+    /// feature is enabled. Tries the device as a playback stream first, then
+    /// falls back to capture, since `test_device` is not given a direction.
+    #[cfg(all(target_os = "linux", feature = "linux-platform"))]
+    fn test_device_via_alsa_lib(
+        card_id: u32,
+        device_id: u32,
+    ) -> Result<ALSADeviceCapability, VoirsFFIError> {
+        let device_name = format!("hw:{card_id},{device_id}");
+
+        let pcm = alsa::pcm::PCM::new(&device_name, alsa::Direction::Playback, false)
+            .or_else(|_| alsa::pcm::PCM::new(&device_name, alsa::Direction::Capture, false))
+            .map_err(|e| {
+                VoirsFFIError::PlatformError(format!(
+                    "Failed to open ALSA device {device_name}: {e}"
+                ))
+            })?;
+
+        let hwp = alsa::pcm::HwParams::any(&pcm).map_err(|e| {
+            VoirsFFIError::PlatformError(format!(
+                "Failed to query hw_params for {device_name}: {e}"
+            ))
+        })?;
+
+        const CANDIDATE_RATES: [u32; 6] = [8_000, 16_000, 22_050, 44_100, 48_000, 96_000];
+        let sample_rates: Vec<u32> = CANDIDATE_RATES
+            .into_iter()
+            .filter(|&rate| hwp.test_rate(rate).is_ok())
+            .collect();
+
+        const CANDIDATE_CHANNELS: [u32; 4] = [1, 2, 6, 8];
+        let channels: Vec<u32> = CANDIDATE_CHANNELS
+            .into_iter()
+            .filter(|&ch| hwp.test_channels(ch).is_ok())
+            .collect();
+
+        let candidate_formats = [
+            alsa::pcm::Format::S16LE,
+            alsa::pcm::Format::S24LE,
+            alsa::pcm::Format::S32LE,
+        ];
+        let formats: Vec<String> = candidate_formats
+            .into_iter()
+            .filter(|&fmt| hwp.test_format(fmt).is_ok())
+            .map(|fmt| fmt.to_string())
+            .collect();
+
+        let buffer_sizes = match (hwp.get_buffer_size_min(), hwp.get_buffer_size_max()) {
+            (Ok(min), Ok(max)) => {
+                let min = i64::from(min);
+                let max = i64::from(max);
+                const CANDIDATE_BUFFER_SIZES: [i64; 5] = [64, 128, 256, 512, 1024];
+                CANDIDATE_BUFFER_SIZES
+                    .into_iter()
+                    .filter(|&size| size >= min && size <= max)
+                    .map(|size| size as u32)
+                    .collect()
+            }
+            _ => Vec::new(),
+        };
+
+        Ok(ALSADeviceCapability {
+            sample_rates,
+            formats,
+            channels,
+            buffer_sizes,
+        })
     }
 }
 
@@ -555,21 +713,60 @@ pub struct SystemDServiceConfig {
 pub struct LinuxPerformanceMonitor;
 
 impl LinuxPerformanceMonitor {
-    /// Get Linux-specific performance metrics
+    /// Get Linux-specific performance metrics from `/proc/loadavg`,
+    /// `/proc/meminfo`, and a short two-sample delta of `/proc/stat`.
+    ///
+    /// `audio_xruns` has no portable, always-available system-wide query
+    /// (xrun counts are per-PCM-substream and only observable while ALSA has
+    /// the device open), so it honestly reports `0` rather than a fabricated
+    /// count.
     pub fn get_metrics() -> Result<LinuxMetrics, VoirsFFIError> {
         #[cfg(target_os = "linux")]
         {
-            // Implementation would read /proc/stat, /proc/meminfo, etc.
-            // For now, return placeholder metrics
+            let loadavg_content = std::fs::read_to_string("/proc/loadavg").map_err(|e| {
+                VoirsFFIError::PlatformError(format!("Failed to read /proc/loadavg: {e}"))
+            })?;
+            let (load_average_1m, load_average_5m, load_average_15m) =
+                parsers::parse_loadavg(&loadavg_content).ok_or_else(|| {
+                    VoirsFFIError::PlatformError("Failed to parse /proc/loadavg".to_string())
+                })?;
+
+            let meminfo_content = std::fs::read_to_string("/proc/meminfo").map_err(|e| {
+                VoirsFFIError::PlatformError(format!("Failed to read /proc/meminfo: {e}"))
+            })?;
+            let mem_info = parsers::parse_meminfo(&meminfo_content);
+
+            // Two-sample /proc/stat delta for an instantaneous CPU usage
+            // estimate -- the same technique `top`/`vmstat` use internally.
+            let sample_before = std::fs::read_to_string("/proc/stat")
+                .ok()
+                .and_then(|c| parsers::parse_proc_stat_cpu_line(&c));
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            let sample_after = std::fs::read_to_string("/proc/stat")
+                .ok()
+                .and_then(|c| parsers::parse_proc_stat_cpu_line(&c));
+            let cpu_usage = match (sample_before, sample_after) {
+                (Some(prev), Some(curr)) => parsers::cpu_usage_percent(prev, curr),
+                _ => 0.0, // /proc/stat unavailable -- honest zero, not fabricated
+            };
+
+            // A queryable SCHED_FIFO max priority is a reasonable proxy for
+            // real-time scheduling being supported/available on this kernel.
+            let rt_priority_available =
+                unsafe { libc::sched_get_priority_max(libc::SCHED_FIFO) } >= 0;
+
             Ok(LinuxMetrics {
-                cpu_usage: 15.0,
-                memory_usage_mb: 2048,
-                swap_usage_mb: 0,
-                load_average_1m: 0.5,
-                load_average_5m: 0.7,
-                load_average_15m: 0.8,
-                audio_xruns: 0,
-                rt_priority_available: true,
+                cpu_usage,
+                memory_usage_mb: mem_info
+                    .mem_total_kb
+                    .saturating_sub(mem_info.mem_available_kb)
+                    / 1024,
+                swap_usage_mb: mem_info.swap_total_kb.saturating_sub(mem_info.swap_free_kb) / 1024,
+                load_average_1m,
+                load_average_5m,
+                load_average_15m,
+                audio_xruns: 0, // no portable system-wide query available
+                rt_priority_available,
             })
         }
         #[cfg(not(target_os = "linux"))]
@@ -799,14 +996,59 @@ mod tests {
             assert!(metrics.is_ok());
             if let Ok(metrics) = metrics {
                 assert!(metrics.cpu_usage >= 0.0);
+                assert!(metrics.cpu_usage <= 100.0);
                 assert!(metrics.memory_usage_mb > 0);
                 assert!(metrics.load_average_1m >= 0.0);
+                assert!(metrics.load_average_5m >= 0.0);
+                assert!(metrics.load_average_15m >= 0.0);
+                // No portable query exists for audio_xruns; must be honestly
+                // zero rather than a fabricated nonzero placeholder.
+                assert_eq!(metrics.audio_xruns, 0);
             }
         }
 
         #[cfg(not(target_os = "linux"))]
         {
             assert!(metrics.is_err());
+        }
+    }
+
+    #[test]
+    fn test_enumerate_cards_matches_proc_asound() {
+        #[cfg(target_os = "linux")]
+        {
+            // Whatever `LinuxALSA::new()` reports must be consistent with a
+            // fresh, independent read of `/proc/asound/cards` -- this would
+            // catch a regression back to the old fixed
+            // "HDA Intel PCH"/"USB Audio" fabricated pair on a host that
+            // doesn't actually have that hardware.
+            if let Ok(alsa) = LinuxALSA::new() {
+                if let Ok(contents) = std::fs::read_to_string("/proc/asound/cards") {
+                    let expected = parsers::parse_asound_cards(&contents);
+                    if let Ok(cards) = alsa.get_cards() {
+                        assert_eq!(cards.len(), expected.len());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_device_nonexistent_card_is_honest_error() {
+        #[cfg(target_os = "linux")]
+        if let Ok(alsa) = LinuxALSA::new() {
+            if alsa.initialized {
+                // Card 9999 essentially never exists; the result must be an
+                // honest `Err`, never a fabricated capability list.
+                let result = alsa.test_device(9999, 9999);
+                assert!(result.is_err());
+            }
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            let alsa = LinuxALSA::new();
+            assert!(alsa.is_err());
         }
     }
 

@@ -155,6 +155,11 @@ numpy = ["python", "dep:numpy"]
 nodejs = ["dep:napi", "dep:napi-derive", "dep:futures", "dep:futures-util"]
 wasm = ["dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:web-sys", "dep:js-sys", "dep:console_error_panic_hook"]
 gpu = ["voirs-acoustic/gpu", "voirs-vocoder/gpu"]
+# Compressed audio codecs (MP3 via LAME, Opus via libopus) — forwards to
+# voirs-vocoder's C-FFI `ffi-codecs`. OFF by default so the default build stays
+# Pure Rust (COOLJAPAN Pure-Rust policy); enable to allow `voirs_audio_save_mp3`
+# to actually encode MP3 rather than reporting InternalError.
+codecs = ["voirs-vocoder/ffi-codecs"]
 memory-detection = ["dep:procfs", "dep:windows"]
 recognition = ["dep:voirs-recognizer", "dep:futures", "dep:futures-util"]
 python-recognition = ["python", "recognition"]

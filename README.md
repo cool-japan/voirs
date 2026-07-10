@@ -8,7 +8,7 @@
 
 VoiRS is a cutting-edge Text-to-Speech (TTS) framework that unifies high-performance crates from the cool-japan ecosystem (SciRS2, NumRS2, PandRS, TrustformeRS) into a cohesive neural speech synthesis solution.
 
-> **🚀 First Release (0.1.0 — 2026-06-20)**: VoiRS's initial public release. Core TTS pipeline is working and production-ready, with CUDA/Metal GPU acceleration, SciRS2-Core integration (SIMD/parallel abstractions), comprehensive code-quality compliance, and a stabilized public API.
+> **🚀 First Release (0.1.0 — 2026-07-08)**: VoiRS's initial public release. Core TTS pipeline is working and production-ready, with CUDA/Metal GPU acceleration, SciRS2-Core integration (SIMD/parallel abstractions), comprehensive code-quality compliance, and a stabilized public API.
 
 ## 📊 Status
 
@@ -30,7 +30,7 @@ VoiRS is a cutting-edge Text-to-Speech (TTS) framework that unifies high-perform
 | voirs-evaluation | Quality metrics | ✓ | Alpha |
 | voirs-feedback | Feedback systems | 861 passing | Alpha |
 
-**Total: 9845 tests passing, 26 skipped** (full `--all-features` suite, clean build 2026-06-20)
+**Total: 10303 tests passing, 27 skipped** (full `--all-features` suite, clean build 2026-07-08)
 
 ## 🎯 Key Features
 
@@ -356,7 +356,7 @@ cargo run --example kokoro_espeak_auto_demo --features onnx --release
 
 ## 🗺️ Roadmap
 
-### 0.1.0 — First Release (2026-06-20) ✅
+### 0.1.0 — First Release (2026-07-08) ✅
 - [x] Complete G2P → Acoustic → Vocoder pipeline
 - [x] English VITS + HiFi-GAN synthesis
 - [x] DiffWave training pipeline with real parameter saving and gradient-based learning

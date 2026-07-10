@@ -11,13 +11,30 @@ use std::time::{Duration, Instant};
 use voirs_sdk::config::AppConfig;
 
 /// CLI-specific configuration
+///
+/// `#[serde(default)]` lets this type deserialize successfully from an
+/// incomplete/legacy document (e.g. one written by an older VoiRS version
+/// that didn't yet have the `cli` section, or that predates a field added
+/// later): any field missing from the input falls back to the corresponding
+/// field of [`CliConfig::default()`] instead of failing the whole parse.
+/// See [`utils::migrate_config`] for the primary consumer of this leniency.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct CliConfig {
-    /// Core VoiRS configuration
-    #[serde(flatten)]
+    /// Core VoiRS configuration.
+    ///
+    /// Serialized under its own `[core]` table (`core.pipeline`, `core.cli`,
+    /// `core.server`, and `core.environment`). It is intentionally *not*
+    /// `#[serde(flatten)]`ed to the top level: [`AppConfig`] has its own
+    /// `cli` field (a different type than [`CliSettings`]), which under
+    /// flattening would collide with this struct's own `cli` field and emit
+    /// two `[cli]` tables -- producing invalid TOML that cannot be parsed
+    /// back. Keeping it nested makes the whole struct round-trip cleanly.
     pub core: AppConfig,
 
-    /// CLI-specific settings
+    /// CLI-specific settings.
+    ///
+    /// Serialized as the single top-level `[cli]` table.
     pub cli: CliSettings,
 }
 
@@ -25,7 +42,11 @@ pub struct CliConfig {
 pub type Config = CliConfig;
 
 /// CLI-specific settings
+///
+/// `#[serde(default)]`: see [`CliConfig`] for why partial input is accepted
+/// here (each missing field falls back to [`CliSettings::default()`]).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct CliSettings {
     /// Default output format
     pub default_output_format: String,
@@ -70,7 +91,11 @@ pub enum SsmlValidationLevel {
 }
 
 /// Download settings
+///
+/// `#[serde(default)]`: see [`CliConfig`] for why partial input is accepted
+/// here (each missing field falls back to [`DownloadSettings::default()`]).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct DownloadSettings {
     /// Parallel downloads
     pub parallel_downloads: usize,
@@ -506,23 +531,83 @@ pub mod utils {
     }
 
     /// Migrate old configuration format to new format
+    ///
+    /// The old (JSON) configuration is deserialized directly into
+    /// [`CliConfig`] so that every field whose name and nesting still match
+    /// the current schema survives the migration unchanged; unknown legacy
+    /// top-level keys are ignored, and fields that are missing from the old
+    /// document (e.g. because they were added in a later version) fall back
+    /// to their [`CliConfig::default()`] value thanks to the
+    /// `#[serde(default)]` attributes on [`CliConfig`]/[`CliSettings`]/
+    /// [`DownloadSettings`]. The one known legacy rename -- a top-level
+    /// `"output_format"` string that predates today's nested
+    /// `cli.default_output_format` field -- is migrated explicitly on top of
+    /// that, and always wins.
+    ///
+    /// Because [`CliConfig::core`] is a plain nested field (no longer
+    /// `#[serde(flatten)]`ed), the whole-document deserialize succeeds for
+    /// well-formed input: `core` ([`AppConfig`], from `voirs_sdk`) simply
+    /// defaults when absent from an old document, and this crate's `cli`
+    /// ([`CliSettings`]) parses from the old `"cli"` section. A defensive
+    /// fallback still recovers the `core` and `cli` sections independently if
+    /// that whole-document parse ever fails -- for instance because a
+    /// hand-edited document gives a present field an incompatible type -- so
+    /// one malformed field cannot discard everything else.
     pub fn migrate_config<P: AsRef<Path>>(old_path: P, new_path: P) -> Result<()> {
         let old_content = fs::read_to_string(old_path.as_ref()).map_err(|e| {
             CliError::file_operation("read", &old_path.as_ref().display().to_string(), e)
         })?;
 
-        // Try to parse as old format (assuming it was JSON)
-        let old_config: serde_json::Value = serde_json::from_str(&old_content)
+        // Parse the raw JSON so we can also inspect legacy top-level keys
+        // that no longer exist anywhere in the current `CliConfig` schema.
+        let raw_old_config: serde_json::Value = serde_json::from_str(&old_content)
             .map_err(|e| CliError::config(format!("Cannot parse old config: {}", e)))?;
 
-        // Create new config with migrated values
-        let mut new_config = CliConfig::default();
+        // Deserialize the same document directly into `CliConfig`. Every
+        // field whose name/nesting is unchanged is preserved as-is; unknown
+        // legacy top-level keys are ignored and anything missing falls back
+        // to `CliConfig::default()` (see the `#[serde(default)]` attributes
+        // on the types involved). This replaces the old behavior of silently
+        // discarding every field except `output_format`.
+        let mut new_config: CliConfig = match serde_json::from_value(raw_old_config.clone()) {
+            Ok(config) => config,
+            Err(_) => {
+                // Defensive fallback for a document the whole-struct parse
+                // cannot handle (e.g. a hand-edited file where a present
+                // field has an incompatible type): recover the `core` and
+                // `cli` sections on their own so one bad field can't discard
+                // the rest.
+                let mut fallback = CliConfig::default();
 
-        // Migrate known fields (this is a simplified example)
-        if let Some(output_format) = old_config.get("output_format") {
-            if let Some(format_str) = output_format.as_str() {
-                new_config.cli.default_output_format = format_str.to_string();
+                // `core` (AppConfig: pipeline/cli/server/environment) can be
+                // recovered independently of the `cli` section.
+                if let Ok(core) = serde_json::from_value(raw_old_config.clone()) {
+                    fallback.core = core;
+                }
+
+                // Every field this function is responsible for preserving
+                // lives under "cli"; migrate that subtree on its own.
+                if let Some(cli_value) = raw_old_config.get("cli") {
+                    if let Ok(cli_settings) =
+                        serde_json::from_value::<CliSettings>(cli_value.clone())
+                    {
+                        fallback.cli = cli_settings;
+                    }
+                }
+
+                fallback
             }
+        };
+
+        // Legacy rename: very old configs stored the output format as a
+        // top-level "output_format" string instead of today's
+        // "cli.default_output_format". Apply it last so it always wins over
+        // whatever `cli.default_output_format` picked up above.
+        if let Some(format_str) = raw_old_config
+            .get("output_format")
+            .and_then(|value| value.as_str())
+        {
+            new_config.cli.default_output_format = format_str.to_string();
         }
 
         // Save migrated config
@@ -553,6 +638,106 @@ pub mod utils {
         })?;
 
         Ok(())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_migrate_config_preserves_cli_fields_and_legacy_rename() {
+            let dir = std::env::temp_dir().join(format!(
+                "voirs_migrate_config_test_{}_{}",
+                std::process::id(),
+                fastrand::u64(..)
+            ));
+            fs::create_dir_all(&dir).expect("temp dir should be creatable");
+
+            let old_path = dir.join("old_config.json");
+            let new_path = dir.join("new_config.toml");
+
+            // Old-format document: a legacy top-level "output_format" (the
+            // one known rename) alongside a "cli" section whose field names
+            // already match today's `CliSettings` schema.
+            let old_json = serde_json::json!({
+                "output_format": "mp3",
+                "cli": {
+                    "default_output_format": "wav",
+                    "default_voice": "test-voice",
+                    "default_quality": "ultra",
+                    "colored_output": false,
+                    "download": {
+                        "parallel_downloads": 7
+                    }
+                }
+            });
+            fs::write(
+                &old_path,
+                serde_json::to_string_pretty(&old_json).expect("serialize fixture"),
+            )
+            .expect("write old config fixture");
+
+            migrate_config(old_path.clone(), new_path.clone())
+                .expect("migrate_config should succeed");
+
+            let migrated_content = fs::read_to_string(&new_path).expect("read migrated config");
+
+            // With `CliConfig::core` no longer `#[serde(flatten)]`ed, the
+            // migrated document is valid, round-trippable TOML: `AppConfig`
+            // now lives under its own `[core]` table (`core.pipeline`,
+            // `core.cli`, `core.server`, ...) and this crate's `CliSettings`
+            // is the single top-level `[cli]` table -- no more colliding
+            // `[cli]` sections. First inspect the `[cli]` table on its own.
+            let migrated_value: toml::Value =
+                toml::from_str(&migrated_content).expect("migrated config should be valid TOML");
+            let cli_table = migrated_value
+                .get("cli")
+                .cloned()
+                .expect("migrated config should have a 'cli' table");
+            // `toml::Value` implements `serde::Deserializer`, so go through
+            // the trait method directly (version-robust across toml releases)
+            // rather than an inherent `try_into`.
+            let migrated_cli: CliSettings = CliSettings::deserialize(cli_table)
+                .expect("'cli' table should deserialize into CliSettings");
+
+            // The legacy rename wins over the (still-present) nested value.
+            assert_eq!(migrated_cli.default_output_format, "mp3");
+            // Fields untouched by the rename survive from the old document
+            // instead of silently reverting to `CliConfig::default()`.
+            assert_eq!(migrated_cli.default_voice, Some("test-voice".to_string()));
+            assert_eq!(migrated_cli.default_quality, "ultra");
+            assert!(!migrated_cli.colored_output);
+            assert_eq!(migrated_cli.download.parallel_downloads, 7);
+
+            // Sanity check against the previous (buggy) behavior: these
+            // values must differ from a fresh default, or this test would
+            // pass vacuously even if migration silently discarded everything.
+            let defaults = CliSettings::default();
+            assert_ne!(migrated_cli.default_voice, defaults.default_voice);
+            assert_ne!(migrated_cli.default_quality, defaults.default_quality);
+            assert_ne!(migrated_cli.colored_output, defaults.colored_output);
+            assert_ne!(
+                migrated_cli.download.parallel_downloads,
+                defaults.download.parallel_downloads
+            );
+
+            // Now that the `[cli]` collision is gone, the whole migrated
+            // document also deserializes straight into `CliConfig` -- proving
+            // the nested `[core]` (`AppConfig`) table round-trips too, not
+            // just the `[cli]` section inspected above.
+            let round_tripped: CliConfig = toml::from_str(&migrated_content)
+                .expect("migrated config should deserialize into CliConfig");
+            assert_eq!(round_tripped.cli.default_output_format, "mp3");
+            assert_eq!(
+                round_tripped.cli.default_voice,
+                Some("test-voice".to_string())
+            );
+            assert_eq!(round_tripped.cli.default_quality, "ultra");
+            assert!(!round_tripped.cli.colored_output);
+            assert_eq!(round_tripped.cli.download.parallel_downloads, 7);
+
+            let _ = fs::remove_dir_all(&dir);
+        }
     }
 }
 

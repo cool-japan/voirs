@@ -14,7 +14,7 @@ _Placeholder for changes targeting the next release._
 
 ---
 
-## [0.1.0] - 2026-06-20
+## [0.1.0] - 2026-07-08
 
 ### Added
 

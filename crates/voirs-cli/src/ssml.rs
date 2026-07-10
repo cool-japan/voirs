@@ -43,6 +43,12 @@ static RE_VOICE_NAME: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"<voice\s+name\s*=\s*["']([^"']+)["']"#).expect("Invalid VOICE_NAME regex pattern")
 });
 
+/// Reference fundamental frequency (in Hz) used to convert an absolute pitch
+/// value (e.g. `pitch="400Hz"`) into a semitone shift. Semitones are
+/// logarithmic (12 semitones = one octave = a frequency doubling), so the
+/// conversion must use `log2`, not a linear Hz difference.
+const F0_REF_HZ: f32 = 200.0;
+
 /// SSML validation and processing utilities
 pub struct SsmlProcessor {
     /// Regex patterns for SSML validation
@@ -336,11 +342,23 @@ impl SsmlProcessor {
                 if value.ends_with("st") {
                     value.trim_end_matches("st").parse::<f32>().ok()
                 } else if value.ends_with("Hz") {
-                    // Convert Hz to approximate semitones (simplified)
-                    value.trim_end_matches("Hz").parse::<f32>().ok().map(|hz| {
-                        // Very rough conversion, would need proper pitch detection
-                        (hz - 200.0) / 20.0
-                    })
+                    // Semitones are a logarithmic (base-2) unit: doubling the
+                    // frequency is +12 semitones (one octave), so the shift
+                    // from a reference frequency must use log2, not a linear
+                    // Hz difference (e.g. 400Hz should be +12st relative to
+                    // 200Hz, and 100Hz should be -12st).
+                    //
+                    // NOTE: `src/plugins/voices.rs` (DefaultVoicePlugin::synthesize)
+                    // independently converts semitones back to Hz using a 150Hz
+                    // reference (`150.0 * 2.0_f32.powf(pitch_shift / 12.0)`).
+                    // That's a pre-existing inconsistency with this function's
+                    // 200Hz reference; it is not reconciled here since fixing it
+                    // is out of scope for this change.
+                    value
+                        .trim_end_matches("Hz")
+                        .parse::<f32>()
+                        .ok()
+                        .map(|hz| 12.0 * (hz / F0_REF_HZ).log2())
                 } else {
                     value.parse::<f32>().ok()
                 }
@@ -540,5 +558,33 @@ mod tests {
         assert_eq!(params.speaking_rate, Some(1.25));
         assert_eq!(params.pitch_shift, Some(3.0));
         assert_eq!(params.volume_gain, Some(6.0));
+    }
+
+    #[test]
+    fn test_parse_pitch_value_hz_uses_logarithmic_semitone_conversion() {
+        let processor = SsmlProcessor::new();
+
+        // 400Hz is exactly one octave above the 200Hz reference, which is
+        // +12 semitones -- a linear formula would (incorrectly) give +10.
+        let one_octave_up = processor.parse_pitch_value("400Hz").unwrap();
+        assert!(
+            (one_octave_up - 12.0).abs() < 1e-3,
+            "expected +12.0 semitones for 400Hz, got {one_octave_up}"
+        );
+
+        // 100Hz is exactly one octave below the 200Hz reference, i.e. -12
+        // semitones -- a linear formula would (incorrectly) give -5.
+        let one_octave_down = processor.parse_pitch_value("100Hz").unwrap();
+        assert!(
+            (one_octave_down - (-12.0)).abs() < 1e-3,
+            "expected -12.0 semitones for 100Hz, got {one_octave_down}"
+        );
+
+        // 200Hz is the reference frequency itself, i.e. no shift.
+        let no_shift = processor.parse_pitch_value("200Hz").unwrap();
+        assert!(
+            no_shift.abs() < 1e-3,
+            "expected 0.0 semitones for 200Hz, got {no_shift}"
+        );
     }
 }
