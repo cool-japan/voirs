@@ -166,10 +166,10 @@ axum = { version = "0.8", features = ["json", "query", "ws"] }
 tower = "0.5"
 tower-http = { version = "0.7", features = ["cors", "trace", "compression-br", "compression-gzip", "limit", "request-id"] }
 hyper = { version = "1.10", features = ["full"] }
-oxiarc-deflate = "0.3.6"
-oxiarc-zstd = "0.3.6"
-oxiarc-archive = "0.3.6"
-oxiarc-bzip2 = "0.3.6"
+oxiarc-deflate = "0.4.0"
+oxiarc-zstd = "0.4.0"
+oxiarc-archive = "0.4.0"
+oxiarc-bzip2 = "0.4.0"
 csv = "1.4"
 walkdir = "2.5"
 glob = "0.3"
