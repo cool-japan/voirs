@@ -101,6 +101,22 @@ fn centroid_from_magnitudes(magnitudes: &[f64], sample_rate: f64, n: usize) -> f
     }
 }
 
+/// Coefficient of variation (std-dev / |mean|) of a set of measurements,
+/// used to quantify how stable a signal's properties are across sub-frames.
+/// Returns `0.0` for empty input or a near-zero mean (avoiding a blow-up on
+/// silence), and is capped at `10.0` to keep downstream scaling sane.
+fn coefficient_of_variation(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    let mean = values.iter().sum::<f64>() / values.len() as f64;
+    if mean.abs() < 1e-9 {
+        return 0.0;
+    }
+    let variance = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / values.len() as f64;
+    (variance.sqrt() / mean.abs()).min(10.0)
+}
+
 /// Quality measurement targets based on TODO.md goals
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct QualityTargets {
@@ -319,7 +335,8 @@ impl QualityAnalyzer {
 
         // Measure individual quality metrics
         let naturalness_score = self.measure_naturalness(emotion, audio_data).await?;
-        let emotion_accuracy = self.measure_emotion_accuracy(emotion, audio_data).await?;
+        let (emotion_accuracy, emotion_accuracy_measured) =
+            self.measure_emotion_accuracy(emotion, audio_data).await?;
         let consistency_score = self.measure_consistency(emotion, audio_data).await?;
         let user_satisfaction = self.estimate_user_satisfaction(emotion, audio_data).await?;
         let audio_quality = self.measure_audio_quality(audio_data).await?;
@@ -331,10 +348,17 @@ impl QualityAnalyzer {
             "naturalness".to_string(),
             naturalness_score >= self.targets.min_naturalness_score,
         );
-        metric_status.insert(
-            "emotion_accuracy".to_string(),
-            emotion_accuracy >= self.targets.min_emotion_accuracy_percent,
-        );
+        // No real perceptual emotion-recognition model is available (see
+        // `analyze_perceived_emotion`), so when the perceived emotion could
+        // not honestly be determined, this metric is excluded from the
+        // pass/fail decision entirely rather than being scored against a
+        // fabricated guess.
+        if emotion_accuracy_measured {
+            metric_status.insert(
+                "emotion_accuracy".to_string(),
+                emotion_accuracy >= self.targets.min_emotion_accuracy_percent,
+            );
+        }
         metric_status.insert(
             "consistency".to_string(),
             consistency_score >= self.targets.min_consistency_score_percent,
@@ -374,6 +398,10 @@ impl QualityAnalyzer {
                 details.insert(
                     "buffer_size".to_string(),
                     serde_json::Value::Number(serde_json::Number::from(audio_data.len())),
+                );
+                details.insert(
+                    "emotion_accuracy_measured".to_string(),
+                    serde_json::Value::Bool(emotion_accuracy_measured),
                 );
                 details
             },
@@ -415,32 +443,35 @@ impl QualityAnalyzer {
         Ok(1.0 + (naturalness * 4.0))
     }
 
-    /// Measure emotion accuracy percentage
+    /// Measure emotion accuracy percentage.
+    ///
+    /// Returns `(percentage, measured)`. `measured` is `false` when the
+    /// perceived emotion could not be honestly determined (see
+    /// [`Self::analyze_perceived_emotion`]) - in that case `percentage` is
+    /// `0.0` and callers must exclude this metric from pass/fail decisions
+    /// rather than scoring it against a fabricated guess.
     async fn measure_emotion_accuracy(
         &self,
         emotion: &EmotionVector,
         audio_data: &[f32],
-    ) -> Result<f64> {
+    ) -> Result<(f64, bool)> {
         // Compare intended emotion with perceived emotion from audio
         let intended_emotion = emotion.dominant_emotion();
         let perceived_emotion = self.analyze_perceived_emotion(audio_data).await?;
 
         // Calculate accuracy based on emotion matching
-        let accuracy = if let (Some((intended, _)), Some((perceived, _))) =
-            (intended_emotion, perceived_emotion)
-        {
-            if intended == perceived {
+        if let (Some((intended, _)), Some((perceived, _))) = (intended_emotion, perceived_emotion) {
+            let accuracy = if intended == perceived {
                 95.0 // High accuracy for exact match
             } else if self.emotions_are_similar(&intended, &perceived) {
                 75.0 // Moderate accuracy for similar emotions
             } else {
                 45.0 // Low accuracy for different emotions
-            }
+            };
+            Ok((accuracy, true))
         } else {
-            60.0 // Default accuracy when emotion is unclear
-        };
-
-        Ok(accuracy)
+            Ok((0.0, false))
+        }
     }
 
     /// Measure consistency score percentage
@@ -587,13 +618,20 @@ impl QualityAnalyzer {
         Ok(natural_zcr)
     }
 
+    /// Attempt to recognize the perceived emotion from synthesized audio.
+    ///
+    /// No trained, validated perceptual emotion-recognition model is
+    /// available in this crate. Rather than fabricate a plausible-looking
+    /// classification (which would silently turn `measure_emotion_accuracy`
+    /// into a coin flip dressed up as a measurement), this honestly reports
+    /// "not determined" (`None`). A real implementation would need an
+    /// audio-emotion classifier validated against human perception data
+    /// before an "accuracy" claim would mean anything.
     async fn analyze_perceived_emotion(
         &self,
         _audio_data: &[f32],
     ) -> Result<Option<(Emotion, EmotionIntensity)>> {
-        // Simplified emotion recognition from audio
-        // In a real implementation, this would use advanced ML models
-        Ok(Some((Emotion::Happy, EmotionIntensity::MEDIUM)))
+        Ok(None)
     }
 
     fn emotions_are_similar(&self, e1: &Emotion, e2: &Emotion) -> bool {
@@ -605,19 +643,40 @@ impl QualityAnalyzer {
             || (negative_emotions.contains(e1) && negative_emotions.contains(e2))
     }
 
+    /// Real (deterministic) inter-sub-frame stability measurement: splits
+    /// `window` into sub-frames and computes the coefficient of variation
+    /// (std-dev / mean) of RMS energy and zero-crossing-rate across them.
+    /// Low variability (a stable, sustained signal) yields high consistency;
+    /// high variability (discontinuities, bursts of noise) yields low
+    /// consistency. This replaces a fixed base score perturbed by
+    /// `fastrand` with an actual measurement of the audio.
     async fn analyze_window_consistency(&self, window: &[f32]) -> Result<f64> {
-        // Analyze consistency within a window
-        let rms = self.calculate_rms(window).await?;
-        let zcr = self.calculate_zero_crossing_rate(window).await?;
+        const SUB_FRAMES: usize = 4;
+        if window.len() < SUB_FRAMES * 2 {
+            // Too short to assess sub-frame stability meaningfully.
+            return Ok(50.0);
+        }
 
-        // Consistent audio has stable RMS and ZCR
-        let consistency = if rms > 0.001 && zcr > 0.01 && zcr < 0.5 {
-            85.0 + (fastrand::f64() * 10.0) // Add some randomness for realism
-        } else {
-            60.0 + (fastrand::f64() * 20.0)
-        };
+        let sub_len = window.len() / SUB_FRAMES;
+        let mut rms_values = Vec::with_capacity(SUB_FRAMES);
+        let mut zcr_values = Vec::with_capacity(SUB_FRAMES);
+        for i in 0..SUB_FRAMES {
+            let start = i * sub_len;
+            let end = if i == SUB_FRAMES - 1 {
+                window.len()
+            } else {
+                start + sub_len
+            };
+            let sub = &window[start..end];
+            rms_values.push(self.calculate_rms(sub).await?);
+            zcr_values.push(self.calculate_zero_crossing_rate(sub).await?);
+        }
 
-        Ok(consistency)
+        let rms_cv = coefficient_of_variation(&rms_values);
+        let zcr_cv = coefficient_of_variation(&zcr_values);
+
+        let consistency = 100.0 * (1.0 - ((rms_cv + zcr_cv) / 2.0).min(1.0));
+        Ok(consistency.clamp(0.0, 100.0))
     }
 
     async fn measure_audio_clarity(&self, audio_data: &[f32]) -> Result<f64> {
@@ -655,15 +714,78 @@ impl QualityAnalyzer {
         Ok(20.0 * (max_val as f64 / rms).log10())
     }
 
-    async fn analyze_frequency_response(&self, _audio_data: &[f32]) -> Result<f64> {
-        // Simplified frequency response analysis
-        Ok(0.8) // Assume good frequency response
+    /// Real spectral-flatness-based frequency-response indicator, in `[0, 1]`:
+    /// the ratio of the geometric mean to the arithmetic mean of the
+    /// Hann-windowed magnitude spectrum (Wiener entropy). This is a genuine,
+    /// input-dependent DSP measurement rather than a hardcoded constant.
+    async fn analyze_frequency_response(&self, audio_data: &[f32]) -> Result<f64> {
+        let magnitudes = rfft_magnitudes(audio_data);
+        if magnitudes.is_empty() {
+            return Ok(0.0);
+        }
+
+        let eps = 1e-12;
+        let log_sum: f64 = magnitudes.iter().map(|&m| m.max(eps).ln()).sum();
+        let geometric_mean = (log_sum / magnitudes.len() as f64).exp();
+        let arithmetic_mean = magnitudes.iter().sum::<f64>() / magnitudes.len() as f64;
+        if arithmetic_mean <= eps {
+            return Ok(0.0);
+        }
+
+        Ok((geometric_mean / arithmetic_mean).clamp(0.0, 1.0))
     }
 
+    /// Estimate the power carried by the fundamental frequency and its
+    /// first few harmonics, via real FFT peak-picking within the typical
+    /// voice F0 range (50-500 Hz) - not a fixed 70% multiplier of total
+    /// power. The spectral fundamental/total ratio is computed from the
+    /// magnitude spectrum, then applied to the real time-domain total power
+    /// so the result stays in the same units as [`Self::calculate_total_power`].
     async fn calculate_fundamental_power(&self, audio_data: &[f32]) -> Result<f64> {
-        // Simplified fundamental frequency power calculation
         let total_power = self.calculate_total_power(audio_data).await?;
-        Ok(total_power * 0.7) // Assume 70% is fundamental
+
+        let magnitudes = rfft_magnitudes(audio_data);
+        let n = audio_data.len();
+        if magnitudes.is_empty() || n == 0 {
+            return Ok(0.0);
+        }
+
+        let bin_hz = ANALYSIS_SAMPLE_RATE / n as f64;
+        let min_bin = ((50.0 / bin_hz).round() as usize).max(1);
+        let max_bin = ((500.0 / bin_hz).round() as usize).min(magnitudes.len().saturating_sub(1));
+        if min_bin >= magnitudes.len() || max_bin <= min_bin {
+            return Ok(0.0);
+        }
+
+        let (peak_offset, _) = magnitudes[min_bin..=max_bin]
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .unwrap_or((0, &0.0));
+        let f0_bin = min_bin + peak_offset;
+
+        let total_spectral_power: f64 = magnitudes.iter().map(|m| m * m).sum();
+        if total_spectral_power <= 1e-12 {
+            return Ok(0.0);
+        }
+
+        // Sum power at the fundamental and harmonics 2x-5x (+/- 1 bin
+        // tolerance each) as a fraction of total spectral power.
+        let mut harmonic_power = 0.0;
+        for h in 1..=5usize {
+            let center = f0_bin * h;
+            if center >= magnitudes.len() {
+                break;
+            }
+            let lo = center.saturating_sub(1);
+            let hi = (center + 1).min(magnitudes.len() - 1);
+            for bin in &magnitudes[lo..=hi] {
+                harmonic_power += bin * bin;
+            }
+        }
+
+        let ratio = (harmonic_power / total_spectral_power).clamp(0.0, 1.0);
+        Ok(total_power * ratio)
     }
 
     async fn calculate_total_power(&self, audio_data: &[f32]) -> Result<f64> {
@@ -1067,5 +1189,127 @@ mod tests {
         assert_eq!(metadata.emotion, "Happy");
         assert_eq!(metadata.sample_rate, 44100);
         assert_eq!(metadata.duration_seconds, 2.5);
+    }
+
+    #[tokio::test]
+    async fn test_analyze_perceived_emotion_is_honestly_undetermined() {
+        let analyzer = QualityAnalyzer::new().unwrap();
+        let audio = vec![0.3; 1024];
+        // No real perceptual model is available; must not fabricate a
+        // classification (the old bug always returned Some(Happy, MEDIUM)).
+        let perceived = analyzer.analyze_perceived_emotion(&audio).await.unwrap();
+        assert!(perceived.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_measure_emotion_accuracy_excludes_unmeasured_from_metric_status() {
+        let analyzer = QualityAnalyzer::new().unwrap();
+        let mut emotion = EmotionVector::new();
+        emotion.add_emotion(Emotion::Sad, EmotionIntensity::HIGH);
+        let audio_data = vec![0.2; 1024];
+
+        let (accuracy, measured) = analyzer
+            .measure_emotion_accuracy(&emotion, &audio_data)
+            .await
+            .unwrap();
+        assert!(!measured, "no real perception model is available");
+        assert_eq!(accuracy, 0.0);
+
+        let result = analyzer
+            .analyze_emotion_quality(&emotion, &audio_data)
+            .await
+            .unwrap();
+        assert!(
+            !result.metric_status.contains_key("emotion_accuracy"),
+            "an unmeasured metric must be excluded from pass/fail, not silently scored"
+        );
+        assert_eq!(
+            result.metadata.details.get("emotion_accuracy_measured"),
+            Some(&serde_json::Value::Bool(false))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_window_consistency_is_deterministic_and_reflects_stability() {
+        let analyzer = QualityAnalyzer::new().unwrap();
+
+        // A steady sine tone should be far more internally consistent than a
+        // signal with abrupt silence/noise bursts across its sub-frames.
+        let stable: Vec<f32> = (0..1024)
+            .map(|i| (2.0 * std::f32::consts::PI * 220.0 * i as f32 / 44100.0).sin() * 0.5)
+            .collect();
+        let bursty: Vec<f32> = (0..1024)
+            .map(|i| {
+                if (i / 256) % 2 == 0 {
+                    0.0
+                } else {
+                    (fastrand::f32() - 0.5) * 2.0
+                }
+            })
+            .collect();
+
+        let stable_consistency_1 = analyzer.analyze_window_consistency(&stable).await.unwrap();
+        let stable_consistency_2 = analyzer.analyze_window_consistency(&stable).await.unwrap();
+        // Deterministic: repeated calls on the same input give the same
+        // result (the old bug used fastrand and would vary run to run).
+        assert_eq!(stable_consistency_1, stable_consistency_2);
+
+        let bursty_consistency = analyzer.analyze_window_consistency(&bursty).await.unwrap();
+        assert!(
+            stable_consistency_1 > bursty_consistency,
+            "stable tone ({stable_consistency_1}) should score more consistent than bursty \
+             silence/noise ({bursty_consistency})"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_frequency_response_is_not_hardcoded_and_varies_with_input() {
+        let analyzer = QualityAnalyzer::new().unwrap();
+
+        let tone: Vec<f32> = (0..2048)
+            .map(|i| (2.0 * std::f32::consts::PI * 300.0 * i as f32 / 44100.0).sin() * 0.5)
+            .collect();
+        let noise: Vec<f32> = (0..2048).map(|_| fastrand::f32() * 2.0 - 1.0).collect();
+
+        let tone_flatness = analyzer.analyze_frequency_response(&tone).await.unwrap();
+        let noise_flatness = analyzer.analyze_frequency_response(&noise).await.unwrap();
+
+        assert_ne!(
+            tone_flatness, 0.8,
+            "must not be the old hardcoded placeholder"
+        );
+        // White noise has a flat spectrum (flatness near 1); a pure tone
+        // concentrates energy in one bin (flatness near 0).
+        assert!(
+            noise_flatness > tone_flatness,
+            "noise ({noise_flatness}) should be spectrally flatter than a pure tone ({tone_flatness})"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_fundamental_power_varies_with_signal_and_not_fixed_ratio() {
+        let analyzer = QualityAnalyzer::new().unwrap();
+
+        let tone: Vec<f32> = (0..4096)
+            .map(|i| (2.0 * std::f32::consts::PI * 200.0 * i as f32 / 44100.0).sin() * 0.5)
+            .collect();
+        let noise: Vec<f32> = (0..4096).map(|_| fastrand::f32() * 2.0 - 1.0).collect();
+
+        let tone_total = analyzer.calculate_total_power(&tone).await.unwrap();
+        let tone_fundamental = analyzer.calculate_fundamental_power(&tone).await.unwrap();
+        let noise_total = analyzer.calculate_total_power(&noise).await.unwrap();
+        let noise_fundamental = analyzer.calculate_fundamental_power(&noise).await.unwrap();
+
+        let tone_ratio = tone_fundamental / tone_total;
+        let noise_ratio = noise_fundamental / noise_total;
+
+        // A near-pure tone should have almost all its power at the
+        // fundamental + harmonics; white noise should not concentrate
+        // there. The old code returned exactly 0.7x total power for both.
+        assert!(
+            tone_ratio > noise_ratio,
+            "tone ratio {tone_ratio} should exceed noise ratio {noise_ratio}"
+        );
+        assert_ne!(tone_ratio, 0.7);
     }
 }

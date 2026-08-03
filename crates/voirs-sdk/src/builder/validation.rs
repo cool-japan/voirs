@@ -78,7 +78,8 @@ impl VoirsPipelineBuilder {
 
         // Create temporary voice manager for validation
         let cache_dir = self.config.effective_cache_dir();
-        let voice_manager = DefaultVoiceManager::new(&cache_dir);
+        let mut voice_manager = DefaultVoiceManager::new(&cache_dir);
+        voice_manager.set_test_mode(self.test_mode);
 
         // Check if voice is available locally
         if !voice_manager.is_voice_available(voice_id) {
@@ -88,8 +89,9 @@ impl VoirsPipelineBuilder {
                     voice_id
                 );
 
-                // Skip remote voice validation in test mode to avoid network calls
-                if !cfg!(test) {
+                // Skip remote voice validation only when test mode was explicitly
+                // requested, so no network call happens in fast tests.
+                if !self.test_mode {
                     // Validate that the voice exists remotely
                     if !self.is_voice_available_remotely(voice_id).await {
                         let available_voices: Vec<String> = voice_manager
@@ -446,8 +448,8 @@ impl VoirsPipelineBuilder {
 
     /// Check if CUDA is available
     fn is_cuda_available(&self) -> bool {
-        // Skip expensive checks in test mode or when validation is disabled
-        if !self.validation_enabled || cfg!(test) {
+        // Skip expensive checks in explicit test mode or when validation is disabled
+        if !self.validation_enabled || self.test_mode {
             tracing::debug!("Skipping CUDA availability check in test/no-validation mode");
             return false;
         }
@@ -516,8 +518,8 @@ impl VoirsPipelineBuilder {
 
     /// Check if MPS (Metal Performance Shaders) is available
     fn is_mps_available(&self) -> bool {
-        // Skip expensive checks in test mode or when validation is disabled
-        if !self.validation_enabled || cfg!(test) {
+        // Skip expensive checks in explicit test mode or when validation is disabled
+        if !self.validation_enabled || self.test_mode {
             tracing::debug!("Skipping MPS availability check in test/no-validation mode");
             return false;
         }

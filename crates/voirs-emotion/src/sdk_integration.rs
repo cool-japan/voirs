@@ -96,6 +96,29 @@ pub enum ProcessingMode {
     Expressive,
 }
 
+/// Read the current process's resident set size (RSS) in MB, when the
+/// platform exposes it cheaply. Mirrors the `/proc/self/status` `VmRSS`
+/// parsing pattern already used by `voirs-acoustic::memory`. Returns `None`
+/// on platforms without that file (or if it cannot be parsed), so callers
+/// can fall back to a state-derived estimate instead.
+fn read_process_rss_mb() -> Option<f32> {
+    #[cfg(target_os = "linux")]
+    {
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        for line in status.lines() {
+            if let Some(rest) = line.strip_prefix("VmRSS:") {
+                let kb: f32 = rest.trim().trim_end_matches("kB").trim().parse().ok()?;
+                return Some(kb / 1024.0);
+            }
+        }
+        None
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
 /// SDK-compatible emotion controller
 ///
 /// This is the main interface that voirs-sdk uses to control emotion processing.
@@ -302,11 +325,42 @@ impl EmotionController {
         samples.iter().map(|&x| x * x).sum::<f32>() / samples.len() as f32
     }
 
+    /// Real per-frame pitch-variance estimate: slides ~25ms analysis frames
+    /// across `audio`, estimates F0 for each via the same autocorrelation
+    /// estimator used elsewhere in this crate ([`crate::signal_processing`]),
+    /// and returns the coefficient of variation (std-dev / mean) of the
+    /// voiced frames' F0. Returns `0.0` when there are fewer than two voiced
+    /// frames to compare (too short, or entirely unvoiced/silent audio).
     #[cfg(feature = "sdk-integration")]
-    fn calculate_pitch_variance(&self, _audio: &AudioBuffer) -> f32 {
-        // Simplified pitch variance calculation
-        // In real implementation, would use proper pitch detection
-        0.3 // Placeholder value
+    fn calculate_pitch_variance(&self, audio: &AudioBuffer) -> f32 {
+        let samples = audio.samples();
+        let sample_rate = audio.sample_rate as f32;
+        if sample_rate <= 0.0 {
+            return 0.0;
+        }
+
+        let frame_len = ((sample_rate * 0.025) as usize).clamp(32, samples.len().max(32));
+        if samples.len() < frame_len * 2 {
+            return 0.0;
+        }
+
+        let f0_values: Vec<f32> = samples
+            .chunks(frame_len)
+            .filter(|frame| frame.len() == frame_len)
+            .filter_map(|frame| crate::signal_processing::estimate_fundamental(frame, sample_rate))
+            .collect();
+
+        if f0_values.len() < 2 {
+            return 0.0;
+        }
+
+        let mean = f0_values.iter().sum::<f32>() / f0_values.len() as f32;
+        if mean <= 0.0 {
+            return 0.0;
+        }
+        let variance =
+            f0_values.iter().map(|f| (f - mean).powi(2)).sum::<f32>() / f0_values.len() as f32;
+        (variance.sqrt() / mean).min(2.0)
     }
 
     /// Spectral centroid of the buffer, normalized to `[0, 1]` by the Nyquist
@@ -409,22 +463,35 @@ impl EmotionController {
             }
         };
 
+        let hooks_active = self.acoustic_hooks.read().await.len();
+
         Ok(EmotionProcessingMetrics {
             total_processed: processing_count,
             average_latency_ms: average_latency,
-            hooks_active: self.acoustic_hooks.read().await.len(),
-            memory_usage_mb: self.estimate_memory_usage(),
+            hooks_active,
+            memory_usage_mb: self.estimate_memory_usage(hooks_active),
         })
     }
 
-    /// Estimate memory usage for the emotion controller
-    fn estimate_memory_usage(&self) -> f32 {
-        // Rough estimation of memory usage in MB
-        let base_size = 10.0; // Base emotion processor
-        let hooks_size = 2.0; // Acoustic hooks
-        let config_size = 1.0; // Configuration
+    /// Estimate memory usage for the emotion controller (MB).
+    ///
+    /// Prefers a real process RSS reading (Linux, via `/proc/self/status`,
+    /// matching the pattern already used by `voirs-acoustic::memory`).
+    /// Elsewhere, falls back to a size estimate derived from real live
+    /// state - the actual number of registered acoustic hooks (`hooks_active`,
+    /// not a fixed constant) plus the controller's own in-memory footprint -
+    /// so the value always reflects genuine state rather than a fixed sum.
+    fn estimate_memory_usage(&self, hooks_active: usize) -> f32 {
+        if let Some(rss_mb) = read_process_rss_mb() {
+            return rss_mb;
+        }
 
-        base_size + hooks_size + config_size
+        let struct_base_kb = std::mem::size_of::<Self>() as f32 / 1024.0;
+        let config_kb = std::mem::size_of::<EmotionSynthesisConfig>() as f32 / 1024.0;
+        // Heap-allocated trait object + Vec entry overhead per registered hook.
+        const PER_HOOK_KB: f32 = 64.0;
+
+        (struct_base_kb + config_kb + hooks_active as f32 * PER_HOOK_KB) / 1024.0
     }
 
     /// Set the processing mode
@@ -1130,5 +1197,75 @@ mod tests {
         assert!((0.0..=1.0).contains(&c_lf));
         assert!((0.0..=1.0).contains(&c_hf));
         assert!(c_hf > c_lf, "hf {c_hf} should exceed lf {c_lf}");
+    }
+
+    #[cfg(feature = "sdk-integration")]
+    #[test]
+    fn test_pitch_variance_real_not_hardcoded() {
+        let controller = EmotionController::new().unwrap();
+        let sr = 16000u32;
+
+        // A steady, constant-pitch tone should have near-zero pitch variance.
+        let steady: Vec<f32> = (0..sr * 2)
+            .map(|i| (2.0 * std::f32::consts::PI * 200.0 * i as f32 / sr as f32).sin() * 0.6)
+            .collect();
+        // A tone that sweeps across a wide pitch range should have high
+        // pitch variance.
+        let sweeping: Vec<f32> = (0..sr * 2)
+            .map(|i| {
+                let t = i as f32 / sr as f32;
+                let freq = 100.0 + 250.0 * (t * 2.0).sin().abs();
+                (2.0 * std::f32::consts::PI * freq * t).sin() * 0.6
+            })
+            .collect();
+
+        let steady_buf = AudioBuffer::new(steady, sr, 1);
+        let sweeping_buf = AudioBuffer::new(sweeping, sr, 1);
+
+        let steady_variance = controller.calculate_pitch_variance(&steady_buf);
+        let sweeping_variance = controller.calculate_pitch_variance(&sweeping_buf);
+
+        // The old code returned exactly 0.3 for any input whatsoever.
+        assert_ne!(steady_variance, 0.3);
+        assert!(
+            steady_variance < 0.15,
+            "steady tone variance was {steady_variance}"
+        );
+        assert!(
+            sweeping_variance > steady_variance,
+            "sweeping ({sweeping_variance}) should have higher pitch variance than steady \
+             ({steady_variance})"
+        );
+    }
+
+    #[cfg(feature = "sdk-integration")]
+    #[tokio::test]
+    async fn test_memory_usage_reflects_registered_hooks() {
+        let controller = EmotionController::new().unwrap();
+
+        let before = controller.get_performance_metrics().await.unwrap();
+        assert_eq!(before.hooks_active, 0);
+
+        controller
+            .register_acoustic_hook(Box::new(BasicAcousticHook::new("hook-1".to_string())))
+            .await
+            .unwrap();
+        controller
+            .register_acoustic_hook(Box::new(BasicAcousticHook::new("hook-2".to_string())))
+            .await
+            .unwrap();
+
+        let after = controller.get_performance_metrics().await.unwrap();
+        assert_eq!(after.hooks_active, 2);
+        // On non-Linux platforms (no real RSS reading available), the
+        // fallback estimate must actually grow with the real hook count -
+        // the old code returned a fixed 13.0 regardless of state.
+        #[cfg(not(target_os = "linux"))]
+        assert!(
+            after.memory_usage_mb > before.memory_usage_mb,
+            "memory estimate should grow with registered hooks: before={}, after={}",
+            before.memory_usage_mb,
+            after.memory_usage_mb
+        );
     }
 }

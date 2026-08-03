@@ -27,6 +27,10 @@ impl VoirsPipelineBuilder {
             _ => 16000,                  // Other languages default to 16kHz
         };
         self.config.default_synthesis.language = language;
+        // `language_code` is what the component initializer reads when constructing
+        // the rule-based G2P backend; keep both in sync so the selected language
+        // actually reaches phonemization.
+        self.config.language_code = Some(language);
         self
     }
 
@@ -45,6 +49,12 @@ impl VoirsPipelineBuilder {
             self.config.device = "cpu".to_string();
         }
         self
+    }
+
+    /// Enable or disable GPU acceleration (alias for
+    /// [`with_gpu_acceleration`](Self::with_gpu_acceleration))
+    pub fn with_gpu(self, enabled: bool) -> Self {
+        self.with_gpu_acceleration(enabled)
     }
 
     /// Set specific device for computation

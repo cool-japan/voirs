@@ -684,10 +684,29 @@ impl MLFrameworkManager {
             DevicePreference::Custom { .. } => Device::Cpu, // Fallback to CPU for custom
         };
 
-        // Load model weights (placeholder - would load actual model file)
-        let model_weights = HashMap::new();
+        // Real safetensors loading: when a file actually exists at
+        // `model_metadata.model_path`, its weights are loaded and used by
+        // `run_candle_inference`'s linear-projection path below. When no
+        // file is present (e.g. a purely structural/registered-only model),
+        // the session still runs a real (non-fabricated) layer-norm + tanh
+        // transform rather than failing - see `apply_candle_normalization`.
+        // A file that *does* exist but fails to parse as safetensors is
+        // treated as a hard error: the caller clearly intended a real model
+        // there, so we must not silently fall back.
+        let model_weights = if model_metadata.model_path.exists() {
+            candle_core::safetensors::load(&model_metadata.model_path, &device).map_err(|e| {
+                Error::model(format!(
+                    "Failed to load Candle model weights from {:?}: {e}",
+                    model_metadata.model_path
+                ))
+            })?
+        } else {
+            HashMap::new()
+        };
 
-        // Create model architecture (placeholder - would parse from model file)
+        // Model architecture metadata (informational): the forward pass
+        // itself is architecture-agnostic (layer-norm or linear-projection,
+        // selected by whether real weights were loaded above).
         let model_architecture = ModelArchitecture::Transformer {
             num_layers: 12,
             hidden_dim: 768,
@@ -709,61 +728,67 @@ impl MLFrameworkManager {
         })
     }
 
-    /// Create ONNX Runtime session (placeholder)
+    /// Create an ONNX Runtime session.
+    ///
+    /// No ONNX Runtime bindings are linked into `MLFrameworkManager`. Real,
+    /// pure-Rust ONNX inference *is* available in this crate via
+    /// [`crate::backends::onnx`] (an `oxionnx`-backed content/speaker/decoder
+    /// pipeline) - but that is a different, specialized API shape, not a
+    /// drop-in for this generic manager. Rather than return a session that
+    /// would silently run unrelated Candle computations under an "ONNX"
+    /// label, this fails closed.
     fn create_onnx_session(&self, model_metadata: &MLModelMetadata) -> Result<MLInferenceSession> {
-        // Placeholder implementation - would use actual ONNX Runtime bindings
-        Ok(MLInferenceSession {
-            framework: MLFramework::OnnxRuntime,
-            model_metadata: model_metadata.clone(),
-            candle_session: None,
-            config: self.config.clone(),
-            metrics: Arc::new(RwLock::new(InferenceMetrics::default())),
-        })
+        Err(Error::model(format!(
+            "ONNX Runtime backend is not implemented in MLFrameworkManager for model '{}'; use \
+             crate::backends::onnx for real ONNX Runtime (oxionnx-backed) inference",
+            model_metadata.name
+        )))
     }
 
-    /// Create TensorFlow Lite session (placeholder)
+    /// Create a TensorFlow Lite session.
+    ///
+    /// No TensorFlow Lite runtime (pure-Rust or otherwise) is linked into
+    /// this build, so this fails closed instead of fabricating a session.
     fn create_tflite_session(
         &self,
         model_metadata: &MLModelMetadata,
     ) -> Result<MLInferenceSession> {
-        // Placeholder implementation - would use actual TensorFlow Lite bindings
-        Ok(MLInferenceSession {
-            framework: MLFramework::TensorFlowLite,
-            model_metadata: model_metadata.clone(),
-            candle_session: None,
-            config: self.config.clone(),
-            metrics: Arc::new(RwLock::new(InferenceMetrics::default())),
-        })
+        Err(Error::model(format!(
+            "TensorFlow Lite backend is not implemented in this build (no TFLite runtime is \
+             linked) for model '{}'",
+            model_metadata.name
+        )))
     }
 
-    /// Create PyTorch session (placeholder)
+    /// Create a PyTorch session.
+    ///
+    /// No native PyTorch runtime is linked into this build. The Candle
+    /// backend (`MLFramework::Candle`) is the pure-Rust alternative
+    /// available in this crate.
     fn create_pytorch_session(
         &self,
         model_metadata: &MLModelMetadata,
     ) -> Result<MLInferenceSession> {
-        // Placeholder implementation - would use actual PyTorch bindings
-        Ok(MLInferenceSession {
-            framework: MLFramework::PyTorch,
-            model_metadata: model_metadata.clone(),
-            candle_session: None,
-            config: self.config.clone(),
-            metrics: Arc::new(RwLock::new(InferenceMetrics::default())),
-        })
+        Err(Error::model(format!(
+            "PyTorch backend is not implemented in this build (no native PyTorch runtime is \
+             linked) for model '{}'; consider the Candle backend instead",
+            model_metadata.name
+        )))
     }
 
-    /// Create custom framework session (placeholder)
+    /// Create a custom-framework session.
+    ///
+    /// No custom inference runtime is registered, so this fails closed
+    /// rather than returning a session with no actual backend behind it.
     fn create_custom_session(
         &self,
         model_metadata: &MLModelMetadata,
     ) -> Result<MLInferenceSession> {
-        // Placeholder implementation - would use custom framework
-        Ok(MLInferenceSession {
-            framework: MLFramework::Custom,
-            model_metadata: model_metadata.clone(),
-            candle_session: None,
-            config: self.config.clone(),
-            metrics: Arc::new(RwLock::new(InferenceMetrics::default())),
-        })
+        Err(Error::model(format!(
+            "Custom framework backend is not implemented; no inference runtime is registered \
+             for model '{}'",
+            model_metadata.name
+        )))
     }
 
     /// Apply layer normalization followed by tanh activation using Candle ops.
@@ -851,58 +876,60 @@ impl MLFrameworkManager {
 
     /// Run ONNX Runtime inference.
     ///
-    /// ONNX Runtime native bindings are not available in this build; the
-    /// computation is approximated via Candle layer normalization + tanh,
-    /// which applies the same spectral-normalization semantics used by many
-    /// ONNX voice-conversion export targets.
+    /// No ONNX Runtime bindings are linked into `MLFrameworkManager` (see
+    /// [`Self::create_onnx_session`], which already fails closed before a
+    /// session could reach this point). Kept fail-closed here too, in
+    /// defense of any future caller that might construct a session without
+    /// going through `create_session`.
     fn run_onnx_inference(
         &self,
-        _session: &MLInferenceSession,
-        inputs: &[Tensor],
+        session: &MLInferenceSession,
+        _inputs: &[Tensor],
     ) -> Result<Vec<Tensor>> {
-        // Approximate ONNX Runtime inference with Candle-backed layer-norm + tanh
-        self.apply_candle_normalization(inputs)
+        Err(Error::model(format!(
+            "ONNX Runtime inference is not implemented in MLFrameworkManager for model '{}'; \
+             use crate::backends::onnx for real ONNX Runtime inference",
+            session.model_metadata.name
+        )))
     }
 
-    /// Run TensorFlow Lite inference.
-    ///
-    /// TFLite native bindings are not available in this build; the computation
-    /// is approximated via Candle layer normalization + tanh, consistent with
-    /// TFLite's default layer-norm operator semantics.
+    /// Run TensorFlow Lite inference. No TFLite runtime is linked; see
+    /// [`Self::create_tflite_session`].
     fn run_tflite_inference(
         &self,
-        _session: &MLInferenceSession,
-        inputs: &[Tensor],
+        session: &MLInferenceSession,
+        _inputs: &[Tensor],
     ) -> Result<Vec<Tensor>> {
-        // Approximate TFLite inference with Candle-backed layer-norm + tanh
-        self.apply_candle_normalization(inputs)
+        Err(Error::model(format!(
+            "TensorFlow Lite inference is not implemented in this build for model '{}'",
+            session.model_metadata.name
+        )))
     }
 
-    /// Run PyTorch inference.
-    ///
-    /// PyTorch native bindings are not available in this build; the
-    /// computation is approximated via Candle layer normalization + tanh,
-    /// mirroring `torch.nn.LayerNorm` followed by `torch.tanh`.
+    /// Run PyTorch inference. No native PyTorch runtime is linked; see
+    /// [`Self::create_pytorch_session`].
     fn run_pytorch_inference(
         &self,
-        _session: &MLInferenceSession,
-        inputs: &[Tensor],
+        session: &MLInferenceSession,
+        _inputs: &[Tensor],
     ) -> Result<Vec<Tensor>> {
-        // Approximate PyTorch inference with Candle-backed layer-norm + tanh
-        self.apply_candle_normalization(inputs)
+        Err(Error::model(format!(
+            "PyTorch inference is not implemented in this build for model '{}'",
+            session.model_metadata.name
+        )))
     }
 
-    /// Run custom framework inference.
-    ///
-    /// Applies Candle layer normalization + tanh as a framework-agnostic
-    /// normalization pass suitable for custom deployment targets.
+    /// Run custom framework inference. No custom runtime is registered; see
+    /// [`Self::create_custom_session`].
     fn run_custom_inference(
         &self,
-        _session: &MLInferenceSession,
-        inputs: &[Tensor],
+        session: &MLInferenceSession,
+        _inputs: &[Tensor],
     ) -> Result<Vec<Tensor>> {
-        // Approximate custom framework inference with Candle-backed layer-norm + tanh
-        self.apply_candle_normalization(inputs)
+        Err(Error::model(format!(
+            "Custom framework inference is not implemented for model '{}'",
+            session.model_metadata.name
+        )))
     }
 
     /// Get inference metrics for a session
@@ -1017,6 +1044,116 @@ mod tests {
         };
 
         manager.register_model(model_metadata).unwrap();
+    }
+
+    fn sample_metadata(model_path: PathBuf) -> MLModelMetadata {
+        MLModelMetadata {
+            name: "test-model".to_string(),
+            version: "1.0.0".to_string(),
+            framework: MLFramework::Candle,
+            input_specs: vec![],
+            output_specs: vec![],
+            model_path,
+            model_size_bytes: 0,
+            supported_sample_rates: vec![22050],
+            capabilities: ModelCapabilities {
+                realtime_capable: true,
+                batch_capable: true,
+                streaming_capable: true,
+                gpu_accelerated: false,
+                quantization_support: false,
+                max_input_length: None,
+            },
+        }
+    }
+
+    #[test]
+    fn test_candle_session_loads_and_uses_real_weights() {
+        let dir = tempfile::tempdir().unwrap();
+        let weights_path = dir.path().join("weights.safetensors");
+
+        let device = Device::Cpu;
+        let weight = Tensor::from_vec(vec![0.5f32; 16], (4, 4), &device).unwrap();
+        let mut tensors = HashMap::new();
+        tensors.insert("proj.weight".to_string(), weight);
+        candle_core::safetensors::save(&tensors, &weights_path).unwrap();
+
+        let config = MLFrameworkConfig::default();
+        let manager = MLFrameworkManager::new(config).unwrap();
+
+        let with_weights = manager
+            .create_candle_session(&sample_metadata(weights_path))
+            .unwrap();
+        let without_weights = manager
+            .create_candle_session(&sample_metadata(
+                dir.path().join("does_not_exist.safetensors"),
+            ))
+            .unwrap();
+
+        assert!(!with_weights
+            .candle_session
+            .as_ref()
+            .unwrap()
+            .model_weights
+            .is_empty());
+        assert!(without_weights
+            .candle_session
+            .as_ref()
+            .unwrap()
+            .model_weights
+            .is_empty());
+
+        let input = Tensor::from_vec(vec![1.0f32; 4], (1, 4), &device).unwrap();
+        let with_output = manager
+            .run_candle_inference(&with_weights, std::slice::from_ref(&input))
+            .unwrap();
+        let without_output = manager
+            .run_candle_inference(&without_weights, std::slice::from_ref(&input))
+            .unwrap();
+
+        let with_vec = with_output[0]
+            .flatten_all()
+            .unwrap()
+            .to_vec1::<f32>()
+            .unwrap();
+        let without_vec = without_output[0]
+            .flatten_all()
+            .unwrap()
+            .to_vec1::<f32>()
+            .unwrap();
+        assert_ne!(
+            with_vec, without_vec,
+            "loading real weights must change the inference output vs. the no-weights fallback"
+        );
+    }
+
+    #[test]
+    fn test_candle_session_fails_closed_on_malformed_weights_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let bad_path = dir.path().join("not_safetensors.safetensors");
+        std::fs::write(&bad_path, b"not a real safetensors file").unwrap();
+
+        let config = MLFrameworkConfig::default();
+        let manager = MLFrameworkManager::new(config).unwrap();
+
+        let result = manager.create_candle_session(&sample_metadata(bad_path));
+        assert!(
+            result.is_err(),
+            "a file present at model_path that fails to parse must be a hard error, not a \
+             silent fallback to empty weights"
+        );
+    }
+
+    #[test]
+    fn test_onnx_tflite_pytorch_custom_sessions_fail_closed() {
+        let config = MLFrameworkConfig::default();
+        let manager = MLFrameworkManager::new(config).unwrap();
+        let metadata = sample_metadata(PathBuf::from("unused.safetensors"));
+
+        assert!(manager.create_onnx_session(&metadata).is_err());
+        assert!(manager.create_tflite_session(&metadata).is_err());
+        assert!(manager.create_pytorch_session(&metadata).is_err());
+        assert!(manager.create_custom_session(&metadata).is_err());
     }
 
     #[test]

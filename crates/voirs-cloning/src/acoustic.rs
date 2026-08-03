@@ -31,37 +31,38 @@ impl AcousticCloningAdapter {
         }
     }
 
-    /// Clone voice using acoustic models with full pipeline
+    /// Clone voice using acoustic models with full pipeline.
+    ///
+    /// # Errors
+    ///
+    /// This adapter does not hold a real `voirs_acoustic::AcousticModel`
+    /// instance, a G2P phonemizer, or a vocoder - it only carries an
+    /// optional [`voirs_acoustic::config::synthesis::SynthesisConfig`].
+    /// `AcousticModel::synthesize` also only produces a mel spectrogram, not
+    /// a waveform, so even with a model configured this crate has no
+    /// vocoder dependency to turn that mel spectrogram into audio samples.
+    ///
+    /// Rather than fabricate a placeholder tone and label it a "cloned
+    /// voice" sample, this fails closed until a real acoustic model +
+    /// vocoder pipeline (driven by the extracted speaker embedding) is
+    /// wired in. See [`Self::extract_speaker_embeddings`] and
+    /// [`Self::adapt_acoustic_parameters`] for the (real, already
+    /// implemented) speaker-adaptation half of that future pipeline.
     pub async fn clone_with_acoustic_model(
         &self,
         reference_samples: &[VoiceSample],
-        text: &str,
+        _text: &str,
     ) -> Result<VoiceSample> {
         if reference_samples.is_empty() {
             return Err(Error::Audio("No reference samples provided".to_string()));
         }
 
-        // For now, use placeholder implementation until voirs-acoustic API is available
-        // Initialize acoustic synthesizer with configuration
-        let synthesis_config = self.config.clone().unwrap_or_default();
-
-        // Extract speaker embeddings from reference samples
-        let speaker_embeddings = self.extract_speaker_embeddings(reference_samples).await?;
-
-        // Use the first embedding for adaptation
-        let target_embedding = &speaker_embeddings[0];
-
-        // Generate synthetic audio based on target characteristics
-        let mut synthesized_audio = vec![0.0f32; 16000]; // 1 second at 16kHz
-
-        // Apply basic speaker characteristics (placeholder until real acoustic synthesis)
-        let f0_stats = self.extract_f0_statistics(&target_embedding.vector)?;
-        self.apply_prosodic_characteristics(&mut synthesized_audio, &f0_stats, text)?;
-
-        Ok(VoiceSample::new(
-            format!("cloned_{}", reference_samples[0].id),
-            synthesized_audio,
-            16000, // Standard sample rate
+        Err(Error::Config(
+            "Acoustic-model-backed cloning synthesis is not implemented: \
+             AcousticCloningAdapter has no configured voirs_acoustic::AcousticModel instance, \
+             G2P phonemizer, or vocoder to drive real text-to-speech synthesis from the \
+             extracted speaker embedding. Refusing to return placeholder audio."
+                .to_string(),
         ))
     }
 
@@ -268,34 +269,6 @@ impl AcousticCloningAdapter {
 
         Ok(embedding)
     }
-
-    /// Apply prosodic characteristics to synthesized audio
-    fn apply_prosodic_characteristics(
-        &self,
-        audio: &mut [f32],
-        f0_stats: &F0Statistics,
-        text: &str,
-    ) -> Result<()> {
-        let base_frequency = f0_stats.mean_f0.clamp(80.0, 400.0); // Clamp to reasonable range
-        let frequency_variation = f0_stats.f0_std.clamp(5.0, 50.0);
-
-        // Apply simple prosodic modulation
-        for (i, sample) in audio.iter_mut().enumerate() {
-            let time = i as f32 / 16000.0; // Assuming 16kHz sample rate
-
-            // Basic F0 contour (simplified)
-            let f0_contour =
-                base_frequency + (frequency_variation * (time * 2.0 * std::f32::consts::PI).sin());
-
-            // Simple speech-like modulation
-            let modulation = (f0_contour * 2.0 * std::f32::consts::PI * time).sin();
-            let envelope = (-(time - 0.5).powi(2) * 8.0).exp(); // Gaussian envelope
-
-            *sample = modulation * envelope * 0.1; // Scale to reasonable amplitude
-        }
-
-        Ok(())
-    }
 }
 
 #[cfg(feature = "acoustic-integration")]
@@ -447,6 +420,30 @@ mod tests {
     async fn test_acoustic_adapter_creation() {
         let adapter = AcousticCloningAdapter::new();
         assert!(adapter.config.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_clone_with_acoustic_model_fails_closed_not_fabricated_beep() {
+        let adapter = AcousticCloningAdapter::new();
+        let sample = VoiceSample::new("reference".to_string(), vec![0.1; 1600], 16000);
+
+        let result = adapter
+            .clone_with_acoustic_model(&[sample], "hello world")
+            .await;
+
+        // Must fail closed (typed error) instead of silently returning a
+        // fabricated tone dressed up as a cloned voice sample.
+        assert!(
+            result.is_err(),
+            "clone_with_acoustic_model must fail closed: no real acoustic model/vocoder is wired"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_clone_with_acoustic_model_rejects_empty_reference_samples() {
+        let adapter = AcousticCloningAdapter::new();
+        let result = adapter.clone_with_acoustic_model(&[], "hello world").await;
+        assert!(result.is_err());
     }
 
     #[test]

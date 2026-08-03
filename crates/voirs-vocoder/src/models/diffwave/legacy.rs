@@ -301,31 +301,35 @@ impl DiffWaveSampler {
         Ok(Self { config, scheduler })
     }
 
+    /// Get the sampling configuration.
+    pub fn config(&self) -> &SamplingConfig {
+        &self.config
+    }
+
+    /// Run the reverse-diffusion sampling process.
+    ///
+    /// The legacy [`DiffWaveVocoder`] has no path to load pretrained weights
+    /// into `unet` (see [`DiffWaveVocoder::load_from_file`]): its parameters
+    /// always come from a freshly created, randomly initialized `VarMap`.
+    /// Running a diffusion reverse process over untrained weights would not
+    /// produce meaningful audio -- it would just replace one fabrication (a
+    /// fixed 440Hz tone) with another (structured noise that merely *looks*
+    /// like real inference). This fails closed instead: use
+    /// [`crate::models::diffwave::DiffWaveVocoder`] (the enhanced U-Net with
+    /// real SafeTensors weight loading) or
+    /// [`crate::models::diffwave::diffusion::DiffWave`] for real synthesis.
     pub fn sample(
         &self,
         _unet: &UNet,
-        shape: &[usize],
+        _shape: &[usize],
         _mel_condition: &Tensor,
-        device: &Device,
+        _device: &Device,
     ) -> CandleResult<Tensor> {
-        // Generate dummy audio (sine wave for testing)
-        let audio_length = shape[2];
-        let mut audio = Vec::new();
-        for i in 0..audio_length {
-            let t = i as f32 / 22050.0;
-            let sample = (2.0 * PI * 440.0 * t).sin() * 0.1;
-            audio.push(sample);
-        }
-
-        let mut x = Tensor::from_vec(audio, shape, device)?;
-
-        // Scale by temperature
-        if self.config.temperature != 1.0 {
-            x = x.affine(self.config.temperature as f64, 0.0)?;
-        }
-
-        // Return the generated audio directly for testing
-        Ok(x)
+        Err(candle_core::Error::msg(
+            "legacy DiffWave sampler has no pretrained weights available (no weight-loading \
+             path exists for this U-Net); use crate::models::diffwave::DiffWaveVocoder \
+             (EnhancedUNet) or crate::models::diffwave::diffusion::DiffWave for real synthesis",
+        ))
     }
 }
 
@@ -420,36 +424,28 @@ impl DiffWaveVocoder {
         Self::new(DiffWaveConfig::default())
     }
 
-    /// Load model from file
+    /// Load model from file.
+    ///
+    /// The legacy U-Net has no weight-mapping/loading path (unlike
+    /// [`crate::models::diffwave::DiffWaveVocoder::load_from_file`], which
+    /// really parses SafeTensors/PyTorch checkpoints into its `EnhancedUNet`).
+    /// Previously this discarded any loaded [`ModelInfo`](crate::backends::loader::ModelInfo)
+    /// and returned `Ok` with a vocoder that always held randomly-initialized
+    /// weights, printing "Successfully loaded" regardless of outcome. That
+    /// silently fabricated success; this now fails closed instead so callers
+    /// get a clear, honest error rather than an untrained vocoder disguised
+    /// as a loaded model.
     pub fn load_from_file<P: AsRef<std::path::Path>>(
         path: P,
-        config: DiffWaveConfig,
+        _config: DiffWaveConfig,
     ) -> Result<Self> {
-        // Implement actual model loading
-        use crate::backends::loader::ModelLoader;
-
-        let mut loader = ModelLoader::new();
-        let vocoder = Self::new(config)?;
-
-        let path_ref = path.as_ref();
-        match tokio::runtime::Runtime::new()
-            .expect("tokio runtime creation should succeed")
-            .block_on(loader.load_from_file(path_ref))
-        {
-            Ok(model_info) => {
-                // Model loaded successfully
-                eprintln!(
-                    "Successfully loaded DiffWave model: {}",
-                    model_info.metadata.name
-                );
-                // Note: In a real implementation, model weights would be loaded here
-            }
-            Err(e) => {
-                eprintln!("Warning: Could not load DiffWave model: {e}. Using default weights.");
-            }
-        }
-
-        Ok(vocoder)
+        Err(VocoderError::ModelError(format!(
+            "legacy DiffWave vocoder cannot load pretrained weights from {} \
+             (no weight-loading path is implemented for this legacy U-Net); \
+             use crate::models::diffwave::DiffWaveVocoder::load_from_file \
+             (EnhancedUNet with real SafeTensors/PyTorch loading) instead",
+            path.as_ref().display()
+        )))
     }
 
     /// Get configuration
@@ -559,29 +555,25 @@ impl DiffWaveVocoder {
         }
     }
 
-    /// Generate audio from mel spectrogram
-    pub async fn generate_audio(&self, mel: &MelSpectrogram) -> Result<AudioBuffer> {
-        // Calculate output audio length
-        let hop_length = 256; // Typical hop length for mel spectrograms
-        let n_frames = mel.n_frames;
-        let audio_length = n_frames * hop_length;
-
-        // Generate dummy audio (sine wave for testing)
-        let mut audio = Vec::new();
-        for i in 0..audio_length {
-            let t = i as f32 / self.config.sample_rate as f32;
-            let sample = (2.0 * PI * 440.0 * t).sin() * 0.1;
-            audio.push(sample);
-        }
-
-        // Create audio buffer directly
-        let buffer = AudioBuffer::new(
-            audio,
-            self.config.sample_rate,
-            1, // mono
-        );
-
-        Ok(buffer)
+    /// Generate audio from a mel spectrogram.
+    ///
+    /// The legacy U-Net (`self.unet`) is always randomly initialized --
+    /// [`Self::load_from_file`] cannot load real weights into it, and
+    /// [`Self::new`] only ever builds it from a fresh, empty `VarMap`. This
+    /// previously ignored the mel spectrogram entirely and returned a fixed
+    /// 440Hz sine tone as `Ok`, which is a fabrication regardless of the
+    /// input. Since no real synthesis is possible on this path, it now fails
+    /// closed. Use [`crate::models::diffwave::DiffWaveVocoder`] (the enhanced
+    /// U-Net with real SafeTensors weight loading) or
+    /// [`crate::models::diffwave::diffusion::DiffWave`] (real DDPM/DDIM
+    /// sampling) for real synthesis.
+    pub async fn generate_audio(&self, _mel: &MelSpectrogram) -> Result<AudioBuffer> {
+        Err(VocoderError::ModelError(
+            "legacy DiffWave vocoder has no pretrained weights available; real synthesis is \
+             not implemented for this path -- use crate::models::diffwave::DiffWaveVocoder \
+             (EnhancedUNet) or crate::models::diffwave::diffusion::DiffWave instead"
+                .to_string(),
+        ))
     }
 }
 
@@ -730,8 +722,12 @@ mod tests {
         assert!(vocoder.supports(VocoderFeature::GpuAcceleration));
     }
 
+    /// Regression test: the legacy vocoder must fail closed instead of
+    /// silently returning a fabricated 440Hz sine tone as "successfully
+    /// synthesized" audio. No pretrained-weight loading path exists for this
+    /// U-Net, so `vocode`/`generate_audio` can never produce real audio.
     #[tokio::test]
-    async fn test_diffwave_generation() {
+    async fn test_diffwave_generation_fails_closed_without_real_weights() {
         let config = DiffWaveConfig::default();
         let vocoder = DiffWaveVocoder::new(config).unwrap();
 
@@ -745,12 +741,59 @@ mod tests {
         }
         let mel = MelSpectrogram::new(mel_data, 22050, 256);
 
-        // This should work but will generate basic audio since no model is loaded
         let result = vocoder.vocode(&mel, None).await;
-        assert!(result.is_ok());
+        assert!(
+            result.is_err(),
+            "legacy DiffWave vocoder must fail closed, not fabricate a fixed tone"
+        );
+        let message = result.unwrap_err().to_string();
+        assert!(
+            message.contains("pretrained weights") || message.contains("no weight-loading"),
+            "error should explain why no real synthesis is possible, got: {message}"
+        );
+    }
 
-        let audio = result.unwrap();
-        assert_eq!(audio.sample_rate(), 22050);
-        assert_eq!(audio.channels(), 1);
+    /// Regression test: `DiffWaveSampler::sample` must fail closed rather
+    /// than returning a fixed sine tone regardless of its (ignored) inputs.
+    #[test]
+    fn test_sampler_sample_fails_closed() {
+        let device = Device::Cpu;
+        let sampler = DiffWaveSampler::new(
+            SamplingConfig::default(),
+            NoiseSchedulerConfig::default(),
+            &device,
+        )
+        .unwrap();
+
+        let varmap = VarMap::new();
+        let vb = VarBuilder::from_varmap(&varmap, DType::F32, &device);
+        let unet = UNet::new(&vb, UNetConfig::default()).unwrap();
+        let mel_condition = Tensor::zeros((1, 80, 10), DType::F32, &device).unwrap();
+
+        let result = sampler.sample(&unet, &[1, 1, 2560], &mel_condition, &device);
+        assert!(
+            result.is_err(),
+            "legacy sampler must fail closed instead of fabricating a sine wave"
+        );
+    }
+
+    /// Regression test: `load_from_file` must fail closed instead of
+    /// discarding the loaded model info and reporting fabricated success.
+    #[test]
+    fn test_load_from_file_fails_closed() {
+        let temp_dir = std::env::temp_dir();
+        let path = temp_dir.join(format!(
+            "voirs_legacy_diffwave_test_{}.safetensors",
+            std::process::id()
+        ));
+        // Even a file that does not exist must produce the same honest
+        // "not implemented" error -- this path never attempts real loading.
+        let result = DiffWaveVocoder::load_from_file(&path, DiffWaveConfig::default());
+        assert!(result.is_err());
+        let message = result.unwrap_err().to_string();
+        assert!(
+            message.contains("cannot load pretrained weights"),
+            "got: {message}"
+        );
     }
 }

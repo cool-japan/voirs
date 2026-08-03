@@ -859,9 +859,19 @@ impl NeuralCodec {
         input_bits as f32 / encoded_bits
     }
 
-    /// Estimate bitrate for given sample rate
+    /// Estimate bitrate for a given input sample rate.
+    ///
+    /// The encoder ([`NeuralEncoder::encode`]) segments the raw input waveform into
+    /// non-overlapping frames of `hop_length` samples (the same quantity
+    /// [`NeuralCodec::compression_ratio`] uses to count encoded frames), so the number
+    /// of codec frames actually produced per second of audio is
+    /// `sample_rate / hop_length`, not the nominal [`NeuralCodecConfig::frame_rate`]
+    /// design value (which only feeds [`NeuralCodecConfig::expected_latency_ms`]).
+    /// The result therefore genuinely depends on `sample_rate`, matching how the
+    /// encoder actually frames its input.
     pub fn estimate_bitrate(&self, sample_rate: usize) -> f32 {
-        let bits_per_second = self.config.frame_rate * self.config.bits_per_frame();
+        let effective_frame_rate = sample_rate as f32 / self.config.hop_length as f32;
+        let bits_per_second = effective_frame_rate * self.config.bits_per_frame();
         bits_per_second / 1000.0 // Convert to kbps
     }
 }
@@ -1161,6 +1171,8 @@ mod tests {
     fn test_codec_bitrate_estimation() {
         let device = Device::Cpu;
         let config = NeuralCodecConfig {
+            // hop_length stays at the default (320), so bitrate is driven by
+            // sample_rate / hop_length, not by this nominal frame_rate field.
             frame_rate: 75.0,
             num_codebooks: 8,
             codebook_size: 1024,
@@ -1168,9 +1180,45 @@ mod tests {
         };
         let codec = NeuralCodec::new(config, &device).unwrap();
 
-        let bitrate = codec.estimate_bitrate(16000);
-        // 75 frames/sec * 80 bits/frame = 6000 bits/sec = 6 kbps
-        assert!((bitrate - 6.0).abs() < 0.1);
+        // hop_length = 320 (default) => effective frame rate = 16000/320 = 50 Hz
+        // 50 frames/sec * 80 bits/frame = 4000 bits/sec = 4 kbps
+        let bitrate_16k = codec.estimate_bitrate(16000);
+        assert!(
+            (bitrate_16k - 4.0).abs() < 0.1,
+            "expected ~4.0 kbps at 16kHz, got {bitrate_16k}"
+        );
+    }
+
+    #[test]
+    fn test_codec_bitrate_estimation_varies_with_sample_rate() {
+        // Regression test: `estimate_bitrate` must actually use its `sample_rate`
+        // argument. Doubling the sample rate must double the estimated bitrate
+        // (effective frame rate doubles => bits/sec doubles), proving the
+        // computation genuinely depends on the input rather than returning a
+        // constant derived solely from the codec's nominal `frame_rate` field.
+        let device = Device::Cpu;
+        let config = NeuralCodecConfig {
+            num_codebooks: 8,
+            codebook_size: 1024,
+            ..Default::default()
+        };
+        let codec = NeuralCodec::new(config, &device).unwrap();
+
+        let bitrate_16k = codec.estimate_bitrate(16_000);
+        let bitrate_32k = codec.estimate_bitrate(32_000);
+
+        assert!(
+            (bitrate_16k - 4.0).abs() < 0.1,
+            "expected ~4.0 kbps at 16kHz, got {bitrate_16k}"
+        );
+        assert!(
+            (bitrate_32k - 8.0).abs() < 0.1,
+            "expected ~8.0 kbps at 32kHz, got {bitrate_32k}"
+        );
+        assert!(
+            (bitrate_32k - 2.0 * bitrate_16k).abs() < 0.01,
+            "bitrate must scale linearly with sample_rate: 16k={bitrate_16k}, 32k={bitrate_32k}"
+        );
     }
 
     #[test]

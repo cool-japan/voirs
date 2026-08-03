@@ -1,12 +1,15 @@
 //! Advanced SSML processor combining all SSML functionality.
 
+use crate::backends::RuleBasedG2p;
 use crate::ssml::accents::{AccentProfile, AccentSystem};
 use crate::ssml::context::{ContextAnalysisResult, ContextAnalyzer};
-use crate::ssml::dictionary::{DictionaryManager, PronunciationContext};
+use crate::ssml::dictionary::DictionaryManager;
 use crate::ssml::elements::*;
 use crate::ssml::simple_parser::SimpleSsmlParser;
-use crate::{G2pError, LanguageCode, Phoneme, Result};
+use crate::{G2p, G2pConverter, G2pError, LanguageCode, Phoneme, Result};
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, RwLock};
 
 /// Advanced SSML processor with full feature support
@@ -27,6 +30,37 @@ pub struct SsmlProcessor {
     phoneme_overrides: HashMap<String, Vec<Phoneme>>,
     /// Active processing context
     processing_context: ProcessingContext,
+    /// Real G2P backend used to phonemize words that have no dictionary entry
+    /// or context-specific override (see [`SsmlProcessor::with_g2p_backend`]).
+    g2p_backend: Arc<dyn G2p>,
+}
+
+/// Build the default G2P backend used by [`SsmlProcessor::new`].
+///
+/// This wires up a [`G2pConverter`] with a dedicated [`RuleBasedG2p`] instance
+/// per supported [`LanguageCode`], so that the `language` hint passed to
+/// [`G2p::to_phonemes`] actually selects language-appropriate phonological
+/// rules instead of always applying a single fixed language's rules.
+fn build_default_g2p_backend(default_language: LanguageCode) -> Arc<dyn G2p> {
+    let mut converter = G2pConverter::new();
+    for language in [
+        LanguageCode::EnUs,
+        LanguageCode::EnGb,
+        LanguageCode::De,
+        LanguageCode::Fr,
+        LanguageCode::Es,
+        LanguageCode::It,
+        LanguageCode::Pt,
+        LanguageCode::Ja,
+        LanguageCode::ZhCn,
+        LanguageCode::Ko,
+        LanguageCode::Ru,
+        LanguageCode::Ar,
+    ] {
+        converter.add_backend(language, Box::new(RuleBasedG2p::new(language)));
+    }
+    converter.set_default_backend(Box::new(RuleBasedG2p::new(default_language)));
+    Arc::new(converter)
 }
 
 /// Processor configuration
@@ -235,21 +269,25 @@ pub enum ProcessingWarningType {
 impl SsmlProcessor {
     /// Create a new SSML processor
     pub fn new() -> Self {
+        let config = ProcessorConfig::default();
+        let g2p_backend = build_default_g2p_backend(config.default_language);
         Self {
             parser: SimpleSsmlParser::new(),
             dictionary_manager: Arc::new(RwLock::new(DictionaryManager::new())),
             context_analyzer: Arc::new(RwLock::new(ContextAnalyzer::new(LanguageCode::EnUs))),
             accent_system: Arc::new(RwLock::new(AccentSystem::new())),
-            config: ProcessorConfig::default(),
+            config,
             statistics: ProcessorStatistics::default(),
             phoneme_overrides: HashMap::new(),
             processing_context: ProcessingContext::default(),
+            g2p_backend,
         }
     }
 
     /// Create processor with custom configuration
     pub fn with_config(config: ProcessorConfig) -> Self {
         let mut processor = Self::new();
+        processor.g2p_backend = build_default_g2p_backend(config.default_language);
         processor.config = config;
 
         // SimpleSsmlParser uses default configuration
@@ -258,8 +296,17 @@ impl SsmlProcessor {
         processor
     }
 
+    /// Inject a custom G2P backend (e.g. a neural or dictionary-based
+    /// converter) to use for words that have no dictionary entry or
+    /// context-specific override. By default, [`SsmlProcessor::new`] wires up
+    /// per-language [`RuleBasedG2p`] instances via a [`G2pConverter`].
+    pub fn with_g2p_backend(mut self, backend: Arc<dyn G2p>) -> Self {
+        self.g2p_backend = backend;
+        self
+    }
+
     /// Process SSML text into phonemes
-    pub fn process(&mut self, ssml_text: &str) -> Result<SsmlProcessingResult> {
+    pub async fn process(&mut self, ssml_text: &str) -> Result<SsmlProcessingResult> {
         let start_time = std::time::Instant::now();
 
         // Parse SSML
@@ -286,7 +333,8 @@ impl SsmlProcessor {
             &mut transformations,
             &mut warnings,
             &mut metadata,
-        )?;
+        )
+        .await?;
 
         let total_time = start_time.elapsed().as_millis() as f64;
         metadata.processing_time_ms = total_time;
@@ -302,186 +350,209 @@ impl SsmlProcessor {
         })
     }
 
-    /// Process a single SSML element
-    fn process_element(
-        &mut self,
-        element: &SsmlElement,
-        phonemes: &mut Vec<Phoneme>,
-        transformations: &mut Vec<AppliedTransformation>,
-        warnings: &mut Vec<ProcessingWarning>,
-        metadata: &mut ProcessingMetadata,
-    ) -> Result<()> {
-        self.processing_context.depth += 1;
+    /// Process a single SSML element.
+    ///
+    /// This recurses into [`Self::process_children`], which recurses back into
+    /// `process_element` for nested content, so (unlike an ordinary `async fn`)
+    /// it must return an explicitly boxed future -- Rust cannot compute a
+    /// finite size for a directly self-recursive `async fn`'s generated state
+    /// machine.
+    fn process_element<'a>(
+        &'a mut self,
+        element: &'a SsmlElement,
+        phonemes: &'a mut Vec<Phoneme>,
+        transformations: &'a mut Vec<AppliedTransformation>,
+        warnings: &'a mut Vec<ProcessingWarning>,
+        metadata: &'a mut ProcessingMetadata,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + 'a>> {
+        Box::pin(async move {
+            self.processing_context.depth += 1;
 
-        match element {
-            SsmlElement::Speak {
-                language, content, ..
-            } => {
-                if let Some(lang) = language {
+            match element {
+                SsmlElement::Speak {
+                    language, content, ..
+                } => {
+                    if let Some(lang) = language {
+                        self.processing_context.document_language = Some(*lang);
+                        metadata.language = *lang;
+                    }
+                    self.process_children(content, phonemes, transformations, warnings, metadata)
+                        .await?;
+                }
+
+                SsmlElement::Text(text) => {
+                    self.process_text(text, phonemes, transformations, warnings, metadata)
+                        .await?;
+                }
+
+                SsmlElement::Phoneme {
+                    ph,
+                    text,
+                    metadata: ph_metadata,
+                    ..
+                } => {
+                    self.process_phoneme_override(
+                        ph,
+                        text,
+                        ph_metadata,
+                        phonemes,
+                        transformations,
+                    )?;
+                }
+
+                SsmlElement::Lang {
+                    lang,
+                    content,
+                    variant: _,
+                    accent,
+                } => {
+                    let previous_lang = self.processing_context.document_language;
                     self.processing_context.document_language = Some(*lang);
                     metadata.language = *lang;
-                }
-                self.process_children(content, phonemes, transformations, warnings, metadata)?;
-            }
 
-            SsmlElement::Text(text) => {
-                self.process_text(text, phonemes, transformations, warnings, metadata)?;
-            }
-
-            SsmlElement::Phoneme {
-                ph,
-                text,
-                metadata: ph_metadata,
-                ..
-            } => {
-                self.process_phoneme_override(ph, text, ph_metadata, phonemes, transformations)?;
-            }
-
-            SsmlElement::Lang {
-                lang,
-                content,
-                variant: _,
-                accent,
-            } => {
-                let previous_lang = self.processing_context.document_language;
-                self.processing_context.document_language = Some(*lang);
-                metadata.language = *lang;
-
-                if let Some(accent_name) = accent {
-                    if let Ok(mut accent_system) = self.accent_system.write() {
-                        if accent_system.set_active_accent(accent_name).is_ok() {
-                            metadata.accent_profile = Some(accent_name.clone());
+                    if let Some(accent_name) = accent {
+                        if let Ok(mut accent_system) = self.accent_system.write() {
+                            if accent_system.set_active_accent(accent_name).is_ok() {
+                                metadata.accent_profile = Some(accent_name.clone());
+                            }
                         }
+                    }
+
+                    self.process_children(content, phonemes, transformations, warnings, metadata)
+                        .await?;
+
+                    // Restore previous language
+                    self.processing_context.document_language = previous_lang;
+                }
+
+                SsmlElement::Emphasis {
+                    content,
+                    level,
+                    custom_params,
+                } => {
+                    // Process emphasis by modifying stress/prominence
+                    self.process_children(content, phonemes, transformations, warnings, metadata)
+                        .await?;
+                    self.apply_emphasis_modification(phonemes, level, custom_params)?;
+                }
+
+                SsmlElement::Break {
+                    time,
+                    strength,
+                    custom_timing,
+                } => {
+                    self.process_break(time, strength, custom_timing, phonemes)?;
+                }
+
+                SsmlElement::SayAs {
+                    interpret_as,
+                    content,
+                    ..
+                } => {
+                    self.process_say_as(
+                        interpret_as,
+                        content,
+                        phonemes,
+                        transformations,
+                        warnings,
+                        metadata,
+                    )
+                    .await?;
+                }
+
+                SsmlElement::Prosody {
+                    rate,
+                    pitch,
+                    volume,
+                    content,
+                    enhanced,
+                } => {
+                    let previous_prosody = self.processing_context.current_prosody.clone();
+                    self.processing_context.current_prosody = Some(ProsodySettings {
+                        rate: rate.clone(),
+                        pitch: pitch.clone(),
+                        volume: volume.clone(),
+                        enhanced: enhanced.clone(),
+                    });
+
+                    self.process_children(content, phonemes, transformations, warnings, metadata)
+                        .await?;
+
+                    // Apply prosody modifications
+                    self.apply_prosody_modifications(phonemes, rate, pitch, volume, enhanced)?;
+
+                    // Restore previous prosody
+                    self.processing_context.current_prosody = previous_prosody;
+                }
+
+                SsmlElement::Voice {
+                    name,
+                    gender,
+                    age,
+                    content,
+                    characteristics,
+                } => {
+                    let previous_voice = self.processing_context.current_voice.clone();
+                    self.processing_context.current_voice = Some(VoiceSettings {
+                        name: name.clone(),
+                        gender: gender.clone(),
+                        age: age.clone(),
+                        characteristics: characteristics.clone(),
+                    });
+
+                    self.process_children(content, phonemes, transformations, warnings, metadata)
+                        .await?;
+
+                    // Restore previous voice
+                    self.processing_context.current_voice = previous_voice;
+                }
+
+                SsmlElement::Mark { name } => {
+                    // Marks are timing points - create a special phoneme marker
+                    phonemes.push(self.create_mark_phoneme(name)?);
+                }
+
+                SsmlElement::Paragraph { content, prosody } => {
+                    self.process_children(content, phonemes, transformations, warnings, metadata)
+                        .await?;
+                    if let Some(para_prosody) = prosody {
+                        self.apply_paragraph_prosody(phonemes, para_prosody)?;
                     }
                 }
 
-                self.process_children(content, phonemes, transformations, warnings, metadata)?;
+                SsmlElement::Sentence { content, prosody } => {
+                    // Extract sentence tokens for context analysis
+                    let sentence_text = self.extract_text_from_content(content);
+                    self.processing_context.current_sentence = sentence_text
+                        .split_whitespace()
+                        .map(|s| s.to_string())
+                        .collect();
+                    self.processing_context.current_word_index = 0;
 
-                // Restore previous language
-                self.processing_context.document_language = previous_lang;
-            }
+                    self.process_children(content, phonemes, transformations, warnings, metadata)
+                        .await?;
 
-            SsmlElement::Emphasis {
-                content,
-                level,
-                custom_params,
-            } => {
-                // Process emphasis by modifying stress/prominence
-                self.process_children(content, phonemes, transformations, warnings, metadata)?;
-                self.apply_emphasis_modification(phonemes, level, custom_params)?;
-            }
+                    if let Some(sent_prosody) = prosody {
+                        self.apply_sentence_prosody(phonemes, sent_prosody)?;
+                    }
+                }
 
-            SsmlElement::Break {
-                time,
-                strength,
-                custom_timing,
-            } => {
-                self.process_break(time, strength, custom_timing, phonemes)?;
-            }
-
-            SsmlElement::SayAs {
-                interpret_as,
-                content,
-                ..
-            } => {
-                self.process_say_as(
-                    interpret_as,
-                    content,
-                    phonemes,
-                    transformations,
-                    warnings,
-                    metadata,
-                )?;
-            }
-
-            SsmlElement::Prosody {
-                rate,
-                pitch,
-                volume,
-                content,
-                enhanced,
-            } => {
-                let previous_prosody = self.processing_context.current_prosody.clone();
-                self.processing_context.current_prosody = Some(ProsodySettings {
-                    rate: rate.clone(),
-                    pitch: pitch.clone(),
-                    volume: volume.clone(),
-                    enhanced: enhanced.clone(),
-                });
-
-                self.process_children(content, phonemes, transformations, warnings, metadata)?;
-
-                // Apply prosody modifications
-                self.apply_prosody_modifications(phonemes, rate, pitch, volume, enhanced)?;
-
-                // Restore previous prosody
-                self.processing_context.current_prosody = previous_prosody;
-            }
-
-            SsmlElement::Voice {
-                name,
-                gender,
-                age,
-                content,
-                characteristics,
-            } => {
-                let previous_voice = self.processing_context.current_voice.clone();
-                self.processing_context.current_voice = Some(VoiceSettings {
-                    name: name.clone(),
-                    gender: gender.clone(),
-                    age: age.clone(),
-                    characteristics: characteristics.clone(),
-                });
-
-                self.process_children(content, phonemes, transformations, warnings, metadata)?;
-
-                // Restore previous voice
-                self.processing_context.current_voice = previous_voice;
-            }
-
-            SsmlElement::Mark { name } => {
-                // Marks are timing points - create a special phoneme marker
-                phonemes.push(self.create_mark_phoneme(name)?);
-            }
-
-            SsmlElement::Paragraph { content, prosody } => {
-                self.process_children(content, phonemes, transformations, warnings, metadata)?;
-                if let Some(para_prosody) = prosody {
-                    self.apply_paragraph_prosody(phonemes, para_prosody)?;
+                SsmlElement::Dictionary {
+                    ref_name: _,
+                    scope: _,
+                } => {
+                    // Dictionary references are processed when loading dictionaries
+                    // This is a placeholder for future implementation
                 }
             }
 
-            SsmlElement::Sentence { content, prosody } => {
-                // Extract sentence tokens for context analysis
-                let sentence_text = self.extract_text_from_content(content);
-                self.processing_context.current_sentence = sentence_text
-                    .split_whitespace()
-                    .map(|s| s.to_string())
-                    .collect();
-                self.processing_context.current_word_index = 0;
-
-                self.process_children(content, phonemes, transformations, warnings, metadata)?;
-
-                if let Some(sent_prosody) = prosody {
-                    self.apply_sentence_prosody(phonemes, sent_prosody)?;
-                }
-            }
-
-            SsmlElement::Dictionary {
-                ref_name: _,
-                scope: _,
-            } => {
-                // Dictionary references are processed when loading dictionaries
-                // This is a placeholder for future implementation
-            }
-        }
-
-        self.processing_context.depth -= 1;
-        Ok(())
+            self.processing_context.depth -= 1;
+            Ok(())
+        })
     }
 
     /// Process child elements
-    fn process_children(
+    async fn process_children(
         &mut self,
         content: &[SsmlElement],
         phonemes: &mut Vec<Phoneme>,
@@ -490,13 +561,14 @@ impl SsmlProcessor {
         metadata: &mut ProcessingMetadata,
     ) -> Result<()> {
         for child in content {
-            self.process_element(child, phonemes, transformations, warnings, metadata)?;
+            self.process_element(child, phonemes, transformations, warnings, metadata)
+                .await?;
         }
         Ok(())
     }
 
     /// Process text content with full analysis
-    fn process_text(
+    async fn process_text(
         &mut self,
         text: &str,
         phonemes: &mut Vec<Phoneme>,
@@ -521,9 +593,9 @@ impl SsmlProcessor {
                 word_phonemes = self.analyze_with_context(word, &words, word_index, metadata)?;
             }
 
-            // If still no result, generate basic phonemes (this would call the G2P backend)
+            // If still no result, fall back to the real G2P backend.
             if word_phonemes.is_none() {
-                word_phonemes = Some(self.generate_basic_phonemes(word)?);
+                word_phonemes = Some(self.generate_basic_phonemes(word).await?);
             }
 
             if let Some(mut word_phon) = word_phonemes {
@@ -539,15 +611,20 @@ impl SsmlProcessor {
         Ok(())
     }
 
-    /// Lookup word in custom dictionaries
+    /// Lookup word in custom dictionaries.
+    ///
+    /// This first pass has no pronunciation context to work with yet (context
+    /// is only known after [`Self::analyze_with_context`] runs), so it performs
+    /// a plain, context-free lookup. [`DictionaryManager::lookup`] with `None`
+    /// still finds a word's primary pronunciation; a context-aware re-lookup
+    /// happens later once real context has actually been analyzed.
     fn lookup_in_dictionary(
         &mut self,
         word: &str,
         metadata: &mut ProcessingMetadata,
     ) -> Result<Option<Vec<Phoneme>>> {
         if let Ok(mut dict_manager) = self.dictionary_manager.write() {
-            let context = self.determine_pronunciation_context(word)?;
-            let result = dict_manager.lookup(word, context.as_ref());
+            let result = dict_manager.lookup(word, None);
 
             if result.is_some() {
                 metadata.dictionary_entries.push(word.to_string());
@@ -560,7 +637,15 @@ impl SsmlProcessor {
         }
     }
 
-    /// Analyze word with context
+    /// Analyze word with context and, if a specific pronunciation context is
+    /// identified, use it for a context-aware dictionary re-lookup.
+    ///
+    /// [`ContextAnalyzer::analyze_context`] performs real analysis and reports
+    /// a `primary_context` (e.g. stressed vs. unstressed); this now actually
+    /// acts on that result via [`DictionaryManager::lookup`] instead of
+    /// discarding it and always deferring to G2P. When no context-specific
+    /// entry exists, this honestly returns `None` so the real G2P backend
+    /// handles the word.
     fn analyze_with_context(
         &mut self,
         word: &str,
@@ -568,18 +653,31 @@ impl SsmlProcessor {
         word_index: usize,
         metadata: &mut ProcessingMetadata,
     ) -> Result<Option<Vec<Phoneme>>> {
-        if let Ok(mut analyzer) = self.context_analyzer.write() {
-            let analysis = analyzer.analyze_context(word, sentence, word_index)?;
-            metadata.context = Some(analysis);
-            self.statistics.context_analyses += 1;
+        let Ok(mut analyzer) = self.context_analyzer.write() else {
+            return Ok(None);
+        };
 
-            // Use context to inform pronunciation (simplified)
-            // In a full implementation, this would use the context to select
-            // appropriate pronunciation variants
-            Ok(None) // For now, let basic generation handle it
-        } else {
-            Ok(None)
+        let analysis = analyzer.analyze_context(word, sentence, word_index)?;
+        let primary_context = analysis.primary_context.clone();
+        metadata.context = Some(analysis);
+        self.statistics.context_analyses += 1;
+        drop(analyzer);
+
+        let Some(context) = primary_context else {
+            return Ok(None);
+        };
+
+        let Ok(mut dict_manager) = self.dictionary_manager.write() else {
+            return Ok(None);
+        };
+
+        let result = dict_manager.lookup(word, Some(&context));
+        if result.is_some() {
+            metadata.dictionary_entries.push(word.to_string());
+            self.statistics.dictionary_lookups += 1;
         }
+
+        Ok(result)
     }
 
     /// Apply accent transformations
@@ -611,23 +709,20 @@ impl SsmlProcessor {
         }
     }
 
-    /// Generate basic phonemes (placeholder - would call actual G2P backend)
-    fn generate_basic_phonemes(&mut self, word: &str) -> Result<Vec<Phoneme>> {
-        // This would integrate with the actual G2P backends
-        // For now, create a placeholder phoneme
-        Ok(vec![Phoneme {
-            symbol: format!("/{word}/"), // Placeholder
-            ipa_symbol: Some(format!("/{word}/")),
-            language_notation: None,
-            stress: 0,
-            syllable_position: crate::SyllablePosition::Standalone,
-            duration_ms: None,
-            confidence: 0.5, // Low confidence for placeholder
-            phonetic_features: None,
-            custom_features: None,
-            is_word_boundary: true,
-            is_syllable_boundary: false,
-        }])
+    /// Generate phonemes for a word that has no dictionary entry or
+    /// context-specific override, by calling the processor's real G2P
+    /// backend (see [`SsmlProcessor::with_g2p_backend`]).
+    ///
+    /// The active language is whatever the SSML document currently has in
+    /// scope (set by `<speak xml:lang>`/`<lang>`), falling back to
+    /// [`ProcessorConfig::default_language`].
+    async fn generate_basic_phonemes(&mut self, word: &str) -> Result<Vec<Phoneme>> {
+        let language = self
+            .processing_context
+            .document_language
+            .unwrap_or(self.config.default_language);
+
+        self.g2p_backend.to_phonemes(word, Some(language)).await
     }
 
     /// Process phoneme override
@@ -680,11 +775,6 @@ impl SsmlProcessor {
     }
 
     /// Helper methods (simplified implementations)
-    fn determine_pronunciation_context(&self, _word: &str) -> Result<Option<PronunciationContext>> {
-        // Simplified context determination
-        Ok(Some(PronunciationContext::Stressed)) // Placeholder
-    }
-
     fn apply_emphasis_modification(
         &mut self,
         phonemes: &mut [Phoneme],
@@ -762,7 +852,7 @@ impl SsmlProcessor {
     }
 
     #[allow(clippy::ptr_arg)]
-    fn process_say_as(
+    async fn process_say_as(
         &mut self,
         interpret_as: &InterpretAs,
         content: &str,
@@ -799,7 +889,8 @@ impl SsmlProcessor {
             transformations,
             warnings,
             metadata,
-        )?;
+        )
+        .await?;
         Ok(())
     }
 
@@ -1052,41 +1143,144 @@ mod tests {
         assert_eq!(processor.config.default_language, LanguageCode::EnUs);
     }
 
-    #[test]
-    fn test_simple_processing() {
+    #[tokio::test]
+    async fn test_simple_processing() {
         let mut processor = SsmlProcessor::new();
         let ssml = "<speak>Hello world</speak>";
-        let result = processor.process(ssml);
+        let result = processor.process(ssml).await;
         assert!(result.is_ok());
 
         let processing_result = result.unwrap();
         assert!(!processing_result.phonemes.is_empty());
     }
 
-    #[test]
-    fn test_phoneme_override() {
+    #[tokio::test]
+    async fn test_phoneme_override() {
         let mut processor = SsmlProcessor::new();
         let ssml = r#"<speak><phoneme alphabet="ipa" ph="təˈmeɪtoʊ">tomato</phoneme></speak>"#;
-        let result = processor.process(ssml);
+        let result = processor.process(ssml).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_emphasis_processing() {
+    #[tokio::test]
+    async fn test_emphasis_processing() {
         let mut processor = SsmlProcessor::new();
         let ssml = r#"<speak><emphasis level="strong">important</emphasis></speak>"#;
-        let result = processor.process(ssml);
+        let result = processor.process(ssml).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_statistics_tracking() {
+    #[tokio::test]
+    async fn test_statistics_tracking() {
         let mut processor = SsmlProcessor::new();
         let ssml = "<speak>Test text</speak>";
-        processor.process(ssml).unwrap();
+        processor.process(ssml).await.unwrap();
 
         let stats = processor.get_statistics();
         assert!(stats.elements_processed > 0);
         assert!(stats.phonemes_generated > 0);
+    }
+
+    /// Regression test: the OOV fallback must call a real G2P backend and
+    /// produce an actual phonemic transcription, not a placeholder literally
+    /// equal to `/word/`.
+    #[tokio::test]
+    async fn test_oov_fallback_uses_real_g2p_not_placeholder() {
+        let mut processor = SsmlProcessor::new();
+        let ssml = "<speak>zzqvyx</speak>"; // not in any dictionary
+        let result = processor.process(ssml).await.unwrap();
+
+        assert!(!result.phonemes.is_empty());
+        for phoneme in &result.phonemes {
+            assert_ne!(
+                phoneme.symbol, "/zzqvyx/",
+                "fallback phoneme must not be the fabricated /word/ placeholder"
+            );
+        }
+        // Real rule-based G2P emits one phoneme per matched grapheme, so a
+        // 6-letter word should produce more than a single synthesized token.
+        assert!(
+            result.phonemes.len() > 1,
+            "expected a real multi-phoneme transcription, got {:?}",
+            result.phonemes
+        );
+    }
+
+    /// Regression test: different words must produce different phoneme
+    /// sequences, proving output genuinely depends on the input word instead
+    /// of being a canned/constant result.
+    #[tokio::test]
+    async fn test_g2p_fallback_output_varies_with_input() {
+        let mut processor = SsmlProcessor::new();
+
+        let result_a = processor
+            .process("<speak>cat</speak>")
+            .await
+            .unwrap()
+            .phonemes;
+        let result_b = processor
+            .process("<speak>banana</speak>")
+            .await
+            .unwrap()
+            .phonemes;
+
+        let symbols_a: Vec<&str> = result_a.iter().map(|p| p.symbol.as_str()).collect();
+        let symbols_b: Vec<&str> = result_b.iter().map(|p| p.symbol.as_str()).collect();
+        assert_ne!(
+            symbols_a, symbols_b,
+            "phoneme output must vary with input word"
+        );
+    }
+
+    /// Regression test: a custom G2P backend injected via
+    /// `with_g2p_backend` must actually be used instead of the default.
+    #[tokio::test]
+    async fn test_with_g2p_backend_overrides_default() {
+        use crate::{G2pMetadata, Phoneme as PhonemeType};
+        use async_trait::async_trait;
+
+        struct StubG2p;
+
+        #[async_trait]
+        impl G2p for StubG2p {
+            async fn to_phonemes(
+                &self,
+                _text: &str,
+                _lang: Option<LanguageCode>,
+            ) -> Result<Vec<PhonemeType>> {
+                Ok(vec![PhonemeType {
+                    symbol: "STUB".to_string(),
+                    ipa_symbol: Some("STUB".to_string()),
+                    language_notation: None,
+                    stress: 0,
+                    syllable_position: crate::SyllablePosition::Standalone,
+                    duration_ms: None,
+                    confidence: 1.0,
+                    phonetic_features: None,
+                    custom_features: None,
+                    is_word_boundary: true,
+                    is_syllable_boundary: false,
+                }])
+            }
+
+            fn supported_languages(&self) -> Vec<LanguageCode> {
+                vec![LanguageCode::EnUs]
+            }
+
+            fn metadata(&self) -> G2pMetadata {
+                G2pMetadata {
+                    name: "stub".to_string(),
+                    version: "0.0.0".to_string(),
+                    description: "test stub".to_string(),
+                    supported_languages: vec![LanguageCode::EnUs],
+                    accuracy_scores: HashMap::new(),
+                }
+            }
+        }
+
+        let mut processor = SsmlProcessor::new().with_g2p_backend(Arc::new(StubG2p));
+        let result = processor.process("<speak>anything</speak>").await.unwrap();
+
+        assert!(result.phonemes.iter().any(|p| p.symbol == "STUB"));
     }
 }

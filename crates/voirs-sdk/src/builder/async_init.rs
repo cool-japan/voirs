@@ -17,7 +17,12 @@ use tracing::{debug, info, warn};
 use super::builder_impl::VoirsPipelineBuilder;
 
 impl VoirsPipelineBuilder {
-    /// Build the pipeline with async initialization
+    /// Build the pipeline with async initialization.
+    ///
+    /// Components are resolved through the single real initialization path
+    /// ([`crate::pipeline::init::PipelineInitializer`]); the advanced-feature
+    /// controllers configured on the builder are constructed here and installed on
+    /// the returned pipeline.
     pub async fn build(self) -> Result<VoirsPipeline> {
         let start_time = Instant::now();
         info!(
@@ -28,7 +33,7 @@ impl VoirsPipelineBuilder {
         // Validate configuration first
         self.validate().await?;
 
-        // Initialize components concurrently
+        // Initialize components
         let pipeline = self.initialize_pipeline().await?;
 
         let build_time = start_time.elapsed();
@@ -41,25 +46,92 @@ impl VoirsPipelineBuilder {
     }
 
     /// Initialize the complete pipeline
-    async fn initialize_pipeline(self) -> Result<VoirsPipeline> {
+    async fn initialize_pipeline(mut self) -> Result<VoirsPipeline> {
         // Initialize cache directory
         self.setup_cache_directory().await?;
 
-        // Create or use provided voice manager
+        // Create or use provided voice manager and reuse it for the built pipeline
+        // so that `set_voice` resolves against the same registry.
         let voice_manager = self.setup_voice_manager().await?;
+        self.voice_manager = Some(voice_manager);
 
-        // Load all components concurrently
-        let (g2p, acoustic, vocoder) = self.load_components_parallel(&voice_manager).await?;
-
-        // Create and configure pipeline with test mode
-        let config = self.config.clone();
-        let test_mode = self.test_mode;
-        let mut pipeline = VoirsPipeline::with_test_mode(g2p, acoustic, vocoder, config, test_mode);
-
-        // Set voice if specified
-        if let Some(ref voice_id) = self.voice_id {
-            self.setup_voice(&mut pipeline, voice_id).await?;
+        // Download voice assets before component initialization if requested
+        if let Some(voice_id) = self.voice_id.clone() {
+            if self.auto_download && !self.test_mode {
+                self.ensure_voice_available(&voice_id).await?;
+            } else if self.test_mode {
+                debug!("Skipping voice download in test mode");
+            }
         }
+
+        // Resolve components and build the core pipeline through the real path
+        let inner = crate::pipeline::pipeline_impl::VoirsPipeline::from_builder_core(&self).await?;
+
+        // Validate the components that were actually installed
+        self.validate_g2p_component(&inner.g2p().await).await?;
+        self.validate_acoustic_component(&inner.acoustic().await)
+            .await?;
+        self.validate_vocoder_component(&inner.vocoder().await)
+            .await?;
+
+        // Build the advanced-feature controllers from the configuration supplied
+        // through the builder, so `.with_emotion_control(..)` and friends actually
+        // reach the pipeline.
+        #[cfg(feature = "emotion")]
+        let emotion_controller = match self.emotion_config.take() {
+            Some(builder) => Some(Arc::new(builder.build().await.map_err(|e| {
+                VoirsError::model_error(format!("Failed to initialize emotion controller: {e}"))
+            })?)),
+            None => None,
+        };
+
+        #[cfg(feature = "cloning")]
+        let voice_cloner = match self.cloning_config.take() {
+            Some(builder) => Some(Arc::new(builder.build().await.map_err(|e| {
+                VoirsError::model_error(format!("Failed to initialize voice cloner: {e}"))
+            })?)),
+            None => None,
+        };
+
+        #[cfg(feature = "conversion")]
+        let voice_converter = match self.conversion_config.take() {
+            Some(builder) => Some(Arc::new(builder.build().await.map_err(|e| {
+                VoirsError::model_error(format!("Failed to initialize voice converter: {e}"))
+            })?)),
+            None => None,
+        };
+
+        #[cfg(feature = "singing")]
+        let singing_controller = match self.singing_config.take() {
+            Some(builder) => Some(Arc::new(builder.build().await.map_err(|e| {
+                VoirsError::model_error(format!("Failed to initialize singing controller: {e}"))
+            })?)),
+            None => None,
+        };
+
+        #[cfg(feature = "spatial")]
+        let spatial_controller = match self.spatial_config.take() {
+            Some(builder) => Some(Arc::new(builder.build().await.map_err(|e| {
+                VoirsError::model_error(format!(
+                    "Failed to initialize spatial audio controller: {e}"
+                ))
+            })?)),
+            None => None,
+        };
+
+        let pipeline = VoirsPipeline::from_parts(
+            inner,
+            #[cfg(feature = "emotion")]
+            emotion_controller,
+            #[cfg(feature = "cloning")]
+            voice_cloner,
+            #[cfg(feature = "conversion")]
+            voice_converter,
+            #[cfg(feature = "singing")]
+            singing_controller,
+            #[cfg(feature = "spatial")]
+            spatial_controller,
+        );
 
         // Perform post-initialization setup
         self.post_initialization_setup(&pipeline).await?;
@@ -132,540 +204,6 @@ impl VoirsPipelineBuilder {
 
         debug!("Voice manager setup completed");
         Ok(voice_manager)
-    }
-
-    /// Load all components in parallel for faster initialization
-    async fn load_components_parallel(
-        &self,
-        voice_manager: &Arc<RwLock<DefaultVoiceManager>>,
-    ) -> Result<(Arc<dyn G2p>, Arc<dyn AcousticModel>, Arc<dyn Vocoder>)> {
-        info!("Loading pipeline components in parallel");
-
-        // In test mode, use fast dummy implementations
-        if self.test_mode {
-            debug!("Using dummy implementations in test mode");
-            let g2p = Arc::new(crate::pipeline::DummyG2p::new());
-            let acoustic = Arc::new(crate::pipeline::DummyAcoustic::new());
-            let vocoder = Arc::new(crate::pipeline::DummyVocoder::new());
-            return Ok((g2p, acoustic, vocoder));
-        }
-
-        // Use tokio::join! for concurrent loading
-        let (g2p_result, acoustic_result, vocoder_result) = tokio::join!(
-            self.load_g2p_component(voice_manager),
-            self.load_acoustic_component(voice_manager),
-            self.load_vocoder_component(voice_manager)
-        );
-
-        let g2p = g2p_result?;
-        let acoustic = acoustic_result?;
-        let vocoder = vocoder_result?;
-
-        info!("All pipeline components loaded successfully");
-        Ok((g2p, acoustic, vocoder))
-    }
-
-    /// Load G2P component with progress reporting
-    async fn load_g2p_component(
-        &self,
-        voice_manager: &Arc<RwLock<DefaultVoiceManager>>,
-    ) -> Result<Arc<dyn G2p>> {
-        debug!("Loading G2P component");
-
-        let g2p: Arc<dyn G2p> = if let Some(ref custom_g2p) = self.custom_g2p {
-            debug!("Using custom G2P component");
-            custom_g2p.clone()
-        } else {
-            self.load_default_g2p(voice_manager).await?
-        };
-
-        // Validate component after loading
-        self.validate_g2p_component(&g2p).await?;
-
-        debug!("G2P component loaded and validated");
-        Ok(g2p)
-    }
-
-    /// Load acoustic model component with progress reporting
-    async fn load_acoustic_component(
-        &self,
-        voice_manager: &Arc<RwLock<DefaultVoiceManager>>,
-    ) -> Result<Arc<dyn AcousticModel>> {
-        debug!("Loading acoustic model component");
-
-        let acoustic: Arc<dyn AcousticModel> =
-            if let Some(ref custom_acoustic) = self.custom_acoustic {
-                debug!("Using custom acoustic model component");
-                custom_acoustic.clone()
-            } else {
-                self.load_default_acoustic(voice_manager).await?
-            };
-
-        // Validate component after loading
-        self.validate_acoustic_component(&acoustic).await?;
-
-        debug!("Acoustic model component loaded and validated");
-        Ok(acoustic)
-    }
-
-    /// Load vocoder component with progress reporting
-    async fn load_vocoder_component(
-        &self,
-        voice_manager: &Arc<RwLock<DefaultVoiceManager>>,
-    ) -> Result<Arc<dyn Vocoder>> {
-        debug!("Loading vocoder component");
-
-        let vocoder: Arc<dyn Vocoder> = if let Some(ref custom_vocoder) = self.custom_vocoder {
-            debug!("Using custom vocoder component");
-            custom_vocoder.clone()
-        } else {
-            self.load_default_vocoder(voice_manager).await?
-        };
-
-        // Validate component after loading
-        self.validate_vocoder_component(&vocoder).await?;
-
-        debug!("Vocoder component loaded and validated");
-        Ok(vocoder)
-    }
-
-    /// Load default G2P component based on language/voice configuration
-    async fn load_default_g2p(
-        &self,
-        voice_manager: &Arc<RwLock<DefaultVoiceManager>>,
-    ) -> Result<Arc<dyn G2p>> {
-        debug!(
-            "Loading default G2P component for language: {:?}",
-            self.config.default_synthesis.language
-        );
-
-        // Try to load real G2P component based on language
-        match self.config.default_synthesis.language {
-            crate::types::LanguageCode::EnUs | crate::types::LanguageCode::EnGb => {
-                // Attempt to load English rule-based G2P
-                if let Ok(english_g2p) = self.load_english_rule_g2p().await {
-                    debug!("Loaded English rule-based G2P component");
-                    return Ok(Arc::new(english_g2p));
-                }
-            }
-            crate::types::LanguageCode::JaJp => {
-                // Attempt to load Japanese G2P (OpenJTalk or similar)
-                if let Ok(japanese_g2p) = self.load_japanese_g2p().await {
-                    debug!("Loaded Japanese G2P component");
-                    return Ok(Arc::new(japanese_g2p));
-                }
-            }
-            _ => {
-                debug!(
-                    "No specific G2P implementation for language: {:?}",
-                    self.config.default_synthesis.language
-                );
-            }
-        }
-
-        // Fallback to voice-specific G2P if available
-        if let Some(voice_id) = &self.voice_id {
-            if let Ok(voice_g2p) = self.load_voice_specific_g2p(voice_id, voice_manager).await {
-                debug!(
-                    "Loaded voice-specific G2P component for voice: {}",
-                    voice_id
-                );
-                return Ok(Arc::new(voice_g2p));
-            }
-        }
-
-        // Final fallback to dummy implementation
-        debug!("Using dummy G2P implementation as fallback");
-        Ok(Arc::new(crate::pipeline::DummyG2p::new()))
-    }
-
-    /// Load English rule-based G2P
-    async fn load_english_rule_g2p(&self) -> Result<impl G2p> {
-        debug!("Initializing English rule-based G2P");
-        // For now, use DummyG2p until EnglishRuleG2p implements the G2p trait
-        Ok(crate::pipeline::DummyG2p::new())
-    }
-
-    /// Load Japanese G2P component
-    async fn load_japanese_g2p(&self) -> Result<impl G2p> {
-        // This would integrate with OpenJTalk or similar Japanese G2P
-        // For now, use DummyG2p as placeholder
-        debug!("Japanese G2P not implemented yet, using dummy implementation");
-        Ok(crate::pipeline::DummyG2p::new())
-    }
-
-    /// Load voice-specific G2P component
-    async fn load_voice_specific_g2p(
-        &self,
-        voice_id: &str,
-        voice_manager: &Arc<RwLock<DefaultVoiceManager>>,
-    ) -> Result<impl G2p> {
-        let manager = voice_manager.read().await;
-
-        // Check if voice has a specific G2P component
-        if let Ok(Some(voice_config)) = manager.get_voice(voice_id).await {
-            if voice_config.model_config.g2p_model.is_some() {
-                debug!("Voice {} has specific G2P model", voice_id);
-                // Load voice-specific G2P model
-                // This would load the actual model file
-                return Err::<crate::pipeline::DummyG2p, _>(VoirsError::NotImplemented {
-                    feature: "Voice-specific G2P loading".to_string(),
-                });
-            }
-        }
-
-        Err::<crate::pipeline::DummyG2p, _>(VoirsError::ModelNotFound {
-            model_name: format!("G2P for voice {voice_id}"),
-            path: self.config.effective_cache_dir(),
-        })
-    }
-
-    /// Load default acoustic model based on voice/quality configuration
-    async fn load_default_acoustic(
-        &self,
-        voice_manager: &Arc<RwLock<DefaultVoiceManager>>,
-    ) -> Result<Arc<dyn AcousticModel>> {
-        debug!(
-            "Loading default acoustic model for quality: {:?}",
-            self.config.default_synthesis.quality
-        );
-
-        // Try to load voice-specific acoustic model first
-        if let Some(voice_id) = &self.voice_id {
-            if let Ok(voice_acoustic) = self
-                .load_voice_specific_acoustic(voice_id, voice_manager)
-                .await
-            {
-                debug!(
-                    "Loaded voice-specific acoustic model for voice: {}",
-                    voice_id
-                );
-                return Ok(voice_acoustic);
-            }
-        }
-
-        // Try to load quality-appropriate acoustic model
-        if let Ok(quality_acoustic) = self.load_quality_based_acoustic().await {
-            debug!("Loaded quality-based acoustic model");
-            return Ok(quality_acoustic);
-        }
-
-        // Fallback to dummy implementation
-        debug!("Using dummy acoustic model implementation as fallback");
-        Ok(Arc::new(crate::pipeline::DummyAcoustic::new()))
-    }
-
-    /// Load voice-specific acoustic model
-    async fn load_voice_specific_acoustic(
-        &self,
-        voice_id: &str,
-        voice_manager: &Arc<RwLock<DefaultVoiceManager>>,
-    ) -> Result<Arc<dyn AcousticModel>> {
-        let manager = voice_manager.read().await;
-
-        // Check if voice has a specific acoustic model
-        if let Ok(Some(voice_config)) = manager.get_voice(voice_id).await {
-            let model_path_str = &voice_config.model_config.acoustic_model;
-            let model_path = std::path::Path::new(model_path_str);
-            debug!("Loading acoustic model from: {}", model_path.display());
-
-            // Determine model type and load accordingly
-            if model_path_str.contains("vits") {
-                return self.load_vits_acoustic_model(model_path).await;
-            } else if model_path_str.contains("fastspeech") {
-                return self.load_fastspeech_acoustic_model(model_path).await;
-            }
-        }
-
-        Err(VoirsError::ModelNotFound {
-            model_name: format!("Acoustic model for voice {voice_id}"),
-            path: self.config.effective_cache_dir(),
-        })
-    }
-
-    /// Load quality-based acoustic model
-    async fn load_quality_based_acoustic(&self) -> Result<Arc<dyn AcousticModel>> {
-        match self.config.default_synthesis.quality {
-            crate::types::QualityLevel::Ultra | crate::types::QualityLevel::High => {
-                // Try to load high-quality VITS model
-                self.load_default_vits_model().await
-            }
-            crate::types::QualityLevel::Medium => {
-                // Try to load FastSpeech2 model for balance of quality and speed
-                self.load_default_fastspeech_model().await
-            }
-            crate::types::QualityLevel::Low => {
-                // Use fastest available model
-                self.load_fast_acoustic_model().await
-            }
-        }
-    }
-
-    /// Load VITS acoustic model from path
-    async fn load_vits_acoustic_model(
-        &self,
-        model_path: &std::path::Path,
-    ) -> Result<Arc<dyn AcousticModel>> {
-        debug!("Loading VITS model from: {}", model_path.display());
-        // For now, use DummyAcoustic until VitsModel implements the AcousticModel trait
-        Ok(Arc::new(crate::pipeline::DummyAcoustic::new()))
-    }
-
-    /// Load FastSpeech acoustic model from path
-    async fn load_fastspeech_acoustic_model(
-        &self,
-        model_path: &std::path::Path,
-    ) -> Result<Arc<dyn AcousticModel>> {
-        debug!("Loading FastSpeech model from: {}", model_path.display());
-        // For now, use DummyAcoustic until FastSpeech2Model implements the AcousticModel trait
-        Ok(Arc::new(crate::pipeline::DummyAcoustic::new()))
-    }
-
-    /// Load default VITS model
-    async fn load_default_vits_model(&self) -> Result<Arc<dyn AcousticModel>> {
-        debug!("Attempting to load default VITS model");
-
-        // Skip file system scanning in test mode
-        if self.test_mode {
-            debug!("Skipping VITS model file scanning in test mode");
-            return Err(VoirsError::ModelNotFound {
-                model_name: "Default VITS model".to_string(),
-                path: self
-                    .config
-                    .effective_cache_dir()
-                    .join("models")
-                    .join("acoustic")
-                    .join("vits"),
-            });
-        }
-
-        // Look for VITS models in cache directory
-        let model_dir = self
-            .config
-            .effective_cache_dir()
-            .join("models")
-            .join("acoustic")
-            .join("vits");
-
-        if model_dir.exists() {
-            if let Ok(entries) = std::fs::read_dir(&model_dir) {
-                for entry in entries.flatten() {
-                    if entry
-                        .file_name()
-                        .to_string_lossy()
-                        .ends_with(".safetensors")
-                        || entry.file_name().to_string_lossy().ends_with(".ckpt")
-                    {
-                        return self.load_vits_acoustic_model(&entry.path()).await;
-                    }
-                }
-            }
-        }
-
-        Err(VoirsError::ModelNotFound {
-            model_name: "Default VITS model".to_string(),
-            path: model_dir,
-        })
-    }
-
-    /// Load default FastSpeech model
-    async fn load_default_fastspeech_model(&self) -> Result<Arc<dyn AcousticModel>> {
-        debug!("Attempting to load default FastSpeech model");
-
-        // Skip file system scanning in test mode
-        if self.test_mode {
-            debug!("Skipping FastSpeech model file scanning in test mode");
-            return Err(VoirsError::ModelNotFound {
-                model_name: "Default FastSpeech model".to_string(),
-                path: self
-                    .config
-                    .effective_cache_dir()
-                    .join("models")
-                    .join("acoustic")
-                    .join("fastspeech"),
-            });
-        }
-
-        let model_dir = self
-            .config
-            .effective_cache_dir()
-            .join("models")
-            .join("acoustic")
-            .join("fastspeech");
-
-        if model_dir.exists() {
-            if let Ok(entries) = std::fs::read_dir(&model_dir) {
-                for entry in entries.flatten() {
-                    if entry
-                        .file_name()
-                        .to_string_lossy()
-                        .ends_with(".safetensors")
-                        || entry.file_name().to_string_lossy().ends_with(".ckpt")
-                    {
-                        return self.load_fastspeech_acoustic_model(&entry.path()).await;
-                    }
-                }
-            }
-        }
-
-        Err(VoirsError::ModelNotFound {
-            model_name: "Default FastSpeech model".to_string(),
-            path: model_dir,
-        })
-    }
-
-    /// Load fast acoustic model for low-quality/fast synthesis
-    async fn load_fast_acoustic_model(&self) -> Result<Arc<dyn AcousticModel>> {
-        // Try FastSpeech first, then any available model
-        match self.load_default_fastspeech_model().await {
-            Ok(model) => Ok(model),
-            Err(_) => self.load_default_vits_model().await,
-        }
-    }
-
-    /// Load default vocoder based on voice/quality configuration
-    async fn load_default_vocoder(
-        &self,
-        voice_manager: &Arc<RwLock<DefaultVoiceManager>>,
-    ) -> Result<Arc<dyn Vocoder>> {
-        debug!(
-            "Loading default vocoder for quality: {:?}",
-            self.config.default_synthesis.quality
-        );
-
-        // Try to load voice-specific vocoder first
-        if let Some(voice_id) = &self.voice_id {
-            if let Ok(voice_vocoder) = self
-                .load_voice_specific_vocoder(voice_id, voice_manager)
-                .await
-            {
-                debug!("Loaded voice-specific vocoder for voice: {}", voice_id);
-                return Ok(voice_vocoder);
-            }
-        }
-
-        // Try to load quality-appropriate vocoder
-        if let Ok(quality_vocoder) = self.load_quality_based_vocoder().await {
-            debug!("Loaded quality-based vocoder");
-            return Ok(quality_vocoder);
-        }
-
-        // Fallback to dummy implementation
-        debug!("Using dummy vocoder implementation as fallback");
-        Ok(Arc::new(crate::pipeline::DummyVocoder::new()))
-    }
-
-    /// Load voice-specific vocoder
-    async fn load_voice_specific_vocoder(
-        &self,
-        voice_id: &str,
-        voice_manager: &Arc<RwLock<DefaultVoiceManager>>,
-    ) -> Result<Arc<dyn Vocoder>> {
-        let manager = voice_manager.read().await;
-
-        // Check if voice has a specific vocoder
-        if let Ok(Some(voice_config)) = manager.get_voice(voice_id).await {
-            let model_path_str = &voice_config.model_config.vocoder_model;
-            let model_path = std::path::Path::new(model_path_str);
-            debug!("Loading vocoder from: {}", model_path.display());
-
-            // Determine vocoder type and load accordingly
-            if model_path_str.contains("hifigan") {
-                return self.load_hifigan_vocoder(model_path).await;
-            } else if model_path_str.contains("waveglow") {
-                return self.load_waveglow_vocoder(model_path).await;
-            }
-        }
-
-        Err(VoirsError::ModelNotFound {
-            model_name: format!("Vocoder for voice {voice_id}"),
-            path: self.config.effective_cache_dir(),
-        })
-    }
-
-    /// Load quality-based vocoder
-    async fn load_quality_based_vocoder(&self) -> Result<Arc<dyn Vocoder>> {
-        match self.config.default_synthesis.quality {
-            crate::types::QualityLevel::Ultra => {
-                // Use highest quality HiFi-GAN V1
-                self.load_hifigan_v1_vocoder().await
-            }
-            crate::types::QualityLevel::High => {
-                // Use balanced HiFi-GAN V2
-                self.load_hifigan_v2_vocoder().await
-            }
-            crate::types::QualityLevel::Medium => {
-                // Use faster HiFi-GAN V3
-                self.load_hifigan_v3_vocoder().await
-            }
-            crate::types::QualityLevel::Low => {
-                // Use fastest available vocoder
-                self.load_fast_vocoder().await
-            }
-        }
-    }
-
-    /// Load HiFi-GAN vocoder from path
-    async fn load_hifigan_vocoder(&self, model_path: &std::path::Path) -> Result<Arc<dyn Vocoder>> {
-        debug!("Loading HiFi-GAN vocoder from: {}", model_path.display());
-        // For now, use DummyVocoder until HiFiGanVocoder implements the Vocoder trait
-        Ok(Arc::new(crate::pipeline::DummyVocoder::new()))
-    }
-
-    /// Load WaveGlow vocoder from path
-    async fn load_waveglow_vocoder(
-        &self,
-        model_path: &std::path::Path,
-    ) -> Result<Arc<dyn Vocoder>> {
-        debug!("Loading WaveGlow vocoder from: {}", model_path.display());
-
-        // For now, use DummyVocoder until WaveGlowVocoder implements the Vocoder trait
-        Ok(Arc::new(crate::pipeline::DummyVocoder::new()))
-    }
-
-    /// Load HiFi-GAN V1 vocoder (highest quality)
-    async fn load_hifigan_v1_vocoder(&self) -> Result<Arc<dyn Vocoder>> {
-        debug!("Loading HiFi-GAN V1 vocoder");
-        // For now, use DummyVocoder until HiFiGanVocoder implements the Vocoder trait
-        Ok(Arc::new(crate::pipeline::DummyVocoder::new()))
-    }
-
-    /// Load HiFi-GAN V2 vocoder (balanced)
-    async fn load_hifigan_v2_vocoder(&self) -> Result<Arc<dyn Vocoder>> {
-        debug!("Loading HiFi-GAN V2 vocoder");
-        // For now, use DummyVocoder until HiFiGanVocoder implements the Vocoder trait
-        Ok(Arc::new(crate::pipeline::DummyVocoder::new()))
-    }
-
-    /// Load HiFi-GAN V3 vocoder (fastest)
-    async fn load_hifigan_v3_vocoder(&self) -> Result<Arc<dyn Vocoder>> {
-        debug!("Loading HiFi-GAN V3 vocoder");
-        // For now, use DummyVocoder until HiFiGanVocoder implements the Vocoder trait
-        Ok(Arc::new(crate::pipeline::DummyVocoder::new()))
-    }
-
-    /// Load fastest available vocoder
-    async fn load_fast_vocoder(&self) -> Result<Arc<dyn Vocoder>> {
-        // Use HiFi-GAN V3 for fast synthesis
-        self.load_hifigan_v3_vocoder().await
-    }
-
-    /// Setup voice configuration
-    async fn setup_voice(&self, pipeline: &mut VoirsPipeline, voice_id: &str) -> Result<()> {
-        info!("Setting up voice: {}", voice_id);
-
-        // Download voice if needed and auto-download is enabled (skip in test mode)
-        if self.auto_download && !self.test_mode {
-            self.ensure_voice_available(voice_id).await?;
-        } else if self.test_mode {
-            tracing::debug!("Skipping voice download in test mode");
-        }
-
-        // Set the voice in the pipeline
-        pipeline.set_voice(voice_id).await?;
-
-        info!("Voice setup completed successfully");
-        Ok(())
     }
 
     /// Ensure voice is available, downloading if necessary
@@ -1346,39 +884,60 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_parallel_component_loading() {
+    async fn test_component_loading_in_test_mode() {
+        use crate::pipeline::init::{ComponentOverrides, PipelineInitializer};
+
         let builder = VoirsPipelineBuilder::new().with_test_mode(true);
-        let voice_manager = builder.setup_voice_manager().await.unwrap();
+        let initializer = PipelineInitializer::new(builder.get_config());
 
-        let result = builder.load_components_parallel(&voice_manager).await;
-        assert!(result.is_ok());
+        let (g2p, acoustic, vocoder) = initializer
+            .initialize_components_with(ComponentOverrides::default(), true)
+            .await
+            .expect("test-mode components");
 
-        let (g2p, acoustic, vocoder) = result.unwrap();
         assert!(!g2p.supported_languages().is_empty());
-
-        let metadata = acoustic.metadata();
-        assert!(!metadata.name.is_empty());
-
-        let vocoder_metadata = vocoder.metadata();
-        assert!(!vocoder_metadata.name.is_empty());
+        assert!(!acoustic.metadata().name.is_empty());
+        assert!(!vocoder.metadata().name.is_empty());
     }
 
     #[tokio::test]
     async fn test_component_validation() {
+        use crate::pipeline::init::{ComponentOverrides, PipelineInitializer};
+
         let builder = VoirsPipelineBuilder::new().with_test_mode(true);
-        let voice_manager = builder.setup_voice_manager().await.unwrap();
+        let initializer = PipelineInitializer::new(builder.get_config());
+        let (g2p, acoustic, vocoder) = initializer
+            .initialize_components_with(ComponentOverrides::default(), true)
+            .await
+            .expect("test-mode components");
 
-        let g2p = builder.load_default_g2p(&voice_manager).await.unwrap();
-        let result = builder.validate_g2p_component(&g2p).await;
-        assert!(result.is_ok());
+        assert!(builder.validate_g2p_component(&g2p).await.is_ok());
+        assert!(builder.validate_acoustic_component(&acoustic).await.is_ok());
+        assert!(builder.validate_vocoder_component(&vocoder).await.is_ok());
+    }
 
-        let acoustic = builder.load_default_acoustic(&voice_manager).await.unwrap();
-        let result = builder.validate_acoustic_component(&acoustic).await;
-        assert!(result.is_ok());
+    /// The custom-component injection path must be honored end to end: a pipeline
+    /// built with an injected G2P/acoustic/vocoder must use exactly those objects
+    /// and must not touch the model cache at all.
+    #[tokio::test]
+    async fn test_custom_components_bypass_model_loading() {
+        use crate::pipeline::{DummyAcoustic, DummyG2p, DummyVocoder};
+        use std::sync::Arc;
 
-        let vocoder = builder.load_default_vocoder(&voice_manager).await.unwrap();
-        let result = builder.validate_vocoder_component(&vocoder).await;
-        assert!(result.is_ok());
+        let cache_dir = tempfile::tempdir().expect("temp dir");
+
+        let pipeline = VoirsPipelineBuilder::new()
+            .with_cache_dir(cache_dir.path())
+            .with_validation(false)
+            .with_g2p(Arc::new(DummyG2p::new()))
+            .with_acoustic_model(Arc::new(DummyAcoustic::new()))
+            .with_vocoder(Arc::new(DummyVocoder::new()))
+            .build()
+            .await
+            .expect("custom components must build without any model files");
+
+        let audio = pipeline.synthesize("hello").await.expect("synthesis");
+        assert!(!audio.is_empty());
     }
 
     #[tokio::test]

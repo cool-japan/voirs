@@ -269,27 +269,12 @@ pub async fn validate_voice_handler(
     let mut quality_score = None;
     let mut test_audio = None;
 
-    // Check if voice exists by trying to set it
-    let voice_info = match pipeline.set_voice(&request.voice_id).await {
-        Ok(()) => {
-            // Get the current voice to validate it was set successfully
-            match pipeline.current_voice().await {
-                Some(voice) => voice,
-                None => {
-                    issues.push(format!("Voice '{}' could not be set", request.voice_id));
-                    return Ok(Json(VoiceValidationResponse {
-                        voice_id: request.voice_id,
-                        valid: false,
-                        issues,
-                        recommendations,
-                        quality_score,
-                        test_audio,
-                    }));
-                }
-            }
-        }
+    // Look the voice up in the registry instead of relying on `set_voice` side
+    // effects: existence is a registry question, not a mutation.
+    let available_voices = match pipeline.list_voices().await {
+        Ok(voices) => voices,
         Err(e) => {
-            issues.push(format!("Error setting voice: {e}"));
+            issues.push(format!("Error listing voices: {e}"));
             return Ok(Json(VoiceValidationResponse {
                 voice_id: request.voice_id,
                 valid: false,
@@ -300,6 +285,40 @@ pub async fn validate_voice_handler(
             }));
         }
     };
+
+    let voice_info = match available_voices
+        .into_iter()
+        .find(|voice| voice.id == request.voice_id)
+    {
+        Some(voice) => voice,
+        None => {
+            issues.push(format!(
+                "Voice '{}' is not present in the voice registry",
+                request.voice_id
+            ));
+            return Ok(Json(VoiceValidationResponse {
+                voice_id: request.voice_id,
+                valid: false,
+                issues,
+                recommendations,
+                quality_score,
+                test_audio,
+            }));
+        }
+    };
+
+    // The voice exists; activating it must also succeed for it to be usable.
+    if let Err(e) = pipeline.set_voice(&request.voice_id).await {
+        issues.push(format!("Error setting voice: {e}"));
+        return Ok(Json(VoiceValidationResponse {
+            voice_id: request.voice_id,
+            valid: false,
+            issues,
+            recommendations,
+            quality_score,
+            test_audio,
+        }));
+    }
 
     // Validate voice configuration
     if voice_info.language == LanguageCode::EnUs {
@@ -486,6 +505,7 @@ mod tests {
     #[tokio::test]
     async fn test_batch_synthesis_handler() {
         let pipeline = VoirsPipelineBuilder::new()
+            .with_test_mode(true)
             .build()
             .await
             .expect("Failed to build pipeline");
@@ -514,8 +534,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_validate_voice_handler() {
+    async fn test_validate_voice_handler_rejects_unknown_voice() {
         let pipeline = VoirsPipelineBuilder::new()
+            .with_test_mode(true)
             .build()
             .await
             .expect("Failed to build pipeline");
@@ -523,13 +544,60 @@ mod tests {
         let shared_pipeline = Arc::new(RwLock::new(pipeline));
 
         let request = VoiceValidationRequest {
-            voice_id: "test_voice".to_string(),
+            voice_id: "definitely-not-a-registered-voice".to_string(),
             test_text: Some("Hello world".to_string()),
             quality_check: Some(true),
         };
 
-        let result = validate_voice_handler(Extension(shared_pipeline), Json(request)).await;
+        let response = validate_voice_handler(Extension(shared_pipeline), Json(request))
+            .await
+            .expect("handler must not fail")
+            .into_response();
 
-        assert!(result.is_ok());
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let parsed: serde_json::Value = serde_json::from_slice(&body).expect("json");
+
+        assert_eq!(
+            parsed["valid"],
+            serde_json::Value::Bool(false),
+            "an unregistered voice ID must not validate as usable"
+        );
+        assert!(!parsed["issues"].as_array().expect("issues").is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_validate_voice_handler_accepts_registered_voice() {
+        let pipeline = VoirsPipelineBuilder::new()
+            .with_test_mode(true)
+            .build()
+            .await
+            .expect("Failed to build pipeline");
+
+        let shared_pipeline = Arc::new(RwLock::new(pipeline));
+
+        let request = VoiceValidationRequest {
+            voice_id: "en-US-female-calm".to_string(),
+            test_text: None,
+            quality_check: Some(false),
+        };
+
+        let response = validate_voice_handler(Extension(shared_pipeline), Json(request))
+            .await
+            .expect("handler must not fail")
+            .into_response();
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let parsed: serde_json::Value = serde_json::from_slice(&body).expect("json");
+
+        assert_eq!(
+            parsed["valid"],
+            serde_json::Value::Bool(true),
+            "registered voice must validate: {:?}",
+            parsed["issues"]
+        );
     }
 }

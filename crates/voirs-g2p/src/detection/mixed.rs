@@ -7,6 +7,15 @@ use crate::preprocessing::unicode::ScriptType;
 use crate::{LanguageCode, Result};
 use std::collections::HashMap;
 
+/// Confidence assigned to a language segment identified only by its Unicode
+/// script (see [`MixedLanguageDetector::detect_segment_language`]), used when
+/// neither the rule-based nor the statistical detector produced a confident
+/// match. Scripts alone carry no learned confidence score, so this is an
+/// honest, fixed, low value -- clearly below the rule detector's `> 0.5`
+/// acceptance threshold used in the same function -- rather than a value
+/// that could be mistaken for a real detector's measurement.
+const SCRIPT_FALLBACK_CONFIDENCE: f32 = 0.35;
+
 /// Mixed language detector for handling code-switching and multilingual text
 pub struct MixedLanguageDetector {
     /// Rule-based detector for individual segments
@@ -112,9 +121,9 @@ impl MixedLanguageDetector {
                 continue;
             }
 
-            let detected_lang = self.detect_segment_language(&segment.text)?;
+            let detected = self.detect_segment_language(&segment.text)?;
 
-            if let Some(lang) = detected_lang {
+            if let Some((lang, confidence)) = detected {
                 let segment_chars = segment.text.chars().count();
                 total_chars += segment_chars;
 
@@ -123,7 +132,7 @@ impl MixedLanguageDetector {
                 language_segments.push(LanguageSegment {
                     text: segment.text,
                     language: lang,
-                    confidence: 0.8, // Placeholder confidence
+                    confidence,
                     start_pos: segment.start_pos,
                     end_pos: segment.end_pos,
                 });
@@ -285,30 +294,39 @@ impl MixedLanguageDetector {
         }
     }
 
-    /// Detect language for a single segment
-    fn detect_segment_language(&self, text: &str) -> Result<Option<LanguageCode>> {
+    /// Detect language for a single segment.
+    ///
+    /// Returns the detected language together with the *real* confidence score
+    /// reported by whichever detector produced the match, so callers can tell a
+    /// strong rule-based/statistical match from a low-confidence script-only guess.
+    fn detect_segment_language(&self, text: &str) -> Result<Option<(LanguageCode, f32)>> {
         // Try rule-based detection first
         if let Some(result) = self.rule_detector.detect(text)? {
             if result.confidence > 0.5 {
-                return Ok(Some(result.language));
+                return Ok(Some((result.language, result.confidence)));
             }
         }
 
         // Try statistical detection
         if let Some(result) = self.statistical_detector.detect(text)? {
             if result.confidence > 0.3 {
-                return Ok(Some(result.language));
+                return Ok(Some((result.language, result.confidence)));
             }
         }
 
-        // Fallback to script-based detection
+        // Fallback to script-based detection. Unlike the detectors above, a bare
+        // script match carries no learned confidence score, so it is honestly
+        // reported as a fixed, low value that is clearly below any real
+        // detector-matched confidence (which must exceed 0.5 or 0.3 above).
         use crate::preprocessing::unicode::detect_script;
 
         let script = detect_script(text);
         match script {
-            ScriptType::Hiragana | ScriptType::Katakana => Ok(Some(LanguageCode::Ja)),
-            ScriptType::Hangul => Ok(Some(LanguageCode::Ko)),
-            ScriptType::CJK => Ok(Some(LanguageCode::ZhCn)),
+            ScriptType::Hiragana | ScriptType::Katakana => {
+                Ok(Some((LanguageCode::Ja, SCRIPT_FALLBACK_CONFIDENCE)))
+            }
+            ScriptType::Hangul => Ok(Some((LanguageCode::Ko, SCRIPT_FALLBACK_CONFIDENCE))),
+            ScriptType::CJK => Ok(Some((LanguageCode::ZhCn, SCRIPT_FALLBACK_CONFIDENCE))),
             _ => Ok(None),
         }
     }
@@ -392,6 +410,82 @@ mod tests {
         if let Some(_lang) = lang {
             // Language detected successfully
         }
+    }
+
+    /// Regression test: `detect_segment_language`'s script-based fallback must
+    /// report the honest, low, fixed `SCRIPT_FALLBACK_CONFIDENCE` -- not a
+    /// value that pretends to come from a real detector match.
+    #[test]
+    fn test_script_fallback_confidence_is_honestly_low() {
+        let detector = MixedLanguageDetector::new();
+
+        // Pure-script text for which neither the rule-based detector
+        // (threshold 0.5) nor the statistical detector (threshold 0.3)
+        // returns a confident match, so detection falls through to the
+        // script-only heuristic.
+        for (text, expected_lang) in [
+            ("こんにちはせかい", LanguageCode::Ja),
+            ("アイウエオ", LanguageCode::Ja),
+            ("안녕하세요", LanguageCode::Ko),
+            ("你好世界", LanguageCode::ZhCn),
+        ] {
+            assert!(
+                detector.rule_detector.detect(text).unwrap().is_none(),
+                "test fixture assumption broken: rule detector now matches {text:?}"
+            );
+            assert!(
+                detector
+                    .statistical_detector
+                    .detect(text)
+                    .unwrap()
+                    .is_none(),
+                "test fixture assumption broken: statistical detector now matches {text:?}"
+            );
+
+            let (lang, confidence) = detector.detect_segment_language(text).unwrap().unwrap();
+            assert_eq!(lang, expected_lang);
+            assert_eq!(confidence, SCRIPT_FALLBACK_CONFIDENCE);
+            // Must stay honestly below either detector's acceptance threshold
+            // so it can never be mistaken for a real, matched detection.
+            assert!(confidence < 0.5);
+        }
+    }
+
+    /// Regression test: mixed real-world input must yield *different*
+    /// per-segment confidences that trace back to whichever detector (or the
+    /// script fallback) actually produced each segment -- not a constant
+    /// placeholder repeated for every segment.
+    #[test]
+    fn test_mixed_detection_confidence_varies_and_is_not_hardcoded() {
+        let detector = MixedLanguageDetector::new();
+
+        // A strongly English sentence (many repeated common function words,
+        // scored well above the rule detector's 0.5 threshold) followed by a
+        // sentence-ending period and a pure-Hiragana sentence that only the
+        // script fallback can identify.
+        let mixed_text = "the quick brown fox and the lazy dog and the cat. こんにちはせかい";
+        let result = detector.detect_mixed(mixed_text).unwrap();
+
+        assert_eq!(result.segments.len(), 2);
+
+        let english = &result.segments[0];
+        assert_eq!(english.language, LanguageCode::EnUs);
+        // A real rule-detector score for this text, not the old hardcoded 0.8.
+        assert!(
+            (english.confidence - 0.6096).abs() < 0.01,
+            "expected the real rule-detector confidence (~0.6096), got {}",
+            english.confidence
+        );
+
+        let japanese = &result.segments[1];
+        assert_eq!(japanese.language, LanguageCode::Ja);
+        assert_eq!(japanese.confidence, SCRIPT_FALLBACK_CONFIDENCE);
+
+        // The whole point: two segments in the same call, two different,
+        // input-dependent confidence values -- never both pinned to 0.8.
+        assert_ne!(english.confidence, japanese.confidence);
+        assert_ne!(english.confidence, 0.8);
+        assert_ne!(japanese.confidence, 0.8);
     }
 
     #[test]

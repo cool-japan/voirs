@@ -195,9 +195,9 @@ pub use simple_parser::SimpleSsmlParser;
 pub type SsmlResult<T> = Result<T, crate::G2pError>;
 
 /// Convenience function to process SSML text with default settings
-pub fn process_ssml(ssml_text: &str) -> SsmlResult<Vec<crate::Phoneme>> {
+pub async fn process_ssml(ssml_text: &str) -> SsmlResult<Vec<crate::Phoneme>> {
     let mut processor = SsmlProcessor::new();
-    let result = processor.process(ssml_text)?;
+    let result = processor.process(ssml_text).await?;
     Ok(result.phonemes)
 }
 
@@ -241,11 +241,11 @@ mod tests {
     use super::*;
     use crate::LanguageCode;
 
-    #[test]
-    fn test_convenience_functions() {
+    #[tokio::test]
+    async fn test_convenience_functions() {
         // Test SSML processing
         let ssml = "<speak>Hello world</speak>";
-        let result = process_ssml(ssml);
+        let result = process_ssml(ssml).await;
         assert!(result.is_ok());
 
         // Test SSML parsing
@@ -281,8 +281,8 @@ mod tests {
         // Basic functionality test would go here
     }
 
-    #[test]
-    fn test_complex_ssml() {
+    #[tokio::test]
+    async fn test_complex_ssml() {
         let ssml = r#"<speak xml:lang="en-US">
             <p>
                 Welcome to our <emphasis level="strong">advanced</emphasis> 
@@ -299,7 +299,7 @@ mod tests {
             </prosody>
         </speak>"#;
 
-        let result = process_ssml(ssml);
+        let result = process_ssml(ssml).await;
         assert!(result.is_ok());
 
         let phonemes = result.unwrap();
@@ -329,13 +329,13 @@ mod tests {
         // In strict mode it might fail, in recovery mode it should succeed
     }
 
-    #[test]
-    fn test_phoneme_override() {
+    #[tokio::test]
+    async fn test_phoneme_override() {
         let ssml = r#"<speak>
             <phoneme alphabet="ipa" ph="h ɛ l oʊ">hello</phoneme>
         </speak>"#;
 
-        let result = process_ssml(ssml);
+        let result = process_ssml(ssml).await;
         assert!(result.is_ok());
 
         let phonemes = result.unwrap();
@@ -343,43 +343,43 @@ mod tests {
         assert!(!phonemes.is_empty());
     }
 
-    #[test]
-    fn test_lang_switching() {
+    #[tokio::test]
+    async fn test_lang_switching() {
         let ssml = r#"<speak>
             Hello, <lang xml:lang="ja">こんにちは</lang>, world!
         </speak>"#;
 
-        let result = process_ssml(ssml);
+        let result = process_ssml(ssml).await;
         assert!(result.is_ok());
 
         let phonemes = result.unwrap();
         assert!(!phonemes.is_empty());
     }
 
-    #[test]
-    fn test_prosody_control() {
+    #[tokio::test]
+    async fn test_prosody_control() {
         let ssml = r#"<speak>
             <prosody rate="slow" pitch="high" volume="loud">
                 This is spoken slowly, with high pitch and loud volume.
             </prosody>
         </speak>"#;
 
-        let result = process_ssml(ssml);
+        let result = process_ssml(ssml).await;
         assert!(result.is_ok());
 
         let phonemes = result.unwrap();
         assert!(!phonemes.is_empty());
     }
 
-    #[test]
-    fn test_breaks_and_marks() {
+    #[tokio::test]
+    async fn test_breaks_and_marks() {
         let ssml = r#"<speak>
-            First part. <break time="1s"/> 
+            First part. <break time="1s"/>
             <mark name="middle"/>
             Second part.
         </speak>"#;
 
-        let result = process_ssml(ssml);
+        let result = process_ssml(ssml).await;
         assert!(result.is_ok());
 
         let phonemes = result.unwrap();

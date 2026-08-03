@@ -1,12 +1,33 @@
 //! DiffSinger: Diffusion-based Singing Voice Synthesis
 //!
-//! This module implements DiffSinger, a state-of-the-art diffusion-based model for
-//! high-quality singing voice synthesis that can generate natural and expressive
-//! singing voices from musical scores and lyrics.
+//! This module implements the DDPM (denoising diffusion probabilistic model)
+//! structure behind DiffSinger: a real noise schedule (see
+//! [`compute_alpha_bar`]) and a real iterative reverse-process loop (see
+//! [`DiffusionState::next_step`]).
+//!
+//! The noise-*prediction* step has two selectable backends (see
+//! [`DiffSingerConfig::use_neural_denoiser`]):
+//! - [`DiffusionDenoiser`]: a real, trainable/loadable candle neural network.
+//!   This crate ships no pretrained weights, so it must be loaded explicitly
+//!   via [`DiffSingerModel::load_from_file`] before use; without loaded
+//!   weights it fails closed rather than fabricating a prediction.
+//! - `predict_noise_analytical_fallback`: an explicit, non-neural DSP
+//!   approximation that reconstructs the noise estimate algebraically from
+//!   the conditioning features. This is the default, since it requires no
+//!   pretrained weights, but it must never be presented as "diffusion
+//!   synthesis" on its own - it is a deterministic fallback the caller opts
+//!   into (or, today, gets by default in the absence of real weights).
+//!
+//! The vocoder stage has an analogous split (see
+//! [`DiffSingerConfig::use_neural_vocoder`]): a real neural vocoder
+//! (HiFi-GAN/PWG/...) is not implemented in this crate yet, so enabling it
+//! fails closed; the default is an explicit additive-sine DSP fallback.
 
 use super::core::{SynthesisModel, SynthesisParams};
 use crate::types::core_types::Articulation;
-use crate::{Expression, MusicalNote, NoteEvent, Result, VoiceType};
+use crate::{Error, Expression, MusicalNote, NoteEvent, Result, VoiceType};
+use candle_core::{Device, Module, Tensor};
+use candle_nn::{Linear, VarBuilder, VarMap};
 use scirs2_core::ndarray::Array2;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -48,20 +69,32 @@ pub struct DiffSingerConfig {
     pub conditioning_features: Vec<ConditioningFeature>,
     /// Voice type support
     pub supported_voices: Vec<VoiceType>,
-    /// Use neural vocoder
+    /// Real, effective selector: `true` requires a loaded [`DiffusionDenoiser`]
+    /// (via [`DiffSingerModel::load_from_file`]) and neural vocoder weights;
+    /// synthesis fails closed (a typed [`crate::Error::Model`]) rather than
+    /// fabricating output if the corresponding weights aren't loaded.
+    /// Defaults to `false` since this crate ships no pretrained weights, so
+    /// synthesis instead uses the explicit analytical DSP fallbacks.
     pub use_neural_vocoder: bool,
-    /// Vocoder type
+    /// Vocoder architecture a `true` `use_neural_vocoder` would target (not
+    /// yet implemented locally - see module docs).
     pub vocoder_type: VocoderType,
     /// Maximum sequence length
     pub max_sequence_length: usize,
     /// Use phoneme conditioning
     pub use_phoneme_conditioning: bool,
-    /// Use musical conditioning  
+    /// Use musical conditioning
     pub use_musical_conditioning: bool,
     /// Use style embedding
     pub use_style_embedding: bool,
     /// Style embedding dimension
     pub style_embedding_dim: usize,
+    /// Real, effective selector for the diffusion noise-prediction step:
+    /// `true` requires a [`DiffusionDenoiser`] loaded via
+    /// [`DiffSingerModel::load_from_file`] and fails closed without one;
+    /// `false` (the default) uses the explicit, non-neural
+    /// `predict_noise_analytical_fallback` DSP approximation.
+    pub use_neural_denoiser: bool,
 }
 
 impl Default for DiffSingerConfig {
@@ -86,13 +119,14 @@ impl Default for DiffSingerConfig {
                 VoiceType::Tenor,
                 VoiceType::Bass,
             ],
-            use_neural_vocoder: true,
+            use_neural_vocoder: false,
             vocoder_type: VocoderType::HiFiGAN,
             max_sequence_length: 2048,
             use_phoneme_conditioning: true,
             use_musical_conditioning: true,
             use_style_embedding: true,
             style_embedding_dim: 128,
+            use_neural_denoiser: false,
         }
     }
 }
@@ -140,6 +174,188 @@ pub enum VocoderType {
     WaveNet,
     /// NSF (Neural Source-Filter) vocoder
     NSF,
+}
+
+/// Real, trainable/loadable neural noise-prediction network `ε_θ(x_t, t, c)`.
+///
+/// Given a noisy mel spectrogram, the conditioning features, and the current
+/// diffusion timestep, predicts the noise added at that step. Every frame is
+/// processed independently through a shared 3-layer MLP (a pointwise
+/// conditional denoiser): `linear3(relu(linear2(relu(linear1(x)))))`, where
+/// `x` concatenates the noisy mel frame, a fixed-size conditioning vector
+/// (see [`conditioning_frame_vector`]), and a sinusoidal timestep embedding
+/// (see [`timestep_embedding`]).
+///
+/// This is a genuine candle neural network - weights are real
+/// [`candle_core::Var`]s backed by a [`VarMap`], trainable, and persisted in
+/// safetensors format via [`Self::save`]/[`Self::load`] - not an analytical
+/// shortcut. This crate ships no pretrained weights for it, so
+/// [`DiffSingerModel::load_from_file`] must be called with a real
+/// safetensors file before it can be used; see the module docs for the
+/// (default) non-neural fallback used otherwise.
+#[derive(Debug, Clone)]
+pub struct DiffusionDenoiser {
+    n_mel: usize,
+    linear1: Linear,
+    linear2: Linear,
+    linear3: Linear,
+    device: Device,
+    varmap: VarMap,
+}
+
+impl DiffusionDenoiser {
+    /// Conditioning vector dimensions, matching `extract_pitch_features`
+    /// (1), `extract_musical_features` (32), `extract_phoneme_features`
+    /// (64), and `extract_voice_features` (16).
+    const PITCH_DIM: usize = 1;
+    const MUSICAL_DIM: usize = 32;
+    const PHONEME_DIM: usize = 64;
+    const VOICE_DIM: usize = 16;
+    /// Sinusoidal timestep embedding dimension.
+    const TIMESTEP_EMBED_DIM: usize = 16;
+    /// Hidden layer width.
+    const HIDDEN_DIM: usize = 128;
+
+    /// Total conditioning-vector width (see [`conditioning_frame_vector`]).
+    const fn conditioning_dim() -> usize {
+        Self::PITCH_DIM + Self::MUSICAL_DIM + Self::PHONEME_DIM + Self::VOICE_DIM
+    }
+
+    /// Build a fresh (randomly-initialized, untrained) denoiser for `n_mel`
+    /// mel bands. Real weights must be loaded via [`Self::load`] before the
+    /// network's predictions are meaningful.
+    fn new(n_mel: usize, device: Device) -> Result<Self> {
+        let varmap = VarMap::new();
+        let vb = VarBuilder::from_varmap(&varmap, candle_core::DType::F32, &device);
+        let input_dim = n_mel + Self::conditioning_dim() + Self::TIMESTEP_EMBED_DIM;
+
+        let linear1 = candle_nn::linear(input_dim, Self::HIDDEN_DIM, vb.pp("linear1"))?;
+        let linear2 = candle_nn::linear(Self::HIDDEN_DIM, Self::HIDDEN_DIM, vb.pp("linear2"))?;
+        let linear3 = candle_nn::linear(Self::HIDDEN_DIM, n_mel, vb.pp("linear3"))?;
+
+        Ok(Self {
+            n_mel,
+            linear1,
+            linear2,
+            linear3,
+            device,
+            varmap,
+        })
+    }
+
+    /// Real neural forward pass: predicts noise for every frame of
+    /// `noisy_mel` at once, conditioned on `conditioning` and the diffusion
+    /// `step`.
+    fn forward(
+        &self,
+        noisy_mel: &Array2<f32>,
+        conditioning: &HashMap<String, Array2<f32>>,
+        step: usize,
+        total_steps: usize,
+    ) -> Result<Array2<f32>> {
+        let (n_mel, n_frames) = noisy_mel.dim();
+        if n_mel != self.n_mel {
+            return Err(Error::Model(format!(
+                "DiffusionDenoiser was built for {} mel bands but received {n_mel}",
+                self.n_mel
+            )));
+        }
+
+        let embed = timestep_embedding(step, total_steps, Self::TIMESTEP_EMBED_DIM);
+        let input_dim = n_mel + Self::conditioning_dim() + Self::TIMESTEP_EMBED_DIM;
+        let mut input_data = Vec::with_capacity(n_frames * input_dim);
+        for frame in 0..n_frames {
+            for mel_bin in 0..n_mel {
+                input_data.push(noisy_mel[[mel_bin, frame]]);
+            }
+            input_data.extend_from_slice(&conditioning_frame_vector(conditioning, frame));
+            input_data.extend_from_slice(&embed);
+        }
+
+        let input_tensor = Tensor::from_vec(input_data, (n_frames, input_dim), &self.device)?;
+        let hidden = self.linear1.forward(&input_tensor)?.relu()?;
+        let hidden = self.linear2.forward(&hidden)?.relu()?;
+        let output = self.linear3.forward(&hidden)?; // (n_frames, n_mel)
+
+        let output_data = output.to_vec2::<f32>()?;
+        let mut result = Array2::<f32>::zeros((n_mel, n_frames));
+        for (frame, row) in output_data.iter().enumerate() {
+            for (mel_bin, &value) in row.iter().enumerate() {
+                result[[mel_bin, frame]] = value;
+            }
+        }
+        Ok(result)
+    }
+
+    /// Persist the real weight tensors in safetensors format.
+    fn save(&self, path: &str) -> Result<()> {
+        self.varmap
+            .save(path)
+            .map_err(|e| Error::Model(format!("Failed to save DiffusionDenoiser weights to {path}: {e}")))
+    }
+
+    /// Load real weight tensors from a safetensors file, failing closed
+    /// (a typed [`Error::Model`]) if the file doesn't exist or its tensors
+    /// don't match this architecture's shapes - never silently keeping
+    /// untrained construction-time weights while reporting success.
+    fn load(n_mel: usize, device: Device, path: &str) -> Result<Self> {
+        if !std::path::Path::new(path).exists() {
+            return Err(Error::Model(format!(
+                "DiffSinger neural denoiser weights not available at {path}"
+            )));
+        }
+        let mut denoiser = Self::new(n_mel, device)?;
+        denoiser.varmap.load(path).map_err(|e| {
+            Error::Model(format!(
+                "Failed to load DiffusionDenoiser weights from {path}: {e}"
+            ))
+        })?;
+        Ok(denoiser)
+    }
+}
+
+/// Build a fixed-size conditioning vector for one frame
+/// (`DiffusionDenoiser::conditioning_dim()` wide: pitch + musical + phoneme +
+/// voice), zero-filling any conditioning type that's absent (e.g. disabled
+/// via config) or shorter than expected, rather than failing or fabricating
+/// a nonzero value.
+fn conditioning_frame_vector(conditioning: &HashMap<String, Array2<f32>>, frame: usize) -> Vec<f32> {
+    let mut vector = Vec::with_capacity(DiffusionDenoiser::conditioning_dim());
+    for (key, dim) in [
+        ("pitch", DiffusionDenoiser::PITCH_DIM),
+        ("musical", DiffusionDenoiser::MUSICAL_DIM),
+        ("phoneme", DiffusionDenoiser::PHONEME_DIM),
+        ("voice", DiffusionDenoiser::VOICE_DIM),
+    ] {
+        let array = conditioning.get(key);
+        for row in 0..dim {
+            let value = array
+                .filter(|a| row < a.nrows() && frame < a.ncols())
+                .map(|a| a[[row, frame]])
+                .unwrap_or(0.0);
+            vector.push(value);
+        }
+    }
+    vector
+}
+
+/// Standard sinusoidal timestep embedding (as used in the original DDPM /
+/// Transformer positional encoding), giving the denoiser network a smooth,
+/// distinguishable representation of how noisy the current diffusion step
+/// is expected to be.
+fn timestep_embedding(step: usize, total_steps: usize, dim: usize) -> Vec<f32> {
+    let t = step as f32 / total_steps.max(1) as f32;
+    (0..dim)
+        .map(|i| {
+            let pair_index = (i / 2) as f32;
+            let freq = 10000f32.powf(-2.0 * pair_index / dim as f32);
+            if i % 2 == 0 {
+                (t * freq).sin()
+            } else {
+                (t * freq).cos()
+            }
+        })
+        .collect()
 }
 
 /// Diffusion model state for iterative denoising
@@ -320,10 +536,11 @@ fn compute_alpha_bar(step: usize, total_steps: usize) -> f32 {
 pub struct DiffSingerModel {
     /// Model configuration
     pub config: DiffSingerConfig,
-    /// Model parameters (placeholder for neural network weights)
-    pub model_params: HashMap<String, Vec<f32>>,
-    /// Vocoder for mel-to-audio conversion
-    pub vocoder_params: HashMap<String, Vec<f32>>,
+    /// Real, loadable noise-prediction network (see [`DiffusionDenoiser`]).
+    /// `None` until [`Self::load_from_file`] is called with real weights;
+    /// [`Self::predict_noise`] fails closed rather than using this when it's
+    /// absent and `config.use_neural_denoiser` is `true`.
+    pub neural_denoiser: Option<DiffusionDenoiser>,
     /// Conditioning embeddings
     pub embeddings: HashMap<String, Array2<f32>>,
     /// Model version
@@ -335,8 +552,7 @@ impl DiffSingerModel {
     pub fn new(config: DiffSingerConfig) -> Self {
         Self {
             config,
-            model_params: HashMap::new(),
-            vocoder_params: HashMap::new(),
+            neural_denoiser: None,
             embeddings: HashMap::new(),
             version: "1.0.0".to_string(),
         }
@@ -561,6 +777,37 @@ impl DiffSingerModel {
 
     /// Predict noise ε_θ(x_t, t, c) for the current diffusion step.
     ///
+    /// Dispatches to a real, loaded [`DiffusionDenoiser`] when
+    /// `config.use_neural_denoiser` is `true` (failing closed if none is
+    /// loaded), otherwise uses the explicit, non-neural
+    /// [`Self::predict_noise_analytical_fallback`].
+    fn predict_noise(
+        &self,
+        diffusion_state: &DiffusionState,
+        conditioning: &HashMap<String, Array2<f32>>,
+        step: usize,
+    ) -> Result<Array2<f32>> {
+        if self.config.use_neural_denoiser {
+            let denoiser = self.neural_denoiser.as_ref().ok_or_else(|| {
+                Error::Model(
+                    "use_neural_denoiser is enabled but no DiffusionDenoiser weights are \
+                     loaded; call `load_from_file` with a real safetensors file, or set \
+                     `use_neural_denoiser = false` to use the analytical DSP fallback"
+                        .to_string(),
+                )
+            })?;
+            return denoiser.forward(
+                &diffusion_state.noisy_spec,
+                conditioning,
+                step,
+                diffusion_state.total_steps,
+            );
+        }
+        self.predict_noise_analytical_fallback(diffusion_state, conditioning, step)
+    }
+
+    /// Explicit, non-neural analytical DSP fallback for noise prediction.
+    ///
     /// Without a trained neural network we treat the conditioning features as
     /// the "target" clean signal x̂_0 and derive the noise estimate analytically
     /// from the DDPM forward-process equation:
@@ -575,7 +822,10 @@ impl DiffSingerModel {
     /// and musical (secondary, scaled 0.5) features.  Any missing conditioning
     /// channels default to zero, which results in a noise estimate that simply
     /// drives the noisy spectrogram toward silence — a safe fallback.
-    fn predict_noise(
+    ///
+    /// This is **not** a trained neural network and must never be presented
+    /// as "DiffSinger diffusion synthesis" on its own - see the module docs.
+    fn predict_noise_analytical_fallback(
         &self,
         diffusion_state: &DiffusionState,
         conditioning: &HashMap<String, Array2<f32>>,
@@ -628,14 +878,33 @@ impl DiffSingerModel {
         Ok(noise_estimate)
     }
 
-    /// Convert mel spectrogram to audio using vocoder
+    /// Convert mel spectrogram to audio.
+    ///
+    /// Dispatches to a real trained neural vocoder when
+    /// `config.use_neural_vocoder` is `true` - not implemented locally in
+    /// this crate yet, so this fails closed rather than fabricating audio -
+    /// otherwise uses the explicit, non-neural
+    /// [`Self::vocoder_synthesis_analytical_fallback`].
     pub fn vocoder_synthesis(&self, mel_spec: &Array2<f32>) -> Result<Vec<f32>> {
+        if self.config.use_neural_vocoder {
+            return Err(Error::Model(format!(
+                "use_neural_vocoder is enabled but this crate does not ship a trained neural \
+                 vocoder integration for {:?} yet; set `use_neural_vocoder = false` to use the \
+                 analytical sine-additive DSP fallback",
+                self.config.vocoder_type
+            )));
+        }
+        self.vocoder_synthesis_analytical_fallback(mel_spec)
+    }
+
+    /// Explicit, non-neural additive-sine DSP fallback for mel-to-audio
+    /// conversion. This is **not** a trained neural vocoder (HiFi-GAN or
+    /// otherwise) and must never be presented as one - see the module docs.
+    fn vocoder_synthesis_analytical_fallback(&self, mel_spec: &Array2<f32>) -> Result<Vec<f32>> {
         let (n_mel, n_frames) = mel_spec.dim();
         let audio_length = n_frames * self.config.hop_size;
         let mut audio = vec![0.0; audio_length];
 
-        // Placeholder vocoder implementation
-        // In practice, this would use a neural vocoder like HiFi-GAN
         match self.config.vocoder_type {
             VocoderType::HiFiGAN => {
                 // Simple overlap-add synthesis as placeholder
@@ -752,17 +1021,33 @@ impl SynthesisModel for DiffSingerModel {
         &self.version
     }
 
+    /// Load real [`DiffusionDenoiser`] weights from a safetensors file at
+    /// `path`, enabling the neural noise-prediction path (see
+    /// [`DiffSingerConfig::use_neural_denoiser`]).
+    ///
+    /// Fails closed with a typed [`Error::Model`] if `path` doesn't exist or
+    /// its tensors don't match the expected architecture - never silently
+    /// "succeeds" without reading real weight data.
     fn load_from_file(&mut self, path: &str) -> Result<()> {
-        // Placeholder for loading model weights
-        // In practice, this would load pretrained DiffSinger weights
-        println!("Loading DiffSinger model from: {}", path);
+        let denoiser = DiffusionDenoiser::load(self.config.n_mel, Device::Cpu, path)?;
+        self.neural_denoiser = Some(denoiser);
         Ok(())
     }
 
+    /// Save the currently-loaded [`DiffusionDenoiser`]'s real weights to a
+    /// safetensors file at `path`.
+    ///
+    /// Fails with a typed [`Error::Model`] if no neural denoiser is loaded -
+    /// there is nothing real to save, so this never reports a fake success.
     fn save_to_file(&self, path: &str) -> Result<()> {
-        // Placeholder for saving model weights
-        println!("Saving DiffSinger model to: {}", path);
-        Ok(())
+        let denoiser = self.neural_denoiser.as_ref().ok_or_else(|| {
+            Error::Model(
+                "No neural denoiser is loaded to save; call `load_from_file` with real weights \
+                 first"
+                    .to_string(),
+            )
+        })?;
+        denoiser.save(path)
     }
 }
 

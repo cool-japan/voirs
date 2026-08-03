@@ -26,6 +26,13 @@ pub mod synthesis;
 pub mod pipeline_impl;
 pub use pipeline_impl::*;
 
+/// The single builder type of the SDK.
+///
+/// `voirs_sdk::VoirsPipelineBuilder`, `voirs_sdk::builder::VoirsPipelineBuilder`,
+/// `voirs_sdk::pipeline::VoirsPipelineBuilder` and `voirs_sdk::prelude::VoirsPipelineBuilder`
+/// are all the same type: [`crate::builder::VoirsPipelineBuilder`].
+pub use crate::builder::VoirsPipelineBuilder;
+
 /// Main VoiRS synthesis pipeline
 pub struct VoirsPipeline {
     /// Internal pipeline implementation
@@ -96,6 +103,46 @@ impl VoirsPipeline {
             singing_controller: None,
             #[cfg(feature = "spatial")]
             spatial_controller: None,
+        }
+    }
+
+    /// Assemble the public pipeline from an initialized core pipeline and the
+    /// advanced-feature controllers built from the builder configuration.
+    ///
+    /// This is the single construction site used by
+    /// [`VoirsPipelineBuilder::build`](crate::builder::VoirsPipelineBuilder::build);
+    /// it is what makes `.with_emotion_control(..)`, `.with_voice_cloning(..)` and
+    /// friends actually reach the built pipeline.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_parts(
+        inner: pipeline_impl::VoirsPipeline,
+        #[cfg(feature = "emotion")] emotion_controller: Option<
+            Arc<crate::emotion::EmotionController>,
+        >,
+        #[cfg(feature = "cloning")] voice_cloner: Option<Arc<crate::cloning::VoiceCloner>>,
+        #[cfg(feature = "conversion")] voice_converter: Option<
+            Arc<crate::conversion::VoiceConverter>,
+        >,
+        #[cfg(feature = "singing")] singing_controller: Option<
+            Arc<crate::singing::SingingController>,
+        >,
+        #[cfg(feature = "spatial")] spatial_controller: Option<
+            Arc<crate::spatial::SpatialAudioController>,
+        >,
+    ) -> Self {
+        Self {
+            inner,
+
+            #[cfg(feature = "emotion")]
+            emotion_controller,
+            #[cfg(feature = "cloning")]
+            voice_cloner,
+            #[cfg(feature = "conversion")]
+            voice_converter,
+            #[cfg(feature = "singing")]
+            singing_controller,
+            #[cfg(feature = "spatial")]
+            spatial_controller,
         }
     }
 
@@ -544,336 +591,19 @@ impl VoirsPipeline {
     }
 }
 
-/// Builder for VoiRS pipeline
-pub struct VoirsPipelineBuilder {
-    voice_id: Option<String>,
-    config: PipelineConfig,
-    test_mode: bool,
+// -----------------------------------------------------------------------------
+// Stub components (TEST UTILITIES ONLY)
+//
+// These are deliberately *not* speech models: they exist so tests, benchmarks and
+// examples can exercise the pipeline plumbing without model weights. They are
+// installed only when `VoirsPipelineBuilder::with_test_mode(true)` is requested
+// explicitly, or when a caller passes them to `with_g2p`/`with_acoustic_model`/
+// `with_vocoder`. No default build path can reach them.
+// -----------------------------------------------------------------------------
 
-    // Advanced features configuration
-    #[cfg(feature = "emotion")]
-    emotion_config: Option<crate::emotion::EmotionControllerBuilder>,
-    #[cfg(feature = "cloning")]
-    cloning_config: Option<crate::cloning::VoiceClonerBuilder>,
-    #[cfg(feature = "conversion")]
-    conversion_config: Option<crate::conversion::VoiceConverterBuilder>,
-    #[cfg(feature = "singing")]
-    singing_config: Option<crate::singing::SingingControllerBuilder>,
-    #[cfg(feature = "spatial")]
-    spatial_config: Option<crate::spatial::SpatialAudioControllerBuilder>,
-}
-
-impl VoirsPipelineBuilder {
-    /// Create new builder
-    pub fn new() -> Self {
-        Self {
-            voice_id: None,
-            config: PipelineConfig::default(),
-            test_mode: cfg!(test), // Automatically enable test mode when running tests
-
-            // Advanced features configuration
-            #[cfg(feature = "emotion")]
-            emotion_config: None,
-            #[cfg(feature = "cloning")]
-            cloning_config: None,
-            #[cfg(feature = "conversion")]
-            conversion_config: None,
-            #[cfg(feature = "singing")]
-            singing_config: None,
-            #[cfg(feature = "spatial")]
-            spatial_config: None,
-        }
-    }
-
-    /// Set the voice to use
-    pub fn with_voice(mut self, voice: impl Into<String>) -> Self {
-        self.voice_id = Some(voice.into());
-        self
-    }
-
-    /// Set synthesis quality
-    pub fn with_quality(mut self, quality: crate::types::QualityLevel) -> Self {
-        self.config.default_synthesis.quality = quality;
-        self
-    }
-
-    /// Enable GPU acceleration
-    pub fn with_gpu_acceleration(mut self, enabled: bool) -> Self {
-        self.config.use_gpu = enabled;
-        self
-    }
-
-    /// Set device for computation
-    pub fn with_device(mut self, device: String) -> Self {
-        self.config.device = device;
-        self
-    }
-
-    /// Enable GPU acceleration (alias for with_gpu_acceleration)
-    pub fn with_gpu(mut self, enabled: bool) -> Self {
-        self.config.use_gpu = enabled;
-        self
-    }
-
-    /// Set number of threads for computation
-    pub fn with_threads(mut self, threads: usize) -> Self {
-        self.config.num_threads = Some(threads);
-        self
-    }
-
-    /// Set custom cache directory
-    pub fn with_cache_dir(mut self, path: impl Into<std::path::PathBuf>) -> Self {
-        self.config.cache_dir = Some(path.into());
-        self
-    }
-
-    /// Enable test mode (skips expensive operations for fast testing)
-    pub fn with_test_mode(mut self, enabled: bool) -> Self {
-        self.test_mode = enabled;
-        self
-    }
-
-    // Advanced features configuration methods
-
-    /// Configure emotion control for the pipeline
-    #[cfg(feature = "emotion")]
-    pub fn with_emotion_control(
-        mut self,
-        emotion_builder: crate::emotion::EmotionControllerBuilder,
-    ) -> Self {
-        self.emotion_config = Some(emotion_builder);
-        self
-    }
-
-    /// Enable emotion control with default configuration
-    #[cfg(feature = "emotion")]
-    pub fn with_emotion_enabled(mut self, enabled: bool) -> Self {
-        if enabled {
-            self.emotion_config =
-                Some(crate::emotion::EmotionControllerBuilder::new().enabled(true));
-        } else {
-            self.emotion_config = None;
-        }
-        self
-    }
-
-    /// Configure voice cloning for the pipeline  
-    #[cfg(feature = "cloning")]
-    pub fn with_voice_cloning(
-        mut self,
-        cloning_builder: crate::cloning::VoiceClonerBuilder,
-    ) -> Self {
-        self.cloning_config = Some(cloning_builder);
-        self
-    }
-
-    /// Enable voice cloning with default configuration
-    #[cfg(feature = "cloning")]
-    pub fn with_cloning_enabled(mut self, enabled: bool) -> Self {
-        if enabled {
-            self.cloning_config = Some(crate::cloning::VoiceClonerBuilder::new().enabled(true));
-        } else {
-            self.cloning_config = None;
-        }
-        self
-    }
-
-    /// Configure voice conversion for the pipeline
-    #[cfg(feature = "conversion")]
-    pub fn with_voice_conversion(
-        mut self,
-        conversion_builder: crate::conversion::VoiceConverterBuilder,
-    ) -> Self {
-        self.conversion_config = Some(conversion_builder);
-        self
-    }
-
-    /// Enable voice conversion with default configuration
-    #[cfg(feature = "conversion")]
-    pub fn with_conversion_enabled(mut self, enabled: bool) -> Self {
-        if enabled {
-            self.conversion_config =
-                Some(crate::conversion::VoiceConverterBuilder::new().enabled(true));
-        } else {
-            self.conversion_config = None;
-        }
-        self
-    }
-
-    /// Configure singing synthesis for the pipeline
-    #[cfg(feature = "singing")]
-    pub fn with_singing_synthesis(
-        mut self,
-        singing_builder: crate::singing::SingingControllerBuilder,
-    ) -> Self {
-        self.singing_config = Some(singing_builder);
-        self
-    }
-
-    /// Enable singing synthesis with default configuration
-    #[cfg(feature = "singing")]
-    pub fn with_singing_enabled(mut self, enabled: bool) -> Self {
-        if enabled {
-            self.singing_config =
-                Some(crate::singing::SingingControllerBuilder::new().enabled(true));
-        } else {
-            self.singing_config = None;
-        }
-        self
-    }
-
-    /// Configure spatial audio for the pipeline
-    #[cfg(feature = "spatial")]
-    pub fn with_spatial_audio(
-        mut self,
-        spatial_builder: crate::spatial::SpatialAudioControllerBuilder,
-    ) -> Self {
-        self.spatial_config = Some(spatial_builder);
-        self
-    }
-
-    /// Enable spatial audio with default configuration
-    #[cfg(feature = "spatial")]
-    pub fn with_spatial_enabled(mut self, enabled: bool) -> Self {
-        if enabled {
-            self.spatial_config =
-                Some(crate::spatial::SpatialAudioControllerBuilder::new().enabled(true));
-        } else {
-            self.spatial_config = None;
-        }
-        self
-    }
-
-    /// Get configuration (internal)
-    pub(crate) fn get_config(&self) -> PipelineConfig {
-        self.config.clone()
-    }
-
-    /// Get voice ID (internal)
-    pub(crate) fn get_voice_id(&self) -> Option<String> {
-        self.voice_id.clone()
-    }
-
-    /// Get test mode (internal)
-    pub(crate) fn get_test_mode(&self) -> bool {
-        self.test_mode
-    }
-
-    /// Get emotion configuration (internal)
-    #[cfg(feature = "emotion")]
-    pub(crate) fn get_emotion_config(&self) -> Option<crate::emotion::EmotionControllerBuilder> {
-        self.emotion_config.clone()
-    }
-
-    /// Get cloning configuration (internal)
-    #[cfg(feature = "cloning")]
-    pub(crate) fn get_cloning_config(&self) -> Option<crate::cloning::VoiceClonerBuilder> {
-        self.cloning_config.clone()
-    }
-
-    /// Get conversion configuration (internal)
-    #[cfg(feature = "conversion")]
-    pub(crate) fn get_conversion_config(&self) -> Option<crate::conversion::VoiceConverterBuilder> {
-        self.conversion_config.clone()
-    }
-
-    /// Get singing configuration (internal)
-    #[cfg(feature = "singing")]
-    pub(crate) fn get_singing_config(&self) -> Option<crate::singing::SingingControllerBuilder> {
-        self.singing_config.clone()
-    }
-
-    /// Get spatial configuration (internal)
-    #[cfg(feature = "spatial")]
-    pub(crate) fn get_spatial_config(
-        &self,
-    ) -> Option<crate::spatial::SpatialAudioControllerBuilder> {
-        self.spatial_config.clone()
-    }
-
-    /// Build the pipeline
-    pub async fn build(self) -> Result<VoirsPipeline> {
-        tracing::info!("Building VoiRS pipeline");
-
-        // Use the new modular pipeline implementation
-        let inner = pipeline_impl::VoirsPipeline::from_builder_core(&self).await?;
-
-        // Initialize advanced features
-        #[cfg(feature = "emotion")]
-        let emotion_controller = if let Some(emotion_builder) = self.emotion_config {
-            Some(Arc::new(emotion_builder.build().await.map_err(|e| {
-                VoirsError::model_error(format!("Failed to initialize emotion controller: {}", e))
-            })?))
-        } else {
-            None
-        };
-
-        #[cfg(feature = "cloning")]
-        let voice_cloner = if let Some(cloning_builder) = self.cloning_config {
-            Some(Arc::new(cloning_builder.build().await.map_err(|e| {
-                VoirsError::model_error(format!("Failed to initialize voice cloner: {}", e))
-            })?))
-        } else {
-            None
-        };
-
-        #[cfg(feature = "conversion")]
-        let voice_converter = if let Some(conversion_builder) = self.conversion_config {
-            Some(Arc::new(conversion_builder.build().await.map_err(|e| {
-                VoirsError::model_error(format!("Failed to initialize voice converter: {}", e))
-            })?))
-        } else {
-            None
-        };
-
-        #[cfg(feature = "singing")]
-        let singing_controller = if let Some(singing_builder) = self.singing_config {
-            Some(Arc::new(singing_builder.build().await.map_err(|e| {
-                VoirsError::model_error(format!("Failed to initialize singing controller: {}", e))
-            })?))
-        } else {
-            None
-        };
-
-        #[cfg(feature = "spatial")]
-        let spatial_controller = if let Some(spatial_builder) = self.spatial_config {
-            Some(Arc::new(spatial_builder.build().await.map_err(|e| {
-                VoirsError::model_error(format!(
-                    "Failed to initialize spatial audio controller: {}",
-                    e
-                ))
-            })?))
-        } else {
-            None
-        };
-
-        tracing::info!("VoiRS pipeline built successfully");
-        Ok(VoirsPipeline {
-            inner,
-
-            #[cfg(feature = "emotion")]
-            emotion_controller,
-            #[cfg(feature = "cloning")]
-            voice_cloner,
-            #[cfg(feature = "conversion")]
-            voice_converter,
-            #[cfg(feature = "singing")]
-            singing_controller,
-            #[cfg(feature = "spatial")]
-            spatial_controller,
-        })
-    }
-}
-
-impl Default for VoirsPipelineBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-// Dummy implementations for testing
-
-/// Dummy G2P implementation for testing
+/// Stub G2P implementation for tests: maps each alphabetic character to a phoneme.
+///
+/// **Test utility.** This is not a phonemizer; do not use it in production paths.
 pub struct DummyG2p;
 
 impl Default for DummyG2p {
@@ -925,7 +655,10 @@ impl G2p for DummyG2p {
     }
 }
 
-/// Dummy acoustic model for testing
+/// Stub acoustic model for tests: emits a randomized mel spectrogram whose size
+/// follows the phoneme count.
+///
+/// **Test utility.** The spectrogram content is noise, not speech.
 pub struct DummyAcoustic;
 
 impl Default for DummyAcoustic {
@@ -1000,7 +733,10 @@ impl AcousticModel for DummyAcoustic {
     }
 }
 
-/// Dummy vocoder for testing
+/// Stub vocoder for tests: emits a 440 Hz sine tone lasting as long as the mel.
+///
+/// **Test utility.** The audio it returns is a placeholder tone, not synthesized
+/// speech.
 pub struct DummyVocoder;
 
 impl Default for DummyVocoder {
@@ -1075,29 +811,19 @@ impl Vocoder for DummyVocoder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-    use tempfile;
 
-    // Helper function to create a test pipeline with mock model files
+    // Helper: a pipeline that explicitly opts into the stub components.
     async fn create_test_pipeline() -> Result<VoirsPipeline> {
-        // Create temporary directory for testing
         let temp_dir = tempfile::tempdir().unwrap();
         let cache_dir = temp_dir.path().to_path_buf();
 
-        // Create mock model files
-        let model_filename = "EnUs-acoustic-High.safetensors";
-        let model_path = cache_dir.join(model_filename);
-        fs::write(&model_path, "dummy model data").unwrap();
-
-        // Create pipeline with custom cache directory and test mode enabled
         let pipeline = VoirsPipeline::builder()
             .with_cache_dir(cache_dir)
-            .with_test_mode(true) // Enable test mode to use dummy implementations
+            .with_test_mode(true) // Explicit opt-in to stub components
             .build()
             .await?;
 
-        // Keep temp_dir alive by storing it in a static or similar
-        // For tests, we can leak it since tests are short-lived
+        // Keep temp_dir alive for the duration of the test.
         std::mem::forget(temp_dir);
 
         Ok(pipeline)
@@ -1123,15 +849,43 @@ mod tests {
         assert!(!audio.is_empty());
     }
 
+    /// Synthesis output must actually depend on the input text.
+    #[tokio::test]
+    async fn test_synthesis_varies_with_input() {
+        let pipeline = create_test_pipeline().await.unwrap();
+
+        let short = pipeline.synthesize("Hi").await.unwrap();
+        let long = pipeline
+            .synthesize("Hi there, this is a considerably longer sentence.")
+            .await
+            .unwrap();
+
+        assert!(
+            long.len() > short.len(),
+            "longer text must produce more samples ({} vs {})",
+            long.len(),
+            short.len()
+        );
+    }
+
     #[tokio::test]
     async fn test_voice_management() {
         let pipeline = create_test_pipeline().await.unwrap();
 
-        // Test voice setting
-        pipeline.set_voice("test-voice").await.unwrap();
-        let current = pipeline.current_voice().await;
-        assert!(current.is_some());
-        assert_eq!(current.unwrap().id, "test-voice");
+        // Voice IDs are resolved against the registry.
+        pipeline.set_voice("en-US-male-news").await.unwrap();
+        let current = pipeline.current_voice().await.expect("voice set");
+        assert_eq!(current.id, "en-US-male-news");
+        assert_eq!(current.name, "English US Male News");
+
+        // Unknown IDs must be rejected instead of silently succeeding.
+        let err = pipeline.set_voice("no-such-voice").await;
+        assert!(err.is_err());
+        // The rejected switch must not have replaced the active voice.
+        assert_eq!(
+            pipeline.current_voice().await.map(|v| v.id),
+            Some("en-US-male-news".to_string())
+        );
 
         // Test voice listing
         let voices = pipeline.list_voices().await.unwrap();

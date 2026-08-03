@@ -118,7 +118,7 @@ impl SynthesisOrchestrator {
         &self,
         text: &str,
         config: &SynthesisConfig,
-    ) -> Result<impl futures::Stream<Item = Result<AudioBuffer>>> {
+    ) -> Result<impl futures::Stream<Item = Result<AudioBuffer>> + 'static> {
         info!("Starting streaming synthesis for long text");
 
         // Split text into chunks for streaming

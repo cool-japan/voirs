@@ -349,7 +349,18 @@ mod tests {
         let result = adapter
             .synthesize_with_emotion("test with config", &emotion_params)
             .await;
-        assert!(result.is_ok());
+        // `synthesize_with_emotion` always fails closed: this adapter has no
+        // real voirs_acoustic::AcousticModel/vocoder wired in, so even with a
+        // valid base config it must not fabricate an audio-effects tone and
+        // present that as synthesized speech. A configured base config still
+        // changes *which* error is returned (it gets past the "no config"
+        // check and into the real-but-unimplemented-synthesis error).
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("not implemented"),
+            "expected the honest not-implemented error, got: {err}"
+        );
     }
 
     #[test]
@@ -364,6 +375,26 @@ mod tests {
         assert!(result.dimensions.valence >= -1.0 && result.dimensions.valence <= 1.0);
         assert!(result.dimensions.arousal >= -1.0 && result.dimensions.arousal <= 1.0);
         assert!(result.dimensions.dominance >= -1.0 && result.dimensions.dominance <= 1.0);
+    }
+
+    #[cfg(feature = "acoustic-integration")]
+    #[tokio::test]
+    async fn test_synthesize_with_enhanced_emotion_fails_closed_not_fabricated_tone() {
+        let adapter = AcousticEmotionAdapter::new();
+        let emotion_params = EmotionParameters::neutral();
+
+        // Must never fabricate an additive-harmonic tone from text.len() and
+        // present it as "enhanced emotion-aware acoustic synthesis" - there
+        // is no real acoustic model/vocoder wired into this adapter.
+        let result = adapter
+            .synthesize_with_enhanced_emotion("hello world", &emotion_params)
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("not implemented"),
+            "expected the honest not-implemented error, got: {err}"
+        );
     }
 
     #[test]

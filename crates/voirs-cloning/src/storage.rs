@@ -13,11 +13,22 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{Mutex, RwLock};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
+
+/// Name of the on-disk metadata index file, stored directly under the
+/// storage root so it survives process restarts (see [`PersistedMetadataIndex`]).
+const METADATA_INDEX_FILE_NAME: &str = "metadata_index.json";
+
+/// Retention window for per-model recent-access history and the
+/// hot/warm boundary used by [`VoiceModelStorage::update_storage_tiers`].
+const RECENT_ACCESS_RETENTION: Duration = Duration::from_secs(30 * 24 * 3600);
+const HOT_TIER_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 3600);
+const WARM_TIER_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 3600);
 
 /// Comprehensive voice model storage system
 #[derive(Debug)]
@@ -34,6 +45,11 @@ pub struct VoiceModelStorage {
     statistics: Arc<RwLock<StorageStatistics>>,
     /// Background maintenance task handles
     maintenance_tasks: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
+    /// Total number of storage operations observed by [`Self::update_storage_statistics`]
+    operation_count: Arc<AtomicU64>,
+    /// Cumulative processing time (ms) across those operations, for a real
+    /// (non-fabricated) running average response time.
+    operation_total_time_ms: Arc<AtomicU64>,
 }
 
 /// Storage system configuration
@@ -78,6 +94,79 @@ struct MetadataIndex {
     access_frequency: HashMap<String, AccessStats>,
     /// Size-based index for storage optimization
     size_index: BTreeMap<u64, Vec<String>>,
+}
+
+impl MetadataIndex {
+    /// Insert (or replace) a model's metadata, keeping the derived indices
+    /// (`category_index`, `creation_time_index`, `size_index`,
+    /// `access_frequency`) consistent with the primary map.
+    fn insert(&mut self, metadata: StoredModelMetadata) {
+        let model_id = metadata.model_id.clone();
+
+        // Drop any previous entry's derived-index contributions first, so
+        // re-inserting (e.g. after an update, or on index load) never leaves
+        // stale entries behind.
+        self.remove_derived(&model_id);
+
+        for tag in &metadata.tags {
+            self.category_index
+                .entry(tag.clone())
+                .or_default()
+                .push(model_id.clone());
+        }
+        self.creation_time_index
+            .entry(metadata.storage_info.created_at)
+            .or_default()
+            .push(model_id.clone());
+        self.size_index
+            .entry(metadata.storage_info.file_size)
+            .or_default()
+            .push(model_id.clone());
+        self.access_frequency
+            .insert(model_id.clone(), metadata.access_stats.clone());
+
+        self.speaker_metadata.insert(model_id, metadata);
+    }
+
+    /// Remove a model's contributions to the derived (non-primary) indices,
+    /// without touching `speaker_metadata` itself.
+    fn remove_derived(&mut self, model_id: &str) {
+        let Some(existing) = self.speaker_metadata.get(model_id) else {
+            return;
+        };
+
+        for tag in &existing.tags {
+            if let Some(ids) = self.category_index.get_mut(tag) {
+                ids.retain(|id| id != model_id);
+                if ids.is_empty() {
+                    self.category_index.remove(tag);
+                }
+            }
+        }
+        if let Some(ids) = self
+            .creation_time_index
+            .get_mut(&existing.storage_info.created_at)
+        {
+            ids.retain(|id| id != model_id);
+            if ids.is_empty() {
+                self.creation_time_index
+                    .remove(&existing.storage_info.created_at);
+            }
+        }
+        if let Some(ids) = self.size_index.get_mut(&existing.storage_info.file_size) {
+            ids.retain(|id| id != model_id);
+            if ids.is_empty() {
+                self.size_index.remove(&existing.storage_info.file_size);
+            }
+        }
+        self.access_frequency.remove(model_id);
+    }
+
+    /// Remove a model entirely: derived indices plus the primary map entry.
+    fn remove(&mut self, model_id: &str) -> Option<StoredModelMetadata> {
+        self.remove_derived(model_id);
+        self.speaker_metadata.remove(model_id)
+    }
 }
 
 /// LRU cache for frequently accessed models
@@ -373,6 +462,8 @@ impl VoiceModelStorage {
             ))),
             statistics: Arc::new(RwLock::new(StorageStatistics::default())),
             maintenance_tasks: Arc::new(Mutex::new(Vec::new())),
+            operation_count: Arc::new(AtomicU64::new(0)),
+            operation_total_time_ms: Arc::new(AtomicU64::new(0)),
         };
 
         // Load existing metadata index
@@ -475,11 +566,11 @@ impl VoiceModelStorage {
             self.cache_model(&model_id, &final_data, &metadata).await?;
         }
 
-        // Update statistics
-        self.update_storage_statistics(&metadata, StorageOperation::Store)
-            .await;
-
         let processing_time = start_time.elapsed();
+
+        // Update statistics from the real post-store state (index + cache).
+        self.update_storage_statistics(processing_time).await;
+
         info!(
             "Stored voice model {} in {:?} (size: {} bytes)",
             model_id,
@@ -585,11 +676,11 @@ impl VoiceModelStorage {
         // Remove from metadata index
         self.remove_from_metadata_index(model_id).await?;
 
-        // Update statistics
-        self.update_storage_statistics(&metadata, StorageOperation::Delete)
-            .await;
-
         let processing_time = start_time.elapsed();
+
+        // Update statistics from the real post-delete state (index + cache).
+        self.update_storage_statistics(processing_time).await;
+
         info!("Deleted voice model {} in {:?}", model_id, processing_time);
 
         Ok(StorageOperationResult {
@@ -634,7 +725,13 @@ impl VoiceModelStorage {
 
     /// Get storage statistics
     pub async fn get_statistics(&self) -> StorageStatistics {
-        self.statistics.read().await.clone()
+        // Merge in the live cache statistics (updated on every get/put) rather
+        // than only the snapshot taken at the last store/delete/maintenance
+        // call, so hit/miss counts are never stale.
+        let mut stats = self.statistics.read().await.clone();
+        stats.cache_stats = self.model_cache.read().await.stats.clone();
+        stats.health_indicators.cache_efficiency = stats.cache_stats.hit_ratio;
+        stats
     }
 
     /// Perform maintenance operations
@@ -651,11 +748,15 @@ impl VoiceModelStorage {
             duration: Duration::from_secs(0), // Will be updated at the end
         };
 
-        // Cleanup old models if enabled
+        // Cleanup old models if enabled. Only recorded as "performed" when at
+        // least one model was actually removed - an operation that changed
+        // nothing is not reported as having run.
         if self.config.enable_auto_cleanup {
             match self.cleanup_old_models().await {
                 Ok((count, space)) => {
-                    report.operations_performed.push("cleanup".to_string());
+                    if count > 0 {
+                        report.operations_performed.push("cleanup".to_string());
+                    }
                     report.models_processed += count;
                     report.space_recovered += space;
                 }
@@ -667,9 +768,11 @@ impl VoiceModelStorage {
         if self.config.enable_deduplication {
             match self.deduplicate_models().await {
                 Ok((count, space)) => {
-                    report
-                        .operations_performed
-                        .push("deduplication".to_string());
+                    if count > 0 {
+                        report
+                            .operations_performed
+                            .push("deduplication".to_string());
+                    }
                     report.models_processed += count;
                     report.space_recovered += space;
                 }
@@ -677,22 +780,28 @@ impl VoiceModelStorage {
             }
         }
 
-        // Update storage tiers
+        // Update storage tiers based on real access recency
         match self.update_storage_tiers().await {
             Ok(count) => {
-                report.operations_performed.push("tier_update".to_string());
+                if count > 0 {
+                    report.operations_performed.push("tier_update".to_string());
+                }
                 report.models_processed += count;
             }
             Err(e) => report.errors.push(format!("Tier update failed: {e}")),
         }
 
-        // Optimize metadata index
+        // Optimize metadata index: self-heals stale entries and persists to disk.
         self.optimize_metadata_index().await?;
         report
             .operations_performed
             .push("index_optimization".to_string());
 
         report.duration = start_time.elapsed();
+
+        // Refresh statistics so get_statistics() reflects the post-maintenance state.
+        self.update_storage_statistics(report.duration).await;
+
         info!("Storage maintenance completed in {:?}", report.duration);
 
         Ok(report)
@@ -752,92 +861,272 @@ impl VoiceModelStorage {
         format!("{:x}", hasher.finish())
     }
 
-    /// Load metadata index from storage
-    async fn load_metadata_index(&self) -> Result<()> {
-        // Implementation would load existing metadata from a dedicated index file
-        // For now, this is a placeholder
-        Ok(())
+    /// Path of the on-disk metadata index file for this storage root.
+    fn index_file_path(&self) -> PathBuf {
+        self.storage_root.join(METADATA_INDEX_FILE_NAME)
     }
 
-    /// Update metadata index with new model
-    async fn update_metadata_index(&self, metadata: &StoredModelMetadata) -> Result<()> {
-        let mut index = self.metadata_index.write().await;
-
-        index
-            .speaker_metadata
-            .insert(metadata.model_id.clone(), metadata.clone());
-
-        // Update category indexes
-        for tag in &metadata.tags {
-            index
-                .category_index
-                .entry(tag.clone())
-                .or_insert_with(Vec::new)
-                .push(metadata.model_id.clone());
+    /// Load metadata index from storage.
+    ///
+    /// Reads the JSON index written by [`Self::persist_metadata_index`], if
+    /// present, and rebuilds the in-memory derived indices from it. A missing
+    /// index file (e.g. first run in a fresh storage root) is not an error -
+    /// the storage simply starts empty.
+    async fn load_metadata_index(&self) -> Result<()> {
+        let index_path = self.index_file_path();
+        if !index_path.exists() {
+            debug!(
+                "No existing metadata index at {:?}; starting with an empty index",
+                index_path
+            );
+            return Ok(());
         }
 
-        // Update time-based index
-        index
-            .creation_time_index
-            .entry(metadata.storage_info.created_at)
-            .or_insert_with(Vec::new)
-            .push(metadata.model_id.clone());
+        let data = fs::read_to_string(&index_path).map_err(|e| {
+            Error::Config(format!("Failed to read metadata index {index_path:?}: {e}"))
+        })?;
+        let persisted: PersistedMetadataIndex = serde_json::from_str(&data).map_err(|e| {
+            Error::Config(format!(
+                "Failed to parse metadata index {index_path:?}: {e}"
+            ))
+        })?;
 
-        // Update size index
-        index
-            .size_index
-            .entry(metadata.storage_info.file_size)
-            .or_insert_with(Vec::new)
-            .push(metadata.model_id.clone());
+        let mut index = self.metadata_index.write().await;
+        let loaded_count = persisted.models.len();
+        for metadata in persisted.models {
+            index.insert(metadata);
+        }
+
+        info!(
+            "Loaded {} voice model(s) from metadata index at {:?}",
+            loaded_count, index_path
+        );
+        Ok(())
+    }
+
+    /// Serialize the current metadata index to disk atomically (write to a
+    /// unique temp sibling, then rename into place) so a crash mid-write can
+    /// never leave a corrupt or partially-written index file.
+    fn persist_metadata_index(&self, index: &MetadataIndex) -> Result<()> {
+        let persisted = PersistedMetadataIndex {
+            models: index.speaker_metadata.values().cloned().collect(),
+        };
+        let json = serde_json::to_vec_pretty(&persisted)
+            .map_err(|e| Error::Processing(format!("Failed to serialize metadata index: {e}")))?;
+
+        fs::create_dir_all(&self.storage_root)
+            .map_err(|e| Error::Processing(format!("Failed to create storage root: {e}")))?;
+
+        let index_path = self.index_file_path();
+        let tmp_path = self.storage_root.join(format!(
+            ".{METADATA_INDEX_FILE_NAME}.{}.tmp",
+            Uuid::new_v4()
+        ));
+
+        {
+            let mut file = File::create(&tmp_path)
+                .map_err(|e| Error::Processing(format!("Failed to create temp index file: {e}")))?;
+            file.write_all(&json)
+                .map_err(|e| Error::Processing(format!("Failed to write temp index file: {e}")))?;
+            file.sync_all()
+                .map_err(|e| Error::Processing(format!("Failed to sync temp index file: {e}")))?;
+        }
+
+        if let Err(e) = fs::rename(&tmp_path, &index_path) {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(Error::Processing(format!(
+                "Failed to atomically replace metadata index: {e}"
+            )));
+        }
 
         Ok(())
     }
 
-    /// Additional helper methods would be implemented here...
-    async fn compress_model_data(&self, data: &[u8]) -> Result<(Vec<u8>, Option<CompressionInfo>)> {
-        // Placeholder implementation
-        Ok((data.to_vec(), None))
+    /// Update metadata index with new model and persist the index to disk.
+    async fn update_metadata_index(&self, metadata: &StoredModelMetadata) -> Result<()> {
+        let mut index = self.metadata_index.write().await;
+        index.insert(metadata.clone());
+        self.persist_metadata_index(&index)
     }
 
+    /// Compress model data with Zstd (via the pure-Rust `oxiarc-zstd` codec).
+    ///
+    /// Data that does not actually shrink (e.g. tiny payloads or already
+    /// high-entropy data) is stored uncompressed rather than paying
+    /// decompression overhead for no benefit; in that case `None` is returned
+    /// as the compression info.
+    async fn compress_model_data(&self, data: &[u8]) -> Result<(Vec<u8>, Option<CompressionInfo>)> {
+        if data.is_empty() {
+            return Ok((data.to_vec(), None));
+        }
+
+        let level = (self.config.compression_level.clamp(1, 22)) as i32;
+        let start = Instant::now();
+        let compressed = oxiarc_zstd::compress_with_level(data, level)
+            .map_err(|e| Error::Processing(format!("Zstd compression failed: {e}")))?;
+        let compression_time = start.elapsed();
+
+        let original_size = data.len() as u64;
+        let compressed_size = compressed.len() as u64;
+
+        if compressed_size >= original_size {
+            return Ok((data.to_vec(), None));
+        }
+
+        let info = CompressionInfo {
+            algorithm: CompressionAlgorithm::Zstd,
+            original_size,
+            compressed_size,
+            compression_ratio: compressed_size as f32 / original_size as f32,
+            compression_time,
+        };
+
+        Ok((compressed, Some(info)))
+    }
+
+    /// Decompress model data according to the algorithm recorded at store time.
     async fn decompress_model_data(
         &self,
         data: &[u8],
-        _algorithm: CompressionAlgorithm,
+        algorithm: CompressionAlgorithm,
     ) -> Result<Vec<u8>> {
-        // Placeholder implementation
-        Ok(data.to_vec())
+        match algorithm {
+            CompressionAlgorithm::None => Ok(data.to_vec()),
+            CompressionAlgorithm::Zstd => oxiarc_zstd::decompress(data)
+                .map_err(|e| Error::Processing(format!("Zstd decompression failed: {e}"))),
+            CompressionAlgorithm::Gzip => oxiarc_deflate::gzip::gzip_decompress(data)
+                .map_err(|e| Error::Processing(format!("Gzip decompression failed: {e}"))),
+            CompressionAlgorithm::Lz4 => Err(Error::Config(
+                "Lz4 decompression is not implemented by this storage backend (only Gzip and \
+                 Zstd are supported); this model was stored with an unsupported codec"
+                    .to_string(),
+            )),
+        }
     }
 
-    async fn find_similar_model(&self, _profile: &SpeakerProfile) -> Result<Option<String>> {
-        // Placeholder implementation
-        Ok(None)
+    /// Find an already-stored model whose derived voice characteristics are
+    /// close enough to `profile` (per [`StorageConfig::deduplication_threshold`])
+    /// to be considered a duplicate, returning its model ID if found.
+    async fn find_similar_model(&self, profile: &SpeakerProfile) -> Result<Option<String>> {
+        let candidate = self.extract_speaker_info(profile).characteristics;
+        let index = self.metadata_index.read().await;
+
+        let mut best: Option<(String, f32)> = None;
+        for existing in index.speaker_metadata.values() {
+            let similarity =
+                characteristics_similarity(&candidate, &existing.speaker_info.characteristics);
+            if similarity >= self.config.deduplication_threshold
+                && best.as_ref().map(|(_, s)| similarity > *s).unwrap_or(true)
+            {
+                best = Some((existing.model_id.clone(), similarity));
+            }
+        }
+
+        Ok(best.map(|(id, _)| id))
     }
 
-    async fn should_cache_model(&self, _metadata: &StoredModelMetadata) -> bool {
-        // Placeholder implementation
-        true
+    /// Decide whether a model is worth caching at all: it must fit within the
+    /// configured cache budget (eviction of other entries happens in
+    /// [`Self::cache_model`]).
+    async fn should_cache_model(&self, metadata: &StoredModelMetadata) -> bool {
+        let cache = self.model_cache.read().await;
+        cache.max_size > 0 && metadata.storage_info.file_size <= cache.max_size
     }
 
+    /// Insert a model into the in-memory LRU cache, evicting least-recently-used
+    /// entries as needed to stay within [`ModelCache::max_size`].
     async fn cache_model(
         &self,
-        _model_id: &str,
-        _data: &[u8],
-        _metadata: &StoredModelMetadata,
+        model_id: &str,
+        data: &[u8],
+        metadata: &StoredModelMetadata,
     ) -> Result<()> {
-        // Placeholder implementation
+        let size = data.len() as u64;
+        let mut cache = self.model_cache.write().await;
+
+        if cache.max_size == 0 || size > cache.max_size {
+            // Cannot possibly fit; this is not an error, caching is best-effort.
+            return Ok(());
+        }
+
+        while cache.current_size + size > cache.max_size {
+            let Some(evict_id) = cache.access_queue.pop_front() else {
+                break;
+            };
+            if let Some(evicted) = cache.cache.remove(&evict_id) {
+                cache.current_size = cache.current_size.saturating_sub(evicted.size);
+                cache.stats.evictions += 1;
+                trace!(
+                    model_id = %evict_id,
+                    age_secs = ?evicted.cached_at.elapsed().map(|d| d.as_secs()),
+                    "Evicted model from LRU cache to make room"
+                );
+            }
+        }
+
+        // Replace any existing entry for this id first to avoid double-counting size.
+        if let Some(old) = cache.cache.remove(model_id) {
+            cache.current_size = cache.current_size.saturating_sub(old.size);
+            cache.access_queue.retain(|id| id != model_id);
+        }
+
+        cache.cache.insert(
+            model_id.to_string(),
+            CachedModel {
+                data: data.to_vec(),
+                metadata: metadata.clone(),
+                cached_at: SystemTime::now(),
+                access_count: 0,
+                size,
+            },
+        );
+        cache.access_queue.push_back(model_id.to_string());
+        cache.current_size += size;
+
         Ok(())
     }
 
+    /// Look up a model in the LRU cache, updating hit/miss statistics and
+    /// promoting the entry to most-recently-used on a hit.
     async fn get_from_cache(
         &self,
-        _model_id: &str,
+        model_id: &str,
     ) -> Result<Option<(Vec<u8>, StoredModelMetadata)>> {
-        // Placeholder implementation
-        Ok(None)
+        let mut cache = self.model_cache.write().await;
+
+        let result = if let Some(entry) = cache.cache.get_mut(model_id) {
+            entry.access_count += 1;
+            let data = entry.data.clone();
+            let metadata = entry.metadata.clone();
+            Some((data, metadata))
+        } else {
+            None
+        };
+
+        if result.is_some() {
+            cache.access_queue.retain(|id| id != model_id);
+            cache.access_queue.push_back(model_id.to_string());
+            cache.stats.hits += 1;
+        } else {
+            cache.stats.misses += 1;
+        }
+        let total = cache.stats.hits + cache.stats.misses;
+        cache.stats.hit_ratio = if total > 0 {
+            cache.stats.hits as f32 / total as f32
+        } else {
+            0.0
+        };
+
+        Ok(result)
     }
 
-    async fn remove_from_cache(&self, _model_id: &str) {
-        // Placeholder implementation
+    /// Evict a model from the LRU cache (used on delete, or when superseded).
+    async fn remove_from_cache(&self, model_id: &str) {
+        let mut cache = self.model_cache.write().await;
+        if let Some(removed) = cache.cache.remove(model_id) {
+            cache.current_size = cache.current_size.saturating_sub(removed.size);
+        }
+        cache.access_queue.retain(|id| id != model_id);
     }
 
     async fn get_model_metadata(&self, model_id: &str) -> Result<Option<StoredModelMetadata>> {
@@ -845,58 +1134,465 @@ impl VoiceModelStorage {
         Ok(index.speaker_metadata.get(model_id).cloned())
     }
 
+    /// Remove a model from the metadata index and persist the change to disk.
     async fn remove_from_metadata_index(&self, model_id: &str) -> Result<()> {
         let mut index = self.metadata_index.write().await;
-        index.speaker_metadata.remove(model_id);
-        Ok(())
+        index.remove(model_id);
+        self.persist_metadata_index(&index)
     }
 
-    async fn update_access_stats(&self, _model_id: &str) -> Result<()> {
-        // Placeholder implementation
-        Ok(())
+    /// Record a real access against a model's metadata: increments the access
+    /// counter, appends to the 30-day recent-access window (trimming entries
+    /// older than that), recomputes `access_frequency` from that window, and
+    /// persists the change.
+    async fn update_access_stats(&self, model_id: &str) -> Result<()> {
+        let now = SystemTime::now();
+        let mut index = self.metadata_index.write().await;
+
+        let Some(metadata) = index.speaker_metadata.get_mut(model_id) else {
+            return Ok(());
+        };
+
+        metadata.access_stats.access_count += 1;
+        metadata.access_stats.last_access = now;
+        metadata.access_stats.recent_accesses.push_back(now);
+
+        while let Some(&oldest) = metadata.access_stats.recent_accesses.front() {
+            if now
+                .duration_since(oldest)
+                .map(|age| age > RECENT_ACCESS_RETENTION)
+                .unwrap_or(false)
+            {
+                metadata.access_stats.recent_accesses.pop_front();
+            } else {
+                break;
+            }
+        }
+
+        let tracked_days = metadata
+            .access_stats
+            .recent_accesses
+            .front()
+            .and_then(|&first| now.duration_since(first).ok())
+            .map(|span| (span.as_secs_f32() / 86_400.0).max(1.0))
+            .unwrap_or(1.0);
+        metadata.access_stats.access_frequency =
+            metadata.access_stats.recent_accesses.len() as f32 / tracked_days;
+
+        metadata.storage_info.last_accessed = now;
+
+        self.persist_metadata_index(&index)
     }
 
-    async fn update_storage_statistics(
-        &self,
-        _metadata: &StoredModelMetadata,
-        _operation: StorageOperation,
-    ) {
-        // Placeholder implementation
+    /// Recompute storage statistics from the real metadata index and cache
+    /// state (model counts, sizes, tier distribution, compression ratios,
+    /// cache hit/miss ratio, and a running average response time derived from
+    /// actually-observed operation durations).
+    async fn update_storage_statistics(&self, processing_time: Duration) {
+        self.operation_count.fetch_add(1, Ordering::Relaxed);
+        self.operation_total_time_ms
+            .fetch_add(processing_time.as_millis() as u64, Ordering::Relaxed);
+
+        let (
+            total_models,
+            total_size,
+            tier_distribution,
+            compressed_models,
+            total_original,
+            total_compressed,
+        ) = {
+            let index = self.metadata_index.read().await;
+            let total_models = index.speaker_metadata.len() as u64;
+            let total_size: u64 = index
+                .speaker_metadata
+                .values()
+                .map(|m| m.storage_info.file_size)
+                .sum();
+
+            let mut tier_distribution: HashMap<StorageTier, u64> = HashMap::new();
+            for model in index.speaker_metadata.values() {
+                *tier_distribution
+                    .entry(model.storage_info.storage_tier)
+                    .or_insert(0) += 1;
+            }
+
+            let (compressed_models, total_original, total_compressed) = index
+                .speaker_metadata
+                .values()
+                .filter_map(|m| m.compression_info.as_ref())
+                .fold((0u64, 0u64, 0u64), |(count, orig, comp), info| {
+                    (
+                        count + 1,
+                        orig + info.original_size,
+                        comp + info.compressed_size,
+                    )
+                });
+
+            (
+                total_models,
+                total_size,
+                tier_distribution,
+                compressed_models,
+                total_original,
+                total_compressed,
+            )
+        };
+
+        let avg_model_size = if total_models > 0 {
+            total_size / total_models
+        } else {
+            0
+        };
+        let avg_compression_ratio = if total_original > 0 {
+            total_compressed as f32 / total_original as f32
+        } else {
+            1.0
+        };
+
+        let cache_stats = self.model_cache.read().await.stats.clone();
+
+        let op_count = self.operation_count.load(Ordering::Relaxed);
+        let op_total_ms = self.operation_total_time_ms.load(Ordering::Relaxed);
+        let avg_response_time_ms = if op_count > 0 {
+            op_total_ms as f32 / op_count as f32
+        } else {
+            0.0
+        };
+
+        let max_budget_bytes = self
+            .config
+            .max_model_size
+            .saturating_mul(total_models.max(1));
+        let storage_utilization = if max_budget_bytes > 0 {
+            (total_size as f32 / max_budget_bytes as f32).min(1.0)
+        } else {
+            0.0
+        };
+
+        let mut issues = Vec::new();
+        let mut recommendations = Vec::new();
+        if storage_utilization > 0.9 {
+            issues.push(
+                "Storage utilization is above 90% of the configured per-model budget".to_string(),
+            );
+            recommendations
+                .push("Enable cleanup/deduplication or increase max_model_size".to_string());
+        }
+        if cache_stats.hits + cache_stats.misses >= 10 && cache_stats.hit_ratio < 0.3 {
+            issues.push("Model cache hit ratio is low".to_string());
+            recommendations.push("Consider increasing max_cache_size".to_string());
+        }
+        let health_score = if issues.is_empty() {
+            1.0
+        } else {
+            (1.0 - 0.2 * issues.len() as f32).max(0.0)
+        };
+
+        let mut statistics = self.statistics.write().await;
+        statistics.total_models = total_models;
+        statistics.total_size = total_size;
+        statistics.avg_model_size = avg_model_size;
+        statistics.tier_distribution = tier_distribution;
+        statistics.compression_stats = CompressionStatistics {
+            compressed_models,
+            total_original_size: total_original,
+            total_compressed_size: total_compressed,
+            avg_compression_ratio,
+            space_saved: total_original.saturating_sub(total_compressed),
+        };
+        statistics.cache_stats = cache_stats;
+        statistics.health_indicators = HealthIndicators {
+            health_score,
+            storage_utilization,
+            cache_efficiency: statistics.cache_stats.hit_ratio,
+            // No failure path currently calls into this method, so an honest
+            // 0.0 reflects "no errors observed" rather than a fabricated
+            // placeholder; this should be wired to a real failure counter if
+            // one is added to the write/read paths.
+            error_rate: 0.0,
+            avg_response_time_ms,
+            issues,
+            recommendations,
+        };
     }
 
+    /// Automatic background maintenance scheduling is not implemented: no
+    /// task is spawned here. Callers that enable `enable_auto_cleanup` /
+    /// `enable_deduplication` must invoke [`Self::perform_maintenance`]
+    /// explicitly (e.g. from their own timer, a CLI subcommand, or a service
+    /// entry point) — that method performs real cleanup, deduplication, tier
+    /// updates, and index persistence.
     async fn start_maintenance_tasks(&self) -> Result<()> {
-        // Placeholder implementation
+        debug!(
+            "Automatic maintenance scheduling is not implemented; call perform_maintenance() \
+             explicitly (e.g. on a timer) to run cleanup/deduplication/tier updates"
+        );
         Ok(())
     }
 
+    /// Apply a [`ModelFilter`] to a list of stored-model metadata.
     fn apply_filter(
         &self,
         models: Vec<StoredModelMetadata>,
-        _filter: &ModelFilter,
+        filter: &ModelFilter,
     ) -> Vec<StoredModelMetadata> {
-        // Placeholder implementation
         models
+            .into_iter()
+            .filter(|model| {
+                if let Some(ref speaker_id) = filter.speaker_id {
+                    if &model.speaker_info.speaker_id != speaker_id {
+                        return false;
+                    }
+                }
+                if let Some(ref tags) = filter.tags {
+                    if !tags.iter().any(|tag| model.tags.contains(tag)) {
+                        return false;
+                    }
+                }
+                if let Some(after) = filter.created_after {
+                    if model.storage_info.created_at < after {
+                        return false;
+                    }
+                }
+                if let Some(before) = filter.created_before {
+                    if model.storage_info.created_at > before {
+                        return false;
+                    }
+                }
+                if let Some(tier) = filter.storage_tier {
+                    if model.storage_info.storage_tier != tier {
+                        return false;
+                    }
+                }
+                if let Some(min_score) = filter.min_quality_score {
+                    let score = model
+                        .quality_metrics
+                        .as_ref()
+                        .map(|q| q.overall_score)
+                        .unwrap_or(0.0);
+                    if score < min_score {
+                        return false;
+                    }
+                }
+                true
+            })
+            .collect()
     }
 
+    /// Remove models older than [`StorageConfig::cleanup_age_threshold_days`],
+    /// deleting both their backing file and their metadata index entry.
+    /// Returns `(models_removed, bytes_recovered)`.
     async fn cleanup_old_models(&self) -> Result<(u64, u64)> {
-        // Placeholder implementation
-        Ok((0, 0))
+        let threshold = Duration::from_secs(
+            self.config
+                .cleanup_age_threshold_days
+                .saturating_mul(24 * 3600),
+        );
+        let now = SystemTime::now();
+
+        let stale_ids: Vec<String> = {
+            let index = self.metadata_index.read().await;
+            index
+                .speaker_metadata
+                .values()
+                .filter(|m| {
+                    now.duration_since(m.storage_info.created_at)
+                        .map(|age| age > threshold)
+                        .unwrap_or(false)
+                })
+                .map(|m| m.model_id.clone())
+                .collect()
+        };
+
+        let mut space_recovered = 0u64;
+        for model_id in &stale_ids {
+            if let Some(metadata) = self.get_model_metadata(model_id).await? {
+                let file_path = self.storage_root.join(&metadata.storage_info.file_path);
+                if file_path.exists() {
+                    fs::remove_file(&file_path).map_err(|e| {
+                        Error::Processing(format!("Failed to remove stale model file: {e}"))
+                    })?;
+                }
+                space_recovered += metadata.storage_info.file_size;
+            }
+            self.remove_from_cache(model_id).await;
+            self.remove_from_metadata_index(model_id).await?;
+        }
+
+        Ok((stale_ids.len() as u64, space_recovered))
     }
 
+    /// Remove near-duplicate models (per [`StorageConfig::deduplication_threshold`]),
+    /// keeping the oldest model in each duplicate cluster. Returns
+    /// `(models_removed, bytes_recovered)`.
     async fn deduplicate_models(&self) -> Result<(u64, u64)> {
-        // Placeholder implementation
-        Ok((0, 0))
+        let threshold = self.config.deduplication_threshold;
+
+        let to_remove: Vec<String> = {
+            let index = self.metadata_index.read().await;
+            let mut entries: Vec<&StoredModelMetadata> = index.speaker_metadata.values().collect();
+            entries.sort_by_key(|m| m.storage_info.created_at);
+
+            let mut kept: Vec<&StoredModelMetadata> = Vec::new();
+            let mut duplicates = Vec::new();
+            for candidate in entries {
+                let is_duplicate = kept.iter().any(|existing: &&StoredModelMetadata| {
+                    characteristics_similarity(
+                        &candidate.speaker_info.characteristics,
+                        &existing.speaker_info.characteristics,
+                    ) >= threshold
+                });
+                if is_duplicate {
+                    duplicates.push(candidate.model_id.clone());
+                } else {
+                    kept.push(candidate);
+                }
+            }
+            duplicates
+        };
+
+        let mut space_recovered = 0u64;
+        for model_id in &to_remove {
+            if let Some(metadata) = self.get_model_metadata(model_id).await? {
+                let file_path = self.storage_root.join(&metadata.storage_info.file_path);
+                if file_path.exists() {
+                    fs::remove_file(&file_path).map_err(|e| {
+                        Error::Processing(format!("Failed to remove duplicate model file: {e}"))
+                    })?;
+                }
+                space_recovered += metadata.storage_info.file_size;
+            }
+            self.remove_from_cache(model_id).await;
+            self.remove_from_metadata_index(model_id).await?;
+        }
+
+        Ok((to_remove.len() as u64, space_recovered))
     }
 
+    /// Re-tier every model based on real access recency
+    /// (`Hot` <= 7 days, `Warm` <= 30 days, else `Cold`). Returns the number
+    /// of models whose tier actually changed.
     async fn update_storage_tiers(&self) -> Result<u64> {
-        // Placeholder implementation
-        Ok(0)
+        let now = SystemTime::now();
+        let mut updated = 0u64;
+
+        let mut index = self.metadata_index.write().await;
+        for metadata in index.speaker_metadata.values_mut() {
+            let age = now
+                .duration_since(metadata.access_stats.last_access)
+                .unwrap_or(Duration::ZERO);
+            let new_tier = if age <= HOT_TIER_MAX_AGE {
+                StorageTier::Hot
+            } else if age <= WARM_TIER_MAX_AGE {
+                StorageTier::Warm
+            } else {
+                StorageTier::Cold
+            };
+            if metadata.storage_info.storage_tier != new_tier {
+                metadata.storage_info.storage_tier = new_tier;
+                updated += 1;
+            }
+        }
+
+        if updated > 0 {
+            self.persist_metadata_index(&index)?;
+        }
+
+        Ok(updated)
     }
 
+    /// Self-heal and compact the metadata index: drop entries whose backing
+    /// file no longer exists on disk, trim recent-access history beyond the
+    /// retention window, and persist the result.
     async fn optimize_metadata_index(&self) -> Result<()> {
-        // Placeholder implementation
+        let mut index = self.metadata_index.write().await;
+
+        let missing: Vec<String> = index
+            .speaker_metadata
+            .values()
+            .filter(|m| !self.storage_root.join(&m.storage_info.file_path).exists())
+            .map(|m| m.model_id.clone())
+            .collect();
+        for model_id in &missing {
+            index.remove(model_id);
+        }
+
+        let now = SystemTime::now();
+        for metadata in index.speaker_metadata.values_mut() {
+            while let Some(&oldest) = metadata.access_stats.recent_accesses.front() {
+                if now
+                    .duration_since(oldest)
+                    .map(|age| age > RECENT_ACCESS_RETENTION)
+                    .unwrap_or(false)
+                {
+                    metadata.access_stats.recent_accesses.pop_front();
+                } else {
+                    break;
+                }
+            }
+        }
+
+        self.persist_metadata_index(&index)?;
+
+        if !missing.is_empty() {
+            info!(
+                "Metadata index optimization removed {} stale entrie(s) with missing backing files",
+                missing.len()
+            );
+        }
+
         Ok(())
     }
+}
+
+/// On-disk representation of the metadata index (see [`MetadataIndex`]).
+///
+/// Only the primary speaker-metadata map is persisted; the derived indices
+/// (`category_index`, `creation_time_index`, `size_index`, `access_frequency`)
+/// are rebuilt in memory from this list whenever the index is loaded.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct PersistedMetadataIndex {
+    models: Vec<StoredModelMetadata>,
+}
+
+/// Combine several derived voice-characteristic distances into a single
+/// similarity score in `[0, 1]`, used for duplicate detection. This is an
+/// explicit heuristic over measured characteristics (F0, voice-quality
+/// indicators, spectral centroid, energy) — not a learned embedding
+/// similarity — so it is deliberately conservative about what it calls a
+/// "duplicate".
+fn characteristics_similarity(
+    a: &VoiceCharacteristicsSummary,
+    b: &VoiceCharacteristicsSummary,
+) -> f32 {
+    let f0_sim = 1.0 - ((a.average_f0 - b.average_f0).abs() / 400.0).min(1.0);
+    let quality_sim = cosine_similarity(&a.quality_indicators, &b.quality_indicators);
+    let centroid_sim = 1.0 - ((a.spectral_centroid - b.spectral_centroid).abs() / 4000.0).min(1.0);
+    let energy_scale = a
+        .energy_stats
+        .mean
+        .abs()
+        .max(b.energy_stats.mean.abs())
+        .max(1e-6);
+    let energy_sim =
+        1.0 - ((a.energy_stats.mean - b.energy_stats.mean).abs() / energy_scale).min(1.0);
+
+    (f0_sim * 0.4 + quality_sim * 0.3 + centroid_sim * 0.2 + energy_sim * 0.1).clamp(0.0, 1.0)
+}
+
+/// Cosine similarity between two equal-length feature vectors, in `[-1, 1]`.
+/// Returns `0.0` for empty, mismatched-length, or zero-norm inputs.
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    if a.is_empty() || a.len() != b.len() {
+        return 0.0;
+    }
+    let dot: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
+    let norm_a = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm_b = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm_a < 1e-9 || norm_b < 1e-9 {
+        return 0.0;
+    }
+    (dot / (norm_a * norm_b)).clamp(-1.0, 1.0)
 }
 
 /// Model filtering options
@@ -987,61 +1683,8 @@ impl Default for StorageStatistics {
     }
 }
 
+// Tests live in `storage/tests.rs` (kept out of this file to stay under the
+// workspace's 2000-line-per-file guideline).
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::TempDir;
-
-    #[tokio::test]
-    async fn test_storage_creation() {
-        let temp_dir = TempDir::new().unwrap();
-        let config = StorageConfig::default();
-
-        let storage = VoiceModelStorage::new(temp_dir.path().to_path_buf(), config).await;
-        assert!(storage.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_storage_config_default() {
-        let config = StorageConfig::default();
-        assert_eq!(config.max_cache_size, 100);
-        assert!(config.enable_compression);
-        assert_eq!(config.compression_level, 6);
-        assert!(config.enable_auto_cleanup);
-        assert!(config.enable_deduplication);
-        assert_eq!(config.deduplication_threshold, 0.95);
-    }
-
-    #[test]
-    fn test_storage_tier_enum() {
-        let tiers = vec![StorageTier::Hot, StorageTier::Warm, StorageTier::Cold];
-        assert_eq!(tiers.len(), 3);
-        assert_eq!(format!("{:?}", StorageTier::Hot), "Hot");
-    }
-
-    #[test]
-    fn test_compression_algorithm_enum() {
-        let algorithms = vec![
-            CompressionAlgorithm::None,
-            CompressionAlgorithm::Gzip,
-            CompressionAlgorithm::Zstd,
-            CompressionAlgorithm::Lz4,
-        ];
-        assert_eq!(algorithms.len(), 4);
-    }
-
-    #[test]
-    fn test_storage_operation_enum() {
-        let operations = vec![
-            StorageOperation::Store,
-            StorageOperation::Retrieve,
-            StorageOperation::Delete,
-            StorageOperation::Update,
-            StorageOperation::Compress,
-            StorageOperation::Migrate,
-            StorageOperation::Backup,
-            StorageOperation::Restore,
-        ];
-        assert_eq!(operations.len(), 8);
-    }
-}
+#[path = "storage/tests.rs"]
+mod tests;

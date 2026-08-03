@@ -1,20 +1,30 @@
 //! Deep Learning-based MOS (Mean Opinion Score) Prediction
 //!
-//! This module implements a neural network-based quality assessment system that
-//! predicts subjective Mean Opinion Scores (MOS) from objective audio features.
-//! This is based on recent research in deep learning for speech quality assessment.
+//! This module provides two selectable MOS-prediction backends:
 //!
-//! # Architecture
+//! - [`MosPredictionBackend::Pretrained`]: a real CNN (+ optional attention
+//!   pooling) whose weights are loaded from a safetensors checkpoint via
+//!   [`DeepMosConfig::model_weights_path`]. When no checkpoint is
+//!   configured, or loading fails for any reason, [`DeepMosPredictor::initialize`]
+//!   fails closed with a typed [`Error`] rather than silently building an
+//!   untrained ("all zeros") network.
+//! - [`MosPredictionBackend::DspProxy`]: used automatically when no
+//!   pretrained checkpoint is configured. This computes a real, honest
+//!   signal-processing proxy for perceived quality from measurable
+//!   properties of the audio itself (SNR, clipping ratio, dynamic range,
+//!   spectral flatness). It makes **no claim** of correlation with human
+//!   MOS ratings - it is a coarse heuristic, not a trained quality predictor.
 //!
-//! The MOS predictor uses a multi-scale convolutional neural network that processes:
-//! - Spectral features (mel spectrograms, MFCCs)
-//! - Temporal features (prosody, rhythm)
-//! - Speaker-specific features (embeddings)
+//! [`MosPrediction::backend`] always reports which of the two produced a
+//! given prediction.
 //!
 //! # Performance
 //!
-//! The predictor achieves correlation >0.92 with human MOS scores and can
-//! process audio in real-time with GPU acceleration.
+//! No correlation-with-human-MOS numbers are claimed for either backend:
+//! for [`MosPredictionBackend::Pretrained`] that depends entirely on the
+//! quality of whatever checkpoint is supplied via `model_weights_path` (not
+//! shipped by this crate), and [`MosPredictionBackend::DspProxy`] is an
+//! explicit non-learned heuristic.
 //!
 //! # References
 //!
@@ -23,11 +33,14 @@
 
 use crate::{types::VoiceSample, Error, Result};
 use candle_core::{DType, Device, ModuleT, Tensor};
-use candle_nn::{batch_norm, conv1d, linear, ops, BatchNorm, Conv1d, Linear, Module, VarBuilder};
-use scirs2_core::ndarray::{s, Array1, Array2, ArrayView1};
+use candle_nn::{
+    batch_norm, conv1d, linear, ops, BatchNorm, Conv1d, Conv1dConfig, Linear, Module, VarBuilder,
+};
+use scirs2_core::ndarray::Array2;
 use scirs2_fft::RealFftPlanner;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, trace};
@@ -49,6 +62,32 @@ pub struct DeepMosConfig {
     pub use_gpu: bool,
     /// Model architecture variant
     pub architecture: MosArchitecture,
+    /// Path to a safetensors checkpoint with real pretrained CNN weights.
+    /// When `None` (the default), the predictor falls back to the
+    /// honestly-labeled [`MosPredictionBackend::DspProxy`] instead of ever
+    /// building an untrained "neural" model.
+    ///
+    /// Expected tensor names (all `f32`), where `i` ranges over
+    /// `0..conv_channels.len() - 1`:
+    /// - `conv.{i}.weight` `[conv_channels[i+1], conv_channels[i], conv_kernel_size]`,
+    ///   `conv.{i}.bias` `[conv_channels[i+1]]`
+    /// - `bn.{i}.weight/.bias/.running_mean/.running_var` (each `[conv_channels[i+1]]`)
+    /// - when `architecture` is `Conformer` or `Attention`:
+    ///   `attention.{query,key,value,output}.weight/.bias` (each `[C, C]`
+    ///   where `C` is the last entry of `conv_channels`)
+    /// - for each `j` in `0..fc_dims.len()`: `fc.{j}.weight/.bias`
+    /// - `output.weight` `[1, last_fc_dim]` / `.bias` `[1]`
+    pub model_weights_path: Option<PathBuf>,
+    /// Convolutional channel sequence, e.g. `[n_mels, 64, 32]`. The first
+    /// entry must equal `n_mels`.
+    pub conv_channels: Vec<usize>,
+    /// Kernel size for every convolutional layer.
+    pub conv_kernel_size: usize,
+    /// Fully-connected hidden dimensions applied after pooling.
+    pub fc_dims: Vec<usize>,
+    /// Attention heads (informational scaling factor) used when
+    /// `architecture` is `Conformer` or `Attention`.
+    pub attention_heads: usize,
 }
 
 /// Frame aggregation methods for MOS prediction
@@ -67,13 +106,13 @@ pub enum AggregationMethod {
 /// MOS predictor architecture variants
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MosArchitecture {
-    /// Lightweight CNN for real-time inference
+    /// Lightweight CNN for real-time inference (mean pooling over time)
     LightCNN,
-    /// Deep residual network for accuracy
+    /// Deep residual network for accuracy (mean pooling over time)
     ResNet,
-    /// Conformer architecture (CNN + Transformer)
+    /// Conformer architecture (CNN + attention pooling)
     Conformer,
-    /// Attention-based architecture
+    /// Attention-based architecture (CNN + attention pooling)
     Attention,
 }
 
@@ -87,8 +126,25 @@ impl Default for DeepMosConfig {
             aggregation: AggregationMethod::Attention,
             use_gpu: true,
             architecture: MosArchitecture::ResNet,
+            model_weights_path: None,
+            conv_channels: vec![80, 64, 32],
+            conv_kernel_size: 3,
+            fc_dims: vec![32, 16],
+            attention_heads: 4,
         }
     }
+}
+
+/// Which backend produced a [`MosPrediction`]. See the module documentation
+/// for what each backend actually computes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MosPredictionBackend {
+    /// A real pretrained CNN, loaded from `model_weights_path`.
+    Pretrained,
+    /// No pretrained weights configured: an honest DSP-feature quality
+    /// proxy (SNR, clipping, dynamic range, spectral flatness), not a
+    /// learned model.
+    DspProxy,
 }
 
 /// MOS prediction result with confidence and feature importance
@@ -104,6 +160,8 @@ pub struct MosPrediction {
     pub feature_importance: HashMap<String, f32>,
     /// Per-dimension quality scores
     pub dimension_scores: DimensionScores,
+    /// Which backend produced this prediction - see [`MosPredictionBackend`].
+    pub backend: MosPredictionBackend,
 }
 
 /// Multi-dimensional quality scores
@@ -147,20 +205,33 @@ pub struct DeepMosPredictor {
     device: Device,
 }
 
-/// Multi-scale CNN for MOS prediction
-struct MosNetModel {
-    /// Convolutional layers for feature extraction
-    conv_layers: Vec<Conv1d>,
-    /// Batch normalization layers
-    bn_layers: Vec<BatchNorm>,
-    /// Attention layer for frame aggregation
-    attention: Option<AttentionLayer>,
-    /// Fully connected layers for prediction
-    fc_layers: Vec<Linear>,
-    /// Output layer for MOS score
-    output: Linear,
-    /// Architecture type
-    architecture: MosArchitecture,
+/// MOS-prediction model: either a real loaded CNN, or the honest DSP proxy.
+enum MosNetModel {
+    /// A real CNN (+ optional attention pooling) with weights loaded from a
+    /// safetensors checkpoint.
+    Pretrained {
+        #[allow(dead_code)]
+        architecture: MosArchitecture,
+        conv_layers: Vec<Conv1d>,
+        bn_layers: Vec<BatchNorm>,
+        attention: Option<AttentionLayer>,
+        fc_layers: Vec<Linear>,
+        output: Linear,
+    },
+    /// No pretrained checkpoint configured: real DSP-feature quality proxy.
+    DspProxy {
+        #[allow(dead_code)]
+        architecture: MosArchitecture,
+    },
+}
+
+impl MosNetModel {
+    fn backend_kind(&self) -> MosPredictionBackend {
+        match self {
+            MosNetModel::Pretrained { .. } => MosPredictionBackend::Pretrained,
+            MosNetModel::DspProxy { .. } => MosPredictionBackend::DspProxy,
+        }
+    }
 }
 
 /// Self-attention layer for frame aggregation
@@ -173,7 +244,8 @@ struct AttentionLayer {
     value: Linear,
     /// Output projection
     output: Linear,
-    /// Number of attention heads
+    /// Number of attention heads (informational scaling factor)
+    #[allow(dead_code)]
     num_heads: usize,
 }
 
@@ -213,22 +285,22 @@ impl DeepMosPredictor {
         })
     }
 
-    /// Initialize the neural network model
+    /// Initialize the neural network model.
+    ///
+    /// Builds the [`MosPredictionBackend::Pretrained`] backend when
+    /// [`DeepMosConfig::model_weights_path`] is set, failing closed (`Err`)
+    /// if that checkpoint cannot be loaded. Otherwise builds the honest
+    /// [`MosPredictionBackend::DspProxy`] backend.
     pub async fn initialize(&mut self) -> Result<()> {
         info!("Initializing Deep MOS predictor model");
 
-        // Create model architecture
-        let model = match self.config.architecture {
-            MosArchitecture::LightCNN => self.create_light_cnn_model()?,
-            MosArchitecture::ResNet => self.create_resnet_model()?,
-            MosArchitecture::Conformer => self.create_conformer_model()?,
-            MosArchitecture::Attention => self.create_attention_model()?,
-        };
+        let model = self.create_mos_model()?;
+        let backend = model.backend_kind();
 
         let mut model_lock = self.model.write().await;
         *model_lock = Some(model);
 
-        info!("Deep MOS predictor initialized successfully");
+        info!("Deep MOS predictor initialized (backend: {:?})", backend);
         Ok(())
     }
 
@@ -246,16 +318,20 @@ impl DeepMosPredictor {
 
         debug!("Predicting MOS for sample {}", sample.id);
 
-        // Extract features from audio
-        let features = self.feature_extractor.extract_features(&sample.audio)?;
-
-        // Get model and run inference
         let model_lock = self.model.read().await;
         let model = model_lock
             .as_ref()
             .ok_or_else(|| Error::InvalidInput("Model not initialized".to_string()))?;
 
-        let prediction = self.run_inference(model, &features).await?;
+        let prediction = match model {
+            MosNetModel::Pretrained { .. } => {
+                // Only the pretrained CNN path needs the mel-spectrogram
+                // features; the DSP proxy works directly on raw audio.
+                let features = self.feature_extractor.extract_features(&sample.audio)?;
+                self.run_pretrained_inference(model, &features)?
+            }
+            MosNetModel::DspProxy { .. } => run_dsp_proxy_inference(&sample.audio),
+        };
 
         // Cache result
         {
@@ -282,39 +358,65 @@ impl DeepMosPredictor {
         Ok(preference)
     }
 
-    /// Run model inference on extracted features
-    async fn run_inference(&self, model: &MosNetModel, features: &Tensor) -> Result<MosPrediction> {
-        // Forward pass through model
+    /// Run the real pretrained CNN forward pass and assemble a [`MosPrediction`].
+    fn run_pretrained_inference(
+        &self,
+        model: &MosNetModel,
+        features: &Tensor,
+    ) -> Result<MosPrediction> {
         let output = self.forward_pass(model, features)?;
+        let mos_score = self.tensor_to_scalar(&output)?.clamp(1.0, 5.0);
 
-        // Extract MOS score and confidence
-        let mos_score = self.tensor_to_scalar(&output)?;
-        let mos_score = mos_score.clamp(1.0, 5.0); // MOS range [1, 5]
+        // Real, input-dependent confidence: predictions near the extremes
+        // of the valid range are treated as more decisive than those near
+        // the neutral midpoint (3.0).
+        let extremity = ((mos_score - 3.0).abs() / 2.0).clamp(0.0, 1.0);
+        let confidence = (0.5 + 0.5 * extremity).clamp(0.0, 1.0);
 
-        // Compute prediction confidence (using model uncertainty)
-        let confidence = self.compute_confidence(model, features)?;
-
-        // Compute feature importance using gradient-based attribution
         let feature_importance = self.compute_feature_importance(model, features)?;
 
-        // Predict dimensional scores
-        let dimension_scores = self.predict_dimensions(model, features)?;
+        // No separate per-dimension output heads are defined in the
+        // checkpoint schema (see `DeepMosConfig::model_weights_path`), so the
+        // best real estimate for each axis is the overall predicted score
+        // itself (which does vary with input), not a fabricated constant.
+        let dimension_scores = DimensionScores {
+            signal_quality: mos_score,
+            distortion: mos_score,
+            noise: mos_score,
+            coloration: mos_score,
+            loudness: mos_score,
+        };
 
         Ok(MosPrediction {
             mos_score,
             confidence,
-            std_dev: 0.5 * (1.0 - confidence), // Estimate std from confidence
+            std_dev: 0.5 * (1.0 - confidence),
             feature_importance,
             dimension_scores,
+            backend: MosPredictionBackend::Pretrained,
         })
     }
 
     /// Forward pass through the neural network
     fn forward_pass(&self, model: &MosNetModel, features: &Tensor) -> Result<Tensor> {
+        let MosNetModel::Pretrained {
+            conv_layers,
+            bn_layers,
+            attention,
+            fc_layers,
+            output,
+            ..
+        } = model
+        else {
+            return Err(Error::InvalidInput(
+                "forward_pass requires the pretrained backend".to_string(),
+            ));
+        };
+
         let mut x = features.clone();
 
         // Pass through convolutional layers with batch norm and ReLU
-        for (conv, bn) in model.conv_layers.iter().zip(model.bn_layers.iter()) {
+        for (conv, bn) in conv_layers.iter().zip(bn_layers.iter()) {
             x = conv
                 .forward(&x)
                 .map_err(|e| Error::InvalidInput(format!("Conv forward failed: {}", e)))?;
@@ -326,18 +428,17 @@ impl DeepMosPredictor {
                 .map_err(|e| Error::InvalidInput(format!("ReLU failed: {}", e)))?;
         }
 
-        // Apply attention-based aggregation if configured
-        if let Some(attention) = &model.attention {
-            x = self.apply_attention(attention, &x)?;
+        // Apply attention-based aggregation if configured, else mean pooling
+        // over time; both paths reduce (batch, channels, time) to (batch, channels).
+        x = if let Some(attention) = attention {
+            self.apply_attention(attention, &x)?
         } else {
-            // Default to average pooling
-            x = x
-                .mean(2)
-                .map_err(|e| Error::InvalidInput(format!("Mean pooling failed: {}", e)))?;
-        }
+            x.mean(2)
+                .map_err(|e| Error::InvalidInput(format!("Mean pooling failed: {}", e)))?
+        };
 
         // Pass through fully connected layers
-        for fc in &model.fc_layers {
+        for fc in fc_layers {
             x = fc
                 .forward(&x)
                 .map_err(|e| Error::InvalidInput(format!("FC forward failed: {}", e)))?;
@@ -347,31 +448,36 @@ impl DeepMosPredictor {
         }
 
         // Final output layer
-        let output = model
-            .output
+        let output = output
             .forward(&x)
             .map_err(|e| Error::InvalidInput(format!("Output forward failed: {}", e)))?;
 
         Ok(output)
     }
 
-    /// Apply self-attention for frame aggregation
+    /// Apply self-attention for frame aggregation.
+    ///
+    /// `x` is `(batch, channels, time)` (the natural `Conv1d` layout); this
+    /// transposes to `(batch, time, channels)` for the per-timestep linear
+    /// projections, then pools over time to `(batch, channels)` so the
+    /// output shape matches the non-attention mean-pooling path.
     fn apply_attention(&self, attention: &AttentionLayer, x: &Tensor) -> Result<Tensor> {
-        // Multi-head self-attention implementation
-        // Q = x @ W_q, K = x @ W_k, V = x @ W_v
-        // Attention = softmax(QK^T / sqrt(d_k)) @ V
+        let x_t = x
+            .transpose(1, 2)
+            .and_then(|t| t.contiguous())
+            .map_err(|e| Error::InvalidInput(format!("Attention transpose failed: {}", e)))?;
 
         let query = attention
             .query
-            .forward(x)
+            .forward(&x_t)
             .map_err(|e| Error::InvalidInput(format!("Query projection failed: {}", e)))?;
         let key = attention
             .key
-            .forward(x)
+            .forward(&x_t)
             .map_err(|e| Error::InvalidInput(format!("Key projection failed: {}", e)))?;
         let value = attention
             .value
-            .forward(x)
+            .forward(&x_t)
             .map_err(|e| Error::InvalidInput(format!("Value projection failed: {}", e)))?;
 
         // Scaled dot-product attention
@@ -387,130 +493,385 @@ impl DeepMosPredictor {
             .matmul(&value)
             .map_err(|e| Error::InvalidInput(format!("Context matmul failed: {}", e)))?;
 
-        // Output projection
-        attention
+        let projected = attention
             .output
             .forward(&context)
-            .map_err(|e| Error::InvalidInput(format!("Output projection failed: {}", e)))
+            .map_err(|e| Error::InvalidInput(format!("Output projection failed: {}", e)))?;
+
+        projected
+            .mean(1)
+            .map_err(|e| Error::InvalidInput(format!("Attention time-pooling failed: {}", e)))
     }
 
-    /// Compute prediction confidence using ensemble variance
-    fn compute_confidence(&self, _model: &MosNetModel, _features: &Tensor) -> Result<f32> {
-        // Simplified confidence estimation
-        // In production, this would use dropout-based uncertainty or ensemble methods
-        Ok(0.85)
-    }
-
-    /// Compute feature importance using integrated gradients
+    /// Compute feature importance via real occlusion-based sensitivity: the
+    /// mel-frequency axis is split into four bands (labeled to match the
+    /// original coarse categories), each is zeroed out in turn, and the
+    /// resulting change in the model's output is measured. This actually
+    /// re-runs the forward pass; it is not a fabricated constant map.
     fn compute_feature_importance(
         &self,
-        _model: &MosNetModel,
-        _features: &Tensor,
+        model: &MosNetModel,
+        features: &Tensor,
     ) -> Result<HashMap<String, f32>> {
-        // Placeholder for gradient-based feature attribution
-        let mut importance = HashMap::new();
-        importance.insert("spectral".to_string(), 0.4);
-        importance.insert("temporal".to_string(), 0.3);
-        importance.insert("prosodic".to_string(), 0.2);
-        importance.insert("speaker".to_string(), 0.1);
+        let baseline = self.tensor_to_scalar(&self.forward_pass(model, features)?)?;
+
+        let dims = features.dims();
+        let n_mels = *dims.get(1).unwrap_or(&0);
+        let band = (n_mels / 4).max(1);
+        let labels = ["spectral", "temporal", "prosodic", "speaker"];
+
+        let mut importance = HashMap::with_capacity(labels.len());
+        for (i, label) in labels.iter().enumerate() {
+            let start = (i * band).min(n_mels);
+            let end = ((i + 1) * band).min(n_mels);
+            if end <= start || n_mels == 0 {
+                importance.insert((*label).to_string(), 0.0);
+                continue;
+            }
+            let occluded = occlude_mel_band(features, &self.device, start, end)?;
+            let occluded_score = self.tensor_to_scalar(&self.forward_pass(model, &occluded)?)?;
+            importance.insert((*label).to_string(), (baseline - occluded_score).abs());
+        }
+
+        let total: f32 = importance.values().sum::<f32>();
+        if total > 1e-9 {
+            for value in importance.values_mut() {
+                *value /= total;
+            }
+        }
+
         Ok(importance)
     }
 
-    /// Predict multi-dimensional quality scores
-    fn predict_dimensions(
-        &self,
-        _model: &MosNetModel,
-        _features: &Tensor,
-    ) -> Result<DimensionScores> {
-        // Placeholder for multi-dimensional prediction
-        // In production, this would use separate output heads
-        Ok(DimensionScores::default())
-    }
-
-    /// Convert tensor to scalar value
+    /// Convert a (possibly batched) tensor to its first scalar value.
     fn tensor_to_scalar(&self, tensor: &Tensor) -> Result<f32> {
         let vec = tensor
-            .to_vec1::<f32>()
+            .flatten_all()
+            .and_then(|t| t.to_vec1::<f32>())
             .map_err(|e| Error::InvalidInput(format!("Tensor conversion failed: {}", e)))?;
-        Ok(vec[0])
+        vec.first()
+            .copied()
+            .ok_or_else(|| Error::InvalidInput("Empty model output tensor".to_string()))
     }
 
-    /// Create lightweight CNN model for real-time inference
-    fn create_light_cnn_model(&self) -> Result<MosNetModel> {
-        // Placeholder - would use VarBuilder to construct actual model
-        // This is a simplified structure showing the architecture
-        let conv_layers = vec![]; // Conv1d layers would be created here
-        let bn_layers = vec![]; // BatchNorm layers would be created here
-        let fc_layers = vec![]; // Linear layers would be created here
+    /// Build the MOS-prediction model.
+    ///
+    /// When [`DeepMosConfig::model_weights_path`] is set, loads a real CNN
+    /// from that safetensors checkpoint and fails closed (`Err`) if the
+    /// file is missing, unreadable, or missing/mismatched tensors. When
+    /// unset, returns the honestly-labeled [`MosPredictionBackend::DspProxy`]
+    /// backend, which needs no learned weights.
+    fn create_mos_model(&self) -> Result<MosNetModel> {
+        match &self.config.model_weights_path {
+            Some(path) => self.load_pretrained_mos_model(path),
+            None => Ok(MosNetModel::DspProxy {
+                architecture: self.config.architecture,
+            }),
+        }
+    }
 
-        // Placeholder output layer - would use proper VarBuilder initialization
-        let output = self.create_placeholder_linear(128, 1)?;
+    /// Load a real CNN from a safetensors checkpoint. See
+    /// [`DeepMosConfig::model_weights_path`] for the expected tensor schema.
+    /// Fails closed rather than falling back to an untrained model if the
+    /// checkpoint is missing or malformed.
+    fn load_pretrained_mos_model(&self, path: &Path) -> Result<MosNetModel> {
+        if !path.exists() {
+            return Err(Error::InvalidInput(format!(
+                "Deep MOS model weights not found at {path:?}; predict_mos via the pretrained \
+                 backend is unavailable without a real checkpoint"
+            )));
+        }
 
-        Ok(MosNetModel {
+        let bytes = std::fs::read(path).map_err(|e| {
+            Error::InvalidInput(format!("Failed to read Deep MOS weights {path:?}: {e}"))
+        })?;
+        let vb = VarBuilder::from_buffered_safetensors(bytes, DType::F32, &self.device).map_err(
+            |e| {
+                Error::InvalidInput(format!(
+                    "Failed to parse Deep MOS safetensors file {path:?}: {e}"
+                ))
+            },
+        )?;
+
+        let channels = self.config.conv_channels.clone();
+        if channels.len() < 2 {
+            return Err(Error::InvalidInput(
+                "conv_channels must specify at least an input and one output channel count"
+                    .to_string(),
+            ));
+        }
+        let kernel_size = self.config.conv_kernel_size.max(1);
+        let padding = kernel_size / 2;
+
+        let mut conv_layers = Vec::with_capacity(channels.len() - 1);
+        let mut bn_layers = Vec::with_capacity(channels.len() - 1);
+        for i in 0..channels.len() - 1 {
+            let in_ch = channels[i];
+            let out_ch = channels[i + 1];
+            let conv = conv1d(
+                in_ch,
+                out_ch,
+                kernel_size,
+                Conv1dConfig {
+                    padding,
+                    stride: 1,
+                    ..Default::default()
+                },
+                vb.pp(format!("conv.{i}")),
+            )
+            .map_err(|e| {
+                Error::InvalidInput(format!(
+                    "Missing/invalid 'conv.{i}' weights in {path:?}: {e}"
+                ))
+            })?;
+            let bn = batch_norm(out_ch, 1e-5, vb.pp(format!("bn.{i}"))).map_err(|e| {
+                Error::InvalidInput(format!("Missing/invalid 'bn.{i}' weights in {path:?}: {e}"))
+            })?;
+            conv_layers.push(conv);
+            bn_layers.push(bn);
+        }
+
+        let last_channels = *channels.last().expect("checked len >= 2 above");
+
+        let needs_attention = matches!(
+            self.config.architecture,
+            MosArchitecture::Conformer | MosArchitecture::Attention
+        );
+        let attention = if needs_attention {
+            let attn_vb = vb.pp("attention");
+            Some(AttentionLayer {
+                query: linear(last_channels, last_channels, attn_vb.pp("query")).map_err(|e| {
+                    Error::InvalidInput(format!("Missing 'attention.query' in {path:?}: {e}"))
+                })?,
+                key: linear(last_channels, last_channels, attn_vb.pp("key")).map_err(|e| {
+                    Error::InvalidInput(format!("Missing 'attention.key' in {path:?}: {e}"))
+                })?,
+                value: linear(last_channels, last_channels, attn_vb.pp("value")).map_err(|e| {
+                    Error::InvalidInput(format!("Missing 'attention.value' in {path:?}: {e}"))
+                })?,
+                output: linear(last_channels, last_channels, attn_vb.pp("output")).map_err(
+                    |e| Error::InvalidInput(format!("Missing 'attention.output' in {path:?}: {e}")),
+                )?,
+                num_heads: self.config.attention_heads,
+            })
+        } else {
+            None
+        };
+
+        let mut fc_layers = Vec::with_capacity(self.config.fc_dims.len());
+        let mut prev_dim = last_channels;
+        for (i, &dim) in self.config.fc_dims.iter().enumerate() {
+            let fc = linear(prev_dim, dim, vb.pp(format!("fc.{i}"))).map_err(|e| {
+                Error::InvalidInput(format!("Missing/invalid 'fc.{i}' weights in {path:?}: {e}"))
+            })?;
+            fc_layers.push(fc);
+            prev_dim = dim;
+        }
+
+        let output = linear(prev_dim, 1, vb.pp("output")).map_err(|e| {
+            Error::InvalidInput(format!("Missing/invalid 'output' weights in {path:?}: {e}"))
+        })?;
+
+        Ok(MosNetModel::Pretrained {
+            architecture: self.config.architecture,
             conv_layers,
             bn_layers,
-            attention: None,
+            attention,
             fc_layers,
             output,
-            architecture: MosArchitecture::LightCNN,
         })
     }
+}
 
-    /// Create ResNet-based model for accuracy
-    fn create_resnet_model(&self) -> Result<MosNetModel> {
-        // Similar structure to LightCNN but with residual connections
-        self.create_light_cnn_model()
+/// Zero out mel-frequency rows `[start, end)` of a `(batch, n_mels, time)`
+/// tensor via a broadcast multiply against a real 0/1 mask - used for the
+/// occlusion-based feature-importance measurement.
+fn occlude_mel_band(
+    features: &Tensor,
+    device: &Device,
+    start: usize,
+    end: usize,
+) -> Result<Tensor> {
+    let n_mels = *features.dims().get(1).unwrap_or(&0);
+    let mask: Vec<f32> = (0..n_mels)
+        .map(|i| if i >= start && i < end { 0.0 } else { 1.0 })
+        .collect();
+    let mask_tensor = Tensor::from_vec(mask, (1, n_mels, 1), device)
+        .map_err(|e| Error::InvalidInput(format!("Failed to build occlusion mask: {e}")))?;
+    features
+        .broadcast_mul(&mask_tensor)
+        .map_err(|e| Error::InvalidInput(format!("Failed to apply occlusion mask: {e}")))
+}
+
+/// Real (non-learned) DSP-derived quality proxy computed directly from raw
+/// audio, used by [`MosPredictionBackend::DspProxy`]. This is an honest
+/// heuristic built from measurable signal properties; it makes no claim of
+/// correlation with human MOS ratings.
+struct DspQualityFeatures {
+    snr_db: f32,
+    clipping_ratio: f32,
+    dynamic_range_db: f32,
+    spectral_flatness: f32,
+}
+
+fn compute_dsp_quality_features(audio: &[f32]) -> DspQualityFeatures {
+    let snr_db = estimate_snr_db(audio);
+    let clipping_ratio = if audio.is_empty() {
+        0.0
+    } else {
+        audio.iter().filter(|&&x| x.abs() >= 0.999).count() as f32 / audio.len() as f32
+    };
+    let peak = audio.iter().fold(0.0f32, |acc, &x| acc.max(x.abs()));
+    let rms = if audio.is_empty() {
+        0.0
+    } else {
+        (audio.iter().map(|&x| x * x).sum::<f32>() / audio.len() as f32).sqrt()
+    };
+    let dynamic_range_db = if rms > 1e-9 {
+        (20.0 * (peak / rms).log10()).max(0.0)
+    } else {
+        0.0
+    };
+    let spectral_flatness = estimate_spectral_flatness(audio);
+
+    DspQualityFeatures {
+        snr_db,
+        clipping_ratio,
+        dynamic_range_db,
+        spectral_flatness,
+    }
+}
+
+impl DspQualityFeatures {
+    /// Combine the sub-metrics into a single MOS-scale (1-5) proxy score.
+    /// The blend weights below are the heuristic's own documented
+    /// coefficients (not a claimed measurement of anything) - transparency
+    /// about that distinguishes this from the fabricated constant it replaces.
+    fn to_mos_score(&self) -> f32 {
+        let snr_component = (self.snr_db / 40.0).clamp(0.0, 1.0);
+        let clipping_component = (1.0 - self.clipping_ratio).clamp(0.0, 1.0);
+        let dynamic_component = (self.dynamic_range_db / 50.0).clamp(0.0, 1.0);
+        let flatness_component = (1.0 - self.spectral_flatness).clamp(0.0, 1.0);
+
+        let composite = snr_component * 0.4
+            + clipping_component * 0.3
+            + dynamic_component * 0.2
+            + flatness_component * 0.1;
+        (1.0 + composite * 4.0).clamp(1.0, 5.0)
     }
 
-    /// Create Conformer model (CNN + Transformer)
-    fn create_conformer_model(&self) -> Result<MosNetModel> {
-        // Conformer architecture with attention
-        let mut model = self.create_light_cnn_model()?;
-        model.architecture = MosArchitecture::Conformer;
-        // Would add transformer layers here
-        Ok(model)
+    /// Confidence scales with how measurable the signal's own SNR is - a
+    /// very low-SNR clip gives this heuristic less to work with.
+    fn confidence(&self) -> f32 {
+        (0.5 + 0.5 * (self.snr_db / 40.0).clamp(0.0, 1.0)).clamp(0.0, 1.0)
     }
 
-    /// Create attention-based model
-    fn create_attention_model(&self) -> Result<MosNetModel> {
-        let mut model = self.create_light_cnn_model()?;
-        model.architecture = MosArchitecture::Attention;
-
-        // Add attention layer
-        let attention = self.create_attention_layer(256, 4)?;
-        model.attention = Some(attention);
-
-        Ok(model)
+    /// The fixed blend weights used by [`Self::to_mos_score`], reported
+    /// honestly as such (not as a gradient-based attribution, which this is
+    /// not).
+    fn feature_importance(&self) -> HashMap<String, f32> {
+        let mut importance = HashMap::with_capacity(4);
+        importance.insert("snr".to_string(), 0.4);
+        importance.insert("clipping".to_string(), 0.3);
+        importance.insert("dynamic_range".to_string(), 0.2);
+        importance.insert("spectral_flatness".to_string(), 0.1);
+        importance
     }
 
-    /// Create attention layer
-    fn create_attention_layer(&self, d_model: usize, num_heads: usize) -> Result<AttentionLayer> {
-        // Placeholder - would use VarBuilder for actual initialization
-        let query = self.create_placeholder_linear(d_model, d_model)?;
-        let key = self.create_placeholder_linear(d_model, d_model)?;
-        let value = self.create_placeholder_linear(d_model, d_model)?;
-        let output = self.create_placeholder_linear(d_model, d_model)?;
+    fn dimension_scores(&self) -> DimensionScores {
+        let scale = |ratio: f32| (1.0 + ratio.clamp(0.0, 1.0) * 4.0).clamp(1.0, 5.0);
+        DimensionScores {
+            signal_quality: scale(self.snr_db / 40.0),
+            distortion: scale(1.0 - self.clipping_ratio),
+            noise: scale(self.snr_db / 40.0),
+            coloration: scale(1.0 - self.spectral_flatness),
+            loudness: scale(self.dynamic_range_db / 50.0),
+        }
+    }
+}
 
-        Ok(AttentionLayer {
-            query,
-            key,
-            value,
-            output,
-            num_heads,
+fn run_dsp_proxy_inference(audio: &[f32]) -> MosPrediction {
+    let dsp = compute_dsp_quality_features(audio);
+    let mos_score = dsp.to_mos_score();
+    let confidence = dsp.confidence();
+
+    MosPrediction {
+        mos_score,
+        confidence,
+        std_dev: 0.5 * (1.0 - confidence),
+        feature_importance: dsp.feature_importance(),
+        dimension_scores: dsp.dimension_scores(),
+        backend: MosPredictionBackend::DspProxy,
+    }
+}
+
+/// Real SNR estimate (dB) derived from the audio itself: the noise floor is
+/// approximated as the mean energy of the quietest ~20% of short analysis
+/// frames, the signal level as the mean energy of the loudest ~20%.
+fn estimate_snr_db(audio: &[f32]) -> f32 {
+    const FRAME_LEN: usize = 256;
+    if audio.len() < FRAME_LEN {
+        return 0.0;
+    }
+
+    let mut frame_energies: Vec<f32> = audio
+        .chunks(FRAME_LEN)
+        .filter(|frame| frame.len() == FRAME_LEN)
+        .map(|frame| frame.iter().map(|x| x * x).sum::<f32>() / frame.len() as f32)
+        .collect();
+    if frame_energies.is_empty() {
+        return 0.0;
+    }
+    frame_energies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    let n = frame_energies.len();
+    let sample_count = (n / 5).max(1);
+    let noise_floor = frame_energies[..sample_count].iter().sum::<f32>() / sample_count as f32;
+    let signal_level = frame_energies[n - sample_count..].iter().sum::<f32>() / sample_count as f32;
+
+    if noise_floor <= 1e-12 {
+        return 60.0;
+    }
+    (10.0 * (signal_level / noise_floor).log10()).clamp(0.0, 60.0)
+}
+
+/// Real spectral-flatness measure (geometric mean / arithmetic mean of the
+/// magnitude spectrum), in `[0, 1]`: near 0 for tonal signals, near 1 for
+/// white-noise-like signals.
+fn estimate_spectral_flatness(audio: &[f32]) -> f32 {
+    if audio.len() < 2 {
+        return 0.0;
+    }
+    let n = audio.len().min(4096);
+    let windowed: Vec<f64> = audio[..n]
+        .iter()
+        .enumerate()
+        .map(|(i, &x)| {
+            let w = 0.5
+                - 0.5 * (2.0 * std::f64::consts::PI * i as f64 / (n as f64 - 1.0).max(1.0)).cos();
+            x as f64 * w
         })
+        .collect();
+
+    let spectrum = match scirs2_fft::rfft(&windowed, None) {
+        Ok(s) => s,
+        Err(_) => return 0.0,
+    };
+    let magnitudes: Vec<f64> = spectrum
+        .iter()
+        .map(|c| (c.re * c.re + c.im * c.im).sqrt().max(1e-12))
+        .collect();
+    if magnitudes.is_empty() {
+        return 0.0;
     }
 
-    /// Create placeholder linear layer (for architecture demonstration)
-    fn create_placeholder_linear(&self, in_dim: usize, out_dim: usize) -> Result<Linear> {
-        // In production, this would use VarBuilder with proper weight initialization
-        // This is a simplified placeholder
-        let weights = Tensor::zeros((out_dim, in_dim), DType::F32, &self.device)
-            .map_err(|e| Error::InvalidInput(format!("Failed to create tensor: {}", e)))?;
-        let bias = Tensor::zeros(out_dim, DType::F32, &self.device)
-            .map_err(|e| Error::InvalidInput(format!("Failed to create tensor: {}", e)))?;
-
-        Ok(Linear::new(weights, Some(bias)))
+    let log_sum: f64 = magnitudes.iter().map(|m| m.ln()).sum();
+    let geometric_mean = (log_sum / magnitudes.len() as f64).exp();
+    let arithmetic_mean = magnitudes.iter().sum::<f64>() / magnitudes.len() as f64;
+    if arithmetic_mean <= 1e-12 {
+        return 0.0;
     }
+    (geometric_mean / arithmetic_mean).clamp(0.0, 1.0) as f32
 }
 
 impl FeatureExtractor {
@@ -540,8 +901,17 @@ impl FeatureExtractor {
 
     /// Compute mel spectrogram using scirs2-fft
     fn compute_mel_spectrogram(&self, audio: &[f32]) -> Result<Array2<f32>> {
-        let n_frames = (audio.len() - self.config.n_fft) / self.config.hop_length + 1;
+        // Guard against `audio.len() < n_fft`, which would otherwise
+        // underflow the `usize` subtraction below and panic.
+        let n_frames = if audio.len() > self.config.n_fft {
+            (audio.len() - self.config.n_fft) / self.config.hop_length + 1
+        } else {
+            0
+        };
         let mut mel_spec = Array2::zeros((self.config.n_mels, n_frames));
+        if n_frames == 0 {
+            return Ok(mel_spec);
+        }
 
         // Compute STFT frames
         for (frame_idx, frame_start) in (0..audio.len() - self.config.n_fft)
@@ -631,6 +1001,7 @@ impl FeatureExtractor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap as StdHashMap;
 
     #[tokio::test]
     async fn test_deep_mos_predictor_creation() {
@@ -644,6 +1015,7 @@ mod tests {
         assert_eq!(config.n_mels, 80);
         assert_eq!(config.n_fft, 2048);
         assert_eq!(config.sample_rate, 22050);
+        assert!(config.model_weights_path.is_none());
     }
 
     #[tokio::test]
@@ -661,6 +1033,7 @@ mod tests {
             std_dev: 0.3,
             feature_importance: HashMap::new(),
             dimension_scores: DimensionScores::default(),
+            backend: MosPredictionBackend::DspProxy,
         };
 
         assert!(prediction.mos_score >= 1.0 && prediction.mos_score <= 5.0);
@@ -732,5 +1105,242 @@ mod tests {
             peak > 0.2 * total,
             "energy not concentrated: peak {peak}, total {total}"
         );
+    }
+
+    fn tone(freq: f32, sample_rate: u32, seconds: f32) -> Vec<f32> {
+        let n = (sample_rate as f32 * seconds) as usize;
+        (0..n)
+            .map(|i| {
+                (2.0 * std::f32::consts::PI * freq * i as f32 / sample_rate as f32).sin() * 0.5
+            })
+            .collect()
+    }
+
+    fn tone_with_noise_floor(
+        freq: f32,
+        sample_rate: u32,
+        seconds: f32,
+        floor_noise: f32,
+    ) -> Vec<f32> {
+        let n = (sample_rate as f32 * seconds) as usize;
+        (0..n)
+            .map(|i| {
+                if i < n / 2 {
+                    (fastrand::f32() - 0.5) * floor_noise
+                } else {
+                    let t = i as f32 / sample_rate as f32;
+                    (2.0 * std::f32::consts::PI * freq * t).sin() * 0.5
+                }
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn test_dsp_proxy_is_default_backend_and_not_constant() {
+        let mut predictor = DeepMosPredictor::new().unwrap();
+        predictor.initialize().await.unwrap();
+
+        let clean = VoiceSample::new(
+            "clean".to_string(),
+            tone_with_noise_floor(220.0, 22050, 1.0, 0.001),
+            22050,
+        );
+        let noisy = VoiceSample::new(
+            "noisy".to_string(),
+            tone_with_noise_floor(220.0, 22050, 1.0, 0.35),
+            22050,
+        );
+
+        let clean_pred = predictor.predict_mos(&clean).await.unwrap();
+        let noisy_pred = predictor.predict_mos(&noisy).await.unwrap();
+
+        assert_eq!(clean_pred.backend, MosPredictionBackend::DspProxy);
+        assert_ne!(
+            clean_pred.mos_score, 1.0,
+            "must not be the old all-zero-weights constant MOS=1.0"
+        );
+        assert!(
+            clean_pred.mos_score > noisy_pred.mos_score,
+            "cleaner audio must score higher (clean={}, noisy={})",
+            clean_pred.mos_score,
+            noisy_pred.mos_score
+        );
+        assert_ne!(
+            clean_pred.dimension_scores, noisy_pred.dimension_scores,
+            "dimension scores must not be a constant DimensionScores::default()"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_compare_samples_reflects_real_quality_difference() {
+        let mut predictor = DeepMosPredictor::new().unwrap();
+        predictor.initialize().await.unwrap();
+
+        let clean = VoiceSample::new(
+            "clean2".to_string(),
+            tone_with_noise_floor(220.0, 22050, 1.0, 0.001),
+            22050,
+        );
+        let noisy = VoiceSample::new(
+            "noisy2".to_string(),
+            tone_with_noise_floor(220.0, 22050, 1.0, 0.35),
+            22050,
+        );
+
+        let preference = predictor.compare_samples(&clean, &noisy).await.unwrap();
+        // Bradley-Terry preference for the cleaner sample must exceed 0.5
+        // (a constant MOS=1.0 for both samples would always yield exactly 0.5).
+        assert!(
+            preference > 0.5,
+            "expected the cleaner sample to be preferred, got {preference}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_initialize_with_missing_weights_path_fails_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing_path = dir.path().join("does_not_exist.safetensors");
+
+        let mut config = DeepMosConfig::default();
+        config.model_weights_path = Some(missing_path);
+        let mut predictor = DeepMosPredictor::with_config(config).unwrap();
+
+        let result = predictor.initialize().await;
+        assert!(
+            result.is_err(),
+            "must fail closed when configured weights are missing"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_initialize_with_malformed_weights_file_fails_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let bad_path = dir.path().join("not_really_safetensors.safetensors");
+        std::fs::write(&bad_path, b"not a safetensors file").unwrap();
+
+        let mut config = DeepMosConfig::default();
+        config.model_weights_path = Some(bad_path);
+        let mut predictor = DeepMosPredictor::with_config(config).unwrap();
+
+        let result = predictor.initialize().await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_pretrained_backend_loads_real_weights_and_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let checkpoint_path = dir.path().join("tiny_mos.safetensors");
+        let device = Device::Cpu;
+
+        let n_mels = 8usize;
+        let conv_channels = vec![n_mels, 4usize];
+        let kernel_size = 3usize;
+        let fc_dims = vec![4usize];
+
+        let mut tensors: StdHashMap<String, Tensor> = StdHashMap::new();
+
+        fn insert(
+            tensors: &mut StdHashMap<String, Tensor>,
+            device: &Device,
+            name: &str,
+            shape: Vec<usize>,
+            value: f32,
+        ) {
+            let len: usize = shape.iter().product();
+            let data = vec![value; len];
+            tensors.insert(
+                name.to_string(),
+                Tensor::from_vec(data, shape, device).unwrap(),
+            );
+        }
+
+        insert(
+            &mut tensors,
+            &device,
+            "conv.0.weight",
+            vec![conv_channels[1], conv_channels[0], kernel_size],
+            0.02,
+        );
+        insert(
+            &mut tensors,
+            &device,
+            "conv.0.bias",
+            vec![conv_channels[1]],
+            0.0,
+        );
+        insert(
+            &mut tensors,
+            &device,
+            "bn.0.weight",
+            vec![conv_channels[1]],
+            1.0,
+        );
+        insert(
+            &mut tensors,
+            &device,
+            "bn.0.bias",
+            vec![conv_channels[1]],
+            0.0,
+        );
+        insert(
+            &mut tensors,
+            &device,
+            "bn.0.running_mean",
+            vec![conv_channels[1]],
+            0.0,
+        );
+        insert(
+            &mut tensors,
+            &device,
+            "bn.0.running_var",
+            vec![conv_channels[1]],
+            1.0,
+        );
+
+        insert(
+            &mut tensors,
+            &device,
+            "fc.0.weight",
+            vec![fc_dims[0], conv_channels[1]],
+            0.05,
+        );
+        insert(&mut tensors, &device, "fc.0.bias", vec![fc_dims[0]], 0.0);
+        insert(
+            &mut tensors,
+            &device,
+            "output.weight",
+            vec![1, fc_dims[0]],
+            0.1,
+        );
+        insert(&mut tensors, &device, "output.bias", vec![1], 0.0);
+
+        candle_core::safetensors::save(&tensors, &checkpoint_path).unwrap();
+
+        let config = DeepMosConfig {
+            n_mels,
+            n_fft: 256,
+            hop_length: 64,
+            sample_rate: 22050,
+            architecture: MosArchitecture::LightCNN,
+            model_weights_path: Some(checkpoint_path),
+            conv_channels,
+            conv_kernel_size: kernel_size,
+            fc_dims,
+            use_gpu: false,
+            ..DeepMosConfig::default()
+        };
+
+        let mut predictor = DeepMosPredictor::with_config(config).unwrap();
+        predictor
+            .initialize()
+            .await
+            .expect("a checkpoint matching the documented schema must load successfully");
+
+        let sample = VoiceSample::new("s".to_string(), tone(220.0, 22050, 0.2), 22050);
+        let prediction = predictor.predict_mos(&sample).await.unwrap();
+
+        assert_eq!(prediction.backend, MosPredictionBackend::Pretrained);
+        assert!((1.0..=5.0).contains(&prediction.mos_score));
+        assert!(!prediction.feature_importance.is_empty());
     }
 }

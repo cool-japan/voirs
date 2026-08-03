@@ -573,7 +573,11 @@ fn spectral_centroid_hz(audio: &[f32], sample_rate: f32) -> f32 {
 /// Returns `Some(f0)` when a plausible periodicity is found within the typical
 /// human voice range (60–500 Hz), otherwise `None` (harmonic enhancement is
 /// then skipped by the spectral processor).
-fn estimate_fundamental(audio: &[f32], sample_rate: f32) -> Option<f32> {
+///
+/// `pub(crate)` so other modules (e.g. [`crate::sdk_integration`]) can reuse
+/// the same real F0 estimator instead of re-deriving pitch statistics
+/// on their own.
+pub(crate) fn estimate_fundamental(audio: &[f32], sample_rate: f32) -> Option<f32> {
     if audio.len() < 2 || sample_rate <= 0.0 {
         return None;
     }

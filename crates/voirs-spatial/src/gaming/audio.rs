@@ -15,6 +15,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+/// Listener orientation as (yaw, pitch, roll) in radians.
+type ListenerOrientation = (f32, f32, f32);
+/// Listener position combined with its orientation - the full listener pose
+/// used to compute real emitter-to-listener distances.
+type ListenerPose = (Position3D, ListenerOrientation);
+
 /// Gaming audio manager
 pub struct GamingAudioManager {
     /// Spatial processor
@@ -29,6 +35,9 @@ pub struct GamingAudioManager {
     pub(super) metrics: Arc<Mutex<GamingMetrics>>,
     /// Frame timing
     pub(super) frame_timer: Arc<Mutex<FrameTimer>>,
+    /// Listener position and orientation, used for real distance-attenuation
+    /// calculations against every active source.
+    pub(super) listener: Arc<Mutex<ListenerPose>>,
 }
 
 impl GamingAudioManager {
@@ -44,6 +53,7 @@ impl GamingAudioManager {
             next_source_id: Arc::new(Mutex::new(1)),
             metrics: Arc::new(Mutex::new(GamingMetrics::default())),
             frame_timer: Arc::new(Mutex::new(FrameTimer::default())),
+            listener: Arc::new(Mutex::new((Position3D::default(), (0.0, 0.0, 0.0)))),
         })
     }
 
@@ -184,19 +194,30 @@ impl GamingAudioManager {
     }
 
     /// Update listener position
+    ///
+    /// Stores the listener pose so that [`Self::calculate_distance_attenuation`]
+    /// (and thus [`Self::process_frame`]) can compute real per-source distances
+    /// against it, instead of assuming a fixed distance.
     pub fn update_listener(
         &self,
         position: Position3D,
         orientation: (f32, f32, f32),
     ) -> Result<()> {
-        let processor = self
-            .processor
+        let mut listener = self
+            .listener
             .lock()
-            .map_err(|_| Error::LegacyAudio("Processor lock poisoned".to_string()))?;
-
-        // Update listener position and orientation
-        // This would be implemented when the processor API is extended
+            .map_err(|_| Error::LegacyAudio("Listener lock poisoned".to_string()))?;
+        *listener = (position, orientation);
         Ok(())
+    }
+
+    /// Get the current listener position and orientation (yaw, pitch, roll).
+    pub fn listener_pose(&self) -> Result<(Position3D, (f32, f32, f32))> {
+        let listener = self
+            .listener
+            .lock()
+            .map_err(|_| Error::LegacyAudio("Listener lock poisoned".to_string()))?;
+        Ok(*listener)
     }
 
     /// Process audio for current frame
@@ -286,9 +307,20 @@ impl GamingAudioManager {
     }
 
     /// Calculate distance attenuation for a source
+    ///
+    /// Computes the real Euclidean distance between the listener pose stored by
+    /// [`Self::update_listener`] and the source's current spatial position (kept
+    /// up to date by [`Self::update_source_position`]), then applies the
+    /// configured attenuation curve to that real distance. A poisoned listener
+    /// lock (only possible after a prior panic elsewhere) falls back to the
+    /// default origin pose rather than propagating a panic from this
+    /// non-`Result` helper.
     pub(super) fn calculate_distance_attenuation(&self, source_data: &GameAudioSourceData) -> f32 {
-        // Simple distance calculation (placeholder)
-        let distance = 1.0; // Would calculate from listener and source positions
+        let (listener_position, _listener_orientation) =
+            self.listener.lock().map(|guard| *guard).unwrap_or_default();
+
+        let source_position = source_data.spatial_source.position();
+        let distance = listener_position.distance_to(&source_position);
         let settings = &source_data.attenuation;
 
         if distance <= settings.min_distance {
@@ -451,6 +483,101 @@ mod tests {
             let attenuation = manager.calculate_distance_attenuation(source_data);
             assert!(attenuation >= 0.0 && attenuation <= 1.0);
         }
+    }
+
+    #[tokio::test]
+    async fn test_update_listener_stores_pose() {
+        let config = GamingConfig::default();
+        let manager = GamingAudioManager::new(config).await.unwrap();
+
+        let position = Position3D::new(3.0, -2.0, 5.0);
+        let orientation = (0.1, 0.2, 0.3);
+        manager.update_listener(position, orientation).unwrap();
+
+        let (stored_position, stored_orientation) = manager.listener_pose().unwrap();
+        assert_eq!(stored_position, position);
+        assert_eq!(stored_orientation, orientation);
+    }
+
+    #[tokio::test]
+    async fn test_distance_attenuation_uses_real_listener_and_source_positions() {
+        let config = GamingConfig::default();
+        let manager = GamingAudioManager::new(config).await.unwrap();
+
+        // Listener at the origin.
+        manager
+            .update_listener(Position3D::new(0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
+            .unwrap();
+
+        // Source close to the listener: within min_distance, so attenuation is
+        // full volume (1.0) regardless of curve.
+        let near_source = manager
+            .create_source(AudioCategory::Sfx, 128, Position3D::new(0.5, 0.0, 0.0))
+            .unwrap();
+        // Source far beyond max_distance: fully attenuated (0.0).
+        let far_source = manager
+            .create_source(AudioCategory::Sfx, 128, Position3D::new(1000.0, 0.0, 0.0))
+            .unwrap();
+
+        let sources = manager.sources.lock().unwrap();
+        let near_attenuation = manager.calculate_distance_attenuation(
+            sources.get(&near_source.id).expect("near source exists"),
+        );
+        let far_attenuation = manager.calculate_distance_attenuation(
+            sources.get(&far_source.id).expect("far source exists"),
+        );
+        drop(sources);
+
+        assert_eq!(
+            near_attenuation, 1.0,
+            "source inside min_distance should be at full volume"
+        );
+        assert_eq!(
+            far_attenuation, 0.0,
+            "source beyond max_distance should be silent"
+        );
+
+        // Moving the listener away from the "near" source should measurably
+        // reduce its attenuation - proof the calculation really depends on the
+        // stored listener position rather than a fixed constant.
+        manager
+            .update_listener(Position3D::new(50.0, 0.0, 0.0), (0.0, 0.0, 0.0))
+            .unwrap();
+        let sources = manager.sources.lock().unwrap();
+        let moved_attenuation = manager.calculate_distance_attenuation(
+            sources.get(&near_source.id).expect("near source exists"),
+        );
+        drop(sources);
+        assert!(
+            moved_attenuation < near_attenuation,
+            "attenuation should drop once the listener moves away: before={near_attenuation}, after={moved_attenuation}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_frame_applies_distance_based_volume() {
+        let config = GamingConfig::default();
+        let manager = GamingAudioManager::new(config).await.unwrap();
+
+        manager
+            .update_listener(Position3D::new(0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
+            .unwrap();
+
+        // A source far beyond max_distance should be fully attenuated and thus
+        // contribute nothing to the mixed output buffer.
+        let far_source = manager
+            .create_source(AudioCategory::Sfx, 128, Position3D::new(1000.0, 0.0, 0.0))
+            .unwrap();
+        manager.set_audio_data(far_source, vec![1.0; 256]).unwrap();
+        manager.play_source(far_source).unwrap();
+
+        let mut output_buffer = vec![0.0; 256];
+        manager.process_frame(&mut output_buffer).unwrap();
+
+        assert!(
+            output_buffer.iter().all(|&x| x == 0.0),
+            "fully-attenuated distant source should not contribute audio"
+        );
     }
 
     #[test]

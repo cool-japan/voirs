@@ -295,16 +295,26 @@ impl DefaultVoiceManager {
                     })?;
             }
 
-            // Skip download in test mode - create dummy file
-            if cfg!(test) {
-                tracing::debug!("Test mode: creating dummy file for {}", model_path);
-                tokio::fs::write(&full_path, b"dummy model file")
-                    .await
-                    .map_err(|e| VoirsError::IoError {
-                        path: full_path.clone(),
-                        operation: crate::error::types::IoOperation::Write,
-                        source: e,
-                    })?;
+            // Skip the network in explicitly-requested test mode. The placeholder
+            // file is written with a `.placeholder` marker extension so it can
+            // never be mistaken for real model weights by the model loaders.
+            if self.test_mode {
+                let placeholder_path = full_path.with_extension("placeholder");
+                tracing::debug!(
+                    "Test mode: writing placeholder marker {} instead of downloading {}",
+                    placeholder_path.display(),
+                    model_path
+                );
+                tokio::fs::write(
+                    &placeholder_path,
+                    b"voirs test-mode placeholder - not model weights",
+                )
+                .await
+                .map_err(|e| VoirsError::IoError {
+                    path: placeholder_path.clone(),
+                    operation: crate::error::types::IoOperation::Write,
+                    source: e,
+                })?;
                 continue;
             }
 

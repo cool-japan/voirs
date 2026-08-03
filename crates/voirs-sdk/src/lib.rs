@@ -13,22 +13,41 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<()> {
-//!     // Create a pipeline with default settings
+//!     // Create a pipeline with default settings.
+//!     // `build()` loads real model weights from the model cache directory; it
+//!     // returns an error (it never falls back to placeholder audio) when the
+//!     // weights are missing.
 //!     let pipeline = VoirsPipelineBuilder::new()
 //!         .with_quality(QualityLevel::High)
-//!         .with_voice("default")
+//!         .with_voice("en-US-female-calm")
 //!         .build()
 //!         .await?;
 //!
 //!     // Synthesize speech
 //!     let audio = pipeline.synthesize("Hello, world!").await?;
-//!     
+//!
 //!     // Save to file
 //!     audio.save_wav("output.wav")?;
-//!     
+//!
 //!     Ok(())
 //! }
 //! ```
+//!
+//! ### One builder, one behavior
+//!
+//! [`VoirsPipelineBuilder`] is a single type. `voirs_sdk::VoirsPipelineBuilder`,
+//! `voirs_sdk::builder::VoirsPipelineBuilder`, `voirs_sdk::pipeline::VoirsPipelineBuilder`
+//! and `voirs_sdk::prelude::VoirsPipelineBuilder` are all the same builder and all
+//! run the same real initialization path (rule-based G2P, Candle acoustic backend,
+//! HiFi-GAN vocoder).
+//!
+//! Two escape hatches exist and both are explicit:
+//!
+//! * [`VoirsPipelineBuilder::with_g2p`] / [`with_acoustic_model`](VoirsPipelineBuilder::with_acoustic_model)
+//!   / [`with_vocoder`](VoirsPipelineBuilder::with_vocoder) inject your own components.
+//! * [`VoirsPipelineBuilder::with_test_mode`] installs the in-process stub components
+//!   ([`pipeline::DummyG2p`] and friends) for fast tests. Stub components are never
+//!   installed implicitly.
 //!
 //! ## Key Features
 //!
@@ -67,6 +86,26 @@
 //! }
 //! ```
 //!
+//! ### Fast Tests Without Model Weights
+//!
+//! ```no_run
+//! use voirs_sdk::prelude::*;
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<()> {
+//!     // Explicitly opt into the in-process stub components. This is the only way
+//!     // to obtain a pipeline that does not require real model weights, and the
+//!     // audio it produces is a synthetic placeholder, not speech.
+//!     let pipeline = VoirsPipelineBuilder::new()
+//!         .with_test_mode(true)
+//!         .build()
+//!         .await?;
+//!     let audio = pipeline.synthesize("Hello, world!").await?;
+//!     assert!(!audio.is_empty());
+//!     Ok(())
+//! }
+//! ```
+//!
 //! ### Streaming Synthesis
 //!
 //! ```no_run
@@ -99,20 +138,22 @@
 //! #[tokio::main]
 //! async fn main() -> Result<()> {
 //!     let pipeline = VoirsPipelineBuilder::new()
-//!         .with_voice("female_voice")
+//!         .with_voice("en-US-female-calm")
 //!         .build()
 //!         .await?;
-//!     
+//!
 //!     // List available voices
 //!     let voices = pipeline.list_voices().await?;
 //!     for voice in voices {
 //!         println!("Available voice: {} ({})", voice.name, voice.language);
 //!     }
-//!     
-//!     // Switch voice at runtime
-//!     pipeline.set_voice("male_voice").await?;
+//!
+//!     // Switch voice at runtime. The ID is resolved against the voice registry
+//!     // and the affected components are reloaded; unknown IDs return
+//!     // `VoirsError::VoiceNotFound`.
+//!     pipeline.set_voice("en-US-male-news").await?;
 //!     let audio = pipeline.synthesize("Speaking with a different voice").await?;
-//!     
+//!
 //!     Ok(())
 //! }
 //! ```

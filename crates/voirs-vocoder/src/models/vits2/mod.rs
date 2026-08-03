@@ -8,17 +8,22 @@
 //! - Reduced synthesis artifacts and improved naturalness
 
 use crate::{Result, VocoderError};
+use generator::GeneratorConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use text_encoder::TextEncoderConfig;
 
 pub mod attention;
+pub mod blocks;
 pub mod duration_predictor;
 pub mod encoder;
 pub mod flow;
 pub mod generator;
 pub mod mas;
 pub mod modules;
+pub mod params;
 pub mod posterior_encoder;
+pub mod relative_attention;
 pub mod stochastic_duration_predictor;
 pub mod text_encoder;
 
@@ -109,6 +114,15 @@ pub struct Vits2Config {
     pub emotion_embedding_dim: u32,
     pub use_style_encoder: bool,
     pub style_encoder_layers: u32,
+
+    /// Size of the phoneme/character vocabulary used by the text encoder
+    #[serde(default = "default_text_vocab_size")]
+    pub text_vocab_size: u32,
+}
+
+/// Default vocabulary size assumed for the text encoder.
+fn default_text_vocab_size() -> u32 {
+    256
 }
 
 impl Default for Vits2Config {
@@ -197,7 +211,25 @@ impl Default for Vits2Config {
             emotion_embedding_dim: 64,
             use_style_encoder: false,
             style_encoder_layers: 2,
+
+            text_vocab_size: default_text_vocab_size(),
         }
+    }
+}
+
+/// Exact parameter counts of the VITS2 components implemented in this crate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Vits2ParameterBreakdown {
+    /// Parameters of [`text_encoder::TextEncoder`]
+    pub text_encoder: u64,
+    /// Parameters of [`generator::Vits2Generator`]
+    pub generator: u64,
+}
+
+impl Vits2ParameterBreakdown {
+    /// Sum of all implemented components.
+    pub fn total(&self) -> u64 {
+        self.text_encoder + self.generator
     }
 }
 
@@ -297,32 +329,86 @@ impl Vits2Config {
             )));
         }
 
+        // The derived module configurations must be constructible; otherwise a
+        // "valid" VITS2 config would fail only at model build time.
+        self.generator_config().validate()?;
+        self.text_encoder_config().validate()?;
+
         Ok(())
     }
 
-    /// Get total model parameters estimate
-    pub fn estimated_parameters(&self) -> u64 {
-        let text_encoder_params = self.text_encoder_hidden_channels as u64
-            * self.text_encoder_filter_channels as u64
-            * self.text_encoder_n_layers as u64;
-        let posterior_encoder_params =
-            self.posterior_encoder_hidden_channels as u64 * self.posterior_encoder_n_layers as u64;
-        let flow_params = self.flow_hidden_channels as u64
-            * self.flow_n_blocks as u64
-            * self.flow_n_layers as u64;
-        let generator_params =
-            self.generator_hidden_channels as u64 * self.generator_n_layers as u64;
-
-        text_encoder_params + posterior_encoder_params + flow_params + generator_params
+    /// Build the decoder/generator configuration described by this config.
+    pub fn generator_config(&self) -> GeneratorConfig {
+        GeneratorConfig {
+            // The decoder consumes the flow latent, not the mel spectrogram.
+            input_dim: self.flow_hidden_channels,
+            hidden_channels: self.generator_hidden_channels,
+            initial_channel: self.generator_upsample_initial_channel,
+            upsample_rates: self.generator_upsample_rates.clone(),
+            upsample_kernel_sizes: self.generator_upsample_kernel_sizes.clone(),
+            resblock_kernel_sizes: self.generator_resblock_kernel_sizes.clone(),
+            resblock_dilation_sizes: self.generator_resblock_dilation_sizes.clone(),
+            gin_channels: self.gin_channels,
+            use_weight_norm: true,
+            use_spectral_norm: false,
+            activation: "LeakyReLU".to_string(),
+            leaky_relu_slope: 0.1,
+        }
     }
 
-    /// Get memory requirements estimate in MB
+    /// Build the text-encoder configuration described by this config.
+    ///
+    /// `window_size`, `pre_ln`, `use_rope` and `max_seq_len` are inherited from
+    /// [`TextEncoderConfig::default`] because [`Vits2Config`] does not model
+    /// them; every other field comes from this configuration.
+    pub fn text_encoder_config(&self) -> TextEncoderConfig {
+        TextEncoderConfig {
+            vocab_size: self.text_vocab_size,
+            hidden_channels: self.text_encoder_hidden_channels,
+            filter_channels: self.text_encoder_filter_channels,
+            n_heads: self.text_encoder_n_heads,
+            n_layers: self.text_encoder_n_layers,
+            kernel_size: self.text_encoder_kernel_size,
+            p_dropout: self.text_encoder_p_dropout,
+            gin_channels: self.gin_channels,
+            ..TextEncoderConfig::default()
+        }
+    }
+
+    /// Exact parameter counts of the components implemented in this crate.
+    ///
+    /// The counts mirror the layer shapes the real modules allocate, so they
+    /// agree with `Vits2Generator::parameter_count()` and
+    /// `TextEncoder::parameter_count()`.
+    pub fn parameter_breakdown(&self) -> Vits2ParameterBreakdown {
+        Vits2ParameterBreakdown {
+            text_encoder: self.text_encoder_config().parameter_count(),
+            generator: self.generator_config().parameter_count(),
+        }
+    }
+
+    /// Total parameters of the VITS2 components implemented in this crate.
+    ///
+    /// This covers the text encoder and the decoder/generator only. The
+    /// posterior encoder, normalizing flows, duration predictors and the
+    /// discriminators described by this configuration are **not** implemented in
+    /// `voirs-vocoder`, so they contribute nothing here — see
+    /// [`Vits2Config::parameter_breakdown`] for the split rather than reading
+    /// this as a full-model figure.
+    pub fn estimated_parameters(&self) -> u64 {
+        self.parameter_breakdown().total()
+    }
+
+    /// Memory required by the implemented components, in MB.
+    ///
+    /// Parameter memory is exact (4 bytes per f32 parameter); the activation
+    /// term is an estimate for one `segment_size` mel segment and its
+    /// intermediate buffers.
     pub fn estimated_memory_mb(&self) -> f32 {
-        let params = self.estimated_parameters();
-        let param_memory = params as f32 * 4.0 / (1024.0 * 1024.0); // 4 bytes per float32
+        let param_memory = self.estimated_parameters() as f32 * 4.0 / (1024.0 * 1024.0);
         let activation_memory =
             self.segment_size as f32 * self.n_mel as f32 * 4.0 / (1024.0 * 1024.0);
-        param_memory + activation_memory * 2.0 // Factor for intermediate activations
+        param_memory + activation_memory * 2.0
     }
 }
 
@@ -522,7 +608,45 @@ mod tests {
         assert!(memory_mb < 10000.0); // Reasonable upper bound
 
         let params = config.estimated_parameters();
-        assert!(params > 0);
+        // A HiFi-GAN-scale decoder plus a 6-layer transformer encoder is in the
+        // tens of millions of parameters; the old estimate reported ~1e5.
+        assert!(params > 10_000_000, "unrealistically small count: {params}");
+    }
+
+    #[test]
+    fn test_parameter_breakdown_matches_real_modules() {
+        // Use the fast preset so the modules stay cheap to allocate.
+        let config = Vits2Config::fast();
+        let breakdown = config.parameter_breakdown();
+        assert_eq!(breakdown.total(), config.estimated_parameters());
+
+        let generator =
+            generator::Vits2Generator::new(config.generator_config()).expect("generator");
+        assert_eq!(
+            breakdown.generator,
+            generator.parameter_count().expect("generator count")
+        );
+
+        let encoder =
+            text_encoder::TextEncoder::new(config.text_encoder_config()).expect("encoder");
+        assert_eq!(
+            breakdown.text_encoder,
+            encoder.parameter_count().expect("encoder count")
+        );
+    }
+
+    #[test]
+    fn test_derived_sub_configs_are_valid() {
+        for config in [
+            Vits2Config::default(),
+            Vits2Config::high_quality(),
+            Vits2Config::fast(),
+            Vits2Config::multi_speaker(4),
+        ] {
+            assert!(config.validate().is_ok(), "{} invalid", config.model_name);
+            assert!(config.generator_config().validate().is_ok());
+            assert!(config.text_encoder_config().validate().is_ok());
+        }
     }
 
     #[test]

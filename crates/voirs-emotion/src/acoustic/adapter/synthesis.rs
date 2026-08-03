@@ -136,7 +136,16 @@ impl AcousticEmotionAdapter {
         Ok(())
     }
 
-    /// Create enhanced acoustic emotion synthesis
+    /// Create enhanced acoustic emotion synthesis.
+    ///
+    /// # Errors
+    ///
+    /// This adapter has no real `voirs_acoustic::AcousticModel` instance, G2P
+    /// phonemizer, or vocoder wired in - only an emotion-to-acoustic-parameter
+    /// mapping (see [`Self::create_voirs_acoustic_emotion_config`]). Rather
+    /// than fabricate an additive-harmonic tone from `text.len()` and label
+    /// it "emotion-aware synthesis", this fails closed until a real acoustic
+    /// pipeline is connected.
     pub async fn synthesize_with_enhanced_emotion(
         &self,
         text: &str,
@@ -144,96 +153,19 @@ impl AcousticEmotionAdapter {
     ) -> Result<Vec<f32>> {
         info!("Starting enhanced emotion-aware acoustic synthesis");
 
-        // Create voirs-acoustic compatible configuration
-        let acoustic_config = self.create_voirs_acoustic_emotion_config(emotion_params)?;
+        // Real, honest emotion-to-acoustic-parameter mapping (used by a
+        // future real synthesis call); still computed so callers configuring
+        // it are validated even though synthesis itself is not implemented.
+        let _acoustic_config = self.create_voirs_acoustic_emotion_config(emotion_params)?;
+        let _ = text;
 
-        // Use the enhanced configuration for synthesis
-        self.synthesize_with_acoustic_config(text, &acoustic_config)
-            .await
-    }
-
-    /// Synthesize using acoustic configuration
-    async fn synthesize_with_acoustic_config(
-        &self,
-        text: &str,
-        acoustic_config: &VoirsAcousticEmotionConfig,
-    ) -> Result<Vec<f32>> {
-        if !self.integration_config.enable_fallback_processing {
-            return Err(Error::Config(
-                "Acoustic integration disabled and no fallback processing".to_string(),
-            ));
-        }
-
-        // For now, use the enhanced fallback implementation
-        // In the future, this would call the actual voirs-acoustic synthesis API
-        let sample_rate = 16000;
-        let duration_secs = text.len() as f32 / 15.0; // Rough estimate: 15 chars per second
-        let samples = (sample_rate as f32 * duration_secs) as usize;
-
-        // Generate enhanced emotion-aware synthesis
-        self.generate_enhanced_emotion_synthesis(samples, acoustic_config)
-    }
-
-    /// Generate enhanced emotion synthesis with acoustic configuration
-    fn generate_enhanced_emotion_synthesis(
-        &self,
-        sample_count: usize,
-        acoustic_config: &VoirsAcousticEmotionConfig,
-    ) -> Result<Vec<f32>> {
-        let mut audio = vec![0.0; sample_count];
-        let sample_rate = 16000.0;
-
-        // Generate base audio with emotion characteristics
-        for (i, sample) in audio.iter_mut().enumerate() {
-            let t = i as f32 / sample_rate;
-
-            // Base frequency modulated by emotion
-            let base_freq = 220.0 * acoustic_config.pitch_shift;
-
-            // Enhanced energy scaling with acoustic parameters
-            let amplitude = 0.1 * acoustic_config.energy_scale * acoustic_config.energy_boost;
-
-            // Generate harmonic content based on acoustic configuration
-            let mut harmonic_sum = 0.0;
-            let num_harmonics = if acoustic_config.harmonic_richness > 1.2 {
-                8
-            } else {
-                4
-            };
-
-            for h in 1..=num_harmonics {
-                let harmonic_freq = base_freq * h as f32 * acoustic_config.formant_shift;
-                let harmonic_amp =
-                    amplitude / (h as f32).sqrt() * acoustic_config.harmonic_richness;
-
-                // Add enhanced breathiness
-                let noise = if acoustic_config.breathiness > 0.1 {
-                    (scirs2_core::random::random::<f32>() - 0.5) * acoustic_config.breathiness * 0.1
-                } else {
-                    0.0
-                };
-
-                // Apply brightness adjustment
-                let brightness_factor = 1.0 + acoustic_config.brightness * 0.3;
-                let spectral_brightness_factor = 1.0 + acoustic_config.spectral_brightness * 0.2;
-
-                harmonic_sum += harmonic_amp
-                    * brightness_factor
-                    * spectral_brightness_factor
-                    * (2.0 * std::f32::consts::PI * harmonic_freq * t).sin()
-                    + noise;
-            }
-
-            *sample = harmonic_sum;
-        }
-
-        // Apply enhanced temporal effects (from effects module)
-        self.apply_enhanced_temporal_effects(&mut audio, acoustic_config)?;
-
-        // Apply quality preset optimizations (from effects module)
-        self.apply_quality_preset_effects(&mut audio, acoustic_config)?;
-
-        Ok(audio)
+        Err(Error::Config(
+            "Emotion-conditioned acoustic synthesis is not implemented: \
+             AcousticEmotionAdapter has no real voirs_acoustic::AcousticModel instance, G2P \
+             phonemizer, or vocoder to drive text-to-speech synthesis. Refusing to return a \
+             fabricated audio-effects tone in its place."
+                .to_string(),
+        ))
     }
 
     /// Apply emotion parameters to acoustic synthesis config
@@ -337,13 +269,27 @@ impl AcousticEmotionAdapter {
         Ok(())
     }
 
-    /// Create emotion-aware synthesis from text
+    /// Create emotion-aware synthesis from text.
+    ///
+    /// # Errors
+    ///
+    /// Always fails closed: this adapter has no real
+    /// `voirs_acoustic::AcousticModel` instance, G2P phonemizer, or vocoder,
+    /// so it cannot produce real synthesized speech from `text`. It never
+    /// falls back to generating an additive-harmonic tone and presenting
+    /// that as speech, regardless of whether the `acoustic-integration`
+    /// feature is enabled or a base [`voirs_acoustic::config::synthesis::SynthesisConfig`]
+    /// has been set via [`Self::with_base_synthesis_config`].
     pub async fn synthesize_with_emotion(
         &self,
         text: &str,
         emotion_params: &EmotionParameters,
     ) -> Result<Vec<f32>> {
-        // Get base config or use default
+        let _ = text;
+
+        // Get base config or use default - still validated so misconfiguration
+        // is reported precisely (and so the mapping logic below runs), even
+        // though the eventual outcome is always a typed error.
         let base_config = self
             .base_synthesis_config
             .as_ref()
@@ -352,48 +298,17 @@ impl AcousticEmotionAdapter {
             })
             .ok_or_else(|| Error::Config("No valid acoustic configuration set".to_string()))?;
 
-        // Apply emotion to config
+        // Real, honest emotion-to-synthesis-config mapping (used by a future
+        // real synthesis call); still computed so callers are validated.
         let _emotion_config = self.apply_emotion_to_config(emotion_params, base_config)?;
 
-        // Perform synthesis using the voirs-acoustic API
-        #[cfg(feature = "acoustic-integration")]
-        {
-            // When the voirs_acoustic synthesis API stabilises this branch can
-            // delegate to it directly. Until then, the emotion synthesis
-            // fallback produces fully-functional emotion-modulated audio.
-            let sample_rate = 16000;
-            let duration_secs = text.len() as f32 / 15.0; // Rough estimate: 15 chars per second
-            let samples = (sample_rate as f32 * duration_secs) as usize;
-
-            // Generate emotion-aware audio synthesis
-            self.generate_emotion_synthesis(samples, emotion_params)
-        }
-
-        #[cfg(not(feature = "acoustic-integration"))]
-        {
-            // Fallback implementation - generate emotion-modulated audio
-            let sample_rate = 16000;
-            let duration_secs = text.len() as f32 / 15.0; // Rough estimate: 15 chars per second
-            let samples = (sample_rate as f32 * duration_secs) as usize;
-
-            // Generate basic audio with emotion characteristics (from effects module)
-            self.generate_emotion_audio(samples, emotion_params)
-        }
-    }
-
-    /// Generate emotion-aware synthesis (fallback implementation)
-    fn generate_emotion_synthesis(
-        &self,
-        sample_count: usize,
-        emotion_params: &EmotionParameters,
-    ) -> Result<Vec<f32>> {
-        // Generate sophisticated emotion synthesis (from effects module)
-        let mut audio = self.generate_emotion_audio(sample_count, emotion_params)?;
-
-        // Add speech-like characteristics (from effects module)
-        self.add_speech_characteristics(&mut audio, emotion_params)?;
-
-        Ok(audio)
+        Err(Error::Config(
+            "Emotion-conditioned acoustic synthesis is not implemented: \
+             AcousticEmotionAdapter has no real voirs_acoustic::AcousticModel instance, G2P \
+             phonemizer, or vocoder to drive text-to-speech synthesis. Refusing to return a \
+             fabricated audio-effects tone in its place."
+                .to_string(),
+        ))
     }
 
     /// Apply emotion parameters to vocoder configuration (placeholder)

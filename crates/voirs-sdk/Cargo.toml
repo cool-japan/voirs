@@ -96,8 +96,9 @@ num_cpus.workspace = true
 # Cloud Integration dependencies
 oxiarc-deflate = { workspace = true, optional = true }
 oxiarc-zstd = { workspace = true, optional = true }
-sha2 = { workspace = true, optional = true }
-hex = { workspace = true, optional = true }
+# SHA-256 model-integrity verification (pipeline/init.rs) - always available
+sha2.workspace = true
+hex.workspace = true
 aes-gcm = { workspace = true, optional = true }
 oxicode = { workspace = true, optional = true }
 
@@ -133,7 +134,7 @@ gpu = ["oxionnx?/gpu", "voirs-acoustic/gpu", "voirs-vocoder/gpu", "voirs-g2p/gpu
 onnx = ["dep:oxionnx", "voirs-acoustic/onnx", "voirs-vocoder/onnx", "voirs-g2p/onnx", "voirs-cloning?/onnx", "voirs-conversion?/onnx", "voirs-emotion?/onnx", "voirs-spatial?/onnx"]
 wasm = ["wasm-bindgen", "wasm-bindgen-futures", "web-sys", "js-sys", "console_error_panic_hook", "wasm-logger"]
 http = ["axum", "tower", "tower-http"]
-cloud = ["oxiarc-deflate", "oxiarc-zstd", "sha2", "hex", "aes-gcm", "oxicode"]
+cloud = ["oxiarc-deflate", "oxiarc-zstd", "aes-gcm", "oxicode"]
 plugins = ["libloading", "wasmtime"]
 
 # Advanced voice features

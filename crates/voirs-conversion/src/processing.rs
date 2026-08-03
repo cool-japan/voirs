@@ -943,7 +943,11 @@ impl FeatureExtractor {
     /// reads as unvoiced rather than as a phantom low pitch. A `sample_rate /
     /// 100` (~10 ms) hop preserves the contour's time resolution through
     /// overlapping frames.
-    fn estimate_f0_contour(&self, audio: &[f32]) -> Result<Vec<f32>> {
+    ///
+    /// `pub(crate)` so other modules (e.g. `crate::acoustic::types`) can
+    /// reuse this real autocorrelation-based estimator instead of
+    /// hardcoding a constant F0.
+    pub(crate) fn estimate_f0_contour(&self, audio: &[f32]) -> Result<Vec<f32>> {
         let window = (self.sample_rate as usize / 20).max(2); // ~50 ms
         let hop = (self.sample_rate as usize / 100).max(1); // ~10 ms
         let mut f0_values = Vec::new();

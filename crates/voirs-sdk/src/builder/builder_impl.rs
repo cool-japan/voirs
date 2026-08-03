@@ -3,7 +3,11 @@
 //! This module provides a modular builder architecture with:
 //! - Fluent API for method chaining
 //! - Comprehensive validation
-//! - Async initialization with parallel component loading
+//! - Async initialization backed by the real component initializer
+//!
+//! This is the single [`VoirsPipelineBuilder`] type of the SDK. It is re-exported
+//! at the crate root, from [`crate::builder`], from [`crate::pipeline`] and from
+//! [`crate::prelude`], so every import path resolves to the same real builder.
 
 use crate::{
     config::PipelineConfig,
@@ -39,8 +43,31 @@ pub struct VoirsPipelineBuilder {
     /// Auto-download missing models
     pub(crate) auto_download: bool,
 
-    /// Test mode - skip expensive operations
+    /// Test mode - use in-process stub components instead of real model weights.
+    ///
+    /// This must be opted into explicitly via
+    /// [`with_test_mode`](Self::with_test_mode); it is never enabled implicitly.
     pub(crate) test_mode: bool,
+
+    /// Emotion controller configuration supplied by the caller
+    #[cfg(feature = "emotion")]
+    pub(crate) emotion_config: Option<crate::emotion::EmotionControllerBuilder>,
+
+    /// Voice cloner configuration supplied by the caller
+    #[cfg(feature = "cloning")]
+    pub(crate) cloning_config: Option<crate::cloning::VoiceClonerBuilder>,
+
+    /// Voice converter configuration supplied by the caller
+    #[cfg(feature = "conversion")]
+    pub(crate) conversion_config: Option<crate::conversion::VoiceConverterBuilder>,
+
+    /// Singing controller configuration supplied by the caller
+    #[cfg(feature = "singing")]
+    pub(crate) singing_config: Option<crate::singing::SingingControllerBuilder>,
+
+    /// Spatial audio controller configuration supplied by the caller
+    #[cfg(feature = "spatial")]
+    pub(crate) spatial_config: Option<crate::spatial::SpatialAudioControllerBuilder>,
 }
 
 impl VoirsPipelineBuilder {
@@ -55,26 +82,87 @@ impl VoirsPipelineBuilder {
             voice_manager: None,
             validation_enabled: true,
             auto_download: true,
-            test_mode: cfg!(test), // Automatically enable test mode when running tests
+            // Never implicitly enabled: stub components must be opted into.
+            test_mode: false,
+
+            #[cfg(feature = "emotion")]
+            emotion_config: None,
+            #[cfg(feature = "cloning")]
+            cloning_config: None,
+            #[cfg(feature = "conversion")]
+            conversion_config: None,
+            #[cfg(feature = "singing")]
+            singing_config: None,
+            #[cfg(feature = "spatial")]
+            spatial_config: None,
         }
     }
 
     /// Get configuration (internal helper)
-    #[allow(dead_code)] // Internal method for debugging/future use
     pub(crate) fn get_config(&self) -> PipelineConfig {
         self.config.clone()
     }
 
     /// Get voice ID (internal helper)
-    #[allow(dead_code)] // Internal method for debugging/future use
     pub(crate) fn get_voice_id(&self) -> Option<String> {
         self.voice_id.clone()
     }
 
     /// Get test mode (internal helper)
-    #[allow(dead_code)] // Internal method for debugging/future use
     pub(crate) fn get_test_mode(&self) -> bool {
         self.test_mode
+    }
+
+    /// Get the custom G2P override, if any (internal helper)
+    pub(crate) fn get_custom_g2p(&self) -> Option<Arc<dyn G2p>> {
+        self.custom_g2p.clone()
+    }
+
+    /// Get the custom acoustic model override, if any (internal helper)
+    pub(crate) fn get_custom_acoustic(&self) -> Option<Arc<dyn AcousticModel>> {
+        self.custom_acoustic.clone()
+    }
+
+    /// Get the custom vocoder override, if any (internal helper)
+    pub(crate) fn get_custom_vocoder(&self) -> Option<Arc<dyn Vocoder>> {
+        self.custom_vocoder.clone()
+    }
+
+    /// Get the voice manager override, if any (internal helper)
+    pub(crate) fn get_voice_manager(&self) -> Option<Arc<RwLock<DefaultVoiceManager>>> {
+        self.voice_manager.clone()
+    }
+
+    /// Get emotion configuration (internal helper)
+    #[cfg(feature = "emotion")]
+    pub(crate) fn get_emotion_config(&self) -> Option<crate::emotion::EmotionControllerBuilder> {
+        self.emotion_config.clone()
+    }
+
+    /// Get cloning configuration (internal helper)
+    #[cfg(feature = "cloning")]
+    pub(crate) fn get_cloning_config(&self) -> Option<crate::cloning::VoiceClonerBuilder> {
+        self.cloning_config.clone()
+    }
+
+    /// Get conversion configuration (internal helper)
+    #[cfg(feature = "conversion")]
+    pub(crate) fn get_conversion_config(&self) -> Option<crate::conversion::VoiceConverterBuilder> {
+        self.conversion_config.clone()
+    }
+
+    /// Get singing configuration (internal helper)
+    #[cfg(feature = "singing")]
+    pub(crate) fn get_singing_config(&self) -> Option<crate::singing::SingingControllerBuilder> {
+        self.singing_config.clone()
+    }
+
+    /// Get spatial configuration (internal helper)
+    #[cfg(feature = "spatial")]
+    pub(crate) fn get_spatial_config(
+        &self,
+    ) -> Option<crate::spatial::SpatialAudioControllerBuilder> {
+        self.spatial_config.clone()
     }
 }
 

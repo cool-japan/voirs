@@ -23,21 +23,41 @@ impl VoirsPipelineBuilder {
     // =============================================================================
 
     /// Enable emotion control with default settings
+    ///
+    /// Alias for [`with_emotion_enabled`](Self::with_emotion_enabled); it also
+    /// installs a default-configured controller so the feature is actually usable
+    /// on the built pipeline.
     #[cfg(feature = "emotion")]
-    pub fn with_emotion_control_enabled(mut self, enabled: bool) -> Self {
-        self.config.default_synthesis.enable_emotion = enabled;
-        self
+    pub fn with_emotion_control_enabled(self, enabled: bool) -> Self {
+        self.with_emotion_enabled(enabled)
     }
 
-    /// Configure emotion control with custom builder
+    /// Configure emotion control with a fully-configured controller builder.
+    ///
+    /// The supplied builder is stored and used verbatim when the pipeline is
+    /// built, so the resulting [`crate::emotion::EmotionController`] carries the
+    /// caller's configuration.
     #[cfg(feature = "emotion")]
     pub fn with_emotion_control(
         mut self,
         builder: crate::emotion::EmotionControllerBuilder,
     ) -> Self {
         self.config.default_synthesis.enable_emotion = true;
-        // Store the builder for later use during pipeline initialization
-        // For now, we'll use the configuration system to pass parameters
+        self.emotion_config = Some(builder);
+        self
+    }
+
+    /// Enable emotion control with the default controller configuration.
+    ///
+    /// Passing `false` removes any previously configured emotion controller.
+    #[cfg(feature = "emotion")]
+    pub fn with_emotion_enabled(mut self, enabled: bool) -> Self {
+        self.config.default_synthesis.enable_emotion = enabled;
+        self.emotion_config = if enabled {
+            Some(crate::emotion::EmotionControllerBuilder::new().enabled(true))
+        } else {
+            None
+        };
         self
     }
 
@@ -76,17 +96,36 @@ impl VoirsPipelineBuilder {
     // =============================================================================
 
     /// Enable voice cloning with default settings
+    ///
+    /// Alias for [`with_cloning_enabled`](Self::with_cloning_enabled); it also
+    /// installs a default-configured cloner so the feature is actually usable on
+    /// the built pipeline.
     #[cfg(feature = "cloning")]
-    pub fn with_voice_cloning_enabled(mut self, enabled: bool) -> Self {
-        self.config.default_synthesis.enable_cloning = enabled;
-        self
+    pub fn with_voice_cloning_enabled(self, enabled: bool) -> Self {
+        self.with_cloning_enabled(enabled)
     }
 
-    /// Configure voice cloning with custom builder
+    /// Configure voice cloning with a fully-configured cloner builder.
+    ///
+    /// The supplied builder is stored and used verbatim when the pipeline is built.
     #[cfg(feature = "cloning")]
     pub fn with_voice_cloning(mut self, builder: crate::cloning::VoiceClonerBuilder) -> Self {
         self.config.default_synthesis.enable_cloning = true;
-        // Store the builder configuration for later use
+        self.cloning_config = Some(builder);
+        self
+    }
+
+    /// Enable voice cloning with the default cloner configuration.
+    ///
+    /// Passing `false` removes any previously configured voice cloner.
+    #[cfg(feature = "cloning")]
+    pub fn with_cloning_enabled(mut self, enabled: bool) -> Self {
+        self.config.default_synthesis.enable_cloning = enabled;
+        self.cloning_config = if enabled {
+            Some(crate::cloning::VoiceClonerBuilder::new().enabled(true))
+        } else {
+            None
+        };
         self
     }
 
@@ -117,20 +156,39 @@ impl VoirsPipelineBuilder {
     // =============================================================================
 
     /// Enable voice conversion with default settings
+    ///
+    /// Alias for [`with_conversion_enabled`](Self::with_conversion_enabled); it
+    /// also installs a default-configured converter so the feature is actually
+    /// usable on the built pipeline.
     #[cfg(feature = "conversion")]
-    pub fn with_voice_conversion_enabled(mut self, enabled: bool) -> Self {
-        self.config.default_synthesis.enable_conversion = enabled;
-        self
+    pub fn with_voice_conversion_enabled(self, enabled: bool) -> Self {
+        self.with_conversion_enabled(enabled)
     }
 
-    /// Configure voice conversion with custom builder
+    /// Configure voice conversion with a fully-configured converter builder.
+    ///
+    /// The supplied builder is stored and used verbatim when the pipeline is built.
     #[cfg(feature = "conversion")]
     pub fn with_voice_conversion(
         mut self,
         builder: crate::conversion::VoiceConverterBuilder,
     ) -> Self {
         self.config.default_synthesis.enable_conversion = true;
-        // Store the builder configuration for later use
+        self.conversion_config = Some(builder);
+        self
+    }
+
+    /// Enable voice conversion with the default converter configuration.
+    ///
+    /// Passing `false` removes any previously configured voice converter.
+    #[cfg(feature = "conversion")]
+    pub fn with_conversion_enabled(mut self, enabled: bool) -> Self {
+        self.config.default_synthesis.enable_conversion = enabled;
+        self.conversion_config = if enabled {
+            Some(crate::conversion::VoiceConverterBuilder::new().enabled(true))
+        } else {
+            None
+        };
         self
     }
 
@@ -166,20 +224,39 @@ impl VoirsPipelineBuilder {
     // =============================================================================
 
     /// Enable singing synthesis with default settings
+    ///
+    /// Alias for [`with_singing_enabled`](Self::with_singing_enabled); it also
+    /// installs a default-configured controller so the feature is actually usable
+    /// on the built pipeline.
     #[cfg(feature = "singing")]
-    pub fn with_singing_synthesis_enabled(mut self, enabled: bool) -> Self {
-        self.config.default_synthesis.enable_singing = enabled;
-        self
+    pub fn with_singing_synthesis_enabled(self, enabled: bool) -> Self {
+        self.with_singing_enabled(enabled)
     }
 
-    /// Configure singing synthesis with custom builder
+    /// Configure singing synthesis with a fully-configured controller builder.
+    ///
+    /// The supplied builder is stored and used verbatim when the pipeline is built.
     #[cfg(feature = "singing")]
     pub fn with_singing_synthesis(
         mut self,
         builder: crate::singing::SingingControllerBuilder,
     ) -> Self {
         self.config.default_synthesis.enable_singing = true;
-        // Store the builder configuration for later use
+        self.singing_config = Some(builder);
+        self
+    }
+
+    /// Enable singing synthesis with the default controller configuration.
+    ///
+    /// Passing `false` removes any previously configured singing controller.
+    #[cfg(feature = "singing")]
+    pub fn with_singing_enabled(mut self, enabled: bool) -> Self {
+        self.config.default_synthesis.enable_singing = enabled;
+        self.singing_config = if enabled {
+            Some(crate::singing::SingingControllerBuilder::new().enabled(true))
+        } else {
+            None
+        };
         self
     }
 
@@ -227,20 +304,39 @@ impl VoirsPipelineBuilder {
     // =============================================================================
 
     /// Enable 3D spatial audio with default settings
+    ///
+    /// Alias for [`with_spatial_enabled`](Self::with_spatial_enabled); it also
+    /// installs a default-configured controller so the feature is actually usable
+    /// on the built pipeline.
     #[cfg(feature = "spatial")]
-    pub fn with_spatial_audio_enabled(mut self, enabled: bool) -> Self {
-        self.config.default_synthesis.enable_spatial = enabled;
-        self
+    pub fn with_spatial_audio_enabled(self, enabled: bool) -> Self {
+        self.with_spatial_enabled(enabled)
     }
 
-    /// Configure 3D spatial audio with custom builder
+    /// Configure 3D spatial audio with a fully-configured controller builder.
+    ///
+    /// The supplied builder is stored and used verbatim when the pipeline is built.
     #[cfg(feature = "spatial")]
     pub fn with_spatial_audio(
         mut self,
         builder: crate::spatial::SpatialAudioControllerBuilder,
     ) -> Self {
         self.config.default_synthesis.enable_spatial = true;
-        // Store the builder configuration for later use
+        self.spatial_config = Some(builder);
+        self
+    }
+
+    /// Enable 3D spatial audio with the default controller configuration.
+    ///
+    /// Passing `false` removes any previously configured spatial controller.
+    #[cfg(feature = "spatial")]
+    pub fn with_spatial_enabled(mut self, enabled: bool) -> Self {
+        self.config.default_synthesis.enable_spatial = enabled;
+        self.spatial_config = if enabled {
+            Some(crate::spatial::SpatialAudioControllerBuilder::new().enabled(true))
+        } else {
+            None
+        };
         self
     }
 
