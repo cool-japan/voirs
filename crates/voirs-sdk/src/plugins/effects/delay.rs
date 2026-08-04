@@ -44,10 +44,7 @@ impl DelayEffect {
 
     fn initialize_buffer(&self, sample_rate: u32) {
         let max_delay_samples = (sample_rate as f32 * 2.0) as usize; // 2 seconds max delay
-        let mut buffer = self
-            .delay_buffer
-            .write()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut buffer = self.delay_buffer.write().unwrap_or_else(|e| e.into_inner());
         if buffer.len() != max_delay_samples {
             *buffer = vec![0.0; max_delay_samples];
             *self
@@ -100,10 +97,7 @@ impl AudioEffect for DelayEffect {
 
         let mut processed = audio.clone();
         let samples = processed.samples_mut();
-        let mut buffer = self
-            .delay_buffer
-            .write()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut buffer = self.delay_buffer.write().unwrap_or_else(|e| e.into_inner());
         let mut pos = *self
             .buffer_position
             .read()
@@ -174,8 +168,7 @@ impl AudioEffect for DelayEffect {
             }
             "feedback" => {
                 if let Some(v) = value.as_f32() {
-                    *self.feedback.write().unwrap_or_else(|e| e.into_inner()) =
-                        v.clamp(0.0, 0.95);
+                    *self.feedback.write().unwrap_or_else(|e| e.into_inner()) = v.clamp(0.0, 0.95);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(

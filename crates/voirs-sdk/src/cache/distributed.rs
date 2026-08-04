@@ -729,16 +729,22 @@ mod tests {
         // Direct regression test for the fabrication bug: the old
         // implementation returned a hardcoded `1` for every key, even ones
         // that were never synced anywhere.
-        let coordinator =
-            DistributedCacheCoordinator::new(2, ConsistencyLevel::Eventual, Duration::from_secs(30));
+        let coordinator = DistributedCacheCoordinator::new(
+            2,
+            ConsistencyLevel::Eventual,
+            Duration::from_secs(30),
+        );
         let count = tokio_test_block_on(coordinator.count_existing_replicas("never_synced_key"));
         assert_eq!(count, 0);
     }
 
     #[tokio::test]
     async fn test_sync_entry_with_no_peers_succeeds_and_records_real_local_placement() {
-        let coordinator =
-            DistributedCacheCoordinator::new(2, ConsistencyLevel::Eventual, Duration::from_secs(30));
+        let coordinator = DistributedCacheCoordinator::new(
+            2,
+            ConsistencyLevel::Eventual,
+            Duration::from_secs(30),
+        );
 
         // No nodes registered - nothing to replicate to, so this is honestly Ok.
         let entry = test_entry("solo_key");
@@ -777,7 +783,10 @@ mod tests {
 
         // Local bookkeeping is still honestly updated even though remote
         // replication could not happen.
-        assert_eq!(coordinator.count_existing_replicas("multi_node_key").await, 1);
+        assert_eq!(
+            coordinator.count_existing_replicas("multi_node_key").await,
+            1
+        );
     }
 
     #[tokio::test]
@@ -786,8 +795,11 @@ mod tests {
         // implementation always returned the same 3 hardcoded fake keys
         // ("user_session_123", "model_weights_abc", "audio_cache_456")
         // regardless of what had actually been synced.
-        let coordinator =
-            DistributedCacheCoordinator::new(2, ConsistencyLevel::Eventual, Duration::from_secs(30));
+        let coordinator = DistributedCacheCoordinator::new(
+            2,
+            ConsistencyLevel::Eventual,
+            Duration::from_secs(30),
+        );
 
         let empty = coordinator
             .get_entries_requiring_redistribution("some_removed_node")
@@ -801,8 +813,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_redistribution_task_prunes_source_and_fails_closed() {
-        let coordinator =
-            DistributedCacheCoordinator::new(2, ConsistencyLevel::Eventual, Duration::from_secs(30));
+        let coordinator = DistributedCacheCoordinator::new(
+            2,
+            ConsistencyLevel::Eventual,
+            Duration::from_secs(30),
+        );
 
         // Seed local bookkeeping as if this coordinator's own node held the key
         // (the only way `entry_locations` is ever populated without a transport).

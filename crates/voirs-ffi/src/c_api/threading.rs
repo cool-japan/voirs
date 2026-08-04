@@ -247,9 +247,9 @@ pub unsafe extern "C" fn voirs_synthesize_async(
     };
 
     // Get pipeline
-    #[cfg(test)]
+    #[cfg(feature = "ffi-test-mocks")]
     {
-        // In test mode, validate pipeline ID using the test tracking system
+        // Mock mode: validate pipeline ID using the test tracking system
         use crate::c_api::core::{CREATED_PIPELINES, DESTROYED_PIPELINES};
 
         let created = match CREATED_PIPELINES.lock() {
@@ -277,7 +277,7 @@ pub unsafe extern "C" fn voirs_synthesize_async(
             return VoirsErrorCode::InvalidParameter;
         }
 
-        // In test mode, simulate successful async synthesis start
+        // Mock mode: simulate successful async synthesis start
         let token = CancellationToken::new(pipeline_id);
         let operation_id = token.operation_id;
 
@@ -305,7 +305,7 @@ pub unsafe extern "C" fn voirs_synthesize_async(
         VoirsErrorCode::Success
     }
 
-    #[cfg(not(test))]
+    #[cfg(not(feature = "ffi-test-mocks"))]
     {
         let manager = get_pipeline_manager();
         let pipeline = {
@@ -313,7 +313,9 @@ pub unsafe extern "C" fn voirs_synthesize_async(
             match mgr.get_pipeline(pipeline_id) {
                 Some(p) => p,
                 None => {
-                    set_last_error("Invalid pipeline ID".to_string());
+                    let is_placeholder = mgr.is_placeholder(pipeline_id);
+                    drop(mgr);
+                    set_last_error(crate::invalid_pipeline_message(pipeline_id, is_placeholder));
                     return VoirsErrorCode::InvalidParameter;
                 }
             }
@@ -505,7 +507,7 @@ pub unsafe extern "C" fn voirs_synthesize_async(
         });
 
         VoirsErrorCode::Success
-    } // End of #[cfg(not(test))]
+    } // End of #[cfg(not(feature = "ffi-test-mocks"))]
 }
 
 /// Cancel an ongoing asynchronous synthesis operation
@@ -615,6 +617,12 @@ pub unsafe extern "C" fn voirs_synthesize_parallel(
                     Some(p) => p,
                     None => {
                         // Handle invalid pipeline ID synchronously
+                        let is_placeholder = mgr.is_placeholder(pipeline_id);
+                        drop(mgr);
+                        set_last_error(crate::invalid_pipeline_message(
+                            pipeline_id,
+                            is_placeholder,
+                        ));
                         result_slice[i] = VoirsErrorCode::InvalidParameter;
                         buffer_slice[i] = ptr::null_mut();
                         continue;
@@ -866,6 +874,10 @@ mod tests {
         }
     }
 
+    // Depends on the mock pipeline bookkeeping in c_api::core (instant,
+    // network-free `voirs_create_pipeline()` + `voirs_synthesize_async()`
+    // success), gated behind the (off-by-default) `ffi-test-mocks` feature.
+    #[cfg(feature = "ffi-test-mocks")]
     #[test]
     fn test_operation_cancellation() {
         use crate::c_api::core::voirs_create_pipeline;

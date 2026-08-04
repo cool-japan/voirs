@@ -3,7 +3,7 @@
 //! This module provides functions for converting between different audio formats,
 //! sample rates, and data types to ensure compatibility across language boundaries.
 
-use crate::{VoirsAudioBuffer, VoirsErrorCode};
+use crate::{set_last_error, VoirsAudioBuffer, VoirsErrorCode};
 use std::os::raw::{c_double, c_float, c_uint};
 
 /// Sample format for audio conversion
@@ -610,14 +610,52 @@ pub unsafe extern "C" fn voirs_convert_sample_rate(
     VoirsErrorCode::Success
 }
 
+/// Allocate an all-zero `*mut c_float` buffer of `len` samples using the same
+/// `Vec<f32> -> into_boxed_slice() -> forget` allocation contract as
+/// `VoirsAudioBuffer::from_audio_buffer`/`free()`, so a pointer produced here
+/// can later be stored into `VoirsAudioBuffer.samples` and freed by
+/// `VoirsAudioBuffer::free()` without a layout mismatch. Unlike a raw
+/// `std::alloc::alloc` + `Layout::from_size_align(..).expect(..)`, this can
+/// never require an `.expect()` in a production code path: `Vec`'s allocator
+/// aborts the process on OOM rather than needing an unwrap-style call here.
+fn alloc_f32_buffer(len: usize) -> *mut c_float {
+    let mut boxed = vec![0.0f32; len].into_boxed_slice();
+    let ptr = boxed.as_mut_ptr();
+    std::mem::forget(boxed);
+    ptr
+}
+
+/// Free a buffer previously returned by [`alloc_f32_buffer`] that was never
+/// installed into a `VoirsAudioBuffer` (e.g. because a conversion step that
+/// would have used it failed). `len` must be the same length passed to
+/// `alloc_f32_buffer`.
+///
+/// # Safety
+/// `ptr` must have come from `alloc_f32_buffer(len)` and not have been freed
+/// already.
+unsafe fn free_f32_buffer(ptr: *mut c_float, len: usize) {
+    drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len)));
+}
+
 /// Convert audio buffer format in-place
+///
+/// Only [`VoirsSampleFormat::Float32`] is supported: [`VoirsAudioBuffer`] is a
+/// `#[repr(C)]` struct whose `samples` field is always `*mut c_float` -- every
+/// other function in this crate (`from_audio_buffer`, `to_audio_buffer`,
+/// `free`, the whole `voirs_convert_float_to_*` family, ...) relies on that.
+/// Repurposing the same storage to hold `Int16`/`Int24`/`UInt8`/... bit
+/// patterns would silently corrupt every other consumer of the buffer, so a
+/// `target_format` other than `Float32` is honestly rejected instead of
+/// being silently ignored. To convert into another sample format, convert the
+/// samples into a *separate* buffer with the appropriate `voirs_convert_float_to_*`
+/// function instead.
 ///
 /// # Safety
 /// The `buffer` pointer must be valid and point to a properly initialized VoirsAudioBuffer.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_audio_convert_format(
     buffer: *mut VoirsAudioBuffer,
-    _target_format: VoirsSampleFormat,
+    target_format: VoirsSampleFormat,
     target_channels: c_uint,
     target_sample_rate: c_uint,
 ) -> VoirsErrorCode {
@@ -625,10 +663,21 @@ pub unsafe extern "C" fn voirs_audio_convert_format(
         return VoirsErrorCode::InvalidParameter;
     }
 
-    let audio_buffer = &mut *buffer;
+    // Checked first, before any buffer mutation: a rejected call must leave
+    // the buffer completely untouched rather than partially converting the
+    // sample rate/channels and only then discovering the format is
+    // unsupported.
+    if target_format != VoirsSampleFormat::Float32 {
+        set_last_error(format!(
+            "voirs_audio_convert_format only supports VoirsSampleFormat::Float32 \
+             (VoirsAudioBuffer.samples is a fixed *mut f32 array); requested {target_format:?}. \
+             Convert samples into a separate buffer with the voirs_convert_float_to_* \
+             family instead."
+        ));
+        return VoirsErrorCode::InvalidParameter;
+    }
 
-    // Enhanced format support for all VoirsSampleFormat types
-    // Convert to target format if different from Float32
+    let audio_buffer = &mut *buffer;
 
     // Convert sample rate if needed
     if target_sample_rate != audio_buffer.sample_rate {
@@ -640,13 +689,7 @@ pub unsafe extern "C" fn voirs_audio_convert_format(
             as usize
             * audio_buffer.channels as usize;
 
-        let temp_buffer = std::alloc::alloc(
-            std::alloc::Layout::from_size_align(
-                max_output_samples * std::mem::size_of::<f32>(),
-                std::mem::align_of::<f32>(),
-            )
-            .expect("f32 layout is valid"),
-        ) as *mut c_float;
+        let temp_buffer = alloc_f32_buffer(max_output_samples);
 
         let result = voirs_convert_sample_rate(
             audio_buffer.samples,
@@ -659,14 +702,7 @@ pub unsafe extern "C" fn voirs_audio_convert_format(
         );
 
         if result != VoirsErrorCode::Success {
-            std::alloc::dealloc(
-                temp_buffer as *mut u8,
-                std::alloc::Layout::from_size_align(
-                    max_output_samples * std::mem::size_of::<f32>(),
-                    std::mem::align_of::<f32>(),
-                )
-                .expect("f32 layout is valid"),
-            );
+            free_f32_buffer(temp_buffer, max_output_samples);
             return result;
         }
 
@@ -682,13 +718,7 @@ pub unsafe extern "C" fn voirs_audio_convert_format(
         if audio_buffer.channels == 1 && target_channels == 2 {
             // Mono to stereo
             let new_length = audio_buffer.length * 2;
-            let temp_buffer = std::alloc::alloc(
-                std::alloc::Layout::from_size_align(
-                    new_length as usize * std::mem::size_of::<f32>(),
-                    std::mem::align_of::<f32>(),
-                )
-                .expect("f32 layout is valid"),
-            ) as *mut c_float;
+            let temp_buffer = alloc_f32_buffer(new_length as usize);
 
             let result = voirs_convert_mono_to_stereo(
                 audio_buffer.samples,
@@ -697,14 +727,7 @@ pub unsafe extern "C" fn voirs_audio_convert_format(
             );
 
             if result != VoirsErrorCode::Success {
-                std::alloc::dealloc(
-                    temp_buffer as *mut u8,
-                    std::alloc::Layout::from_size_align(
-                        new_length as usize * std::mem::size_of::<f32>(),
-                        std::mem::align_of::<f32>(),
-                    )
-                    .expect("f32 layout is valid"),
-                );
+                free_f32_buffer(temp_buffer, new_length as usize);
                 return result;
             }
 
@@ -715,13 +738,7 @@ pub unsafe extern "C" fn voirs_audio_convert_format(
         } else if audio_buffer.channels == 2 && target_channels == 1 {
             // Stereo to mono
             let new_length = audio_buffer.length / 2;
-            let temp_buffer = std::alloc::alloc(
-                std::alloc::Layout::from_size_align(
-                    new_length as usize * std::mem::size_of::<f32>(),
-                    std::mem::align_of::<f32>(),
-                )
-                .expect("f32 layout is valid"),
-            ) as *mut c_float;
+            let temp_buffer = alloc_f32_buffer(new_length as usize);
 
             let result = voirs_convert_stereo_to_mono(
                 audio_buffer.samples,
@@ -730,14 +747,7 @@ pub unsafe extern "C" fn voirs_audio_convert_format(
             );
 
             if result != VoirsErrorCode::Success {
-                std::alloc::dealloc(
-                    temp_buffer as *mut u8,
-                    std::alloc::Layout::from_size_align(
-                        new_length as usize * std::mem::size_of::<f32>(),
-                        std::mem::align_of::<f32>(),
-                    )
-                    .expect("f32 layout is valid"),
-                );
+                free_f32_buffer(temp_buffer, new_length as usize);
                 return result;
             }
 
@@ -1051,6 +1061,97 @@ mod tests {
             assert!((output[2] - (-0.5)).abs() < 0.001);
             assert!((output[3] - 1.0).abs() < 0.001);
             assert!((output[4] - (-1.0)).abs() < 0.001);
+        }
+    }
+
+    /// Build a `VoirsAudioBuffer` using the exact same allocation contract as
+    /// `VoirsAudioBuffer::from_audio_buffer` (`Vec -> into_boxed_slice ->
+    /// forget`), so it can be safely passed to `voirs_audio_convert_format`
+    /// and later freed via `.free()`.
+    fn make_test_buffer(samples: &[f32], sample_rate: u32, channels: u32) -> VoirsAudioBuffer {
+        VoirsAudioBuffer::from_audio_buffer(voirs_sdk::audio::AudioBuffer::new(
+            samples.to_vec(),
+            sample_rate,
+            channels,
+        ))
+    }
+
+    #[test]
+    fn test_convert_format_rejects_non_float32_and_leaves_buffer_unchanged() {
+        let mut buffer = make_test_buffer(&[0.1, 0.2, 0.3, 0.4], 44100, 1);
+        let original_ptr = buffer.samples;
+        let original_length = buffer.length;
+        let original_sample_rate = buffer.sample_rate;
+        let original_channels = buffer.channels;
+
+        let non_float32_formats = [
+            VoirsSampleFormat::Int16,
+            VoirsSampleFormat::Int24,
+            VoirsSampleFormat::Int32,
+            VoirsSampleFormat::Float64,
+            VoirsSampleFormat::UInt8,
+            VoirsSampleFormat::UInt16,
+            VoirsSampleFormat::UInt32,
+        ];
+
+        for format in non_float32_formats {
+            let result = unsafe { voirs_audio_convert_format(&mut buffer, format, 1, 44100) };
+            assert_eq!(
+                result,
+                VoirsErrorCode::InvalidParameter,
+                "non-Float32 target {format:?} must be honestly rejected, not silently ignored"
+            );
+
+            // A rejected call must be a true no-op: same allocation, same
+            // metadata -- not a partially-applied sample-rate/channel
+            // conversion that then discovers the format is unsupported.
+            assert_eq!(buffer.samples, original_ptr);
+            assert_eq!(buffer.length, original_length);
+            assert_eq!(buffer.sample_rate, original_sample_rate);
+            assert_eq!(buffer.channels, original_channels);
+        }
+
+        unsafe {
+            buffer.free();
+        }
+    }
+
+    #[test]
+    fn test_convert_format_float32_actually_resamples() {
+        // 4 samples at 22050 Hz mono.
+        let mut buffer = make_test_buffer(&[1.0, 2.0, 3.0, 4.0], 22050, 1);
+
+        let result =
+            unsafe { voirs_audio_convert_format(&mut buffer, VoirsSampleFormat::Float32, 1, 44100) };
+        assert_eq!(result, VoirsErrorCode::Success);
+
+        // Real resampling must actually change sample_rate and length --
+        // proving the Float32 path still performs the real conversion (only
+        // non-Float32 targets are rejected).
+        assert_eq!(buffer.sample_rate, 44100);
+        assert_eq!(buffer.length, 8, "doubling the rate should double the sample count");
+
+        unsafe {
+            buffer.free();
+        }
+    }
+
+    #[test]
+    fn test_convert_format_float32_actually_rechannels() {
+        let mut buffer = make_test_buffer(&[0.5, -0.5, 1.0], 44100, 1);
+
+        let result =
+            unsafe { voirs_audio_convert_format(&mut buffer, VoirsSampleFormat::Float32, 2, 44100) };
+        assert_eq!(result, VoirsErrorCode::Success);
+
+        assert_eq!(buffer.channels, 2);
+        assert_eq!(buffer.length, 6);
+
+        unsafe {
+            let samples = std::slice::from_raw_parts(buffer.samples, buffer.length as usize);
+            // Mono-to-stereo duplicates each sample across both channels.
+            assert_eq!(samples, &[0.5, 0.5, -0.5, -0.5, 1.0, 1.0]);
+            buffer.free();
         }
     }
 }

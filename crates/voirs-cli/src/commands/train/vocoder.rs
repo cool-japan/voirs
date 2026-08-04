@@ -264,6 +264,20 @@ async fn train_diffwave(args: VocoderTrainingArgs, global: &GlobalOptions) -> Re
     let mut current_lr = args.lr;
     let mut patience_counter = 0;
 
+    // Tracks genuine training-step failures across the whole run (never reset
+    // between epochs). Crossing the threshold aborts the run with a real error
+    // instead of silently continuing on fabricated data.
+    let mut error_count: usize = 0;
+    // Last real (non-fabricated) batch loss, used only to keep the live progress
+    // display continuous across a transient failure; never fed into any
+    // aggregate/reported statistic.
+    let mut last_known_batch_loss: Option<f64> = None;
+    // Real per-epoch statistics from the most recently completed epoch, used for
+    // the final summary and checkpoint instead of hardcoded literals.
+    let mut last_completed_epoch: Option<usize> = None;
+    let mut last_avg_epoch_loss: f64 = 0.0;
+    let mut last_val_loss: Option<f64> = None;
+
     // Calculate total warmup steps (if warmup_steps > 0, treat as absolute steps)
     let warmup_steps = args.training_config.warmup_steps;
 
@@ -273,6 +287,7 @@ async fn train_diffwave(args: VocoderTrainingArgs, global: &GlobalOptions) -> Re
 
         let epoch_start = Instant::now();
         let mut epoch_loss = 0.0;
+        let mut successful_batches: u64 = 0;
 
         // Reset data loader for new epoch
         data_loader.reset();
@@ -308,19 +323,35 @@ async fn train_diffwave(args: VocoderTrainingArgs, global: &GlobalOptions) -> Re
                     if epoch == 0 && batch_idx == 0 && !global.quiet {
                         println!("   ✅ Real forward pass SUCCESS! Loss: {:.6}", loss);
                     }
+                    epoch_loss += loss;
+                    successful_batches += 1;
+                    last_known_batch_loss = Some(loss);
                     loss
                 }
                 Err(e) => {
-                    if epoch == 0 && batch_idx == 0 && !global.quiet {
-                        eprintln!("\n⚠️  Training step FAILED:");
-                        eprintln!("   Error: {}", e);
-                        eprintln!("   Falling back to simulated training\n");
+                    error_count += 1;
+                    if !global.quiet {
+                        eprintln!(
+                            "⚠️  DiffWave training step {}/{} failed: {}",
+                            epoch + 1,
+                            batch_idx + 1,
+                            e
+                        );
                     }
-                    // Use simulated loss on error
-                    train_step_with_real_data(&audio_tensors, &mel_tensors, epoch, batch_idx)
+                    if error_count > batches_per_epoch / 2 {
+                        return Err(voirs_sdk::VoirsError::config_error(format!(
+                            "Too many DiffWave training-step failures ({error_count} failed \
+                             out of {} batches attempted), aborting instead of fabricating \
+                             training progress. Last error: {e}",
+                            total_steps + 1
+                        )));
+                    }
+                    // Do not fabricate a loss value: reuse the last real
+                    // measurement for the live display only, or NaN if no batch
+                    // has ever succeeded yet. Never added to epoch_loss.
+                    last_known_batch_loss.unwrap_or(f64::NAN)
                 }
             };
-            epoch_loss += batch_loss;
             total_steps += 1;
 
             // Apply warmup to learning rate (overrides scheduler during warmup phase)
@@ -362,8 +393,10 @@ async fn train_diffwave(args: VocoderTrainingArgs, global: &GlobalOptions) -> Re
             progress.finish_batch();
         }
 
-        // Calculate epoch metrics
-        let avg_epoch_loss = epoch_loss / batches_per_epoch as f64;
+        // Calculate epoch metrics: divide by batches that actually succeeded, not
+        // by batches_per_epoch, so a failed batch (excluded above) cannot dilute
+        // the reported average toward a falsely lower loss.
+        let avg_epoch_loss = epoch_loss / successful_batches.max(1) as f64;
 
         // Perform validation at specified frequency
         let val_loss = if epoch % args.training_config.val_frequency == 0 {
@@ -383,6 +416,13 @@ async fn train_diffwave(args: VocoderTrainingArgs, global: &GlobalOptions) -> Re
             None
         };
 
+        // Record real per-epoch statistics for the final summary/checkpoint.
+        last_completed_epoch = Some(epoch);
+        last_avg_epoch_loss = avg_epoch_loss;
+        if val_loss.is_some() {
+            last_val_loss = val_loss;
+        }
+
         // Update best validation loss and check early stopping
         if let Some(vl) = val_loss {
             let improved = vl < (best_val_loss - args.training_config.min_delta);
@@ -400,7 +440,8 @@ async fn train_diffwave(args: VocoderTrainingArgs, global: &GlobalOptions) -> Re
                     "best_model",
                     epoch,
                     avg_epoch_loss,
-                    vl,
+                    Some(vl),
+                    "DiffWave",
                     &varmap,
                 )
                 .await?;
@@ -455,7 +496,8 @@ async fn train_diffwave(args: VocoderTrainingArgs, global: &GlobalOptions) -> Re
                 &format!("epoch_{}", epoch),
                 epoch,
                 avg_epoch_loss,
-                val_loss.unwrap_or(0.0),
+                val_loss,
+                "DiffWave",
                 &varmap,
             )
             .await?;
@@ -465,45 +507,60 @@ async fn train_diffwave(args: VocoderTrainingArgs, global: &GlobalOptions) -> Re
         }
     }
 
-    // Save final model
-    save_checkpoint(
-        &args.output,
-        "final_model",
-        args.epochs - 1,
-        0.0,
-        0.0,
-        &varmap,
-    )
-    .await?;
-
     // Finish training
     let total_duration = start_time.elapsed();
-    progress.finish("✅ Training completed successfully!");
 
-    // Print summary
-    if !global.quiet {
-        let stats = TrainingStats {
-            total_duration,
-            epochs_completed: args.epochs,
-            total_steps,
-            final_train_loss: 0.1,
-            final_val_loss: Some(0.08),
-            best_val_loss: Some(best_val_loss),
-            avg_samples_per_sec: (total_steps * args.batch_size) as f64
-                / total_duration.as_secs_f64(),
-        };
-        progress.print_summary(&stats);
+    // Save final model and print the summary only if at least one epoch actually
+    // completed; otherwise there is nothing real to report or persist.
+    match last_completed_epoch {
+        Some(final_epoch) => {
+            save_checkpoint(
+                &args.output,
+                "final_model",
+                final_epoch,
+                last_avg_epoch_loss,
+                last_val_loss,
+                "DiffWave",
+                &varmap,
+            )
+            .await?;
 
-        println!("\n📊 Model outputs:");
-        println!(
-            "   - Final model: {}/final_model.safetensors",
-            args.output.display()
-        );
-        println!(
-            "   - Best model:  {}/best_model.safetensors",
-            args.output.display()
-        );
-        println!("   - Logs:        {}/training.log", args.output.display());
+            progress.finish("✅ Training completed successfully!");
+
+            if !global.quiet {
+                let stats = TrainingStats {
+                    total_duration,
+                    epochs_completed: final_epoch + 1,
+                    total_steps,
+                    final_train_loss: last_avg_epoch_loss,
+                    final_val_loss: last_val_loss,
+                    best_val_loss: Some(best_val_loss),
+                    avg_samples_per_sec: (total_steps * args.batch_size) as f64
+                        / total_duration.as_secs_f64(),
+                };
+                progress.print_summary(&stats);
+
+                println!("\n📊 Model outputs:");
+                println!(
+                    "   - Final model: {}/final_model.safetensors",
+                    args.output.display()
+                );
+                println!(
+                    "   - Best model:  {}/best_model.safetensors",
+                    args.output.display()
+                );
+            }
+        }
+        None => {
+            progress.finish("⚠️  No epochs were completed; nothing was trained.");
+            if !global.quiet {
+                println!(
+                    "\n⚠️  Training requested {} epochs but none completed; no checkpoint \
+                     was saved.",
+                    args.epochs
+                );
+            }
+        }
     }
 
     Ok(())
@@ -627,6 +684,20 @@ async fn train_hifigan(args: VocoderTrainingArgs, global: &GlobalOptions) -> Res
     let mut current_lr = args.lr;
     let mut patience_counter = 0;
 
+    // Tracks genuine training-step failures across the whole run (never reset
+    // between epochs). Crossing the threshold aborts the run with a real error
+    // instead of silently continuing on fabricated data.
+    let mut error_count: usize = 0;
+    // Last real (non-fabricated) batch loss, used only to keep the live progress
+    // display continuous across a transient failure; never fed into any
+    // aggregate/reported statistic.
+    let mut last_known_batch_loss: Option<f64> = None;
+    // Real per-epoch statistics from the most recently completed epoch, used for
+    // the final summary and checkpoint instead of hardcoded literals.
+    let mut last_completed_epoch: Option<usize> = None;
+    let mut last_avg_epoch_loss: f64 = 0.0;
+    let mut last_val_loss: Option<f64> = None;
+
     // Calculate total warmup steps
     let warmup_steps = args.training_config.warmup_steps;
 
@@ -636,6 +707,7 @@ async fn train_hifigan(args: VocoderTrainingArgs, global: &GlobalOptions) -> Res
 
         let epoch_start = Instant::now();
         let mut epoch_loss = 0.0;
+        let mut successful_batches: u64 = 0;
 
         // Reset data loader for new epoch
         data_loader.reset();
@@ -661,18 +733,37 @@ async fn train_hifigan(args: VocoderTrainingArgs, global: &GlobalOptions) -> Res
                 &mel_tensors,
                 args.training_config.grad_clip,
             ) {
-                Ok(loss) => loss,
+                Ok(loss) => {
+                    epoch_loss += loss;
+                    successful_batches += 1;
+                    last_known_batch_loss = Some(loss);
+                    loss
+                }
                 Err(e) => {
-                    if epoch == 0 && batch_idx == 0 && !global.quiet {
-                        eprintln!("\n⚠️  HiFi-GAN training step FAILED:");
-                        eprintln!("   Error: {}", e);
-                        eprintln!("   Using simulated training\n");
+                    error_count += 1;
+                    if !global.quiet {
+                        eprintln!(
+                            "⚠️  HiFi-GAN training step {}/{} failed: {}",
+                            epoch + 1,
+                            batch_idx + 1,
+                            e
+                        );
                     }
-                    train_step_with_real_data(&audio_tensors, &mel_tensors, epoch, batch_idx)
+                    if error_count > batches_per_epoch / 2 {
+                        return Err(voirs_sdk::VoirsError::config_error(format!(
+                            "Too many HiFi-GAN training-step failures ({error_count} failed \
+                             out of {} batches attempted), aborting instead of fabricating \
+                             training progress. Last error: {e}",
+                            total_steps + 1
+                        )));
+                    }
+                    // Do not fabricate a loss value: reuse the last real
+                    // measurement for the live display only, or NaN if no batch
+                    // has ever succeeded yet. Never added to epoch_loss.
+                    last_known_batch_loss.unwrap_or(f64::NAN)
                 }
             };
 
-            epoch_loss += batch_loss;
             total_steps += 1;
 
             // Apply warmup to learning rate
@@ -709,8 +800,10 @@ async fn train_hifigan(args: VocoderTrainingArgs, global: &GlobalOptions) -> Res
             progress.finish_batch();
         }
 
-        // Calculate epoch metrics
-        let avg_epoch_loss = epoch_loss / batches_per_epoch as f64;
+        // Calculate epoch metrics: divide by batches that actually succeeded, not
+        // by batches_per_epoch, so a failed batch (excluded above) cannot dilute
+        // the reported average toward a falsely lower loss.
+        let avg_epoch_loss = epoch_loss / successful_batches.max(1) as f64;
 
         // Perform validation at specified frequency (HiFi-GAN specific)
         let val_loss = if epoch % args.training_config.val_frequency == 0 {
@@ -730,6 +823,13 @@ async fn train_hifigan(args: VocoderTrainingArgs, global: &GlobalOptions) -> Res
             None
         };
 
+        // Record real per-epoch statistics for the final summary/checkpoint.
+        last_completed_epoch = Some(epoch);
+        last_avg_epoch_loss = avg_epoch_loss;
+        if val_loss.is_some() {
+            last_val_loss = val_loss;
+        }
+
         // Update best validation loss and check early stopping
         if let Some(vl) = val_loss {
             let improved = vl < (best_val_loss - args.training_config.min_delta);
@@ -746,7 +846,8 @@ async fn train_hifigan(args: VocoderTrainingArgs, global: &GlobalOptions) -> Res
                     "best_model",
                     epoch,
                     avg_epoch_loss,
-                    vl,
+                    Some(vl),
+                    "HiFiGan",
                     &varmap,
                 )
                 .await?;
@@ -796,7 +897,8 @@ async fn train_hifigan(args: VocoderTrainingArgs, global: &GlobalOptions) -> Res
                 &format!("epoch_{}", epoch),
                 epoch,
                 avg_epoch_loss,
-                val_loss.unwrap_or(0.0),
+                val_loss,
+                "HiFiGan",
                 &varmap,
             )
             .await?;
@@ -806,44 +908,60 @@ async fn train_hifigan(args: VocoderTrainingArgs, global: &GlobalOptions) -> Res
         }
     }
 
-    // Save final model
-    save_checkpoint(
-        &args.output,
-        "final_model",
-        args.epochs - 1,
-        0.0,
-        0.0,
-        &varmap,
-    )
-    .await?;
-
     // Finish training
     let total_duration = start_time.elapsed();
-    progress.finish("✅ HiFi-GAN generator training completed successfully!");
 
-    // Print summary
-    if !global.quiet {
-        let stats = TrainingStats {
-            total_duration,
-            epochs_completed: args.epochs,
-            total_steps,
-            final_train_loss: 0.1,
-            final_val_loss: Some(0.08),
-            best_val_loss: Some(best_val_loss),
-            avg_samples_per_sec: (total_steps * args.batch_size) as f64
-                / total_duration.as_secs_f64(),
-        };
-        progress.print_summary(&stats);
+    // Save final model and print the summary only if at least one epoch actually
+    // completed; otherwise there is nothing real to report or persist.
+    match last_completed_epoch {
+        Some(final_epoch) => {
+            save_checkpoint(
+                &args.output,
+                "final_model",
+                final_epoch,
+                last_avg_epoch_loss,
+                last_val_loss,
+                "HiFiGan",
+                &varmap,
+            )
+            .await?;
 
-        println!("\n📊 Model outputs:");
-        println!(
-            "   - Final model: {}/final_model.safetensors",
-            args.output.display()
-        );
-        println!(
-            "   - Best model:  {}/best_model.safetensors",
-            args.output.display()
-        );
+            progress.finish("✅ HiFi-GAN generator training completed successfully!");
+
+            if !global.quiet {
+                let stats = TrainingStats {
+                    total_duration,
+                    epochs_completed: final_epoch + 1,
+                    total_steps,
+                    final_train_loss: last_avg_epoch_loss,
+                    final_val_loss: last_val_loss,
+                    best_val_loss: Some(best_val_loss),
+                    avg_samples_per_sec: (total_steps * args.batch_size) as f64
+                        / total_duration.as_secs_f64(),
+                };
+                progress.print_summary(&stats);
+
+                println!("\n📊 Model outputs:");
+                println!(
+                    "   - Final model: {}/final_model.safetensors",
+                    args.output.display()
+                );
+                println!(
+                    "   - Best model:  {}/best_model.safetensors",
+                    args.output.display()
+                );
+            }
+        }
+        None => {
+            progress.finish("⚠️  No epochs were completed; nothing was trained.");
+            if !global.quiet {
+                println!(
+                    "\n⚠️  Training requested {} epochs but none completed; no checkpoint \
+                     was saved.",
+                    args.epochs
+                );
+            }
+        }
     }
 
     Ok(())
@@ -1008,21 +1126,18 @@ fn train_step_real(
     Ok(loss_value)
 }
 
-/// Training step with real data (fallback/simulation)
-fn train_step_with_real_data(_audio: &Tensor, _mel: &Tensor, epoch: usize, batch: usize) -> f64 {
-    // Simulate decreasing loss based on epoch and batch
-    let base_loss = 1.0;
-    let decay = (epoch as f64 * 100.0 + batch as f64) / 10000.0;
-    base_loss * (-decay).exp() + 0.01
-}
-
 /// Save checkpoint to file
+///
+/// `val_loss` is `None` when no validation ran for this checkpoint (e.g. this
+/// epoch fell outside `val_frequency`); the metadata records that honestly
+/// (`null`) rather than substituting a fabricated number.
 async fn save_checkpoint(
     output_dir: &Path,
     name: &str,
     epoch: usize,
     train_loss: f64,
-    val_loss: f64,
+    val_loss: Option<f64>,
+    model_type: &str,
     varmap: &VarMap,
 ) -> Result<()> {
     use safetensors::tensor::{Dtype, SafeTensors};
@@ -1030,12 +1145,15 @@ async fn save_checkpoint(
     use std::collections::HashMap;
 
     let checkpoint_path = output_dir.join(format!("{}.safetensors", name));
+    let val_loss_str = val_loss
+        .map(|v| format!("{:.6}", v))
+        .unwrap_or_else(|| "null".to_string());
 
     // Create checkpoint metadata
     let mut metadata = HashMap::new();
     metadata.insert("epoch".to_string(), epoch.to_string());
     metadata.insert("train_loss".to_string(), format!("{:.6}", train_loss));
-    metadata.insert("val_loss".to_string(), format!("{:.6}", val_loss));
+    metadata.insert("val_loss".to_string(), val_loss_str.clone());
     metadata.insert(
         "timestamp".to_string(),
         std::time::SystemTime::now()
@@ -1086,8 +1204,8 @@ async fn save_checkpoint(
         json!({
             "epoch": epoch.to_string(),
             "train_loss": format!("{:.6}", train_loss),
-            "val_loss": format!("{:.6}", val_loss),
-            "model_type": "DiffWave",
+            "val_loss": val_loss_str,
+            "model_type": model_type,
         }),
     );
 
@@ -1138,7 +1256,7 @@ async fn save_checkpoint(
             .duration_since(std::time::UNIX_EPOCH)
             .expect("SystemTime should be after UNIX_EPOCH")
             .as_secs(),
-        "model_type": "DiffWave",
+        "model_type": model_type,
         "tensors": tensors.iter().map(|(name, (_, shape))| {
             json!({
                 "name": name,

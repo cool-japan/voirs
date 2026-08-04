@@ -147,8 +147,7 @@ impl AudioEffect for SpatialAudioEffect {
             }
             "distance" => {
                 if let Some(v) = value.as_f32() {
-                    *self.distance.write().unwrap_or_else(|e| e.into_inner()) =
-                        v.clamp(0.1, 100.0);
+                    *self.distance.write().unwrap_or_else(|e| e.into_inner()) = v.clamp(0.1, 100.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -159,8 +158,7 @@ impl AudioEffect for SpatialAudioEffect {
             }
             "room_size" => {
                 if let Some(v) = value.as_f32() {
-                    *self.room_size.write().unwrap_or_else(|e| e.into_inner()) =
-                        v.clamp(0.0, 1.0);
+                    *self.room_size.write().unwrap_or_else(|e| e.into_inner()) = v.clamp(0.0, 1.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(

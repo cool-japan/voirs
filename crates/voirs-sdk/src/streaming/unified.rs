@@ -313,7 +313,8 @@ pub struct UnifiedStreamingPipeline {
 #[derive(Debug)]
 struct StreamingState {
     /// Current request configuration
-    #[allow(dead_code)] // Retained for introspection/debugging even though no field reads it yet.
+    #[allow(dead_code)]
+    // Retained for introspection/debugging even though no field reads it yet.
     request: UnifiedStreamingRequest,
     /// Chunk counter
     chunk_counter: u32,
@@ -783,7 +784,8 @@ impl UnifiedStreamingPipeline {
 /// by genuine [`Self::record_chunk_metrics`] calls during streaming) — never a
 /// fabricated constant.
 struct DefaultStreamingPerformanceMonitor {
-    metrics_history: std::sync::Arc<std::sync::Mutex<Vec<(std::time::Instant, PerformanceMetrics)>>>,
+    metrics_history:
+        std::sync::Arc<std::sync::Mutex<Vec<(std::time::Instant, PerformanceMetrics)>>>,
 }
 
 impl DefaultStreamingPerformanceMonitor {
@@ -828,12 +830,17 @@ impl StreamingPerformanceMonitor for DefaultStreamingPerformanceMonitor {
         }
 
         let count = windowed.len() as f32;
-        let processing_time_ms =
-            (windowed.iter().map(|m| m.processing_time_ms as f32).sum::<f32>() / count) as u32;
-        let memory_usage_mb =
-            (windowed.iter().map(|m| m.memory_usage_mb as f32).sum::<f32>() / count) as u32;
-        let cpu_utilization =
-            windowed.iter().map(|m| m.cpu_utilization).sum::<f32>() / count;
+        let processing_time_ms = (windowed
+            .iter()
+            .map(|m| m.processing_time_ms as f32)
+            .sum::<f32>()
+            / count) as u32;
+        let memory_usage_mb = (windowed
+            .iter()
+            .map(|m| m.memory_usage_mb as f32)
+            .sum::<f32>()
+            / count) as u32;
+        let cpu_utilization = windowed.iter().map(|m| m.cpu_utilization).sum::<f32>() / count;
         let gpu_samples: Vec<f32> = windowed.iter().filter_map(|m| m.gpu_utilization).collect();
         let gpu_utilization = if gpu_samples.is_empty() {
             None
@@ -874,8 +881,11 @@ impl StreamingPerformanceMonitor for DefaultStreamingPerformanceMonitor {
         }
 
         let count = history.len() as f32;
-        let avg_latency_ms =
-            history.iter().map(|(_, m)| m.processing_time_ms as f32).sum::<f32>() / count;
+        let avg_latency_ms = history
+            .iter()
+            .map(|(_, m)| m.processing_time_ms as f32)
+            .sum::<f32>()
+            / count;
         let avg_cpu = history.iter().map(|(_, m)| m.cpu_utilization).sum::<f32>() / count;
 
         let mut recommendations = Vec::new();
@@ -984,7 +994,9 @@ mod tests {
         // backend attached, the old implementation returned `Ok` with a stream
         // that silently yielded zero chunks. It must now fail closed instead.
         let pipeline = UnifiedStreamingPipeline::new();
-        let result = pipeline.start_unified_streaming(test_request("Hello")).await;
+        let result = pipeline
+            .start_unified_streaming(test_request("Hello"))
+            .await;
         match result {
             Err(VoirsError::FeatureUnavailable { .. }) => {}
             Err(other) => panic!("expected FeatureUnavailable, got {other:?}"),
@@ -994,7 +1006,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_start_unified_streaming_produces_real_nonempty_audio() {
-        let pipeline = UnifiedStreamingPipeline::new().with_synthesis_pipeline(test_synthesis_pipeline());
+        let pipeline =
+            UnifiedStreamingPipeline::new().with_synthesis_pipeline(test_synthesis_pipeline());
 
         let mut stream = pipeline
             .start_unified_streaming(test_request("Hello there, this is real synthesis."))
@@ -1015,7 +1028,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_streaming_status_reflects_real_activity_then_completion() {
-        let pipeline = UnifiedStreamingPipeline::new().with_synthesis_pipeline(test_synthesis_pipeline());
+        let pipeline =
+            UnifiedStreamingPipeline::new().with_synthesis_pipeline(test_synthesis_pipeline());
 
         // Before streaming starts, honestly idle.
         let idle_status = pipeline.get_streaming_status().await.unwrap();

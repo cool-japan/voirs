@@ -165,6 +165,19 @@ recognition = ["dep:voirs-recognizer", "dep:futures", "dep:futures-util"]
 python-recognition = ["python", "recognition"]
 futures = ["dep:futures", "dep:futures-util"]
 
+# Test-only mock pipeline bookkeeping for c_api::{core,voice,threading}
+# (in-memory HashSet-based fakes standing in for PIPELINE_MANAGER/SdkPipeline).
+# OFF by default -- including for plain `cargo test`/`cargo nextest run` --
+# so this crate's own unit test suite exercises the REAL production C API
+# (touching PIPELINE_MANAGER, get_runtime(), and the real SdkPipeline) by
+# default, rather than only ever validating mock bookkeeping. Enable
+# explicitly (`--features ffi-test-mocks` or `--all-features`) to run the
+# fast, network-free mock-based tests instead (useful for CI without model
+# weights / network access). See voirs-ffi/tests/pipeline_real_path.rs for
+# the always-on, feature-independent integration tests that exercise the
+# real path's honest contract regardless of which configuration is active.
+ffi-test-mocks = []
+
 # Recognition model features
 whisper-pure = ["recognition", "voirs-recognizer/whisper-pure"]
 

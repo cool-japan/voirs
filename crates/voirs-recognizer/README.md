@@ -20,7 +20,7 @@ never returns an invented transcript.
 |---------|---------|--------|
 | `OnnxWhisper` | `onnx` | **Runs.** Needs Whisper exported to ONNX. |
 | `OnnxWav2Vec2` / `OnnxConformer` | `onnx` | **Runs.** Needs an exported ONNX graph. |
-| `PureRustWhisper` | `whisper-pure` | **Runs.** Needs a `safetensors` checkpoint plus `vocab.json`. |
+| `PureRustWhisper` | `whisper-pure` | **Runs** from a `safetensors` checkpoint plus `vocab.json` — but only in the OpenAI-style tensor naming, **not** the `openai/whisper-*` layout published on the Hugging Face Hub. A mismatched checkpoint is refused with a message saying so. Use `OnnxWhisper` for stock HF weights. |
 | `ConformerModel` | `conformer` | **Runs** from a `safetensors` checkpoint; refuses to transcribe on untrained parameters. |
 | `DeepSpeechModel` | `deepspeech` | **Inspects and validates** real `.pbmm`/`.tflite` files, then reports that no pure-Rust decoder exists for them. Use the ONNX path. |
 | `Wav2Vec2Model` | `wav2vec2` | Same: validates real checkpoints, then defers to `OnnxWav2Vec2` for inference. |
@@ -155,10 +155,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## Supported ASR Models
 
 ### Whisper
-- **Backends**: `OnnxWhisper` (exported ONNX graph) or `PureRustWhisper`
-  (`safetensors` checkpoint + `vocab.json`, via `WhisperConfig::with_assets`, or
-  the `VOIRS_WHISPER_ASSETS` directory).
-- **Model Sizes**: whichever you export — tiny through large.
+- **`OnnxWhisper`** (feature `onnx`) — the recommended path. Export any Whisper
+  checkpoint with `optimum-cli export onnx --model openai/whisper-tiny ...` and
+  point the config at the resulting graphs.
+- **`PureRustWhisper`** (feature `whisper-pure`) — reads a `safetensors`
+  checkpoint plus `vocab.json`, supplied via `WhisperConfig::with_assets` or the
+  `VOIRS_WHISPER_ASSETS` directory.
+
+  Its layers are named in the OpenAI style
+  (`encoder.blocks.N.attn.query.weight`, `decoder.token_embedding.weight`,
+  `...mlp.c_fc.weight`). The Hugging Face `openai/whisper-*` checkpoints use the
+  `transformers` naming (`model.encoder.layers.N.self_attn.q_proj.weight`,
+  `...fc1.weight`) and are **rejected** rather than loaded with uninitialised
+  layers — `whisper::assets::check_layout` detects the scheme and reports it.
+  Rename the tensors, or use `OnnxWhisper` /
+  `candle_transformers::models::whisper` (already a dependency) for stock
+  Hugging Face weights.
 - **Use Case**: General-purpose, multilingual applications.
 
 ### DeepSpeech

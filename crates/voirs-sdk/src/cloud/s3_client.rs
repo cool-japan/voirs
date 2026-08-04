@@ -325,7 +325,11 @@ mod tests {
                             .is_some_and(|a| a.starts_with("AWS4-HMAC-SHA256 Credential=")),
                         "expected a real SigV4 Authorization header, got: {headers:?}"
                     );
-                    let key = path.trim_start_matches('/').to_string();
+                    // Path-style addressing: "/{bucket}/{key}" - strip the
+                    // leading bucket segment so the store is keyed the same
+                    // way callers refer to objects (bare key, no bucket
+                    // prefix).
+                    let key = path.splitn(3, '/').nth(2).unwrap_or_default().to_string();
                     match method.as_str() {
                         "PUT" => {
                             store.lock().expect("store lock").insert(key, body);
@@ -451,7 +455,11 @@ mod tests {
         let client = test_client(&server);
 
         client
-            .put_object("a.model", b"first payload".to_vec(), "application/octet-stream")
+            .put_object(
+                "a.model",
+                b"first payload".to_vec(),
+                "application/octet-stream",
+            )
             .await
             .unwrap();
         client

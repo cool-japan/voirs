@@ -6,6 +6,7 @@
 use parking_lot::RwLock;
 use std::alloc::{GlobalAlloc, Layout};
 use std::collections::HashMap;
+use std::ffi::CStr;
 use std::ptr;
 // Note: AtomicUsize and Ordering imports removed as they are unused in this file
 use std::sync::Mutex;
@@ -68,8 +69,14 @@ pub trait VoirsAllocator: Send + Sync {
     /// Reset statistics
     fn reset_stats(&self);
 
-    /// Get allocator name
-    fn name(&self) -> &'static str;
+    /// Get allocator name.
+    ///
+    /// Returns a null-terminated C string literal (not a plain Rust `&str`)
+    /// so callers across the FFI boundary can hand the pointer straight to
+    /// `CStr::from_ptr`/`strlen` without reading past the end of the string
+    /// into adjacent memory -- the same undefined-behavior class previously
+    /// fixed for `voirs_error_message`.
+    fn name(&self) -> &'static CStr;
 }
 
 /// System allocator wrapper with tracking
@@ -176,8 +183,8 @@ impl VoirsAllocator for TrackedSystemAllocator {
         allocations.clear();
     }
 
-    fn name(&self) -> &'static str {
-        "TrackedSystem"
+    fn name(&self) -> &'static CStr {
+        c"TrackedSystem"
     }
 }
 
@@ -343,8 +350,8 @@ impl VoirsAllocator for PoolAllocator {
         *stats = AllocatorStats::default();
     }
 
-    fn name(&self) -> &'static str {
-        "Pool"
+    fn name(&self) -> &'static CStr {
+        c"Pool"
     }
 }
 
@@ -425,8 +432,8 @@ impl VoirsAllocator for DebugAllocator {
         self.inner.reset_stats();
     }
 
-    fn name(&self) -> &'static str {
-        "Debug"
+    fn name(&self) -> &'static CStr {
+        c"Debug"
     }
 }
 
@@ -453,8 +460,8 @@ pub fn reset_global_allocator_stats() {
     }
 }
 
-/// Get global allocator name
-pub fn get_global_allocator_name() -> Option<&'static str> {
+/// Get global allocator name as a null-terminated C string.
+pub fn get_global_allocator_name() -> Option<&'static CStr> {
     let global = GLOBAL_ALLOCATOR.read();
     global.as_ref().map(|alloc| alloc.name())
 }
@@ -585,7 +592,7 @@ mod tests {
         set_global_allocator(allocator);
 
         assert!(get_global_allocator_stats().is_some());
-        assert_eq!(get_global_allocator_name(), Some("TrackedSystem"));
+        assert_eq!(get_global_allocator_name(), Some(c"TrackedSystem"));
 
         reset_global_allocator_stats();
 

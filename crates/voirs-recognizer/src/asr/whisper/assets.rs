@@ -4,9 +4,31 @@
 //! and the real byte-pair vocabulary that produced them. This module locates those
 //! assets on disk and turns them into a `candle` [`VarBuilder`] and a token map.
 //!
-//! Nothing here downloads anything: VoiRS never fetches weights implicitly. Export or
-//! download the assets yourself, for example from `openai/whisper-tiny` on the
-//! Hugging Face Hub, and point [`WhisperAssets`] at them.
+//! Nothing here downloads anything: VoiRS never fetches weights implicitly. Provide the
+//! assets yourself and point [`WhisperAssets`] at them.
+//!
+//! # Required tensor naming
+//!
+//! The encoder and decoder in this crate read the OpenAI-style parameter names
+//! ([`WhisperLayout::Voirs`]):
+//!
+//! ```text
+//! encoder.positional_embedding      decoder.positional_embedding
+//! encoder.conv1.weight              decoder.token_embedding.weight
+//! encoder.blocks.N.attn.query.…     decoder.blocks.N.cross_attn.…
+//! encoder.blocks.N.mlp.c_fc.…       decoder.ln.weight
+//! encoder.ln_post.weight
+//! ```
+//!
+//! The `openai/whisper-*` checkpoints published on the Hugging Face Hub use the
+//! `transformers` naming instead (`model.encoder.layers.N.self_attn.q_proj.weight`,
+//! `model.decoder.embed_tokens.weight`, `…fc1.weight`) and are **not** loadable here —
+//! [`check_layout`] detects them and fails closed with a message saying so, rather than
+//! leaving layers silently uninitialised.
+//!
+//! To run a stock Hugging Face checkpoint today, use `OnnxWhisper` (feature `onnx`) with
+//! an ONNX export, or `candle_transformers::models::whisper`, which is already a
+//! dependency of this crate and reads that layout as published.
 
 use crate::RecognitionError;
 use candle_core::{DType, Device};
@@ -126,6 +148,10 @@ pub fn var_builder_from_assets(
 ) -> Result<VarBuilder<'static>, RecognitionError> {
     let assets = assets.ok_or_else(|| missing_assets_error(model_size))?;
     assets.validate()?;
+    // Reject a checkpoint written in a naming scheme these modules cannot read *before*
+    // building layers from it, so the caller gets a precise diagnostic instead of a bare
+    // "cannot find tensor" from deep inside layer construction.
+    check_layout(&assets.weights)?;
 
     let tensors = candle_core::safetensors::load(&assets.weights, device).map_err(|e| {
         RecognitionError::ModelLoadError {
@@ -154,6 +180,95 @@ pub fn var_builder_from_assets(
     );
 
     Ok(VarBuilder::from_tensors(tensors, DType::F32, device))
+}
+
+/// Parameter-naming schemes published Whisper checkpoints use.
+///
+/// The three differ only in how they spell their tensors; the architecture is the same.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WhisperLayout {
+    /// What these modules read: `encoder.blocks.N.attn.query.weight`,
+    /// `encoder.ln_post.weight`, `decoder.token_embedding.weight`, `…mlp.c_fc.weight`.
+    Voirs,
+    /// The `transformers` layout published as `openai/whisper-*` on the Hugging Face
+    /// Hub: `model.encoder.layers.N.self_attn.q_proj.weight`,
+    /// `model.decoder.embed_tokens.weight`, `…fc1.weight`.
+    HuggingFace,
+    /// The original OpenAI release: `encoder.blocks.N.attn.query.weight` with the MLP as
+    /// an indexed `Sequential` (`…mlp.0.weight`, `…mlp.2.weight`).
+    OpenAi,
+    /// Nothing recognisable.
+    Unknown,
+}
+
+impl WhisperLayout {
+    /// Identify the layout from the tensor names a checkpoint really declares.
+    #[must_use]
+    pub fn detect(names: &[&str]) -> Self {
+        let has = |needle: &str| names.iter().any(|name| name.contains(needle));
+
+        if has("model.encoder.") || has("model.decoder.") || has(".self_attn.q_proj") {
+            return Self::HuggingFace;
+        }
+        // The MLP spelling is the only thing that really separates the VoiRS naming from
+        // the original OpenAI release: both use `blocks.N.attn.query` and `ln_post`, but
+        // OpenAI stores the MLP as an indexed `Sequential`. Discriminate on it first, so
+        // a name the two share can never decide the answer.
+        if has(".mlp.c_fc") || has(".mlp.c_proj") {
+            return Self::Voirs;
+        }
+        if has(".mlp.0.") || has(".mlp.2.") {
+            return Self::OpenAi;
+        }
+        if has("ln_post") || has(".attn.query") || has("token_embedding") {
+            return Self::Voirs;
+        }
+        Self::Unknown
+    }
+
+    /// Human-readable name used in diagnostics.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Voirs => "VoiRS/OpenAI-style",
+            Self::HuggingFace => "Hugging Face `transformers`",
+            Self::OpenAi => "original OpenAI release",
+            Self::Unknown => "unrecognised",
+        }
+    }
+}
+
+/// Verify that a checkpoint is written in the naming scheme these modules read.
+///
+/// # Errors
+/// Returns [`RecognitionError::ModelLoadError`] when the header cannot be parsed, or
+/// when the checkpoint uses a different naming scheme — with a message naming both the
+/// detected scheme and the working alternatives, instead of letting layer construction
+/// fail later with a bare "cannot find tensor".
+pub fn check_layout(weights: &Path) -> Result<(), RecognitionError> {
+    let header = crate::asr::weights::SafetensorsHeader::read(weights)?;
+    let names: Vec<&str> = header.tensors.keys().map(String::as_str).collect();
+
+    match WhisperLayout::detect(&names) {
+        WhisperLayout::Voirs => Ok(()),
+        other => Err(RecognitionError::ModelLoadError {
+            message: format!(
+                "{} is a {} checkpoint ({} tensors), but this pure-Rust Whisper reads the \
+                 {} naming scheme (`encoder.blocks.N.attn.query.weight`, \
+                 `decoder.token_embedding.weight`, `...mlp.c_fc.weight`). Loading it would \
+                 silently leave layers uninitialised, so it is refused. Either convert the \
+                 tensor names, or use a backend that reads this checkpoint directly: \
+                 `OnnxWhisper` (feature `onnx`) with an ONNX export, or \
+                 `candle_transformers::models::whisper`, which reads the Hugging Face layout \
+                 as published.",
+                weights.display(),
+                other.label(),
+                header.tensors.len(),
+                WhisperLayout::Voirs.label(),
+            ),
+            source: None,
+        }),
+    }
 }
 
 /// Read a Hugging Face `vocab.json` into a token-string to token-id map.
@@ -310,6 +425,140 @@ mod tests {
 
         std::fs::write(&path, br#"{"a":"not-an-id"}"#).unwrap();
         assert!(load_vocab(&path).is_err());
+    }
+
+    /// Build a real (header-only) safetensors file declaring the given tensor names.
+    fn write_named_checkpoint(dir: &std::path::Path, names: &[&str]) -> PathBuf {
+        let mut header = serde_json::Map::new();
+        let mut offset = 0_u64;
+        for name in names {
+            header.insert(
+                (*name).to_string(),
+                serde_json::json!({
+                    "dtype": "F32",
+                    "shape": [2_usize, 2],
+                    "data_offsets": [offset, offset + 16],
+                }),
+            );
+            offset += 16;
+        }
+        let header_bytes = serde_json::to_vec(&header).expect("serialise");
+        let path = dir.join("model.safetensors");
+        let mut file = std::fs::File::create(&path).expect("create");
+        file.write_all(&(header_bytes.len() as u64).to_le_bytes())
+            .expect("write len");
+        file.write_all(&header_bytes).expect("write header");
+        file.write_all(&vec![0_u8; offset as usize])
+            .expect("write payload");
+        path
+    }
+
+    #[test]
+    fn layout_detection_tells_the_published_schemes_apart() {
+        assert_eq!(
+            WhisperLayout::detect(&[
+                "model.encoder.layers.0.self_attn.q_proj.weight",
+                "model.decoder.embed_tokens.weight",
+            ]),
+            WhisperLayout::HuggingFace
+        );
+        assert_eq!(
+            WhisperLayout::detect(&[
+                "encoder.blocks.0.attn.query.weight",
+                "encoder.blocks.0.mlp.c_fc.weight",
+                "encoder.ln_post.weight",
+            ]),
+            WhisperLayout::Voirs
+        );
+        assert_eq!(
+            WhisperLayout::detect(&[
+                "encoder.blocks.0.attn.query.weight",
+                "encoder.blocks.0.mlp.0.weight",
+            ]),
+            WhisperLayout::OpenAi
+        );
+        // Regression guard: the OpenAI release also carries `ln_post` and
+        // `token_embedding`, so those shared names must not outvote the MLP spelling.
+        assert_eq!(
+            WhisperLayout::detect(&[
+                "encoder.ln_post.weight",
+                "encoder.blocks.0.attn.query.weight",
+                "encoder.blocks.0.mlp.0.weight",
+                "encoder.blocks.0.mlp.2.weight",
+                "decoder.token_embedding.weight",
+            ]),
+            WhisperLayout::OpenAi,
+            "a full OpenAI checkpoint must not be mistaken for the VoiRS layout"
+        );
+        // ...and a full VoiRS checkpoint is still recognised with all of them present.
+        assert_eq!(
+            WhisperLayout::detect(&[
+                "encoder.ln_post.weight",
+                "encoder.blocks.0.attn.query.weight",
+                "encoder.blocks.0.mlp.c_fc.weight",
+                "encoder.blocks.0.mlp.c_proj.weight",
+                "decoder.token_embedding.weight",
+            ]),
+            WhisperLayout::Voirs
+        );
+        assert_eq!(
+            WhisperLayout::detect(&["something.completely.unrelated"]),
+            WhisperLayout::Unknown
+        );
+    }
+
+    #[test]
+    fn hugging_face_checkpoints_are_refused_with_an_actionable_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_named_checkpoint(
+            dir.path(),
+            &[
+                "model.encoder.conv1.weight",
+                "model.encoder.layers.0.self_attn.q_proj.weight",
+                "model.decoder.embed_tokens.weight",
+            ],
+        );
+
+        let err = check_layout(&path).unwrap_err();
+        let rendered = err.to_string();
+        assert!(rendered.contains("Hugging Face"), "unexpected: {rendered}");
+        // The message must name a route that actually works today.
+        assert!(rendered.contains("OnnxWhisper"), "unexpected: {rendered}");
+        assert!(
+            rendered.contains("candle_transformers"),
+            "unexpected: {rendered}"
+        );
+        // And it must not pretend the file was loaded.
+        assert!(rendered.contains("refused"), "unexpected: {rendered}");
+    }
+
+    #[test]
+    fn matching_checkpoints_pass_the_layout_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_named_checkpoint(
+            dir.path(),
+            &[
+                "encoder.positional_embedding",
+                "encoder.blocks.0.attn.query.weight",
+                "encoder.blocks.0.mlp.c_fc.weight",
+                "encoder.ln_post.weight",
+                "decoder.token_embedding.weight",
+            ],
+        );
+        check_layout(&path).expect("a VoiRS-layout checkpoint must be accepted");
+    }
+
+    #[test]
+    fn var_builder_rejects_a_mismatched_checkpoint_before_building_layers() {
+        let dir = tempfile::tempdir().unwrap();
+        write_named_checkpoint(dir.path(), &["model.encoder.conv1.weight"]);
+        std::fs::write(dir.path().join("vocab.json"), br#"{"a":0}"#).unwrap();
+
+        let assets = WhisperAssets::from_dir(dir.path());
+        let Err(err) = var_builder_from_assets(Some(&assets), "tiny", &Device::Cpu) else {
+            panic!("a mismatched checkpoint must not produce a VarBuilder");
+        };
+        assert!(err.to_string().contains("Hugging Face"), "{err}");
     }
 
     #[test]

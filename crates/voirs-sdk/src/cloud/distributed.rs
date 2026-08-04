@@ -6,7 +6,18 @@ use tokio::sync::{RwLock, Semaphore};
 use tokio::time::{interval, timeout, Instant};
 use uuid::Uuid;
 
-/// Distributed processing manager for VoiRS synthesis workloads
+/// Distributed processing manager for VoiRS synthesis workloads.
+///
+/// **Local-process scaffolding, not a real distributed system.** Job
+/// scheduling, worker-pool bookkeeping, health/fault tracking, and cost
+/// accounting here are all real *local* state — but nothing in this type
+/// contacts a real cloud provider API, container orchestrator, or remote
+/// worker process. "Workers" are in-memory records with no backing compute;
+/// `scale_workers`/fault-recovery methods update that local bookkeeping
+/// honestly (no fabricated worker/replication/latency metrics) but do not
+/// perform real provisioning, job execution, or cross-process recovery. This
+/// exists to exercise the [`DistributedProcessing`] trait contract (e.g. for
+/// [`CloudManager`] wiring and tests) ahead of a real backend implementation.
 pub struct VoirsDistributedProcessing {
     config: ProcessingConfig,
     job_scheduler: Arc<JobScheduler>,
@@ -687,9 +698,16 @@ impl WorkerManager {
             let pool_name = self.select_optimal_pool_for_scaling(&pools).await;
 
             let worker_id = Uuid::new_v4().to_string();
+            // No real provisioning happens in this local-scaffolding build
+            // (see the module doc comment), so the worker record is marked
+            // `Idle` (ready) immediately rather than left in `Provisioning`
+            // forever - the old fire-and-forget `tokio::spawn` below used to
+            // log "provisioned successfully" after a delay without ever
+            // actually transitioning the status, so `get_available_workers`
+            // (which filters on `Idle`) could never see a "scaled up" worker.
             let worker = Worker {
                 id: worker_id.clone(),
-                status: WorkerStatus::Provisioning,
+                status: WorkerStatus::Idle,
                 capabilities: WorkerCapabilities {
                     cpu_cores: 4,
                     memory_mb: 8192,
@@ -722,12 +740,7 @@ impl WorkerManager {
             // Add worker to pool and worker list
             let mut workers = self.workers.write().await;
             workers.insert(worker_id.clone(), worker.clone());
-
-            // Simulate provisioning process
-            tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(30)).await; // Simulate provisioning time
-                tracing::info!("Worker {} provisioned successfully", worker_id);
-            });
+            tracing::info!("Worker {} registered and marked ready", worker_id);
 
             // Record scaling event
             let scaling_event = ScalingEvent {
@@ -774,19 +787,14 @@ impl WorkerManager {
             // Gracefully drain the worker
             let worker_id = worker.id.clone();
 
-            // Mark worker as draining
+            // Mark worker as draining, then remove it from the active pool
+            // below (real local bookkeeping - synchronous, not a
+            // fire-and-forget background task that would race the removal
+            // that already happens a few lines down in this same function).
             if let Some(worker_mut) = workers.get_mut(&worker_id) {
                 worker_mut.status = WorkerStatus::Draining;
             }
-
-            // Wait for current jobs to complete (in a real implementation)
-            // For now, we'll just simulate the process
-            let worker_id_clone = worker_id.clone();
-            tokio::spawn(async move {
-                // Simulate graceful shutdown time
-                tokio::time::sleep(Duration::from_secs(60)).await;
-                tracing::info!("Worker {} drained and terminated", worker_id_clone);
-            });
+            tracing::info!("Worker {} draining", worker_id);
 
             removed_count += 1;
 
@@ -842,14 +850,11 @@ impl WorkerManager {
             job_id
         );
 
-        // In a real implementation, this would:
-        // 1. Send a cancellation signal through a worker communication channel
-        // 2. Use message queues (Redis, RabbitMQ) or HTTP API calls to notify workers
-        // 3. Set cancellation flags in shared storage that workers check periodically
-        // 4. Use gRPC/WebSocket connections to send real-time cancellation requests
-        // 5. Update job status to "Cancelling" to prevent further processing
-
-        // For now, simulate the cancellation process
+        // No real worker communication channel exists in this local-process
+        // scaffolding (see the module doc comment) - a genuine
+        // implementation would need a message queue, gRPC/WebSocket
+        // connection, or HTTP API call to actually notify a remote worker
+        // process. What IS real here is the local bookkeeping update below.
         let mut workers = self.workers.write().await;
         if let Some(worker) = workers.get_mut(worker_id) {
             // Clear the current job assignment
@@ -865,13 +870,6 @@ impl WorkerManager {
             tracing::warn!("Worker {} not found for job cancellation signal", worker_id);
         }
 
-        // Simulate network communication delay
-        tokio::time::sleep(Duration::from_millis(10)).await;
-
-        tracing::info!(
-            "Job cancellation signal sent successfully to worker {}",
-            worker_id
-        );
         Ok(())
     }
 
@@ -1029,137 +1027,87 @@ impl FaultManager {
         Ok(())
     }
 
-    /// Execute worker restart recovery strategy
+    /// Worker restart recovery strategy.
+    ///
+    /// **No real worker process exists to restart** in this local-process
+    /// scaffolding (see the module doc comment on
+    /// [`VoirsDistributedProcessing`]) - a genuine implementation would stop
+    /// a real process/container and start a replacement. This honestly logs
+    /// that no real restart occurred rather than pretending one happened
+    /// after an artificial delay.
     async fn execute_worker_restart(&self, worker_id: &str) -> Result<()> {
-        tracing::info!("Executing worker restart for worker: {}", worker_id);
-
-        // In a real implementation, this would:
-        // 1. Stop the current worker process/container
-        // 2. Clear the worker's state and resources
-        // 3. Start a new worker instance with the same configuration
-        // 4. Update the worker status and metrics
-        // 5. Redistribute any pending jobs from the restarted worker
-
-        // Simulate the restart process
-        tokio::time::sleep(Duration::from_millis(100)).await;
-
-        tracing::info!("Worker restart completed for: {}", worker_id);
+        tracing::warn!(
+            "Worker restart requested for '{worker_id}' but no real worker process is managed \
+             by this build; no actual restart was performed"
+        );
         Ok(())
     }
 
-    /// Execute job migration recovery strategy
+    /// Job migration recovery strategy.
+    ///
+    /// **No real job-transfer channel exists** in this local-process
+    /// scaffolding - see [`Self::execute_worker_restart`].
     async fn execute_job_migration(&self, worker_id: &str) -> Result<()> {
-        tracing::info!("Executing job migration from worker: {}", worker_id);
-
-        // In a real implementation, this would:
-        // 1. Identify all jobs currently running on the failed worker
-        // 2. Find suitable alternative workers with sufficient capacity
-        // 3. Transfer job state and data to the new workers
-        // 4. Update job routing and tracking information
-        // 5. Resume job execution on the new workers
-
-        // Simulate the migration process
-        tokio::time::sleep(Duration::from_millis(50)).await;
-
-        tracing::info!("Job migration completed from worker: {}", worker_id);
+        tracing::warn!(
+            "Job migration requested away from worker '{worker_id}' but no real job-transfer \
+             mechanism is implemented in this build; no jobs were actually migrated"
+        );
         Ok(())
     }
 
-    /// Execute retry logic recovery strategy
+    /// Retry recovery strategy: real local retry-count bookkeeping only
+    /// (no exponential-backoff timer is applied here — see
+    /// [`Self::execute_worker_restart`] for why no artificial delay is
+    /// simulated).
     async fn execute_retry_logic(&self, failure: &DetectedFailure) -> Result<()> {
         tracing::info!(
-            "Executing retry logic for failure: {:?}",
-            failure.failure_type
-        );
-
-        // In a real implementation, this would:
-        // 1. Analyze the failure to determine if retry is appropriate
-        // 2. Implement exponential backoff for retry attempts
-        // 3. Track retry count to prevent infinite retry loops
-        // 4. Consider circuit breaker patterns for repeated failures
-        // 5. Retry the failed operation with potentially modified parameters
-
-        // Simulate retry logic with exponential backoff
-        let retry_delay = Duration::from_millis(200);
-        tokio::time::sleep(retry_delay).await;
-
-        tracing::info!(
-            "Retry logic executed for failure: {:?}",
-            failure.failure_type
+            "Retry recorded for failure {:?} on worker '{}': {}",
+            failure.failure_type,
+            failure.affected_worker,
+            failure.details
         );
         Ok(())
     }
 
-    /// Execute abort logic recovery strategy
+    /// Abort recovery strategy: logs the abort decision. No real job/resource
+    /// cleanup happens here since no real job execution backs this build's
+    /// worker records — see [`Self::execute_worker_restart`].
     async fn execute_abort_logic(&self, failure: &DetectedFailure) -> Result<()> {
-        tracing::info!(
-            "Executing abort logic for failure: {:?}",
-            failure.failure_type
-        );
-
-        // In a real implementation, this would:
-        // 1. Cancel all related operations and jobs
-        // 2. Clean up allocated resources
-        // 3. Notify clients about the operation failure
-        // 4. Log detailed failure information for analysis
-        // 5. Update system metrics and monitoring dashboards
-
-        // Simulate abort logic
-        tokio::time::sleep(Duration::from_millis(10)).await;
-
-        tracing::info!(
-            "Abort logic executed for failure on worker: {}",
+        tracing::warn!(
+            "Aborting failure {:?} on worker '{}' with no further recovery attempted",
+            failure.failure_type,
             failure.affected_worker
         );
         Ok(())
     }
 
-    /// Execute fallback logic recovery strategy
+    /// Fallback recovery strategy.
+    ///
+    /// Recognized strategy names are validated and logged; switching actual
+    /// traffic/processing behavior requires integration points this
+    /// local-process scaffolding does not have (see
+    /// [`Self::execute_worker_restart`]), so unknown strategies are reported
+    /// as a real configuration error rather than silently accepted.
     async fn execute_fallback_logic(
         &self,
         failure: &DetectedFailure,
         fallback_strategy: &str,
     ) -> Result<()> {
-        tracing::info!(
-            "Executing fallback logic '{}' for failure: {:?}",
-            fallback_strategy,
-            failure.failure_type
-        );
-
-        // In a real implementation, this would:
-        // 1. Parse the fallback strategy configuration
-        // 2. Switch to alternative processing methods or services
-        // 3. Adjust quality or performance parameters as needed
-        // 4. Route traffic to backup systems or degraded service modes
-        // 5. Monitor fallback system performance and capacity
-
         match fallback_strategy {
-            "degraded_quality" => {
-                tracing::info!("Switching to degraded quality processing mode");
-                // Lower quality settings to reduce resource requirements
+            "degraded_quality" | "backup_service" | "local_processing" => {
+                tracing::warn!(
+                    "Fallback strategy '{fallback_strategy}' selected for failure {:?} on \
+                     worker '{}', but no real routing/quality-adjustment integration exists in \
+                     this build; no traffic was actually redirected",
+                    failure.failure_type,
+                    failure.affected_worker
+                );
+                Ok(())
             }
-            "backup_service" => {
-                tracing::info!("Routing to backup service");
-                // Redirect traffic to backup processing service
-            }
-            "local_processing" => {
-                tracing::info!("Falling back to local processing");
-                // Process locally instead of distributed processing
-            }
-            _ => {
-                tracing::warn!("Unknown fallback strategy: {}", fallback_strategy);
-                // Default fallback behavior
-            }
+            other => Err(VoirsError::config_error(format!(
+                "unknown fallback strategy '{other}'"
+            ))),
         }
-
-        // Simulate fallback execution
-        tokio::time::sleep(Duration::from_millis(75)).await;
-
-        tracing::info!(
-            "Fallback logic '{}' executed successfully",
-            fallback_strategy
-        );
-        Ok(())
     }
 }
 
@@ -1430,6 +1378,82 @@ mod tests {
         let handle = processing.submit_job(job).await.unwrap();
         let status = processing.get_job_status(&handle.id).await.unwrap();
         assert!(matches!(status, JobStatus::Queued));
+    }
+
+    fn default_config() -> ProcessingConfig {
+        ProcessingConfig {
+            max_concurrent_jobs: 10,
+            timeout_seconds: 3600,
+            retry_count: 3,
+            load_balancing: LoadBalancingStrategy::RoundRobin,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_scale_workers_up_produces_genuinely_available_workers() {
+        // Direct regression test for the worker-provisioning bug: the old
+        // implementation inserted new workers as `WorkerStatus::Provisioning`
+        // and only a fire-and-forget background task (which never updated
+        // the real status) claimed to finish provisioning - so scaled-up
+        // workers could never actually be counted as available.
+        let processing = VoirsDistributedProcessing::new(default_config())
+            .await
+            .unwrap();
+
+        processing.scale_workers(3).await.unwrap();
+
+        let stats = processing.get_worker_stats().await.unwrap();
+        assert_eq!(stats.len(), 3);
+        assert!(
+            stats.iter().all(|w| matches!(w.status, WorkerStatus::Idle)),
+            "scaled-up workers must be genuinely available (Idle), not stuck in Provisioning: {stats:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_scale_workers_down_actually_removes_workers() {
+        let processing = VoirsDistributedProcessing::new(default_config())
+            .await
+            .unwrap();
+
+        processing.scale_workers(4).await.unwrap();
+        assert_eq!(processing.get_worker_stats().await.unwrap().len(), 4);
+
+        processing.scale_workers(1).await.unwrap();
+        let remaining = processing.get_worker_stats().await.unwrap();
+        assert_eq!(
+            remaining.len(),
+            1,
+            "scaling down must really remove worker records, not just log a fake drain"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_fallback_logic_rejects_unknown_strategy_instead_of_fabricating_success() {
+        // Direct regression test: the old implementation accepted *any*
+        // string (falling into a `_ => { warn!(...) }` arm) and still
+        // returned `Ok(())` after a fake delay, regardless of whether the
+        // requested fallback strategy meant anything.
+        let fault_manager = FaultManager::new();
+        let failure = DetectedFailure {
+            failure_type: FailureType::WorkerUnresponsive,
+            affected_worker: "worker-1".to_string(),
+            severity: FailureSeverity::Medium,
+            detected_at: chrono::Utc::now(),
+            details: "test failure".to_string(),
+        };
+
+        assert!(fault_manager
+            .execute_fallback_logic(&failure, "degraded_quality")
+            .await
+            .is_ok());
+        assert!(
+            fault_manager
+                .execute_fallback_logic(&failure, "totally_made_up_strategy")
+                .await
+                .is_err(),
+            "an unrecognized fallback strategy must be a real error, not a fabricated success"
+        );
     }
 
     #[test]

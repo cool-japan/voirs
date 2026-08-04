@@ -124,7 +124,10 @@ pub extern "C" fn voirs_reset_allocator_stats() -> c_int {
 #[no_mangle]
 pub extern "C" fn voirs_get_allocator_name() -> *const c_char {
     match get_global_allocator_name() {
-        Some(name) => name.as_ptr() as *const c_char,
+        // `name` is a `&'static CStr` (a real null-terminated C string literal),
+        // so `as_ptr()` is already `*const c_char` -- no cast, and no UB from
+        // handing a non-terminated Rust `&str` pointer across the FFI boundary.
+        Some(name) => name.as_ptr(),
         None => std::ptr::null(),
     }
 }
@@ -210,6 +213,52 @@ mod tests {
 
         let name = voirs_get_allocator_name();
         assert!(!name.is_null(), "Allocator name should not be null");
+    }
+
+    /// Regression test for the non-null-terminated `&str` -> `*const c_char`
+    /// UB: read the returned pointer through `CStr::from_ptr` exactly like a
+    /// real C/Python/Node caller would, and verify the *content* matches the
+    /// allocator that was actually configured (not just "non-null"). Covers
+    /// all three allocator kinds so a regression to a bare `&str` cast (which
+    /// would read garbage past the true string length for at least one of
+    /// these, depending on what follows it in rodata) has three chances to be
+    /// caught instead of one.
+    #[test]
+    fn test_allocator_name_is_real_null_terminated_cstr() {
+        let cases: [(c_int, &str); 3] = [
+            (VOIRS_ALLOCATOR_TRACKED_SYSTEM, "TrackedSystem"),
+            (VOIRS_ALLOCATOR_POOL, "Pool"),
+            (VOIRS_ALLOCATOR_DEBUG, "Debug"),
+        ];
+
+        for (allocator_type, expected_name) in cases {
+            let block_size = if allocator_type == VOIRS_ALLOCATOR_POOL {
+                64
+            } else {
+                0
+            };
+            let blocks_per_chunk = if allocator_type == VOIRS_ALLOCATOR_POOL {
+                10
+            } else {
+                0
+            };
+            let result = voirs_set_allocator(allocator_type, block_size, blocks_per_chunk, 0);
+            assert_eq!(result, 0, "Setting allocator {allocator_type} should succeed");
+
+            let name_ptr = voirs_get_allocator_name();
+            assert!(!name_ptr.is_null(), "Allocator name should not be null");
+
+            // SAFETY: name_ptr came from voirs_get_allocator_name(), which now
+            // returns a real `&'static CStr::as_ptr()`; this mirrors exactly
+            // what a C caller does with the returned pointer.
+            let name = unsafe { std::ffi::CStr::from_ptr(name_ptr) }
+                .to_str()
+                .expect("allocator name should be valid UTF-8");
+            assert_eq!(
+                name, expected_name,
+                "allocator name should reflect the configured allocator, not garbage"
+            );
+        }
     }
 
     #[test]

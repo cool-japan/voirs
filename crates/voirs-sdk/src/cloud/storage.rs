@@ -35,6 +35,11 @@ enum CloudBackend {
 /// Resolve `config` into a real network backend, or a clear reason why none
 /// is available. Never returns a "fake" backend.
 fn resolve_cloud_backend(config: &CloudConfig) -> CloudBackend {
+    // `reqwest` is built with `rustls-no-provider`; a default crypto
+    // provider must be installed before any client (even one that never
+    // ends up making a request) is built.
+    crate::ensure_crypto_provider();
+
     let bucket = config.storage_config.bucket_name.trim();
     if bucket.is_empty() {
         return CloudBackend::Unsupported(
@@ -78,9 +83,12 @@ fn resolve_cloud_backend(config: &CloudConfig) -> CloudBackend {
                 // An explicit endpoint override (e.g. a regional/VPC S3
                 // endpoint, or an S3-compatible service) uses path-style
                 // addressing rather than assuming `*.amazonaws.com`.
-                Some(endpoint) => {
-                    CloudBackend::S3(S3Client::new_path_style(http, endpoint, bucket, credentials))
-                }
+                Some(endpoint) => CloudBackend::S3(S3Client::new_path_style(
+                    http,
+                    endpoint,
+                    bucket,
+                    credentials,
+                )),
                 None => CloudBackend::S3(S3Client::new_aws(http, bucket, credentials)),
             }
         }
@@ -550,9 +558,12 @@ impl VoirsCloudStorage {
         let sync_manager = self.sync_manager.clone();
         let local_cache = self.local_cache.clone();
         let cloud_backend = Arc::clone(&self.cloud_backend);
+        let compression_type = self.get_compression_type();
 
         tokio::spawn(async move {
-            let _ = Self::run_sync_process(sync_manager, local_cache, cloud_backend).await;
+            let _ =
+                Self::run_sync_process(sync_manager, local_cache, cloud_backend, compression_type)
+                    .await;
         });
 
         Ok(())
@@ -562,6 +573,7 @@ impl VoirsCloudStorage {
         sync_manager: Arc<SyncManager>,
         local_cache: Arc<Mutex<LocalCache>>,
         cloud_backend: Arc<CloudBackend>,
+        compression_type: CompressionType,
     ) -> Result<()> {
         let operations = {
             let mut queue = sync_manager.sync_queue.lock().await;
@@ -573,7 +585,14 @@ impl VoirsCloudStorage {
         let mut errors = Vec::new();
 
         for operation in operations {
-            match Self::execute_sync_operation(&operation, &local_cache, &cloud_backend).await {
+            match Self::execute_sync_operation(
+                &operation,
+                &local_cache,
+                &cloud_backend,
+                compression_type,
+            )
+            .await
+            {
                 Ok(_) => {}
                 Err(e) => {
                     errors.push(SyncError {
@@ -614,6 +633,7 @@ impl VoirsCloudStorage {
         operation: &SyncOperation,
         local_cache: &Arc<Mutex<LocalCache>>,
         cloud_backend: &CloudBackend,
+        compression_type: CompressionType,
     ) -> Result<()> {
         match operation {
             SyncOperation::Upload(model_id) => {
@@ -622,7 +642,13 @@ impl VoirsCloudStorage {
             }
             SyncOperation::Download(model_id) => {
                 tracing::info!("Downloading model: {}", model_id);
-                Self::download_model_from_cloud(model_id, local_cache, cloud_backend).await
+                Self::download_model_from_cloud(
+                    model_id,
+                    local_cache,
+                    cloud_backend,
+                    compression_type,
+                )
+                .await
             }
             SyncOperation::Delete(model_id) => {
                 tracing::info!("Deleting model: {}", model_id);
@@ -638,6 +664,11 @@ impl VoirsCloudStorage {
     /// Really upload the model's bytes and metadata to `cloud_backend` as two
     /// S3 objects (`{model_id}.model`, `{model_id}.metadata`) via a genuine
     /// SigV4-signed HTTP PUT — no local-file mirroring.
+    ///
+    /// The on-disk cache file at `model.local_path` is already compressed
+    /// (written that way by [`CloudStorage::upload_model`]'s
+    /// `compress_data_with_type` call), so it is uploaded byte-for-byte
+    /// rather than being re-compressed on top of itself.
     async fn upload_model_to_cloud(
         model_id: &str,
         local_cache: &Arc<Mutex<LocalCache>>,
@@ -645,21 +676,18 @@ impl VoirsCloudStorage {
     ) -> Result<()> {
         let client = Self::require_s3(cloud_backend, "upload", model_id)?;
 
-        let (data, metadata) = {
+        let (compressed_data, metadata) = {
             let cache = local_cache.lock().await;
             let Some(model) = cache.models.get(model_id) else {
                 return Err(VoirsError::config_error(format!(
                     "Model {model_id} not found in local cache"
                 )));
             };
-            let data = fs::read(&model.local_path).await.map_err(|e| {
+            let compressed_data = fs::read(&model.local_path).await.map_err(|e| {
                 VoirsError::config_error(format!("Failed to read model file: {}", e))
             })?;
-            (data, model.metadata.clone())
+            (compressed_data, model.metadata.clone())
         };
-
-        let checksum = Self::calculate_checksum(&data);
-        let compressed_data = Self::compress_data(&data)?;
 
         client
             .put_object(
@@ -683,7 +711,7 @@ impl VoirsCloudStorage {
         tracing::info!(
             "Successfully uploaded model {} to cloud (checksum: {})",
             model_id,
-            checksum
+            metadata.checksum
         );
         Ok(())
     }
@@ -691,10 +719,18 @@ impl VoirsCloudStorage {
     /// Really download the model's bytes and metadata from `cloud_backend`
     /// via genuine SigV4-signed HTTP GET requests, then verify the checksum
     /// and populate the local cache — no local-file mirroring.
+    ///
+    /// `compression_type` must match whatever the uploader used (i.e. the
+    /// caller's current [`VoirsCloudStorage::get_compression_type`]) so the
+    /// fetched bytes decompress into the exact data the checksum was
+    /// originally computed over. The compressed bytes (not the decompressed
+    /// ones) are written to the local cache file, matching
+    /// [`CloudStorage::upload_model`]'s on-disk convention.
     async fn download_model_from_cloud(
         model_id: &str,
         local_cache: &Arc<Mutex<LocalCache>>,
         cloud_backend: &CloudBackend,
+        compression_type: CompressionType,
     ) -> Result<()> {
         let client = Self::require_s3(cloud_backend, "download", model_id)?;
 
@@ -703,10 +739,9 @@ impl VoirsCloudStorage {
         let metadata: ModelMetadata = serde_json::from_slice(&metadata_json)
             .map_err(|e| VoirsError::config_error(format!("Failed to parse metadata: {}", e)))?;
 
-        // Decompress data
-        let data = Self::decompress_data(&compressed_data)?;
-
-        // Verify checksum
+        // Decompress only to verify the checksum against the original raw
+        // data; the on-disk cache file itself stays compressed.
+        let data = Self::decompress_data_with_type(&compressed_data, compression_type)?;
         let calculated_checksum = Self::calculate_checksum(&data);
         if calculated_checksum != metadata.checksum {
             return Err(VoirsError::config_error(format!(
@@ -715,10 +750,12 @@ impl VoirsCloudStorage {
             )));
         }
 
-        // Save to local cache
+        // Save the compressed bytes to the local cache (matching
+        // `upload_model`'s on-disk convention, so future local-cache reads
+        // decompress correctly).
         let cache_dir = { local_cache.lock().await.cache_dir.clone() };
         let local_path = cache_dir.join(format!("{}.model", model_id));
-        fs::write(&local_path, &data)
+        fs::write(&local_path, &compressed_data)
             .await
             .map_err(|e| VoirsError::config_error(format!("Failed to write local model: {}", e)))?;
 
@@ -752,10 +789,7 @@ impl VoirsCloudStorage {
             .delete_object(&format!("{model_id}.metadata"))
             .await?;
 
-        tracing::info!(
-            "Successfully deleted model {} from cloud storage",
-            model_id
-        );
+        tracing::info!("Successfully deleted model {} from cloud storage", model_id);
         Ok(())
     }
 
@@ -876,8 +910,13 @@ impl CloudStorage for VoirsCloudStorage {
         );
 
         // Attempt cloud download
-        match Self::download_model_from_cloud(model_id, &self.local_cache, &self.cloud_backend)
-            .await
+        match Self::download_model_from_cloud(
+            model_id,
+            &self.local_cache,
+            &self.cloud_backend,
+            self.get_compression_type(),
+        )
+        .await
         {
             Ok(()) => {
                 // Successfully downloaded, now retrieve from cache
@@ -1384,8 +1423,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_upload_download_delete_model_to_cloud_round_trip_real_bytes_over_loopback_http()
-    {
+    async fn test_upload_download_delete_model_to_cloud_round_trip_real_bytes_over_loopback_http() {
         let server = spawn_mock_object_server().await;
         let temp_dir = TempDir::new().unwrap();
 
@@ -1508,7 +1546,12 @@ mod tests {
 
         async fn read_request(
             socket: &mut TcpStream,
-        ) -> (String, String, std::collections::HashMap<String, String>, Vec<u8>) {
+        ) -> (
+            String,
+            String,
+            std::collections::HashMap<String, String>,
+            Vec<u8>,
+        ) {
             let mut buf: Vec<u8> = Vec::new();
             let mut tmp = [0u8; 8192];
             let header_len = loop {
@@ -1568,11 +1611,7 @@ mod tests {
                         "expected a real SigV4 Authorization header, got: {headers:?}"
                     );
                     // Path-style: "/{bucket}/{key}".
-                    let key = path
-                        .splitn(3, '/')
-                        .nth(2)
-                        .unwrap_or_default()
-                        .to_string();
+                    let key = path.splitn(3, '/').nth(2).unwrap_or_default().to_string();
                     match method.as_str() {
                         "PUT" => {
                             store.lock().expect("store lock").insert(key, body);

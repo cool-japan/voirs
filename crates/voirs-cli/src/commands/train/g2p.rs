@@ -1,17 +1,25 @@
 //! G2P model training command implementation
 //!
 //! Provides CLI interface for training G2P (Grapheme-to-Phoneme) models.
+//!
+//! # Current status: fails closed
+//!
+//! `voirs-g2p`'s `LstmTrainer` does run a real forward pass over real dictionary
+//! data (real character/phoneme index tensors, a real encoder/decoder forward
+//! pass, a real loss computation), but it never performs a backward pass or
+//! optimizer step (see `G2P_TRAINING_BLOCKED_REASON` below for exact evidence), so
+//! model weights never change and the saved "model" file is fabricated data, not
+//! serialized weights. Rather than run a loop that cannot learn and then present
+//! its output as a trained model, this command validates and loads the
+//! pronunciation dictionary (genuinely useful, independent of training) and then
+//! refuses to train, with a diagnostic explaining exactly what is missing. This
+//! guard should be removed once `voirs-g2p` implements real gradient-based
+//! training.
 
-use super::progress::{
-    EpochMetrics, ResourceUsage, TrainingMetrics, TrainingProgress, TrainingStats,
-};
+use crate::error::CliError;
 use crate::GlobalOptions;
-use candle_core::Device;
-use std::path::{Path, PathBuf};
-use std::time::Instant;
-use voirs_g2p::backends::neural::training::{LstmConfig, LstmTrainer};
-use voirs_g2p::models::{DatasetInfo, TrainingDataset, TrainingExample};
-use voirs_g2p::{LanguageCode, Phoneme};
+use std::path::PathBuf;
+use voirs_g2p::LanguageCode;
 use voirs_sdk::Result;
 
 /// Run G2P model training
@@ -53,14 +61,13 @@ pub async fn run_train_g2p(
         std::fs::create_dir_all(parent)?;
     }
 
-    train_g2p_model(language, dictionary, output, config, epochs, lr, global).await
+    train_g2p_model(language, dictionary, output, epochs, lr, global).await
 }
 
 async fn train_g2p_model(
     language: String,
     dictionary: PathBuf,
     output: PathBuf,
-    _config: Option<PathBuf>,
     epochs: usize,
     lr: f64,
     global: &GlobalOptions,
@@ -73,288 +80,62 @@ async fn train_g2p_model(
         );
     }
 
-    // Load and validate dictionary
+    // Load and validate dictionary. This is real, useful validation independent
+    // of whether training itself can run: it parses the actual file and reports
+    // real entry counts / malformed lines.
     let dict_entries = load_pronunciation_dictionary(&dictionary, &language).await?;
+    let resolved_language = parse_language_code(&language);
 
     if !global.quiet {
         println!("   ✓ Loaded dictionary: {} entries", dict_entries.len());
-        println!("   ✓ Language: {}", language);
-        println!();
-        println!("🔨 Building G2P model architecture:");
-        println!("   - Encoder: Bidirectional LSTM (3 layers, 256 hidden)");
-        println!("   - Attention: Multi-head attention (4 heads)");
-        println!("   - Decoder: LSTM with attention (2 layers, 256 hidden)");
-        println!("   - Output: Phoneme vocabulary projection");
+        println!(
+            "   ✓ Language: {} (resolved: {:?})",
+            language, resolved_language
+        );
         println!();
     }
 
-    // Determine device (CPU or GPU)
-    let device = std::panic::catch_unwind(|| Device::cuda_if_available(0))
-        .ok()
-        .and_then(|r| r.ok())
-        .unwrap_or(Device::Cpu);
-    if !global.quiet {
-        println!("   Using device: {:?}", device);
-        println!();
-    }
-
-    // Configure LSTM model
-    let lstm_config = LstmConfig {
-        vocab_size: 256,         // Character vocabulary
-        phoneme_vocab_size: 128, // Phoneme vocabulary
-        hidden_size: 256,        // Hidden layer size
-        num_layers: 3,           // 3 LSTM layers
-        dropout: 0.1,            // 10% dropout
-        use_attention: true,     // Enable attention mechanism
-        max_seq_len: 100,        // Maximum sequence length
-    };
-
-    // Create LSTM trainer
-    let mut trainer = LstmTrainer::new(device, lstm_config);
-
-    // Convert DictionaryEntry to TrainingExample
-    let training_examples: Vec<TrainingExample> = dict_entries
-        .iter()
-        .map(|entry| TrainingExample {
-            text: entry.grapheme.clone(),
-            phonemes: entry
-                .phonemes
-                .iter()
-                .map(|p| Phoneme::new(p.clone()))
-                .collect(),
-            context: None,
-            weight: 1.0, // Equal weight for all examples
-        })
-        .collect();
-
-    // Split dataset into training and validation (80/20 split)
-    let split_idx = (training_examples.len() * 4) / 5;
-    let train_examples = training_examples[..split_idx].to_vec();
-    let val_examples = training_examples[split_idx..].to_vec();
-
-    let train_dataset = TrainingDataset {
-        examples: train_examples,
-        metadata: DatasetInfo {
-            name: "Custom G2P Dictionary".to_string(),
-            train_size: split_idx,
-            validation_size: dict_entries.len() - split_idx,
-            test_size: None,
-            source: dictionary.display().to_string(),
-            version: "1.0.0".to_string(),
-        },
-        language: parse_language_code(&language),
-    };
-
-    let val_dataset = TrainingDataset {
-        examples: val_examples,
-        metadata: train_dataset.metadata.clone(),
-        language: parse_language_code(&language),
-    };
-
-    // Create progress tracker
-    let batch_size = 64;
-    let batches_per_epoch = train_dataset.examples.len().div_ceil(batch_size);
-    let mut progress = TrainingProgress::new(epochs, batches_per_epoch, !global.quiet);
-
-    // Training statistics
-    let start_time = Instant::now();
-    let mut total_steps = 0;
-    let mut best_val_loss = f32::INFINITY;
-
-    if !global.quiet {
-        println!("🚀 Starting neural G2P training...");
-        println!("   Training examples: {}", train_dataset.examples.len());
-        println!("   Validation examples: {}", val_dataset.examples.len());
-        println!("   Batch size: {}", batch_size);
-        println!();
-    }
-
-    // Real training loop with LstmTrainer
-    for epoch in 0..epochs {
-        progress.start_epoch(epoch, batches_per_epoch);
-
-        let epoch_start = Instant::now();
-
-        // Train one epoch using real LSTM trainer
-        let train_result = trainer
-            .train_model(&train_dataset, Some(&val_dataset), 1, batch_size)
-            .await;
-
-        match train_result {
-            Ok((encoder, decoder)) => {
-                // Get training statistics from trainer
-                let stats = trainer.get_training_stats();
-                let train_loss = stats.get("last_train_loss").copied().unwrap_or(0.5) as f64;
-                let val_loss = stats.get("last_val_loss").copied().unwrap_or(0.5);
-
-                // Simulate batch progress for display
-                for batch in 0..batches_per_epoch {
-                    let batch_start = Instant::now();
-                    let batch_loss = train_loss + (fastrand::f64() - 0.5) * 0.1;
-
-                    // Calculate samples per second
-                    let batch_duration = batch_start.elapsed().as_secs_f64().max(0.001);
-                    let samples_per_sec = (batch_size as f64) / batch_duration;
-
-                    progress.update_batch(batch, batch_loss, samples_per_sec);
-
-                    // Update metrics every 5 batches
-                    if batch % 5 == 0 {
-                        let metrics = TrainingMetrics {
-                            loss: batch_loss,
-                            learning_rate: lr,
-                            grad_norm: Some(0.3),
-                        };
-                        progress.update_metrics(&metrics);
-
-                        let resources = ResourceUsage::current();
-                        progress.update_resources(&resources);
-                    }
-
-                    progress.finish_batch();
-                    total_steps += 1;
-                }
-
-                // Update best validation loss
-                if val_loss < best_val_loss {
-                    best_val_loss = val_loss;
-                    if !global.quiet {
-                        println!(
-                            "\n💾 New best model saved (val_loss: {:.4}, accuracy: ~{:.2}%)",
-                            val_loss,
-                            (1.0 - val_loss) * 100.0
-                        );
-                    }
-
-                    // Save best model
-                    if epoch % 10 == 0 || val_loss < best_val_loss + 0.01 {
-                        let best_path = output
-                            .display()
-                            .to_string()
-                            .trim_end_matches(".safetensors")
-                            .to_string()
-                            + "_best.safetensors";
-                        if let Err(e) =
-                            trainer.save_model(&encoder, &decoder, Path::new(&best_path))
-                        {
-                            if !global.quiet {
-                                println!("⚠️  Failed to save best model: {}", e);
-                            }
-                        }
-                    }
-                }
-
-                let epoch_metrics = EpochMetrics {
-                    epoch,
-                    train_loss,
-                    val_loss: Some(val_loss as f64),
-                    duration: epoch_start.elapsed(),
-                };
-
-                progress.finish_epoch(&epoch_metrics);
-
-                // Save checkpoint every 10 epochs
-                if epoch % 10 == 0 && !global.quiet {
-                    println!("\n💾 Checkpoint saved: g2p_epoch_{}.safetensors", epoch);
-                    let checkpoint_path = format!(
-                        "{}_epoch_{}.safetensors",
-                        output
-                            .display()
-                            .to_string()
-                            .trim_end_matches(".safetensors"),
-                        epoch
-                    );
-                    if let Err(e) =
-                        trainer.save_model(&encoder, &decoder, Path::new(&checkpoint_path))
-                    {
-                        if !global.quiet {
-                            println!("⚠️  Failed to save checkpoint: {}", e);
-                        }
-                    }
-                }
-
-                // Save final model on last epoch
-                if epoch == epochs - 1 {
-                    if let Err(e) = trainer.save_model(&encoder, &decoder, &output) {
-                        if !global.quiet {
-                            println!("⚠️  Failed to save final model: {}", e);
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                if !global.quiet {
-                    println!("⚠️  Training epoch {} failed: {}", epoch, e);
-                }
-                // Continue with simulated metrics
-                let train_loss = 0.5;
-                let epoch_metrics = EpochMetrics {
-                    epoch,
-                    train_loss,
-                    val_loss: Some(0.45),
-                    duration: epoch_start.elapsed(),
-                };
-                progress.finish_epoch(&epoch_metrics);
-            }
-        }
-    }
-
-    // Finish training
-    let total_duration = start_time.elapsed();
-    progress.finish("✅ G2P training completed successfully!");
-
-    // Print summary
-    if !global.quiet {
-        let best_val_accuracy = (1.0 - best_val_loss as f64).max(0.0);
-        let stats = TrainingStats {
-            total_duration,
-            epochs_completed: epochs,
-            total_steps,
-            final_train_loss: 0.08,
-            final_val_loss: Some(best_val_loss as f64),
-            best_val_loss: Some(best_val_loss as f64),
-            avg_samples_per_sec: (total_steps * batch_size) as f64 / total_duration.as_secs_f64(),
-        };
-        progress.print_summary(&stats);
-
-        println!("\n📊 Model outputs:");
-        println!("   - Final model:  {}", output.display());
-        println!(
-            "   - Best model:   {}_best.safetensors",
-            output
-                .display()
-                .to_string()
-                .trim_end_matches(".safetensors")
-        );
-        println!(
-            "   - Vocab file:   {}_vocab.json",
-            output
-                .display()
-                .to_string()
-                .trim_end_matches(".safetensors")
-        );
-        println!(
-            "   - Training log: {}.log",
-            output
-                .display()
-                .to_string()
-                .trim_end_matches(".safetensors")
-        );
-
-        println!("\n📈 Performance metrics:");
-        println!(
-            "   - Best validation accuracy: {:.2}%",
-            best_val_accuracy * 100.0
-        );
-        println!(
-            "   - Phoneme error rate (PER):  {:.2}%",
-            (1.0 - best_val_accuracy) * 100.0
-        );
-        println!("\n✅ Real neural G2P model trained successfully with LSTM architecture!");
-    }
-
-    Ok(())
+    let entry_count = dict_entries.len();
+    let output_display = output.display();
+    Err(CliError::NotImplemented(format!(
+        "G2P training requested (language={language}, dictionary entries={entry_count}, \
+         output={output_display}, epochs={epochs}, lr={lr}) but refused: \
+         {G2P_TRAINING_BLOCKED_REASON}"
+    ))
+    .into())
 }
+
+/// Why G2P training refuses to run.
+///
+/// Evidence, all in `crates/voirs-g2p/src/backends/neural/training.rs`:
+/// - `LstmTrainer::train_epoch` (~L207-239) genuinely runs a real forward pass
+///   (real character/phoneme index tensors built from the dictionary, a real
+///   `SimpleEncoder`/`SimpleDecoder` forward pass, a real loss computation), but
+///   the comment directly above the loss accumulation (~L225) states: "Simulated
+///   backward pass and parameter update / In a full implementation, this would
+///   involve actual gradients and optimization" -- no backward pass or optimizer
+///   step ever runs, so weights never change.
+/// - `train_model` (~L155) calls `prepare_batches` once before the epoch loop, so
+///   with unchanging weights every epoch would report a bit-identical loss: there
+///   is no learning curve at all, real or otherwise.
+/// - `calculate_sequence_loss` (~L361-373) returns a constant `Ok(0.5)` whenever
+///   predicted/target tensor shapes mismatch, silently substituting a stub loss.
+/// - `save_model_safetensors` (~L423-456) ignores the encoder/decoder it is given
+///   (parameters are literally named `_encoder`/`_decoder`) and writes a constant
+///   dummy tensor (`vec![0.1f32; 100]`) plus a human-readable descriptive string
+///   as the file contents -- not a real SafeTensors payload and not the model's
+///   actual (never-updated) weights either way.
+const G2P_TRAINING_BLOCKED_REASON: &str =
+    "LstmTrainer::train_epoch runs a real forward pass over real dictionary data but never \
+     performs a backward pass or optimizer step (the code says so directly: \"Simulated \
+     backward pass and parameter update\"), so model weights never change and every epoch \
+     would report the same loss; calculate_sequence_loss substitutes a constant Ok(0.5) on \
+     any tensor shape mismatch instead of a real computed loss; and save_model_safetensors \
+     ignores the trained encoder/decoder entirely and writes a constant dummy tensor and a \
+     descriptive string rather than real weights or a real SafeTensors payload. Training \
+     would silently produce a fabricated \"model\" file with no relationship to the \
+     dictionary or the requested epochs, so this command refuses to run until voirs-g2p \
+     implements real gradient-based training";
 
 // Helper functions
 
@@ -449,7 +230,7 @@ fn parse_language_code(lang: &str) -> LanguageCode {
     }
 }
 
-fn truncate_path(path: &Path, max_len: usize) -> String {
+fn truncate_path(path: &std::path::Path, max_len: usize) -> String {
     let path_str = path.display().to_string();
     if path_str.len() <= max_len {
         path_str
@@ -478,5 +259,82 @@ mod tests {
         assert!(matches!(parse_language_code("korean"), LanguageCode::Ko));
         assert!(matches!(parse_language_code("german"), LanguageCode::De));
         assert!(matches!(parse_language_code("unknown"), LanguageCode::EnUs)); // Defaults to English
+    }
+
+    fn test_global_options(quiet: bool) -> GlobalOptions {
+        GlobalOptions {
+            config: None,
+            verbose: 0,
+            quiet,
+            format: None,
+            voice: None,
+            gpu: false,
+            threads: None,
+        }
+    }
+
+    /// A dictionary that fails to parse must still be rejected with a real error
+    /// (unaffected by the fail-closed training guard: this is input validation).
+    #[tokio::test]
+    async fn test_missing_dictionary_is_rejected() {
+        let temp = tempfile::tempdir().expect("failed to create temp dir");
+        let missing = temp.path().join("does-not-exist.dict");
+        let output = temp.path().join("out").join("g2p.safetensors");
+
+        let result = run_train_g2p(
+            "en".to_string(),
+            missing,
+            output,
+            None,
+            5,
+            0.001,
+            &test_global_options(true),
+        )
+        .await;
+
+        assert!(result.is_err(), "missing dictionary must be rejected");
+    }
+
+    /// G2P training must fail closed (never fabricate a "trained" model file) and
+    /// must explain why, even when given a well-formed dictionary.
+    #[tokio::test]
+    async fn test_g2p_training_fails_closed_without_fabricating_a_model() {
+        let temp = tempfile::tempdir().expect("failed to create temp dir");
+        let dict_path = temp.path().join("test.dict");
+        std::fs::write(&dict_path, "hello HH AH L OW\nworld W ER L D\n")
+            .expect("failed to write dictionary");
+        let output_dir = temp.path().join("out");
+        let output = output_dir.join("g2p.safetensors");
+
+        let result = run_train_g2p(
+            "en".to_string(),
+            dict_path,
+            output,
+            None,
+            5,
+            0.001,
+            &test_global_options(true),
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "G2P training must fail closed instead of fabricating a trained model"
+        );
+        let message = result.unwrap_err().to_string();
+        assert!(
+            message.contains("backward pass"),
+            "error should explain the real blocker (no backward pass), got: {message}"
+        );
+        assert!(
+            message.contains("2 entries") || message.contains("entries=2"),
+            "error should reflect the real parsed dictionary size, got: {message}"
+        );
+
+        // No model file should ever be fabricated for an untrained model.
+        assert!(
+            !output_dir.exists() || std::fs::read_dir(&output_dir).unwrap().next().is_none(),
+            "must not write any model file for a model that was never actually trained"
+        );
     }
 }

@@ -1439,7 +1439,11 @@ mod tests {
         // makes the fail-closed `save_ogg` above safe (there is no way to construct a file
         // this crate will silently mis-parse as valid Ogg Vorbis).
         let temp_file = NamedTempFile::new().unwrap();
-        std::fs::write(temp_file.path(), b"OggSnot a real ogg page at all, just noise").unwrap();
+        std::fs::write(
+            temp_file.path(),
+            b"OggSnot a real ogg page at all, just noise",
+        )
+        .unwrap();
 
         assert!(AudioBuffer::load_ogg(temp_file.path()).is_err());
         assert!(AudioBuffer::get_ogg_info(temp_file.path()).is_err());

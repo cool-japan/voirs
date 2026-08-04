@@ -341,15 +341,6 @@ impl IsoUsacValidator {
             return None;
         }
 
-        let ref_energy: f64 = ref_samples
-            .iter()
-            .take(usable_len)
-            .map(|&x| f64::from(x) * f64::from(x))
-            .sum();
-        if ref_energy <= 1e-12 {
-            return None;
-        }
-
         let mut best_lag = 0usize;
         let mut best_corr = f64::MIN;
         for lag in 0..=max_lag {
@@ -357,15 +348,25 @@ impl IsoUsacValidator {
             if n == 0 {
                 continue;
             }
+            // Both the cross term and *each* energy term are accumulated over
+            // exactly the same overlapping window `[0, n)`, so the normalized
+            // correlation is comparable across lags: using a fixed
+            // full-length reference energy here (instead of the per-lag
+            // window) would systematically bias the normalized score toward
+            // smaller lags as `n` shrinks, since the (necessarily smaller)
+            // cross/deg-energy sums would be divided by a disproportionately
+            // large, lag-independent denominator.
             let mut cross = 0.0f64;
+            let mut ref_energy = 0.0f64;
             let mut deg_energy = 0.0f64;
             for i in 0..n {
                 let r = f64::from(ref_samples[i]);
                 let d = f64::from(deg_samples[i + lag]);
                 cross += r * d;
+                ref_energy += r * r;
                 deg_energy += d * d;
             }
-            if deg_energy <= 1e-12 {
+            if ref_energy <= 1e-12 || deg_energy <= 1e-12 {
                 continue;
             }
             let normalized = cross / (ref_energy.sqrt() * deg_energy.sqrt());
@@ -591,37 +592,51 @@ impl IsoUsacValidator {
 
     /// Detect bandwidth-edge limitation artifacts (abrupt low-pass cutoff).
     ///
-    /// A codec that limits bandwidth more aggressively than its nominal mode
-    /// implies produces a sharp spectral cliff rather than the smooth,
-    /// gradual roll-off of natural speech/audio content. This measures the
-    /// power ratio between the two analysis bins straddling the mode's
-    /// nominal bandwidth edge; a drop of more than 20 dB across that single
-    /// bin boundary indicates an artificially hard cutoff rather than
-    /// content that simply has little energy up there naturally.
+    /// A codec that limits bandwidth more aggressively than natural
+    /// speech/audio roll-off produces a sharp spectral *cliff*: a single
+    /// bin-to-bin power drop far steeper than the gradual decay elsewhere in
+    /// the spectrum. Rather than checking a fixed nominal edge bin (which
+    /// coincides with Nyquist — i.e. sits *outside* any bin an FFT of real
+    /// audio can even populate — for three of the four USAC bandwidth
+    /// modes), this scans every consecutive-bin power ratio across the upper
+    /// three-quarters of the spectrum (skipping the low end, where natural
+    /// formant structure can also show locally large drops) and flags a hard
+    /// cutoff when the single steepest drop is both large in absolute terms
+    /// (>15 dB in one bin step) and a clear outlier relative to the typical
+    /// (median) drop elsewhere in that same range — the signature of an
+    /// artificial brick-wall filter rather than gradual natural roll-off.
     fn detect_bandwidth_artifacts(&self, samples: &[f32]) -> Result<bool, StandardsError> {
         let power = match Self::averaged_power_spectrum(samples, self.sample_rate) {
-            Some(power) if power.len() > 4 => power,
+            Some(power) if power.len() > 16 => power,
             _ => return Ok(false),
         };
 
-        let fft_size = Self::fft_size_for(samples.len());
-        let bin_hz = self.sample_rate as f32 / fft_size as f32;
-        let edge_bin = ((self.bandwidth_mode.bandwidth_hz() as f32 / bin_hz) as usize)
-            .clamp(1, power.len() - 2);
-
-        // Average power just below vs. just above the nominal bandwidth edge.
-        let below_start = edge_bin.saturating_sub(2);
-        let below: f32 = power[below_start..edge_bin].iter().sum::<f32>()
-            / (edge_bin - below_start).max(1) as f32;
-        let above_end = (edge_bin + 3).min(power.len());
-        let above: f32 = power[edge_bin..above_end].iter().sum::<f32>()
-            / (above_end - edge_bin).max(1) as f32;
-
-        if below <= 1e-20 {
+        let scan_start = power.len() / 4;
+        let mut drops_db = Vec::with_capacity(power.len() - scan_start);
+        for i in scan_start..power.len() - 1 {
+            let from = power[i].max(1e-20);
+            let to = power[i + 1].max(1e-20);
+            if from <= 1e-18 {
+                continue; // Nothing but noise floor here; not a meaningful edge.
+            }
+            drops_db.push(10.0 * (from / to).log10());
+        }
+        if drops_db.len() < 4 {
             return Ok(false);
         }
-        let drop_db = 10.0 * (below / above.max(1e-20)).log10();
-        Ok(drop_db > 20.0)
+
+        let max_drop = drops_db.iter().cloned().fold(f32::MIN, f32::max);
+        // Median *magnitude* of bin-to-bin change (sign-agnostic): the
+        // typical scale of natural spectral fluctuation in this range. Using
+        // the magnitude (rather than the signed median, which can be
+        // near-zero or even negative in a locally rising region) keeps the
+        // outlier comparison well-defined regardless of the overall spectral
+        // trend.
+        let mut magnitudes: Vec<f32> = drops_db.iter().map(|d| d.abs()).collect();
+        magnitudes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let typical_fluctuation = magnitudes[magnitudes.len() / 2];
+
+        Ok(max_drop > 15.0 && max_drop > typical_fluctuation * 5.0 + 3.0)
     }
 
     /// FFT length used for spectral analysis at a given sample count: the
@@ -739,5 +754,130 @@ mod tests {
 
         let compliance = result.unwrap();
         assert!(compliance.quality_score >= 1.0 && compliance.quality_score <= 5.0);
+    }
+
+    fn sine(freq: f32, sample_rate: u32, seconds: f32) -> Vec<f32> {
+        let n = (sample_rate as f32 * seconds) as usize;
+        (0..n)
+            .map(|i| {
+                let t = i as f32 / sample_rate as f32;
+                (2.0 * std::f32::consts::PI * freq * t).sin() * 0.6
+            })
+            .collect()
+    }
+
+    fn lcg_noise(seed: u64, len: usize) -> Vec<f32> {
+        let mut state = seed;
+        (0..len)
+            .map(|_| {
+                state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+                let unit = (state >> 33) as f32 / (1u64 << 31) as f32;
+                2.0 * unit - 1.0
+            })
+            .collect()
+    }
+
+    /// `detect_tonal_artifacts` must actually respond to the signal: a clean
+    /// broadband-noise-free tone (no isolated peak far above a local floor
+    /// that is itself near zero) should not falsely trigger, while an
+    /// artificial "birdie" -- a single, very narrow, isolated tone injected
+    /// into an otherwise-quiet spectrum -- must be detected.
+    #[test]
+    fn test_detect_tonal_artifacts_responds_to_isolated_peak() {
+        let validator = IsoUsacValidator::new(UsacBandwidthMode::WideBand, 64).unwrap();
+        let sample_rate = 16_000u32;
+
+        // Broadband noise: no single isolated narrow peak standing far above
+        // its local neighborhood (noise energy is roughly uniform per-bin).
+        let noise = lcg_noise(0x1234_5678, sample_rate as usize);
+        assert!(
+            !validator.detect_tonal_artifacts(&noise).unwrap(),
+            "broadband noise should not be flagged as containing an isolated tonal artifact"
+        );
+
+        // Near-silence with a single strong, narrow tone injected: classic
+        // "birdie" artifact shape (isolated peak far above an ~empty floor).
+        let mut birdie = vec![0.0f32; sample_rate as usize];
+        for (i, s) in birdie.iter_mut().enumerate() {
+            let t = i as f32 / sample_rate as f32;
+            *s = (2.0 * std::f32::consts::PI * 3000.0 * t).sin() * 0.5;
+        }
+        assert!(
+            validator.detect_tonal_artifacts(&birdie).unwrap(),
+            "an isolated strong tone in an otherwise near-silent spectrum should be flagged"
+        );
+    }
+
+    /// `detect_bandwidth_artifacts` must distinguish a hard low-pass cliff
+    /// (an artifact) from full-band content that naturally has energy at high
+    /// frequencies (not an artifact).
+    #[test]
+    fn test_detect_bandwidth_artifacts_responds_to_hard_cutoff() {
+        let validator = IsoUsacValidator::new(UsacBandwidthMode::NarrowBand, 16).unwrap();
+        let sample_rate = 8_000u32;
+
+        // Broadband noise: gradual, roughly-uniform bin-to-bin fluctuation
+        // with no single dominating cliff -- must not be flagged.
+        let noise = lcg_noise(0xFEED_BEEF, sample_rate as usize);
+        assert!(
+            !validator.detect_bandwidth_artifacts(&noise).unwrap(),
+            "broadband noise (gradual spectral variation, no cliff) should not be flagged"
+        );
+
+        // A harmonic comb with real energy up to 2 kHz and then an abrupt
+        // stop (no content at all above it): the classic brick-wall
+        // low-pass-filter artifact shape, well within the scanned upper
+        // three-quarters of the spectrum for an 8 kHz sample rate.
+        let mut band_limited = vec![0.0f32; sample_rate as usize];
+        for h in 1..=10u32 {
+            let freq = 200.0 * h as f32; // harmonics up to 2000 Hz
+            let component = sine(freq, sample_rate, 1.0);
+            for (s, c) in band_limited.iter_mut().zip(component.iter()) {
+                *s += c * 0.1;
+            }
+        }
+        assert!(
+            validator.detect_bandwidth_artifacts(&band_limited).unwrap(),
+            "a harmonic comb with real energy up to 2 kHz and an abrupt stop above it \
+             should be flagged as a hard bandwidth cutoff"
+        );
+    }
+
+    /// `estimate_delay` must return a genuinely measured lag (not the fixed
+    /// specification constant) when given a reference/degraded pair with a
+    /// known, deliberately introduced offset.
+    #[test]
+    fn test_estimate_delay_measures_real_offset_from_reference() {
+        let validator = IsoUsacValidator::new(UsacBandwidthMode::WideBand, 64).unwrap();
+        let sample_rate = 16_000u32;
+
+        // Broadband noise (not a periodic tone): cross-correlation against a
+        // shifted copy of a periodic signal has ambiguous secondary peaks at
+        // every multiple of the period, whereas noise gives a single sharp,
+        // unambiguous correlation peak at the true lag.
+        let reference_samples = lcg_noise(0x0BAD_F00D, sample_rate as usize / 2);
+        let reference = AudioBuffer::new(reference_samples.clone(), sample_rate, 1);
+
+        // Introduce a known 30 ms delay by prepending silence.
+        let delay_samples = (0.03 * sample_rate as f32) as usize;
+        let mut delayed_samples = vec![0.0f32; delay_samples];
+        delayed_samples.extend(reference_samples);
+        let delayed = AudioBuffer::new(delayed_samples, sample_rate, 1);
+
+        let measured = validator
+            .estimate_delay(&delayed, Some(&reference))
+            .unwrap();
+        let expected_ms = 30.0;
+        assert!(
+            (measured - expected_ms).abs() < 2.0,
+            "measured delay ({measured} ms) should be close to the real 30 ms offset, \
+             not the fixed 60 ms specification constant"
+        );
+
+        // Without a reference, there is nothing to measure a lag from: falls
+        // back to the honestly-labeled specification-derived estimate, which
+        // must still be a positive, finite number in the typical USAC range.
+        let no_reference = validator.estimate_delay(&delayed, None).unwrap();
+        assert!(no_reference > 0.0 && no_reference.is_finite());
     }
 }

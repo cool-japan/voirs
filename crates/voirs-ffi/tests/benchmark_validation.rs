@@ -85,7 +85,14 @@ fn test_config_creation_performance() {
 
 #[test]
 fn test_pipeline_validation_performance() {
-    // Test that pipeline validation meets performance threshold
+    // This test measures voirs_is_pipeline_valid()'s call overhead, which is
+    // independent of whether the handle backs a real (model-loaded) or
+    // placeholder pipeline -- so use VOIRS_BENCHMARK_MODE (like
+    // test_pipeline_creation_performance above) to get a handle without
+    // paying for real model loading, which would make this a network/model-
+    // cache availability test rather than a validation-speed test.
+    std::env::set_var("VOIRS_BENCHMARK_MODE", "1");
+
     #[allow(unused_unsafe)]
     let pipeline_id = unsafe { voirs_create_pipeline() };
     assert!(pipeline_id > 0, "Pipeline creation should succeed");
@@ -116,6 +123,8 @@ fn test_pipeline_validation_performance() {
         let result = voirs_destroy_pipeline(pipeline_id);
         assert_eq!(result, 0, "Pipeline destruction should succeed");
     }
+
+    std::env::remove_var("VOIRS_BENCHMARK_MODE");
 }
 
 #[test]
@@ -164,7 +173,13 @@ fn test_error_handling_performance() {
 
 #[test]
 fn test_concurrent_access_performance() {
-    // Test that concurrent access doesn't degrade performance excessively
+    // Test that concurrent access doesn't degrade performance excessively.
+    // This measures pipeline-management overhead under concurrency (ID
+    // allocation, table locking), not real model loading, so use
+    // VOIRS_BENCHMARK_MODE to avoid 400 real pipeline builds (4 threads *
+    // 100 iterations) each requiring model weights / network access.
+    std::env::set_var("VOIRS_BENCHMARK_MODE", "1");
+
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
     use std::thread;
@@ -224,6 +239,8 @@ fn test_concurrent_access_performance() {
         "Concurrent throughput too low: {:.2} ops/sec < 0.1 ops/sec",
         throughput
     );
+
+    std::env::remove_var("VOIRS_BENCHMARK_MODE");
 }
 
 #[test]
@@ -278,7 +295,14 @@ mod performance_validation {
     #[test]
     #[allow(unused_unsafe)]
     fn test_benchmark_infrastructure_validation() {
-        // Quick validation that benchmark infrastructure is working
+        // Quick validation that benchmark infrastructure is working. Uses
+        // VOIRS_BENCHMARK_MODE for the same reason as the other tests in
+        // this file: this validates the benchmark harness's pipeline-handle
+        // plumbing, not real model loading (which would make "quick" and
+        // "30 second threshold to account for slower CI" mean "requires
+        // network access to a model host", an unrelated concern).
+        std::env::set_var("VOIRS_BENCHMARK_MODE", "1");
+
         let start = Instant::now();
 
         // Perform a simple operation
@@ -287,6 +311,8 @@ mod performance_validation {
             assert!(pipeline_id > 0);
             voirs_destroy_pipeline(pipeline_id);
         }
+
+        std::env::remove_var("VOIRS_BENCHMARK_MODE");
 
         let duration = start.elapsed();
 

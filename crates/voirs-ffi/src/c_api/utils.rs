@@ -4,6 +4,7 @@
 //! logging, and error handling through the C API.
 
 use crate::VoirsErrorCode;
+use parking_lot::Mutex;
 use std::os::raw::{c_char, c_float, c_int, c_uint, c_void};
 use std::ptr;
 
@@ -44,7 +45,8 @@ impl Default for VoirsMemoryStats {
 pub struct VoirsSystemInfo {
     /// Number of CPU cores
     pub cpu_cores: c_uint,
-    /// Available RAM in MB
+    /// Total physical RAM in MB (not a currently-free/available estimate;
+    /// queried via `platform::PlatformInfo::total_memory`).
     pub available_ram_mb: c_uint,
     /// Operating system type (0=unknown, 1=linux, 2=windows, 3=macos)
     pub os_type: c_uint,
@@ -82,6 +84,40 @@ pub type VoirsLogCallback = extern "C" fn(
     line: c_uint,
     user_data: *mut c_void,
 );
+
+/// Shared state backing `voirs_set_log_callback`, `voirs_log_message`, and
+/// `voirs_is_log_level_enabled`.
+///
+/// These three functions previously each declared their own function-local
+/// `static mut LOG_CALLBACK`/`LOG_MIN_LEVEL`/`LOG_USER_DATA`. In Rust, a
+/// function-local `static` is one distinct storage location *per declaration
+/// site*, not per name -- so despite sharing names, those were three separate,
+/// unconnected copies: a callback registered via `voirs_set_log_callback`
+/// could never be observed by `voirs_log_message` (its `LOG_CALLBACK` copy
+/// was permanently `None`), and `voirs_is_log_level_enabled` read a *third*
+/// copy permanently stuck at the hardcoded default (`Info`). This single
+/// module-level static, locked by all three functions, is the fix.
+struct LogState {
+    callback: Option<VoirsLogCallback>,
+    min_level: VoirsLogLevel,
+    user_data: *mut c_void,
+}
+
+// SAFETY: `user_data` is an opaque pointer we only ever store and hand back
+// to the registered callback -- we never dereference it ourselves. The
+// caller of `voirs_set_log_callback` is responsible (per that function's
+// safety doc) for `user_data` remaining valid for as long as the callback
+// may fire and for the callback being safe to invoke from any thread. This
+// mirrors `c_api::threading::CallbackInfo`'s identical `unsafe impl
+// Send/Sync` for the same kind of opaque FFI user-data pointer.
+unsafe impl Send for LogState {}
+unsafe impl Sync for LogState {}
+
+static LOG_STATE: Mutex<LogState> = Mutex::new(LogState {
+    callback: None,
+    min_level: VoirsLogLevel::Info,
+    user_data: ptr::null_mut(),
+});
 
 /// Get library version information
 ///
@@ -157,8 +193,14 @@ pub unsafe extern "C" fn voirs_get_system_info(info: *mut VoirsSystemInfo) -> Vo
     // Get CPU cores
     sys_info.cpu_cores = num_cpus::get() as c_uint;
 
-    // Get available RAM (simplified)
-    sys_info.available_ram_mb = 8192; // Default fallback
+    // Real physical RAM, queried via platform::PlatformInfo (Linux:
+    // /proc/meminfo MemTotal, macOS: `sysctl hw.memsize`, Windows:
+    // GlobalMemoryStatusEx) -- not a hardcoded constant. Note this reports
+    // *total* physical memory, matching PlatformInfo::total_memory; it is
+    // not a currently-free/available estimate (see VoirsSystemInfo::
+    // available_ram_mb's doc comment).
+    let total_ram_bytes = crate::platform::PlatformInfo::current().total_memory;
+    sys_info.available_ram_mb = (total_ram_bytes / (1024 * 1024)) as c_uint;
 
     // Detect OS
     sys_info.os_type = if cfg!(target_os = "linux") {
@@ -194,8 +236,9 @@ pub unsafe extern "C" fn voirs_get_system_info(info: *mut VoirsSystemInfo) -> Vo
         sys_info.simd_support |= 4;
     }
 
-    // GPU detection (simplified)
-    sys_info.gpu_available = 0; // Default to no GPU
+    // Runtime GPU probe (see crate::gpu_probe doc comment for exactly what
+    // this does and does not detect) -- not a hardcoded constant.
+    sys_info.gpu_available = c_uint::from(crate::gpu_probe());
 
     VoirsErrorCode::Success
 }
@@ -212,23 +255,29 @@ pub unsafe extern "C" fn voirs_get_memory_stats(stats: *mut VoirsMemoryStats) ->
 
     let mem_stats = &mut *stats;
 
-    // Get real memory statistics from the allocator tracking system
-    if let Some(global_stats) = get_global_memory_stats() {
-        mem_stats.total_allocated = global_stats.total_allocated as c_uint;
-        mem_stats.peak_usage = global_stats.peak_usage as c_uint;
-        mem_stats.active_allocations = global_stats.active_allocations as c_uint;
-        mem_stats.total_allocations = global_stats.total_allocations as c_uint;
-        mem_stats.total_deallocations = global_stats.total_deallocations as c_uint;
-        mem_stats.fragmentation_ratio = global_stats.fragmentation_ratio;
+    // Real allocation statistics from crate::memory's global tracker (the
+    // same tracker backing crate::memory::voirs_memory_get_stats and
+    // exercised by RefCountedBuffer/pool_allocate/pool_deallocate) --
+    // previously this branch was permanently unreachable because
+    // get_global_memory_stats() unconditionally returned None, so every
+    // caller received hardcoded placeholder numbers instead.
+    let real_stats = crate::memory::get_memory_stats();
+    mem_stats.total_allocated = real_stats.total_bytes_allocated as c_uint;
+    mem_stats.peak_usage = real_stats.peak_bytes_allocated as c_uint;
+    mem_stats.active_allocations = real_stats.current_allocations as c_uint;
+    mem_stats.total_allocations = real_stats.total_allocations as c_uint;
+    mem_stats.total_deallocations = real_stats.total_deallocations as c_uint;
+    mem_stats.fragmentation_ratio = if real_stats.total_bytes_allocated > 0 {
+        // Fraction of all-time-allocated bytes that have since been freed
+        // again -- the same formula voirs_get_memory_fragmentation() (c_api/
+        // allocator.rs) already uses for the allocator-level equivalent of
+        // this metric, kept consistent here.
+        (1.0 - (real_stats.current_bytes_allocated as f32
+            / real_stats.total_bytes_allocated as f32))
+            .clamp(0.0, 1.0)
     } else {
-        // Fallback to conservative estimates if tracking is not available
-        mem_stats.total_allocated = estimate_current_memory_usage();
-        mem_stats.peak_usage = mem_stats.total_allocated + (mem_stats.total_allocated / 4); // +25% estimate
-        mem_stats.active_allocations = 5; // Conservative estimate
-        mem_stats.total_allocations = 50; // Conservative estimate
-        mem_stats.total_deallocations = 45; // Conservative estimate
-        mem_stats.fragmentation_ratio = 0.05; // Low fragmentation estimate
-    }
+        0.0
+    };
 
     VoirsErrorCode::Success
 }
@@ -244,15 +293,10 @@ pub unsafe extern "C" fn voirs_set_log_callback(
     min_level: VoirsLogLevel,
     user_data: *mut c_void,
 ) -> VoirsErrorCode {
-    // Store callback information in a static variable
-    // This is a simplified implementation
-    static mut LOG_CALLBACK: Option<VoirsLogCallback> = None;
-    static mut LOG_MIN_LEVEL: VoirsLogLevel = VoirsLogLevel::Info;
-    static mut LOG_USER_DATA: *mut c_void = ptr::null_mut();
-
-    LOG_CALLBACK = callback;
-    LOG_MIN_LEVEL = min_level;
-    LOG_USER_DATA = user_data;
+    let mut state = LOG_STATE.lock();
+    state.callback = callback;
+    state.min_level = min_level;
+    state.user_data = user_data;
 
     VoirsErrorCode::Success
 }
@@ -273,14 +317,19 @@ pub unsafe extern "C" fn voirs_log_message(
         return VoirsErrorCode::InvalidParameter;
     }
 
-    // Check if callback is set and level is appropriate
-    static mut LOG_CALLBACK: Option<VoirsLogCallback> = None;
-    static mut LOG_MIN_LEVEL: VoirsLogLevel = VoirsLogLevel::Info;
-    static mut LOG_USER_DATA: *mut c_void = ptr::null_mut();
+    // Copy the callback + threshold + user_data out and release the lock
+    // *before* invoking the callback: the callback is arbitrary C code that
+    // may legally call back into voirs_log_message/voirs_is_log_level_enabled/
+    // voirs_set_log_callback on the same thread, and parking_lot::Mutex is
+    // not reentrant -- holding the lock across the call would self-deadlock.
+    let (callback, min_level, user_data) = {
+        let state = LOG_STATE.lock();
+        (state.callback, state.min_level, state.user_data)
+    };
 
-    if let Some(callback) = LOG_CALLBACK {
-        if (level as u32) >= (LOG_MIN_LEVEL as u32) {
-            callback(level, message, file, line, LOG_USER_DATA);
+    if let Some(callback) = callback {
+        if (level as u32) >= (min_level as u32) {
+            callback(level, message, file, line, user_data);
         }
     }
 
@@ -393,22 +442,11 @@ pub unsafe extern "C" fn voirs_get_error_description(
     VoirsErrorCode::Success
 }
 
-// Helper functions for real memory statistics
-struct GlobalMemoryStats {
-    total_allocated: usize,
-    peak_usage: usize,
-    active_allocations: usize,
-    total_allocations: usize,
-    total_deallocations: usize,
-    fragmentation_ratio: f32,
-}
-
-fn get_global_memory_stats() -> Option<GlobalMemoryStats> {
-    // This would integrate with the memory tracking system from memory.rs
-    // For now, return None to use estimates
-    None
-}
-
+/// Estimate this process's own resident memory usage (distinct from
+/// `crate::memory::get_memory_stats()`, which tracks *this crate's* audio
+/// buffer allocations specifically). Used by `voirs_get_process_memory_usage`
+/// for a whole-process view via real OS queries (procfs/getrusage/
+/// GetProcessMemoryInfo depending on platform and enabled features).
 fn estimate_current_memory_usage() -> c_uint {
     // Try to get actual memory usage, fall back to conservative estimate
 
@@ -478,8 +516,8 @@ pub unsafe extern "C" fn voirs_get_process_memory_usage() -> c_uint {
 /// This function checks logging configuration and is safe to call at any time.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_is_log_level_enabled(level: VoirsLogLevel) -> c_int {
-    static mut LOG_MIN_LEVEL: VoirsLogLevel = VoirsLogLevel::Info;
-    if (level as u32) >= (LOG_MIN_LEVEL as u32) {
+    let min_level = LOG_STATE.lock().min_level;
+    if (level as u32) >= (min_level as u32) {
         1
     } else {
         0
@@ -492,8 +530,7 @@ pub unsafe extern "C" fn voirs_is_log_level_enabled(level: VoirsLogLevel) -> c_i
 /// This function resets internal memory tracking counters and is safe to call at any time.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_reset_memory_stats() -> VoirsErrorCode {
-    // This would reset the global memory tracking counters
-    // For now, this is a no-op but provides the API for future implementation
+    crate::memory::reset_memory_stats();
     VoirsErrorCode::Success
 }
 
@@ -590,6 +627,23 @@ mod tests {
             let result = voirs_get_system_info(&mut info);
             assert_eq!(result, VoirsErrorCode::Success);
             assert!(info.cpu_cores > 0);
+
+            // Regression check for the hardcoded `8192` fallback: the
+            // reported RAM must match a real, independently-computed
+            // platform query exactly (a fabricated constant would not, on
+            // any host with a different amount of physical memory), and
+            // must never be the specific old hardcoded value on a host that
+            // doesn't actually have exactly 8192 MB of RAM.
+            let expected_ram_mb =
+                (crate::platform::PlatformInfo::current().total_memory / (1024 * 1024)) as c_uint;
+            assert_eq!(info.available_ram_mb, expected_ram_mb);
+
+            // Regression check for the hardcoded `gpu_available = 0`: the
+            // reported flag must track the real runtime probe, not a
+            // constant.
+            let expected_gpu = c_uint::from(crate::gpu_probe());
+            assert_eq!(info.gpu_available, expected_gpu);
+            assert!(info.gpu_available == 0 || info.gpu_available == 1);
         }
     }
 
@@ -664,6 +718,12 @@ mod tests {
     #[test]
     fn test_log_level_enabled() {
         unsafe {
+            // Explicitly establish the baseline (min_level = Info) rather
+            // than assuming it: LOG_STATE is now genuinely shared mutable
+            // state (that is the point of the fix), so this test must not
+            // depend on no other test in this process having changed it.
+            voirs_set_log_callback(None, VoirsLogLevel::Info, ptr::null_mut());
+
             // Test that higher levels are enabled when min level is Info
             assert_eq!(voirs_is_log_level_enabled(VoirsLogLevel::Info), 1);
             assert_eq!(voirs_is_log_level_enabled(VoirsLogLevel::Warning), 1);
@@ -671,25 +731,162 @@ mod tests {
         }
     }
 
+    /// Regression test for the three-independent-`static mut`-copies bug:
+    /// a callback registered via `voirs_set_log_callback` must actually be
+    /// observed and invoked by `voirs_log_message` (a *different* function),
+    /// and the configured minimum level must actually be honored by
+    /// `voirs_is_log_level_enabled` (a *third* function) -- all three
+    /// reading the same shared state instead of three disconnected copies
+    /// that could never see each other's writes.
     #[test]
-    fn test_reset_memory_stats() {
+    fn test_log_callback_state_shared_across_functions() {
+        use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
+
+        static RECEIVED_LEVEL: AtomicI32 = AtomicI32::new(-1);
+        static CALL_COUNT: AtomicU32 = AtomicU32::new(0);
+        static RECEIVED_USER_DATA: AtomicU32 = AtomicU32::new(0);
+
+        extern "C" fn recording_callback(
+            level: VoirsLogLevel,
+            _message: *const c_char,
+            _file: *const c_char,
+            _line: c_uint,
+            user_data: *mut c_void,
+        ) {
+            RECEIVED_LEVEL.store(level as i32, Ordering::SeqCst);
+            RECEIVED_USER_DATA.store(user_data as usize as u32, Ordering::SeqCst);
+            CALL_COUNT.fetch_add(1, Ordering::SeqCst);
+        }
+
         unsafe {
-            let result = voirs_reset_memory_stats();
-            assert_eq!(result, VoirsErrorCode::Success);
+            let sentinel_user_data = 0x1234_u32 as *mut c_void;
+            let set_result = voirs_set_log_callback(
+                Some(recording_callback),
+                VoirsLogLevel::Warning,
+                sentinel_user_data,
+            );
+            assert_eq!(set_result, VoirsErrorCode::Success);
+
+            // The min_level set by voirs_set_log_callback must be visible to
+            // voirs_is_log_level_enabled -- a different function.
+            assert_eq!(
+                voirs_is_log_level_enabled(VoirsLogLevel::Info),
+                0,
+                "Info is below the configured Warning threshold"
+            );
+            assert_eq!(voirs_is_log_level_enabled(VoirsLogLevel::Warning), 1);
+            assert_eq!(voirs_is_log_level_enabled(VoirsLogLevel::Error), 1);
+
+            // A below-threshold message must be suppressed: the callback
+            // registered by voirs_set_log_callback must NOT fire.
+            let below = std::ffi::CString::new("info message").expect("no interior NUL");
+            voirs_log_message(VoirsLogLevel::Info, below.as_ptr(), ptr::null(), 1);
+            assert_eq!(
+                CALL_COUNT.load(Ordering::SeqCst),
+                0,
+                "sub-threshold message must not invoke the callback"
+            );
+
+            // An at-threshold message must reach the callback that was
+            // registered by a DIFFERENT function -- this is the crux of the
+            // fix (previously the callback copy read here was always None).
+            let at_threshold = std::ffi::CString::new("warning message").expect("no interior NUL");
+            voirs_log_message(VoirsLogLevel::Warning, at_threshold.as_ptr(), ptr::null(), 2);
+            assert_eq!(
+                CALL_COUNT.load(Ordering::SeqCst),
+                1,
+                "voirs_log_message must invoke the callback registered via voirs_set_log_callback"
+            );
+            assert_eq!(
+                RECEIVED_LEVEL.load(Ordering::SeqCst),
+                VoirsLogLevel::Warning as i32
+            );
+            assert_eq!(
+                RECEIVED_USER_DATA.load(Ordering::SeqCst),
+                sentinel_user_data as usize as u32
+            );
+
+            // Restore the default so later tests in this process (e.g. under
+            // plain `cargo test`, which is single-process/multi-threaded
+            // unlike nextest's per-test process isolation) see a clean slate.
+            voirs_set_log_callback(None, VoirsLogLevel::Info, ptr::null_mut());
         }
     }
 
     #[test]
-    fn test_enhanced_memory_stats() {
-        let mut stats = VoirsMemoryStats::default();
+    fn test_reset_memory_stats() {
+        use crate::memory::{get_memory_stats, RefCountedBuffer};
+
         unsafe {
-            let result = voirs_get_memory_stats(&mut stats);
+            // Allocate something real so there is nonzero state to reset.
+            let _buffer = RefCountedBuffer::new(vec![1.0, 2.0, 3.0, 4.0], 44100, 1);
+            assert!(
+                get_memory_stats().total_allocations > 0,
+                "precondition: at least one real allocation must be tracked"
+            );
+
+            let result = voirs_reset_memory_stats();
             assert_eq!(result, VoirsErrorCode::Success);
 
-            // Check that we get reasonable values
-            assert!(stats.total_allocated > 0);
-            assert!(stats.peak_usage >= stats.total_allocated);
-            assert!(stats.fragmentation_ratio >= 0.0 && stats.fragmentation_ratio <= 1.0);
+            let stats_after_reset = get_memory_stats();
+            assert_eq!(
+                stats_after_reset.total_allocations, 0,
+                "voirs_reset_memory_stats must actually reset crate::memory's \
+                 counters, not be a no-op"
+            );
+            assert_eq!(stats_after_reset.total_bytes_allocated, 0);
+        }
+    }
+
+    #[test]
+    fn test_enhanced_memory_stats_reflects_real_allocations() {
+        use crate::memory::{reset_memory_stats, RefCountedBuffer};
+
+        unsafe {
+            reset_memory_stats();
+
+            let mut baseline = VoirsMemoryStats::default();
+            assert_eq!(
+                voirs_get_memory_stats(&mut baseline),
+                VoirsErrorCode::Success
+            );
+            assert_eq!(baseline.total_allocated, 0);
+            assert_eq!(baseline.active_allocations, 0);
+
+            // Keep the buffer alive across the "after alloc" measurement.
+            let buffer = RefCountedBuffer::new(vec![0.0f32; 1024], 44100, 1);
+
+            let mut after_alloc = VoirsMemoryStats::default();
+            assert_eq!(
+                voirs_get_memory_stats(&mut after_alloc),
+                VoirsErrorCode::Success
+            );
+            // This is the property a fabricated constant cannot satisfy:
+            // the reported stats must actually change in response to a real
+            // allocation made through this crate's tracked buffer type.
+            assert!(after_alloc.total_allocated > baseline.total_allocated);
+            assert_eq!(after_alloc.active_allocations, 1);
+            assert_eq!(after_alloc.total_allocations, 1);
+            // Exactly one allocation has ever happened since the reset, so
+            // the historical peak equals the (also single-allocation) total
+            // -- and in particular peak <= total, the inverse of the old
+            // fabricated `peak = total * 1.25`.
+            assert_eq!(after_alloc.peak_usage, after_alloc.total_allocated);
+
+            drop(buffer);
+
+            let mut after_drop = VoirsMemoryStats::default();
+            assert_eq!(
+                voirs_get_memory_stats(&mut after_drop),
+                VoirsErrorCode::Success
+            );
+            assert_eq!(after_drop.active_allocations, 0);
+            assert_eq!(after_drop.total_deallocations, 1);
+            // Peak usage is monotonic non-decreasing even after the buffer
+            // is freed (it tracks the historical high-water mark).
+            assert!(after_drop.peak_usage >= after_alloc.peak_usage);
+
+            assert!(after_alloc.fragmentation_ratio >= 0.0 && after_alloc.fragmentation_ratio <= 1.0);
         }
     }
 

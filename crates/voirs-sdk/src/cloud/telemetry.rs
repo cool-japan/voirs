@@ -182,6 +182,11 @@ struct AnalyticsEngine {
     report_generator: Arc<ReportGenerator>,
     dashboard_manager: Arc<DashboardManager>,
     real_time_processor: Arc<RealTimeProcessor>,
+    /// Real metrics store queried by [`VoirsTelemetryProvider::get_analytics`]
+    /// (via `query_processor`'s helpers) and by
+    /// `DashboardManager::get_widget_data` — analytics results always
+    /// reflect genuinely recorded [`Metric`]s, never a fabricated series.
+    metrics_collector: Arc<MetricsCollector>,
 }
 
 struct QueryProcessor {
@@ -317,6 +322,9 @@ struct DashboardManager {
     dashboards: Arc<RwLock<HashMap<String, Dashboard>>>,
     dashboard_storage: Arc<dyn DashboardStorage>,
     real_time_updates: Arc<RealTimeUpdater>,
+    /// Real metrics store used by [`DashboardManager::get_widget_data`] to
+    /// answer each widget's `query` from genuinely recorded metrics.
+    metrics_collector: Arc<MetricsCollector>,
 }
 
 /// Telemetry dashboard configuration
@@ -675,7 +683,8 @@ impl VoirsTelemetryProvider {
     pub async fn new(config: TelemetryConfig) -> Result<Self> {
         let event_collector = Arc::new(EventCollector::new(&config).await?);
         let metrics_collector = Arc::new(MetricsCollector::new(&config).await?);
-        let analytics_engine = Arc::new(AnalyticsEngine::new().await?);
+        let analytics_engine =
+            Arc::new(AnalyticsEngine::new(Arc::clone(&metrics_collector)).await?);
         let ab_testing_manager = Arc::new(ABTestingManager::new().await?);
 
         let provider = Self {
@@ -932,6 +941,35 @@ impl MetricsCollector {
 
         Ok(())
     }
+
+    /// Query genuinely recorded metrics matching `query`.
+    ///
+    /// Reads from the same buffer [`Self::record_metric`]-equivalent calls
+    /// (`TelemetryProvider::record_metric`) push into, so results always
+    /// reflect real, previously-recorded [`Metric`]s — matching name,
+    /// timestamp range, and tag filters — never a fabricated/synthetic
+    /// series. An empty result honestly means nothing matching has been
+    /// recorded yet (or it was already evicted by `flush()`), not that the
+    /// query itself failed.
+    async fn query(&self, query: &AnalyticsQuery) -> Vec<DataPoint> {
+        let buffer = self.metrics_buffer.lock().await;
+        buffer
+            .iter()
+            .filter(|m| m.name == query.metric_name)
+            .filter(|m| m.timestamp >= query.start_time && m.timestamp <= query.end_time)
+            .filter(|m| {
+                query
+                    .filters
+                    .iter()
+                    .all(|(key, value)| m.tags.get(key) == Some(value))
+            })
+            .map(|m| DataPoint {
+                timestamp: m.timestamp,
+                value: m.value,
+                dimensions: m.tags.clone(),
+            })
+            .collect()
+    }
 }
 
 impl MetricAggregator {
@@ -999,12 +1037,13 @@ impl AlertManager {
 }
 
 impl AnalyticsEngine {
-    async fn new() -> Result<Self> {
+    async fn new(metrics_collector: Arc<MetricsCollector>) -> Result<Self> {
         Ok(Self {
             query_processor: Arc::new(QueryProcessor::new()),
             report_generator: Arc::new(ReportGenerator::new()),
-            dashboard_manager: Arc::new(DashboardManager::new()),
+            dashboard_manager: Arc::new(DashboardManager::new(Arc::clone(&metrics_collector))),
             real_time_processor: Arc::new(RealTimeProcessor::new()),
+            metrics_collector,
         })
     }
 
@@ -1064,11 +1103,12 @@ impl ReportGenerator {
 }
 
 impl DashboardManager {
-    fn new() -> Self {
+    fn new(metrics_collector: Arc<MetricsCollector>) -> Self {
         Self {
             dashboards: Arc::new(RwLock::new(HashMap::new())),
             dashboard_storage: Arc::new(LocalDashboardStorage::new()),
             real_time_updates: Arc::new(RealTimeUpdater::new()),
+            metrics_collector,
         }
     }
 
@@ -1103,24 +1143,18 @@ impl DashboardManager {
         }
     }
 
-    async fn get_widget_data(&self, _widget: &Widget) -> Result<WidgetData> {
-        // Mock implementation - return dummy widget data
-        // Create a mock AnalyticsSummary
-        let mock_summary = super::AnalyticsSummary {
-            total_points: 0,
-            min_value: 0.0,
-            max_value: 0.0,
-            average_value: 0.0,
-            sum_value: 0.0,
-        };
-
-        let mock_result = AnalyticsResult {
-            data_points: vec![],
-            summary: mock_summary,
-        };
+    async fn get_widget_data(&self, widget: &Widget) -> Result<WidgetData> {
+        // Real query against genuinely recorded metrics via the widget's own
+        // `query` (never a fabricated/dummy result, regardless of what the
+        // widget asks for).
+        let data_points = self.metrics_collector.query(&widget.query).await;
+        let summary = QueryProcessor::calculate_summary(&data_points, &widget.query.aggregation);
 
         Ok(WidgetData {
-            data: mock_result,
+            data: AnalyticsResult {
+                data_points,
+                summary,
+            },
             cached: false,
             cache_age: Duration::from_secs(0),
         })
@@ -1344,148 +1378,33 @@ impl TelemetryProvider for VoirsTelemetryProvider {
     }
 
     async fn get_analytics(&self, query: AnalyticsQuery) -> Result<AnalyticsResult> {
-        self.analytics_engine
-            .query_processor
-            .execute_query(query)
-            .await
-    }
-}
-
-impl QueryProcessor {
-    async fn execute_query(&self, query: AnalyticsQuery) -> Result<AnalyticsResult> {
-        // Implement comprehensive query execution based on metric name and aggregation
-        let data_points = self.generate_mock_data_points(&query).await;
-        let summary = self.calculate_summary(&data_points, &query.aggregation);
+        // Query real recorded metrics (via `MetricsCollector::query`) rather
+        // than a fabricated series: `data_points` always reflects genuine
+        // `Metric`s previously passed to `record_metric`, filtered by name,
+        // time range, and tags.
+        let data_points = self.analytics_engine.metrics_collector.query(&query).await;
+        let summary = QueryProcessor::calculate_summary(&data_points, &query.aggregation);
 
         Ok(AnalyticsResult {
             data_points,
             summary,
         })
     }
+}
 
-    async fn generate_mock_data_points(&self, query: &AnalyticsQuery) -> Vec<DataPoint> {
-        let mut data_points = Vec::new();
-        let duration = query.end_time - query.start_time;
-        let interval_hours = duration.num_hours().max(1);
-
-        // Generate realistic mock data based on metric type
-        for i in 0..interval_hours {
-            let timestamp = query.start_time + chrono::Duration::hours(i);
-            let value = match query.metric_name.as_str() {
-                "events" => self.generate_event_count(i),
-                "cpu_usage" => self.generate_cpu_usage(i),
-                "memory_usage" => self.generate_memory_usage(i),
-                "response_time" => self.generate_response_time(i),
-                "error_rate" => self.generate_error_rate(i),
-                "throughput" => self.generate_throughput(i),
-                _ => (i as f64 * 10.0) + (i as f64 % 7.0) * 5.0, // Default pattern
-            };
-
-            data_points.push(DataPoint {
-                timestamp,
-                value,
-                dimensions: self.generate_tags(&query.group_by, i),
-            });
-        }
-
-        data_points
-    }
-
-    fn generate_event_count(&self, hour: i64) -> f64 {
-        // Simulate daily traffic pattern with peak during business hours
-        let base_count = 100.0;
-        let peak_multiplier = if hour % 24 >= 9 && hour % 24 <= 17 {
-            3.0
-        } else {
-            1.0
-        };
-        let random_factor = 0.8 + (hour % 5) as f64 * 0.1; // Add some variance
-        base_count * peak_multiplier * random_factor
-    }
-
-    fn generate_cpu_usage(&self, hour: i64) -> f64 {
-        // Simulate CPU usage with some fluctuation
-        let base_usage = 45.0;
-        let variation = ((hour as f64 * 0.3).sin() * 15.0) + ((hour % 3) as f64 * 5.0);
-        (base_usage + variation).clamp(10.0, 95.0)
-    }
-
-    fn generate_memory_usage(&self, hour: i64) -> f64 {
-        // Simulate memory usage with gradual increase and occasional drops
-        let base_usage = 60.0;
-        let trend = (hour as f64 * 0.5) % 20.0; // Gradual increase with resets
-        let variation = (hour as f64 * 0.2).cos() * 8.0;
-        (base_usage + trend + variation).clamp(30.0, 90.0)
-    }
-
-    fn generate_response_time(&self, hour: i64) -> f64 {
-        // Simulate response time in milliseconds
-        let base_time = 150.0;
-        let peak_delay = if hour % 24 >= 9 && hour % 24 <= 17 {
-            50.0
-        } else {
-            0.0
-        };
-        let variation = (hour as f64 * 0.4).sin().abs() * 30.0;
-        base_time + peak_delay + variation
-    }
-
-    fn generate_error_rate(&self, hour: i64) -> f64 {
-        // Simulate error rate as percentage
-        let base_rate = 0.5;
-        let spike = if hour % 13 == 0 { 2.0 } else { 0.0 }; // Occasional spikes
-        let variation = (hour as f64 * 0.1).sin().abs() * 0.3;
-        (base_rate + spike + variation).clamp(0.0, 5.0)
-    }
-
-    fn generate_throughput(&self, hour: i64) -> f64 {
-        // Simulate requests per second
-        let base_throughput = 50.0;
-        let business_hours_boost = if hour % 24 >= 9 && hour % 24 <= 17 {
-            30.0
-        } else {
-            0.0
-        };
-        let variation = (hour as f64 * 0.2).cos() * 10.0;
-        (base_throughput + business_hours_boost + variation).max(5.0)
-    }
-
-    fn generate_tags(&self, group_by: &[String], hour: i64) -> HashMap<String, String> {
-        let mut tags = HashMap::new();
-
-        for group in group_by {
-            match group.as_str() {
-                "hour" => {
-                    tags.insert("hour".to_string(), (hour % 24).to_string());
-                }
-                "region" => {
-                    let regions = ["us-west-1", "us-east-1", "eu-west-1"];
-                    tags.insert(
-                        "region".to_string(),
-                        regions[hour as usize % regions.len()].to_string(),
-                    );
-                }
-                "service" => {
-                    let services = ["synthesis", "recognition", "evaluation"];
-                    tags.insert(
-                        "service".to_string(),
-                        services[hour as usize % services.len()].to_string(),
-                    );
-                }
-                _ => {
-                    tags.insert(group.clone(), format!("value_{}", hour % 10));
-                }
-            }
-        }
-
-        tags
-    }
-
+impl QueryProcessor {
+    /// Summarize `data_points` (min/max/sum/average) — a pure function of
+    /// its arguments so it can be shared by both
+    /// [`VoirsTelemetryProvider::get_analytics`] and
+    /// `DashboardManager::get_widget_data` without needing a `QueryProcessor`
+    /// instance. `aggregation` is accepted for API symmetry with
+    /// [`AnalyticsQuery`] but every summary statistic is always computed
+    /// (real callers pick the field matching their requested aggregation).
     fn calculate_summary(
-        &self,
         data_points: &[DataPoint],
         aggregation: &AggregationType,
     ) -> AnalyticsSummary {
+        let _ = aggregation;
         if data_points.is_empty() {
             return AnalyticsSummary {
                 total_points: 0,
@@ -1563,6 +1482,141 @@ mod tests {
 
         let result = provider.record_metric(metric).await;
         assert!(result.is_ok());
+    }
+
+    fn analytics_query(
+        metric_name: &str,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> AnalyticsQuery {
+        AnalyticsQuery {
+            metric_name: metric_name.to_string(),
+            start_time: start,
+            end_time: end,
+            aggregation: AggregationType::Average,
+            filters: HashMap::new(),
+            group_by: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_analytics_reflects_real_recorded_metrics_not_a_fabricated_series() {
+        // Direct regression test for the fabrication bug: the old
+        // implementation ignored every recorded metric entirely and
+        // generated a synthetic sin/cos-based series instead.
+        let config = TelemetryConfig::default();
+        let provider = VoirsTelemetryProvider::new(config).await.unwrap();
+
+        let now = Utc::now();
+        provider
+            .record_metric(Metric {
+                name: "cpu_usage".to_string(),
+                value: 12.5,
+                unit: "percent".to_string(),
+                timestamp: now,
+                tags: HashMap::new(),
+            })
+            .await
+            .unwrap();
+        provider
+            .record_metric(Metric {
+                name: "cpu_usage".to_string(),
+                value: 87.5,
+                unit: "percent".to_string(),
+                timestamp: now,
+                tags: HashMap::new(),
+            })
+            .await
+            .unwrap();
+
+        let query = analytics_query(
+            "cpu_usage",
+            now - chrono::Duration::minutes(5),
+            now + chrono::Duration::minutes(5),
+        );
+        let result = provider.get_analytics(query).await.unwrap();
+
+        assert_eq!(
+            result.data_points.len(),
+            2,
+            "must reflect the two real recorded points"
+        );
+        let values: Vec<f64> = result.data_points.iter().map(|dp| dp.value).collect();
+        assert!(values.contains(&12.5));
+        assert!(values.contains(&87.5));
+        // Real mean of 12.5 and 87.5, not any hardcoded/synthetic pattern.
+        assert!((result.summary.average_value - 50.0).abs() < 1e-9);
+        assert_eq!(result.summary.total_points, 2);
+    }
+
+    #[tokio::test]
+    async fn test_get_analytics_for_unrecorded_metric_is_honestly_empty() {
+        // Direct regression test: the old implementation always returned at
+        // least one data point (a fabricated one) for *any* metric name,
+        // including ones nothing had ever recorded.
+        let config = TelemetryConfig::default();
+        let provider = VoirsTelemetryProvider::new(config).await.unwrap();
+
+        let now = Utc::now();
+        let query = analytics_query(
+            "never_recorded_metric",
+            now - chrono::Duration::hours(1),
+            now + chrono::Duration::hours(1),
+        );
+        let result = provider.get_analytics(query).await.unwrap();
+
+        assert!(result.data_points.is_empty());
+        assert_eq!(result.summary.total_points, 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_analytics_filters_by_metric_name_and_time_range() {
+        let config = TelemetryConfig::default();
+        let provider = VoirsTelemetryProvider::new(config).await.unwrap();
+
+        let now = Utc::now();
+        provider
+            .record_metric(Metric {
+                name: "throughput".to_string(),
+                value: 111.0,
+                unit: "rps".to_string(),
+                timestamp: now,
+                tags: HashMap::new(),
+            })
+            .await
+            .unwrap();
+        // Different metric name - must not leak into a "throughput" query.
+        provider
+            .record_metric(Metric {
+                name: "error_rate".to_string(),
+                value: 999.0,
+                unit: "percent".to_string(),
+                timestamp: now,
+                tags: HashMap::new(),
+            })
+            .await
+            .unwrap();
+        // Same metric name but well outside the queried time range.
+        provider
+            .record_metric(Metric {
+                name: "throughput".to_string(),
+                value: 222.0,
+                unit: "rps".to_string(),
+                timestamp: now - chrono::Duration::days(30),
+                tags: HashMap::new(),
+            })
+            .await
+            .unwrap();
+
+        let query = analytics_query(
+            "throughput",
+            now - chrono::Duration::minutes(1),
+            now + chrono::Duration::minutes(1),
+        );
+        let result = provider.get_analytics(query).await.unwrap();
+
+        assert_eq!(result.data_points.len(), 1);
+        assert_eq!(result.data_points[0].value, 111.0);
     }
 
     #[tokio::test]

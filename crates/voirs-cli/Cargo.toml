@@ -99,6 +99,9 @@ sha2.workspace = true
 hex.workspace = true
 futures-util.workspace = true
 
+# AWS SigV4 / Azure Shared Key request signing (cloud/sigv4.rs, cloud/azure_backend.rs)
+hmac.workspace = true
+
 # Pure-Rust TLS provider (rustls + RustCrypto) — installed as process default in main()
 oxitls-adapter-rustls-rustcrypto.workspace = true
 rustls.workspace = true

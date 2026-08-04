@@ -142,9 +142,6 @@ pub mod utils;
 #[cfg(feature = "wasm")]
 pub mod wasm;
 
-// Note: perf module contains x86_64-specific optimizations
-// and is not compiled by default. See src/perf/ for implementation details.
-
 // Re-export for convenience
 pub use c_api::*;
 pub use error::*;
@@ -439,8 +436,47 @@ impl PipelineManager {
         self.pipelines.contains_key(&id) || self.placeholder_pipelines.contains(&id)
     }
 
+    /// Whether `id` refers to a `VOIRS_BENCHMARK_MODE` placeholder handle
+    /// rather than a real, synthesis-capable pipeline. Lets call sites give
+    /// callers an honest, specific error ("this handle is a benchmark
+    /// placeholder") instead of the generic "invalid pipeline ID" when a
+    /// caller passes a placeholder handle to an operation that requires a
+    /// real pipeline (voice management, synthesis, ...).
+    ///
+    /// Takes `&self` on an already-held `MutexGuard<PipelineManager>` (see
+    /// call sites in `c_api::voice` / `c_api::threading`) rather than
+    /// re-locking `PIPELINE_MANAGER` itself, since `parking_lot::Mutex` is
+    /// not reentrant and a second `.lock()` from the same thread while the
+    /// first guard is still alive would deadlock.
+    pub(crate) fn is_placeholder(&self, id: u32) -> bool {
+        self.placeholder_pipelines.contains(&id)
+    }
+
     fn count(&self) -> usize {
         self.pipelines.len() + self.placeholder_pipelines.len()
+    }
+}
+
+/// Build an honest `voirs_get_last_error()` message for a pipeline ID that
+/// `PipelineManager::get_pipeline()` failed to resolve, distinguishing a
+/// genuinely unknown/destroyed ID from a `VOIRS_BENCHMARK_MODE` placeholder
+/// handle (which passes `voirs_is_pipeline_valid()` by design, but backs no
+/// real `SdkPipeline` and therefore cannot perform synthesis or voice
+/// operations).
+///
+/// Pure/lock-free by design: callers must determine `is_placeholder` via
+/// `PipelineManager::is_placeholder()` while they already hold the
+/// `PIPELINE_MANAGER` guard, then pass the result in here (see doc on
+/// `is_placeholder` for why this function must not lock the manager itself).
+pub(crate) fn invalid_pipeline_message(id: u32, is_placeholder: bool) -> String {
+    if is_placeholder {
+        format!(
+            "Pipeline {id} is a VOIRS_BENCHMARK_MODE placeholder handle: it has no \
+             real model loaded and cannot perform synthesis or voice operations. \
+             Create a pipeline without VOIRS_BENCHMARK_MODE=1 set for real synthesis."
+        )
+    } else {
+        format!("Invalid pipeline ID: {id}")
     }
 }
 
@@ -603,6 +639,47 @@ pub extern "C" fn voirs_has_error() -> c_int {
         1
     } else {
         0
+    }
+}
+
+/// Cheap, non-initializing runtime probe for GPU availability.
+///
+/// Shared by the C (`c_api::utils::voirs_get_system_info`), Python
+/// (`python::pipeline::VoirsPipeline::is_gpu_available`), and Node.js
+/// (`nodejs::is_gpu_available`) bindings so all three language bindings
+/// report the same answer instead of drifting independently.
+///
+/// This intentionally does **not** create a CUDA or Metal device context
+/// (context creation can be slow, print vendor diagnostics to stderr, or
+/// have other side effects unsuitable for a "just tell me if a GPU is
+/// there" query) -- it only inspects the `CUDA_VISIBLE_DEVICES` environment
+/// variable using NVIDIA's convention. This makes it CUDA-oriented: on a
+/// Metal-only host (e.g. Apple Silicon) with no `CUDA_VISIBLE_DEVICES` set,
+/// this returns `false` even though Metal acceleration may be usable
+/// through `voirs-acoustic`'s `gpu` feature. Reporting `false` without
+/// positive evidence is the honest default for this probe: it never claims
+/// GPU availability it cannot back up, unlike the previous
+/// `cfg!(feature = "gpu")` (a compile-time constant baked into the binary,
+/// identical for every process regardless of actual hardware) or the
+/// hardcoded `gpu_available = 0` this replaces.
+pub(crate) fn gpu_probe() -> bool {
+    gpu_available_from_env(std::env::var("CUDA_VISIBLE_DEVICES").ok().as_deref())
+}
+
+/// Decide GPU availability from the value of `CUDA_VISIBLE_DEVICES`.
+///
+/// Heuristic (NVIDIA convention):
+/// * unset (`None`) -> `false` (cannot confirm without initializing a device)
+/// * empty string -> `false` (all GPUs masked)
+/// * exactly `"-1"` -> `false` (all GPUs masked)
+/// * any other value (e.g. `"0"`, `"0,1"`) -> `true`
+pub(crate) fn gpu_available_from_env(cuda_visible_devices: Option<&str>) -> bool {
+    match cuda_visible_devices {
+        Some(value) => {
+            let trimmed = value.trim();
+            !trimmed.is_empty() && trimmed != "-1"
+        }
+        None => false,
     }
 }
 
@@ -915,5 +992,57 @@ mod tests {
 
         drop(buffer2);
         assert_eq!(buffer.ref_count(), 1);
+    }
+
+    #[test]
+    fn test_gpu_available_from_env_heuristic() {
+        // Visible devices -> available.
+        assert!(gpu_available_from_env(Some("0")));
+        assert!(gpu_available_from_env(Some("0,1")));
+        assert!(gpu_available_from_env(Some(" 0 ")));
+        // Masked / unset -> unavailable. The probe never claims availability
+        // it can't back up with positive evidence.
+        assert!(!gpu_available_from_env(Some("")));
+        assert!(!gpu_available_from_env(Some("-1")));
+        assert!(!gpu_available_from_env(Some(" -1 ")));
+        assert!(!gpu_available_from_env(None));
+    }
+
+    #[test]
+    fn test_pipeline_manager_distinguishes_placeholder_from_real() {
+        let mut manager = PipelineManager::new();
+        let placeholder_id = manager.add_placeholder_pipeline();
+
+        assert!(manager.is_valid_pipeline(placeholder_id));
+        assert!(
+            manager.is_placeholder(placeholder_id),
+            "a benchmark-mode handle must be reported as a placeholder"
+        );
+        // A placeholder handle is deliberately absent from `pipelines`, so
+        // any real-pipeline lookup honestly fails instead of fabricating one.
+        assert!(manager.get_pipeline(placeholder_id).is_none());
+
+        // A never-issued ID is neither valid nor a placeholder.
+        assert!(!manager.is_valid_pipeline(9999));
+        assert!(!manager.is_placeholder(9999));
+
+        assert_eq!(
+            invalid_pipeline_message(placeholder_id, true),
+            invalid_pipeline_message(placeholder_id, manager.is_placeholder(placeholder_id))
+        );
+        assert!(invalid_pipeline_message(placeholder_id, true).contains("VOIRS_BENCHMARK_MODE"));
+        assert!(!invalid_pipeline_message(9999, false).contains("VOIRS_BENCHMARK_MODE"));
+    }
+
+    #[test]
+    fn test_gpu_probe_matches_current_env() {
+        // gpu_probe() must be a pure function of CUDA_VISIBLE_DEVICES, not a
+        // hardcoded constant: it should agree with gpu_available_from_env()
+        // applied to whatever is actually set in this process's environment
+        // right now (nextest runs each test in its own process, so no other
+        // test can race this env var).
+        let expected =
+            gpu_available_from_env(std::env::var("CUDA_VISIBLE_DEVICES").ok().as_deref());
+        assert_eq!(gpu_probe(), expected);
     }
 }

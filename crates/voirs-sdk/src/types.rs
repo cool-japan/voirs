@@ -429,7 +429,10 @@ impl MelSpectrogram {
             return None;
         }
 
-        self.data.iter().map(|row| row.get(frame_idx).copied()).collect()
+        self.data
+            .iter()
+            .map(|row| row.get(frame_idx).copied())
+            .collect()
     }
 }
 

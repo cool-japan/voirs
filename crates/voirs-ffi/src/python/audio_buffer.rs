@@ -26,7 +26,9 @@ impl PyAudioBuffer {
         self.inner.samples().to_vec()
     }
 
-    /// Get the audio samples as a NumPy array (1D for mono, 2D for multi-channel)
+    /// Get the audio samples as a NumPy array (1D for mono, 2D `[frames,
+    /// channels]` for multi-channel -- see `voirs.pyi`'s documented contract
+    /// for this method).
     #[cfg(feature = "numpy")]
     fn as_numpy<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let samples = self.inner.samples();
@@ -37,18 +39,24 @@ impl PyAudioBuffer {
             let array = PyArray::from_slice(py, samples);
             Ok(array.into_any())
         } else {
-            // Multi-channel audio - return 2D array [samples, channels]
+            // Multi-channel audio - return a real 2D array shaped
+            // [frame_count, channels]. The source buffer is already
+            // frame-major/channel-minor interleaved (`samples[frame *
+            // channels + channel]`), which is *exactly* row-major
+            // `[frame_count, channels]` layout -- so producing that shape
+            // needs no data reordering, only correctly grouping each frame's
+            // `channels` samples into its own row (previously this pushed
+            // the entire flat buffer into a single `vec![reshaped; 1]`,
+            // producing shape `(1, frame_count * channels)`: one giant row
+            // instead of one row per frame).
             let frame_count = samples.len() / channels;
-            let mut reshaped = Vec::with_capacity(frame_count * channels);
-
-            // Interleaved to planar conversion for easier numpy manipulation
+            let mut rows: Vec<Vec<f32>> = Vec::with_capacity(frame_count);
             for frame in 0..frame_count {
-                for channel in 0..channels {
-                    reshaped.push(samples[frame * channels + channel]);
-                }
+                let start = frame * channels;
+                rows.push(samples[start..start + channels].to_vec());
             }
 
-            let array = PyArray2::from_vec2(py, &vec![reshaped; 1]).map_err(|e| {
+            let array = PyArray2::from_vec2(py, &rows).map_err(|e| {
                 PyRuntimeError::new_err(format!("Failed to create 2D array: {}", e))
             })?;
             Ok(array.into_any())
@@ -822,5 +830,67 @@ mod tests {
         // window_size of 0 or 1 yields an empty spectrum.
         assert!(magnitude_spectrum_core(&samples, 0).unwrap().is_empty());
         assert!(magnitude_spectrum_core(&samples, 1).unwrap().is_empty());
+    }
+
+    /// Regression test for the interleaved-to-planar "conversion that
+    /// converts nothing" bug: build a 2-channel buffer with distinct,
+    /// position-identifiable values (`frame*10 + channel`) and verify
+    /// `as_numpy()` returns a real `[frame_count, channels]` 2D array where
+    /// `array[frame][channel]` actually equals that frame/channel's sample --
+    /// not a `(1, frame_count*channels)` single row containing the raw
+    /// untouched interleaved buffer.
+    #[test]
+    fn test_as_numpy_multichannel_shape_and_values() {
+        Python::attach(|py| {
+            let channels = 2u32;
+            let frame_count = 3usize;
+            // Interleaved: [f0c0, f0c1, f1c0, f1c1, f2c0, f2c1]
+            let samples: Vec<f32> = (0..frame_count)
+                .flat_map(|frame| {
+                    (0..channels).map(move |channel| (frame * 10 + channel as usize) as f32)
+                })
+                .collect();
+            let audio = AudioBuffer::new(samples, 44100, channels);
+            let buf = PyAudioBuffer::new(audio);
+
+            let result = buf.as_numpy(py).expect("as_numpy should succeed");
+            let array: PyReadonlyArray2<f32> = result
+                .extract()
+                .expect("multi-channel as_numpy() must return a 2D array");
+            let view = array.as_array();
+
+            assert_eq!(
+                view.shape(),
+                &[frame_count, channels as usize],
+                "shape must be [frame_count, channels], not (1, frame_count*channels)"
+            );
+
+            for frame in 0..frame_count {
+                for channel in 0..channels as usize {
+                    let expected = (frame * 10 + channel) as f32;
+                    assert_eq!(
+                        view[[frame, channel]],
+                        expected,
+                        "array[{frame}][{channel}] should be this frame/channel's sample"
+                    );
+                }
+            }
+        });
+    }
+
+    /// Mono audio must still return a plain 1D array (unaffected by the
+    /// multi-channel shape fix).
+    #[test]
+    fn test_as_numpy_mono_is_1d() {
+        Python::attach(|py| {
+            let audio = AudioBuffer::new(vec![0.1, 0.2, 0.3], 44100, 1);
+            let buf = PyAudioBuffer::new(audio);
+
+            let result = buf.as_numpy(py).expect("as_numpy should succeed");
+            let array: PyReadonlyArray1<f32> = result
+                .extract()
+                .expect("mono as_numpy() must return a 1D array");
+            assert_eq!(array.as_array().to_vec(), vec![0.1, 0.2, 0.3]);
+        });
     }
 }

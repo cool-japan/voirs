@@ -7,7 +7,7 @@
 //! - Training statistics (samples/sec, ETA)
 
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 /// Training progress tracker with multi-level progress bars
@@ -312,18 +312,90 @@ impl ResourceUsage {
         unsafe { libc::sysconf(libc::_SC_PAGESIZE) as u64 }
     }
 
-    /// Get approximate CPU usage percent
+    /// Get real CPU usage percent for the current process, normalized to the
+    /// 0-100% of *total available* CPU capacity (i.e. divided by core count, so a
+    /// single fully-loaded core on an 8-core machine reads ~12.5%, not 100%).
+    ///
+    /// Computed from real process CPU time (user + system), sampled via
+    /// `getrusage` on Unix and compared against the previous sample to get an
+    /// instantaneous rate (like `top`). On platforms without a supported
+    /// sampling method this returns `0.0` honestly rather than a fabricated
+    /// constant.
     fn get_cpu_usage_percent() -> f64 {
-        // Simple approximation: assume 50% usage during training
-        // For accurate measurement, would need to track process CPU time
-        // over intervals (would require sysinfo or similar crate)
+        let Some(cpu_time) = Self::read_process_cpu_time() else {
+            return 0.0;
+        };
 
-        // For now, return estimated load based on CPU count
-        let cpu_count = num_cpus::get();
+        let now = Instant::now();
+        let cpu_count = (num_cpus::get().max(1)) as f64;
 
-        // Estimate based on active training (typically uses 70-90% of available cores)
-        let estimated_usage = 75.0 * cpu_count as f64 / cpu_count as f64;
-        estimated_usage.min(100.0)
+        let sample_lock = Self::cpu_sample_state();
+        let mut last_sample = sample_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        let percent = match *last_sample {
+            Some((prev_instant, prev_cpu_time, prev_percent)) => {
+                let wall_delta = now.saturating_duration_since(prev_instant).as_secs_f64();
+                // Require a minimum interval between samples: back-to-back calls
+                // with a near-zero denominator would produce meaningless noise,
+                // so reuse the last real measurement instead of dividing by it.
+                if wall_delta < 0.02 {
+                    prev_percent
+                } else {
+                    let cpu_delta = cpu_time.saturating_sub(prev_cpu_time).as_secs_f64();
+                    ((cpu_delta / wall_delta / cpu_count) * 100.0).clamp(0.0, 100.0)
+                }
+            }
+            // No prior sample yet: establish the baseline, nothing to compare
+            // against, so there is no honest rate to report yet.
+            None => 0.0,
+        };
+
+        *last_sample = Some((now, cpu_time, percent));
+        percent
+    }
+
+    /// Process-wide storage for the last CPU-time sample, so consecutive calls to
+    /// [`Self::get_cpu_usage_percent`] can compute a real instantaneous rate.
+    fn cpu_sample_state() -> &'static Mutex<Option<(Instant, Duration, f64)>> {
+        static STATE: OnceLock<Mutex<Option<(Instant, Duration, f64)>>> = OnceLock::new();
+        STATE.get_or_init(|| Mutex::new(None))
+    }
+
+    /// Total CPU time (user + system) consumed by this process so far.
+    #[cfg(unix)]
+    fn read_process_cpu_time() -> Option<Duration> {
+        // SAFETY: `usage` is a plain-old-data struct that `getrusage` fully
+        // populates before we read any field; RUSAGE_SELF only inspects the
+        // calling process, no pointers/lifetimes are involved.
+        let usage = unsafe {
+            let mut usage: libc::rusage = std::mem::zeroed();
+            if libc::getrusage(libc::RUSAGE_SELF, &mut usage) != 0 {
+                return None;
+            }
+            usage
+        };
+
+        let user = Duration::new(
+            usage.ru_utime.tv_sec.max(0) as u64,
+            (usage.ru_utime.tv_usec.max(0) as u32).saturating_mul(1000),
+        );
+        let system = Duration::new(
+            usage.ru_stime.tv_sec.max(0) as u64,
+            (usage.ru_stime.tv_usec.max(0) as u32).saturating_mul(1000),
+        );
+
+        Some(user + system)
+    }
+
+    /// No supported process-CPU-time API wired up for this platform (e.g.
+    /// Windows, where `libc` is not even linked -- see the crate's
+    /// `[target.'cfg(unix)'.dependencies]`); report honestly that no
+    /// measurement is available instead of fabricating one.
+    #[cfg(not(unix))]
+    fn read_process_cpu_time() -> Option<Duration> {
+        None
     }
 }
 
@@ -360,5 +432,65 @@ mod tests {
         assert_eq!(format_duration(Duration::from_secs(45)), "45s");
         assert_eq!(format_duration(Duration::from_secs(125)), "2m 5s");
         assert_eq!(format_duration(Duration::from_secs(7325)), "2h 2m");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_read_process_cpu_time_returns_a_real_measurement_on_unix() {
+        let cpu_time = ResourceUsage::read_process_cpu_time();
+        assert!(
+            cpu_time.is_some(),
+            "getrusage-based sampling should succeed on unix"
+        );
+    }
+
+    /// The finding this regression test guards against: `get_cpu_usage_percent`
+    /// used to be `75.0 * cpu_count / cpu_count`, which algebraically simplifies
+    /// to a constant `75.0` regardless of what the process was doing. A real
+    /// implementation must show a busy period consuming visibly more CPU time
+    /// than an idle (sleeping) period of comparable wall-clock length.
+    #[test]
+    fn test_cpu_usage_percent_reflects_real_load_not_a_constant() {
+        // Establish a baseline sample so the next call can compute a real delta
+        // instead of falling back to the "no prior sample" case.
+        let _ = ResourceUsage::get_cpu_usage_percent();
+
+        // Idle period: sleep without doing any work on this thread.
+        std::thread::sleep(Duration::from_millis(150));
+        let idle_percent = ResourceUsage::get_cpu_usage_percent();
+
+        // Busy period: burn CPU in a tight loop for a comparable wall-clock span.
+        let busy_start = Instant::now();
+        let mut acc: u64 = 0xdead_beef;
+        while busy_start.elapsed() < Duration::from_millis(150) {
+            acc = acc.wrapping_mul(2_654_435_761).wrapping_add(1);
+        }
+        std::hint::black_box(acc);
+        let busy_percent = ResourceUsage::get_cpu_usage_percent();
+
+        assert!(
+            (0.0..=100.0).contains(&idle_percent),
+            "idle CPU% out of range: {idle_percent}"
+        );
+        assert!(
+            (0.0..=100.0).contains(&busy_percent),
+            "busy CPU% out of range: {busy_percent}"
+        );
+
+        #[cfg(unix)]
+        {
+            assert!(
+                busy_percent > idle_percent,
+                "busy-spin CPU% ({busy_percent}) should clearly exceed idle-sleep CPU% \
+                 ({idle_percent}); a hardcoded constant would make these equal"
+            );
+        }
+    }
+
+    #[test]
+    fn test_resource_usage_current_does_not_panic() {
+        let usage = ResourceUsage::current();
+        assert!((0.0..=100.0).contains(&usage.cpu_percent));
+        assert!(usage.ram_gb >= 0.0);
     }
 }

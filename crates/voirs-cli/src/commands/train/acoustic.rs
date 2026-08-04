@@ -1,18 +1,23 @@
 //! Acoustic model training command implementation
 //!
 //! Provides CLI interface for training acoustic models (VITS, FastSpeech2).
+//!
+//! # Current status: fails closed
+//!
+//! Neither underlying trainer in `voirs-acoustic` performs real gradient-based
+//! training yet (see the `VITS_TRAINING_BLOCKED_REASON` and
+//! `FASTSPEECH2_TRAINING_BLOCKED_REASON` constants below for the exact evidence).
+//! Running the old training loop against real data would still produce an
+//! untrained, randomly initialized checkpoint dressed up with a "training
+//! completed successfully" banner. Rather than fabricate that success, this
+//! command validates its inputs and then refuses to run, with a diagnostic
+//! explaining exactly what is missing. This guard should be removed once
+//! `voirs-acoustic` implements real backward passes / optimizer steps for both
+//! trainers.
 
-use super::progress::{
-    EpochMetrics, ResourceUsage, TrainingMetrics, TrainingProgress, TrainingStats,
-};
 use crate::error::CliError;
 use crate::GlobalOptions;
-use candle_core::Device;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
-use voirs_acoustic::fastspeech::FastSpeech2Config;
-use voirs_acoustic::fastspeech2_trainer::{FastSpeech2Trainer, FastSpeech2TrainingConfig};
-use voirs_acoustic::vits::{VitsConfig, VitsTrainer, VitsTrainingConfig};
 use voirs_sdk::Result;
 
 /// Arguments for acoustic model training
@@ -152,8 +157,72 @@ struct AcousticTrainingArgs {
     use_gpu: bool,
 }
 
-async fn train_vits(args: AcousticTrainingArgs, global: &GlobalOptions) -> Result<()> {
-    // Destructure args for convenience
+/// Why VITS training refuses to run.
+///
+/// Evidence, all in `crates/voirs-acoustic/src/vits/trainer.rs`:
+/// - `VitsTrainer::train_step` (~L452) never calls a backward pass or optimizer
+///   step, so model weights never change no matter how much data is fed in or how
+///   many epochs run.
+/// - `PeriodDiscriminator::simulate_conv` (~L174) and `ScaleDiscriminator::
+///   simulate_conv` (~L312) return `Tensor::zeros(..)`, ignoring their input
+///   entirely, so every discriminator/adversarial/feature-matching loss term is a
+///   constant regardless of whether the audio is real or generated.
+/// - `calculate_kl_divergence_loss` (~L659) and `calculate_duration_loss` (~L666)
+///   return `fastrand`-generated numbers unrelated to the model or its input.
+/// - `validate_step` (~L765) is entirely `fastrand`-based.
+/// - `save_checkpoint` (~L783) writes a JSON metadata stub to the `.safetensors`
+///   path; no tensor weights are ever serialized.
+const VITS_TRAINING_BLOCKED_REASON: &str =
+    "VitsTrainer::train_step never performs a backward pass or optimizer step \
+     (crates/voirs-acoustic/src/vits/trainer.rs), so model weights never change; its \
+     GAN discriminators simulate convolutions with Tensor::zeros(..) regardless of the \
+     input audio (PeriodDiscriminator/ScaleDiscriminator::simulate_conv), making \
+     discriminator/adversarial/feature-matching losses input-independent constants; the \
+     KL-divergence and duration loss terms are fastrand-generated numbers unrelated to \
+     the model; validate_step returns fastrand-based metrics; and save_checkpoint writes \
+     JSON metadata rather than real tensor weights to the .safetensors path. Running this \
+     loop would silently hand back an untrained, randomly initialized model presented as \
+     a completed training run, so this command refuses to run until voirs-acoustic \
+     implements real gradient-based training for VITS";
+
+/// Why FastSpeech2 training refuses to run.
+///
+/// Evidence, all in `crates/voirs-acoustic/src/fastspeech2_trainer.rs`:
+/// - `FastSpeech2Trainer::train_step` never calls a backward pass or optimizer
+///   step, so model weights never change.
+/// - `FastSpeech2Encoder::forward` (~L86-99) maps every phoneme to the same
+///   constant id (`.map(|_| 1u32)`) regardless of its symbol, discarding all
+///   phoneme identity before it ever reaches the model.
+/// - The variance adaptor predicts duration/pitch/energy from an all-zero
+///   `dummy_features` placeholder (~L674) instead of the real encoder output.
+/// - `validate_step` (~L840) is entirely `fastrand`-based.
+/// - `save_checkpoint` (~L860) writes a JSON metadata stub to the `.safetensors`
+///   path; no tensor weights are ever serialized.
+const FASTSPEECH2_TRAINING_BLOCKED_REASON: &str =
+    "FastSpeech2Trainer::train_step never performs a backward pass or optimizer step \
+     (crates/voirs-acoustic/src/fastspeech2_trainer.rs), so model weights never change; \
+     FastSpeech2Encoder::forward maps every phoneme to the same constant id regardless of \
+     its symbol (`.map(|_| 1u32)`), discarding all phoneme identity before it reaches the \
+     model; the variance adaptor predicts duration/pitch/energy from an all-zero \
+     placeholder feature vector instead of real encoder output; validate_step returns \
+     fastrand-based metrics; and save_checkpoint writes JSON metadata rather than real \
+     tensor weights to the .safetensors path. Running this loop would silently hand back \
+     an untrained, content-blind model presented as a completed training run, so this \
+     command refuses to run until voirs-acoustic implements real gradient-based training \
+     for FastSpeech2";
+
+/// Refuse to run acoustic model training and explain exactly why.
+///
+/// The current `voirs-acoustic` trainers never perform a real gradient-based
+/// training step (see `reason`), so any checkpoint they "save" is in fact an
+/// untouched, randomly initialized model. Printing a success banner and writing
+/// that checkpoint would be fabricated output, so this fails closed with a typed,
+/// diagnostic error instead of running the loop.
+fn fail_closed_acoustic_training(
+    model_name: &str,
+    args: AcousticTrainingArgs,
+    reason: &str,
+) -> Result<()> {
     let AcousticTrainingArgs {
         data,
         output,
@@ -165,574 +234,21 @@ async fn train_vits(args: AcousticTrainingArgs, global: &GlobalOptions) -> Resul
         use_gpu,
     } = args;
 
-    if !global.quiet {
-        println!("🔧 Initializing VITS training...\n");
-    }
-
-    // Determine device
-    let device = if use_gpu {
-        std::panic::catch_unwind(|| Device::cuda_if_available(0))
-            .ok()
-            .and_then(|r| r.ok())
-            .unwrap_or(Device::Cpu)
-    } else {
-        Device::Cpu
-    };
-
-    if !global.quiet {
-        println!("   Using device: {:?}", device);
-        println!("   Batch size: {}", batch_size);
-        println!("   Learning rate: {}", lr);
-        println!();
-    }
-
-    // Configure VITS model
-    let vits_config = VitsConfig::default();
-
-    // Configure training
-    let training_config = VitsTrainingConfig {
-        generator_lr: lr,
-        discriminator_lr: lr,
-        batch_size,
-        epochs,
-        grad_clip: 5.0,
-        kl_loss_weight: 1.0,
-        duration_loss_weight: 1.0,
-        adversarial_loss_weight: 1.0,
-        feature_matching_loss_weight: 2.0,
-        mel_loss_weight: 45.0,
-        validation_frequency: 5,
-        checkpoint_frequency: 10,
-    };
-
-    // Create VITS trainer
-    let mut trainer = VitsTrainer::new(vits_config, training_config, device)?;
-
-    if !global.quiet {
-        println!("✅ VITS trainer initialized successfully");
-        println!("   - Multi-period discriminator (MPD): 5 periods");
-        println!("   - Multi-scale discriminator (MSD): 3 scales");
-        println!("   - Generator: Text encoder + Posterior + Flow + Decoder");
-        println!();
-    }
-
-    // Create progress tracker
-    let batches_per_epoch = 150; // Acoustic models typically need more data
-    let mut progress = TrainingProgress::new(epochs, batches_per_epoch, !global.quiet);
-
-    // Training statistics
-    let start_time = Instant::now();
-    let mut total_steps = 0;
-    let mut best_val_loss = f64::MAX;
-    let mut error_count = 0;
-    let mut last_loss: Option<f64> = None;
-    let mut last_val_loss: Option<f64> = None;
-
-    // Real VITS training loop
-    for epoch in 0..epochs {
-        progress.start_epoch(epoch, batches_per_epoch);
-
-        let epoch_start = Instant::now();
-        let mut epoch_gen_loss = 0.0;
-        let mut epoch_disc_loss = 0.0;
-
-        // Batch loop
-        for batch in 0..batches_per_epoch {
-            let batch_start = Instant::now();
-
-            // Real VITS training step
-            // In production, would load actual audio/mel/phoneme data
-            let train_result = trainer
-                .train_step(
-                    &vec![vec![]; batch_size], // Placeholder phonemes
-                    &vec![],                   // Placeholder mel specs
-                    &vec![],                   // Placeholder audio
-                )
-                .await;
-
-            let batch_loss = match train_result {
-                Ok(metrics) => {
-                    epoch_gen_loss += metrics.generator_loss as f64;
-                    epoch_disc_loss += metrics.discriminator_loss as f64;
-
-                    // Combined loss for display
-                    let current_loss =
-                        (metrics.generator_loss + metrics.discriminator_loss) as f64 / 2.0;
-                    last_loss = Some(current_loss);
-                    current_loss
-                }
-                Err(e) => {
-                    error_count += 1;
-                    if !global.quiet {
-                        eprintln!(
-                            "⚠️  Training step {}/{} failed: {}",
-                            epoch + 1,
-                            batch + 1,
-                            e
-                        );
-                    }
-                    // Use last known good loss or fail if too many errors
-                    if error_count > batches_per_epoch / 2 {
-                        return Err(CliError::InvalidParameter {
-                            parameter: "training".to_string(),
-                            message: format!(
-                                "Too many training errors ({}/{}), aborting",
-                                error_count, total_steps
-                            ),
-                        }
-                        .into());
-                    }
-                    last_loss.unwrap_or(2.5) // Use last known loss or reasonable default
-                }
-            };
-
-            total_steps += 1;
-
-            // Calculate samples per second
-            let batch_duration = batch_start.elapsed().as_secs_f64().max(0.001);
-            let samples_per_sec = (batch_size as f64) / batch_duration;
-
-            // Update progress
-            progress.update_batch(batch, batch_loss, samples_per_sec);
-
-            // Update metrics every 10 batches
-            if batch % 10 == 0 {
-                let metrics = TrainingMetrics {
-                    loss: batch_loss,
-                    learning_rate: lr,
-                    grad_norm: Some(0.8),
-                };
-                progress.update_metrics(&metrics);
-
-                let resources = ResourceUsage::current();
-                progress.update_resources(&resources);
-            }
-
-            progress.finish_batch();
-        }
-
-        // Calculate epoch metrics
-        let avg_epoch_loss = (epoch_gen_loss + epoch_disc_loss) / (2.0 * batches_per_epoch as f64);
-
-        // Validation
-        let val_loss = if epoch % 5 == 0 {
-            // Run validation
-            let val_result = trainer
-                .validate_step(
-                    &vec![vec![]; 32], // Placeholder phonemes
-                    &vec![],           // Placeholder mel specs
-                )
-                .await;
-
-            match val_result {
-                Ok(val_metrics) => {
-                    last_val_loss = Some(val_metrics.mel_loss as f64);
-                    Some(val_metrics.mel_loss as f64)
-                }
-                Err(e) => {
-                    eprintln!("⚠️  Validation failed for epoch {}: {}", epoch + 1, e);
-                    last_val_loss // Use last known validation loss
-                }
-            }
-        } else {
-            None
-        };
-
-        // Update best validation loss
-        if let Some(vl) = val_loss {
-            if vl < best_val_loss {
-                best_val_loss = vl;
-                if !global.quiet {
-                    println!("\n💾 New best model saved (val_loss: {:.4})", vl);
-                }
-
-                // Save best checkpoint
-                let best_path = output.parent().unwrap_or(output.as_path()).join(format!(
-                    "{}_best.safetensors",
-                    output
-                        .file_stem()
-                        .unwrap_or_default()
-                        .to_str()
-                        .unwrap_or_default()
-                ));
-                if let Err(e) = trainer.save_checkpoint(&best_path, epoch) {
-                    if !global.quiet {
-                        println!("⚠️  Failed to save best checkpoint: {}", e);
-                    }
-                }
-            }
-        }
-
-        let epoch_metrics = EpochMetrics {
-            epoch,
-            train_loss: avg_epoch_loss,
-            val_loss,
-            duration: epoch_start.elapsed(),
-        };
-
-        progress.finish_epoch(&epoch_metrics);
-
-        // Save checkpoint every 10 epochs
-        if epoch % 10 == 0 {
-            if !global.quiet {
-                println!("\n💾 Checkpoint saved: vits_epoch_{}.safetensors", epoch);
-            }
-            let checkpoint_path = output
-                .parent()
-                .unwrap_or(output.as_path())
-                .join(format!("vits_epoch_{}.safetensors", epoch));
-            if let Err(e) = trainer.save_checkpoint(&checkpoint_path, epoch) {
-                if !global.quiet {
-                    println!("⚠️  Failed to save checkpoint: {}", e);
-                }
-            }
-        }
-
-        // Save final model on last epoch
-        if epoch == epochs - 1 {
-            if let Err(e) = trainer.save_checkpoint(&output, epoch) {
-                if !global.quiet {
-                    println!("⚠️  Failed to save final model: {}", e);
-                }
-            }
-        }
-    }
-
-    // Finish training
-    let total_duration = start_time.elapsed();
-    progress.finish("✅ VITS training completed successfully!");
-
-    // Print summary
-    if !global.quiet {
-        let stats = TrainingStats {
-            total_duration,
-            epochs_completed: epochs,
-            total_steps,
-            final_train_loss: 0.15,
-            final_val_loss: Some(0.12),
-            best_val_loss: Some(best_val_loss),
-            avg_samples_per_sec: (total_steps * batch_size) as f64 / total_duration.as_secs_f64(),
-        };
-        progress.print_summary(&stats);
-
-        println!("\n📊 Model outputs:");
-        println!(
-            "   - Final model: {}/vits_final.safetensors",
-            output.display()
-        );
-        println!(
-            "   - Best model:  {}/vits_best.safetensors",
-            output.display()
-        );
-        println!("   - Config:      {}/vits_config.json", output.display());
-        println!("   - Logs:        {}/training.log", output.display());
-    }
-
-    if !global.quiet {
-        println!("\n📊 Training Summary:");
-        println!("   - Total duration: {:.1}s", total_duration.as_secs_f64());
-        println!("   - Total training steps: {}", total_steps);
-        println!("   - Best validation loss: {:.4}", best_val_loss);
-        println!(
-            "   - Avg samples/sec: {:.1}",
-            (total_steps * batch_size) as f64 / total_duration.as_secs_f64()
-        );
-        println!("\n✅ Real VITS training completed with GAN discriminators!");
-        println!("   Architecture: Text Encoder + Posterior + Normalizing Flows + Decoder");
-        println!("   Discriminators: Multi-Period (MPD) + Multi-Scale (MSD)");
-    }
-
-    Ok(())
+    Err(CliError::NotImplemented(format!(
+        "{model_name} training requested (data={}, output={}, epochs={epochs}, \
+         batch_size={batch_size}, lr={lr}, gpu={use_gpu}) but refused: {reason}",
+        data.display(),
+        output.display(),
+    ))
+    .into())
 }
 
-async fn train_fastspeech2(args: AcousticTrainingArgs, global: &GlobalOptions) -> Result<()> {
-    // Destructure args for convenience
-    let AcousticTrainingArgs {
-        data,
-        output,
-        config: _config,
-        epochs,
-        batch_size,
-        lr,
-        resume: _resume,
-        use_gpu,
-    } = args;
+async fn train_vits(args: AcousticTrainingArgs, _global: &GlobalOptions) -> Result<()> {
+    fail_closed_acoustic_training("VITS", args, VITS_TRAINING_BLOCKED_REASON)
+}
 
-    if !global.quiet {
-        println!("🔧 Initializing FastSpeech2 training...\n");
-    }
-
-    // Determine device
-    let device = if use_gpu {
-        std::panic::catch_unwind(|| Device::cuda_if_available(0))
-            .ok()
-            .and_then(|r| r.ok())
-            .unwrap_or(Device::Cpu)
-    } else {
-        Device::Cpu
-    };
-
-    if !global.quiet {
-        println!("   Using device: {:?}", device);
-        println!("   Batch size: {}", batch_size);
-        println!("   Learning rate: {}", lr);
-        println!();
-    }
-
-    // Configure FastSpeech2 model
-    let fs2_config = FastSpeech2Config::default();
-
-    // Configure training
-    let training_config = FastSpeech2TrainingConfig {
-        learning_rate: lr,
-        batch_size,
-        epochs,
-        grad_clip: 1.0,
-        mel_loss_weight: 1.0,
-        duration_loss_weight: 1.0,
-        pitch_loss_weight: 0.1,
-        energy_loss_weight: 0.1,
-        validation_frequency: 5,
-        checkpoint_frequency: 10,
-    };
-
-    // Create FastSpeech2 trainer
-    let mut trainer = FastSpeech2Trainer::new(fs2_config, training_config, device)?;
-
-    if !global.quiet {
-        println!("✅ FastSpeech2 trainer initialized successfully");
-        println!("   - Encoder: Phoneme embedding + FFT blocks");
-        println!("   - Variance Adaptor: Duration + Pitch + Energy predictors");
-        println!("   - Length Regulator: Duration-based expansion");
-        println!("   - Decoder: FFT blocks + Mel linear projection");
-        println!();
-    }
-
-    // Create progress tracker
-    let batches_per_epoch = 100;
-    let mut progress = TrainingProgress::new(epochs, batches_per_epoch, !global.quiet);
-
-    // Training statistics
-    let start_time = Instant::now();
-    let mut total_steps = 0;
-    let mut best_val_loss = f64::MAX;
-    let mut error_count = 0;
-    let mut last_loss: Option<f64> = None;
-    let mut last_val_loss: Option<f64> = None;
-
-    // Real FastSpeech2 training loop
-    for epoch in 0..epochs {
-        progress.start_epoch(epoch, batches_per_epoch);
-
-        let epoch_start = Instant::now();
-        let mut epoch_loss = 0.0;
-
-        // Batch loop
-        for batch in 0..batches_per_epoch {
-            let batch_start = Instant::now();
-
-            // Real FastSpeech2 training step
-            // In production, would load actual phoneme/mel/duration/pitch/energy data
-            let train_result = trainer
-                .train_step(
-                    &vec![vec![]; batch_size],           // Placeholder phonemes
-                    &vec![],                             // Placeholder mel specs
-                    &vec![vec![1.0; 100]; batch_size],   // Placeholder durations
-                    &vec![vec![200.0; 100]; batch_size], // Placeholder pitches
-                    &vec![vec![0.5; 100]; batch_size],   // Placeholder energies
-                )
-                .await;
-
-            let batch_loss = match train_result {
-                Ok(metrics) => {
-                    epoch_loss += metrics.total_loss as f64;
-                    let current_loss = metrics.total_loss as f64;
-                    last_loss = Some(current_loss);
-                    current_loss
-                }
-                Err(e) => {
-                    error_count += 1;
-                    if !global.quiet {
-                        eprintln!(
-                            "⚠️  Training step {}/{} failed: {}",
-                            epoch + 1,
-                            batch + 1,
-                            e
-                        );
-                    }
-                    // Use last known good loss or fail if too many errors
-                    if error_count > batches_per_epoch / 2 {
-                        return Err(CliError::InvalidParameter {
-                            parameter: "training".to_string(),
-                            message: format!(
-                                "Too many training errors ({}/{}), aborting",
-                                error_count, total_steps
-                            ),
-                        }
-                        .into());
-                    }
-                    last_loss.unwrap_or(1.8) // Use last known loss or reasonable default
-                }
-            };
-
-            total_steps += 1;
-
-            // Calculate samples per second
-            let batch_duration = batch_start.elapsed().as_secs_f64().max(0.001);
-            let samples_per_sec = (batch_size as f64) / batch_duration;
-
-            // Update progress
-            progress.update_batch(batch, batch_loss, samples_per_sec);
-
-            // Update metrics every 10 batches
-            if batch % 10 == 0 {
-                let metrics = TrainingMetrics {
-                    loss: batch_loss,
-                    learning_rate: lr,
-                    grad_norm: Some(0.7),
-                };
-                progress.update_metrics(&metrics);
-
-                let resources = ResourceUsage::current();
-                progress.update_resources(&resources);
-            }
-
-            progress.finish_batch();
-        }
-
-        // Calculate epoch metrics
-        let avg_epoch_loss = epoch_loss / batches_per_epoch as f64;
-
-        // Validation
-        let val_loss = if epoch % 5 == 0 {
-            let val_result = trainer
-                .validate_step(
-                    &vec![vec![]; 32], // Placeholder phonemes
-                    &vec![],           // Placeholder mel specs
-                )
-                .await;
-
-            match val_result {
-                Ok(val_metrics) => {
-                    last_val_loss = Some(val_metrics.mel_loss as f64);
-                    Some(val_metrics.mel_loss as f64)
-                }
-                Err(e) => {
-                    eprintln!("⚠️  Validation failed for epoch {}: {}", epoch + 1, e);
-                    last_val_loss // Use last known validation loss
-                }
-            }
-        } else {
-            None
-        };
-
-        // Update best validation loss
-        if let Some(vl) = val_loss {
-            if vl < best_val_loss {
-                best_val_loss = vl;
-                if !global.quiet {
-                    println!("\n💾 New best model saved (val_loss: {:.4})", vl);
-                }
-
-                // Save best checkpoint
-                let best_path = output.parent().unwrap_or(output.as_path()).join(format!(
-                    "{}_best.safetensors",
-                    output
-                        .file_stem()
-                        .unwrap_or_default()
-                        .to_str()
-                        .unwrap_or_default()
-                ));
-                if let Err(e) = trainer.save_checkpoint(&best_path, epoch) {
-                    if !global.quiet {
-                        println!("⚠️  Failed to save best checkpoint: {}", e);
-                    }
-                }
-            }
-        }
-
-        let epoch_metrics = EpochMetrics {
-            epoch,
-            train_loss: avg_epoch_loss,
-            val_loss,
-            duration: epoch_start.elapsed(),
-        };
-
-        progress.finish_epoch(&epoch_metrics);
-
-        // Save checkpoint every 10 epochs
-        if epoch % 10 == 0 {
-            if !global.quiet {
-                println!(
-                    "\n💾 Checkpoint saved: fastspeech2_epoch_{}.safetensors",
-                    epoch
-                );
-            }
-            let checkpoint_path = output
-                .parent()
-                .unwrap_or(output.as_path())
-                .join(format!("fastspeech2_epoch_{}.safetensors", epoch));
-            if let Err(e) = trainer.save_checkpoint(&checkpoint_path, epoch) {
-                if !global.quiet {
-                    println!("⚠️  Failed to save checkpoint: {}", e);
-                }
-            }
-        }
-
-        // Save final model on last epoch
-        if epoch == epochs - 1 {
-            if let Err(e) = trainer.save_checkpoint(&output, epoch) {
-                if !global.quiet {
-                    println!("⚠️  Failed to save final model: {}", e);
-                }
-            }
-        }
-    }
-
-    // Finish training
-    let total_duration = start_time.elapsed();
-    progress.finish("✅ FastSpeech2 training completed successfully!");
-
-    // Print summary
-    if !global.quiet {
-        let stats = TrainingStats {
-            total_duration,
-            epochs_completed: epochs,
-            total_steps,
-            final_train_loss: 0.18,
-            final_val_loss: Some(0.14),
-            best_val_loss: Some(best_val_loss),
-            avg_samples_per_sec: (total_steps * batch_size) as f64 / total_duration.as_secs_f64(),
-        };
-        progress.print_summary(&stats);
-
-        println!("\n📊 Training Summary:");
-        println!("   - Total duration: {:.1}s", total_duration.as_secs_f64());
-        println!("   - Total training steps: {}", total_steps);
-        println!("   - Best validation loss: {:.4}", best_val_loss);
-        println!(
-            "   - Avg samples/sec: {:.1}",
-            (total_steps * batch_size) as f64 / total_duration.as_secs_f64()
-        );
-
-        println!("\n📂 Model outputs:");
-        println!("   - Final model: {}", output.display());
-        println!(
-            "   - Best model:  {}_best.safetensors",
-            output
-                .file_stem()
-                .unwrap_or_default()
-                .to_str()
-                .unwrap_or_default()
-        );
-
-        println!("\n✅ Real FastSpeech2 training completed!");
-        println!("   Architecture: Encoder + Variance Adaptor + Length Regulator + Decoder");
-        println!("   Variance Predictors: Duration + Pitch + Energy");
-        println!("   Non-autoregressive parallel mel generation");
-    }
-
-    Ok(())
+async fn train_fastspeech2(args: AcousticTrainingArgs, _global: &GlobalOptions) -> Result<()> {
+    fail_closed_acoustic_training("FastSpeech2", args, FASTSPEECH2_TRAINING_BLOCKED_REASON)
 }
 
 fn truncate_path(path: &Path, max_len: usize) -> String {
@@ -754,5 +270,129 @@ mod tests {
         let truncated = truncate_path(&path, 20);
         assert!(truncated.len() <= 20);
         assert!(truncated.starts_with("..."));
+    }
+
+    fn test_global_options(quiet: bool) -> GlobalOptions {
+        GlobalOptions {
+            config: None,
+            verbose: 0,
+            quiet,
+            format: None,
+            voice: None,
+            gpu: false,
+            threads: None,
+        }
+    }
+
+    /// VITS training must fail closed (never fabricate a "trained" checkpoint) and
+    /// must explain why, rather than silently writing an untrained model.
+    #[tokio::test]
+    async fn test_vits_training_fails_closed_without_fabricating_a_checkpoint() {
+        let temp = tempfile::tempdir().expect("failed to create temp dir");
+        let data_dir = temp.path().join("data");
+        std::fs::create_dir_all(&data_dir).expect("failed to create data dir");
+        let output_dir = temp.path().join("out");
+
+        let args = AcousticModelTrainingArgs {
+            model_type: "vits".to_string(),
+            data: data_dir,
+            output: output_dir.clone(),
+            config: None,
+            epochs: 1,
+            batch_size: 2,
+            lr: 0.0002,
+            resume: None,
+            use_gpu: false,
+        };
+
+        let result = run_train_acoustic(args, &test_global_options(true)).await;
+        assert!(
+            result.is_err(),
+            "VITS training must fail closed instead of fabricating a trained model"
+        );
+        let message = result.unwrap_err().to_string();
+        assert!(
+            message.contains("backward pass"),
+            "error should explain the real blocker (no backward pass), got: {message}"
+        );
+
+        // No checkpoint should ever be fabricated for an untrained model.
+        let entries: Vec<_> = std::fs::read_dir(&output_dir)
+            .expect("output dir should exist")
+            .collect();
+        assert!(
+            entries.is_empty(),
+            "must not write any checkpoint for a model that was never actually trained"
+        );
+    }
+
+    /// Same guarantee for FastSpeech2: fails closed with a model-specific reason.
+    #[tokio::test]
+    async fn test_fastspeech2_training_fails_closed_without_fabricating_a_checkpoint() {
+        let temp = tempfile::tempdir().expect("failed to create temp dir");
+        let data_dir = temp.path().join("data");
+        std::fs::create_dir_all(&data_dir).expect("failed to create data dir");
+        let output_dir = temp.path().join("out");
+
+        let args = AcousticModelTrainingArgs {
+            model_type: "fastspeech2".to_string(),
+            data: data_dir,
+            output: output_dir.clone(),
+            config: None,
+            epochs: 1,
+            batch_size: 2,
+            lr: 0.0002,
+            resume: None,
+            use_gpu: false,
+        };
+
+        let result = run_train_acoustic(args, &test_global_options(true)).await;
+        assert!(
+            result.is_err(),
+            "FastSpeech2 training must fail closed instead of fabricating a trained model"
+        );
+        let message = result.unwrap_err().to_string();
+        assert!(
+            message.contains("phoneme"),
+            "error should explain the real blocker (content-blind phoneme ids), got: {message}"
+        );
+        assert!(
+            entries_is_empty(&output_dir),
+            "must not write any checkpoint for a model that was never actually trained"
+        );
+    }
+
+    fn entries_is_empty(dir: &Path) -> bool {
+        std::fs::read_dir(dir)
+            .map(|mut it| it.next().is_none())
+            .unwrap_or(true)
+    }
+
+    /// An unsupported model type must still be rejected before reaching either
+    /// fail-closed path (existing, unrelated validation behavior).
+    #[tokio::test]
+    async fn test_unsupported_model_type_is_rejected() {
+        let temp = tempfile::tempdir().expect("failed to create temp dir");
+        let data_dir = temp.path().join("data");
+        std::fs::create_dir_all(&data_dir).expect("failed to create data dir");
+
+        let args = AcousticModelTrainingArgs {
+            model_type: "not-a-real-model".to_string(),
+            data: data_dir,
+            output: temp.path().join("out"),
+            config: None,
+            epochs: 1,
+            batch_size: 2,
+            lr: 0.0002,
+            resume: None,
+            use_gpu: false,
+        };
+
+        let result = run_train_acoustic(args, &test_global_options(true)).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unsupported acoustic model type"));
     }
 }

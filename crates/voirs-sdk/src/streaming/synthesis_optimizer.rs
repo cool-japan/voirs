@@ -1316,10 +1316,7 @@ mod tests {
     async fn test_synthesize_streaming_produces_real_nonsilent_audio() {
         let optimizer = test_optimizer();
 
-        let audio = optimizer
-            .synthesize_streaming("Hello world")
-            .await
-            .unwrap();
+        let audio = optimizer.synthesize_streaming("Hello world").await.unwrap();
 
         assert!(!audio.samples().is_empty(), "expected non-empty audio");
         assert!(

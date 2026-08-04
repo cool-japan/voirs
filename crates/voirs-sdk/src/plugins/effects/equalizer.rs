@@ -116,10 +116,7 @@ impl VoirsPlugin for EqualizerEffect {
 impl AudioEffect for EqualizerEffect {
     async fn process_audio(&self, audio: &AudioBuffer) -> Result<AudioBuffer> {
         // Update filters if sample rate changed
-        let current_sample_rate = *self
-            .sample_rate
-            .read()
-            .unwrap_or_else(|e| e.into_inner());
+        let current_sample_rate = *self.sample_rate.read().unwrap_or_else(|e| e.into_inner());
         if current_sample_rate != Some(audio.sample_rate()) {
             self.update_filters(audio.sample_rate());
         }

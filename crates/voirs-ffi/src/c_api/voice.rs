@@ -67,9 +67,18 @@ pub extern "C" fn voirs_set_voice(pipeline_id: c_uint, voice_id: *const c_char) 
     match set_voice_impl(pipeline_id, voice_id) {
         Ok(()) => 0,
         Err(code) => {
-            set_last_error(format!(
-                "Failed to set voice for pipeline {pipeline_id}: {code:?}"
-            ));
+            // Only install the generic fallback message if set_voice_impl
+            // didn't already set a more specific one (e.g. the honest
+            // "this is a VOIRS_BENCHMARK_MODE placeholder" message from
+            // crate::invalid_pipeline_message) -- otherwise this wrapper
+            // would silently clobber it, and callers of the public
+            // voirs_set_voice() (as opposed to the private set_voice_impl())
+            // would never actually see the more specific diagnostic.
+            if crate::voirs_has_error() == 0 {
+                set_last_error(format!(
+                    "Failed to set voice for pipeline {pipeline_id}: {code:?}"
+                ));
+            }
             code as c_int
         }
     }
@@ -93,9 +102,13 @@ pub extern "C" fn voirs_get_voice(pipeline_id: c_uint) -> *mut c_char {
             }
         },
         Err(code) => {
-            set_last_error(format!(
-                "Failed to get voice for pipeline {pipeline_id}: {code:?}"
-            ));
+            // See voirs_set_voice's identical guard: don't clobber a more
+            // specific message get_voice_impl may have already set.
+            if crate::voirs_has_error() == 0 {
+                set_last_error(format!(
+                    "Failed to get voice for pipeline {pipeline_id}: {code:?}"
+                ));
+            }
             ptr::null_mut()
         }
     }
@@ -220,9 +233,9 @@ fn set_voice_impl(pipeline_id: c_uint, voice_id: *const c_char) -> Result<(), Vo
         }
     };
 
-    #[cfg(test)]
+    #[cfg(feature = "ffi-test-mocks")]
     {
-        // In test mode, validate pipeline ID using the test tracking system
+        // Mock mode: validate pipeline ID using the test tracking system
         use crate::c_api::core::{CREATED_PIPELINES, DESTROYED_PIPELINES};
 
         let created = match CREATED_PIPELINES.lock() {
@@ -246,17 +259,24 @@ fn set_voice_impl(pipeline_id: c_uint, voice_id: *const c_char) -> Result<(), Vo
             return Err(VoirsErrorCode::InvalidParameter);
         }
 
-        // In test mode, just return success for valid pipeline IDs
+        // Mock mode: just return success for valid pipeline IDs
         Ok(())
     }
 
-    #[cfg(not(test))]
+    #[cfg(not(feature = "ffi-test-mocks"))]
     {
         let manager = get_pipeline_manager();
         let guard = manager.lock();
-        let pipeline = guard
-            .get_pipeline(pipeline_id)
-            .ok_or(VoirsErrorCode::InvalidParameter)?;
+        let pipeline = match guard.get_pipeline(pipeline_id) {
+            Some(p) => p,
+            None => {
+                let is_placeholder = guard.is_placeholder(pipeline_id);
+                drop(guard);
+                set_last_error(crate::invalid_pipeline_message(pipeline_id, is_placeholder));
+                return Err(VoirsErrorCode::InvalidParameter);
+            }
+        };
+        drop(guard);
 
         let runtime = get_runtime()?;
 
@@ -276,9 +296,9 @@ fn get_voice_impl(pipeline_id: c_uint) -> Result<String, VoirsErrorCode> {
         return Err(VoirsErrorCode::InvalidParameter);
     }
 
-    #[cfg(test)]
+    #[cfg(feature = "ffi-test-mocks")]
     {
-        // In test mode, validate pipeline ID using the test tracking system
+        // Mock mode: validate pipeline ID using the test tracking system
         use crate::c_api::core::{CREATED_PIPELINES, DESTROYED_PIPELINES};
 
         let created = match CREATED_PIPELINES.lock() {
@@ -302,17 +322,24 @@ fn get_voice_impl(pipeline_id: c_uint) -> Result<String, VoirsErrorCode> {
             return Err(VoirsErrorCode::InvalidParameter);
         }
 
-        // In test mode, just return a default voice ID
+        // Mock mode: just return a default voice ID
         Ok("default".to_string())
     }
 
-    #[cfg(not(test))]
+    #[cfg(not(feature = "ffi-test-mocks"))]
     {
         let manager = get_pipeline_manager();
         let guard = manager.lock();
-        let pipeline = guard
-            .get_pipeline(pipeline_id)
-            .ok_or(VoirsErrorCode::InvalidParameter)?;
+        let pipeline = match guard.get_pipeline(pipeline_id) {
+            Some(p) => p,
+            None => {
+                let is_placeholder = guard.is_placeholder(pipeline_id);
+                drop(guard);
+                set_last_error(crate::invalid_pipeline_message(pipeline_id, is_placeholder));
+                return Err(VoirsErrorCode::InvalidParameter);
+            }
+        };
+        drop(guard);
 
         let runtime = get_runtime()?;
 
@@ -344,13 +371,13 @@ fn list_voices_impl() -> Result<VoirsVoiceListDetailed, VoirsErrorCode> {
     for (id, name, lang, gender, quality) in voices {
         let voice_info = VoirsVoiceInfoDetailed {
             id: CString::new(id)
-                .expect("id should not contain null bytes")
+                .map_err(|_| VoirsErrorCode::InternalError)?
                 .into_raw(),
             name: CString::new(name)
-                .expect("name should not contain null bytes")
+                .map_err(|_| VoirsErrorCode::InternalError)?
                 .into_raw(),
             language: CString::new(lang)
-                .expect("lang should not contain null bytes")
+                .map_err(|_| VoirsErrorCode::InternalError)?
                 .into_raw(),
             gender,
             quality,
@@ -358,12 +385,20 @@ fn list_voices_impl() -> Result<VoirsVoiceListDetailed, VoirsErrorCode> {
         voice_infos.push(voice_info);
     }
 
+    // `.into_boxed_slice()` guarantees capacity == length, so the pointer +
+    // length pair below is reconstructible via `Box::from_raw` in
+    // `voirs_free_voice_list` regardless of how many entries are ever pushed
+    // (unlike relying on `Vec::with_capacity(voices.len())` happening to
+    // equal the final length -- see `VoirsAudioBuffer::from_audio_buffer`
+    // for the same pattern used elsewhere in this crate).
+    let mut voice_infos = voice_infos.into_boxed_slice();
     let voice_list = VoirsVoiceListDetailed {
         voices: voice_infos.as_mut_ptr(),
         count: voice_infos.len() as c_uint,
     };
 
-    // Prevent the vector from being dropped
+    // Prevent the boxed slice from being dropped; ownership transfers to the
+    // raw pointer above, reclaimed by `Box::from_raw` in `voirs_free_voice_list`.
     std::mem::forget(voice_infos);
 
     Ok(voice_list)
@@ -395,13 +430,13 @@ fn get_voice_info_impl(voice_id: *const c_char) -> Result<VoirsVoiceInfoDetailed
 
     Ok(VoirsVoiceInfoDetailed {
         id: CString::new(voice_str)
-            .expect("voice_str should not contain null bytes")
+            .map_err(|_| VoirsErrorCode::InternalError)?
             .into_raw(),
         name: CString::new(name)
-            .expect("name should not contain null bytes")
+            .map_err(|_| VoirsErrorCode::InternalError)?
             .into_raw(),
         language: CString::new(lang)
-            .expect("lang should not contain null bytes")
+            .map_err(|_| VoirsErrorCode::InternalError)?
             .into_raw(),
         gender,
         quality,
@@ -413,6 +448,12 @@ mod tests {
     use super::*;
     use crate::c_api::core::*;
 
+    // This test creates a pipeline and expects instant, network-free success
+    // -- true only for the mock pipeline bookkeeping in c_api::core, which is
+    // gated behind the (off-by-default) `ffi-test-mocks` feature. The real
+    // (mocks-off) pipeline creation + voice path is exercised by
+    // `voirs-ffi/tests/pipeline_real_path.rs`.
+    #[cfg(feature = "ffi-test-mocks")]
     #[test]
     fn test_voice_operations() {
         // Create a pipeline first

@@ -250,6 +250,15 @@ impl VoirsPipeline {
         let voice_list: Vec<Py<PyVoiceInfo>> = voices
             .into_iter()
             .map(|voice| {
+                // `voice.metadata["status"]` is set by
+                // `VoirsPipeline::list_voices()` (voirs-sdk) to "available" or
+                // "downloadable" based on a real filesystem check of whether
+                // this voice's model files exist locally. Default to `false`
+                // if absent rather than fabricating a positive claim.
+                let is_available = voice
+                    .metadata
+                    .get("status")
+                    .is_some_and(|status| status == "available");
                 Py::new(
                     py,
                     PyVoiceInfo {
@@ -257,7 +266,7 @@ impl VoirsPipeline {
                         name: voice.name,
                         language: voice.language.to_string(),
                         quality: format!("{:?}", voice.characteristics.quality),
-                        is_available: true, // Always available for now
+                        is_available,
                     },
                 )
             })
@@ -712,8 +721,12 @@ impl VoirsPipeline {
     }
 
     /// Check whether a GPU is (heuristically) available for synthesis.
+    ///
+    /// Delegates to `crate::gpu_probe()`, shared with the C API
+    /// (`voirs_get_system_info`) and Node.js (`nodejs::is_gpu_available`)
+    /// bindings so all three report the same answer.
     fn is_gpu_available(&self) -> bool {
-        gpu_probe()
+        crate::gpu_probe()
     }
 }
 
@@ -767,34 +780,15 @@ fn current_rss_mb() -> f64 {
     0.0
 }
 
-/// Cheap, non-initializing probe for GPU availability.
-///
-/// This intentionally does **not** create a CUDA/Metal context. It reads the
-/// `CUDA_VISIBLE_DEVICES` environment variable and applies NVIDIA's convention.
-fn gpu_probe() -> bool {
-    gpu_available_from_env(std::env::var("CUDA_VISIBLE_DEVICES").ok().as_deref())
-}
-
-/// Decide GPU availability from the value of `CUDA_VISIBLE_DEVICES`.
-///
-/// Heuristic (NVIDIA convention):
-/// * unset (`None`) -> `false` (cannot confirm without initializing a device)
-/// * empty string -> `false` (all GPUs masked)
-/// * exactly `"-1"` -> `false` (all GPUs masked)
-/// * any other value (e.g. `"0"`, `"0,1"`) -> `true`
-fn gpu_available_from_env(cuda_visible_devices: Option<&str>) -> bool {
-    match cuda_visible_devices {
-        Some(value) => {
-            let trimmed = value.trim();
-            !trimmed.is_empty() && trimmed != "-1"
-        }
-        None => false,
-    }
-}
+// GPU availability probing lives in `crate::gpu_probe()`/
+// `crate::gpu_available_from_env()` (lib.rs), shared with the C API and
+// Node.js bindings so all three language bindings agree -- see
+// `VoirsPipeline::is_gpu_available()` above.
 
 #[cfg(test)]
 mod memory_gpu_tests {
-    use super::{current_rss_mb, gpu_available_from_env};
+    use super::current_rss_mb;
+    use crate::gpu_available_from_env;
 
     #[test]
     fn test_current_rss_mb_is_nonnegative() {

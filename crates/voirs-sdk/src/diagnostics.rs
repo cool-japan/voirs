@@ -1164,8 +1164,14 @@ mod tests {
             .benchmark_results
             .expect("benchmark should run with a real backend attached");
 
-        assert_eq!(bench.test_count, 3, "must match the real number of sentences run");
-        assert_ne!(bench.average_rtf, 0.3, "must not be the old hardcoded value");
+        assert_eq!(
+            bench.test_count, 3,
+            "must match the real number of sentences run"
+        );
+        assert_ne!(
+            bench.average_rtf, 0.3,
+            "must not be the old hardcoded value"
+        );
         assert_ne!(
             bench.average_latency_ms, 80,
             "must not be the old hardcoded value"

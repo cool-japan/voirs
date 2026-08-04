@@ -40,9 +40,15 @@
 //! ```
 
 pub mod api;
+pub mod azure_backend;
 pub mod distributed;
+pub mod error;
+pub mod gcp_backend;
+pub mod s3_backend;
+pub mod sigv4;
 pub mod storage;
 
 pub use api::*;
 pub use distributed::*;
+pub use error::CloudStorageError;
 pub use storage::*;

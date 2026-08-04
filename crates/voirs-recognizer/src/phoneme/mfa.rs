@@ -1138,6 +1138,31 @@ mod tests {
             .expect("constructing a handle must not touch the filesystem")
     }
 
+    /// A two-tier grid: one spoken word covering two phones, then silence.
+    const TWO_TIER_GRID: &str = "Object class = \"TextGrid\"\n\
+             xmin = 0\nxmax = 1.0\nsize = 2\n\
+             class = \"IntervalTier\"\nname = \"words\"\nxmin = 0\nxmax = 1.0\n\
+             intervals: size = 2\n\
+             xmin = 0\nxmax = 0.5\ntext = \"hi\"\n\
+             xmin = 0.5\nxmax = 1.0\ntext = \"\"\n\
+             class = \"IntervalTier\"\nname = \"phones\"\nxmin = 0\nxmax = 1.0\n\
+             intervals: size = 3\n\
+             xmin = 0\nxmax = 0.25\ntext = \"HH\"\n\
+             xmin = 0.25\nxmax = 0.5\ntext = \"AY1\"\n\
+             xmin = 0.5\nxmax = 1.0\ntext = \"sil\"\n";
+
+    fn blank_metadata() -> PhonemeRecognizerMetadata {
+        PhonemeRecognizerMetadata {
+            name: String::new(),
+            version: String::new(),
+            description: String::new(),
+            supported_languages: vec![],
+            alignment_methods: vec![],
+            alignment_accuracy: 0.0,
+            supported_features: vec![],
+        }
+    }
+
     fn speech_then_silence() -> AudioBuffer {
         // 0.5 s of a loud tone followed by 0.5 s of near-silence, at 16 kHz.
         let mut samples = Vec::with_capacity(16000);
@@ -1488,6 +1513,58 @@ mod tests {
             matching.alignment_confidence,
             mismatching.alignment_confidence
         );
+    }
+
+    /// Both inclusion flags must really change the returned result, and turning phone
+    /// alignment off must not silently strip the phones nested inside each word.
+    #[test]
+    fn inclusion_flags_really_shape_the_result() {
+        let audio = speech_then_silence();
+        let grid = TextGrid::parse(TWO_TIER_GRID).expect("fixture parses");
+
+        let build = |include_phone_alignment: bool, include_word_alignment: bool| {
+            let config = MFAConfig {
+                include_phone_alignment,
+                include_word_alignment,
+                ..Default::default()
+            };
+            let model = MFAModel {
+                state: Arc::new(RwLock::new(MFAState::new(
+                    config.model.clone(),
+                    config.dictionary.clone(),
+                ))),
+                config,
+                supported_languages: vec![LanguageCode::EnUs],
+                metadata: blank_metadata(),
+            };
+            model
+                .alignment_from_grid(&grid, &audio, 1.0)
+                .expect("conversion succeeds")
+        };
+
+        let both = build(true, true);
+        assert_eq!(both.phonemes.len(), 2);
+        assert_eq!(both.word_alignments.len(), 1);
+        assert_eq!(both.word_alignments[0].phonemes.len(), 2);
+
+        let words_only = build(false, true);
+        assert!(words_only.phonemes.is_empty(), "phone list must be dropped");
+        assert_eq!(words_only.word_alignments.len(), 1);
+        assert_eq!(
+            words_only.word_alignments[0].phonemes.len(),
+            2,
+            "phones nested in words must survive `include_phone_alignment: false`"
+        );
+        // The confidence is still measured from every phone, not from the empty list.
+        assert!((words_only.alignment_confidence - both.alignment_confidence).abs() < 1e-6);
+
+        let phones_only = build(true, false);
+        assert_eq!(phones_only.phonemes.len(), 2);
+        assert!(phones_only.word_alignments.is_empty());
+
+        let neither = build(false, false);
+        assert!(neither.phonemes.is_empty());
+        assert!(neither.word_alignments.is_empty());
     }
 
     #[test]

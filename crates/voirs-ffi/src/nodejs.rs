@@ -201,9 +201,18 @@ pub mod napi_bindings {
         }
 
         /// Check if GPU is available
+        ///
+        /// Runtime probe (see `crate::gpu_probe()`'s doc comment for exactly
+        /// what this does and does not detect), shared with the C API
+        /// (`voirs_get_system_info`) and Python
+        /// (`VoirsPipeline.is_gpu_available()`) bindings. Previously this
+        /// returned `cfg!(feature = "gpu")`, a compile-time constant baked
+        /// into the binary and identical for every process regardless of
+        /// whether a GPU is actually present or visible (e.g. masked via
+        /// `CUDA_VISIBLE_DEVICES=-1`).
         #[napi]
         pub fn is_gpu_available() -> bool {
-            cfg!(feature = "gpu")
+            crate::gpu_probe()
         }
 
         /// Get version information
@@ -273,6 +282,21 @@ pub mod napi_bindings {
         }
 
         Ok(config)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// `is_gpu_available()` must be a real runtime probe
+        /// (`crate::gpu_probe()`), not a hardcoded/compile-time constant.
+        /// Regression test for the `cfg!(feature = "gpu")` bug: that would
+        /// return the *same* value regardless of `CUDA_VISIBLE_DEVICES`,
+        /// whereas the real probe tracks it.
+        #[test]
+        fn test_is_gpu_available_matches_shared_probe() {
+            assert_eq!(VoirsPipeline::is_gpu_available(), crate::gpu_probe());
+        }
     }
 
     // Recognition support (if feature enabled)

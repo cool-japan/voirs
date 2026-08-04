@@ -128,10 +128,7 @@ impl VoirsPlugin for ReverbEffect {
 impl AudioEffect for ReverbEffect {
     async fn process_audio(&self, audio: &AudioBuffer) -> Result<AudioBuffer> {
         // Initialize filters if needed
-        let current_sample_rate = *self
-            .sample_rate
-            .read()
-            .unwrap_or_else(|e| e.into_inner());
+        let current_sample_rate = *self.sample_rate.read().unwrap_or_else(|e| e.into_inner());
         if current_sample_rate != Some(audio.sample_rate()) {
             self.initialize_filters(audio.sample_rate());
         }
@@ -210,8 +207,7 @@ impl AudioEffect for ReverbEffect {
             }
             "room_size" => {
                 if let Some(v) = value.as_f32() {
-                    *self.room_size.write().unwrap_or_else(|e| e.into_inner()) =
-                        v.clamp(0.0, 1.0);
+                    *self.room_size.write().unwrap_or_else(|e| e.into_inner()) = v.clamp(0.0, 1.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(

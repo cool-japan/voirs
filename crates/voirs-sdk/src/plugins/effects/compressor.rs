@@ -93,10 +93,7 @@ impl AudioEffect for CompressorEffect {
         let sample_rate = audio.sample_rate();
 
         // Update sample rate if changed
-        let current_sample_rate = *self
-            .sample_rate
-            .read()
-            .unwrap_or_else(|e| e.into_inner());
+        let current_sample_rate = *self.sample_rate.read().unwrap_or_else(|e| e.into_inner());
         if current_sample_rate != Some(sample_rate) {
             *self.sample_rate.write().unwrap_or_else(|e| e.into_inner()) = Some(sample_rate);
         }
@@ -197,8 +194,7 @@ impl AudioEffect for CompressorEffect {
             }
             "attack" => {
                 if let Some(v) = value.as_f32() {
-                    *self.attack.write().unwrap_or_else(|e| e.into_inner()) =
-                        v.clamp(0.1, 100.0);
+                    *self.attack.write().unwrap_or_else(|e| e.into_inner()) = v.clamp(0.1, 100.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
